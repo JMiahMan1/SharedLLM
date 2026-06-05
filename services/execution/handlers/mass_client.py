@@ -11,18 +11,16 @@ async def _ma_api(mass_url: str, mass_token: str, command: str, params: Dict[str
     if not mass_url or not mass_token:
         return []
 
-    # Normalize URL - ensure it ends without trailing slash
+    # Normalize URL - ensure it ends without trailing slash, always use /api for MA v2
     base = mass_url.rstrip("/")
-
-    # Try the configured URL first, then try common port variations
-    urls_to_try = [base]
-    if not base.endswith("8095") and not "8095" in base:
-        # Try with explicit port 8095
-        from urllib.parse import urlparse
-        parsed = urlparse(base)
-        port_url = f"{parsed.scheme}://{parsed.hostname}:8095/api"
-        if port_url not in urls_to_try:
-            urls_to_try.append(port_url)
+    from urllib.parse import urlparse
+    parsed = urlparse(base)
+    base_url = f"{parsed.scheme}://{parsed.hostname}"
+    if parsed.port:
+        base_url = f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"
+    
+    # MA v2 REST API requires /api suffix
+    urls_to_try = [f"{base_url}/api"]
 
     payload = {
         "command": command,
