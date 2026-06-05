@@ -168,7 +168,10 @@ async def lifespan(app: FastAPI):
     
     # Run initial seed if needed
     with Session(engine) as session:
-        seed_from_env(session)
+        force_reseed = os.getenv("FORCE_RESEED", "false").lower() == "true"
+        if force_reseed:
+            log.info("[lifespan] FORCE_RESEED=true — re-seeding all data")
+        seed_from_env(session, force=force_reseed)
         await _ensure_default_settings(session)
         _migrate_api_key_material(session)
     yield
