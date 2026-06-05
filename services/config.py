@@ -211,7 +211,7 @@ async def resolve_runtime_config():
                             value = float(value)
                         
                         # Rewrite legacy execution hostname to use .local DNS container resolution
-                        if var_name == "EXECUTION_SVC_URL" and "://execution:" in value:
+                        if var_name == "EXECUTION_SVC_URL" and isinstance(value, str) and "://execution:" in value:
                             value = value.replace("://execution:", "://execution.local:")
                             
                         globals()[var_name] = value
