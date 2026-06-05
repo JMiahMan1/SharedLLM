@@ -692,7 +692,7 @@ class AudiobookshelfRequest(BaseRequest):
     Interacts with Audiobookshelf (ABS) for searching, playing, and tracking audiobooks.
     """
     user_context: UserContext
-    action: Literal["search", "play", "resume", "progress", "libraries", "list", "get_book"]
+    action: Literal["search", "play", "resume", "progress", "libraries", "list", "get_book", "last_played"]
     query: Optional[str] = Field(None, description="Search query or book title")
     book_id: Optional[str] = Field(None, description="ABS item ID for play/resume/progress")
     entity_id: Optional[str] = Field(None, description="Home Assistant media_player entity to play on")
