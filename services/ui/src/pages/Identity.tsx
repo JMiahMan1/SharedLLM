@@ -21,8 +21,7 @@ import {
   User,
   Zap,
   Calendar,
-  Shield,
-  Key
+  Shield
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -472,29 +471,14 @@ const APIKeyRows = () => {
     onError: () => toast.error('Revocation failed')
   });
 
-  const userApiKey = user?.api_key || null;
-  const hasKeys = keys?.length || userApiKey;
+  const isAdmin = user?.is_admin || false;
+  const hasKeys = keys?.length;
 
   if (isLoading) return <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500 animate-pulse">Scanning Vault...</td></tr>;
   if (!hasKeys) return <tr><td colSpan={4} className="px-6 py-8 text-center text-slate-500 italic">No active external keys found.</td></tr>;
 
   return (
     <>
-      {userApiKey && (
-        <tr className="group hover:bg-white/5 transition-colors">
-           <td className="px-6 py-4">
-              <div className="flex items-center gap-3">
-                 <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400"><Key size={14} /></div>
-                 <span className="font-bold text-white tracking-tight">Default API Key</span>
-              </div>
-           </td>
-           <td className="px-6 py-4 font-mono text-slate-500 text-[10px]">sk-jarvis-••••{userApiKey.slice(-4)}</td>
-           <td className="px-6 py-4">
-              <span className="px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[8px] font-black uppercase tracking-widest">Default</span>
-           </td>
-           <td className="px-6 py-4 text-right text-slate-600 text-[9px] italic">System-generated</td>
-        </tr>
-      )}
       {keys?.map((k) => (
         <tr key={k.id} className="group hover:bg-white/5 transition-colors">
            <td className="px-6 py-4">
@@ -505,7 +489,9 @@ const APIKeyRows = () => {
            </td>
            <td className="px-6 py-4 font-mono text-slate-500 text-[10px]">sk-jarvis-••••{k.prefix}</td>
            <td className="px-6 py-4">
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[8px] font-black uppercase tracking-widest">Active</span>
+              <span className={`px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest ${isAdmin ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>
+                {isAdmin ? `Owner: ${k.owner_username}` : 'Active'}
+              </span>
            </td>
            <td className="px-6 py-4 text-right">
               <button 

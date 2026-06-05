@@ -809,16 +809,39 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
 
 @app.get("/api/users/me/keys")
 def get_my_keys(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
-    """Return list of API keys for the current user."""
-    # Return masked keys
-    return [
-        {
-            "id": k.id, 
-            "label": k.label, 
-            "prefix": k.key_prefix or _api_key_prefix(k.key_value) or "unavailable",
-            "created_at": k.created_at
-        } for k in user.api_keys
-    ]
+    """Return list of API keys for the current user.
+    
+    Admin users see all keys with associated usernames.
+    Non-admin users see only their own keys.
+    """
+    from sqlmodel import select
+    
+    if user.is_admin:
+        # Admin sees all keys with associated usernames
+        all_keys = session.exec(select(APIKey, User).join(User, APIKey.user_id == User.id)).all()
+        result = []
+        for api_key, user_obj in all_keys:
+            result.append({
+                "id": api_key.id,
+                "label": api_key.label,
+                "prefix": api_key.key_prefix or _api_key_prefix(api_key.key_value) or "unavailable",
+                "created_at": api_key.created_at,
+                "owner_username": user_obj.username,
+                "owner_id": user_obj.id
+            })
+        return result
+    else:
+        # Non-admin users see only their own keys
+        return [
+            {
+                "id": k.id, 
+                "label": k.label, 
+                "prefix": k.key_prefix or _api_key_prefix(k.key_value) or "unavailable",
+                "created_at": k.created_at,
+                "owner_username": user.username,
+                "owner_id": user.id
+            } for k in user.api_keys
+        ]
 
 @app.post("/api/users/me/keys")
 def generate_key(body: dict, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
