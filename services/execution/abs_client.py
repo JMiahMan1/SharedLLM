@@ -46,7 +46,7 @@ def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[
 
 async def abs_login(abs_url: str, username: str, password: str) -> Optional[str]:
     """Login to ABS with username/password and return API token."""
-    url = f"{abs_url.rstrip('/')}/api/login"
+    url = f"{abs_url.rstrip('/')}/login"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
             resp = await client.post(url, json={"username": username, "password": password})
