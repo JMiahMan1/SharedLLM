@@ -1595,18 +1595,123 @@ async def execute_media_status(req: MediaStatusRequest):
     return await media_status_handler.handle_media_status(req)
 
 
+async def _resolve_mass_ha_creds(user_id: str):
+    """Resolve HA credentials for a user via MA's HA integration (avoids MA REST API auth issues)."""
+    if not user_id:
+        return None
+    creds = await resolve_internal_user(rag_user=user_id)
+    if not creds:
+        return None
+    ha_url = creds.get("ha_url")
+    ha_token = creds.get("ha_token")
+    if not ha_url or not ha_token:
+        return None
+    # If mass_config_entry_id is missing, discover it from HA
+    if not creds.get("mass_config_entry_id"):
+        from services.execution import ha_client as _hc
+        entry_id = await _hc.find_mass_config_entry(ha_url, ha_token)
+        if entry_id:
+            creds["mass_config_entry_id"] = entry_id
+            log.info(f"[mass_ha] Discovered MA config entry: {entry_id}")
+    return creds
+
+
+async def _get_ma_playlists_via_ha(ha_url: str, ha_token: str, mass_entry_id: str = "", limit: int = 50) -> List[Dict[str, Any]]:
+    """Get MA playlists via HA's music_assistant.get_library service."""
+    if not ha_url or not ha_token:
+        return []
+    
+    service_data = {
+        "media_type": "PLAYLIST",
+        "limit": limit,
+    }
+    if mass_entry_id:
+        service_data["config_entry_id"] = mass_entry_id
+    
+    result = await ha_client.call_service(
+        ha_url, ha_token, "music_assistant", "get_library", entity_id="",
+        service_data=service_data,
+        return_response=True,
+    )
+    
+    if not result.get("ok") or not result.get("service_response"):
+        return []
+    
+    raw = result["service_response"]
+    resp = raw.get("service_response", raw)
+    items = resp.get("playlists", resp.get("items", []))
+    
+    return [
+        {
+            "name": item.get("name", ""),
+            "items": item.get("num_tracks", item.get("track_count", 0)),
+            "uri": item.get("uri", ""),
+            "type": item.get("type", "playlist"),
+            "image": item.get("image", ""),
+            "description": item.get("description", ""),
+        }
+        for item in items
+    ]
+
+
+async def _get_ma_recent_via_ha(ha_url: str, ha_token: str, mass_entry_id: str = "", limit: int = 25) -> List[Dict[str, Any]]:
+    """Get MA recently played via HA's music_assistant.get_library service (tracks)."""
+    if not ha_url or not ha_token:
+        return []
+    
+    service_data = {
+        "media_type": "TRACK",
+        "limit": limit,
+        "order_by": "recently_played_rank",
+    }
+    if mass_entry_id:
+        service_data["config_entry_id"] = mass_entry_id
+    
+    result = await ha_client.call_service(
+        ha_url, ha_token, "music_assistant", "get_library", entity_id="",
+        service_data=service_data,
+        return_response=True,
+    )
+    
+    if not result.get("ok") or not result.get("service_response"):
+        return []
+    
+    raw = result["service_response"]
+    resp = raw.get("service_response", raw)
+    items = resp.get("tracks", resp.get("items", []))
+    
+    return [
+        {
+            "name": item.get("name", ""),
+            "artist": item.get("artists", [{}])[0].get("name", "") if item.get("artists") else item.get("artist", ""),
+            "uri": item.get("uri", ""),
+            "last_played": item.get("last_played", item.get("added_at", item.get("timestamp", ""))),
+            "type": "track",
+            "image": item.get("image", ""),
+        }
+        for item in items
+    ]
+
+
 @app.get("/execute/media/music-assistant/playlists")
 async def get_ma_playlists(user_id: str = ""):
-    """Get Music Assistant playlists (per-user credentials)."""
+    """Get Music Assistant playlists via HA proxy (avoids MA REST API auth issues)."""
     try:
-        creds = await resolve_internal_user(rag_user=user_id)
-        mass_url = creds.get("mass_url") if creds else (None)
-        mass_token = creds.get("mass_token") if creds else (None)
-        if not mass_url or not mass_token:
-            log.error(f"[ma/playlists] No MA credentials for user {user_id}")
-            return {"status": "SUCCESS", "playlists": []}
-        from services.execution.handlers.mass_client import get_playlists
-        playlists = await get_playlists(mass_url, mass_token)
+        creds = await _resolve_mass_ha_creds(user_id)
+        ha_url = creds.get("ha_url") if creds else None
+        ha_token = creds.get("ha_token") if creds else None
+        mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
+        
+        if not ha_url or not ha_token:
+            # Fallback to direct MA REST API (may fail if mass_token is incompatible)
+            log.warning("[ma/playlists] No HA credentials, falling back to direct MA REST API")
+            from services.execution.handlers.mass_client import get_playlists as _direct_playlists
+            mass_url = creds.get("mass_url") if creds else None
+            mass_token = creds.get("mass_token") if creds else None
+            playlists = await _direct_playlists(mass_url, mass_token) if mass_url and mass_token else []
+            return {"status": "SUCCESS", "playlists": playlists}
+        
+        playlists = await _get_ma_playlists_via_ha(ha_url, ha_token, mass_entry_id)
         return {"status": "SUCCESS", "playlists": playlists}
     except Exception as e:
         log.error(f"[ma/playlists] Error: {e}")
@@ -1615,16 +1720,22 @@ async def get_ma_playlists(user_id: str = ""):
 
 @app.get("/execute/media/music-assistant/recent")
 async def get_ma_recent(user_id: str = ""):
-    """Get Music Assistant recently played items (per-user credentials)."""
+    """Get Music Assistant recently played via HA proxy (avoids MA REST API auth issues)."""
     try:
-        creds = await resolve_internal_user(rag_user=user_id)
-        mass_url = creds.get("mass_url") if creds else (None)
-        mass_token = creds.get("mass_token") if creds else (None)
-        if not mass_url or not mass_token:
-            log.error(f"[ma/recent] No MA credentials for user {user_id}")
-            return {"status": "SUCCESS", "recent": []}
-        from services.execution.handlers.mass_client import get_recent
-        recent = await get_recent(mass_url, mass_token)
+        creds = await _resolve_mass_ha_creds(user_id)
+        ha_url = creds.get("ha_url") if creds else None
+        ha_token = creds.get("ha_token") if creds else None
+        mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
+        
+        if not ha_url or not ha_token:
+            log.warning("[ma/recent] No HA credentials, falling back to direct MA REST API")
+            from services.execution.handlers.mass_client import get_recent as _direct_recent
+            mass_url = creds.get("mass_url") if creds else None
+            mass_token = creds.get("mass_token") if creds else None
+            recent = await _direct_recent(mass_url, mass_token) if mass_url and mass_token else []
+            return {"status": "SUCCESS", "recent": recent}
+        
+        recent = await _get_ma_recent_via_ha(ha_url, ha_token, mass_entry_id)
         return {"status": "SUCCESS", "recent": recent}
     except Exception as e:
         log.error(f"[ma/recent] Error: {e}")
