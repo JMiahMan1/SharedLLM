@@ -74,6 +74,26 @@ test.describe('Device Selector — Rendering', () => {
     // At least one indicator dot should exist (one per card)
     expect(count).toBeGreaterThan(0);
   });
+
+  test('shows Local Player card as first option', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
+  });
+
+  test('Local Player card shows Browser / Android App subtitle', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
+    const subtitle = localPlayerCard.locator('p:text-is("Browser / Android App")');
+    await expect(subtitle).toBeVisible({ timeout: 10000 });
+  });
+
+  test('Local Player card has online indicator', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
+    // Green dot indicator
+    const dot = localPlayerCard.locator('.rounded-full.bg-green-400');
+    await expect(dot).toBeVisible({ timeout: 10000 });
+  });
 });
 
 test.describe('Device Selector — Selection', () => {
@@ -128,8 +148,18 @@ test.describe('Device Selector — Selection', () => {
       await deviceCard.click();
       await page.waitForTimeout(500);
       // Player card should show the selected device name
-      await expect(page.getByText('Gracies TV')).toBeVisible();
+      const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
+      await expect(playerCard.getByText('Gracies TV')).toBeVisible();
     }
+  });
+
+  test('clicking Local Player card highlights it', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
+    await localPlayerCard.click();
+    await page.waitForTimeout(500);
+    // Local Player card should get cyan highlight
+    await expect(localPlayerCard).toHaveClass(/cyan-500/);
   });
 });
 
@@ -167,9 +197,12 @@ test.describe('Player Header', () => {
   test('transport controls (prev, play/pause, next) are visible', async ({
     page,
   }) => {
-    const prevBtn = page.getByLabel('Previous track');
-    const playPauseBtn = page.getByRole('button', { name: /play|pause/i });
-    const nextBtn = page.getByLabel('Next track');
+    // Scope to player card to avoid matching buttons in device selector
+    const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
+
+    const prevBtn = playerCard.getByLabel('Previous track');
+    const playPauseBtn = playerCard.getByRole('button', { name: /play|pause/i });
+    const nextBtn = playerCard.getByLabel('Next track');
 
     if (await prevBtn.isVisible({ timeout: 5000 })) {
       await expect(prevBtn).toBeVisible();
@@ -287,42 +320,48 @@ test.describe('Media Explorer Modal', () => {
     await expect(page.getByRole('button', { name: /Audiobooks/i })).toBeVisible();
   });
 
-  test('MA tab shows playlists with data or empty state', async ({ page }) => {
+  test('MA tab playlists section exists with items', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(3000);
 
-    const playlistsHeader = page.getByRole('heading', { name: /playlists/i, level: 3 }).first();
+    const modal = page.locator('div.fixed.inset-0');
+    const playlistsHeader = modal.getByRole('heading', { name: /playlists/i, level: 3 });
     await expect(playlistsHeader).toBeVisible({ timeout: 10000 });
 
-    const hasPlaylists = await page.getByText('500 Random tracks').isVisible({ timeout: 5000 }).catch(() => false);
-    const hasEmpty = await page.getByText('No playlists found').isVisible({ timeout: 5000 }).catch(() => false);
-    expect(hasPlaylists || hasEmpty).toBe(true);
+    // Playlists must have items > 0 — empty generators are not valid playlists
+    const hasItems = await modal.locator('text=/\\d+ tracks/').first().isVisible({ timeout: 5000 }).catch(() => false);
+    const hasEmpty = await modal.getByText('No playlists found').isVisible({ timeout: 5000 }).catch(() => false);
+    expect(hasItems && !hasEmpty).toBe(true);
   });
 
-  test('MA tab shows recently played with data or empty state', async ({ page }) => {
+  test('MA tab shows recent items section', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(3000);
 
-    const recentHeader = page.getByRole('heading', { name: /recently played/i, level: 3 }).first();
+    const modal = page.locator('div.fixed.inset-0');
+    const recentHeader = modal.getByRole('heading', { name: /recently played/i, level: 3 });
     await expect(recentHeader).toBeVisible({ timeout: 10000 });
 
-    const hasItems = await page.getByText('Does Anybody Hear Her').isVisible({ timeout: 5000 }).catch(() => false);
-    const hasEmpty = await page.getByText('No recent items').isVisible({ timeout: 5000 }).catch(() => false);
-    expect(hasItems || hasEmpty).toBe(true);
+    // Recent items must display track names (e.g. "Does Anybody Hear Her")
+    const hasRecentItems = await modal.locator('text=Does Anybody Hear Her').first().isVisible({ timeout: 5000 }).catch(() => false);
+    expect(hasRecentItems).toBe(true);
   });
 
-  test('Audiobooks tab shows libraries with data or empty state', async ({ page }) => {
+  test('Audiobooks tab shows libraries with actual content', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await page.getByRole('button', { name: /Audiobooks/i }).click();
     await page.waitForTimeout(4000);
 
-    const libsHeader = page.getByRole('heading', { name: /libraries/i, level: 3 }).first();
+    const modal = page.locator('div.fixed.inset-0');
+    const libsHeader = modal.getByRole('heading', { name: /libraries/i, level: 3 });
     await expect(libsHeader).toBeVisible({ timeout: 10000 });
 
-    const hasLibraries = await page.getByText('Books').isVisible({ timeout: 5000 }).catch(() => false);
-    const hasEmpty = await page.getByText('No libraries found').isVisible({ timeout: 5000 }).catch(() => false);
-    expect(hasLibraries || hasEmpty).toBe(true);
+    // Libraries must have actual content (e.g. "Books", "Podcasts")
+    const hasBooks = await modal.getByText('Books').isVisible({ timeout: 5000 }).catch(() => false);
+    const hasPodcasts = await modal.getByText('Podcasts').isVisible({ timeout: 5000 }).catch(() => false);
+    const hasEmpty = await modal.getByText('No libraries found').isVisible({ timeout: 5000 }).catch(() => false);
+    expect((hasBooks || hasPodcasts) && !hasEmpty).toBe(true);
   });
 
   test('search input filters content', async ({ page }) => {
