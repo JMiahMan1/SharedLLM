@@ -40,12 +40,16 @@ class NextcloudPersonalDataProvider:
     kind: str = "nextcloud"
 
     def calendar_client(self) -> caldav.DAVClient:
-        return caldav.DAVClient(
+        client = caldav.DAVClient(
             url=f"{self.base_url.rstrip('/')}/remote.php/dav",
             username=self.username,
             password=self.password,
             timeout=60,
         )
+        # Disable HTTP/3 - Nextcloud advertises it via Alt-Svc but can't handle it
+        if hasattr(client, "session") and hasattr(client.session, "_disable_http3"):
+            client.session._disable_http3 = True  # type: ignore[assignment]
+        return client
 
     def ensure_directory(self, path: str) -> None:
         ensure_webdav_dir(self.base_url, self.username, self.password, path)

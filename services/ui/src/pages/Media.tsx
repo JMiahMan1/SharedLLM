@@ -690,7 +690,7 @@ const Media = () => {
         });
       }
     }
-    return items.slice(0, 3);
+    return items.slice(0, 6);
   }, [absLastPlayed, maRecent]);
 
   /* ── media status polling ───────────────────────────────────── */
