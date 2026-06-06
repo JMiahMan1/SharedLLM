@@ -8,6 +8,9 @@
     "build": "DEBUG=vite:*,rolldown:* node build.js",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
     "preview": "vite preview"
   },
   "dependencies": {
