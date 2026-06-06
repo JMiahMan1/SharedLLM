@@ -44,6 +44,10 @@ from services.execution.announce_handlers import detect_tv_type as _detect_tv_ty
 from services.execution import device_registry
 
 import threading
+import requests
+
+# Patch requests to disable HTTP/3 globally (Nextcloud advertises it via Alt-Svc but can't handle it)
+requests.Session._disable_http3 = True
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
