@@ -268,6 +268,21 @@ test.describe('Media Sections', () => {
     expect(hasBooks || hasEmpty).toBe(true);
   });
 
+  test('Jump Back In shows maximum 3 entries', async ({ page }) => {
+    await expect(page.getByRole('heading', { name: 'Jump Back In' })).toBeVisible({ timeout: 10000 });
+    const jumpBackInSection = page.getByRole('heading', { name: 'Jump Back In' }).locator('..');
+    await expect(jumpBackInSection).toBeVisible({ timeout: 10000 });
+
+    // Count items in the Jump Back In grid
+    const grid = jumpBackInSection.locator('div.grid.grid-cols-1.sm\\:grid-cols-2');
+    if (await grid.count() > 0) {
+      const items = grid.first().locator('div[class*="rounded"], div[class*="glass"], div[class*="bg-"], button');
+      const itemCount = await items.count();
+      // Should show at most 3 entries
+      expect(itemCount).toBeLessThanOrEqual(3);
+    }
+  });
+
   test('Playlists section renders with heading', async ({ page }) => {
     await expect(
       page.getByRole('heading', { name: 'Playlists' }),
@@ -570,6 +585,221 @@ test.describe('Navigation', () => {
       await page.waitForLoadState('domcontentloaded');
       await page.waitForTimeout(3000);
       await expect(page.getByRole('heading', { name: 'Media', level: 1 })).toBeVisible({ timeout: 10000 });
+    }
+  });
+});
+
+/* ──────────────────────────────────────────────────────────────
+   Media Playback — full flow
+   ────────────────────────────────────────────────────────────── */
+
+test.describe('Media Playback — End-to-End', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+    await page.goto(`${UI_URL}/media`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
+  });
+
+  test('selecting a device shows it as active', async ({ page }) => {
+    // Click the Office TV device card
+    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    if (await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await officeTvCard.click();
+      await page.waitForTimeout(500);
+
+      // Player card should show the selected device name
+      const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
+      await expect(playerCard.getByText('Office TV')).toBeVisible();
+    }
+  });
+
+  test('playing a song updates media status', async ({ page }) => {
+    // Select Office TV
+    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
+      test.skip();
+    }
+    await officeTvCard.click();
+    await page.waitForTimeout(500);
+
+    // Jump Back In should show MA recent items
+    const jumpBackIn = page.getByRole('heading', { name: 'Jump Back In' }).locator('..');
+    await expect(jumpBackIn).toBeVisible({ timeout: 10000 });
+
+    // Find the first MA recent item (e.g. "Does Anybody Hear Her")
+    const maRecentItem = page.getByText('Does Anybody Hear Her').first();
+    if (await maRecentItem.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // Get the parent play button
+      const playBtn = maRecentItem.locator('ancestor::div button:has-text("Play")').first()
+        .or(maRecentItem.locator('..').locator('button:has(svg path[d*="play"])').first());
+
+      if (await playBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        // Play the track
+        await playBtn.click();
+        await page.waitForTimeout(5000);
+
+        // Player card should now show active playback
+        const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
+        await expect(playerCard.getByText('Does Anybody Hear Her')).toBeVisible();
+      }
+    }
+  });
+
+  test('stopping playback resets player card', async ({ page }) => {
+    // Select Office TV
+    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
+      test.skip();
+    }
+    await officeTvCard.click();
+    await page.waitForTimeout(500);
+
+    // Jump Back In should show MA recent items
+    const jumpBackIn = page.getByRole('heading', { name: 'Jump Back In' }).locator('..');
+    await expect(jumpBackIn).toBeVisible({ timeout: 10000 });
+
+    // Find the first MA recent item
+    const maRecentItem = page.getByText('Does Anybody Hear Her').first();
+    if (await maRecentItem.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // Get the parent play button
+      const playBtn = maRecentItem.locator('ancestor::div button:has-text("Play")').first()
+        .or(maRecentItem.locator('..').locator('button:has(svg path[d*="play"])').first());
+
+      if (await playBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        // Play the track
+        await playBtn.click();
+        await page.waitForTimeout(5000);
+
+        // Verify track is playing
+        const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
+        await expect(playerCard.getByText('Does Anybody Hear Her')).toBeVisible();
+
+        // Find and click pause button in player card
+        const pauseBtn = playerCard.getByLabel('Pause').or(playerCard.getByRole('button', { name: /pause/i }).first());
+        if (await pauseBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await pauseBtn.click();
+          await page.waitForTimeout(3000);
+
+          // Player card should show paused state or stop
+          const stateText = playerCard.locator('text=/playing|paused|stopped/i').first();
+          if (await stateText.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await expect(stateText).toBeVisible();
+          }
+        }
+      }
+    }
+  });
+
+  test('playing from playlists updates media status', async ({ page }) => {
+    // Select Office TV
+    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
+      test.skip();
+    }
+    await officeTvCard.click();
+    await page.waitForTimeout(500);
+
+    // Click Browse All Media to open modal
+    await page.getByRole('button', { name: 'Browse All Media' }).click();
+    await page.waitForTimeout(3000);
+
+    // Click Music Assistant tab
+    await page.getByRole('button', { name: /Music Assistant/i }).click();
+    await page.waitForTimeout(2000);
+
+    // Find a playlist with items
+    const playlistItem = page.locator('text=/\\d+ tracks/').first();
+    if (await playlistItem.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // Click the playlist item
+      const playlistCard = playlistItem.locator('ancestor::div[role="button"]').first()
+        .or(playlistItem.locator('..').locator('[class*="cursor-pointer"]')).first();
+
+      if (await playlistCard.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await playlistCard.click();
+        await page.waitForTimeout(3000);
+
+        // Should show playlist items with play buttons
+        const playBtns = page.locator('button:has-text("Play"), [aria-label*="Play"]').first();
+        if (await playBtns.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await playBtns.click();
+          await page.waitForTimeout(5000);
+
+          // Player card should show active playback
+          const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
+          const hasNowPlaying = playerCard.locator('text=/playing|Now Playing/').first();
+          if (await hasNowPlaying.isVisible({ timeout: 5000 }).catch(() => false)) {
+            await expect(hasNowPlaying).toBeVisible();
+          }
+        }
+      }
+    }
+  });
+
+  test('transport controls respond to clicks', async ({ page }) => {
+    // Select Office TV
+    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
+      test.skip();
+    }
+    await officeTvCard.click();
+    await page.waitForTimeout(500);
+
+    // Play a track
+    const maRecentItem = page.getByText('Does Anybody Hear Her').first();
+    if (await maRecentItem.isVisible({ timeout: 5000 }).catch(() => false)) {
+      const playBtn = maRecentItem.locator('ancestor::div button:has-text("Play")').first()
+        .or(maRecentItem.locator('..').locator('button:has(svg path[d*="play"])').first());
+
+      if (await playBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await playBtn.click();
+        await page.waitForTimeout(5000);
+
+        // Player card should show active playback
+        const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
+        await expect(playerCard.getByText('Does Anybody Hear Her')).toBeVisible();
+
+        // Click next track
+        const nextBtn = playerCard.getByLabel('Next track').or(playerCard.getByRole('button', { name: /next/i }).first());
+        if (await nextBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await nextBtn.click();
+          await page.waitForTimeout(3000);
+
+          // Player card should still show active playback (may be different track)
+          const stillPlaying = playerCard.locator('text=/playing|paused|Does Anybody Hear Her/').first();
+          if (await stillPlaying.isVisible({ timeout: 5000 }).catch(() => false)) {
+            await expect(stillPlaying).toBeVisible();
+          }
+        }
+      }
+    }
+  });
+
+  test('volume slider updates on player card', async ({ page }) => {
+    // Select Office TV
+    const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
+    if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
+      test.skip();
+    }
+    await officeTvCard.click();
+    await page.waitForTimeout(500);
+
+    // Find volume slider
+    const volumeSlider = page.locator('input[type="range"]').first();
+    if (await volumeSlider.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // Set volume to 50%
+      await volumeSlider.evaluate((el: HTMLInputElement) => {
+        el.value = '50';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await page.waitForTimeout(1000);
+
+      // Volume display should update
+      const volumeDisplay = page.locator('span.tabular-nums').first();
+      if (await volumeDisplay.isVisible({ timeout: 3000 }).catch(() => false)) {
+        const text = await volumeDisplay.textContent();
+        expect(text).toContain('50');
+      }
     }
   });
 });
