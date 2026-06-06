@@ -669,7 +669,7 @@ const Media = () => {
     }> = [];
 
     if (absLastPlayed?.books) {
-      for (const book of absLastPlayed.books) {
+      for (const book of absLastPlayed.books.slice(0, 3)) {
         // Backend returns progress as 0-100 percentage, normalize to 0-1 ratio for UI
         let progress: number | undefined;
         if (book.progress !== undefined && book.progress !== null) {
@@ -683,14 +683,14 @@ const Media = () => {
       }
     }
     if (maRecent?.recent) {
-      for (const item of maRecent.recent) {
+      for (const item of maRecent.recent.slice(0, 3)) {
         items.push({
           id: `ma-${item.uri}`, title: item.name, subtitle: item.artist,
           type: 'music',
         });
       }
     }
-    return items;
+    return items.slice(0, 3);
   }, [absLastPlayed, maRecent]);
 
   /* ── media status polling ───────────────────────────────────── */
