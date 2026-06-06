@@ -63,7 +63,7 @@ NEXTCLOUD_PASS = ""
 GIT_URL = ""
 GIT_USER = ""
 GIT_TOKEN = ""
-REDIS_URL = "redis://redis:6379/0"
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 LOG_RETENTION_DAYS = 30
 LOG_MAX_ENTRIES = 10000
 RAVEN_MAX_TOTAL_SECONDS = 1800
@@ -153,7 +153,7 @@ async def resolve_runtime_config():
         "git_url": "GIT_URL",
         "git_user": "GIT_USER",
         "git_token": "GIT_TOKEN",
-        "redis_url": "REDIS_URL",
+        # redis_url is infrastructure-dependent (Docker vs host networking) — read from env only
         "log_retention_days": "LOG_RETENTION_DAYS",
         "log_max_entries": "LOG_MAX_ENTRIES",
         "raven_max_total_seconds": "RAVEN_MAX_TOTAL_SECONDS",
