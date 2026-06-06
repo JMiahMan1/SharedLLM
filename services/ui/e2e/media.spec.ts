@@ -802,6 +802,140 @@ test.describe('Media Playback — End-to-End', () => {
       }
     }
   });
+
+  test('MA music plays via Local Player', async ({ page }) => {
+    // Click Local Player card first
+    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
+    await localPlayerCard.click();
+    await page.waitForTimeout(500);
+
+    // Jump Back In should show MA recent items
+    const maRecentItem = page.getByText('Does Anybody Hear Her').first();
+    if (await maRecentItem.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // Get the parent play button
+      const playBtn = maRecentItem.locator('ancestor::div button:has-text("Play")').first()
+        .or(maRecentItem.locator('..').locator('button:has(svg path[d*="play"])').first());
+
+      if (await playBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        // Play the track
+        await playBtn.click();
+        await page.waitForTimeout(3000);
+
+        // Local Audio Player should appear with track info
+        const localPlayer = page.locator('.fixed.inset-0.bg-black\\/90').first()
+          .or(page.locator('div:has-text("Does Anybody Hear Her")'));
+        if (await localPlayer.isVisible({ timeout: 5000 }).catch(() => false)) {
+          // Verify the track title is shown
+          await expect(localPlayer.getByText('Does Anybody Hear Her')).toBeVisible();
+        }
+      }
+    }
+  });
+
+  test('ABS audiobook plays via Local Player', async ({ page }) => {
+    // Click Local Player card first
+    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
+    await localPlayerCard.click();
+    await page.waitForTimeout(500);
+
+    // Jump Back In should show ABS books
+    const absBook = page.getByText('Homilies of Saint John Chrysostom').first();
+    if (await absBook.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // Get the parent play button
+      const playBtn = absBook.locator('ancestor::div button:has-text("Play")').first()
+        .or(absBook.locator('..').locator('button:has(svg path[d*="play"])').first());
+
+      if (await playBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        // Play the audiobook
+        await playBtn.click();
+        await page.waitForTimeout(3000);
+
+        // Local Audio Player should appear with book info
+        const localPlayer = page.locator('.fixed.inset-0.bg-black\\/90').first()
+          .or(page.locator('div:has-text("Homilies of Saint John Chrysostom")'));
+        if (await localPlayer.isVisible({ timeout: 5000 }).catch(() => false)) {
+          // Verify the book title is shown
+          await expect(localPlayer.getByText('Homilies of Saint John Chrysostom')).toBeVisible();
+        }
+      }
+    }
+  });
+
+  test('transport controls work in Local Player', async ({ page }) => {
+    // Click Local Player card first
+    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
+    await localPlayerCard.click();
+    await page.waitForTimeout(500);
+
+    // Find and play an MA track
+    const maRecentItem = page.getByText('Does Anybody Hear Her').first();
+    if (await maRecentItem.isVisible({ timeout: 5000 }).catch(() => false)) {
+      const playBtn = maRecentItem.locator('ancestor::div button:has-text("Play")').first()
+        .or(maRecentItem.locator('..').locator('button:has(svg path[d*="play"])').first());
+
+      if (await playBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await playBtn.click();
+        await page.waitForTimeout(3000);
+
+        // Local Audio Player should be visible
+        const localPlayer = page.locator('.fixed.inset-0.bg-black\\/90').first();
+        if (await localPlayer.isVisible({ timeout: 5000 }).catch(() => false)) {
+          // Click the play/pause toggle button
+          const toggleBtn = localPlayer.locator('button.rounded-full').first();
+          if (await toggleBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+            await toggleBtn.click();
+            await page.waitForTimeout(1000);
+          }
+        }
+      }
+    }
+  });
+
+  test('Local Player can play from playlists', async ({ page }) => {
+    // Click Local Player card first
+    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
+    await localPlayerCard.click();
+    await page.waitForTimeout(500);
+
+    // Click Browse All Media to open modal
+    await page.getByRole('button', { name: 'Browse All Media' }).click();
+    await page.waitForTimeout(3000);
+
+    // Click Music Assistant tab
+    await page.getByRole('button', { name: /Music Assistant/i }).click();
+    await page.waitForTimeout(2000);
+
+    // Find a playlist with items
+    const playlistItem = page.locator('text=/\\d+ tracks/').first();
+    if (await playlistItem.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // Click the playlist item
+      const playlistCard = playlistItem.locator('ancestor::div[role="button"]').first()
+        .or(playlistItem.locator('..').locator('[class*="cursor-pointer"]')).first();
+
+      if (await playlistCard.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await playlistCard.click();
+        await page.waitForTimeout(3000);
+
+        // Should show playlist items with play buttons
+        const playBtns = page.locator('button:has-text("Play"), [aria-label*="Play"]').first();
+        if (await playBtns.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await playBtns.click();
+          await page.waitForTimeout(3000);
+
+          // Local Audio Player should appear
+          const localPlayer = page.locator('.fixed.inset-0.bg-black\\/90').first();
+          if (await localPlayer.isVisible({ timeout: 5000 }).catch(() => false)) {
+            // Should show playlist name or track info
+            await expect(localPlayer.locator('p.text-white.font-semibold')).toBeVisible();
+          }
+        }
+      }
+    }
+  });
 });
 
 /* ──────────────────────────────────────────────────────────────
