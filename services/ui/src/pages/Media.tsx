@@ -44,14 +44,20 @@ const loadingSection = () => (
 
 /* ── device selector (horizontal card list) ────────────────────────── */
 
+type DeviceType = 'local' | 'ha';
+
 const DeviceSelector = ({
   selectedTarget,
   entities,
   onDeviceSelect,
+  localMode,
+  onLocalToggle,
 }: {
   selectedTarget: string;
   entities: MediaEntity[];
   onDeviceSelect?: (entityId: string) => void;
+  localMode: boolean;
+  onLocalToggle?: (mode: boolean) => void;
 }) => {
   const { trigger } = useHaptics();
 
@@ -66,13 +72,21 @@ const DeviceSelector = ({
     [entities],
   );
 
-  const handleSelect = useCallback(
+  const handleLocalSelect = useCallback(() => {
+    trigger('light');
+    onLocalToggle?.(true);
+  }, [onLocalToggle, trigger]);
+
+  const handleDeviceSelect = useCallback(
     (id: string) => {
       trigger('light');
+      onLocalToggle?.(false);
       onDeviceSelect?.(id);
     },
-    [onDeviceSelect, trigger],
+    [onDeviceSelect, onLocalToggle, trigger],
   );
+
+  const hasHaDevices = targets.length > 0;
 
   return (
     <div className="glass-panel rounded-2xl p-4">
@@ -80,41 +94,60 @@ const DeviceSelector = ({
         <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
           <Cast size={12} />Select Device
         </h2>
-        <span className="text-[10px] text-slate-600">{targets.filter((t) => t.online).length} online</span>
+        <span className="text-[10px] text-slate-600">{localMode ? '1 mode' : `${targets.filter((t) => t.online).length} online`}</span>
       </div>
-      {targets.length === 0 ? (
-        <p className="text-xs text-slate-500 text-center py-4">No media players found</p>
-      ) : (
-        <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
-          {targets.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => handleSelect(t.id)}
-              className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] ${
-                selectedTarget === t.id
-                  ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
-                  : t.online
-                    ? 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
-                    : 'bg-white/3 border-white/5 opacity-40'
-              }`}
-            >
-              <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
-              <div className="min-w-0 flex-1">
-                <p className="text-white text-sm font-medium truncate">{t.name}</p>
-                <p className="text-[10px] text-slate-500 truncate">{t.room}</p>
-              </div>
-              {selectedTarget === t.id && (
-                <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />
-              )}
-            </button>
-          ))}
-          {!selectedTarget && (
-            <div className="flex items-center justify-center px-4 py-2.5 rounded-xl border border-dashed border-white/5 text-slate-600 text-xs shrink-0">
-              Tap a device to start
-            </div>
+      <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
+        {/* Local Player */}
+        <button
+          onClick={handleLocalSelect}
+          className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] ${
+            localMode
+              ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
+              : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+          }`}
+        >
+          <div className="w-2.5 h-2.5 rounded-full shrink-0 bg-green-400" />
+          <div className="min-w-0 flex-1">
+            <p className="text-white text-sm font-medium truncate">Local Player</p>
+            <p className="text-[10px] text-slate-500 truncate">Browser / Android App</p>
+          </div>
+          {localMode && (
+            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />
           )}
-        </div>
-      )}
+        </button>
+        {/* HA Devices */}
+        {hasHaDevices && (
+          <>
+            {targets.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => handleDeviceSelect(t.id)}
+                className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] ${
+                  selectedTarget === t.id
+                    ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
+                    : t.online
+                      ? 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                      : 'bg-white/3 border-white/5 opacity-40'
+                }`}
+              >
+                <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-white text-sm font-medium truncate">{t.name}</p>
+                  <p className="text-[10px] text-slate-500 truncate">{t.room}</p>
+                </div>
+                {selectedTarget === t.id && (
+                  <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />
+                )}
+              </button>
+            ))}
+          </>
+        )}
+        {!localMode && !hasHaDevices && (
+          <div className="flex items-center justify-center px-4 py-2.5 rounded-xl border border-dashed border-white/5 text-slate-600 text-xs shrink-0">
+            Tap a device to start
+          </div>
+        )}
+      </div>
     </div>
   );
 };
@@ -276,7 +309,7 @@ const PlaylistItem = ({
 /* ── explorer modal ─────────────────────────────────────────────────── */
 
 const MediaExplorerModal = ({
-  show, onClose, playAudiobook, playPlaylist, playMedia, playLocal, selectedTarget,
+  show, onClose, playAudiobook, playPlaylist, playMedia, playLocal, selectedTarget, localMode,
 }: {
   show: boolean; onClose: () => void;
   playAudiobook: (id: string) => void;
@@ -284,6 +317,7 @@ const MediaExplorerModal = ({
   playMedia: (query: string, mediaType?: string) => void;
   playLocal: (id: string, title: string, subtitle: string, type: 'audiobook' | 'music', source: 'abs' | 'ma') => void;
   selectedTarget: string;
+  localMode: boolean;
 }) => {
   const { trigger } = useHaptics();
   const [tab, setTab] = useState<'ma' | 'abs'>('ma');
@@ -333,6 +367,17 @@ const MediaExplorerModal = ({
 
   const handlePlay = useCallback(
     (id: string, type: 'audiobook' | 'music' | 'playlist', title?: string, subtitle?: string) => {
+      if (localMode) {
+        if (title && subtitle) {
+          trigger('heavy');
+          setItemLoading(id);
+          try {
+            const source = type === 'audiobook' ? 'abs' : 'ma';
+            playLocal(id, title, subtitle, type === 'audiobook' ? 'audiobook' : 'music', source);
+          } finally { setItemLoading(null); }
+        }
+        return;
+      }
       if (!selectedTarget) {
         if (title && subtitle) {
           trigger('heavy');
@@ -352,7 +397,7 @@ const MediaExplorerModal = ({
         else playMedia(id, 'music');
       } finally { setItemLoading(null); }
     },
-    [selectedTarget, trigger, playAudiobook, playPlaylist, playMedia, playLocal],
+    [selectedTarget, localMode, trigger, playAudiobook, playPlaylist, playMedia, playLocal],
   );
 
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -597,6 +642,7 @@ const Media = () => {
   const [mediaStatus, setMediaStatus] = useState<MediaStatus | null>(null);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
+  const [localMode, setLocalMode] = useState(false);
 
   const { data: maPlaylists, isLoading: maPlaylistsLoading } = useQuery({
     queryKey: ['ma-playlists'],
@@ -659,11 +705,16 @@ const Media = () => {
           setMediaStatus(active as MediaStatus);
           if (active.volume_level !== undefined) setVolume(Math.round(Number(active.volume_level) * 100));
           if (active.is_volume_muted !== undefined) setMuted(Boolean(active.is_volume_muted));
-          if (active.entity_id) setSelectedTarget(String(active.entity_id));
+          if (active.entity_id) {
+            setSelectedTarget(String(active.entity_id));
+            setLocalMode(false);
+          }
+        } else if (!selectedTarget) {
+          setLocalMode(false);
         }
       }
     } catch { /* ignore */ }
-  }, []);
+  }, [selectedTarget]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -678,6 +729,7 @@ const Media = () => {
   const handleDeviceSelect = useCallback((entityId: string) => {
     trigger('light');
     setSelectedTarget(entityId);
+    setLocalMode(false);
     setError(null);
   }, [trigger]);
 
@@ -775,6 +827,8 @@ const Media = () => {
         selectedTarget={selectedTarget}
         entities={entities}
         onDeviceSelect={handleDeviceSelect}
+        localMode={localMode}
+        onLocalToggle={setLocalMode}
       />
 
       {/* 2. Active Player Header */}
@@ -819,6 +873,10 @@ const Media = () => {
               const id = item.id;
               const handlePlay = item.type === 'audiobook'
                 ? () => {
+                    if (localMode) {
+                      playLocal(item.id.replace('abs-', ''), item.title, item.subtitle, 'audiobook', 'abs');
+                      return;
+                    }
                     if (!selectedTarget) {
                       playLocal(item.id.replace('abs-', ''), item.title, item.subtitle, 'audiobook', 'abs');
                       return;
@@ -826,6 +884,10 @@ const Media = () => {
                     playAudiobook(item.id.replace('abs-', ''));
                   }
                 : () => {
+                    if (localMode) {
+                      playLocal(item.id.replace('ma-', ''), item.title, item.subtitle, 'music', 'ma');
+                      return;
+                    }
                     if (!selectedTarget) {
                       playLocal(item.id.replace('ma-', ''), item.title, item.subtitle, 'music', 'ma');
                       return;
@@ -866,6 +928,10 @@ const Media = () => {
                 <PlaylistItem
                   key={pl.uri} name={pl.name} trackCount={pl.items}
                   onPlay={() => {
+                    if (localMode) {
+                      playLocal(pl.uri, pl.name, `${pl.items} tracks`, 'music', 'ma');
+                      return;
+                    }
                     if (!selectedTarget) {
                       playLocal(pl.uri, pl.name, `${pl.items} tracks`, 'music', 'ma');
                       return;
@@ -898,6 +964,7 @@ const Media = () => {
         playMedia={playMedia}
         playLocal={playLocal}
         selectedTarget={selectedTarget}
+        localMode={localMode}
       />
     </div>
   );
