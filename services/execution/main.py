@@ -44,10 +44,27 @@ from services.execution.announce_handlers import detect_tv_type as _detect_tv_ty
 from services.execution import device_registry
 
 import threading
-import requests
+import urllib3
+from typing import Any, Callable
 
-# Patch requests to disable HTTP/3 globally (Nextcloud advertises it via Alt-Svc but can't handle it)
-requests.Session._disable_http3 = True
+# Patch urllib3 to suppress MustDowngradeError from Nextcloud's Alt-Svc HTTP/3 advertisement.
+# Nextcloud advertises HTTP/3 via Alt-Svc response header but cannot handle it, causing
+# urllib3 to raise MustDowngradeError and retry loops. We intercept this at the connection
+# pool level to silently ignore the error and continue with HTTP/1.1.
+def _make_patched_validate_conn(original: Callable) -> Callable:
+    def _patched(self, conn, *args, **kwargs):
+        try:
+            return original(self, conn, *args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if 'MustDowngrade' in err_str or 'HttpVersion.h3' in err_str or 'Alt-Svc' in err_str:
+                return
+            raise
+    return _patched
+
+for cls in [urllib3.HTTPConnectionPool, urllib3.HTTPSConnectionPool]:
+    if hasattr(cls, '_validate_conn'):
+        cls._validate_conn = _make_patched_validate_conn(cls._validate_conn)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
