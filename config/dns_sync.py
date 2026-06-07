@@ -16,6 +16,7 @@ IDENTITY_URL = os.environ.get("IDENTITY_SVC_URL", "http://localhost:8001")
 DNS_POLL_INTERVAL = int(os.environ.get("DNS_POLL_INTERVAL", "30"))
 DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "53"))
 UPSTREAM_DNS = os.environ.get("UPSTREAM_DNS", "127.0.0.11")
+UPSTREAM_DNS_2 = os.environ.get("UPSTREAM_DNS_2", "192.168.1.1")
 HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", "10"))
 HEALTH_CHECK_TIMEOUT = int(os.environ.get("HEALTH_CHECK_TIMEOUT", "2"))
 HOSTS_FILE = os.environ.get("HOSTS_FILE", "/etc/hosts")
@@ -330,25 +331,27 @@ def build_dns_response(txid, hostname, answers, rcode=0):
     return header + question + ans
 
 def forward_query(hostname, qtype):
-    """Forward query to upstream DNS server."""
-    try:
-        query = bytearray()
-        query += b'\x00\x01'
-        query += b'\x01\x00'
-        query += b'\x00\x01\x00\x00\x00\x00\x00\x00'
-        for label in hostname.split('.'):
-            query += bytes([len(label)]) + label.encode()
-        query += b'\x00'
-        query += struct.pack('!HH', qtype, 1)
-        
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(2)
-        sock.sendto(bytes(query), (UPSTREAM_DNS, 53))
-        resp, _ = sock.recvfrom(512)
-        sock.close()
-        return resp
-    except Exception:
-        return None
+    """Forward query to upstream DNS server with fallback."""
+    for upstream in [UPSTREAM_DNS, UPSTREAM_DNS_2]:
+        try:
+            query = bytearray()
+            query += b'\x00\x01'
+            query += b'\x01\x00'
+            query += b'\x00\x01\x00\x00\x00\x00\x00\x00'
+            for label in hostname.split('.'):
+                query += bytes([len(label)]) + label.encode()
+            query += b'\x00'
+            query += struct.pack('!HH', qtype, 1)
+            
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(2)
+            sock.sendto(bytes(query), (upstream, 53))
+            resp, _ = sock.recvfrom(512)
+            sock.close()
+            return resp
+        except Exception:
+            continue
+    return None
 
 def dns_server():
     """Run a simple DNS server with health-aware responses."""

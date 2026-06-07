@@ -21,6 +21,7 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - IDENTITY_SVC_URL=http://identity:8001
       - DNS_POLL_INTERVAL=30
+      - UPSTREAM_DNS_2=192.168.1.1
     depends_on:
       - identity
 
@@ -163,8 +164,7 @@ services:
     user: "${PUID:-1000}:${PGID:-1000}"
     dns:
       - "172.26.0.10"
-      - "127.0.0.11"
-      - "8.8.8.8"
+      - "192.168.1.1"
     depends_on:
       identity:
         condition: service_healthy
