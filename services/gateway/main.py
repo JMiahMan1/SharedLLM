@@ -4931,7 +4931,7 @@ async def stream_music_assistant(uri: str, request: Request):
         log.error(f"[stream/ma] identity resolution failed: {e.detail}")
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    mass_url = creds.get("mass_url") or os.getenv("MA_URL") or "http://ha.sumemail.com:8095"
+    mass_url = creds.get("mass_url")
     mass_token = creds.get("mass_token") or os.getenv("MA_TOKEN")
 
     if not mass_url or not mass_token:
