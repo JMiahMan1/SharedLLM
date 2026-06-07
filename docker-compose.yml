@@ -164,6 +164,7 @@ services:
     dns:
       - "172.26.0.10"
       - "127.0.0.11"
+      - "8.8.8.8"
     depends_on:
       identity:
         condition: service_healthy
