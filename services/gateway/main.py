@@ -4866,7 +4866,11 @@ async def proxy_entity_search(request: Request):
                 json=exec_body,
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+            data = resp.json()
+            if isinstance(data, dict):
+                entities = data.get("detail", {}).get("entities", [])
+                data["result"] = entities
+            return JSONResponse(content=data, status_code=resp.status_code)
     except httpx.RequestError as e:
         log.error(f"Execution service unreachable for entity search: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
