@@ -1,4 +1,4 @@
-import { test, expect, Locator } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 
@@ -109,6 +109,7 @@ test.describe('Device Selector — Selection', () => {
     const selected = page.locator(
       '.glass-panel button.bg-cyan-500\\/15',
     ).first();
+    await expect(selected).not.toBeVisible();
     // If no card is selected, the prompt should be visible
     await expect(page.getByText('Tap a device to start')).toBeVisible();
   });
@@ -448,7 +449,7 @@ test.describe('API — Data Integrity', () => {
 
     // Should include media_player domain entities
     const mediaPlayers = data.entities.filter(
-      (e: any) => e.domain === 'media_player',
+      (e: { domain: string }) => e.domain === 'media_player',
     );
     expect(mediaPlayers.length).toBeGreaterThan(0);
   });
@@ -555,7 +556,7 @@ test.describe('API — Data Integrity', () => {
     );
     const data = await resp.json();
     // Top results should have at least some variety in titles
-    const titles = data.books.slice(0, 10).map((b: any) => b.title);
+    const titles = data.books.slice(0, 10).map((b: { title: string }) => b.title);
     const unique = new Set(titles);
     // Allow some duplicates since user may have replayed same book
     expect(unique.size).toBeGreaterThan(0);

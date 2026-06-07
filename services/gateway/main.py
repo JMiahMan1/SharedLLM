@@ -4853,6 +4853,25 @@ async def proxy_media_play(request: Request):
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
 
+@app.post("/execute/entity/search")
+async def proxy_entity_search(request: Request):
+    """Proxy entity search requests from UI to execution service."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            body = await request.json() if await request.body() else {}
+            user_ctx = await _resolve_user_context(request, body)
+            exec_body = {**body, "user_context": user_ctx}
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/entity/search",
+                json=exec_body,
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except httpx.RequestError as e:
+        log.error(f"Execution service unreachable for entity search: {e}")
+        raise HTTPException(status_code=503, detail="Execution service unreachable")
+
+
 @app.post("/execute/audiobookshelf")
 async def proxy_audiobookshelf(request: Request):
     """Proxy audiobookshelf requests from UI to execution service."""

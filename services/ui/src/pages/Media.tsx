@@ -44,7 +44,7 @@ const loadingSection = () => (
 
 /* ── device selector (horizontal card list) ────────────────────────── */
 
-type DeviceType = 'local' | 'ha';
+
 
 const DeviceSelector = ({
   selectedTarget,
@@ -300,7 +300,9 @@ const PlaylistItem = ({
     </div>
     <div className="min-w-0 flex-1">
       <p className="text-white text-sm font-medium truncate">{name}</p>
-      <p className="text-xs text-slate-400">{trackCount} {trackCount === 1 ? 'track' : 'tracks'}</p>
+      {trackCount > 0 && (
+        <p className="text-xs text-slate-400">{trackCount} {trackCount === 1 ? 'track' : 'tracks'}</p>
+      )}
     </div>
     <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
   </button>
@@ -480,7 +482,7 @@ const MediaExplorerModal = ({
                       .filter((pl) => !search || pl.name.toLowerCase().includes(search.toLowerCase()))
                       .map((pl) => (
                         <PlaylistItem key={pl.uri} name={pl.name} trackCount={pl.items}
-                          onPlay={() => handlePlay(pl.uri, 'playlist', pl.name, `${pl.items} tracks`)}
+                          onPlay={() => handlePlay(pl.uri, 'playlist', pl.name, pl.items > 0 ? `${pl.items} tracks` : 'Playlist')}
                           isDisabled={!selectedTarget} isLoading={itemLoading === `pl-${pl.uri}`} />
                       ))}
                   </div>
@@ -929,11 +931,11 @@ const Media = () => {
                   key={pl.uri} name={pl.name} trackCount={pl.items}
                   onPlay={() => {
                     if (localMode) {
-                      playLocal(pl.uri, pl.name, `${pl.items} tracks`, 'music', 'ma');
+                      playLocal(pl.uri, pl.name, pl.items > 0 ? `${pl.items} tracks` : 'Playlist', 'music', 'ma');
                       return;
                     }
                     if (!selectedTarget) {
-                      playLocal(pl.uri, pl.name, `${pl.items} tracks`, 'music', 'ma');
+                      playLocal(pl.uri, pl.name, pl.items > 0 ? `${pl.items} tracks` : 'Playlist', 'music', 'ma');
                       return;
                     }
                     playPlaylist(pl.uri);

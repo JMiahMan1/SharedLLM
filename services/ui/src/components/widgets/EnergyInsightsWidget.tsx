@@ -34,10 +34,12 @@ interface TelemetrySummary {
 const EnergyInsightsWidget = ({ userSettings, onTogglePin }: EnergyInsightsWidgetProps) => {
   const [summaries, setSummaries] = React.useState<Record<string, TelemetrySummary>>({});
   const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const fetchEnergyData = async () => {
       try {
+        setError(null);
         const enrolled = await api.getTelemetryEnrollments();
         const powerEnrollments = enrolled.filter((e) => e.power_tracking);
 
@@ -54,7 +56,7 @@ const EnergyInsightsWidget = ({ userSettings, onTogglePin }: EnergyInsightsWidge
         }
         setSummaries(summaryMap);
       } catch {
-        // Silently fail if telemetry API is unavailable
+        setError('Telemetry Service Unconfigured');
       } finally {
         setLoading(false);
       }
@@ -122,6 +124,18 @@ const EnergyInsightsWidget = ({ userSettings, onTogglePin }: EnergyInsightsWidge
     return (
       <div className="glass-card h-full p-5 relative flex items-center justify-center">
         <p className="text-slate-500 text-sm">Loading energy data...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="glass-card h-full p-5 relative flex items-center justify-center">
+        <div className="text-center">
+          <Zap size={32} className="text-slate-700 mb-2 mx-auto" />
+          <p className="text-sm text-red-400 mb-2">{error}</p>
+          <p className="text-xs text-slate-500">Check telemetry system status</p>
+        </div>
       </div>
     );
   }
