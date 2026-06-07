@@ -990,7 +990,7 @@ async def execute_index_capabilities():
 @app.get("/execute/tts/voices")
 async def list_tts_voices():
     """List available voices for the active TTS engine."""
-    from tts import get_tts_engine
+    from services.execution.tts import get_tts_engine
     engine = get_tts_engine()
     return {"status": "SUCCESS", "voices": engine.list_voices()}
 
