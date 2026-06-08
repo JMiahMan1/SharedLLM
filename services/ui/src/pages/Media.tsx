@@ -701,18 +701,41 @@ const Media = () => {
     try {
       const resp = await api.mediaStatus();
       if (resp.status === 'SUCCESS' && resp.detail) {
-        const detail = resp.detail as { active?: Record<string, unknown>; available?: unknown[]; all_players?: unknown[] };
-        const active = detail.active;
-        if (active) {
-          setMediaStatus(active as MediaStatus);
-          if (active.volume_level !== undefined) setVolume(Math.round(Number(active.volume_level) * 100));
-          if (active.is_volume_muted !== undefined) setMuted(Boolean(active.is_volume_muted));
-          if (active.entity_id) {
-            setSelectedTarget(String(active.entity_id));
-            setLocalMode(false);
+        const detail = resp.detail as { active?: MediaStatus | null; available?: MediaStatus[]; all_players?: MediaStatus[] };
+        const allPlayers = detail.all_players || [];
+        
+        const targetPlayer = selectedTarget ? allPlayers.find(p => p.entity_id === selectedTarget) : null;
+        
+        if (targetPlayer) {
+          setMediaStatus(targetPlayer);
+          if (targetPlayer.volume_level !== undefined && targetPlayer.volume_level !== null) {
+            setVolume(Math.round(Number(targetPlayer.volume_level) * 100));
           }
-        } else if (!selectedTarget) {
-          setLocalMode(false);
+          if (targetPlayer.is_volume_muted !== undefined) {
+            setMuted(Boolean(targetPlayer.is_volume_muted));
+          }
+        } else {
+          // If no selected target, or selected target is not in the list, fall back to active player
+          const active = detail.active;
+          if (active) {
+            setMediaStatus(active);
+            if (active.volume_level !== undefined && active.volume_level !== null) {
+              setVolume(Math.round(Number(active.volume_level) * 100));
+            }
+            if (active.is_volume_muted !== undefined) {
+              setMuted(Boolean(active.is_volume_muted));
+            }
+            if (active.entity_id && !selectedTarget) {
+              setSelectedTarget(String(active.entity_id));
+              setLocalMode(false);
+            }
+          } else {
+            // No active playback and no selected target
+            setMediaStatus(null);
+            if (!selectedTarget) {
+              setLocalMode(false);
+            }
+          }
         }
       }
     } catch { /* ignore */ }
@@ -754,6 +777,7 @@ const Media = () => {
   const playMedia = useCallback(async (query: string, mediaType?: string) => {
     if (!selectedTarget) { setError('Select a device first'); return; }
     trigger('heavy');
+    setLoading('play');
     setError(null);
     try {
       const resp = await api.mediaPlay({ entity_id: selectedTarget, query, media_type: mediaType });
@@ -761,12 +785,15 @@ const Media = () => {
       else await fetchMediaStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Playback failed');
+    } finally {
+      setLoading(null);
     }
   }, [selectedTarget, trigger, fetchMediaStatus]);
 
   const playAudiobook = useCallback(async (bookId: string) => {
     if (!selectedTarget) { setError('Select a device first'); return; }
     trigger('heavy');
+    setLoading('play');
     setError(null);
     try {
       const resp = await api.playAudiobook({ book_id: bookId, entity_id: selectedTarget, resume: true });
@@ -774,12 +801,15 @@ const Media = () => {
       else await fetchMediaStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Playback failed');
+    } finally {
+      setLoading(null);
     }
   }, [selectedTarget, trigger, fetchMediaStatus]);
 
   const playPlaylist = useCallback(async (uri: string) => {
     if (!selectedTarget) { setError('Select a device first'); return; }
     trigger('heavy');
+    setLoading('play');
     setError(null);
     try {
       const resp = await api.playPlaylist({ playlist_uri: uri, entity_id: selectedTarget });
@@ -787,6 +817,8 @@ const Media = () => {
       else await fetchMediaStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Playback failed');
+    } finally {
+      setLoading(null);
     }
   }, [selectedTarget, trigger, fetchMediaStatus]);
 
