@@ -1606,6 +1606,12 @@ def _auth_body_from_request(request: Request, body: dict | None = None) -> Any:
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         merged["api_key"] = auth_header.split(" ", 1)[1]
+    # Fallback: accept ?token= query param for browser-native requests (HTMLAudioElement)
+    # that cannot set request headers (used by local media streaming).
+    elif not merged.get("api_key"):
+        token_qp = request.query_params.get("token")
+        if token_qp:
+            merged["api_key"] = token_qp
     return merged
 
 
