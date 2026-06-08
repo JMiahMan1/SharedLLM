@@ -1,11 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import {
   Play, Pause, Volume2, Volume1, VolumeX,
   Loader2, SkipBack, SkipForward, BookOpen, Music,
   ChevronDown,
 } from 'lucide-react';
 
-interface LocalTrack {
+export interface LocalTrack {
   id: string;
   title: string;
   subtitle: string;
@@ -14,160 +14,42 @@ interface LocalTrack {
   source: 'abs' | 'ma';
 }
 
+interface LocalAudioPlayerProps {
+  track: LocalTrack | null;
+  isPlaying: boolean;
+  isLoaded: boolean;
+  volume: number;
+  isMuted: boolean;
+  currentTime: number;
+  duration: number;
+  error: string | null;
+  onTogglePlay: () => void;
+  onVolumeChange: (v: number) => void;
+  onMuteToggle: () => void;
+  onSeek: (time: number) => void;
+  onSkipBack: () => void;
+  onSkipForward: () => void;
+  onStopPlayback: () => void;
+}
+
 export const LocalAudioPlayer = ({
-  initialTrack,
-}: {
-  initialTrack?: LocalTrack;
-}) => {
-  const [track, setTrack] = useState<LocalTrack | null>(initialTrack || null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [volume, setVolume] = useState(70);
-  const [isMuted, setIsMuted] = useState(false);
+  track,
+  isPlaying,
+  isLoaded,
+  volume,
+  isMuted,
+  currentTime,
+  duration,
+  error,
+  onTogglePlay,
+  onVolumeChange,
+  onMuteToggle,
+  onSeek,
+  onSkipBack,
+  onSkipForward,
+  onStopPlayback,
+}: LocalAudioPlayerProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [streamUrl, setStreamUrl] = useState<string | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const progressTimerRef = useRef<number | null>(null);
-
-  const handlePlay = useCallback(async () => {
-    if (!track) return;
-    setIsPlaying(true);
-    setError(null);
-    try {
-      let url = '';
-      if (track.source === 'abs') {
-        url = `/api/media/stream/audiobookshelf/${track.id}`;
-      } else if (track.source === 'ma') {
-        url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(track.id)}`;
-      }
-      setStreamUrl(url);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to start playback');
-      setIsPlaying(false);
-    }
-  }, [track]);
-
-  const handlePause = useCallback(() => {
-    setIsPlaying(false);
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-  }, []);
-
-  const handleToggle = useCallback(() => {
-    if (isPlaying) {
-      handlePause();
-    } else {
-      handlePlay();
-    }
-  }, [isPlaying, handlePlay, handlePause]);
-
-  const handleVolume = useCallback((v: number) => {
-    setVolume(v);
-    if (audioRef.current) {
-      audioRef.current.volume = v / 100;
-      audioRef.current.muted = false;
-      setIsMuted(false);
-    }
-  }, []);
-
-  const handleMuteToggle = useCallback(() => {
-    if (audioRef.current) {
-      const newMuted = !isMuted;
-      audioRef.current.muted = newMuted;
-      setIsMuted(newMuted);
-    }
-  }, [isMuted]);
-
-  const handleSeek = useCallback((time: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
-      setCurrentTime(time);
-    }
-  }, []);
-
-  const handleSkipBack = useCallback(() => {
-    if (audioRef.current && audioRef.current.currentTime > 5) {
-      audioRef.current.currentTime = 0;
-    }
-  }, []);
-
-  const handleSkipForward = useCallback(() => {
-    if (audioRef.current && duration > 0) {
-      audioRef.current.currentTime = Math.min(audioRef.current.currentTime + 30, duration);
-    }
-  }, [duration]);
-
-  // Setup audio element
-  useEffect(() => {
-    if (streamUrl) {
-      if (!audioRef.current) {
-        audioRef.current = new Audio();
-      }
-      audioRef.current.src = streamUrl;
-      audioRef.current.volume = volume / 100;
-      audioRef.current.muted = isMuted;
-
-      const onLoaded = () => {
-        setIsLoaded(true);
-        setDuration(audioRef.current?.duration || 0);
-        audioRef.current?.play().catch(() => {
-          setIsLoaded(false);
-          setError('Playback failed. Tap play to start.');
-        });
-      };
-
-      const onEnded = () => {
-        setIsPlaying(false);
-        setIsLoaded(false);
-      };
-
-      const onError = () => {
-        setIsPlaying(false);
-        setIsLoaded(false);
-        setError('Failed to load stream. Check your connection.');
-      };
-
-      audioRef.current.addEventListener('loadeddata', onLoaded);
-      audioRef.current.addEventListener('ended', onEnded);
-      audioRef.current.addEventListener('error', onError);
-
-      return () => {
-        audioRef.current?.removeEventListener('loadeddata', onLoaded);
-        audioRef.current?.removeEventListener('ended', onEnded);
-        audioRef.current?.removeEventListener('error', onError);
-      };
-    }
-  }, [streamUrl, volume, isMuted]);
-
-  // Progress timer
-  useEffect(() => {
-    if (isPlaying && audioRef.current) {
-      progressTimerRef.current = window.setInterval(() => {
-        if (audioRef.current && !audioRef.current.paused) {
-          setCurrentTime(audioRef.current.currentTime);
-        }
-      }, 1000);
-    }
-    return () => {
-      if (progressTimerRef.current) {
-        clearInterval(progressTimerRef.current);
-      }
-    };
-  }, [isPlaying]);
-
-  // Cleanup
-  useEffect(() => {
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-      }
-    };
-  }, []);
 
   if (!track) return null;
 
@@ -251,7 +133,7 @@ export const LocalAudioPlayer = ({
                   const rect = e.currentTarget.getBoundingClientRect();
                   const x = e.clientX - rect.left;
                   const percent = x / rect.width;
-                  handleSeek(percent * duration);
+                  onSeek(percent * duration);
                 }}
               >
                 <div
@@ -270,13 +152,13 @@ export const LocalAudioPlayer = ({
             {/* Controls */}
             <div className="flex items-center justify-center gap-6 mb-6">
               <button
-                onClick={handleSkipBack}
+                onClick={onSkipBack}
                 className="text-slate-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5"
               >
                 <SkipBack size={20} />
               </button>
               <button
-                onClick={handleToggle}
+                onClick={onTogglePlay}
                 disabled={!isLoaded && !isPlaying}
                 className="w-16 h-16 rounded-full bg-gradient-to-br from-cyan-400 to-purple-400 flex items-center justify-center text-white hover:scale-105 transition-all disabled:opacity-50"
               >
@@ -287,7 +169,7 @@ export const LocalAudioPlayer = ({
                 )}
               </button>
               <button
-                onClick={handleSkipForward}
+                onClick={onSkipForward}
                 className="text-slate-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5"
               >
                 <SkipForward size={20} />
@@ -297,7 +179,7 @@ export const LocalAudioPlayer = ({
             {/* Volume control */}
             <div className="flex items-center gap-3 mb-6">
               <button
-                onClick={handleMuteToggle}
+                onClick={onMuteToggle}
                 className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5"
               >
                 {isMuted || volume === 0 ? (
@@ -313,7 +195,7 @@ export const LocalAudioPlayer = ({
                 min="0"
                 max="100"
                 value={isMuted ? 0 : volume}
-                onChange={(e) => handleVolume(Number(e.target.value))}
+                onChange={(e) => onVolumeChange(Number(e.target.value))}
                 className="flex-1 accent-cyan-400"
               />
               <span className="text-xs text-slate-500 w-8 text-right tabular-nums">{isMuted ? 'M' : volume}</span>
@@ -330,10 +212,7 @@ export const LocalAudioPlayer = ({
             <button
               onClick={() => {
                 setIsExpanded(false);
-                setTrack(null);
-                setIsPlaying(false);
-                setIsLoaded(false);
-                setStreamUrl(null);
+                onStopPlayback();
               }}
               className="w-full mt-4 py-2 text-sm text-slate-500 hover:text-red-400 transition-colors"
             >
