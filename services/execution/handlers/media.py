@@ -556,9 +556,9 @@ async def handle_media_transport(req) -> ExecutionResult:
     
     # Standard media transport commands (all devices)
     button_map = {
-        "pause": "media_pause", "resume": "media_play", "stop": "media_stop",
+        "pause": "media_pause", "resume": "media_play", "play": "media_play", "stop": "media_stop",
         "next": "media_next_track", "previous": "media_previous_track",
-        "volume_up": "volume_up", "volume_down": "volume_down", "mute": "volume_mute"
+        "volume_up": "volume_up", "volume_down": "volume_down", "volume_set": "volume_set", "mute": "volume_mute"
     }
     
     service = button_map.get(command, command)
@@ -577,7 +577,7 @@ async def handle_media_transport(req) -> ExecutionResult:
         assert service_cmd is not None
         data = {}
 
-    if command in ("volume_up", "volume_down") and req.volume_level is not None:
+    if command in ("volume_up", "volume_down", "volume_set") and req.volume_level is not None:
         service_cmd = "volume_set"
         data = {"volume_level": req.volume_level}
 

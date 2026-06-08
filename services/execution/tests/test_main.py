@@ -51,6 +51,34 @@ def test_media_play_valid(mocker):
     assert resp.status_code == 200
     assert resp.json()["status"] == "SUCCESS"
 
+def test_media_transport_play_and_volume_set(mocker):
+    mocker.patch("services.execution.handlers.media.ha_client.call_service", return_value={"ok": True})
+    
+    # Verify play command works without 422
+    resp1 = client.post("/execute/media/transport", 
+        headers={"X-Internal-Secret": "test-secret"},
+        json={
+            "user_context": valid_context,
+            "entity_id": "media_player.kitchen",
+            "command": "play"
+        }
+    )
+    assert resp1.status_code == 200
+    assert resp1.json()["status"] == "SUCCESS"
+
+    # Verify volume_set command works with volume_level parameter
+    resp2 = client.post("/execute/media/transport", 
+        headers={"X-Internal-Secret": "test-secret"},
+        json={
+            "user_context": valid_context,
+            "entity_id": "media_player.kitchen",
+            "command": "volume_set",
+            "volume_level": 0.8
+        }
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["status"] == "SUCCESS"
+
 def test_tv_cast_smart_power_sync(mocker):
     mocker.patch("services.execution.handlers.media.ha_client.get_state", return_value={"state": "off"})
     mocker.patch("services.execution.handlers.media.ha_client.call_service", return_value={"ok": True})

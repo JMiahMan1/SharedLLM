@@ -150,7 +150,7 @@ class MediaPlayRequest(BaseRequest):
 class MediaTransportRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
-    command: Literal["pause", "resume", "stop", "next", "previous", "volume_up", "volume_down", "home", "power_off", "back"]
+    command: Literal["pause", "resume", "stop", "next", "previous", "volume_up", "volume_down", "home", "power_off", "back", "play", "volume_set"]
     volume_level: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
