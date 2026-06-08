@@ -504,7 +504,7 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
         else:
             log.warning(f"[media/play] Could not retrieve state for {entity_id}")
             
-        if state and state.get("state") in ("off", "unavailable", "standby", "idle"):
+        if state and state.get("state") in ("off", "standby"):
             log.info(f"[media/play] Device {entity_id} is {state.get('state')}, turning on...")
             on_res = await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", entity_id)
             log.info(f"[media/play] Turn on result: {on_res}")
