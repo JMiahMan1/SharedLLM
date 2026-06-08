@@ -9,6 +9,7 @@ import {
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import { LocalAudioPlayer } from '../components/LocalAudioPlayer';
+import { storageGetSync } from '../lib/storage';
 
 interface MediaStatus {
   entity_id?: string;
@@ -709,7 +710,10 @@ const Media = () => {
       };
 
       const onError = () => {
-        console.error('[LocalAudio] audio element error');
+        const err = localAudioRef.current?.error;
+        const code = err?.code ?? 'unknown';
+        const msg = err?.message ?? '';
+        console.error(`[LocalAudio] audio element error code=${code} msg="${msg}"`);
         setLocalIsPlaying(false);
         setLocalIsLoaded(false);
         setLocalError('Failed to load stream. Check your connection.');
@@ -947,11 +951,16 @@ const Media = () => {
     setLocalIsLoaded(false);
     setLocalError(null);
 
+    // HTMLAudioElement cannot set Authorization headers, so we embed the token
+    // as a query param. The gateway accepts ?token= as a fallback for stream endpoints.
+    const apiToken = storageGetSync('jarvis_api_key') ?? '';
+    const tokenSuffix = apiToken ? `${apiToken.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiToken)}` : '';
+
     let url = '';
     if (source === 'abs') {
-      url = `/api/media/stream/audiobookshelf/${idClean}`;
+      url = `/api/media/stream/audiobookshelf/${idClean}${tokenSuffix}`;
     } else if (source === 'ma') {
-      url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}`;
+      url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
     }
     setLocalStreamUrl(url);
   }, [trigger]);
