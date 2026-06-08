@@ -17,9 +17,31 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop }: ActiveMed
   useEffect(() => {
     const fetchMedia = async () => {
       try {
-        const resp = await api.mediaStatus() as { status: string; data?: MediaState };
-        if (resp.status === 'SUCCESS' && resp.data) {
-          setMedia(resp.data);
+        const resp = await api.mediaStatus() as {
+          status: string;
+          detail?: {
+            active?: {
+              entity_id?: string;
+              friendly_name?: string;
+              state?: string;
+              media_title?: string;
+              media_artist?: string;
+              media_album?: string;
+              volume_level?: number;
+              is_volume_muted?: boolean;
+            } | null;
+          };
+        };
+        if (resp.status === 'SUCCESS' && resp.detail?.active) {
+          const active = resp.detail.active;
+          setMedia({
+            entity_id: active.entity_id || '',
+            device_name: active.friendly_name || active.entity_id || '',
+            title: active.media_title || 'Unknown',
+            artist: active.media_artist || 'Unknown Artist',
+            album: active.media_album || '',
+            state: active.state || 'idle',
+          });
         } else {
           setMedia(null);
           if (!userSettings.is_pinned) onMediaStop();
@@ -37,9 +59,11 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop }: ActiveMed
   }, [onMediaStop, userSettings.is_pinned]);
 
   const playPause = async () => {
+    if (!media?.entity_id) return;
     try {
       await api.mediaTransport({
-        command: media?.state === 'playing' ? 'pause' : 'play',
+        entity_id: media.entity_id,
+        command: media.state === 'playing' ? 'pause' : 'play',
       });
       setMedia((prev) => prev ? { ...prev, state: prev.state === 'playing' ? 'paused' : 'playing' } : prev);
     } catch {
@@ -77,7 +101,9 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop }: ActiveMed
           <div className="flex items-center justify-center gap-4">
             <button
               onClick={async () => {
-                try { await api.mediaTransport({ command: 'previous' }); } catch { /* ignore */ }
+                if (media?.entity_id) {
+                  try { await api.mediaTransport({ entity_id: media.entity_id, command: 'previous' }); } catch { /* ignore */ }
+                }
               }}
               className="text-slate-400 hover:text-white transition-colors"
             >
@@ -91,7 +117,9 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop }: ActiveMed
             </button>
             <button
               onClick={async () => {
-                try { await api.mediaTransport({ command: 'next' }); } catch { /* ignore */ }
+                if (media?.entity_id) {
+                  try { await api.mediaTransport({ entity_id: media.entity_id, command: 'next' }); } catch { /* ignore */ }
+                }
               }}
               className="text-slate-400 hover:text-white transition-colors"
             >
@@ -108,7 +136,9 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop }: ActiveMed
               defaultValue={50}
               className="flex-1 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer accent-purple-500"
               onChange={async (e) => {
-                try { await api.mediaTransport({ command: 'volume_set', volume_level: Number(e.target.value) / 100 }); } catch { /* ignore */ }
+                if (media?.entity_id) {
+                  try { await api.mediaTransport({ entity_id: media.entity_id, command: 'volume_set', volume_level: Number(e.target.value) / 100 }); } catch { /* ignore */ }
+                }
               }}
             />
           </div>
