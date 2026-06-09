@@ -22,12 +22,16 @@ import socket
 from typing import Optional, cast
 
 try:
-    import device_registry
+    from . import device_registry as _device_registry_mod
 
-    import ha_client
+    from . import ha_client as _ha_client_mod
 except ImportError:
-    device_registry = None
-    ha_client = None
+    _device_registry_mod = None
+    _ha_client_mod = None
+
+# Backwards compat aliases
+device_registry = _device_registry_mod
+ha_client = _ha_client_mod
 
 log = logging.getLogger("execution.discovery")
 
