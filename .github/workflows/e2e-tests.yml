@@ -210,7 +210,7 @@ jobs:
   e2e-full:
     runs-on: ubuntu-latest
     needs: [integration-tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/microservices')
     steps:
       - uses: actions/checkout@v4
 
