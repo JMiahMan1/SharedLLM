@@ -39,7 +39,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 # Backward-compatible aliases — sourced from config.py, updated by _sync_main_constants from Identity settings
 from services.gateway.config import (
     IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC, LOGGING_SVC,
-    WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL, OLLAMA_TIMEOUT,
+    WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL, OLLAMA_TIMEOUT, ABS_TIMEOUT,
 )
 
 
@@ -4683,26 +4683,31 @@ async def get_abs_libraries(request: Request):
     except HTTPException as e:
         log.error(f"[abs/libraries] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "libraries": []}
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(
-            f"{EXECUTION_SVC}/execute/audiobookshelf",
-            params={"action": "libraries", "user_id": creds.get("user") or ""},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            detail = data.get("detail") or {}
-            if detail.get("libraries"):
-                # Normalize 'type' → 'media_type' for UI compatibility
-                libs = detail["libraries"]
-                return {
-                    "status": "SUCCESS",
-                    "libraries": [
-                        {**lib, "media_type": lib.get("media_type") or lib.get("type") or lib.get("media_type", "audiobook")}
-                        for lib in libs
-                    ],
-                }
-    return {"status": "SUCCESS", "libraries": []}
+    try:
+        async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/execute/audiobookshelf",
+                params={"action": "libraries", "user_id": creds.get("user") or ""},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                detail = data.get("detail") or {}
+                if detail.get("libraries"):
+                    # Normalize 'type' → 'media_type' for UI compatibility
+                    libs = detail["libraries"]
+                    return {
+                        "status": "SUCCESS",
+                        "libraries": [
+                            {**lib, "media_type": lib.get("media_type") or lib.get("type") or lib.get("media_type", "audiobook")}
+                            for lib in libs
+                        ],
+                    }
+    except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as e:
+        log.warning(f"[abs/libraries] ABS timeout: {e}")
+    except Exception as e:
+        log.warning(f"[abs/libraries] ABS error: {e}")
+    return {"status": "SUCCESS", "libraries": [], "notice": "ABS unavailable"}
 
 
 @app.get("/api/media/audiobookshelf/last-played")
@@ -4713,22 +4718,27 @@ async def get_abs_last_played(request: Request):
     except HTTPException as e:
         log.error(f"[abs/last-played] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": []}
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(
-            f"{EXECUTION_SVC}/execute/audiobookshelf",
-            params={"action": "last_played", "user_id": creds.get("user") or ""},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            detail = data.get("detail") or {}
-            if detail.get("books"):
-                return {"status": "SUCCESS", "books": detail["books"]}
-    return {"status": "SUCCESS", "books": []}
+    try:
+        async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/execute/audiobookshelf",
+                params={"action": "last_played", "user_id": creds.get("user") or ""},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                detail = data.get("detail") or {}
+                if detail.get("books"):
+                    return {"status": "SUCCESS", "books": detail["books"]}
+    except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as e:
+        log.warning(f"[abs/last-played] ABS timeout: {e}")
+    except Exception as e:
+        log.warning(f"[abs/last-played] ABS error: {e}")
+    return {"status": "SUCCESS", "books": [], "notice": "ABS unavailable"}
 
 
 @app.get("/api/media/audiobookshelf/library/{library_id}")
-async def get_abs_library_items(library_id: str, limit: int = 50, request = None):
+async def get_abs_library_items(library_id: str, limit: int = 50, request: Request = None):
     """Get audiobooks from a specific Audiobookshelf library (per-user credentials)."""
     if not request:
         return {"status": "SUCCESS", "books": []}
@@ -4737,22 +4747,27 @@ async def get_abs_library_items(library_id: str, limit: int = 50, request = None
     except HTTPException as e:
         log.error(f"[abs/library] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": []}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            f"{EXECUTION_SVC}/execute/audiobookshelf",
-            params={"action": "list", "library_id": library_id, "limit": limit, "user_id": creds.get("user") or ""},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            detail = data.get("detail") or {}
-            if detail.get("books"):
-                return {"status": "SUCCESS", "books": detail["books"]}
-    return {"status": "SUCCESS", "books": []}
+    try:
+        async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/execute/audiobookshelf",
+                params={"action": "list", "library_id": library_id, "limit": limit, "user_id": creds.get("user") or ""},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                detail = data.get("detail") or {}
+                if detail.get("books"):
+                    return {"status": "SUCCESS", "books": detail["books"]}
+    except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as e:
+        log.warning(f"[abs/library] ABS timeout: {e}")
+    except Exception as e:
+        log.warning(f"[abs/library] ABS error: {e}")
+    return {"status": "SUCCESS", "books": [], "notice": "ABS unavailable"}
 
 
 @app.get("/api/media/audiobookshelf/search")
-async def search_abs(q: str, limit: int = 20, request = None):
+async def search_abs(q: str, limit: int = 20, request: Request = None):
     """Search Audiobookshelf for audiobooks (per-user credentials)."""
     if not request:
         return {"status": "SUCCESS", "books": []}
@@ -4761,18 +4776,63 @@ async def search_abs(q: str, limit: int = 20, request = None):
     except HTTPException as e:
         log.error(f"[abs/search] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": []}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            f"{EXECUTION_SVC}/execute/audiobookshelf",
-            params={"action": "search", "query": q, "limit": limit, "user_id": creds.get("user") or ""},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            detail = data.get("detail") or {}
-            if detail.get("books"):
-                return {"status": "SUCCESS", "books": detail["books"]}
-    return {"status": "SUCCESS", "books": []}
+    try:
+        async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/execute/audiobookshelf",
+                params={"action": "search", "query": q, "limit": limit, "user_id": creds.get("user") or ""},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                detail = data.get("detail") or {}
+                if detail.get("books"):
+                    return {"status": "SUCCESS", "books": detail["books"]}
+    except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as e:
+        log.warning(f"[abs/search] ABS timeout: {e}")
+    except Exception as e:
+        log.warning(f"[abs/search] ABS error: {e}")
+    return {"status": "SUCCESS", "books": [], "notice": "ABS unavailable"}
+
+
+# ─── ABS connectivity status ─────────────────────────────────────────────
+
+@app.get("/api/media/audiobookshelf/status")
+async def get_abs_status():
+    """Check ABS server connectivity by pinging the login endpoint."""
+    try:
+        from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
+        async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
+            # Resolve ABS URL from identity settings
+            settings_resp = await client.get(
+                f"{IDENTITY_SVC_URL}/api/settings",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if settings_resp.status_code == 200:
+                settings = settings_resp.json()
+                abs_url = ""
+                for s in settings:
+                    if s.get("key") == "audiobookshelf_url" and s.get("value"):
+                        abs_url = s["value"]
+                        break
+                if not abs_url:
+                    return {"status": "UNAVAILABLE", "error": "ABS URL not configured", "reachable": False}
+
+            # Ping ABS with a lightweight HEAD request
+            async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as ping_client:
+                resp = await ping_client.get(f"{abs_url}/api/books?limit=1")
+                if resp.status_code == 200:
+                    return {"status": "AVAILABLE", "url": abs_url, "reachable": True}
+                return {"status": "ERROR", "url": abs_url, "reachable": False, "code": resp.status_code}
+    except httpx.TimeoutException as e:
+        log.warning(f"[abs/status] ABS timeout: {e}")
+        return {"status": "UNREACHABLE", "error": "Connection timed out", "reachable": False}
+    except httpx.ConnectError as e:
+        log.warning(f"[abs/status] ABS connect error: {e}")
+        return {"status": "UNREACHABLE", "error": str(e), "reachable": False}
+    except Exception as e:
+        log.warning(f"[abs/status] ABS status check failed: {e}")
+        return {"status": "ERROR", "error": str(e), "reachable": False}
 
 
 # ─── Execution service proxy routes (for UI access) ──────────────────────
