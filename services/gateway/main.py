@@ -4921,7 +4921,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 login_resp = await client.post(
-                    f"{abs_url.rstrip('/')}/api/login",
+                    f"{abs_url.rstrip('/')}/login",
                     json={"username": creds["audiobookshelf_user"], "password": creds["audiobookshelf_pass"]}
                 )
                 if login_resp.status_code == 200:
@@ -4983,24 +4983,20 @@ async def stream_music_assistant(uri: str, request: Request):
         raise HTTPException(status_code=400, detail=f"Could not parse MA URI: {uri}")
 
     # Use MA REST API to get the playable media URL
+    # MA REST API uses standard REST endpoints (GET /api/{type}/{id}), not MQTT commands
     base = mass_url.rstrip("/")
     if not base.endswith("/api"):
         from urllib.parse import urlparse
         parsed = urlparse(base)
         base = f"{parsed.scheme}://{parsed.hostname}:8095/api"
 
-    payload = {
-        "command": f"{item_type}/get",
-        "params": {"item_id": item_id}
-    }
+    api_url = f"{base}/{item_type}s/{item_id}"
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                base,
-                json=payload,
+            resp = await client.get(
+                api_url,
                 headers={
-                    "Content-Type": "application/json",
                     "Authorization": f"Bearer {mass_token}",
                 }
             )
@@ -5013,17 +5009,27 @@ async def stream_music_assistant(uri: str, request: Request):
             playable_url = None
 
             # Check common locations for stream URLs
-            for key in ("url", "stream_url", "media_url", "path"):
+            for key in ("url", "stream_url", "media_url"):
                 if data.get(key):
                     playable_url = data[key]
                     break
 
             # If it's a playlist, get the first track
-            if not playable_url and item_type == "playlist" and "items" in data:
-                for item in data["items"][:1]:
-                    if item.get("url"):
-                        playable_url = item["url"]
-                        break
+            if not playable_url and item_type == "playlist":
+                tracks_path = f"{base}/{item_type}s/{item_id}/tracks"
+                tracks_resp = await client.get(tracks_path, headers={"Authorization": f"Bearer {mass_token}"})
+                if tracks_resp.status_code == 200:
+                    tracks_data = tracks_resp.json()
+                    tracks = tracks_data.get("items", tracks_data.get("tracks", []))
+                    if tracks:
+                        first_track_id = tracks[0].get("track_id") or tracks[0].get("id")
+                        track_resp = await client.get(
+                            f"{base}/tracks/{first_track_id}",
+                            headers={"Authorization": f"Bearer {mass_token}"}
+                        )
+                        if track_resp.status_code == 200:
+                            track_data = track_resp.json()
+                            playable_url = track_data.get("url") or track_data.get("stream_url")
 
             if not playable_url:
                 raise HTTPException(status_code=404, detail=f"No playable URL found for {item_type}: {item_id}")
