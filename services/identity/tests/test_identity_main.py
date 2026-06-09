@@ -81,3 +81,78 @@ def test_create_user_stores_git_provider_credentials(client: TestClient, session
     # Verify via resolution
     data = resolve_identity(ResolveRequest(rag_user="bob"), session)
     assert data.github_token == "bob-gh-token"
+
+def test_add_device(client: TestClient, session: Session):
+    resp = client.post("/api/users/devices", json={
+        "device_id": "media_player.kitchen",
+        "username": "default"
+    }, headers={"X-Internal-Secret": "test-secret"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["device_id"] == "media_player.kitchen"
+    assert data["username"] == "default"
+    assert data["revoked"] == False
+
+def test_list_devices(client: TestClient, session: Session):
+    client.post("/api/users/devices", json={
+        "device_id": "media_player.kitchen",
+        "username": "default"
+    }, headers={"X-Internal-Secret": "test-secret"})
+    resp = client.get("/api/devices")
+    assert resp.status_code == 200
+    devices = resp.json()
+    assert len(devices) == 1
+    assert devices[0]["device_id"] == "media_player.kitchen"
+    assert devices[0]["revoked"] == False
+
+def test_revoke_device(client: TestClient, session: Session):
+    client.post("/api/users/devices", json={
+        "device_id": "media_player.kitchen",
+        "username": "default"
+    }, headers={"X-Internal-Secret": "test-secret"})
+    resp = client.post("/api/devices/media_player.kitchen/revoke")
+    assert resp.status_code == 200
+    assert "revoked" in resp.json()["message"].lower() or "SUCCESS" in resp.json()["status"]
+    
+    # Verify device shows as revoked
+    resp = client.get("/api/devices")
+    devices = resp.json()
+    assert devices[0]["revoked"] == True
+
+def test_revoke_device_already_revoked(client: TestClient, session: Session):
+    client.post("/api/users/devices", json={
+        "device_id": "media_player.kitchen",
+        "username": "default"
+    }, headers={"X-Internal-Secret": "test-secret"})
+    client.post("/api/devices/media_player.kitchen/revoke")
+    resp = client.post("/api/devices/media_player.kitchen/revoke")
+    assert resp.status_code == 200
+    assert resp.json()["message"] == "Device already revoked."
+
+def test_revoke_nonexistent_device(client: TestClient):
+    resp = client.post("/api/devices/media_player.nonexistent/revoke")
+    assert resp.status_code == 404
+    assert "not found" in resp.json()["detail"]
+
+def test_device_resolve_with_revoked_device(client: TestClient, session: Session):
+    from services.identity.models import User as UserModel
+    bob = UserModel(username="bob", ha_url="http://ha.local", ha_token_enc=encrypt("bob-ha-token"))
+    session.add(bob)
+    session.commit()
+    
+    # Assign device to bob
+    client.post("/api/users/devices", json={
+        "device_id": "media_player.kitchen",
+        "username": "bob"
+    }, headers={"X-Internal-Secret": "test-secret"})
+    # Revoke the device
+    client.post("/api/devices/media_player.kitchen/revoke")
+    
+    payload = {"device_id": "media_player.kitchen"}
+    resp = client.post("/api/resolve", json=payload, headers={"X-Internal-Secret": "test-secret"})
+    assert resp.status_code == 200
+    resolved = resp.json()
+    # Since device is revoked, should NOT resolve to bob (the device-assigned user)
+    # Instead falls back to system account (ID 1 = "default")
+    assert resolved["user"] != "bob"
+    assert resolved["user"] == "default"
