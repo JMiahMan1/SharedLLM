@@ -1,4 +1,3 @@
-import pytest
 import asyncio
 import os
 import sys
@@ -7,9 +6,12 @@ from fastapi.testclient import TestClient
 # Ensure parent directory is in sys.path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from main import app, health, list_provider_entries, search_provider, write_provider_content
-from models import IndexScanRequest, ProviderListRequest, ProviderWriteRequest, StorageEntry
-import main
+os.environ["INTERNAL_SECRET"] = "test-secret"
+
+from main import app, health, list_provider_entries, write_provider_content
+from main import IndexScanRequest
+from models import ProviderWriteRequest, StorageEntry
+from storage.providers import ProviderConfig
 
 client = TestClient(app)
 
@@ -42,28 +44,22 @@ def test_health():
 def test_provider_list_returns_generic_entries(monkeypatch):
     monkeypatch.setattr("main.build_provider", lambda config: FakeProvider(_fixture_entries()))
 
-    request = ProviderListRequest(
-        provider={
-            "kind": "nextcloud",
-            "settings": {"url": "https://cloud.local", "username": "jeremiah", "password": "secret"},
-        },
+    request = IndexScanRequest(
+        provider=ProviderConfig(kind="nextcloud", settings={"url": "https://cloud.local", "username": "jeremiah", "password": "secret"}),
         path="/Library",
         recursive=False,
     )
 
     data = asyncio.run(list_provider_entries(request))
     assert data["status"] == "SUCCESS"
-    assert len(data["entries"]) == 2
+    assert len(data["entries"]) == 2  # type: ignore[arg-type]
 
 def test_provider_write_returns_result(monkeypatch):
     fake_provider = FakeProvider(_fixture_entries())
     monkeypatch.setattr("main.build_provider", lambda config: fake_provider)
 
     request = ProviderWriteRequest(
-        provider={
-            "kind": "nextcloud",
-            "settings": {"url": "https://cloud.local", "username": "jeremiah", "password": "secret"},
-        },
+        provider=ProviderConfig(kind="nextcloud", settings={"url": "https://cloud.local", "username": "jeremiah", "password": "secret"}),
         path="/docs/example.md",
         content="# Example\n",
         create_parents=True,
@@ -72,4 +68,4 @@ def test_provider_write_returns_result(monkeypatch):
 
     data = asyncio.run(write_provider_content(request))
     assert data["status"] == "SUCCESS"
-    assert data["result"]["path"] == "/docs/example.md"
+    assert data["result"]["path"] == "/docs/example.md"  # type: ignore[call-overload]

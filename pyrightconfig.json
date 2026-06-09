@@ -1,6 +1,6 @@
 {
   "extraPaths": [
-    "/home/jeremiah/Summers Drive/Code/SharedLLM"
+    "."
   ],
   "typeCheckingMode": "strict",
   "pythonVersion": "3.11",
@@ -15,5 +15,6 @@
   "reportPrivateUsage": "none",
   "reportOptionalMemberAccess": "none",
   "reportCallIssue": "none",
-  "reportMissingTypeStubs": "none"
+  "reportMissingTypeStubs": "none",
+  "reportMissingImports": "none"
 }

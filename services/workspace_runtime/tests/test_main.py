@@ -14,7 +14,7 @@ def session_fixture():
 
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
-    from main import app, engine
+    from main import app
     # Override engine in main with our test engine
     import main
     original_engine = main.engine

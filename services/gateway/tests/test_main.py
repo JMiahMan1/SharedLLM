@@ -27,7 +27,7 @@ def client_fixture(monkeypatch):
     from main import app
     import main
     # Disable background tasks for testing
-    main.background_tasks = None
+    main.background_tasks = None  # type: ignore[assignment]
     
     return TestClient(app)
 
@@ -47,12 +47,6 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     monkeypatch.setattr(main, "contextualize_query", AsyncMock(return_value="hello"))
     monkeypatch.setattr(main, "decompose_command_query", AsyncMock(return_value=[]))
     
-    # Mock RAG to return empty results
-    async def mock_get_rag(coll, query, user_id):
-        return []
-    # Actually gateway/main.py uses httpx.post for RAG
-    # I'll mock the httpx client if possible, or the call_ollama which is the final step
-    
     class MockResponse:
         def __init__(self, json_data, status_code=200):
             self.json_data = json_data
@@ -65,7 +59,6 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     monkeypatch.setattr(main, "call_ollama", AsyncMock(return_value=MockResponse({"message": {"content": "Mocked LLM response"}})))
     
     # Mock the RAG httpx call
-    import httpx
     async def mock_post_rag(*args, **kwargs):
         if "/rag/search" in args[0]:
             return MockResponse({"results": []})

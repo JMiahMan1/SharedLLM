@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import pytz
+import dateparser
 from datetime import date, datetime, timedelta, timezone
 from services.config import TIMEZONE
 from services.execution.schemas import CalendarRequest, ExecutionResult
@@ -88,7 +89,6 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
             if not req.summary or not req.start_time:
                 return ExecutionResult(status="FAILURE", message="Summary and start_time are required.", service="calendar_add")
             
-            import dateparser
             dt = dateparser.parse(req.start_time, settings={'PREFER_DATES_FROM': 'future'})
             if not dt:
                 return ExecutionResult(status="FAILURE", message=f"Could not parse date: {req.start_time}", service="calendar_add")
