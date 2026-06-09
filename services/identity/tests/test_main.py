@@ -8,9 +8,9 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, StaticPool, select
 
 from services.identity.main import app, require_api_key, require_internal, resolve_identity
-from services.identity.models import User, DeviceAssignment
+from services.identity.models import User
 from services.identity.crypto import encrypt
-from services.identity.schemas import ResolveRequest, UserCreate
+from services.identity.schemas import ResolveRequest
 from services.identity.seed import seed_from_env
 from services.identity import main as identity_main
 

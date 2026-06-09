@@ -844,7 +844,7 @@ def get_my_keys(session: Session = Depends(get_session), user: User = Depends(re
     
     if user.is_admin:
         # Admin sees all keys with associated usernames
-        all_keys = session.exec(select(APIKey, User).join(User, APIKey.user_id == User.id)).all()
+        all_keys = session.exec(select(APIKey, User).join(User, APIKey.user_id == User.id)).all()  # type: ignore[arg-type]
         result = []
         for api_key, user_obj in all_keys:
             result.append({
