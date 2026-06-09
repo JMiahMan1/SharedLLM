@@ -121,6 +121,13 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE ravenmission ADD COLUMN slug VARCHAR"))
             conn.commit()
 
+    if "device_assignment" in inspector.get_table_names():
+        da_columns = {column["name"] for column in inspector.get_columns("device_assignment")}
+        with engine.connect() as conn:
+            if "revoked" not in da_columns:
+                conn.execute(text("ALTER TABLE device_assignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0"))
+            conn.commit()
+
     if "user_widgets" not in inspector.get_table_names():
         with engine.connect() as conn:
             conn.execute(text("""
@@ -346,7 +353,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         user = session.exec(select(User).where(User.username == req.voice_id.lower())).first()
     if not user and req.device_id:
         assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == req.device_id)).first()
-        if assignment:
+        if assignment and not assignment.revoked:
             user = assignment.user
 
     if not user:
@@ -596,7 +603,8 @@ def list_devices(session: Session = Depends(get_session), _: User = Depends(requ
             id=d.id or 0, 
             device_id=d.device_id, 
             user_id=d.user_id or 0, 
-            username=d.user.username if d.user else ""
+            username=d.user.username if d.user else "",
+            revoked=d.revoked
         ) for d in results
     ]
 
@@ -606,7 +614,7 @@ def add_device(body: DeviceAssignmentCreate, session: Session = Depends(get_sess
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
         
-    assignment = DeviceAssignment(device_id=body.device_id, user_id=user.id or 0)
+    assignment = DeviceAssignment(device_id=body.device_id, user_id=user.id or 0, revoked=body.revoked)
     session.add(assignment)
     session.commit()
     session.refresh(assignment)
@@ -614,7 +622,8 @@ def add_device(body: DeviceAssignmentCreate, session: Session = Depends(get_sess
         id=assignment.id or 0, 
         device_id=assignment.device_id, 
         user_id=assignment.user_id or 0, 
-        username=user.username
+        username=user.username,
+        revoked=assignment.revoked
     )
 
 @app.delete("/api/devices/{device_id}")
@@ -625,6 +634,18 @@ def remove_device(device_id: str, session: Session = Depends(get_session), _: Us
     session.delete(assignment)
     session.commit()
     return {"status": "SUCCESS"}
+
+@app.post("/api/devices/{device_id}/revoke")
+def revoke_device(device_id: str, session: Session = Depends(get_session), _: User = Depends(require_api_key)):
+    assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == device_id)).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Device assignment not found.")
+    if assignment.revoked:
+        return {"status": "SUCCESS", "message": "Device already revoked."}
+    assignment.revoked = True
+    session.commit()
+    username = assignment.user.username if assignment.user else "unknown"
+    return {"status": "SUCCESS", "message": f"Device '{device_id}' revoked (was assigned to '{username}')."}
 
 # --- Device Matrix (UI Contract) ---
 @app.get("/api/users/devices", response_model=List[DeviceAssignmentRead])
@@ -667,9 +688,10 @@ def add_device_ui(
         session.add(existing)
         session.commit()
         session.refresh(existing)
-        return DeviceAssignmentRead(id=existing.id or 0, device_id=existing.device_id, user_id=existing.user_id or 0, username=target_user.username)
+        session.refresh(existing)
+        return DeviceAssignmentRead(id=existing.id or 0, device_id=existing.device_id, user_id=existing.user_id or 0, username=target_user.username, revoked=existing.revoked)
 
-    assignment = DeviceAssignment(device_id=body.device_id, user_id=target_user.id or 0)
+    assignment = DeviceAssignment(device_id=body.device_id, user_id=target_user.id or 0, revoked=body.revoked)
     session.add(assignment)
     session.commit()
     session.refresh(assignment)
@@ -677,7 +699,8 @@ def add_device_ui(
         id=assignment.id or 0, 
         device_id=assignment.device_id, 
         user_id=assignment.user_id or 0, 
-        username=target_user.username
+        username=target_user.username,
+        revoked=assignment.revoked
     )
 
 # ─── Auth & Discovery ──────────────────────────────────────────────────────────

@@ -144,6 +144,7 @@ class UserRead(BaseModel):
 class DeviceAssignmentCreate(BaseModel):
     device_id: str
     username: str  # resolved to user_id on server
+    revoked: bool = False  # not used on create, but included for schema completeness
 
 
 class DeviceAssignmentRead(BaseModel):
@@ -151,6 +152,7 @@ class DeviceAssignmentRead(BaseModel):
     device_id: str
     user_id: int
     username: str
+    revoked: bool = False
 
 class LoginRequest(BaseModel):
     username: str

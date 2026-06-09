@@ -10,7 +10,7 @@ from typing import Optional, Any
 
 log = logging.getLogger("execution.abs_client")
 
-_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+_TIMEOUT = httpx.Timeout(8.0, connect=3.0)
 
 
 def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
