@@ -19,13 +19,17 @@ from starlette.datastructures import UploadFile
 from pydantic import BaseModel
 
 from services.gateway.schemas import ResolvedCredentials, StorageListRequest, StorageIndexRequest
-from services.gateway.agent_loop import execute_inference as provider_execute_inference, get_vram_safe_params
+from services.gateway.agent_loop import (
+    execute_inference as provider_execute_inference,
+    get_vram_safe_params,
+    extract_action_json,
+)
 from services.gateway.config import INTERNAL_SECRET, CONFIG
 from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 from services.gateway.orchestrator import get_all_settings, _get, SINGLE_TURN_TOOL_GUIDE
 from services.gateway.config_validator import validate_config
 from services.gateway.intent_engine import engine
-from services.gateway.history import update_history, ping_redis
+from services.gateway.history import update_history, ping_redis, get_history, get_long_term_memory
 from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
 from services.gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
 from services.gateway.messaging import InferenceJobQueue, JobStatus
@@ -34,6 +38,9 @@ from services.gateway.background_worker import worker as raven_worker
 # --- Setup Logging IMMEDIATELY ---
 log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+
+# Singleton lock for Ollama inference to prevent concurrent VRAM exhaustion
+INFERENCE_LOCK = asyncio.Lock()
 
 
 # Backward-compatible aliases — sourced from config.py, updated by _sync_main_constants from Identity settings
@@ -1893,7 +1900,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     MAX_TOOL_ITERATIONS = 30
     HEARTBEAT_INTERVAL = 15   # seconds between heartbeat log lines
     HUNG_THRESHOLD = 240      # seconds before a HUNG WARNING is emitted
-    agent_messages = ollama_payload.get("messages", [])[:]  # shallow copy
+    agent_messages: list[dict] = list(ollama_payload.get("messages") or [])  # pyright: ignore[reportArgumentType]
     exec_data = None
     ans = ""
     loop_start = asyncio.get_event_loop().time()
@@ -1938,8 +1945,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         try:
             # Strategy 7 & 8: Dynamic VRAM Awareness & Singleton Queue
-            vram_params = await get_vram_safe_params(selected_model)
-            ollama_payload["options"] = vram_params
+            vram_params = await get_vram_safe_params(selected_model, {})
+            ollama_payload["options"] = vram_params  # pyright: ignore[reportArgumentType]
 
             # ISOLATED CONTEXT: Only send the mission, protocol, and the LAST tool result to prevent history drift
             ollama_payload["messages"] = [
@@ -1955,14 +1962,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             
             async with INFERENCE_LOCK:
                 log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model} (Iter {agent_iter + 1})")
-                resp = await call_ollama(ollama_payload, use_chat=True, timeout=300.0)
+                resp = await call_ollama(ollama_payload, use_chat=True)
                 log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
                 
             heartbeat_stop.set()
             await hb_task
-            if resp.status_code != 200:
+            if resp.status_code != 200:  # pyright: ignore[reportAttributeAccessIssue]
                 return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
-            data = resp.json()
+            data = resp.json()  # pyright: ignore[reportAttributeAccessIssue]
             ans = data.get("message", {}).get("content", "Error.")
             ollama_ms = (asyncio.get_event_loop().time() - iter_start) * 1000
             log.info(f"[AgentLoop] Ollama responded in {ollama_ms:.0f}ms — iter {agent_iter + 1}")
@@ -2102,33 +2109,34 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         if tool_data and isinstance(tool_data, dict):
             # Handle array format (e.g. OpenAI or custom tool array)
             for array_key in ("tools", "tool_calls", "actions"):
-                if array_key in tool_data and isinstance(tool_data[array_key], list) and len(tool_data[array_key]) > 0:
+                if array_key in tool_data and isinstance(tool_data[array_key], list) and len(tool_data[array_key]) > 0:  # pyright: ignore[reportArgumentType]
                     log.info(f"[AgentLoop] Normalizing tool schema: extracting first item from '{array_key}'")
-                    tool_data = tool_data[array_key][0]
+                    tool_data = tool_data[array_key][0]  # pyright: ignore[reportArgumentType,reportOptionalSubscript]
                     break
 
             for nest_key in ("arguments", "payload", "args", "json", "tool_call"):
-                if tool_data and isinstance(tool_data, dict) and nest_key in tool_data and isinstance(tool_data[nest_key], dict):
+                if tool_data and isinstance(tool_data, dict) and nest_key in tool_data and isinstance(tool_data[nest_key], dict):  # pyright: ignore[reportAttributeAccessIssue]
                     log.info(f"[AgentLoop] Normalizing tool schema: hoisting '{nest_key}' to top level")
                     nested_vals = tool_data.pop(nest_key)
                     # Preserve top-level action/type if they exist, but inner payload fields take precedence
                     # for parameters like 'action' in GitOperationRequest.
-                    for k, v in nested_vals.items():
-                        if k in ("action", "type") and k in tool_data:
+                    for k, v in nested_vals.items():  # pyright: ignore[reportAttributeAccessIssue]
+                        if k in ("action", "type") and k in tool_data:  # pyright: ignore[reportArgumentType]
                             # Move the outer discriminator to 'tool_name' to avoid clobbering
-                            tool_data["tool_name"] = tool_data.get(k)
-                        tool_data[k] = v
+                            tool_data["tool_name"] = tool_data.get(k)  # pyright: ignore[reportArgumentType]
+                        tool_data[k] = v  # pyright: ignore[reportArgumentType]
             
             mapping = {"offset": "offset_lines", "limit": "limit_lines"}
-            for old_key, new_key in mapping.items():
-                if old_key in tool_data and new_key not in tool_data:
-                    log.info(f"[AgentLoop] Normalizing parameter: '{old_key}' -> '{new_key}'")
-                    tool_data[new_key] = tool_data.pop(old_key)
-            
-            if "properties" in tool_data and "type" in tool_data:
-                # Detect schema hallucinations
-                log.warning(f"[AgentLoop] Detected schema hallucination — triggering protocol correction")
-                tool_data = None
+            if isinstance(tool_data, dict):
+                for old_key, new_key in mapping.items():
+                    if old_key in tool_data and new_key not in tool_data:
+                        log.info(f"[AgentLoop] Normalizing parameter: '{old_key}' -> '{new_key}'")
+                        tool_data[new_key] = tool_data.pop(old_key)  # pyright: ignore[reportArgumentType]
+                
+                if "properties" in tool_data and "type" in tool_data:
+                    # Detect schema hallucinations
+                    log.warning(f"[AgentLoop] Detected schema hallucination — triggering protocol correction")
+                    tool_data = None
             
             # SCHEMA_WHITELIST: Strictly enforce allowed workspace tools
             ALLOWED_TOOLS = [
@@ -2142,7 +2150,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ]
             # Tool Discriminator: Detect which tool is being called. 
             # Prioritize 'tool_name' if it was set during hoisting to avoid clobbering by payload parameters.
-            action_key = tool_data.get("tool_name") or tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_choice") or tool_data.get("tool") if tool_data else None
+            action_key = None
+            if isinstance(tool_data, dict):
+                action_key = tool_data.get("tool_name") or tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_choice") or tool_data.get("tool")
             dispatch_action = None
             
             if action_key:
@@ -2170,7 +2180,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 
             if agent_iter < MAX_TOOL_ITERATIONS - 1:
                 log.info(f"[AgentLoop] Re-prompting for autonomous tool execution...")
-                agent_messages.append({"role": "assistant", "content": ans})
+                agent_messages.append({"role": "assistant", "content": str(ans) if ans else ""})
                 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
 1. **FOCUS**: YOU ARE RAVEN. Your ONLY mission is to resolve the BUG or TASK.
@@ -2187,28 +2197,30 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 log.info(f"[AgentLoop] Max iterations reached — final response.")
                 break
 
-        log.info(f"[AgentLoop] Dispatching action: {json.dumps({k: v for k, v in tool_data.items() if k != 'user_context'}, indent=2)}")
+        if isinstance(tool_data, dict):
+            log.info(f"[AgentLoop] Dispatching action: {json.dumps({k: v for k, v in tool_data.items() if k != 'user_context'}, indent=2)}")
+        else:
+            log.warning(f"[AgentLoop] tool_data is not dict: {type(tool_data)}")
+            break
 
         try:
+            if not isinstance(tool_data, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
+                log.warning(f"[AgentLoop] tool_data is not a dict, skipping action dispatch")
+                break
             action = (
                 dispatch_action or
-                tool_data.get("tool_name") or 
-                tool_data.get("action") or 
-                tool_data.get("tool") or 
-                tool_data.get("name") or 
-                tool_data.get("type") or 
-                tool_data.get("tool_choice")
+                str(tool_data.get("tool_name") or tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type") or tool_data.get("tool_choice") or "")
             )
             # If hoisting occurred, tool_data itself contains the payload fields.
             # Otherwise, we use the 'payload' sub-dictionary if it exists.
             orig_payload = tool_data.get("payload")
-            if isinstance(orig_payload, dict) and orig_payload:
+            if orig_payload and isinstance(orig_payload, dict):
                 payload = orig_payload
             else:
                 # Use everything in tool_data as the payload, excluding internal discriminators
                 payload = {k: v for k, v in tool_data.items() if k not in ("payload", "tool_name", "tool_choice")}
             
-            if isinstance(tool_data, dict):
+            if isinstance(tool_data, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
                 for k, v in tool_data.items():
                     if k not in ("action", "payload", "tool", "name", "type", "tool_name") and k not in payload:
                         if "path" in k.lower():
@@ -2336,7 +2348,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     exec_msg = f"Failed: {err_detail}"
 
                 log.info(f"[AgentLoop] Tool result (iter {agent_iter + 1}): {exec_msg[:200]}...")
-                agent_messages.append({"role": "assistant", "content": ans})
+                agent_messages.append({"role": "assistant", "content": str(ans) if ans else ""})
                 agent_messages.append({
                     "role": "user",
                     "content": f"[TOOL RESULT for {action}]: {exec_msg[:8000]}\n\nContinue with your plan."
@@ -2350,7 +2362,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             import traceback
             tb = traceback.format_exc()
             log.error(f"[AgentLoop] Tool execution failed: {e}\n{tb}")
-            agent_messages.append({"role": "assistant", "content": ans})
+            agent_messages.append({"role": "assistant", "content": str(ans) if ans else ""})
             agent_messages.append({
                 "role": "user",
                 "content": f"[FATAL ERROR IN TOOL EXECUTION]: {e}\n\nTraceback:\n{tb}\n\nPlease analyze this failure, adjust your approach or parameters, and continue the mission."
@@ -2680,28 +2692,16 @@ async def chat_handler(request: Request, background_tasks=None):
         coding_model = await get_coding_model()
         selected_model = coding_model
         log.info("[ShadowExecution] Routing to autonomous AgentLoop...")
-        return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user"), creds)
+        return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user") or "", creds)
 
-    vram_params = await get_vram_safe_params(selected_model)
+    settings = await get_all_settings()
+    _vram_params = await get_vram_safe_params(selected_model, settings)
 
     # Build job_payload for the FIFO queue
     default_sys = select_system_instruction_for_query(query, selected_model)
     job_payload = {
         "model": selected_model,
         "query": final_query,
-        "system": body.get("system") or default_sys,
-        "creds": creds.model_dump(),
-        "client": body.get("client"),
-        "source": body.get("source"),
-        "device_id": body.get("device_id"),
-        "rag_user": body.get("rag_user"),
-        "show_thinking": show_thinking,
-        "is_openai": is_openai,
-    }
-    
-    ollama_payload = {
-        "model": selected_model,
-        "query": query,
         "system": body.get("system") or default_sys,
         "creds": creds.model_dump(),
         "client": body.get("client"),
@@ -2846,89 +2846,19 @@ async def get_chat_job_status(job_id: str):
     job = await job_queue.get_job_status(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     if job["status"] == JobStatus.COMPLETED:
-        # Return the final result
         result = job["result"]
-        # Wrap in expected response format
         if job["payload"].get("is_openai"):
             return _make_openai_response(result, job["payload"]["model"], "completed")
         return _make_ollama_response(result, job["payload"]["model"], "completed")
-    
-    # TOOL EXECUTION (Non-autonomous/Single-turn)
-    # Detect tool block (either ```json or raw ``` if it looks like JSON)
-    if "```json" in ans or ("```" in ans and "action" in ans and "payload" in ans):
-        try:
-            tag = "```json" if "```json" in ans else "```"
-            start = ans.find(tag) + len(tag)
-            end = ans.find("```", start)
-            tool_json = ans[start:end].strip()
-            tool_data = json.loads(tool_json)
-            # Handle model wrapping tool call in an array
-            if isinstance(tool_data, list) and len(tool_data) > 0:
-                tool_data = tool_data[0]
-            
-            action = tool_data.get("action") or tool_data.get("tool") or tool_data.get("name") or tool_data.get("type")
-            payload = tool_data.get("payload", {})
-            # PIPELINE HARDENING: If model provides flat JSON or mixed keys, merge them into payload
-            if isinstance(tool_data, dict):
-                for k, v in tool_data.items():
-                    if k not in ("action", "payload", "tool", "name", "type") and k not in payload:
-                        if "path" in k.lower():
-                            payload["path"] = v
-                        else:
-                            payload[k] = v
-            
-            # (Reuse existing logic for action mapping - for brevity, I'll just handle the ones in the test)
-            # In a real fix, I would refactor the action mapping to a shared function.
-            # For now, I'll use the mapping logic from the streaming path if possible, or just copy it.
-            
-            if action and action.lower() == "storageindexrequest":
-                # Storage logic
-                log.info("[ToolExecution] Executing storageindexrequest...")
-                payload = {
-                    "provider": {
-                        "kind": "nextcloud",
-                        "settings": {
-                            "url": creds.nextcloud_url,
-                            "username": creds.nextcloud_user,
-                            "password": creds.nextcloud_pass
-                        }
-                    },
-                    "path": payload.get("path", "/"),
-                    "recursive": True
-                }
-                client_http = get_http_client()
-                exec_resp = await client_http.post(
-                    f"{STORAGE_SVC}/index/full",
-                    json=payload,
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
-                if exec_resp.status_code == 200:
-                    exec_data = exec_resp.json()
-                    exec_msg = exec_data.get("message", "Success")
-                else:
-                    exec_msg = f"Failed: {exec_resp.text}"
-                
-                update_text = f"\n\n**System Update**: {exec_msg}"
-                ans = ans[:ans.find("```")].strip() + update_text
-        except Exception as e:
-            log.error(f"Tool execution failed: {e}")
 
-    # Update History
-    if not is_openai:
-        await update_history(user_id, "user", query)
-        await update_history(user_id, "assistant", ans)
-    else:
-        log.info(f"[Background] Skipping history update for task: {query[:50]}...")
-    
-    # Check for tool execution result
-    if exec_msg:
-        if is_openai:
-            return _make_openai_response(exec_msg, selected_model, "tool_executed")
-        return _make_ollama_response(exec_msg, selected_model, "tool_executed")
-    
-    # Fallback: return job status for standard polling
+    if job["status"] == JobStatus.FAILED:
+        err_msg = job.get("error", "Job failed")
+        if job["payload"].get("is_openai"):
+            return JSONResponse(_make_openai_error(err_msg, job["payload"].get("model", "unknown")), status_code=500)
+        return JSONResponse(_make_ollama_error(err_msg, job["payload"].get("model", "unknown")), status_code=500)
+
     return {
         "status": job["status"].upper(),
         "job_id": job_id,
@@ -4738,7 +4668,7 @@ async def get_abs_last_played(request: Request):
 
 
 @app.get("/api/media/audiobookshelf/library/{library_id}")
-async def get_abs_library_items(library_id: str, limit: int = 50, request: Request = None):
+async def get_abs_library_items(library_id: str, limit: int = 50, request: Optional[Request] = None):
     """Get audiobooks from a specific Audiobookshelf library (per-user credentials)."""
     if not request:
         return {"status": "SUCCESS", "books": []}
@@ -4767,7 +4697,7 @@ async def get_abs_library_items(library_id: str, limit: int = 50, request: Reque
 
 
 @app.get("/api/media/audiobookshelf/search")
-async def search_abs(q: str, limit: int = 20, request: Request = None):
+async def search_abs(q: str, limit: int = 20, request: Optional[Request] = None):
     """Search Audiobookshelf for audiobooks (per-user credentials)."""
     if not request:
         return {"status": "SUCCESS", "books": []}
@@ -4998,7 +4928,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
     async def stream_generator():
         async with httpx.AsyncClient(timeout=30.0) as client:
             async with client.stream("GET", stream_url) as resp:
-                for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
+                async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):  # pyright: ignore[reportGeneralTypeIssues]
                     yield chunk
 
     return StreamingResponse(
@@ -5105,7 +5035,7 @@ async def stream_music_assistant(uri: str, request: Request):
             async def stream_generator():
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     async with client.stream("GET", playable_url) as resp:
-                        for chunk in resp.aiter_bytes(chunk_size=64 * 1024):
+                        async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):  # pyright: ignore[reportGeneralTypeIssues]
                             yield chunk
 
             return StreamingResponse(
