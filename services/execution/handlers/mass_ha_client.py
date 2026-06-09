@@ -9,7 +9,7 @@ These use HA's existing MA connection, avoiding direct MA REST API auth issues.
 """
 import logging
 import httpx
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 log = logging.getLogger("execution.mass_ha")
 
@@ -73,7 +73,7 @@ async def search(
     if not ha_url or not ha_token:
         return []
 
-    service_data = {
+    service_data: dict[str, Any] = {
         "name": query,
         "limit": limit,
     }
@@ -92,7 +92,7 @@ async def search(
 
     # MA search returns {"results": [...]} with MediaType as keys
     items = []
-    results = result.get("results", {}) if isinstance(result, dict) else []
+    results = result.get("results", []) if result else []
     if isinstance(results, dict):
         for media_type, items_list in results.items():
             if isinstance(items_list, list):
@@ -162,31 +162,30 @@ async def get_library(
 
     # MA get_library returns {"playlists": [...]} or {"tracks": [...]} etc.
     items = []
-    if isinstance(result, dict):
-        # Look for the key matching the media_type pluralized
-        type_keys = {
-            "PLAYLIST": "playlists",
-            "PLAYLISTS": "playlists",
-            "TRACK": "tracks",
-            "TRACKS": "tracks",
-            "ALBUM": "albums",
-            "ALBUMS": "albums",
-            "ARTIST": "artists",
-            "ARTISTS": "artists",
-            "RADIO": "radios",
-            "RADIOS": "radios",
-        }
-        key = type_keys.get(media_type, f"{media_type.lower()}s")
-        items_list = result.get(key, result.get("items", []))
-        if isinstance(items_list, list):
-            for item in items_list:
-                items.append({
-                    "name": item.get("name", ""),
-                    "uri": item.get("uri", ""),
-                    "type": media_type,
-                    "duration": item.get("duration", 0),
-                    "num_tracks": item.get("num_tracks", item.get("track_count", 0)),
-                })
+    # Look for the key matching the media_type pluralized
+    type_keys = {
+        "PLAYLIST": "playlists",
+        "PLAYLISTS": "playlists",
+        "TRACK": "tracks",
+        "TRACKS": "tracks",
+        "ALBUM": "albums",
+        "ALBUMS": "albums",
+        "ARTIST": "artists",
+        "ARTISTS": "artists",
+        "RADIO": "radios",
+        "RADIOS": "radios",
+    }
+    key = type_keys.get(media_type, f"{media_type.lower()}s")
+    items_list = result.get(key, result.get("items", []))
+    if isinstance(items_list, list):
+        for item in items_list:
+            items.append({
+                "name": item.get("name", ""),
+                "uri": item.get("uri", ""),
+                "type": media_type,
+                "duration": item.get("duration", 0),
+                "num_tracks": item.get("num_tracks", item.get("track_count", 0)),
+            })
     
     return items
 
@@ -208,7 +207,7 @@ async def get_queue(
         return {}
 
     result = await _call_ha_ma_service(ha_url, ha_token, "get_queue", entity_id=entity_id)
-    if not result or not isinstance(result, dict):
+    if not result:
         return {}
 
     # Flatten queue data with media item details

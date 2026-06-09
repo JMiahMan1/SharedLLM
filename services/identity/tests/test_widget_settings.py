@@ -9,8 +9,7 @@ from sqlmodel import Session, SQLModel, create_engine, StaticPool, select
 
 from services.identity.main import app, require_api_key, require_internal
 from services.identity.models import User, UserWidget
-from services.identity.crypto import encrypt
-from services.identity.schemas import ResolveRequest
+
 import services.identity.main as main
 
 

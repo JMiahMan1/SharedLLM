@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 sys.modules['redis'] = MagicMock()
 
 from fastapi.testclient import TestClient
-from services.gateway.main import app, STORAGE_SVC, EXECUTION_SVC, INTERNAL_SECRET
+from services.gateway.main import app, STORAGE_SVC
 import json
 
 client = TestClient(app)

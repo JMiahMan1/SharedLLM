@@ -6,8 +6,7 @@ import sys
 
 # Verify fastembed is installed and CPU-only
 try:
-    from fastembed import TextEmbedding
-    import fastembed
+    import fastembed  # pyright: ignore[reportMissingImports]
     print(f"✓ fastembed {fastembed.__version__} installed")
 except ImportError:
     print("✗ fastembed not installed")
@@ -24,7 +23,7 @@ except ImportError:
     print("✓ No torch dependency (fastembed handles its own)")
 
 # Test embedding function creation (this is what RAG service does)
-from chromadb.utils.embedding_functions import FastembedEmbeddingFunction
+from chromadb.utils.embedding_functions import FastembedEmbeddingFunction  # pyright: ignore[reportAttributeAccessIssue]
 
 try:
     ef = FastembedEmbeddingFunction(model_name="BAAI/bge-small-en-v1.5")
@@ -49,7 +48,7 @@ try:
     import chromadb
     from chromadb.config import Settings
     
-    client = chromadb.PersistentClient(path="/tmp/test_rag_fastembed", settings=Settings(anonymized_telemetry=False))
+    client = chromadb.PersistentClient(path="/tmp/test_rag_fastembed", settings=Settings(anonymized_telemetry=False))  # pyright: ignore[reportAttributeAccessIssue]
     coll = client.get_or_create_collection("test", embedding_function=ef)
     coll.add(documents=["test doc"], ids=["test-id"])
     results = coll.query(query_texts=["test"], n_results=1)
