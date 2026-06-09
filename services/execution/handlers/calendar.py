@@ -123,7 +123,65 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
             res_msg = await loop.run_in_executor(None, _add)
             return ExecutionResult(status="SUCCESS", message=res_msg, service="calendar_add")
 
-        return ExecutionResult(status="FAILURE", message=f"Action {action} not yet implemented.", service="calendar")
+        elif action == "delete":
+            if not req.query:
+                return ExecutionResult(status="FAILURE", message="Query parameter is required for delete.", service="calendar_delete")
+            
+            def _delete():
+                client = provider.calendar_client()
+                calendars = client.principal().calendars()
+                deleted_count = 0
+                query_lower = req.query.lower()
+                for cal in calendars:
+                    if any(x in (cal.name or "").lower() for x in ["birthday", "contact", "holiday"]): continue
+                    try:
+                        events = cal.search(event=True, expand=True)
+                        for ev in events:
+                            ve = ev.vobject_instance.vevent
+                            summary = ve.summary.value if hasattr(ve, 'summary') else ""
+                            if query_lower in summary.lower():
+                                ev.delete()
+                                deleted_count += 1
+                    except: continue
+                return f"Deleted {deleted_count} matching event(s)."
+
+            res_msg = await loop.run_in_executor(None, _delete)
+            return ExecutionResult(status="SUCCESS", message=res_msg, service="calendar_delete")
+
+        elif action == "update":
+            if not req.query or not req.summary:
+                return ExecutionResult(status="FAILURE", message="Query and summary are required for update.", service="calendar_update")
+            
+            def _update():
+                client = provider.calendar_client()
+                calendars = client.principal().calendars()
+                updated_count = 0
+                query_lower = req.query.lower()
+                for cal in calendars:
+                    if any(x in (cal.name or "").lower() for x in ["birthday", "contact", "holiday"]): continue
+                    try:
+                        events = cal.search(event=True, expand=True)
+                        for ev in events:
+                            ve = ev.vobject_instance.vevent
+                            summary = ve.summary.value if hasattr(ve, 'summary') else ""
+                            if query_lower in summary.lower():
+                                ve.summary.value = req.summary
+                                if req.start_time:
+                                    dt = dateparser.parse(req.start_time)
+                                    if dt:
+                                        local_tz = _get_local_tz()
+                                        if dt.tzinfo is None:
+                                            dt = dt.replace(tzinfo=local_tz)
+                                        ve.dtstart.value = dt
+                                ev.save()
+                                updated_count += 1
+                    except: continue
+                return f"Updated {updated_count} matching event(s) to '{req.summary}'."
+
+            res_msg = await loop.run_in_executor(None, _update)
+            return ExecutionResult(status="SUCCESS", message=res_msg, service="calendar_update")
+
+        return ExecutionResult(status="FAILURE", message=f"Unknown calendar action: {action}", service="calendar")
 
     except Exception as e:
         log.error(f"Calendar error: {e}")

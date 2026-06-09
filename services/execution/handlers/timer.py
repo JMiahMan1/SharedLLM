@@ -95,7 +95,35 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 return ExecutionResult(status="SUCCESS", message=f"Deleted {deleted_count} timer(s).", service="timer_delete")
             return ExecutionResult(status="FAILURE", message="No matching timer found.", service="timer_delete")
 
-        return ExecutionResult(status="FAILURE", message=f"Action {action} not yet implemented.", service="timer")
+        elif action == "pause":
+            user_id = req.user_context.user
+            keys = await r.keys(f"timer:{user_id}:*")
+            for k in keys:
+                data = await r.get(k)
+                if data:
+                    t = json.loads(data)
+                    if t.get('active') and (not req.title or req.title.lower() in t['title'].lower()):
+                        t['active'] = False
+                        t['paused_at'] = datetime.now().isoformat()
+                        await r.set(k, json.dumps(t))
+                        return ExecutionResult(status="SUCCESS", message=f"Paused timer '{t['title']}'.", service="timer_pause", detail={"timer_id": t['id']})
+            return ExecutionResult(status="FAILURE", message="No active matching timer found to pause.", service="timer_pause")
+
+        elif action == "resume":
+            user_id = req.user_context.user
+            keys = await r.keys(f"timer:{user_id}:*")
+            for k in keys:
+                data = await r.get(k)
+                if data:
+                    t = json.loads(data)
+                    if not t.get('active') and t.get('paused_at'):
+                        t['active'] = True
+                        del t['paused_at']
+                        await r.set(k, json.dumps(t))
+                        return ExecutionResult(status="SUCCESS", message=f"Resumed timer '{t['title']}'.", service="timer_resume", detail={"timer_id": t['id']})
+            return ExecutionResult(status="FAILURE", message="No paused matching timer found to resume.", service="timer_resume")
+
+        return ExecutionResult(status="FAILURE", message=f"Unknown timer action: {action}", service="timer")
 
     except Exception as e:
         log.error(f"Timer error: {e}")
