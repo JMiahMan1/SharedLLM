@@ -9,6 +9,7 @@ from sqlmodel import SQLModel, Field, Relationship
 
 class User(SQLModel, table=True):
     """A user account with service credentials."""
+    __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(index=True, unique=True)
     display_name: str = Field(default="")
@@ -57,6 +58,7 @@ class User(SQLModel, table=True):
 
 class DeviceAssignment(SQLModel, table=True):
     """Maps an HA entity_id to a User for device-based identity resolution."""
+    __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
     device_id: str = Field(index=True, unique=True)  # e.g. "media_player.kitchen_speaker"
     user_id: int = Field(foreign_key="user.id")
@@ -65,6 +67,7 @@ class DeviceAssignment(SQLModel, table=True):
 
 class APIKey(SQLModel, table=True):
     """Secure access tokens for users and external clients."""
+    __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
     key_value: Optional[str] = Field(default=None, index=True, unique=True)
     key_hash: Optional[str] = Field(default=None, index=True, unique=True)
@@ -76,6 +79,7 @@ class APIKey(SQLModel, table=True):
 
 class GlobalSetting(SQLModel, table=True):
     """System-wide configuration settings."""
+    __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
     key: str = Field(index=True, unique=True)
     value: str
@@ -83,6 +87,7 @@ class GlobalSetting(SQLModel, table=True):
 
 class RavenMission(SQLModel, table=True):
     """Pending or completed autonomous missions for Raven (Admin ROZ or User Tasks)."""
+    __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
     slug: Optional[str] = Field(default=None, index=True, unique=True)
     mission_type: str = Field(default="admin_fix") # admin_fix, user_task, media_conversion
@@ -101,6 +106,7 @@ class RavenMission(SQLModel, table=True):
 
 class UserWidget(SQLModel, table=True):
     """Per-user widget customization settings for the Bento Dashboard."""
+    __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
     username: str = Field(index=True, foreign_key="user.username")
     widget_key: str

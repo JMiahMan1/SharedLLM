@@ -75,6 +75,7 @@ class UserCreate(BaseModel):
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
     audiobookshelf_pass: Optional[str] = None
+    mass_url: Optional[str] = None
     mass_token: Optional[str] = None
     skylight_url: Optional[str] = None
     skylight_email: Optional[str] = None
