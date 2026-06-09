@@ -252,7 +252,7 @@ class TestInternalSecretEnforcement:
         base_url = os.getenv("IDENTITY_URL", "http://localhost:8011")
         try:
             resp = httpx.post(
-                f"{base_url}/users",
+                f"{base_url}/api/users",
                 json={"username": "test"},
                 timeout=5.0,
             )
