@@ -49,7 +49,7 @@ def client_fixture(session: Session):
 def test_health_check(client: TestClient):
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "OK"
+    assert resp.json()["status"] == "ok"
 
 def test_identity_resolve(client: TestClient):
     payload = {"rag_user": "default"}
