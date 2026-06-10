@@ -8,7 +8,6 @@ from services.execution.schemas import (
     MediaStatusRequest, MediaStateSyncRequest
 )
 from services.execution.media_playback_service import MediaPlaybackService
-from services.execution import media_playback_registry as registry
 
 mock_context = UserContext(
     user="test_user",
@@ -89,6 +88,7 @@ async def test_play_local_and_transport(mocker):
     
     play_res = await MediaPlaybackService.play(play_req)
     assert play_res.status == "SUCCESS"
+    assert play_res.detail is not None
     assert play_res.detail["target"] == "local"
     assert play_res.detail["media_title"] == "Yesterday"
     
@@ -105,4 +105,29 @@ async def test_play_local_and_transport(mocker):
     # Verify status reflects pause
     status_req = MediaStatusRequest(user_context=mock_context)
     status_res = await MediaPlaybackService.status(status_req)
+    assert status_res.detail is not None
     assert status_res.detail["active"]["state"] == "paused"
+
+
+@pytest.mark.asyncio
+async def test_resolve_stream(mocker):
+    # Mock search_youtube and download_video_progressive
+    mocker.patch("services.execution.handlers.video.search_youtube", return_value="https://youtube.com/watch?v=123")
+    mocker.patch("services.execution.handlers.video.download_video_progressive", return_value=("vid-123", "Resolved Title"))
+    
+    # Temporarily override config value
+    import services.config
+    mocker.patch.object(services.config, "EXECUTION_EXTERNAL_HOST", "192.168.2.205")
+
+    from services.execution.schemas import ResolveStreamRequest
+    from services.execution.main import execute_media_resolve_stream
+
+    req = ResolveStreamRequest(
+        user_context=mock_context,
+        query="Yesterday"
+    )
+    res = await execute_media_resolve_stream(req)
+    assert res.status == "SUCCESS"
+    assert res.detail is not None
+    assert res.detail["stream_url"] == "http://192.168.2.205:8888/media/vid-123"
+
