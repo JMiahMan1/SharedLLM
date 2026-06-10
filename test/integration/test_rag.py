@@ -4,6 +4,7 @@ import httpx
 # RAG Service URL
 RAG_URL = "http://localhost:11438"
 
+@pytest.mark.server_only
 @pytest.mark.live
 @pytest.mark.asyncio
 async def test_hybrid_rag_fusion_precision():

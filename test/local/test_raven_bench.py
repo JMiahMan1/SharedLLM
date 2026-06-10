@@ -82,5 +82,11 @@ async def main():
         
         print(f"\n=== Final Score: {success_count}/{len(RAVEN_MISSIONS)} missions successful ===")
 
+import pytest
+
+@pytest.mark.local_only
+async def test_raven_benchmark():
+    await main()
+
 if __name__ == "__main__":
     asyncio.run(main())

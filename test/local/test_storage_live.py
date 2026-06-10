@@ -9,6 +9,7 @@ NC_URL = os.getenv("NC_URL")
 NC_USER = os.getenv("NC_USER")
 NC_PASS = os.getenv("NC_PASS")
 
+@pytest.mark.local_only
 @pytest.mark.skipif(not NC_URL, reason="NC_URL not set - skipping live integration test")
 @pytest.mark.asyncio
 async def test_live_nextcloud_connection():
@@ -26,6 +27,7 @@ async def test_live_nextcloud_connection():
     assert isinstance(entries, list)
     print(f"\nSuccessfully listed {len(entries)} entries from live NextCloud.")
 
+@pytest.mark.local_only
 @pytest.mark.skipif(not NC_URL, reason="NC_URL not set - skipping live integration test")
 @pytest.mark.asyncio
 async def test_live_content_extraction():

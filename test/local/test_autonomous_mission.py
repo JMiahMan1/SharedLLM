@@ -1,7 +1,9 @@
 import asyncio
 import os
 import httpx
+import pytest
 
+@pytest.mark.local_only
 async def test_autonomous_mission():
     """
     Tests the Raven Autonomous Mission pipeline.

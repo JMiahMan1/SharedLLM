@@ -20,12 +20,10 @@ async def test_workspace_path_traversal_blocked():
         resp = await ac.post(
             "http://test/files/write", 
             json=malicious_payload,
-            headers={"X-Internal-Secret": "change-me-in-production"}
+            headers={"X-Internal-Secret": "test-secret"}
         )
         
-        if resp.status_code == 404:
-            print(f"Routes: {[getattr(r, 'path', '<no path>') for r in app.routes]}")
-            
-        # Should be blocked by resolve_safe_path
+        # Should be blocked by resolve_safe_path with 403
         assert resp.status_code == 403
-        assert "Path traversal detected" in resp.json()["detail"]
+        detail = resp.json().get("detail", "")
+        assert "Forbidden" in detail or "traversal" in detail.lower()

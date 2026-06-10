@@ -14,9 +14,9 @@ def session_fixture():
 
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
-    from services.workspace_runtime.main import app
+    from main import app
     # Override engine in main with our test engine
-    from services.workspace_runtime import main
+    import main
     original_engine = main.engine
     main.engine = session.bind
     client = TestClient(app)

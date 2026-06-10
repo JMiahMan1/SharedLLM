@@ -14,6 +14,7 @@ from services.gateway.config import (
     RAVEN_MAX_TOTAL_SECONDS,
     RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
 )
+from services.gateway.prompts import RAVEN_PLAN_PROMPT, RAVEN_REFLECTION_PROMPT
 from services.gateway.schemas import ResolvedCredentials
 from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider
 
@@ -273,7 +274,14 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
     """Dynamically checks VRAM pressure using DB constraints."""
     local_url = settings.get("llm_local_url", "")
     if not local_url:
-        raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
+        log.warning("[AgentLoop] llm_local_url not configured; returning default VRAM-safe params")
+        return {
+            "num_predict": 1024,
+            "temperature": 0.1,
+            "top_p": 0.9,
+            "repeat_penalty": 1.1,
+            "thinking": False,
+        }
     max_ctx = int(settings.get("llm_local_max_ctx", "4096"))
     params = {
         "num_predict": 1024,  # Allow sufficient tokens for full JSON tool calls
@@ -476,9 +484,26 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     exec_data = None
     ans = ""
     successful_tool_calls = 0
+    generated_plan = ""
 
     # --- VRAM-SAFE SCRATCHPAD ---
     action_log = []
+
+    # --- PLANNING PHASE ---
+    try:
+        plan_prompt = [
+            {"role": "system", "content": RAVEN_PLAN_PROMPT},
+            {"role": "user", "content": f"Mission: {query}\n\nCreate a concise execution plan:"}
+        ]
+        plan_data = await execute_inference(provider, selected_model, plan_prompt, {"temperature": 0.1, "num_predict": 512})
+        generated_plan = plan_data.get("message", {}).get("content", "").strip()
+        if generated_plan:
+            action_log.append(f"PLAN GENERATED:\n{generated_plan}")
+            log.info(f"[AgentLoop] Planning phase complete. Plan:\n{generated_plan[:500]}")
+            await stream_event("system", f"Plan generated ({generated_plan.count(chr(10)) + 1} steps)")
+    except Exception as e:
+        log.warning(f"[AgentLoop] Planning phase failed (continuing without plan): {e}")
+        generated_plan = ""
 
     # --- CHECKPOINT/RESUME ---
     start_iteration = 0
@@ -633,6 +658,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ctx_summary, ctx_recent = await _compress_context()
             
             mission_header = f"MISSION LOCK: {query}"
+            if generated_plan:
+                mission_header += f"\n\nEXECUTION PLAN:\n{generated_plan}"
             if ctx_summary:
                 mission_header += f"\n\n{ctx_summary}"
             
@@ -1124,6 +1151,22 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 log.warning(f"[AgentLoop] Summarization phase failed: {e}")
                 from services.gateway.orchestrator import strip_json_from_response
                 ans = strip_json_from_response(ans)
+
+    # --- POST-MISSION REFLECTION ---
+    reflection_summary = ""
+    if action_log and successful_tool_calls > 0:
+        try:
+            reflection_prompt = [
+                {"role": "system", "content": RAVEN_REFLECTION_PROMPT},
+                {"role": "user", "content": f"Mission: {query}\n\nPlan:\n{generated_plan}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nFinal result: {ans}\n\nProvide your reflection:"}
+            ]
+            reflection_data = await execute_inference(provider, selected_model, reflection_prompt, {"temperature": 0.1})
+            reflection_summary = reflection_data.get("message", {}).get("content", "").strip()
+            if reflection_summary:
+                action_log.append(f"REFLECTION:\n{reflection_summary}")
+                log.info(f"[AgentLoop] Mission reflection:\n{reflection_summary[:500]}")
+        except Exception as e:
+            log.warning(f"[AgentLoop] Reflection phase failed: {e}")
 
     if action_log and not (isinstance(exec_data, dict) and exec_data.get("status") == "ERROR"):
         if should_persist_learning(ans):

@@ -13,6 +13,7 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 def client():
     return httpx.Client(timeout=30.0)
 
+@pytest.mark.local_only
 @pytest.mark.skipif(LIVE_TEST_URL is not None, reason="RAG service is internal and not exposed externally")
 def test_rag_sync_flow(client):
     """

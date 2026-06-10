@@ -68,6 +68,14 @@ def test_storage_index_proxy(auth_headers):
 
 @respx.mock
 def test_storage_stats_proxy():
+    # Mock identity resolution (called by _resolve_identity_from_request)
+    respx.post(f"{IDENTITY_SVC}/api/resolve").mock(
+        return_value=httpx.Response(200, json={
+            "user": "testuser",
+            "nextcloud_user": "ncuser"
+        })
+    )
+    
     # Mock RAG stats call
     respx.get(f"{RAG_SVC}/rag/stats").mock(
         return_value=httpx.Response(200, json={"total_chunks": 100, "total_documents": 10})

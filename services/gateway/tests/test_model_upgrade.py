@@ -68,13 +68,16 @@ class TestDynamicModelSelection:
             ]
         }
 
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
-            mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+        mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
 
-            result = await self.worker._get_upgrade_model("qwen3:8b")
-            assert result == "qwen3.6-35b-a3b:q4_k_m"
+        with patch("services.gateway.orchestrator.get_all_settings", mock_settings):
+            with patch("httpx.AsyncClient") as mock_client:
+                mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
+                mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+
+                result = await self.worker._get_upgrade_model("qwen3:8b")
+                assert result == "qwen3.6-35b-a3b:q4_k_m"
 
     @pytest.mark.asyncio
     async def test_excludes_current_model(self):
@@ -87,13 +90,16 @@ class TestDynamicModelSelection:
             ]
         }
 
-        with patch("httpx.AsyncClient") as mock_client:
-            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
-            mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+        mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
 
-            result = await self.worker._get_upgrade_model("qwen3.6-35b-a3b:q4_k_m")
-            assert result == "qwen3:8b"
+        with patch("services.gateway.orchestrator.get_all_settings", mock_settings):
+            with patch("httpx.AsyncClient") as mock_client:
+                mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
+                mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
+                mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+
+                result = await self.worker._get_upgrade_model("qwen3.6-35b-a3b:q4_k_m")
+                assert result == "qwen3:8b"
 
     @pytest.mark.asyncio
     async def test_returns_current_on_api_failure(self):

@@ -64,6 +64,7 @@ def wait_for(predicate, timeout: int = 20, interval: float = 2.0):
     return last_value
 
 
+@pytest.mark.local_only
 def test_office_tv_music_controls(client):
     """
     Local-only hardware test:

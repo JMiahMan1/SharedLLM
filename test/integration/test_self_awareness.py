@@ -1,4 +1,3 @@
-# test/integration/test_self_awareness.py
 import os
 import requests
 import pytest  # pyright: ignore[reportUnusedImport]
@@ -7,6 +6,7 @@ RAG_SVC_URL = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
 GATEWAY_SVC_URL = os.getenv("GATEWAY_SVC_URL", "http://127.0.0.1:11435")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
+@pytest.mark.server_only
 def test_rag_capability_search():
     """Verify that we can search for capabilities in RAG directly."""
     query = "How do I control the lights?"
@@ -30,6 +30,7 @@ def test_rag_capability_search():
     assert "light" in content_blob
     assert "schema" in content_blob
 
+@pytest.mark.server_only
 def test_gateway_self_awareness():
     """Verify that the Gateway injects capability context into its reasoning."""
     # We use 'debug': True to see the rag_context in the response

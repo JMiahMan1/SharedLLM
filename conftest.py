@@ -1,9 +1,15 @@
 import os
+import sys
 import tempfile
 import pytest
 from cryptography.fernet import Fernet
 
 _test_fernet_key = Fernet.generate_key().decode()
+
+# Ensure root is in PYTHONPATH for imports across services
+_root = os.path.dirname(os.path.abspath(__file__))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 os.environ["FERNET_KEY"] = _test_fernet_key
