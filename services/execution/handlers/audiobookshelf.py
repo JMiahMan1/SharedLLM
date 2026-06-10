@@ -144,13 +144,33 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
     if is_roku:
         return await _roku_play_audiobook(full_entity_id, stream_url, book_title, ha_url, ha_token)
 
-    # All other devices: direct play_media with ABS stream URL
-    result = await ha_client.call_service(
-        ha_url, ha_token,
-        "media_player", "play_media",
-        full_entity_id,
-        {"media_content_id": stream_url, "media_content_type": "audio/mp4"},
-    )
+    # Detect if this is a Music Assistant player
+    is_ma = False
+    if state:
+        attrs = state.get("attributes", {})
+        is_ma = (
+            attrs.get("integration") == "music_assistant"
+            or "music assistant" in attrs.get("source", "").lower()
+            or attrs.get("active_queue") is not None
+            or full_entity_id.startswith("media_player.mass_")
+        )
+
+    if is_ma:
+        log.info(f"[abs] Playing on MA player '{full_entity_id}' using music_assistant.play_media")
+        result = await ha_client.call_service(
+            ha_url, ha_token,
+            "music_assistant", "play_media",
+            full_entity_id,
+            {"media_id": stream_url, "media_type": "track", "enqueue": "play"},
+        )
+    else:
+        # All other devices: direct play_media with ABS stream URL
+        result = await ha_client.call_service(
+            ha_url, ha_token,
+            "media_player", "play_media",
+            full_entity_id,
+            {"media_content_id": stream_url, "media_content_type": "audio/mp4"},
+        )
 
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Now playing: {book_title}", service="audiobookshelf")
@@ -186,12 +206,33 @@ async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
     if is_roku:
         return await _roku_play_audiobook(full_entity_id, stream_url, title, ha_url, ha_token)
 
-    result = await ha_client.call_service(
-        ha_url, ha_token,
-        "media_player", "play_media",
-        full_entity_id,
-        {"media_content_id": stream_url, "media_content_type": "audio/mp4"},
-    )
+    state = await ha_client.get_state(ha_url, ha_token, full_entity_id)
+    # Detect if this is a Music Assistant player
+    is_ma = False
+    if state:
+        attrs = state.get("attributes", {})
+        is_ma = (
+            attrs.get("integration") == "music_assistant"
+            or "music assistant" in attrs.get("source", "").lower()
+            or attrs.get("active_queue") is not None
+            or full_entity_id.startswith("media_player.mass_")
+        )
+
+    if is_ma:
+        log.info(f"[abs] Resuming on MA player '{full_entity_id}' using music_assistant.play_media")
+        result = await ha_client.call_service(
+            ha_url, ha_token,
+            "music_assistant", "play_media",
+            full_entity_id,
+            {"media_id": stream_url, "media_type": "track", "enqueue": "play"},
+        )
+    else:
+        result = await ha_client.call_service(
+            ha_url, ha_token,
+            "media_player", "play_media",
+            full_entity_id,
+            {"media_content_id": stream_url, "media_content_type": "audio/mp4"},
+        )
 
     if result.get("ok"):
         return ExecutionResult(

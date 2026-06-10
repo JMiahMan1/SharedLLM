@@ -31,7 +31,7 @@ from services.execution.schemas import (
     WebSearchRequest, WebReadRequest, ExecutionResult,
        DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
     WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-      SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest, MediaStateSyncRequest
+      SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest, MediaStateSyncRequest, ResolveStreamRequest
 )
 from services.execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
 from services.execution.handlers import docker_logs as docker_logs_handler
@@ -391,6 +391,31 @@ async def execute_media_play(req: MediaPlayRequest):
             ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
             ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
     return await MediaPlaybackService.play(req)
+
+
+@app.post("/execute/media/resolve_stream", response_model=ExecutionResult)
+async def execute_media_resolve_stream(req: ResolveStreamRequest):
+    from services.execution.handlers import video as video_handler
+    from services.config import EXECUTION_EXTERNAL_HOST
+    
+    query = req.query
+    log.info(f"[media/resolve_stream] Resolving query='{query}' to progressive stream")
+    video_url = await video_handler.search_youtube(query)
+    if not video_url:
+        return ExecutionResult(status="FAILURE", message="Could not find stream on YouTube", service="resolve_stream")
+        
+    media_id, title = await video_handler.download_video_progressive(video_url)
+    if not media_id:
+        return ExecutionResult(status="FAILURE", message="Could not download/stream audio", service="resolve_stream")
+        
+    stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+    return ExecutionResult(
+        status="SUCCESS",
+        message=f"Resolved stream: {title}",
+        service="resolve_stream",
+        detail={"stream_url": stream_url}
+    )
+
 
 @app.post("/execute/media/transport", response_model=ExecutionResult)
 async def execute_media_transport(req: MediaTransportRequest):

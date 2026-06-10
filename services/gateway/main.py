@@ -4964,8 +4964,8 @@ async def stream_music_assistant(uri: str, request: Request):
         log.error(f"[stream/ma] identity resolution failed: {e.detail}")
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    mass_url = creds.get("mass_url")
-    mass_token = creds.get("mass_token") or os.getenv("MA_TOKEN")
+    mass_url = creds.get("mass_url") or os.getenv("MA_URL") or os.getenv("MUSIC_ASSISTANT_URL") or os.getenv("MASS_URL")
+    mass_token = creds.get("mass_token") or os.getenv("MA_TOKEN") or os.getenv("MUSIC_ASSISTANT_TOKEN") or os.getenv("MASS_TOKEN")
 
     if not mass_url or not mass_token:
         raise HTTPException(status_code=400, detail="Music Assistant not configured")
@@ -5034,6 +5034,39 @@ async def stream_music_assistant(uri: str, request: Request):
                         if track_resp.status_code == 200:
                             track_data = track_resp.json()
                             playable_url = track_data.get("url") or track_data.get("stream_url")
+
+            if not playable_url:
+                # Fallback to execution service to resolve stream via YouTube/yt-dlp
+                track_name = data.get("name")
+                artists = data.get("artists", [])
+                artist_name = ""
+                if isinstance(artists, list) and artists:
+                    artist_name = ", ".join([a.get("name", "") for a in artists if a.get("name")])
+                elif isinstance(artists, dict):
+                    artist_name = artists.get("name", "")
+                
+                query = f"{artist_name} - {track_name}" if artist_name else track_name
+                log.info(f"[stream/ma] Playable URL not found in MA response. Requesting execution service to resolve: {query}")
+                
+                try:
+                    async with httpx.AsyncClient(timeout=60.0) as client_exec:
+                        exec_resp = await client_exec.post(
+                            f"{EXECUTION_SVC}/execute/media/resolve_stream",
+                            json={
+                                "user_context": {
+                                    "user": creds.get("username", "default"),
+                                    "is_admin": creds.get("is_admin", False)
+                                },
+                                "query": query
+                            },
+                            headers={"X-Internal-Secret": INTERNAL_SECRET}
+                        )
+                        if exec_resp.status_code == 200:
+                            exec_data = exec_resp.json()
+                            if exec_data.get("status") == "SUCCESS" and exec_data.get("detail"):
+                                playable_url = exec_data["detail"].get("stream_url")
+                except Exception as exec_err:
+                    log.warning(f"[stream/ma] Failed to call execution service to resolve stream: {exec_err}")
 
             if not playable_url:
                 raise HTTPException(status_code=404, detail=f"No playable URL found for {item_type}: {item_id}")

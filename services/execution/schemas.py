@@ -778,3 +778,10 @@ class HAConfigRequest(BaseRequest):
     domain: Optional[str] = Field(None, description="Integration domain to inspect (e.g. 'ollama', 'webostv', 'roborock')")
     entity_domain: Optional[str] = Field(None, description="Entity domain to filter by (e.g. 'light', 'media_player', 'weather')")
     keyword: Optional[str] = Field(None, description="Search keyword to filter integrations or entities")
+
+
+class ResolveStreamRequest(BaseRequest):
+    """Request to resolve a media query (track name, video title, etc.) into a playable stream URL."""
+    user_context: UserContext
+    query: str
+
