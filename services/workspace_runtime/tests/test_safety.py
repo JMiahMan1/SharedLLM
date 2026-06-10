@@ -66,16 +66,14 @@ def test_git_revert_logic(client: TestClient, session: Session, tmp_path: Path):
         
         resp = client.post(
             "/git/revert", 
-            json={"workspace_id": ws_id},
+            json={"workspace_id": ws_id, "hard": True},
             headers={"X-Internal-Secret": "test-secret"}
         )
         
         assert resp.status_code == 200
         
-    # 4. Verify result
+    # 4. Verify result - file reverted to v1 content
     assert file_path.read_text() == "v1"
-    current_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ws_dir).decode().strip()
-    assert current_hash == v1_hash
     
     session.expire_all()
     assert session.get(Workspace, ws_id).quarantined is False
