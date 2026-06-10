@@ -4948,6 +4948,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
             await cli.aclose()
 
     range_header = request.headers.get("range")
+    log.info(f"[stream/abs] Client requested range: {range_header} for book {book_id}")
     client = httpx.AsyncClient(timeout=30.0)
     try:
         req_headers = {}
@@ -4958,6 +4959,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
             client.build_request("GET", stream_url, headers=req_headers),
             stream=True
         )
+        log.info(f"[stream/abs] ABS stream response status: {resp.status_code}, headers: {dict(resp.headers)}")
         
         response_headers = {
             "Accept-Ranges": "bytes",
@@ -5115,6 +5117,7 @@ async def stream_music_assistant(uri: str, request: Request):
                     await cli.aclose()
 
             range_header = request.headers.get("range")
+            log.info(f"[stream/ma] Client requested range: {range_header} for MA {item_type} {item_id}")
             client = httpx.AsyncClient(timeout=30.0)
             try:
                 req_headers = {}
@@ -5125,6 +5128,7 @@ async def stream_music_assistant(uri: str, request: Request):
                     client.build_request("GET", playable_url, headers=req_headers),
                     stream=True
                 )
+                log.info(f"[stream/ma] MA stream response status: {resp.status_code}, headers: {dict(resp.headers)}")
                 
                 response_headers = {
                     "Accept-Ranges": "bytes",
