@@ -2,7 +2,9 @@ import asyncio
 import os
 
 import httpx
+import pytest
 
+@pytest.mark.local_only
 async def test_control_plane_integration():
     """
     Tests the full Control Plane integration: listing services, checking models, and restarting.

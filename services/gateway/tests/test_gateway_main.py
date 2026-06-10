@@ -29,6 +29,14 @@ def client_fixture(monkeypatch):
     # Disable background tasks for testing
     main.background_tasks = None  # type: ignore[assignment]
     
+    # Mock job_queue to avoid Redis dependency in tests
+    mock_job_queue = MagicMock()
+    mock_job_queue.enqueue_job = AsyncMock(return_value="test-job-123")
+    mock_job_queue.get_job_status = AsyncMock(return_value={"status": "completed", "result": "Mocked LLM response"})
+    mock_job_queue.get_chunks = AsyncMock(return_value=["test"])
+    mock_job_queue.get_queue_position = AsyncMock(return_value=0)
+    monkeypatch.setattr(main, "job_queue", mock_job_queue)
+    
     return TestClient(app)
 
 def test_health_check(client: TestClient):
@@ -41,6 +49,7 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     import main
     # Mock dependencies to avoid real network/ML calls
     monkeypatch.setattr(main, "resolve_identity", AsyncMock(return_value={"user": "alice", "ha_url": "http://ha.local", "ha_token": "tok"}))
+    monkeypatch.setattr(main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
     monkeypatch.setattr(main, "fetch_ha_entities", AsyncMock(return_value=[]))
     monkeypatch.setattr(main, "update_history", AsyncMock(return_value=None))
     monkeypatch.setattr(main, "get_history", AsyncMock(return_value=[]))

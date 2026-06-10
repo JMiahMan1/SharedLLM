@@ -10,6 +10,7 @@ HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 # Service URLs (Internal routing via Gateway)
 GATEWAY_URL = f"{BASE_URL}/api"
 
+@pytest.mark.local_only
 @pytest.mark.asyncio
 async def test_capability_read_success():
     """Verify that a workspace with 'read' capability allowed can list and read files."""
@@ -26,6 +27,7 @@ async def test_capability_read_success():
         assert resp.status_code == 200
         assert resp.json()["status"] == "SUCCESS"
 
+@pytest.mark.local_only
 @pytest.mark.asyncio
 async def test_capability_write_failure():
     """Verify that a workspace WITHOUT 'write' capability rejects file writes."""
@@ -43,6 +45,7 @@ async def test_capability_write_failure():
         assert resp.status_code == 403
         assert "does not allow capability 'write'" in resp.json()["detail"]
 
+@pytest.mark.local_only
 @pytest.mark.asyncio
 async def test_capability_git_status_success():
     """Verify git_status is allowed on sharedllm_system."""
@@ -57,6 +60,7 @@ async def test_capability_git_status_success():
         assert resp.status_code == 200
         assert resp.json()["status"] == "SUCCESS"
 
+@pytest.mark.local_only
 @pytest.mark.asyncio
 async def test_capability_git_write_failure():
     """Verify git_write (commit/add) is rejected on sharedllm_system."""
@@ -72,6 +76,7 @@ async def test_capability_git_write_failure():
         assert resp.status_code == 403
         assert "does not allow capability 'git_write'" in resp.json()["detail"]
 
+@pytest.mark.local_only
 @pytest.mark.asyncio
 async def test_capability_pytest_failure():
     """Verify pytest is rejected on sharedllm_system."""
@@ -86,6 +91,7 @@ async def test_capability_pytest_failure():
         assert resp.status_code == 403
         assert "does not allow capability 'pytest'" in resp.json()["detail"]
 
+@pytest.mark.local_only
 @pytest.mark.asyncio
 async def test_admin_bypass():
     """Verify that an admin user bypasses all capability checks."""
