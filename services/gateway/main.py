@@ -1967,10 +1967,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 
             heartbeat_stop.set()
             await hb_task
-            if resp.status_code != 200:  # pyright: ignore[reportAttributeAccessIssue]
+            if not resp:
                 return JSONResponse({"status": "ERROR", "message": "Brain offline."}, status_code=502)
-            data = resp.json()  # pyright: ignore[reportAttributeAccessIssue]
-            ans = data.get("message", {}).get("content", "Error.")
+            ans = resp.get("message", {}).get("content", "Error.")
             ollama_ms = (asyncio.get_event_loop().time() - iter_start) * 1000
             log.info(f"[AgentLoop] Ollama responded in {ollama_ms:.0f}ms — iter {agent_iter + 1}")
         except (httpx.TimeoutException, httpx.ConnectError):
@@ -4668,10 +4667,8 @@ async def get_abs_last_played(request: Request):
 
 
 @app.get("/api/media/audiobookshelf/library/{library_id}")
-async def get_abs_library_items(library_id: str, limit: int = 50, request: Optional[Request] = None):
+async def get_abs_library_items(library_id: str, request: Request, limit: int = 50):
     """Get audiobooks from a specific Audiobookshelf library (per-user credentials)."""
-    if not request:
-        return {"status": "SUCCESS", "books": []}
     try:
         creds = await _resolve_identity_from_request(request)
     except HTTPException as e:
@@ -4697,10 +4694,8 @@ async def get_abs_library_items(library_id: str, limit: int = 50, request: Optio
 
 
 @app.get("/api/media/audiobookshelf/search")
-async def search_abs(q: str, limit: int = 20, request: Optional[Request] = None):
+async def search_abs(q: str, request: Request, limit: int = 20):
     """Search Audiobookshelf for audiobooks (per-user credentials)."""
-    if not request:
-        return {"status": "SUCCESS", "books": []}
     try:
         creds = await _resolve_identity_from_request(request)
     except HTTPException as e:
@@ -4846,6 +4841,25 @@ async def proxy_media_play(request: Request):
             return JSONResponse(content=resp.json(), status_code=resp.status_code)
     except httpx.RequestError as e:
         log.error(f"Execution service unreachable for media play: {e}")
+        raise HTTPException(status_code=503, detail="Execution service unreachable")
+
+
+@app.post("/execute/media/state/sync")
+async def proxy_media_state_sync(request: Request):
+    """Proxy media state sync requests from UI to execution service."""
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            body = await request.json() if await request.body() else {}
+            user_ctx = await _resolve_user_context(request, body)
+            exec_body = {**body, "user_context": user_ctx}
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/media/state/sync",
+                json=exec_body,
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    except httpx.RequestError as e:
+        log.error(f"Execution service unreachable for media state sync: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
 
