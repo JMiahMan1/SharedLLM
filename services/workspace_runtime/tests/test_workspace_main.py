@@ -3,7 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, StaticPool
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
+os.environ["INTERNAL_SECRET"] = "test-secret"
 
 # Setup in-memory database for testing
 @pytest.fixture(name="session")
