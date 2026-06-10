@@ -983,6 +983,25 @@ export const api = {
     return resp.data;
   },
 
+  async syncMediaState(payload: {
+    entity_id: string;
+    state: string;
+    media_type?: string;
+    query?: string;
+    media_content_id?: string;
+    position?: number;
+    duration?: number;
+    volume_level?: number;
+    is_volume_muted?: boolean;
+    media_title?: string;
+    media_artist?: string;
+    media_album?: string;
+    queue?: unknown[];
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/media/state/sync', payload);
+    return resp.data;
+  },
+
   async getMusicAssistantPlaylists(): Promise<{ status: string; playlists: Array<{ name: string; items: number; uri: string }> }> {
     const resp = await apiClient.get('/api/media/music-assistant/playlists');
     return resp.data;

@@ -154,6 +154,25 @@ class MediaTransportRequest(BaseRequest):
     volume_level: Optional[float] = Field(None, ge=0.0, le=1.0)
 
 
+class MediaStateSyncRequest(BaseRequest):
+    """Sync request for local or remote media state."""
+    user_context: UserContext
+    entity_id: str = Field("local", description="Playback target (e.g. 'local' or HA entity_id)")
+    state: str = Field("idle", description="Playback state (playing, paused, idle)")
+    media_type: Optional[str] = None
+    query: Optional[str] = None
+    media_content_id: Optional[str] = None
+    position: Optional[float] = 0.0
+    duration: Optional[float] = 0.0
+    volume_level: Optional[float] = None
+    is_volume_muted: Optional[bool] = None
+    media_title: Optional[str] = None
+    media_artist: Optional[str] = None
+    media_album: Optional[str] = None
+    queue: Optional[list] = None
+
+
+
 # ─── Lights ─────────────────────────────────────────────────────────────────────
 
 class LightControlRequest(BaseRequest):
