@@ -31,17 +31,17 @@ from services.execution.schemas import (
     WebSearchRequest, WebReadRequest, ExecutionResult,
        DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
     WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-      SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest
+      SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest, MediaStateSyncRequest
 )
 from services.execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
 from services.execution.handlers import docker_logs as docker_logs_handler
 from services.execution.handlers import git as git_handler
 from services.execution.handlers import deployment as deployment_handler
 from services.execution.handlers import volumes as volume_handler
-from services.execution.handlers import media_status as media_status_handler
 from services.execution.handlers import ha_config as ha_config_handler
 from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
 from services.execution import device_registry
+from services.execution.media_playback_service import MediaPlaybackService
 
 import threading
 import urllib3
@@ -380,8 +380,9 @@ async def execute_light(req: LightControlRequest):
 
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
-    if req.entity_id and not await verify_entity_access(req.user_context, req.entity_id):
-        raise HTTPException(status_code=403, detail="Access denied to this device")
+    if req.entity_id and req.entity_id.lower() not in ("local", "local_player", "browser", "android"):
+        if not await verify_entity_access(req.user_context, req.entity_id):
+            raise HTTPException(status_code=403, detail="Access denied to this device")
     # Resolve HA credentials via Identity service if not in context
     ctx = req.user_context
     if not ctx.ha_url or not ctx.ha_token:
@@ -389,7 +390,7 @@ async def execute_media_play(req: MediaPlayRequest):
         if creds:
             ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
             ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
-    return await media.handle_media_play(req)
+    return await MediaPlaybackService.play(req)
 
 @app.post("/execute/media/transport", response_model=ExecutionResult)
 async def execute_media_transport(req: MediaTransportRequest):
@@ -399,7 +400,7 @@ async def execute_media_transport(req: MediaTransportRequest):
         if creds:
             ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
             ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
-    return await media.handle_media_transport(req)
+    return await MediaPlaybackService.transport(req)
 
 @app.post("/execute/tv_cast", response_model=ExecutionResult)
 async def execute_tv_cast(req: TVCastRequest):
@@ -1611,7 +1612,17 @@ async def execute_ha_logbook(req: LogbookRequest):
 async def execute_media_status(req: MediaStatusRequest):
     ctx = req.user_context
     log.info(f"[media/status] user={ctx.user} area={req.area} entity={req.entity_id}")
-    return await media_status_handler.handle_media_status(req)
+    if not ctx.ha_url or not ctx.ha_token:
+        creds = await resolve_first_user()
+        if creds:
+            ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
+            ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
+    return await MediaPlaybackService.status(req)
+
+
+@app.post("/execute/media/state/sync", response_model=ExecutionResult)
+async def execute_media_state_sync(req: MediaStateSyncRequest):
+    return await MediaPlaybackService.sync_local(req)
 
 
 async def _resolve_mass_ha_creds(user_id: str):

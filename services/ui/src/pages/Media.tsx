@@ -810,49 +810,94 @@ const Media = () => {
   /* ── media status polling ───────────────────────────────────── */
 
   const fetchMediaStatus = useCallback(async () => {
-    if (localMode) return;
     try {
       const resp = await api.mediaStatus();
       if (resp.status === 'SUCCESS' && resp.detail) {
-        const detail = resp.detail as { active?: MediaStatus | null; available?: MediaStatus[]; all_players?: MediaStatus[] };
+        const detail = resp.detail as {
+          active?: (MediaStatus & { position?: number; duration?: number; media_content_id?: string; media_type?: string }) | null;
+          available?: MediaStatus[];
+          all_players?: MediaStatus[];
+        };
         const allPlayers = detail.all_players || [];
+        const active = detail.active;
         
-        const targetPlayer = selectedTarget ? allPlayers.find(p => p.entity_id === selectedTarget) : null;
-        
-        if (targetPlayer) {
-          setMediaStatus(targetPlayer);
-          if (targetPlayer.volume_level !== undefined && targetPlayer.volume_level !== null) {
-            setVolume(Math.round(Number(targetPlayer.volume_level) * 100));
-          }
-          if (targetPlayer.is_volume_muted !== undefined) {
-            setMuted(Boolean(targetPlayer.is_volume_muted));
-          }
-        } else {
-          // If no selected target, or selected target is not in the list, fall back to active player
-          const active = detail.active;
-          if (active) {
+        if (active) {
+          if (active.entity_id === 'local_player') {
+            setLocalMode(true);
+            setSelectedTarget('');
+            
+            // Sync local player states
+            if (!localTrack && active.media_content_id) {
+              const idClean = active.media_content_id;
+              const title = active.media_title;
+              const subtitle = active.media_artist;
+              const type = active.media_type as 'audiobook' | 'music';
+              const source = active.media_type === 'audiobook' ? 'abs' : 'ma';
+              
+              setLocalTrack({ id: idClean, title, subtitle, type, source });
+              setLocalIsPlaying(active.state === 'playing');
+              setLocalCurrentTime(active.position || 0);
+              
+              const apiToken = storageGetSync('jarvis_api_key') ?? '';
+              const tokenSuffix = apiToken ? `${apiToken.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiToken)}` : '';
+              let url = '';
+              if (source === 'abs') {
+                url = `/api/media/stream/audiobookshelf/${idClean}${tokenSuffix}`;
+              } else {
+                url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
+              }
+              setLocalStreamUrl(url);
+            } else if (localTrack) {
+              const backendPlaying = active.state === 'playing';
+              if (backendPlaying !== localIsPlaying) {
+                setLocalIsPlaying(backendPlaying);
+                if (localAudioRef.current) {
+                  if (backendPlaying) {
+                    localAudioRef.current.play().catch(() => {});
+                  } else {
+                    localAudioRef.current.pause();
+                  }
+                }
+              }
+            }
+            
+            if (active.volume_level !== undefined && active.volume_level !== null) {
+              setLocalVolume(Math.round(active.volume_level * 100));
+            }
+            if (active.is_volume_muted !== undefined) {
+              setLocalMuted(active.is_volume_muted);
+            }
+          } else {
             setMediaStatus(active);
+            setLocalMode(false);
+            if (active.entity_id) {
+              setSelectedTarget(String(active.entity_id));
+            }
             if (active.volume_level !== undefined && active.volume_level !== null) {
               setVolume(Math.round(Number(active.volume_level) * 100));
             }
             if (active.is_volume_muted !== undefined) {
               setMuted(Boolean(active.is_volume_muted));
             }
-            if (active.entity_id && !selectedTarget) {
-              setSelectedTarget(String(active.entity_id));
-              setLocalMode(false);
+          }
+        } else {
+          // If no active target is reported, we check standard HA player target matching
+          const targetPlayer = selectedTarget ? allPlayers.find(p => p.entity_id === selectedTarget) : null;
+          if (targetPlayer) {
+            setMediaStatus(targetPlayer);
+            if (targetPlayer.volume_level !== undefined && targetPlayer.volume_level !== null) {
+              setVolume(Math.round(Number(targetPlayer.volume_level) * 100));
+            }
+            if (targetPlayer.is_volume_muted !== undefined) {
+              setMuted(Boolean(targetPlayer.is_volume_muted));
             }
           } else {
-            // No active playback and no selected target
             setMediaStatus(null);
-            if (!selectedTarget) {
-              setLocalMode(false);
-            }
           }
         }
       }
     } catch { /* ignore */ }
-  }, [selectedTarget, localMode]);
+  }, [selectedTarget, localTrack, localIsPlaying]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
@@ -862,6 +907,41 @@ const Media = () => {
   }, [fetchMediaStatus]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  // Periodically sync local progress
+  useEffect(() => {
+    if (localIsPlaying && localAudioRef.current) {
+      let counter = 0;
+      localProgressTimerRef.current = window.setInterval(() => {
+        if (localAudioRef.current && !localAudioRef.current.paused) {
+          const pos = localAudioRef.current.currentTime;
+          setLocalCurrentTime(pos);
+          
+          counter++;
+          if (counter >= 5 && localTrack) {
+            counter = 0;
+            api.syncMediaState({
+              entity_id: 'local',
+              state: 'playing',
+              media_type: localTrack.type,
+              media_content_id: localTrack.id,
+              media_title: localTrack.title,
+              media_artist: localTrack.subtitle,
+              position: pos,
+              duration: localAudioRef.current.duration || 0,
+              volume_level: localVolume / 100,
+              is_volume_muted: localMuted
+            }).catch(err => console.error('Failed to sync progress:', err));
+          }
+        }
+      }, 1000);
+    }
+    return () => {
+      if (localProgressTimerRef.current) {
+        clearInterval(localProgressTimerRef.current);
+      }
+    };
+  }, [localIsPlaying, localTrack, localVolume, localMuted]);
+
   /* ── device selection ───────────────────────────────────────────── */
 
   const handleDeviceSelect = useCallback((entityId: string) => {
@@ -869,14 +949,30 @@ const Media = () => {
     setSelectedTarget(entityId);
     setLocalMode(false);
     setError(null);
+    api.syncMediaState({
+      entity_id: entityId,
+      state: 'idle'
+    }).catch(err => console.error('Failed to sync device select:', err));
   }, [trigger]);
 
   const handleLocalToggle = useCallback((mode: boolean) => {
     setLocalMode(mode);
     if (mode) {
       setSelectedTarget('');
+      api.syncMediaState({
+        entity_id: 'local',
+        state: localTrack ? (localIsPlaying ? 'playing' : 'paused') : 'idle',
+        media_type: localTrack?.type,
+        media_content_id: localTrack?.id,
+        media_title: localTrack?.title,
+        media_artist: localTrack?.subtitle,
+        position: localCurrentTime,
+        duration: localDuration,
+        volume_level: localVolume / 100,
+        is_volume_muted: localMuted
+      }).catch(err => console.error('Failed to sync local toggle:', err));
     }
-  }, []);
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted]);
 
   /* ── transport helpers ────────────────────────────────────────── */
 
@@ -951,8 +1047,6 @@ const Media = () => {
     setLocalIsLoaded(false);
     setLocalError(null);
 
-    // HTMLAudioElement cannot set Authorization headers, so we embed the token
-    // as a query param. The gateway accepts ?token= as a fallback for stream endpoints.
     const apiToken = storageGetSync('jarvis_api_key') ?? '';
     const tokenSuffix = apiToken ? `${apiToken.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiToken)}` : '';
 
@@ -963,10 +1057,28 @@ const Media = () => {
       url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
     }
     setLocalStreamUrl(url);
-  }, [trigger]);
+
+    try {
+      await api.syncMediaState({
+        entity_id: 'local',
+        state: 'playing',
+        media_type: type,
+        media_content_id: idClean,
+        media_title: title,
+        media_artist: subtitle,
+        position: 0.0,
+        duration: 0.0,
+        volume_level: localVolume / 100,
+        is_volume_muted: localMuted
+      });
+    } catch (err) {
+      console.error('Failed to sync local play:', err);
+    }
+  }, [trigger, localVolume, localMuted]);
 
   const toggleLocalPlay = useCallback(() => {
     if (!localTrack) return;
+    const nextPlaying = !localIsPlaying;
     if (localIsPlaying) {
       setLocalIsPlaying(false);
       localAudioRef.current?.pause();
@@ -978,40 +1090,137 @@ const Media = () => {
         });
       }
     }
-  }, [localTrack, localIsPlaying]);
+    api.syncMediaState({
+      entity_id: 'local',
+      state: nextPlaying ? 'playing' : 'paused',
+      media_type: localTrack.type,
+      media_content_id: localTrack.id,
+      media_title: localTrack.title,
+      media_artist: localTrack.subtitle,
+      position: localAudioRef.current?.currentTime || 0,
+      duration: localDuration,
+      volume_level: localVolume / 100,
+      is_volume_muted: localMuted
+    }).catch(err => console.error('Failed to sync toggleLocalPlay:', err));
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted]);
 
   const handleLocalVolume = useCallback((v: number) => {
     setLocalVolume(v);
     setLocalMuted(false);
-  }, []);
+    if (localTrack) {
+      api.syncMediaState({
+        entity_id: 'local',
+        state: localIsPlaying ? 'playing' : 'paused',
+        media_type: localTrack.type,
+        media_content_id: localTrack.id,
+        media_title: localTrack.title,
+        media_artist: localTrack.subtitle,
+        position: localCurrentTime,
+        duration: localDuration,
+        volume_level: v / 100,
+        is_volume_muted: false
+      }).catch(err => console.error('Failed to sync volume:', err));
+    }
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration]);
 
   const toggleLocalMute = useCallback(() => {
-    setLocalMuted(prev => !prev);
-  }, []);
+    const nextMuted = !localMuted;
+    setLocalMuted(nextMuted);
+    if (localTrack) {
+      api.syncMediaState({
+        entity_id: 'local',
+        state: localIsPlaying ? 'playing' : 'paused',
+        media_type: localTrack.type,
+        media_content_id: localTrack.id,
+        media_title: localTrack.title,
+        media_artist: localTrack.subtitle,
+        position: localCurrentTime,
+        duration: localDuration,
+        volume_level: localVolume / 100,
+        is_volume_muted: nextMuted
+      }).catch(err => console.error('Failed to sync mute:', err));
+    }
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted]);
 
   const handleLocalSeek = useCallback((time: number) => {
     if (localAudioRef.current) {
       localAudioRef.current.currentTime = time;
       setLocalCurrentTime(time);
+      if (localTrack) {
+        api.syncMediaState({
+          entity_id: 'local',
+          state: localIsPlaying ? 'playing' : 'paused',
+          media_type: localTrack.type,
+          media_content_id: localTrack.id,
+          media_title: localTrack.title,
+          media_artist: localTrack.subtitle,
+          position: time,
+          duration: localDuration,
+          volume_level: localVolume / 100,
+          is_volume_muted: localMuted
+        }).catch(err => console.error('Failed to sync seek:', err));
+      }
     }
-  }, []);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted]);
 
   const skipLocalBack = useCallback(() => {
     if (localAudioRef.current && localAudioRef.current.currentTime > 5) {
       localAudioRef.current.currentTime = 0;
       setLocalCurrentTime(0);
+      if (localTrack) {
+        api.syncMediaState({
+          entity_id: 'local',
+          state: localIsPlaying ? 'playing' : 'paused',
+          media_type: localTrack.type,
+          media_content_id: localTrack.id,
+          media_title: localTrack.title,
+          media_artist: localTrack.subtitle,
+          position: 0,
+          duration: localDuration,
+          volume_level: localVolume / 100,
+          is_volume_muted: localMuted
+        }).catch(err => console.error('Failed to sync skip back:', err));
+      }
     }
-  }, []);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted]);
 
   const skipLocalForward = useCallback(() => {
     if (localAudioRef.current && localDuration > 0) {
       const newTime = Math.min(localAudioRef.current.currentTime + 30, localDuration);
       localAudioRef.current.currentTime = newTime;
       setLocalCurrentTime(newTime);
+      if (localTrack) {
+        api.syncMediaState({
+          entity_id: 'local',
+          state: localIsPlaying ? 'playing' : 'paused',
+          media_type: localTrack.type,
+          media_content_id: localTrack.id,
+          media_title: localTrack.title,
+          media_artist: localTrack.subtitle,
+          position: newTime,
+          duration: localDuration,
+          volume_level: localVolume / 100,
+          is_volume_muted: localMuted
+        }).catch(err => console.error('Failed to sync skip forward:', err));
+      }
     }
-  }, [localDuration]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted]);
 
   const handleStopPlayback = useCallback(() => {
+    if (localTrack) {
+      api.syncMediaState({
+        entity_id: 'local',
+        state: 'idle',
+        media_type: localTrack.type,
+        media_content_id: localTrack.id,
+        media_title: localTrack.title,
+        media_artist: localTrack.subtitle,
+        position: 0,
+        duration: localDuration,
+        volume_level: localVolume / 100,
+        is_volume_muted: localMuted
+      }).catch(err => console.error('Failed to sync stop:', err));
+    }
     setLocalTrack(null);
     setLocalIsPlaying(false);
     setLocalIsLoaded(false);
@@ -1022,7 +1231,7 @@ const Media = () => {
       localAudioRef.current.pause();
       localAudioRef.current.src = '';
     }
-  }, []);
+  }, [localTrack, localDuration, localVolume, localMuted]);
 
   const handleVolume = useCallback(async (v: number) => {
     if (!selectedTarget) return;

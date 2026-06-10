@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["EXECUTION_EXTERNAL_HOST"] = "localhost"
+os.environ["DEVICE_REGISTRY_PATH"] = ":memory:"
 from services.execution.main import app
 
 client = TestClient(app)
