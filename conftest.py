@@ -11,7 +11,7 @@ _root = os.path.dirname(os.path.abspath(__file__))
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
+os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["FERNET_KEY"] = _test_fernet_key
 os.environ.setdefault("INIT_DB", "false")
 os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
