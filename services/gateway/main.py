@@ -4908,255 +4908,297 @@ async def proxy_audiobookshelf(request: Request):
 @app.get("/api/media/stream/audiobookshelf/{book_id}")
 async def stream_audiobookshelf(book_id: str, request: Request):
     """Stream audiobook audio directly from ABS to mobile device."""
+    log.info(f"[stream/abs] Received stream request for book_id={book_id}")
     try:
-        creds = await _resolve_identity_from_request(request)
-    except HTTPException as e:
-        log.error(f"[stream/abs] identity resolution failed: {e.detail}")
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    abs_url = creds.get("audiobookshelf_url") or os.getenv("AUDIOBOOKSHELF_URL", "")
-    abs_key = creds.get("audiobookshelf_api_key") or os.getenv("ABS_API_KEY")
-
-    if not abs_url or not abs_key:
-        raise HTTPException(status_code=400, detail="Audiobookshelf not configured")
-
-    # Try API key first, then login with username/password
-    if not abs_key and creds.get("audiobookshelf_user") and creds.get("audiobookshelf_pass"):
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                login_resp = await client.post(
-                    f"{abs_url.rstrip('/')}/login",
-                    json={"username": creds["audiobookshelf_user"], "password": creds["audiobookshelf_pass"]}
-                )
-                if login_resp.status_code == 200:
-                    abs_key = login_resp.json().get("user", {}).get("token")
+            creds = await _resolve_identity_from_request(request)
+            log.info(f"[stream/abs] Identity resolved successfully for user: {creds.get('user')}")
+        except HTTPException as e:
+            log.error(f"[stream/abs] Identity resolution failed: {e.detail}")
+            raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
         except Exception as e:
-            log.error(f"[stream/abs] Login failed: {e}")
+            log.error(f"[stream/abs] Identity resolution crashed: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Internal server error resolving identity")
 
-    if not abs_key:
-        raise HTTPException(status_code=400, detail="Audiobookshelf credentials not configured")
+        abs_url = creds.get("audiobookshelf_url") or ""
+        abs_key = creds.get("audiobookshelf_api_key") or ""
+        abs_user = creds.get("audiobookshelf_user") or ""
+        abs_pass = creds.get("audiobookshelf_pass") or ""
 
-    stream_url = f"{abs_url.rstrip('/')}/api/items/{book_id}/stream?format=mp4&token={abs_key}"
-    log.info(f"[stream/abs] Streaming book {book_id} from ABS: {abs_url}")
+        log.info(f"[stream/abs] Resolved credentials: url={abs_url}, has_key={bool(abs_key)}, user={abs_user}, has_pass={bool(abs_pass)}")
 
-    async def stream_generator(cli, r):
+        if not abs_url:
+            log.error("[stream/abs] Audiobookshelf URL not configured in resolved credentials")
+            raise HTTPException(status_code=400, detail="Audiobookshelf URL not configured")
+
+        # Try API key first, then login with username/password
+        if not abs_key and abs_user and abs_pass:
+            log.info(f"[stream/abs] No API key present. Attempting username/password login for user '{abs_user}' to {abs_url}")
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    login_resp = await client.post(
+                        f"{abs_url.rstrip('/')}/login",
+                        json={"username": abs_user, "password": abs_pass}
+                    )
+                    log.info(f"[stream/abs] Login response code: {login_resp.status_code}")
+                    if login_resp.status_code == 200:
+                        abs_key = login_resp.json().get("user", {}).get("token")
+                        log.info("[stream/abs] Successfully obtained token from ABS login")
+                    else:
+                        log.error(f"[stream/abs] Login failed with status {login_resp.status_code}: {login_resp.text}")
+            except Exception as e:
+                log.error(f"[stream/abs] Exception during login attempt: {e}", exc_info=True)
+
+        if not abs_key:
+            log.error("[stream/abs] Audiobookshelf credentials/token not configured or resolved")
+            raise HTTPException(status_code=400, detail="Audiobookshelf credentials not configured")
+
+        stream_url = f"{abs_url.rstrip('/')}/api/items/{book_id}/stream?format=mp4&token={abs_key}"
+        log.info(f"[stream/abs] Constructed ABS stream URL for book {book_id}")
+
+        async def stream_generator(cli, r):
+            try:
+                bytes_sent = 0
+                async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                    yield chunk
+                    bytes_sent += len(chunk)
+                log.info(f"[stream/abs/generator] Finished streaming {bytes_sent} bytes for book {book_id}")
+            except Exception as e:
+                log.error(f"[stream/abs/generator] Error streaming chunks for book {book_id}: {e}", exc_info=True)
+                raise
+            finally:
+                await r.aclose()
+                await cli.aclose()
+
+        range_header = request.headers.get("range")
+        log.info(f"[stream/abs] Client requested range: {range_header} for book {book_id}")
+        client = httpx.AsyncClient(timeout=30.0)
         try:
-            async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
-                yield chunk
+            req_headers = {}
+            if range_header:
+                req_headers["Range"] = range_header
+            
+            resp = await client.send(
+                client.build_request("GET", stream_url, headers=req_headers),
+                stream=True
+            )
+            log.info(f"[stream/abs] ABS stream response status: {resp.status_code}, headers: {dict(resp.headers)}")
+            
+            response_headers = {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "no-cache",
+            }
+            for key in ("Content-Range", "Content-Length", "Content-Type"):
+                val = resp.headers.get(key)
+                if val:
+                    response_headers[key] = val
+                    
+            status_code = resp.status_code
+            
+            return StreamingResponse(
+                stream_generator(client, resp),
+                status_code=status_code,
+                media_type=response_headers.get("Content-Type", "audio/mpeg"),
+                headers=response_headers
+            )
         except Exception as e:
-            log.error(f"[stream/abs/generator] Error streaming chunks: {e}")
-            raise
-        finally:
-            await r.aclose()
-            await cli.aclose()
-
-    range_header = request.headers.get("range")
-    log.info(f"[stream/abs] Client requested range: {range_header} for book {book_id}")
-    client = httpx.AsyncClient(timeout=30.0)
-    try:
-        req_headers = {}
-        if range_header:
-            req_headers["Range"] = range_header
-        
-        resp = await client.send(
-            client.build_request("GET", stream_url, headers=req_headers),
-            stream=True
-        )
-        log.info(f"[stream/abs] ABS stream response status: {resp.status_code}, headers: {dict(resp.headers)}")
-        
-        response_headers = {
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "no-cache",
-        }
-        for key in ("Content-Range", "Content-Length", "Content-Type"):
-            val = resp.headers.get(key)
-            if val:
-                response_headers[key] = val
-                
-        status_code = resp.status_code
-        
-        return StreamingResponse(
-            stream_generator(client, resp),
-            status_code=status_code,
-            media_type=response_headers.get("Content-Type", "audio/mpeg"),
-            headers=response_headers
-        )
+            log.error(f"[stream/abs] Stream initiation failed: {e}", exc_info=True)
+            await client.aclose()
+            raise HTTPException(status_code=502, detail="Failed to connect to media source")
+    except HTTPException as he:
+        raise he
     except Exception as e:
-        log.error(f"[stream/abs] Stream initiation failed: {e}")
-        await client.aclose()
-        raise HTTPException(status_code=502, detail="Failed to connect to media source")
+        log.error(f"[stream/abs] Unhandled exception in stream_audiobookshelf: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal stream error: {str(e)}")
 
 
 @app.get("/api/media/stream/music-assistant")
 async def stream_music_assistant(uri: str, request: Request):
     """Stream music directly from MA to mobile device by resolving the MA URI to a playable URL."""
+    log.info(f"[stream/ma] Received stream request for uri='{uri}'")
     try:
-        creds = await _resolve_identity_from_request(request)
-    except HTTPException as e:
-        log.error(f"[stream/ma] identity resolution failed: {e.detail}")
-        raise HTTPException(status_code=401, detail="Authentication required")
+        try:
+            creds = await _resolve_identity_from_request(request)
+            log.info(f"[stream/ma] Identity resolved successfully for user: {creds.get('user')}")
+        except HTTPException as e:
+            log.error(f"[stream/ma] Identity resolution failed: {e.detail}")
+            raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
+        except Exception as e:
+            log.error(f"[stream/ma] Identity resolution crashed: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Internal server error resolving identity")
 
-    mass_url = creds.get("mass_url") or os.getenv("MA_URL") or os.getenv("MUSIC_ASSISTANT_URL") or os.getenv("MASS_URL")
-    mass_token = creds.get("mass_token") or os.getenv("MA_TOKEN") or os.getenv("MUSIC_ASSISTANT_TOKEN") or os.getenv("MASS_TOKEN")
+        mass_url = creds.get("mass_url") or ""
+        mass_token = creds.get("mass_token") or ""
 
-    if not mass_url or not mass_token:
-        raise HTTPException(status_code=400, detail="Music Assistant not configured")
+        log.info(f"[stream/ma] Resolved credentials: url={mass_url}, has_token={bool(mass_token)}")
 
-    # MA URIs are typically music_assistant://playlist/xxx or music_assistant://track/xxx
-    # We need to use the MA REST API to get the actual playable URL
-    # First, try to extract the item ID from the URI
-    uri_parts = uri.split("/")
-    item_type = None
-    item_id = None
-    for i, part in enumerate(uri_parts):
-        if part == "playlist" or part == "track" or part == "album" or part == "artist":
-            item_type = part
-            if i + 1 < len(uri_parts):
-                item_id = uri_parts[i + 1]
-            break
+        if not mass_url:
+            log.error("[stream/ma] Music Assistant URL not configured in resolved credentials")
+            raise HTTPException(status_code=400, detail="Music Assistant not configured")
 
-    if not item_id:
-        raise HTTPException(status_code=400, detail=f"Could not parse MA URI: {uri}")
+        uri_parts = uri.split("/")
+        item_type = None
+        item_id = None
+        for i, part in enumerate(uri_parts):
+            if part in ("playlist", "track", "album", "artist"):
+                item_type = part
+                if i + 1 < len(uri_parts):
+                    item_id = uri_parts[i + 1]
+                break
 
-    # Use MA REST API to get the playable media URL
-    # MA REST API uses standard REST endpoints (GET /api/{type}/{id}), not MQTT commands
-    base = mass_url.rstrip("/")
-    if not base.endswith("/api"):
-        from urllib.parse import urlparse
-        parsed = urlparse(base)
-        base = f"{parsed.scheme}://{parsed.hostname}:8095/api"
+        if not item_id or not item_type:
+            log.error(f"[stream/ma] Could not parse MA URI: '{uri}'")
+            raise HTTPException(status_code=400, detail=f"Could not parse MA URI: {uri}")
 
-    api_url = f"{base}/{item_type}s/{item_id}"
+        log.info(f"[stream/ma] Parsed item_type='{item_type}', item_id='{item_id}'")
 
-    try:
+        base = mass_url.rstrip("/")
+        if not base.endswith("/api"):
+            from urllib.parse import urlparse
+            parsed = urlparse(base)
+            base = f"{parsed.scheme}://{parsed.hostname}:8095/api"
+
+        api_url = f"{base}/{item_type}s/{item_id}"
+        log.info(f"[stream/ma] Querying MA REST API: {api_url}")
+
+        playable_url = None
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 api_url,
-                headers={
-                    "Authorization": f"Bearer {mass_token}",
-                }
+                headers={"Authorization": f"Bearer {mass_token}"} if mass_token else {}
             )
-            if resp.status_code != 200:
-                log.warning(f"[stream/ma] MA API returned {resp.status_code}: {resp.text[:200]}")
-                raise HTTPException(status_code=502, detail=f"Music Assistant API error: {resp.status_code}")
+            log.info(f"[stream/ma] MA API response status: {resp.status_code}")
+            if resp.status_code == 200:
+                data = resp.json()
+                for key in ("url", "stream_url", "media_url"):
+                    if data.get(key):
+                        playable_url = data[key]
+                        log.info(f"[stream/ma] Found playable_url directly: {playable_url}")
+                        break
 
-            data = resp.json()
-            # Try to find a playable URL in the response
-            playable_url = None
+                if not playable_url and item_type == "playlist":
+                    tracks_path = f"{base}/{item_type}s/{item_id}/tracks"
+                    log.info(f"[stream/ma] Playlist lacks URL. Fetching tracks: {tracks_path}")
+                    tracks_resp = await client.get(
+                        tracks_path,
+                        headers={"Authorization": f"Bearer {mass_token}"} if mass_token else {}
+                    )
+                    if tracks_resp.status_code == 200:
+                        tracks_data = tracks_resp.json()
+                        tracks = tracks_data.get("items", tracks_data.get("tracks", []))
+                        if tracks:
+                            first_track_id = tracks[0].get("track_id") or tracks[0].get("id")
+                            first_track_url = f"{base}/tracks/{first_track_id}"
+                            log.info(f"[stream/ma] Fetching first track of playlist: {first_track_url}")
+                            track_resp = await client.get(
+                                first_track_url,
+                                headers={"Authorization": f"Bearer {mass_token}"} if mass_token else {}
+                            )
+                            if track_resp.status_code == 200:
+                                track_data = track_resp.json()
+                                playable_url = track_data.get("url") or track_data.get("stream_url")
+                                log.info(f"[stream/ma] Found playlist first track URL: {playable_url}")
+            else:
+                log.warning(f"[stream/ma] MA API returned non-200 status {resp.status_code}: {resp.text[:200]}")
 
-            # Check common locations for stream URLs
-            for key in ("url", "stream_url", "media_url"):
-                if data.get(key):
-                    playable_url = data[key]
-                    break
-
-            # If it's a playlist, get the first track
-            if not playable_url and item_type == "playlist":
-                tracks_path = f"{base}/{item_type}s/{item_id}/tracks"
-                tracks_resp = await client.get(tracks_path, headers={"Authorization": f"Bearer {mass_token}"})
-                if tracks_resp.status_code == 200:
-                    tracks_data = tracks_resp.json()
-                    tracks = tracks_data.get("items", tracks_data.get("tracks", []))
-                    if tracks:
-                        first_track_id = tracks[0].get("track_id") or tracks[0].get("id")
-                        track_resp = await client.get(
-                            f"{base}/tracks/{first_track_id}",
-                            headers={"Authorization": f"Bearer {mass_token}"}
-                        )
-                        if track_resp.status_code == 200:
-                            track_data = track_resp.json()
-                            playable_url = track_data.get("url") or track_data.get("stream_url")
-
-            if not playable_url:
-                # Fallback to execution service to resolve stream via YouTube/yt-dlp
-                track_name = data.get("name")
-                artists = data.get("artists", [])
-                artist_name = ""
-                if isinstance(artists, list) and artists:
-                    artist_name = ", ".join([a.get("name", "") for a in artists if a.get("name")])
-                elif isinstance(artists, dict):
-                    artist_name = artists.get("name", "")
-                
-                query = f"{artist_name} - {track_name}" if artist_name else track_name
-                log.info(f"[stream/ma] Playable URL not found in MA response. Requesting execution service to resolve: {query}")
-                
-                try:
-                    async with httpx.AsyncClient(timeout=60.0) as client_exec:
-                        exec_resp = await client_exec.post(
-                            f"{EXECUTION_SVC}/execute/media/resolve_stream",
-                            json={
-                                "user_context": {
-                                    "user": creds.get("username", "default"),
-                                    "is_admin": creds.get("is_admin", False)
-                                },
-                                "query": query
-                            },
-                            headers={"X-Internal-Secret": INTERNAL_SECRET}
-                        )
-                        if exec_resp.status_code == 200:
-                            exec_data = exec_resp.json()
-                            if exec_data.get("status") == "SUCCESS" and exec_data.get("detail"):
-                                playable_url = exec_data["detail"].get("stream_url")
-                except Exception as exec_err:
-                    log.warning(f"[stream/ma] Failed to call execution service to resolve stream: {exec_err}")
-
-            if not playable_url:
-                raise HTTPException(status_code=404, detail=f"No playable URL found for {item_type}: {item_id}")
-
-            # Ensure absolute URL
-            if playable_url.startswith("//"):
-                playable_url = f"https:{playable_url}"
-            elif not playable_url.startswith("http"):
-                playable_url = f"{base.replace('/api', '')}/{playable_url.lstrip('/')}"
-
-            log.info(f"[stream/ma] Streaming {item_type} {item_id}: {playable_url}")
-
-            async def stream_generator(cli, r):
-                try:
-                    async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
-                        yield chunk
-                except Exception as e:
-                    log.error(f"[stream/ma/generator] Error streaming chunks: {e}")
-                    raise
-                finally:
-                    await r.aclose()
-                    await cli.aclose()
-
-            range_header = request.headers.get("range")
-            log.info(f"[stream/ma] Client requested range: {range_header} for MA {item_type} {item_id}")
-            client = httpx.AsyncClient(timeout=30.0)
+        if not playable_url:
+            # Fallback to execution service to resolve stream via YouTube/yt-dlp
+            track_name = data.get("name") if 'data' in locals() else item_id
+            artists = data.get("artists", []) if 'data' in locals() else []
+            artist_name = ""
+            if isinstance(artists, list) and artists:
+                artist_name = ", ".join([a.get("name", "") for a in artists if a.get("name")])
+            elif isinstance(artists, dict):
+                artist_name = artists.get("name", "")
+            
+            query = f"{artist_name} - {track_name}" if artist_name else track_name
+            log.info(f"[stream/ma] Playable URL not found in MA response. Querying execution service to resolve: {query}")
+            
             try:
-                req_headers = {}
-                if range_header:
-                    req_headers["Range"] = range_header
-                
-                resp = await client.send(
-                    client.build_request("GET", playable_url, headers=req_headers),
-                    stream=True
-                )
-                log.info(f"[stream/ma] MA stream response status: {resp.status_code}, headers: {dict(resp.headers)}")
-                
-                response_headers = {
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "no-cache",
-                }
-                for key in ("Content-Range", "Content-Length", "Content-Type"):
-                    val = resp.headers.get(key)
-                    if val:
-                        response_headers[key] = val
-                        
-                status_code = resp.status_code
-                
-                return StreamingResponse(
-                    stream_generator(client, resp),
-                    status_code=status_code,
-                    media_type=response_headers.get("Content-Type", "audio/mpeg"),
-                    headers=response_headers
-                )
+                async with httpx.AsyncClient(timeout=60.0) as client_exec:
+                    exec_resp = await client_exec.post(
+                        f"{EXECUTION_SVC}/execute/media/resolve_stream",
+                        json={
+                            "user_context": {
+                                "user": creds.get("username", "default"),
+                                "is_admin": creds.get("is_admin", False)
+                            },
+                            "query": query
+                        },
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    )
+                    log.info(f"[stream/ma] Execution service resolve_stream response: {exec_resp.status_code}")
+                    if exec_resp.status_code == 200:
+                        exec_data = exec_resp.json()
+                        if exec_data.get("status") == "SUCCESS" and exec_data.get("detail"):
+                            playable_url = exec_data["detail"].get("stream_url")
+                            log.info(f"[stream/ma] Successfully resolved stream from execution service: {playable_url}")
+            except Exception as exec_err:
+                log.warning(f"[stream/ma] Failed to call execution service to resolve stream: {exec_err}", exc_info=True)
+
+        if not playable_url:
+            log.error(f"[stream/ma] No playable URL found or resolved for {item_type}: {item_id}")
+            raise HTTPException(status_code=404, detail=f"No playable URL found for {item_type}: {item_id}")
+
+        # Ensure absolute URL
+        if playable_url.startswith("//"):
+            playable_url = f"https:{playable_url}"
+        elif not playable_url.startswith("http"):
+            playable_url = f"{base.replace('/api', '')}/{playable_url.lstrip('/')}"
+
+        log.info(f"[stream/ma] Streaming {item_type} {item_id} from final URL: {playable_url}")
+
+        async def stream_generator(cli, r):
+            try:
+                bytes_sent = 0
+                async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                    yield chunk
+                    bytes_sent += len(chunk)
+                log.info(f"[stream/ma/generator] Finished streaming {bytes_sent} bytes for MA {item_type} {item_id}")
             except Exception as e:
-                log.error(f"[stream/ma] Stream initiation failed: {e}")
-                await client.aclose()
-                raise HTTPException(status_code=502, detail="Failed to connect to media source")
-    except httpx.RequestError as e:
-        log.error(f"[stream/ma] Stream error: {e}")
+                log.error(f"[stream/ma/generator] Error streaming chunks: {e}", exc_info=True)
+                raise
+            finally:
+                await r.aclose()
+                await cli.aclose()
+
+        range_header = request.headers.get("range")
+        log.info(f"[stream/ma] Client requested range: {range_header} for MA {item_type} {item_id}")
+        client = httpx.AsyncClient(timeout=30.0)
+        try:
+            req_headers = {}
+            if range_header:
+                req_headers["Range"] = range_header
+            
+            resp = await client.send(
+                client.build_request("GET", playable_url, headers=req_headers),
+                stream=True
+            )
+            log.info(f"[stream/ma] MA stream response status: {resp.status_code}, headers: {dict(resp.headers)}")
+            
+            response_headers = {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "no-cache",
+            }
+            for key in ("Content-Range", "Content-Length", "Content-Type"):
+                val = resp.headers.get(key)
+                if val:
+                    response_headers[key] = val
+                    
+            status_code = resp.status_code
+            
+            return StreamingResponse(
+                stream_generator(client, resp),
+                status_code=status_code,
+                media_type=response_headers.get("Content-Type", "audio/mpeg"),
+                headers=response_headers
+            )
+        except Exception as e:
+            log.error(f"[stream/ma] Stream initiation failed: {e}", exc_info=True)
+            await client.aclose()
+            raise HTTPException(status_code=502, detail="Failed to connect to media source")
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        log.error(f"[stream/ma] Unhandled exception in stream_music_assistant: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=f"Failed to connect to Music Assistant: {e}")

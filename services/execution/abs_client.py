@@ -4,7 +4,6 @@ Audiobookshelf (ABS) REST API client.
 Handles authentication, library search, playback progress, and streaming.
 """
 import logging
-import os
 import httpx
 from typing import Optional, Any
 
@@ -14,33 +13,23 @@ _TIMEOUT = httpx.Timeout(8.0, connect=3.0)
 
 
 def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    """Extract ABS URL and auth from user context or environment fallback.
+    """Extract ABS URL and auth from user context.
     Returns (abs_url, abs_api_key, username, password).
     User context comes from ResolvedCredentials with fields:
       audiobookshelf_url, audiobookshelf_user, audiobookshelf_pass
     """
-    abs_url = (
-        getattr(user_context, "audiobookshelf_url", None)
-        or getattr(user_context, "abs_url", None)
-        or os.getenv("AUDIOBOOKSHELF_URL")
-        or os.getenv("ABS_URL")
-    )
-    abs_key = (
-        getattr(user_context, "abs_api_key", None)
-        or os.getenv("ABS_API_KEY")
-    )
-    username = (
-        getattr(user_context, "audiobookshelf_user", None)
-        or getattr(user_context, "abs_username", None)
-        or os.getenv("AUDIOBOOKSHELF_USER")
-        or os.getenv("ABS_USER")
-    )
-    password = (
-        getattr(user_context, "audiobookshelf_pass", None)
-        or getattr(user_context, "abs_password", None)
-        or os.getenv("AUDIOBOOKSHELF_PASS")
-        or os.getenv("ABS_PASS")
-    )
+    def get_val(obj, key, alt_key=None):
+        if not obj:
+            return None
+        if isinstance(obj, dict):
+            return obj.get(key) or (obj.get(alt_key) if alt_key else None)
+        return getattr(obj, key, None) or (getattr(obj, alt_key, None) if alt_key else None)
+
+    abs_url = get_val(user_context, "audiobookshelf_url", "abs_url")
+    abs_key = get_val(user_context, "abs_api_key", "audiobookshelf_api_key")
+    username = get_val(user_context, "audiobookshelf_user", "abs_username")
+    password = get_val(user_context, "audiobookshelf_pass", "abs_password")
+    
     return abs_url, abs_key, username, password
 
 
