@@ -4939,20 +4939,47 @@ async def stream_audiobookshelf(book_id: str, request: Request):
     stream_url = f"{abs_url.rstrip('/')}/api/items/{book_id}/stream?format=mp4&token={abs_key}"
     log.info(f"[stream/abs] Streaming book {book_id} from ABS: {abs_url}")
 
-    async def stream_generator():
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            async with client.stream("GET", stream_url) as resp:
-                async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):  # pyright: ignore[reportGeneralTypeIssues]
-                    yield chunk
+    async def stream_generator(cli, r):
+        try:
+            async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                yield chunk
+        finally:
+            await r.aclose()
+            await cli.aclose()
 
-    return StreamingResponse(
-        stream_generator(),
-        media_type="audio/mpeg",
-        headers={
+    range_header = request.headers.get("range")
+    client = httpx.AsyncClient(timeout=30.0)
+    try:
+        req_headers = {}
+        if range_header:
+            req_headers["Range"] = range_header
+        
+        resp = await client.send(
+            client.build_request("GET", stream_url, headers=req_headers),
+            stream=True
+        )
+        
+        response_headers = {
             "Accept-Ranges": "bytes",
             "Cache-Control": "no-cache",
         }
-    )
+        for key in ("Content-Range", "Content-Length", "Content-Type"):
+            val = resp.headers.get(key)
+            if val:
+                response_headers[key] = val
+                
+        status_code = resp.status_code
+        
+        return StreamingResponse(
+            stream_generator(client, resp),
+            status_code=status_code,
+            media_type=response_headers.get("Content-Type", "audio/mpeg"),
+            headers=response_headers
+        )
+    except Exception as e:
+        log.error(f"[stream/abs] Stream initiation failed: {e}")
+        await client.aclose()
+        raise HTTPException(status_code=502, detail="Failed to connect to media source")
 
 
 @app.get("/api/media/stream/music-assistant")
@@ -5079,20 +5106,47 @@ async def stream_music_assistant(uri: str, request: Request):
 
             log.info(f"[stream/ma] Streaming {item_type} {item_id}: {playable_url}")
 
-            async def stream_generator():
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    async with client.stream("GET", playable_url) as resp:
-                        async for chunk in resp.aiter_bytes(chunk_size=64 * 1024):  # pyright: ignore[reportGeneralTypeIssues]
-                            yield chunk
+            async def stream_generator(cli, r):
+                try:
+                    async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                        yield chunk
+                finally:
+                    await r.aclose()
+                    await cli.aclose()
 
-            return StreamingResponse(
-                stream_generator(),
-                media_type="audio/mpeg",
-                headers={
+            range_header = request.headers.get("range")
+            client = httpx.AsyncClient(timeout=30.0)
+            try:
+                req_headers = {}
+                if range_header:
+                    req_headers["Range"] = range_header
+                
+                resp = await client.send(
+                    client.build_request("GET", playable_url, headers=req_headers),
+                    stream=True
+                )
+                
+                response_headers = {
                     "Accept-Ranges": "bytes",
                     "Cache-Control": "no-cache",
                 }
-            )
+                for key in ("Content-Range", "Content-Length", "Content-Type"):
+                    val = resp.headers.get(key)
+                    if val:
+                        response_headers[key] = val
+                        
+                status_code = resp.status_code
+                
+                return StreamingResponse(
+                    stream_generator(client, resp),
+                    status_code=status_code,
+                    media_type=response_headers.get("Content-Type", "audio/mpeg"),
+                    headers=response_headers
+                )
+            except Exception as e:
+                log.error(f"[stream/ma] Stream initiation failed: {e}")
+                await client.aclose()
+                raise HTTPException(status_code=502, detail="Failed to connect to media source")
     except httpx.RequestError as e:
         log.error(f"[stream/ma] Stream error: {e}")
         raise HTTPException(status_code=502, detail=f"Failed to connect to Music Assistant: {e}")
