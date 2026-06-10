@@ -4943,6 +4943,9 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         try:
             async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
                 yield chunk
+        except Exception as e:
+            log.error(f"[stream/abs/generator] Error streaming chunks: {e}")
+            raise
         finally:
             await r.aclose()
             await cli.aclose()
@@ -5112,6 +5115,9 @@ async def stream_music_assistant(uri: str, request: Request):
                 try:
                     async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
                         yield chunk
+                except Exception as e:
+                    log.error(f"[stream/ma/generator] Error streaming chunks: {e}")
+                    raise
                 finally:
                     await r.aclose()
                     await cli.aclose()
