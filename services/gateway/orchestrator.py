@@ -7,7 +7,10 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional, Callable, Awaitable, Any
 
-from services.gateway.config import INTERNAL_SECRET
+from services.gateway.config import (
+    INTERNAL_SECRET, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC,
+    LOGGING_SVC, WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL,
+)
 from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider, OllamaProvider
 from services.gateway.schemas import ResolvedCredentials
 
@@ -15,13 +18,13 @@ log = logging.getLogger("gateway.orchestrator")
 
 # --- Default service URLs (Docker DNS) — overridable via Identity settings ---
 _DEFAULTS = {
-    "identity_svc_url": "http://identity:8001",
-    "execution_svc_url": "http://execution:8003",
-    "rag_svc_url": "http://rag:8004",
-    "storage_svc_url": "http://storage:8005",
-    "logging_svc_url": "http://logging:8006",
-    "workspace_runtime_svc_url": "http://workspace_runtime:8007",
-    "control_plane_url": "http://control_plane:8008",
+    "identity_svc_url": IDENTITY_SVC,
+    "execution_svc_url": EXECUTION_SVC,
+    "rag_svc_url": RAG_SVC,
+    "storage_svc_url": STORAGE_SVC,
+    "logging_svc_url": LOGGING_SVC,
+    "workspace_runtime_svc_url": WORKSPACE_RUNTIME_SVC,
+    "control_plane_url": CONTROL_PLANE_URL,
     "llm_local_url": "",  # .env is seed-only; runtime resolved from Identity settings
     "redis_url": "redis://redis:6379/0",
     "ollama_timeout": "600",
@@ -53,7 +56,7 @@ async def get_all_settings() -> Dict[str, str]:
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(
-                "http://identity:8001/api/settings",
+                f"{IDENTITY_SVC}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status_code == 200:

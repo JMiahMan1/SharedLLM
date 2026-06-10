@@ -3,10 +3,15 @@ import respx
 import httpx
 import sys
 from unittest.mock import MagicMock
-sys.modules['redis'] = MagicMock()
+_mock_redis_async = MagicMock()
+_mock_redis = MagicMock()
+_mock_redis.asyncio = _mock_redis_async
+sys.modules['redis'] = _mock_redis
+sys.modules['redis.asyncio'] = _mock_redis_async
 
 from fastapi.testclient import TestClient
 from services.gateway.main import app, STORAGE_SVC
+from services.gateway.config import IDENTITY_SVC, RAG_SVC
 import json
 
 client = TestClient(app)
@@ -17,8 +22,19 @@ def auth_headers():
 
 @respx.mock
 def test_chat_storage_routing(auth_headers):
+    # Mock identity settings (needed by get_assistant_model in chat path)
+    respx.get(f"{IDENTITY_SVC}/api/settings").mock(
+        return_value=httpx.Response(200, json=[
+            {"key": "active_llm_provider", "value": "ollama"},
+            {"key": "ollama_assistant_model", "value": "qwen3:8b"},
+            {"key": "ollama_coding_model", "value": "qwen3:8b"},
+            {"key": "llm_local_url", "value": "http://localhost:11434"},
+            {"key": "embedding_model", "value": "BAAI/bge-small-en-v1.5"}
+        ])
+    )
+    
     # Mock identity resolution
-    respx.post("http://127.0.0.1:8001/api/resolve").mock(
+    respx.post(f"{IDENTITY_SVC}/api/resolve").mock(
         return_value=httpx.Response(200, json={
             "user": "testuser",
             "is_admin": True,
@@ -31,7 +47,7 @@ def test_chat_storage_routing(auth_headers):
     )
     
     # Mock the RAG search
-    respx.post("http://127.0.0.1:8004/rag/search").mock(
+    respx.post(f"{RAG_SVC}/rag/search").mock(
         return_value=httpx.Response(200, json={"results": []})
     )
 
@@ -64,7 +80,7 @@ def test_chat_storage_routing(auth_headers):
         except StopIteration:
             return httpx.Response(200, json=responses[-1])
 
-    llm_route = respx.post("http://127.0.0.1:11434/api/chat").mock(side_effect=ollama_side_effect)
+    llm_route = respx.post("http://localhost:11434/api/chat").mock(side_effect=ollama_side_effect)
 
     # Mock Storage Index call
     storage_route = respx.post(f"{STORAGE_SVC}/index/full").mock(

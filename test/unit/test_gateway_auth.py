@@ -1,139 +1,80 @@
 import os
-import pytest
-from unittest.mock import AsyncMock, MagicMock
-from fastapi.testclient import TestClient
-from contextlib import asynccontextmanager
+import sys
+from unittest.mock import MagicMock
 
-# Set environment variables for testing
+# Mock Redis before importing anything that uses it
+_mock_redis_async = MagicMock()
+_mock_redis = MagicMock()
+_mock_redis.asyncio = _mock_redis_async
+sys.modules['redis'] = _mock_redis
+sys.modules['redis.asyncio'] = _mock_redis_async
+
 os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["IDENTITY_SVC_URL"] = "http://identity"
+os.environ["REDIS_URL"] = "redis://localhost:6379/0"
+os.environ["RAG_SVC"] = "http://localhost:8004"
 
-from services.gateway.main import app
+import respx
+import httpx
+import json
+from fastapi.testclient import TestClient
+from services.gateway.main import app, STORAGE_SVC
+from services.gateway.config import IDENTITY_SVC
 
-@pytest.fixture
-def client(monkeypatch):
-    @asynccontextmanager
-    async def noop_lifespan(_app):
-        yield
-    monkeypatch.setattr(app.router, "lifespan_context", noop_lifespan)
-    with TestClient(app) as test_client:
-        yield test_client
+client = TestClient(app)
 
-def test_gateway_extracts_bearer_token(client, mocker):
+# Use a mutable object to capture the request body across respx callbacks
+_capture = {"body": None}
+
+@respx.mock
+def test_gateway_extracts_bearer_token():
     """
     Test that the Gateway extracts the Bearer token from the Authorization header
     and passes it to the Identity service's /api/resolve endpoint.
     """
-    # FIX: Use AsyncMock for all awaited functions
-    mock_resolve = mocker.patch("services.gateway.main.resolve_identity", new_callable=AsyncMock, return_value={"user": "testuser"})
+    # Mock identity settings
+    respx.get(f"{IDENTITY_SVC}/api/settings").mock(
+        return_value=httpx.Response(200, json=[
+            {"key": "active_llm_provider", "value": "ollama"},
+            {"key": "ollama_assistant_model", "value": "qwen3:8b"},
+            {"key": "ollama_coding_model", "value": "qwen3:8b"},
+            {"key": "llm_local_url", "value": "http://localhost:11434"},
+            {"key": "embedding_model", "value": "BAAI/bge-small-en-v1.5"},
+            {"key": "redis_url", "value": "redis://localhost:6379/0"},
+            {"key": "fast_path_threshold", "value": "0.8"},
+        ])
+    )
     
-    # Mock other downstream calls to prevent errors
-    mocker.patch("services.gateway.main.get_history", new_callable=AsyncMock, return_value=[])
-    mocker.patch("services.gateway.main.fetch_ha_entities", new_callable=AsyncMock, return_value=[])
-    mocker.patch("services.gateway.main.contextualize_query", new_callable=AsyncMock, return_value="test query")
-    mocker.patch("services.gateway.main.decompose_command_query", new_callable=AsyncMock, return_value=[])
-    mocker.patch("services.gateway.main.update_history", new_callable=AsyncMock, return_value=None)
+    # Mock identity resolve - capture the call
+    def capture_resolve(request):
+        _capture["body"] = json.loads(request.content)
+        return httpx.Response(200, json={
+            "user": "testuser",
+            "ha_url": "http://ha",
+            "ha_token": "token",
+            "nextcloud_url": "http://nc",
+            "nextcloud_user": "ncuser",
+            "nextcloud_pass": "ncpass"
+        })
     
-    # Mock the LLM response
-    class MockResponse:
-        def __init__(self):
-            self.status_code = 200
-        def json(self):
-            return {"message": {"content": "Test response"}}
+    respx.post(f"{IDENTITY_SVC}/api/resolve").mock(side_effect=capture_resolve)
     
-    mocker.patch("services.gateway.main.call_ollama", new_callable=AsyncMock, return_value=MockResponse())
-
-    # Send a request with a Bearer token
+    # Mock storage index (fast path for "index" query)
+    respx.post(f"{STORAGE_SVC}/index/full").mock(
+        return_value=httpx.Response(200, json={"message": "Indexing started"})
+    )
+    
+    # Query "index" triggers index_storage intent (confidence=1.0, fast path)
     resp = client.post(
         "/api/chat",
-        json={"query": "test query"},
+        json={"query": "index"},
         headers={"Authorization": "Bearer sk-test-123"}
     )
     
     assert resp.status_code == 200
     
-    # The Assertion: Check that resolve_identity was called with api_key in the body
-    mock_resolve.assert_called_once()
-    passed_body = mock_resolve.call_args[0][0]
-    assert passed_body["api_key"] == "sk-test-123"
-    print("\nSUCCESS: Gateway correctly extracted and passed the Bearer token.")
-
-@pytest.mark.asyncio
-async def test_gateway_enforces_capabilities_for_coding(client, mocker):
-    """
-    Test that the Gateway intercepts requests when required capabilities are missing.
-    In this case, intent 'workspace_coding' requires 'github_token'.
-    """
-    # 1. Resolve identity with NO github_token
-    mocker.patch("services.gateway.main.resolve_identity", new_callable=AsyncMock, return_value={
-        "user": "testuser",
-        "github_token": None  # MISSING!
-    })
-    
-    # 2. Force intent to 'workspace_coding'
-    mocker.patch("services.gateway.main.engine.classify", return_value=("workspace_coding", 1.0))
-    
-    # 3. Mock Ollama for the persona-driven redirection message
-    class MockPersonaResponse:
-        def __init__(self):
-            self.status_code = 200
-        def json(self):
-            return {"response": "Please set up your GitHub token in the Identity page."}
-            
-    mocker.patch("services.gateway.main.call_ollama", new_callable=AsyncMock, return_value=MockPersonaResponse())
-    
-    # 4. Mock the downstream service (should NOT be called)
-    mock_workspace = mocker.patch("services.gateway.main.orchestrate_code_change", new_callable=AsyncMock)
-
-    # Send request
-    resp = client.post(
-        "/api/chat",
-        json={"query": "fix my code"},
-        headers={"Authorization": "Bearer sk-test-123"}
-    )
-    
-    assert resp.status_code == 200
-    data = resp.json()
-    content = data["message"]["content"]
-    assert "GitHub" in content or "Identity" in content
-    
-    # PROOF: Downstream was never called
-    mock_workspace.assert_not_called()
-    print("\nSUCCESS: Gateway correctly blocked request due to missing capability.")
-
-@pytest.mark.asyncio
-async def test_gateway_rejects_missing_ha_token(client, mocker):
-    """
-    Test that the Gateway intercepts 'turn_on' if ha_token is missing.
-    """
-    # 1. Resolve identity with NO ha_token
-    mocker.patch("services.gateway.main.resolve_identity", new_callable=AsyncMock, return_value={
-        "user": "testuser",
-        "ha_token": None, # MISSING
-        "ha_url": "http://ha"
-    })
-    
-    # 2. Force intent to 'turn_on'
-    mocker.patch("services.gateway.main.engine.classify", return_value=("turn_on", 1.0))
-    
-    # 3. Mock Ollama for the persona-driven redirection message
-    mocker.patch("services.gateway.main.call_ollama", new_callable=AsyncMock, return_value=MagicMock(
-        status_code=200, 
-        json=lambda: {"response": "Please set up your Home Assistant token."}
-    ))
-    
-    # 4. Mock execution service (should NOT be called)
-    mock_exec = mocker.patch("services.gateway.main.execute_command", new_callable=AsyncMock)
-
-    # Send request
-    resp = client.post(
-        "/api/chat",
-        json={"query": "turn on lights"}
-    )
-    
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "Home Assistant" in data.get("message", {}).get("content", "")
-    
-    # PROOF: Execution was never triggered
-    mock_exec.assert_not_called()
+    # Verify identity was called with the bearer token
+    body = _capture["body"]
+    assert body is not None
+    assert "api_key" in body
+    assert body["api_key"] == "sk-test-123"

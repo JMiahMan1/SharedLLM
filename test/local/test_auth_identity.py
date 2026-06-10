@@ -21,6 +21,8 @@ EXPECTED_NC_USER = os.getenv("NEXTCLOUD_USER")
 def client():
     return httpx.Client(timeout=10.0)
 
+@pytest.mark.local_only
+@pytest.mark.skipif("LIVE_TEST_URL" not in os.environ, reason="Requires running Identity service")
 def test_identity_resolution_from_db(client):
     """
     Test: Verify that the Identity service correctly resolves the system default user
@@ -57,6 +59,8 @@ def test_identity_resolution_from_db(client):
     
     print(f"[Test] Identity and Database Auth verification successful.")
 
+@pytest.mark.local_only
+@pytest.mark.skipif("LIVE_TEST_URL" not in os.environ, reason="Requires running Identity service")
 def test_identity_resolution_by_voice_id(client):
     """
     Test: Verify that a specific username (acting as voice_id) can be resolved.

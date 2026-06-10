@@ -32,6 +32,7 @@ def get_ha_state(entity_id: str):
             return resp.json()
         return None
 
+@pytest.mark.local_only
 def test_light_toggle_verification(client):
     """
     Test: Send a toggle command to the Gateway and verify HA state actually flips.
@@ -65,6 +66,7 @@ def test_light_toggle_verification(client):
     
     assert final_state != initial_state, f"State did not change! Expected != {initial_state}"
 
+@pytest.mark.local_only
 def test_brightness_control_verification(client):
     """
     Test: Set brightness and verify HA attributes match.
@@ -94,6 +96,7 @@ def test_brightness_control_verification(client):
     # Allow small tolerance
     assert abs(brightness - target_val) < 10
 
+@pytest.mark.local_only
 def test_nextcloud_note_creation(client):
     """
     Test: Create a note and verify it actually exists on Nextcloud.
