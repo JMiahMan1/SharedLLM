@@ -1,3 +1,6 @@
+import os
+os.environ["INTERNAL_SECRET"] = "test-secret"
+
 import pytest
 import subprocess
 from fastapi.testclient import TestClient
