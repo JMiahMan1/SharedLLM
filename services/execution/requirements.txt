@@ -29,3 +29,4 @@ openai-whisper>=20231117
 dnspython>=2.6.0
 pytest>=8.0.0
 pytest-asyncio>=0.24.0
+respx>=0.21.0
