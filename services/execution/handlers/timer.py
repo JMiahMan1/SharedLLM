@@ -117,8 +117,22 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 if data:
                     t = json.loads(data)
                     if not t.get('active') and t.get('paused_at'):
+                        try:
+                            paused_at = datetime.fromisoformat(t['paused_at'])
+                            expires_at = datetime.fromisoformat(t['expires_at'])
+                            now = datetime.now()
+                            if paused_at.tzinfo: paused_at = paused_at.replace(tzinfo=None)
+                            if expires_at.tzinfo: expires_at = expires_at.replace(tzinfo=None)
+                            if now.tzinfo: now = now.replace(tzinfo=None)
+                            
+                            elapsed_paused = now - paused_at
+                            new_expires = expires_at + elapsed_paused
+                            t['expires_at'] = new_expires.isoformat()
+                        except Exception as err:
+                            log.error(f"Error recalculating timer expiry on resume: {err}")
+                        
                         t['active'] = True
-                        del t['paused_at']
+                        t.pop('paused_at', None)
                         await r.set(k, json.dumps(t))
                         return ExecutionResult(status="SUCCESS", message=f"Resumed timer '{t['title']}'.", service="timer_resume", detail={"timer_id": t['id']})
             return ExecutionResult(status="FAILURE", message="No paused matching timer found to resume.", service="timer_resume")
