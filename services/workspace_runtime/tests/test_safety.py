@@ -64,7 +64,7 @@ def test_git_revert_logic(client: TestClient, session: Session, tmp_path: Path):
         resp = client.post(
             "/git/revert", 
             json={"workspace_id": ws_id},
-            headers={"X-Internal-Secret": "change-me-in-production"}
+            headers={"X-Internal-Secret": "test-secret"}
         )
         
         assert resp.status_code == 200
@@ -92,7 +92,7 @@ def test_git_revert_failure_state(client: TestClient, session: Session, tmp_path
         resp = client.post(
             "/git/revert", 
             json={"workspace_id": ws_id},
-            headers={"X-Internal-Secret": "change-me-in-production"}
+            headers={"X-Internal-Secret": "test-secret"}
         )
         
         assert resp.status_code == 400

@@ -1,6 +1,9 @@
+import os
 import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, StaticPool
+
+os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 
 # Setup in-memory database for testing
 @pytest.fixture(name="session")
@@ -14,9 +17,8 @@ def session_fixture():
 
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
-    from main import app
-    # Override engine in main with our test engine
-    import main
+    from services.workspace_runtime.main import app
+    import services.workspace_runtime.main as main
     original_engine = main.engine
     main.engine = session.bind
     client = TestClient(app)
@@ -38,26 +40,26 @@ def test_workspace_crud(client: TestClient):
         "scope": "user",
         "capabilities": ["read", "write"]
     }
-    resp = client.post("/workspaces", json=ws_data, headers={"X-Internal-Secret": "change-me-in-production"})
+    resp = client.post("/workspaces", json=ws_data, headers={"X-Internal-Secret": "test-secret"})
     assert resp.status_code == 200
     assert resp.json()["workspace"]["id"] == "test_ws"
 
     # 2. Read (List)
-    resp = client.get("/workspaces", headers={"X-Internal-Secret": "change-me-in-production"})
+    resp = client.get("/workspaces", headers={"X-Internal-Secret": "test-secret"})
     assert resp.status_code == 200
     data = resp.json()
     assert any(ws["id"] == "test_ws" for ws in data["workspaces"])
 
     # 3. Update
-    resp = client.patch("/workspaces/test_ws", json={"display_name": "Updated Name"}, headers={"X-Internal-Secret": "change-me-in-production"})
+    resp = client.patch("/workspaces/test_ws", json={"display_name": "Updated Name"}, headers={"X-Internal-Secret": "test-secret"})
     assert resp.status_code == 200
     assert resp.json()["workspace"]["display_name"] == "Updated Name"
 
     # 4. Delete
-    resp = client.delete("/workspaces/test_ws", headers={"X-Internal-Secret": "change-me-in-production"})
+    resp = client.delete("/workspaces/test_ws", headers={"X-Internal-Secret": "test-secret"})
     assert resp.status_code == 200
     
     # 5. Verify Deleted
-    resp = client.get("/workspaces", headers={"X-Internal-Secret": "change-me-in-production"})
+    resp = client.get("/workspaces", headers={"X-Internal-Secret": "test-secret"})
     data = resp.json()
     assert not any(ws["id"] == "test_ws" for ws in data["workspaces"])
