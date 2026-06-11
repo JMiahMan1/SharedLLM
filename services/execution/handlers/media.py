@@ -150,6 +150,26 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     log.info(f"[media/play] play_music configuration: entity_id={entity_id}, mass_entity={mass_entity}, mass_entry={mass_entry}, is_samsung={is_samsung}")
     
     if req.query:
+        # Check if the query is already a direct Music Assistant URI
+        if "://" in req.query:
+            log.info(f"[media/play] Query looks like a direct URI: {req.query}. Playing directly.")
+            if is_samsung:
+                log.info("[media/play] Samsung TV detected, playing MASS URL via play_media")
+                return await samsung_handler.play_music(
+                    ctx.ha_url, ctx.ha_token, entity_id, req.query,
+                )
+            
+            result = await ha_client.call_service(
+                ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
+                {"media_id": req.query, "enqueue": "play" if req.enqueue == "replace" else req.enqueue},
+            )
+            log.info(f"[media/play] play_media service call response for direct URI: {result}")
+            if result.get("ok"):
+                return ExecutionResult(status="SUCCESS", message=f"Playing media on {entity_id}.", service="media_play")
+            else:
+                log.error(f"[media/play] play_media direct call failed: {result.get('error')}")
+                return ExecutionResult(status="FAILURE", message=f"Failed to play direct URI: {result.get('error')}", service="media_play")
+
         log.info(f"[media/play] Searching MASS for '{req.query}' on {entity_id}")
         search_result = await ha_client.call_service(
             ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
