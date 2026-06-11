@@ -5021,12 +5021,21 @@ async def stream_audiobookshelf(book_id: str, request: Request):
 
 @app.get("/api/media/stream/music-assistant")
 async def stream_music_assistant(uri: str, request: Request):
-    """Stream music directly from MA to mobile device by resolving the MA URI to a playable URL."""
+    """Stream a Music Assistant track to the browser via MA's native /preview endpoint.
+
+    Flow:
+    1. Resolve credentials (mass_url, mass_token) from the Jarvis identity service.
+    2. Call MA JSON-RPC music/item_by_uri to get provider_instance + item_id.
+    3. Proxy GET <ma_host>/preview?provider=<instance>&item_id=<id> as a streaming response.
+
+    This sources audio directly from MA (OpenSubsonic/Navidrome, Spotify, etc.) —
+    no yt-dlp, no YouTube fallback, guaranteed correct track.
+    """
     log.info(f"[stream/ma] Received stream request for uri='{uri}'")
     try:
         try:
             creds = await _resolve_identity_from_request(request)
-            log.info(f"[stream/ma] Identity resolved successfully for user: {creds.get('user')}")
+            log.info(f"[stream/ma] Identity resolved for user: {creds.get('user')}")
         except HTTPException as e:
             log.error(f"[stream/ma] Identity resolution failed: {e.detail}")
             raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
@@ -5037,216 +5046,157 @@ async def stream_music_assistant(uri: str, request: Request):
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
 
-        log.info(f"[stream/ma] Resolved credentials: url={mass_url}, has_token={bool(mass_token)}")
+        log.info(f"[stream/ma] Credentials: url={mass_url}, has_token={bool(mass_token)}")
 
         if not mass_url:
-            log.error("[stream/ma] Music Assistant URL not configured in resolved credentials")
+            log.error("[stream/ma] Music Assistant URL not configured")
             raise HTTPException(status_code=400, detail="Music Assistant not configured")
 
-        item_type = "track"
-        item_id = "track"
-        uri_parts = uri.split("/")
-        for i, part in enumerate(uri_parts):
-            if part in ("playlist", "track", "album", "artist"):
-                item_type = part
-                if i + 1 < len(uri_parts):
-                    item_id = uri_parts[i + 1]
-                break
+        # Derive the base host (scheme://host:port) from mass_url
+        from urllib.parse import urlparse, urlencode
+        parsed = urlparse(mass_url)
+        ma_host = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}"
+        ma_api = f"{ma_host}/api"
 
-        base = mass_url.rstrip("/")
-        if not base.endswith("/api"):
-            from urllib.parse import urlparse
-            parsed = urlparse(base)
-            base = f"{parsed.scheme}://{parsed.hostname}:8095/api"
+        auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
 
-        playable_url = None
-        track_name = None
-        artist_name = ""
-
-        # Query MA JSON-RPC API via POST
-        payload = {
-            "command": "music/item_by_uri",
-            "args": {
-                "uri": uri
-            }
-        }
-        log.info(f"[stream/ma] Querying MA JSON-RPC API: {base} with payload: {payload}")
+        # ── Step 1: Resolve item metadata via MA JSON-RPC ──────────────────────
+        log.info(f"[stream/ma] Resolving item metadata for uri='{uri}'")
+        provider_instance: str | None = None
+        provider_item_id: str | None = None
+        track_name: str | None = None
+        artist_name: str = ""
+        audio_content_type: str = "audio/mpeg"
 
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                base,
-                json=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {mass_token}"
-                } if mass_token else {}
-            )
-            log.info(f"[stream/ma] MA JSON-RPC API response status: {resp.status_code}")
-            if resp.status_code == 200:
-                data = resp.json()
-                result = data.get("result")
-                if result:
-                    # If it's a playlist or album, resolve to the first track
-                    media_type = result.get("media_type")
-                    if media_type in ("playlist", "album") or "tracks" in result or "items" in result:
-                        tracks = result.get("tracks", result.get("items", []))
-                        if tracks and isinstance(tracks, list):
-                            first_track_uri = tracks[0].get("uri")
-                            if first_track_uri:
-                                log.info(f"[stream/ma] Resolving first track of {media_type}: {first_track_uri}")
-                                track_payload = {
-                                    "command": "music/item_by_uri",
-                                    "args": {
-                                        "uri": first_track_uri
-                                    }
-                                }
-                                track_resp = await client.post(
-                                    base,
-                                    json=track_payload,
-                                    headers={
-                                        "Content-Type": "application/json",
-                                        "Authorization": f"Bearer {mass_token}"
-                                    } if mass_token else {}
-                                )
-                                if track_resp.status_code == 200:
-                                    result = track_resp.json().get("result") or result
-
-                    track_name = result.get("name")
-                    artists = result.get("artists", [])
-                    if isinstance(artists, list) and artists:
-                        artist_name = ", ".join([a.get("name", "") for a in artists if a.get("name")])
-                    elif isinstance(artists, dict):
-                        artist_name = artists.get("name", "")
-
-                    # Attempt to extract direct URL from media item if provided
-                    for key in ("url", "stream_url", "media_url"):
-                        if result.get(key):
-                            playable_url = result[key]
-                            log.info(f"[stream/ma] Found playable_url directly: {playable_url}")
-                            break
-
-                    # Check provider mappings for URLs
-                    if not playable_url:
+            try:
+                resp = await client.post(
+                    ma_api,
+                    json={"command": "music/item_by_uri", "args": {"uri": uri}},
+                    headers={"Content-Type": "application/json", **auth_headers},
+                )
+                log.info(f"[stream/ma] item_by_uri status: {resp.status_code}")
+                if resp.status_code == 200:
+                    result = resp.json()
+                    if isinstance(result, dict):
+                        track_name = result.get("name")
+                        artists = result.get("artists", [])
+                        if isinstance(artists, list) and artists:
+                            artist_name = ", ".join(
+                                a.get("name", "") for a in artists if a.get("name")
+                            )
+                        # Pick first available provider mapping
                         mappings = result.get("provider_mappings", [])
                         for mapping in mappings:
-                            for key in ("url", "stream_url", "media_url"):
-                                if mapping.get(key):
-                                    playable_url = mapping[key]
-                                    log.info(f"[stream/ma] Found playable_url in provider_mappings: {playable_url}")
-                                    break
-                            if playable_url:
+                            if mapping.get("available"):
+                                provider_instance = mapping.get("provider_instance")
+                                provider_item_id = mapping.get("item_id")
+                                # Infer audio type from format
+                                fmt = mapping.get("audio_format", {})
+                                ct = fmt.get("content_type", "")
+                                if ct in ("aac", "mp4", "m4a"):
+                                    audio_content_type = "audio/aac"
+                                elif ct in ("ogg", "opus", "vorbis"):
+                                    audio_content_type = "audio/ogg"
+                                elif ct in ("flac",):
+                                    audio_content_type = "audio/flac"
+                                elif ct in ("wav",):
+                                    audio_content_type = "audio/wav"
                                 break
-            else:
-                log.warning(f"[stream/ma] MA API returned non-200 status {resp.status_code}: {resp.text[:200]}")
+                else:
+                    log.warning(f"[stream/ma] item_by_uri returned {resp.status_code}: {resp.text[:200]}")
+            except Exception as err:
+                log.warning(f"[stream/ma] item_by_uri call failed: {err}", exc_info=True)
 
-        if not playable_url:
-            # Fallback to execution service to resolve stream via YouTube/yt-dlp
-            track_name = track_name or item_id
-            query = f"{artist_name} - {track_name}" if artist_name else track_name
-            log.info(f"[stream/ma] Playable URL not found. Querying execution service to resolve: {query}")
-            
-            try:
-                async with httpx.AsyncClient(timeout=60.0) as client_exec:
-                    exec_resp = await client_exec.post(
-                        f"{EXECUTION_SVC}/execute/media/resolve_stream",
-                        json={
-                            "user_context": {
-                                "user": creds.get("username", "default"),
-                                "is_admin": creds.get("is_admin", False)
-                            },
-                            "query": query
-                        },
-                        headers={"X-Internal-Secret": INTERNAL_SECRET}
-                    )
-                    log.info(f"[stream/ma] Execution service resolve_stream response: {exec_resp.status_code}")
-                    if exec_resp.status_code == 200:
-                        exec_data = exec_resp.json()
-                        if exec_data.get("status") == "SUCCESS" and exec_data.get("detail"):
-                            playable_url = exec_data["detail"].get("stream_url")
-                            log.info(f"[stream/ma] Successfully resolved stream from execution service: {playable_url}")
-            except Exception as exec_err:
-                log.warning(f"[stream/ma] Failed to call execution service to resolve stream: {exec_err}", exc_info=True)
+        if not provider_instance or not provider_item_id:
+            log.error(f"[stream/ma] Could not resolve provider for uri='{uri}'. "
+                      f"instance={provider_instance}, item_id={provider_item_id}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Could not resolve MA provider for URI: {uri}"
+            )
 
-        if not playable_url:
-            log.error(f"[stream/ma] No playable URL found or resolved for {item_type}: {item_id}")
-            raise HTTPException(status_code=404, detail=f"No playable URL found for {item_type}: {item_id}")
+        # ── Step 2: Build and proxy the MA /preview stream ─────────────────────
+        preview_params = urlencode({"provider": provider_instance, "item_id": provider_item_id})
+        preview_url = f"{ma_host}/preview?{preview_params}"
+        log.info(
+            f"[stream/ma] Streaming '{track_name}' by '{artist_name}' "
+            f"via {preview_url}"
+        )
 
-        # Ensure absolute URL
-        if playable_url.startswith("//"):
-            playable_url = f"https:{playable_url}"
-        elif not playable_url.startswith("http"):
-            playable_url = f"{base.replace('/api', '')}/{playable_url.lstrip('/')}"
-
-        log.info(f"[stream/ma] Streaming {item_type} {item_id} from final URL: {playable_url}")
-
-        async def stream_generator(cli, r):
+        async def stream_generator(cli: httpx.AsyncClient, r: httpx.Response):
             try:
                 bytes_sent = 0
                 async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
                     yield chunk
                     bytes_sent += len(chunk)
-                log.info(f"[stream/ma/generator] Finished streaming {bytes_sent} bytes for MA {item_type} {item_id}")
+                log.info(f"[stream/ma] Finished — {bytes_sent} bytes for uri='{uri}'")
             except Exception as e:
-                log.error(f"[stream/ma/generator] Error streaming chunks: {e}", exc_info=True)
+                log.error(f"[stream/ma] Stream error: {e}", exc_info=True)
                 raise
             finally:
                 await r.aclose()
                 await cli.aclose()
 
         range_header = request.headers.get("range")
-        log.info(f"[stream/ma] Client requested range: {range_header} for MA {item_type} {item_id}")
-        client = httpx.AsyncClient(
+        req_headers: dict[str, str] = {
+            "Accept": "audio/*,*/*;q=0.9",
+            **auth_headers,
+        }
+        if range_header:
+            req_headers["Range"] = range_header
+
+        stream_client = httpx.AsyncClient(
             timeout=httpx.Timeout(300.0, connect=15.0),
             follow_redirects=True,
         )
         try:
-            req_headers: dict[str, str] = {
-                # Mimic a browser so CDN servers don't reject the proxy request
-                "User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)",
-                "Accept": "audio/*,*/*;q=0.9",
-            }
-            if range_header:
-                req_headers["Range"] = range_header
-            
-            resp = await client.send(
-                client.build_request("GET", playable_url, headers=req_headers),
-                stream=True
+            upstream = await stream_client.send(
+                stream_client.build_request("GET", preview_url, headers=req_headers),
+                stream=True,
             )
-            log.info(f"[stream/ma] MA stream response status: {resp.status_code}, headers: {dict(resp.headers)}")
-            
-            # Infer content-type from URL if upstream doesn't provide it
-            default_content_type = "audio/mpeg"
-            url_lower = playable_url.lower().split("?")[0]
-            if ".m4a" in url_lower or ".mp4" in url_lower:
-                default_content_type = "audio/mp4"
-            elif ".webm" in url_lower:
-                default_content_type = "audio/webm"
-            elif ".ogg" in url_lower or ".opus" in url_lower:
-                default_content_type = "audio/ogg"
+            log.info(
+                f"[stream/ma] MA /preview response: {upstream.status_code}, "
+                f"content-type: {upstream.headers.get('content-type', 'unknown')}"
+            )
 
-            response_headers = {
+            if upstream.status_code not in (200, 206):
+                await stream_client.aclose()
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"MA /preview returned {upstream.status_code} for uri='{uri}'"
+                )
+
+            # Honour whatever content-type MA sends; fall back to our inferred type
+            content_type = upstream.headers.get("content-type") or audio_content_type
+            response_headers: dict[str, str] = {
                 "Accept-Ranges": "bytes",
                 "Cache-Control": "no-cache",
+                "Content-Type": content_type,
             }
-            for key in ("Content-Range", "Content-Length", "Content-Type"):
-                val = resp.headers.get(key)
+            for key in ("Content-Range", "Content-Length"):
+                val = upstream.headers.get(key)
                 if val:
                     response_headers[key] = val
-                    
-            status_code = resp.status_code
-            
+
             return StreamingResponse(
-                stream_generator(client, resp),
-                status_code=status_code,
-                media_type=response_headers.get("Content-Type", default_content_type),
-                headers=response_headers
+                stream_generator(stream_client, upstream),
+                status_code=upstream.status_code,
+                media_type=content_type,
+                headers=response_headers,
             )
+        except HTTPException:
+            raise
         except Exception as e:
             log.error(f"[stream/ma] Stream initiation failed: {e}", exc_info=True)
-            await client.aclose()
-            raise HTTPException(status_code=502, detail="Failed to connect to media source")
-    except HTTPException as he:
-        raise he
+            await stream_client.aclose()
+            raise HTTPException(status_code=502, detail="Failed to connect to Music Assistant")
+
+    except HTTPException:
+        raise
     except Exception as e:
-        log.error(f"[stream/ma] Unhandled exception in stream_music_assistant: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Failed to connect to Music Assistant: {e}")
+        log.error(f"[stream/ma] Unhandled exception: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Failed to stream from Music Assistant: {e}")
+
+
+
