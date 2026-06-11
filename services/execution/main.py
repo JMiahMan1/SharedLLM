@@ -1765,24 +1765,26 @@ async def _get_ma_recent_via_ha(ha_url: str, ha_token: str, mass_entry_id: str =
 
 @app.get("/execute/media/music-assistant/playlists")
 async def get_ma_playlists(user_id: str = ""):
-    """Get Music Assistant playlists via HA proxy (avoids MA REST API auth issues)."""
+    """Get Music Assistant playlists via direct API if configured, fallback to HA."""
     try:
         creds = await _resolve_mass_ha_creds(user_id)
+        mass_url = creds.get("mass_url") if creds else None
+        mass_token = creds.get("mass_token") if creds else None
+        
+        if mass_url and mass_token:
+            from services.execution.handlers.mass_client import get_playlists as _direct_playlists
+            playlists = await _direct_playlists(mass_url, mass_token)
+            if playlists:
+                return {"status": "SUCCESS", "playlists": playlists}
+        
         ha_url = creds.get("ha_url") if creds else None
         ha_token = creds.get("ha_token") if creds else None
         mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
-        
-        if not ha_url or not ha_token:
-            # Fallback to direct MA REST API (may fail if mass_token is incompatible)
-            log.warning("[ma/playlists] No HA credentials, falling back to direct MA REST API")
-            from services.execution.handlers.mass_client import get_playlists as _direct_playlists
-            mass_url = creds.get("mass_url") if creds else None
-            mass_token = creds.get("mass_token") if creds else None
-            playlists = await _direct_playlists(mass_url, mass_token) if mass_url and mass_token else []
+        if ha_url and ha_token:
+            playlists = await _get_ma_playlists_via_ha(ha_url, ha_token, mass_entry_id)
             return {"status": "SUCCESS", "playlists": playlists}
-        
-        playlists = await _get_ma_playlists_via_ha(ha_url, ha_token, mass_entry_id)
-        return {"status": "SUCCESS", "playlists": playlists}
+            
+        return {"status": "SUCCESS", "playlists": []}
     except Exception as e:
         log.error(f"[ma/playlists] Error: {e}")
         return {"status": "SUCCESS", "playlists": []}
@@ -1790,23 +1792,26 @@ async def get_ma_playlists(user_id: str = ""):
 
 @app.get("/execute/media/music-assistant/recent")
 async def get_ma_recent(user_id: str = ""):
-    """Get Music Assistant recently played via HA proxy (avoids MA REST API auth issues)."""
+    """Get Music Assistant recently played via direct API if configured, fallback to HA."""
     try:
         creds = await _resolve_mass_ha_creds(user_id)
+        mass_url = creds.get("mass_url") if creds else None
+        mass_token = creds.get("mass_token") if creds else None
+        
+        if mass_url and mass_token:
+            from services.execution.handlers.mass_client import get_recent as _direct_recent
+            recent = await _direct_recent(mass_url, mass_token)
+            if recent:
+                return {"status": "SUCCESS", "recent": recent}
+        
         ha_url = creds.get("ha_url") if creds else None
         ha_token = creds.get("ha_token") if creds else None
         mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
-        
-        if not ha_url or not ha_token:
-            log.warning("[ma/recent] No HA credentials, falling back to direct MA REST API")
-            from services.execution.handlers.mass_client import get_recent as _direct_recent
-            mass_url = creds.get("mass_url") if creds else None
-            mass_token = creds.get("mass_token") if creds else None
-            recent = await _direct_recent(mass_url, mass_token) if mass_url and mass_token else []
+        if ha_url and ha_token:
+            recent = await _get_ma_recent_via_ha(ha_url, ha_token, mass_entry_id)
             return {"status": "SUCCESS", "recent": recent}
-        
-        recent = await _get_ma_recent_via_ha(ha_url, ha_token, mass_entry_id)
-        return {"status": "SUCCESS", "recent": recent}
+            
+        return {"status": "SUCCESS", "recent": []}
     except Exception as e:
         log.error(f"[ma/recent] Error: {e}")
         return {"status": "SUCCESS", "recent": []}
