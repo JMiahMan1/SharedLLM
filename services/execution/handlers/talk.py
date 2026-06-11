@@ -75,7 +75,8 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
 
     try:
         if action == "list":
-            ok, data, message = provider.request(
+            ok, data, message = await asyncio.to_thread(
+                provider.request,
                 "GET",
                 "/ocs/v2.php/apps/spreed/api/v4/room",
                 params={"includeStatus": "true"},
@@ -92,12 +93,14 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
 
         if action == "open":
             if req.token:
-                ok, data, message = provider.request(
+                ok, data, message = await asyncio.to_thread(
+                    provider.request,
                     "GET",
                     f"/ocs/v2.php/apps/spreed/api/v4/room/{urllib.parse.quote(req.token)}",
                 )
             elif req.target_user:
-                ok, data, message = provider.request(
+                ok, data, message = await asyncio.to_thread(
+                    provider.request,
                     "POST",
                     "/ocs/v2.php/apps/spreed/api/v4/room",
                     data={"roomType": "1", "invite": req.target_user},
@@ -116,7 +119,8 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
         if action == "messages":
             if not req.token:
                 return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_messages")
-            ok, data, message = provider.request(
+            ok, data, message = await asyncio.to_thread(
+                provider.request,
                 "GET",
                 f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}",
                 params={"lookIntoFuture": "0", "limit": str(req.limit)},
@@ -134,7 +138,8 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
         if action == "send":
             if not req.token or not req.message:
                 return ExecutionResult(status="FAILURE", message="Conversation token and message are required.", service="talk_send")
-            ok, data, message = provider.request(
+            ok, data, message = await asyncio.to_thread(
+                provider.request,
                 "POST",
                 f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}",
                 data={"message": req.message},
@@ -173,9 +178,9 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             extension = ".mp3" if (req.mime_type or "").endswith("mpeg") else (".m4a" if (req.mime_type or "").endswith("mp4") else ".webm")
             file_name = provider.sanitize_filename(req.file_name or f"voice-{uuid4().hex}{extension}", f"voice-{uuid4().hex}{extension}")
             remote_path = f"{TALK_UPLOAD_DIR}/{file_name}"
-            provider.ensure_directory(TALK_UPLOAD_DIR)
+            await asyncio.to_thread(provider.ensure_directory, TALK_UPLOAD_DIR)
 
-            upload_resp = provider.upload_file(remote_path, audio_bytes, req.mime_type or "audio/webm")
+            upload_resp = await asyncio.to_thread(provider.upload_file, remote_path, audio_bytes, req.mime_type or "audio/webm")
             if upload_resp.status_code not in {200, 201, 204}:
                 return ExecutionResult(
                     status="FAILURE",
@@ -187,7 +192,8 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             if req.caption:
                 metadata["caption"] = req.caption
 
-            ok, data, message = provider.request(
+            ok, data, message = await asyncio.to_thread(
+                provider.request,
                 "POST",
                 "/ocs/v2.php/apps/files_sharing/api/v1/shares",
                 data={

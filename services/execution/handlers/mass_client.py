@@ -63,7 +63,7 @@ async def _ma_api(mass_url: str, mass_token: str, command: str, params: Dict[str
 async def get_playlists(mass_url: str, mass_token: str) -> List[Dict[str, Any]]:
     """Get Music Assistant playlists via REST API."""
     try:
-        raw = await _ma_api(mass_url, mass_token, "playlists/list_playlists")
+        raw = await _ma_api(mass_url, mass_token, "music/playlists/library_items")
         return [
             {
                 "name": item.get("name", ""),
@@ -80,13 +80,14 @@ async def get_playlists(mass_url: str, mass_token: str) -> List[Dict[str, Any]]:
 async def get_recent(mass_url: str, mass_token: str) -> List[Dict[str, Any]]:
     """Get Music Assistant recently played items via REST API."""
     try:
-        raw = await _ma_api(mass_url, mass_token, "recently_played/list")
+        raw = await _ma_api(mass_url, mass_token, "music/recently_played_items")
         return [
             {
-                "name": mi.get("name", item.get("name", "")) if mi else item.get("name", ""),
-                "artist": (mi.get("artists", [{}])[0].get("name", "") if mi.get("artists") else "") if mi else item.get("artist", ""),
-                "uri": mi.get("uri", item.get("uri", "")) if mi else item.get("uri", ""),
-                "last_played": item.get("added_at", item.get("last_played", item.get("timestamp", ""))),
+                "name": mi.get("name", ""),
+                "artist": mi.get("artist", (mi.get("artists", [{}])[0].get("name", "") if mi.get("artists") else "")),
+                "uri": mi.get("uri", ""),
+                "last_played": item.get("timestamp_played", item.get("added_at", item.get("last_played", item.get("timestamp", "")))),
+                "image": mi.get("image", {}).get("path", "") if isinstance(mi.get("image"), dict) else (mi.get("image", "") or ""),
             }
             for item in raw
             for mi in [item.get("media_item") or item]
@@ -94,3 +95,4 @@ async def get_recent(mass_url: str, mass_token: str) -> List[Dict[str, Any]]:
     except Exception as e:
         log.error(f"[mass] Failed to get recent: {e}")
         return []
+
