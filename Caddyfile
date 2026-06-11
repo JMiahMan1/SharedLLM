@@ -55,12 +55,10 @@
     handle /api/groups* {
         reverse_proxy gateway:11435
     }
-    handle /api/telemetry* {
-        reverse_proxy gateway:11435
-    }
     handle /api/intercom* {
         reverse_proxy gateway:11435
     }
+
 
 
     handle /api/logs* {
@@ -98,6 +96,9 @@
         reverse_proxy identity:8001
     }
     handle /api/widgets* {
+        reverse_proxy identity:8001
+    }
+    handle /api/telemetry* {
         reverse_proxy identity:8001
     }
     
