@@ -830,14 +830,14 @@ useEffect(() => {
               setLocalCurrentTime(active.position || 0);
               
               const apiToken = storageGetSync('jarvis_api_key') ?? '';
-              const tokenSuffix = apiToken ? `${apiToken.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiToken)}` : '';
-        let url = '';
-        if (source === 'abs') {
-          url = `/api/media/stream/audiobookshelf/${idClean}${tokenSuffix}`;
-        } else if (source === 'ma') {
-          // Use full MA URI (idClean) and include token suffix if present
-          url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenSuffix}`;
-        }
+              const tokenParam = apiToken ? `token=${encodeURIComponent(apiToken)}` : '';
+              let url = '';
+              if (source === 'abs') {
+                url = `/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`;
+              } else if (source === 'ma') {
+                // Use full MA URI (idClean) and include token suffix if present
+                url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`;
+              }
               setLocalStreamUrl(url);
             } else if (localTrack) {
               const backendPlaying = active.state === 'playing';
@@ -1040,15 +1040,15 @@ useEffect(() => {
     setLocalError(null);
 
     const apiToken = storageGetSync('jarvis_api_key') ?? '';
-    const tokenSuffix = apiToken ? `${apiToken.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiToken)}` : '';
+    const tokenParam = apiToken ? `token=${encodeURIComponent(apiToken)}` : '';
 
-        let url = '';
-        if (source === 'abs') {
-          // ABS stream URL already contains token
-          url = `/api/media/stream/audiobookshelf/${idClean}${tokenSuffix}`;
-        } else if (source === 'ma') {
-          url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenSuffix}`;
-        }
+    let url = '';
+    if (source === 'abs') {
+      // ABS stream URL already contains token
+      url = `/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`;
+    } else if (source === 'ma') {
+      url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`;
+    }
     setLocalStreamUrl(url);
 
     try {
