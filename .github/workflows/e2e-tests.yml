@@ -169,6 +169,7 @@ jobs:
       - name: Run integration tests
         env:
           PYTHONPATH: ${{ github.workspace }}/services
+          INTERNAL_SECRET: ${{ env.INTERNAL_SECRET }}
           REDIS_URL: redis://localhost:6397/0
           IDENTITY_URL: http://localhost:8011
           EXECUTION_URL: http://localhost:8012
@@ -176,6 +177,7 @@ jobs:
           STORAGE_URL: http://localhost:8014
           LOGGING_URL: http://localhost:8015
           GATEWAY_URL: http://localhost:8016
+          AUTOMATION_URL: http://localhost:8017
         run: |
           pytest tests/integration/ -v -m integration --junitxml=integration-results.xml
 
@@ -251,6 +253,7 @@ jobs:
       - name: Run full E2E suite
         env:
           PYTHONPATH: ${{ github.workspace }}/services
+          INTERNAL_SECRET: ${{ env.INTERNAL_SECRET }}
           REDIS_URL: redis://localhost:6397/0
           IDENTITY_URL: http://localhost:8011
           EXECUTION_URL: http://localhost:8012
@@ -258,6 +261,7 @@ jobs:
           STORAGE_URL: http://localhost:8014
           LOGGING_URL: http://localhost:8015
           GATEWAY_URL: http://localhost:8016
+          AUTOMATION_URL: http://localhost:8017
         run: |
           pytest tests/ -v --junitxml=e2e-results.xml \
             -m "integration or contract or unit" \

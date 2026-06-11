@@ -1100,9 +1100,14 @@ def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depen
     session.refresh(setting)
     return setting
 
+class _SeedRequest(BaseModel):
+    force: bool = False
+
 @app.post("/api/admin/seed", dependencies=[Depends(require_internal)])
-def manual_seed(force: bool = False, session: Session = Depends(get_session)):
-    count = seed_from_env(session, force=force)
+def manual_seed(body: Optional[_SeedRequest] = None, force: bool = False, session: Session = Depends(get_session)):
+    # Accept force from either JSON body or query param
+    should_force = (body.force if body else False) or force
+    count = seed_from_env(session, force=should_force)
     return {"status": "SUCCESS", "count": count}
 
 # ─── Widget Settings (Bento Dashboard) ─────────────────────────────────────────
