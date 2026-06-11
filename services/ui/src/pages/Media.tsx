@@ -685,52 +685,43 @@ const Media = () => {
   }, [localMuted]);
 
   // Setup local Audio element event listeners
-  useEffect(() => {
-    if (localStreamUrl) {
-      if (!localAudioRef.current) {
-        localAudioRef.current = new Audio();
-      }
-      localAudioRef.current.src = localStreamUrl;
-      localAudioRef.current.volume = localVolume / 100;
-      localAudioRef.current.muted = localMuted;
-
-      const onLoaded = () => {
-        setLocalIsLoaded(true);
-        setLocalDuration(localAudioRef.current?.duration || 0);
-        localAudioRef.current?.play().catch((err) => {
-          console.error('[LocalAudio] play failed:', err);
-          setLocalIsLoaded(false);
-          setLocalIsPlaying(false);
-        });
-      };
-
-      const onEnded = () => {
-        setLocalIsPlaying(false);
-        setLocalIsLoaded(false);
-      };
-
-      const onError = () => {
-        const err = localAudioRef.current?.error;
-        const code = err?.code ?? 'unknown';
-        const msg = err?.message ?? '';
-        console.error(`[LocalAudio] audio element error code=${code} msg="${msg}"`);
-        setLocalIsPlaying(false);
-        setLocalIsLoaded(false);
-        setLocalError('Failed to load stream. Check your connection.');
-      };
-
-      localAudioRef.current.addEventListener('loadeddata', onLoaded);
-      localAudioRef.current.addEventListener('ended', onEnded);
-      localAudioRef.current.addEventListener('error', onError);
-
-      return () => {
-        localAudioRef.current?.removeEventListener('loadeddata', onLoaded);
-        localAudioRef.current?.removeEventListener('ended', onEnded);
-        localAudioRef.current?.removeEventListener('error', onError);
-      };
+useEffect(() => {
+  if (localTrack) {
+    if (localAudioRef.current) {
+      localAudioRef.current.pause();
+      localAudioRef.current.src = '';
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localStreamUrl]);
+    localAudioRef.current = new Audio();
+    localAudioRef.current.src = localStreamUrl!;
+    localAudioRef.current.volume = localVolume / 100;
+    localAudioRef.current.muted = localMuted;
+    localAudioRef.current.load();
+
+    const onLoaded = () => {
+      setLocalIsLoaded(true);
+      setLocalDuration(localAudioRef.current?.duration || 0);
+      localAudioRef.current?.play().catch(() => {});
+    };
+    const onEnded = () => {
+      setLocalIsPlaying(false);
+      setLocalIsLoaded(false);
+    };
+    const onError = () => {
+      setLocalIsPlaying(false);
+      setLocalIsLoaded(false);
+      setLocalError('Failed to load stream. Check your connection.');
+    };
+
+    localAudioRef.current.addEventListener('loadeddata', onLoaded);
+    localAudioRef.current.addEventListener('ended', onEnded);
+    localAudioRef.current.addEventListener('error', onError);
+    return () => {
+      localAudioRef.current?.removeEventListener('loadeddata', onLoaded);
+      localAudioRef.current?.removeEventListener('ended', onEnded);
+      localAudioRef.current?.removeEventListener('error', onError);
+    };
+  }
+}, [localStreamUrl]);
 
   // Handle local playback progress tracking
   useEffect(() => {
@@ -840,12 +831,13 @@ const Media = () => {
               
               const apiToken = storageGetSync('jarvis_api_key') ?? '';
               const tokenSuffix = apiToken ? `${apiToken.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiToken)}` : '';
-              let url = '';
-              if (source === 'abs') {
-                url = `/api/media/stream/audiobookshelf/${idClean}${tokenSuffix}`;
-              } else {
-                url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
-              }
+        let url = '';
+        if (source === 'abs') {
+          url = `/api/media/stream/audiobookshelf/${idClean}${tokenSuffix}`;
+        } else if (source === 'ma') {
+          // Use full MA URI (idClean) and include token suffix if present
+          url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenSuffix}`;
+        }
               setLocalStreamUrl(url);
             } else if (localTrack) {
               const backendPlaying = active.state === 'playing';
@@ -1050,12 +1042,13 @@ const Media = () => {
     const apiToken = storageGetSync('jarvis_api_key') ?? '';
     const tokenSuffix = apiToken ? `${apiToken.includes('?') ? '&' : '?'}token=${encodeURIComponent(apiToken)}` : '';
 
-    let url = '';
-    if (source === 'abs') {
-      url = `/api/media/stream/audiobookshelf/${idClean}${tokenSuffix}`;
-    } else if (source === 'ma') {
-      url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
-    }
+        let url = '';
+        if (source === 'abs') {
+          // ABS stream URL already contains token
+          url = `/api/media/stream/audiobookshelf/${idClean}${tokenSuffix}`;
+        } else if (source === 'ma') {
+          url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenSuffix}`;
+        }
     setLocalStreamUrl(url);
 
     try {
