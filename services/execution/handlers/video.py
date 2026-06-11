@@ -136,6 +136,58 @@ async def search_youtube(query: str) -> str | None:
     return None
 
 
+async def extract_audio_stream_url(video_url: str) -> tuple[str | None, str | None]:
+    """
+    Extract a direct, in-memory audio CDN URL from a YouTube video using yt-dlp.
+    Does NOT download anything — returns the CDN URL that can be proxied directly.
+
+    Returns (stream_url, title) or (None, None) on failure.
+    The returned URL is typically a short-lived (~6h) signed Google CDN URL.
+    """
+    try:
+        import yt_dlp
+
+        def _extract():
+            ydl_opts: dict[str, object] = {
+                "quiet": True,
+                "no_warnings": True,
+                # Prefer m4a/aac (browser-compatible), then any audio-only, then best
+                "format": "bestaudio[ext=m4a]/bestaudio[acodec=aac]/bestaudio/best",
+                "no_playlist": True,
+                "extract_flat": False,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:  # type: ignore[arg-type]
+                info = ydl.extract_info(video_url, download=False)
+                if not info:
+                    return None, None
+                title: str = info.get("title") or video_url
+
+                # For formats that were merged (video+audio), url points to the best stream
+                url: str | None = info.get("url")
+                if not url:
+                    # Try the requested_formats or formats list
+                    fmts = info.get("requested_formats") or info.get("formats") or []
+                    # Pick the best audio-only format
+                    audio_fmts = [f for f in fmts if f.get("vcodec") == "none" and f.get("url")]
+                    if audio_fmts:
+                        audio_fmts.sort(key=lambda f: f.get("tbr") or 0, reverse=True)
+                        url = audio_fmts[0].get("url")
+                    elif fmts:
+                        url = fmts[-1].get("url")  # type: ignore[index]
+
+                if not url:
+                    return None, title
+                return url, title
+
+        stream_url, title = await asyncio.get_running_loop().run_in_executor(None, _extract)
+        if stream_url:
+            log.info(f"[video] extract_audio_stream_url: resolved direct URL for '{title}' ({len(stream_url)} chars)")
+        return stream_url, title
+    except Exception as e:
+        log.warning(f"[video] extract_audio_stream_url failed for '{video_url}': {e}")
+        return None, None
+
+
 YT_COOKIES_PATH = os.path.join(TEMP_VIDEO_DIR, "youtube_cookies.txt")
 
 async def _ensure_youtube_cookies() -> str | None:

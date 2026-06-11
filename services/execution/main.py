@@ -396,24 +396,33 @@ async def execute_media_play(req: MediaPlayRequest):
 @app.post("/execute/media/resolve_stream", response_model=ExecutionResult)
 async def execute_media_resolve_stream(req: ResolveStreamRequest):
     from services.execution.handlers import video as video_handler
-    from services.config import EXECUTION_EXTERNAL_HOST
-    
+
     query = req.query
-    log.info(f"[media/resolve_stream] Resolving query='{query}' to progressive stream")
+    log.info(f"[media/resolve_stream] Resolving audio stream URL for query='{query}'")
+
+    # Step 1: Find a YouTube page URL for the query
     video_url = await video_handler.search_youtube(query)
     if not video_url:
         return ExecutionResult(status="FAILURE", message="Could not find stream on YouTube", service="resolve_stream")
-        
-    media_id, title = await video_handler.download_video_progressive(video_url)
-    if not media_id:
-        return ExecutionResult(status="FAILURE", message="Could not download/stream audio", service="resolve_stream")
-        
-    stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+
+    # Step 2: Extract a direct, in-memory audio stream URL — no download needed
+    stream_url, title = await video_handler.extract_audio_stream_url(video_url)
+    if not stream_url:
+        log.warning(f"[media/resolve_stream] Audio URL extraction failed for '{video_url}', falling back to progressive download")
+        # Fallback: progressive video download (slower but reliable)
+        from services.config import EXECUTION_EXTERNAL_HOST
+        media_id, dl_title = await video_handler.download_video_progressive(video_url)
+        if not media_id or not EXECUTION_EXTERNAL_HOST:
+            return ExecutionResult(status="FAILURE", message="Could not resolve audio stream", service="resolve_stream")
+        stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+        title = dl_title or query
+
+    log.info(f"[media/resolve_stream] Resolved: title='{title}' stream_url='{stream_url[:80]}...'")
     return ExecutionResult(
         status="SUCCESS",
         message=f"Resolved stream: {title}",
         service="resolve_stream",
-        detail={"stream_url": stream_url}
+        detail={"stream_url": stream_url, "title": title}
     )
 
 
