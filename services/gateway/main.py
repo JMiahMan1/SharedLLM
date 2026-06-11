@@ -5103,8 +5103,9 @@ async def stream_music_assistant(uri: str, request: Request):
 
         if not playable_url:
             # Fallback to execution service to resolve stream via YouTube/yt-dlp
-            track_name = data.get("name") if 'data' in locals() else item_id
-            artists = data.get("artists", []) if 'data' in locals() else []
+            ma_data = locals().get('data', {}) or {}
+            track_name = ma_data.get("name") or item_id
+            artists = ma_data.get("artists", [])
             artist_name = ""
             if isinstance(artists, list) and artists:
                 artist_name = ", ".join([a.get("name", "") for a in artists if a.get("name")])
@@ -5164,9 +5165,16 @@ async def stream_music_assistant(uri: str, request: Request):
 
         range_header = request.headers.get("range")
         log.info(f"[stream/ma] Client requested range: {range_header} for MA {item_type} {item_id}")
-        client = httpx.AsyncClient(timeout=30.0)
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(300.0, connect=15.0),
+            follow_redirects=True,
+        )
         try:
-            req_headers = {}
+            req_headers: dict[str, str] = {
+                # Mimic a browser so CDN servers don't reject the proxy request
+                "User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)",
+                "Accept": "audio/*,*/*;q=0.9",
+            }
             if range_header:
                 req_headers["Range"] = range_header
             
@@ -5176,6 +5184,16 @@ async def stream_music_assistant(uri: str, request: Request):
             )
             log.info(f"[stream/ma] MA stream response status: {resp.status_code}, headers: {dict(resp.headers)}")
             
+            # Infer content-type from URL if upstream doesn't provide it
+            default_content_type = "audio/mpeg"
+            url_lower = playable_url.lower().split("?")[0]
+            if ".m4a" in url_lower or ".mp4" in url_lower:
+                default_content_type = "audio/mp4"
+            elif ".webm" in url_lower:
+                default_content_type = "audio/webm"
+            elif ".ogg" in url_lower or ".opus" in url_lower:
+                default_content_type = "audio/ogg"
+
             response_headers = {
                 "Accept-Ranges": "bytes",
                 "Cache-Control": "no-cache",
@@ -5190,7 +5208,7 @@ async def stream_music_assistant(uri: str, request: Request):
             return StreamingResponse(
                 stream_generator(client, resp),
                 status_code=status_code,
-                media_type=response_headers.get("Content-Type", "audio/mpeg"),
+                media_type=response_headers.get("Content-Type", default_content_type),
                 headers=response_headers
             )
         except Exception as e:
