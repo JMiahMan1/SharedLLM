@@ -374,17 +374,15 @@ def dns_server():
                     resp = build_dns_response(txid, hostname, answers)
                     sock.sendto(resp, addr)
                     print(f"[dns-sync] DNS: {hostname} -> {answers}", flush=True)
-                else:
-                    resp = build_dns_response(txid, hostname, [], rcode=3)
-                    sock.sendto(resp, addr)
+                    continue
+
+            resp = forward_query(hostname, qtype or 1)
+            if resp:
+                resp = struct.pack('!H', txid) + resp[2:]
+                sock.sendto(resp, addr)
             else:
-                resp = forward_query(hostname, qtype or 1)
-                if resp:
-                    resp = struct.pack('!H', txid) + resp[2:]
-                    sock.sendto(resp, addr)
-                else:
-                    resp = build_dns_response(txid, hostname, [], rcode=3)
-                    sock.sendto(resp, addr)
+                resp = build_dns_response(txid, hostname, [], rcode=3)
+                sock.sendto(resp, addr)
         except socket.timeout:
             continue
         except Exception as e:

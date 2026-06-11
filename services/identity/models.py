@@ -133,8 +133,10 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "llm_cloud_url", "value": "https://openrouter.ai/api/v1/chat/completions", "description": "Base URL for cloud inference"},
     
     # --- OLLAMA MODELS ---
-    # Not seeded here — must be set explicitly via the UI.
-    # If absent from the DB, get_assistant_model() raises RuntimeError immediately.
+    # Seeded with small default models for testing. Override via Identity UI or .env.
+    {"key": "ollama_assistant_model", "value": "qwen3:8b", "description": "Ollama assistant model (default: qwen3:8b for testing)"},
+    {"key": "ollama_coding_model", "value": "qwen3:8b", "description": "Ollama coding model (default: qwen3:8b for testing)"},
+    {"key": "ollama_librarian_model", "value": "qwen3:8b", "description": "Ollama librarian model (default: qwen3:8b for testing)"},
 
 
     # --- CLOUD MODELS ---

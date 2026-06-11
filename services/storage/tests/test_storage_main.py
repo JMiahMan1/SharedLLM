@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 
 from services.storage.main import app, health  # noqa: E402
-from services.storage.models import ProviderWriteRequest, StorageEntry, ProviderConfig  # noqa: E402
+# noqa: E402
 from services.storage.providers import StorageProvider  # noqa: E402
 
 client = TestClient(app)
@@ -28,23 +28,6 @@ class FakeProvider(StorageProvider):
 
     def upload_directory(self, remote_path, local_path, excludes=None):
         return {"status": "SUCCESS", "files_uploaded": 0}
-
-
-def _fixture_entries():
-    return [
-        StorageEntry(
-            path="/Library/ProjectAlpha/README.md",
-            name="README.md",
-            is_dir=False,
-            content_type="text/markdown",
-        ),
-        StorageEntry(
-            path="/Library/Media/song.mp3",
-            name="song.mp3",
-            is_dir=False,
-            content_type="audio/mpeg",
-        ),
-    ]
 
 
 def test_health():

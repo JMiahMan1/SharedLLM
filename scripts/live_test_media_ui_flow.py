@@ -3,7 +3,6 @@
 import os
 import sys
 import httpx
-import json
 
 BASE_URL = os.getenv("LIVE_TEST_URL", "http://192.168.2.205:8080")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
