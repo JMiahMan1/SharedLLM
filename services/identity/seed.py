@@ -18,9 +18,16 @@ from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Load legacy .env if available
-from services.config import LEGACY_ENV_PATH
-if os.path.exists(LEGACY_ENV_PATH):
-    load_dotenv(LEGACY_ENV_PATH)
+from services.config import LEGACY_ENV_PATH as _LEGACY_ENV_PATH
+
+_legacy_env = _LEGACY_ENV_PATH
+if os.path.exists(_legacy_env):
+    load_dotenv(_legacy_env)
+elif os.path.exists(".env"):
+    load_dotenv(".env")
+else:
+    # Try loading .env from current directory as last resort
+    load_dotenv(".env", override=True)
 
 log = logging.getLogger("identity.seed")
 
@@ -196,7 +203,12 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             session.add(existing)
 
     # ── Seed OLLAMA_URL from .env (seed-only, not in DEFAULT_GLOBAL_SETTINGS) ─
-    from services.config import OLLAMA_URL as env_ollama_url
+    # Read directly from .env file to avoid import-time caching issues
+    env_ollama_url = os.getenv("OLLAMA_URL", "")
+    if not env_ollama_url and os.path.exists(".env"):
+        from dotenv import dotenv_values
+        env_vals = dotenv_values(".env")
+        env_ollama_url = env_vals.get("OLLAMA_URL", "")
     if env_ollama_url:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == "llm_local_url")).first()
         if not existing:
@@ -222,6 +234,24 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
             if not existing:
                 session.add(GlobalSetting(key=global_key, value=env_val))
+                log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
+            elif force and not existing.value:
+                existing.value = env_val
+                session.add(existing)
+                log.info(f"[seed] Re-seeded {env_key} -> {global_key}: {env_val}")
+
+    # ── Seed Ollama models from .env (seed-only, overrides DEFAULT_GLOBAL_SETTINGS) ─
+    env_models = {
+        "ASSISTANT_MODEL": "ollama_assistant_model",
+        "CODING_MODEL": "ollama_coding_model",
+        "LIBRARIAN_MODEL": "ollama_librarian_model",
+    }
+    for env_key, global_key in env_models.items():
+        env_val = os.getenv(env_key)
+        if env_val:
+            existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
+            if not existing:
+                session.add(GlobalSetting(key=global_key, value=env_val, description=f"Ollama {global_key} model. Seeded from .env {env_key} on first startup."))
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
             elif force and not existing.value:
                 existing.value = env_val
