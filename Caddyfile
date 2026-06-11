@@ -46,6 +46,22 @@
     handle /api/media* {
         reverse_proxy gateway:11435
     }
+    handle /api/presence* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/integrations* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/groups* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/telemetry* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/intercom* {
+        reverse_proxy gateway:11435
+    }
+
 
     handle /api/logs* {
         reverse_proxy logging:8006
