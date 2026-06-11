@@ -1,10 +1,12 @@
 # services/execution/handlers/timer.py
 import json
 import logging
+import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import dateparser
 import redis
 from services.config import REDIS_URL
 from services.execution.schemas import TimerRequest, ExecutionResult
@@ -30,7 +32,6 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 # Basic duration parsing (e.g. "10m", "5s")
                 # This should ideally be handled by Gateway extraction
                 # but we'll add a safety fallback here.
-                import re
                 m = re.search(r"(\d+)\s*(m|s|h)", req.duration_str)
                 if m:
                     val, unit = int(m.group(1)), m.group(2)
@@ -38,9 +39,11 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                     elif unit == "s": expires_at += timedelta(seconds=val)
                     elif unit == "h": expires_at += timedelta(hours=val)
             elif req.time_str:
-                import dateparser
-                dt = dateparser.parse(req.time_str, settings={'PREFER_DATES_FROM': 'future'})
-                if dt: expires_at = dt
+                dt = dateparser.parse(req.time_str, settings={"PREFER_DATES_FROM": "future"})
+                if dt:
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    expires_at = dt
             
             if expires_at == now:
                 return ExecutionResult(status="FAILURE", message="Could not determine timer duration/time.", service="timer_add")
@@ -102,11 +105,11 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 data = await r.get(k)
                 if data:
                     t = json.loads(data)
-                    if t.get('active') and (not req.title or req.title.lower() in t['title'].lower()):
-                        t['active'] = False
-                        t['paused_at'] = datetime.now().isoformat()
+                    if t.get("active") and (not req.title or req.title.lower() in t["title"].lower()):
+                        t["active"] = False
+                        t["paused_at"] = datetime.now(timezone.utc).isoformat()
                         await r.set(k, json.dumps(t))
-                        return ExecutionResult(status="SUCCESS", message=f"Paused timer '{t['title']}'.", service="timer_pause", detail={"timer_id": t['id']})
+                        return ExecutionResult(status="SUCCESS", message=f"Paused timer '{t['title']}'.", service="timer_pause", detail={"timer_id": t["id"]})
             return ExecutionResult(status="FAILURE", message="No active matching timer found to pause.", service="timer_pause")
 
         elif action == "resume":
@@ -116,25 +119,28 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 data = await r.get(k)
                 if data:
                     t = json.loads(data)
-                    if not t.get('active') and t.get('paused_at'):
+                    if not t.get("active") and t.get("paused_at"):
                         try:
-                            paused_at = datetime.fromisoformat(t['paused_at'])
-                            expires_at = datetime.fromisoformat(t['expires_at'])
-                            now = datetime.now()
-                            if paused_at.tzinfo: paused_at = paused_at.replace(tzinfo=None)
-                            if expires_at.tzinfo: expires_at = expires_at.replace(tzinfo=None)
-                            if now.tzinfo: now = now.replace(tzinfo=None)
-                            
+                            paused_at = datetime.fromisoformat(t["paused_at"])
+                            expires_at = datetime.fromisoformat(t["expires_at"])
+                            now = datetime.now(timezone.utc)
+                            if not paused_at.tzinfo:
+                                paused_at = paused_at.replace(tzinfo=timezone.utc)
+                            if not expires_at.tzinfo:
+                                expires_at = expires_at.replace(tzinfo=timezone.utc)
+                            if not now.tzinfo:
+                                now = now.replace(tzinfo=timezone.utc)
+
                             elapsed_paused = now - paused_at
                             new_expires = expires_at + elapsed_paused
-                            t['expires_at'] = new_expires.isoformat()
+                            t["expires_at"] = new_expires.isoformat()
                         except Exception as err:
                             log.error(f"Error recalculating timer expiry on resume: {err}")
-                        
-                        t['active'] = True
-                        t.pop('paused_at', None)
+
+                        t["active"] = True
+                        t.pop("paused_at", None)
                         await r.set(k, json.dumps(t))
-                        return ExecutionResult(status="SUCCESS", message=f"Resumed timer '{t['title']}'.", service="timer_resume", detail={"timer_id": t['id']})
+                        return ExecutionResult(status="SUCCESS", message=f"Resumed timer '{t['title']}'.", service="timer_resume", detail={"timer_id": t["id"]})
             return ExecutionResult(status="FAILURE", message="No paused matching timer found to resume.", service="timer_resume")
 
         return ExecutionResult(status="FAILURE", message=f"Unknown timer action: {action}", service="timer")

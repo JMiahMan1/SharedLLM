@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-from sqlmodel import Session, select
+from sqlmodel import Session, select, create_engine
 from services.identity.models import User
 from services.identity.crypto import encrypt
 
@@ -28,9 +28,14 @@ MA_TOKEN = os.getenv("MA_TOKEN", os.getenv("MA_TOKEN"))
 DB_URL = os.getenv("DATABASE_URL", "sqlite:////data/identity.db")
 
 if "sqlite" in DB_URL:
-    from sqlmodel import SQLModel, create_engine
     from sqlalchemy.pool import StaticPool
-    engine = create_engine(DB_URL, connect_args={"check_same_thread": False, "timeout": 30}, echo=False)
+
+    engine = create_engine(
+        DB_URL,
+        connect_args={"check_same_thread": False, "timeout": 30},
+        poolclass=StaticPool,
+        echo=False,
+    )
 else:
     engine = create_engine(DB_URL, echo=False)
 

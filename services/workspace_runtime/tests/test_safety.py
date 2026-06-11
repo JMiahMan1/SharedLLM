@@ -42,7 +42,7 @@ def test_git_revert_logic(client: TestClient, session: Session, tmp_path: Path):
     file_path.write_text("v1")
     subprocess.run(["git", "add", "test.txt"], cwd=ws_dir, check=True)
     subprocess.run(["git", "commit", "-m", "v1"], cwd=ws_dir, check=True)
-    v1_hash = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ws_dir).decode().strip()
+    subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ws_dir).decode().strip()  # noqa: F841
     
     file_path.write_text("v2")
     subprocess.run(["git", "add", "test.txt"], cwd=ws_dir, check=True)

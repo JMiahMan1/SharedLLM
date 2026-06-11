@@ -88,11 +88,11 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
         elif action == "add":
             if not req.summary or not req.start_time:
                 return ExecutionResult(status="FAILURE", message="Summary and start_time are required.", service="calendar_add")
-            
-            dt = dateparser.parse(req.start_time, settings={'PREFER_DATES_FROM': 'future'})
-            if not dt:
+
+            dt = dateparser.parse(req.start_time, settings={"PREFER_DATES_FROM": "future"})
+            if dt is None:
                 return ExecutionResult(status="FAILURE", message=f"Could not parse date: {req.start_time}", service="calendar_add")
-            
+
             # Ensure datetime is aware in the user's configured timezone
             local_tz = _get_local_tz()
             if dt.tzinfo is None:
@@ -168,7 +168,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                                 ve.summary.value = req.summary
                                 if req.start_time:
                                     dt = dateparser.parse(req.start_time)
-                                    if dt:
+                                    if dt is not None:
                                         local_tz = _get_local_tz()
                                         if dt.tzinfo is None:
                                             dt = dt.replace(tzinfo=local_tz)

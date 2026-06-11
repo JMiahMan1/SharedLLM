@@ -5036,9 +5036,9 @@ async def stream_music_assistant(uri: str, request: Request):
             log.error("[stream/ma] Music Assistant URL not configured in resolved credentials")
             raise HTTPException(status_code=400, detail="Music Assistant not configured")
 
+        item_type = "track"
+        item_id = "track"
         uri_parts = uri.split("/")
-        item_type = None
-        item_id = None
         for i, part in enumerate(uri_parts):
             if part in ("playlist", "track", "album", "artist"):
                 item_type = part
@@ -5046,74 +5046,97 @@ async def stream_music_assistant(uri: str, request: Request):
                     item_id = uri_parts[i + 1]
                 break
 
-        if not item_id or not item_type:
-            log.error(f"[stream/ma] Could not parse MA URI: '{uri}'")
-            raise HTTPException(status_code=400, detail=f"Could not parse MA URI: {uri}")
-
-        log.info(f"[stream/ma] Parsed item_type='{item_type}', item_id='{item_id}'")
-
         base = mass_url.rstrip("/")
         if not base.endswith("/api"):
             from urllib.parse import urlparse
             parsed = urlparse(base)
             base = f"{parsed.scheme}://{parsed.hostname}:8095/api"
 
-        api_url = f"{base}/{item_type}s/{item_id}"
-        log.info(f"[stream/ma] Querying MA REST API: {api_url}")
-
         playable_url = None
+        track_name = None
+        artist_name = ""
+
+        # Query MA JSON-RPC API via POST
+        payload = {
+            "command": "music/item_by_uri",
+            "args": {
+                "uri": uri
+            }
+        }
+        log.info(f"[stream/ma] Querying MA JSON-RPC API: {base} with payload: {payload}")
+
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(
-                api_url,
-                headers={"Authorization": f"Bearer {mass_token}"} if mass_token else {}
+            resp = await client.post(
+                base,
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {mass_token}"
+                } if mass_token else {}
             )
-            log.info(f"[stream/ma] MA API response status: {resp.status_code}")
+            log.info(f"[stream/ma] MA JSON-RPC API response status: {resp.status_code}")
             if resp.status_code == 200:
                 data = resp.json()
-                for key in ("url", "stream_url", "media_url"):
-                    if data.get(key):
-                        playable_url = data[key]
-                        log.info(f"[stream/ma] Found playable_url directly: {playable_url}")
-                        break
+                result = data.get("result")
+                if result:
+                    # If it's a playlist or album, resolve to the first track
+                    media_type = result.get("media_type")
+                    if media_type in ("playlist", "album") or "tracks" in result or "items" in result:
+                        tracks = result.get("tracks", result.get("items", []))
+                        if tracks and isinstance(tracks, list):
+                            first_track_uri = tracks[0].get("uri")
+                            if first_track_uri:
+                                log.info(f"[stream/ma] Resolving first track of {media_type}: {first_track_uri}")
+                                track_payload = {
+                                    "command": "music/item_by_uri",
+                                    "args": {
+                                        "uri": first_track_uri
+                                    }
+                                }
+                                track_resp = await client.post(
+                                    base,
+                                    json=track_payload,
+                                    headers={
+                                        "Content-Type": "application/json",
+                                        "Authorization": f"Bearer {mass_token}"
+                                    } if mass_token else {}
+                                )
+                                if track_resp.status_code == 200:
+                                    result = track_resp.json().get("result") or result
 
-                if not playable_url and item_type == "playlist":
-                    tracks_path = f"{base}/{item_type}s/{item_id}/tracks"
-                    log.info(f"[stream/ma] Playlist lacks URL. Fetching tracks: {tracks_path}")
-                    tracks_resp = await client.get(
-                        tracks_path,
-                        headers={"Authorization": f"Bearer {mass_token}"} if mass_token else {}
-                    )
-                    if tracks_resp.status_code == 200:
-                        tracks_data = tracks_resp.json()
-                        tracks = tracks_data.get("items", tracks_data.get("tracks", []))
-                        if tracks:
-                            first_track_id = tracks[0].get("track_id") or tracks[0].get("id")
-                            first_track_url = f"{base}/tracks/{first_track_id}"
-                            log.info(f"[stream/ma] Fetching first track of playlist: {first_track_url}")
-                            track_resp = await client.get(
-                                first_track_url,
-                                headers={"Authorization": f"Bearer {mass_token}"} if mass_token else {}
-                            )
-                            if track_resp.status_code == 200:
-                                track_data = track_resp.json()
-                                playable_url = track_data.get("url") or track_data.get("stream_url")
-                                log.info(f"[stream/ma] Found playlist first track URL: {playable_url}")
+                    track_name = result.get("name")
+                    artists = result.get("artists", [])
+                    if isinstance(artists, list) and artists:
+                        artist_name = ", ".join([a.get("name", "") for a in artists if a.get("name")])
+                    elif isinstance(artists, dict):
+                        artist_name = artists.get("name", "")
+
+                    # Attempt to extract direct URL from media item if provided
+                    for key in ("url", "stream_url", "media_url"):
+                        if result.get(key):
+                            playable_url = result[key]
+                            log.info(f"[stream/ma] Found playable_url directly: {playable_url}")
+                            break
+
+                    # Check provider mappings for URLs
+                    if not playable_url:
+                        mappings = result.get("provider_mappings", [])
+                        for mapping in mappings:
+                            for key in ("url", "stream_url", "media_url"):
+                                if mapping.get(key):
+                                    playable_url = mapping[key]
+                                    log.info(f"[stream/ma] Found playable_url in provider_mappings: {playable_url}")
+                                    break
+                            if playable_url:
+                                break
             else:
                 log.warning(f"[stream/ma] MA API returned non-200 status {resp.status_code}: {resp.text[:200]}")
 
         if not playable_url:
             # Fallback to execution service to resolve stream via YouTube/yt-dlp
-            ma_data = locals().get('data', {}) or {}
-            track_name = ma_data.get("name") or item_id
-            artists = ma_data.get("artists", [])
-            artist_name = ""
-            if isinstance(artists, list) and artists:
-                artist_name = ", ".join([a.get("name", "") for a in artists if a.get("name")])
-            elif isinstance(artists, dict):
-                artist_name = artists.get("name", "")
-            
+            track_name = track_name or item_id
             query = f"{artist_name} - {track_name}" if artist_name else track_name
-            log.info(f"[stream/ma] Playable URL not found in MA response. Querying execution service to resolve: {query}")
+            log.info(f"[stream/ma] Playable URL not found. Querying execution service to resolve: {query}")
             
             try:
                 async with httpx.AsyncClient(timeout=60.0) as client_exec:
