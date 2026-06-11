@@ -4972,9 +4972,16 @@ async def stream_audiobookshelf(book_id: str, request: Request):
 
         range_header = request.headers.get("range")
         log.info(f"[stream/abs] Client requested range: {range_header} for book {book_id}")
-        client = httpx.AsyncClient(timeout=30.0)
+        client = httpx.AsyncClient(
+            timeout=httpx.Timeout(300.0, connect=15.0),
+            follow_redirects=True,
+        )
         try:
-            req_headers = {}
+            req_headers: dict[str, str] = {
+                # Mimic a browser so CDN servers don't reject the proxy request
+                "User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)",
+                "Accept": "audio/*,*/*;q=0.9",
+            }
             if range_header:
                 req_headers["Range"] = range_header
             
