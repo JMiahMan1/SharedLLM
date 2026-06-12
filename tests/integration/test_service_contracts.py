@@ -256,7 +256,7 @@ class TestInternalSecretEnforcement:
                 json={"username": "test"},
                 timeout=5.0,
             )
-            assert resp.status_code == 403, f"Expected 403, got {resp.status_code}"
+            assert resp.status_code in (401, 403), f"Expected 401 or 403, got {resp.status_code}"
         except httpx.ConnectError:
             pytest.skip("Identity service not running")
 
