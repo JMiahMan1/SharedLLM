@@ -114,12 +114,12 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
         integration = attrs.get("integration", "")
         active_queue = attrs.get("active_queue")
         
-        # Must have an active MA queue to be a valid playback target
-        if not active_queue:
-            continue
+        # Check if this is an MA player (via integration/source attributes)
+        is_ma_player = "music assistant" in source or integration == "music_assistant"
         
-        if search in friendly and ("music assistant" in source or integration == "music_assistant"):
-            log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid} (queue: {active_queue})")
+        # For MA players, allow any state (idle/playing/paused) - active_queue not required
+        if is_ma_player and search in friendly:
+            log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid} (integration={integration}, queue={active_queue})")
             return eid
     
     # No MA variant found, return original (may still work for non-MA players)
@@ -417,7 +417,7 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
         service_data={
             "config_entry_id": MASS_CONFIG_ENTRY_ID,
             "name": req.query,
-            "media_type": ["track", "album"],
+            "media_type": ["podcast", "episode"],
             "limit": 5,
         },
         return_response=True,
@@ -426,16 +426,43 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
     if search_result.get("ok") and search_result.get("service_response"):
         raw = search_result["service_response"]
         resp = raw.get("service_response", raw)
-        for category in ["tracks", "albums"]:
+        for category in ["podcasts", "episodes", "tracks"]:
             items = resp.get(category, [])
             if items:
                 uri = items[0].get("uri")
+                if uri:
+                    result = await ha_client.call_service(
+                        ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
+                        {"media_id": uri, "enqueue": "play"},
+                    )
+                    if result.get("ok"):
+                        return ExecutionResult(status="SUCCESS", message=f"Playing podcast '{req.query}' on {entity_id}.", service="media_play")
+
+    # Fallback: try searching as track if no podcast/episode results
+    log.info(f"[media/podcast] No podcast/episode results found, trying track search for '{req.query}'")
+    track_search = await ha_client.call_service(
+        ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
+        service_data={
+            "config_entry_id": MASS_CONFIG_ENTRY_ID,
+            "name": req.query,
+            "media_type": ["track"],
+            "limit": 5,
+        },
+        return_response=True,
+    )
+    if track_search.get("ok") and track_search.get("service_response"):
+        raw = track_search["service_response"]
+        resp = raw.get("service_response", raw)
+        items = resp.get("tracks", [])
+        if items:
+            uri = items[0].get("uri")
+            if uri:
                 result = await ha_client.call_service(
                     ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
                     {"media_id": uri, "enqueue": "play"},
                 )
                 if result.get("ok"):
-                    return ExecutionResult(status="SUCCESS", message=f"Playing podcast '{req.query}' on {entity_id}.", service="media_play")
+                    return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' as track on {entity_id}.", service="media_play")
 
     return ExecutionResult(status="FAILURE", message=f"Could not play podcast '{req.query}' on {entity_id}. Try providing a direct URL.", service="media_play")
 

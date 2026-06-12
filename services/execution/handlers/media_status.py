@@ -35,6 +35,19 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         media_album = attrs.get("media_album_name", "")
         source = attrs.get("source", "")
 
+        # Only include MA-compatible devices (those with MA queue integration)
+        # Check integration source and queue presence for MA compatibility
+        integration = attrs.get("integration", "")
+        active_queue = attrs.get("active_queue")
+        is_ma_compatible = (
+            integration == "music_assistant"
+            or "music assistant" in source.lower()
+            or active_queue is not None
+        )
+        
+        if not is_ma_compatible:
+            continue
+
         player = {
             "entity_id": entity_id,
             "friendly_name": friendly_name,
@@ -50,7 +63,7 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         if st in ("playing", "paused", "buffering"):
             active_players.append(player)
 
-        # Also collect idle/standby players for device selection
+        # Also collect idle/standby/off players for device selection
         if st in ("idle", "standby", "off"):
             available_players.append(player)
 
