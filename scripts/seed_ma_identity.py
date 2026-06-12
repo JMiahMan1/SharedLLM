@@ -21,8 +21,16 @@ from services.identity.models import User
 from services.identity.crypto import encrypt
 
 # MA credentials from .env only
-MA_URL = os.getenv("MA_URL", os.getenv("MA_URL", "http://ha.sumemail.com:8095"))
-MA_TOKEN = os.getenv("MA_TOKEN", os.getenv("MA_TOKEN"))
+MA_URL = os.getenv("MA_URL")
+MA_TOKEN = os.getenv("MA_TOKEN")
+
+if not MA_URL:
+    print("[ERROR] MA_URL is required but not set in .env")
+    sys.exit(1)
+
+if not MA_TOKEN:
+    print("[ERROR] MA_TOKEN is required but not set in .env")
+    sys.exit(1)
 
 # Database URL - default to sqlite at /data/identity.db
 DB_URL = os.getenv("DATABASE_URL", "sqlite:////data/identity.db")

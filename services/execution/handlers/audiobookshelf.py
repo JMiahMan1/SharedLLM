@@ -4,6 +4,7 @@ Audiobookshelf (ABS) handler — search, play, resume, and track audiobook progr
 Integrates with Home Assistant media_player for playback on any supported device.
 """
 import logging
+from datetime import datetime
 from services.execution import ha_client, abs_client
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult
 
@@ -93,12 +94,20 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
     for b in books[:req.limit]:
         book = b.get("libraryItem", {})
         meta = book.get("media", {}).get("metadata", {})
+        media_info = book.get("media", {})
+        chapters = media_info.get("chapters", [])
         summaries.append({
             "id": book.get("id"),
             "title": meta.get("title", "Unknown"),
             "author": meta.get("authorName", "Unknown"),
             "narrator": meta.get("narratorName", "Unknown"),
-            "duration": book.get("media", {}).get("duration", 0),
+            "series": meta.get("series", ""),
+            "published": meta.get("publishedYear", meta.get("publishedDate", "")),
+            "genres": meta.get("genres", []),
+            "duration": media_info.get("duration", 0),
+            "chapters": len(chapters) if isinstance(chapters, list) else 0,
+            "status": book.get("status", "unknown"),
+            "progress": book.get("progress", 0),
         })
 
     return ExecutionResult(
@@ -345,46 +354,108 @@ async def _handle_get_book(abs_url: str, abs_key: str, req) -> ExecutionResult:
 
 
 async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
-    """Get recently played audiobooks from Audiobookshelf."""
+    """Get recently played audiobooks from Audiobookshelf with full details."""
     try:
-        progress = await abs_client.get_items_in_progress(abs_url, abs_key)
-        # ABS /me/items-in-progress returns { "libraryItems": [...] }
-        items = progress.get("libraryItems", [])
+        items = await abs_client.get_items_in_progress(abs_url, abs_key)
+        library_items = items.get("libraryItems", [])
+        if not library_items:
+            return ExecutionResult(
+                status="SUCCESS",
+                message="No recently played audiobooks found.",
+                service="audiobookshelf",
+                detail={"books": []},
+            )
+
+        # Sort by most recently played first
+        library_items.sort(key=lambda x: x.get("progressLastUpdate", 0), reverse=True)
+
         books = []
-        for item in items:
+        for item in library_items[:20]:
             media = item.get("media", {})
             meta = media.get("metadata", {})
+
+            # Build complete author string
             author_name = meta.get("authorName", "") or meta.get("author", "")
             authors = meta.get("authors", [])
             if authors and isinstance(authors, list):
-                author_name = ", ".join(authors)
+                author_name = ", ".join(a if isinstance(a, str) else a.get("name", "") for a in authors)
             if not author_name:
-                author_name = meta.get("name", "Unknown")
+                author_name = "Unknown"
+
+            # Collect narrator info
+            narrators = meta.get("narrators", [])
+            narrator_str = ""
+            if narrators:
+                if isinstance(narrators, list):
+                    narrator_str = ", ".join(n if isinstance(n, str) else n.get("name", "") for n in narrators)
+                else:
+                    narrator_str = str(narrators)
+            if not narrator_str:
+                narrator_str = meta.get("narratorName", "") or meta.get("narrator", "")
 
             duration = media.get("duration", item.get("duration", 0))
-            # Progress data not available in items-in-progress endpoint
-            pct = 0
-            # Use progressLastUpdate as the sort key (epoch ms)
             last_update = item.get("progressLastUpdate", 0)
 
+            # Fetch individual progress for this book to get actual percentage
+            try:
+                progress_data = await abs_client.get_book_progress(abs_url, abs_key, item.get("id", ""))
+                current_time = progress_data.get("currentTime", 0)
+                is_complete = progress_data.get("isComplete", False)
+                if duration and duration > 0:
+                    pct = min(100, int((current_time / duration) * 100))
+                else:
+                    pct = progress_data.get("progress", 0)
+            except Exception:
+                current_time = 0
+                is_complete = False
+                pct = 0
+
+            # Build chapters info
+            chapters = media.get("chapters", [])
+            chapters_list = []
+            if chapters and isinstance(chapters, list):
+                chapters_list = [
+                    {"title": c.get("title", ""), "startTime": c.get("startTime", 0)}
+                    for c in chapters if c
+                ]
+
+            # Build full metadata
             books.append({
                 "id": item.get("id", ""),
                 "title": meta.get("title", item.get("title", "Unknown")),
                 "author": author_name or "Unknown",
-                "progress": pct,
-                "last_played": last_update,
+                "narrator": narrator_str,
+                "publisher": meta.get("publisher", ""),
+                "series": meta.get("series", ""),
+                "publishedDate": meta.get("publishedDate", ""),
+                "publishedYear": meta.get("publishedYear", ""),
+                "description": meta.get("description", ""),
+                "genres": meta.get("genres", []),
+                "tags": meta.get("tags", []),
+                "language": meta.get("language", ""),
                 "duration": duration,
+                "duration_formatted": _format_time(duration) if duration else "",
+                "progress": pct,
+                "progress_current_time": current_time,
+                "is_complete": is_complete,
+                "last_played": last_update,
+                "last_played_formatted": datetime.fromtimestamp(last_update / 1000).strftime("%Y-%m-%d %H:%M") if last_update else "",
                 "library_id": item.get("libraryId", ""),
+                "has_podcast": meta.get("isPodcast", False),
+                "explicit": meta.get("explicit", False),
+                "chapters": chapters_list,
+                "chapter_count": len(chapters_list),
+                "cover_path": media.get("cover", {}).get("path", "") if isinstance(media.get("cover"), dict) else (media.get("cover", "") or ""),
             })
-        books.sort(key=lambda b: b["last_played"], reverse=True)
+
         return ExecutionResult(
             status="SUCCESS",
-            message="Recently played audiobooks retrieved.",
+            message=f"Retrieved {len(books)} recently played audiobook(s).",
             service="audiobookshelf",
-            detail={"books": books[:20]},
+            detail={"books": books},
         )
     except Exception as e:
-        log.error(f"[abs.last_played] Error: {e}")
+        log.error(f"[abs.last_played] Error: {e}", exc_info=True)
         return ExecutionResult(
             status="FAILURE",
             message=f"Failed to get last played: {e}",

@@ -17,11 +17,20 @@ def _make_state(entity_id, state, attrs=None):
     return {
         "entity_id": entity_id,
         "state": state,
-        "attributes": attrs or {
+        "attributes": {
             "friendly_name": entity_id.split(".")[-1].replace("_", " ").title(),
             "volume_level": 0.5,
             "is_volume_muted": False,
+            **(_make_ma_attributes() if attrs is None else {}),
+            **(attrs or {}),
         },
+    }
+
+
+def _make_ma_attributes():
+    return {
+        "integration": "music_assistant",
+        "active_queue": "queue://ma/abc123",
     }
 
 
@@ -97,7 +106,7 @@ async def test_media_status_non_media_entities_filtered():
 @pytest.mark.asyncio
 async def test_media_status_volume_rounding():
     """Test that volume_level is properly rounded to 2 decimal places."""
-    states = [_make_state("media_player.tv", "playing", {"volume_level": 0.123456789})]
+    states = [_make_state("media_player.tv", "playing", {"volume_level": 0.123456789, **_make_ma_attributes()})]
     with (
         patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
         patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
@@ -113,7 +122,7 @@ async def test_media_status_volume_rounding():
 @pytest.mark.asyncio
 async def test_media_status_null_volume():
     """Test that null volume_level is handled gracefully."""
-    states = [_make_state("media_player.tv", "playing", {"volume_level": None})]
+    states = [_make_state("media_player.tv", "playing", {"volume_level": None, **_make_ma_attributes()})]
     with (
         patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
         patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
@@ -212,6 +221,7 @@ async def test_media_status_message_includes_player_info():
                 "volume_level": 0.75,
                 "media_title": "Song Title",
                 "media_artist": "Artist Name",
+                **_make_ma_attributes(),
             },
         )
     ]
@@ -233,7 +243,7 @@ async def test_media_status_muted_volume_captured():
         _make_state(
             "media_player.speaker",
             "playing",
-            {"volume_level": 0.5, "is_volume_muted": True},
+            {"volume_level": 0.5, "is_volume_muted": True, **_make_ma_attributes()},
         )
     ]
     with (
@@ -265,7 +275,7 @@ async def test_media_status_buffering_is_active():
 @pytest.mark.asyncio
 async def test_media_status_missing_attributes_handled():
     """Test that missing attributes don't crash."""
-    states = [{"entity_id": "media_player.minimal", "state": "playing"}]
+    states = [{"entity_id": "media_player.minimal", "state": "playing", "attributes": {**_make_ma_attributes()}}]
     with (
         patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
         patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
@@ -312,6 +322,7 @@ async def test_media_status_media_attrs_captured():
                 "media_artist": "My Artist",
                 "media_album_name": "My Album",
                 "source": "Spotify",
+                **_make_ma_attributes(),
             },
         )
     ]
