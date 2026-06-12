@@ -1,0 +1,608 @@
+"""
+Music Assistant WebSocket client for the Jarvis gateway.
+
+Connects to MA's WebSocket API for real-time queue state updates and
+command dispatch. Handles authentication, auto-reconnect, and event
+processing.
+
+Usage:
+    client = MAWebSocketClient(mass_url, mass_token)
+    await client.connect()
+    client.register_event_callback("queue_updated", handle_queue_updated)
+    await client.send_command("player/play_media", {"uri": "spotify:track:..."})
+    # ... use the client ...
+    await client.disconnect()
+"""
+import asyncio
+import inspect
+import json
+import logging
+import time
+from typing import Any, Callable, Dict, Optional
+
+import websockets
+
+log = logging.getLogger("gateway.ma_ws")
+
+# Event types we care about
+EVENT_QUEUE_UPDATED = "queue_updated"
+EVENT_PLAYER_UPDATED = "player_updated"
+EVENT_QUEUE_ENDED = "queue_ended"
+EVENT_QUEUE_STARTED = "queue_started"
+EVENT_QUEUE_VOLATILE_UPDATED = "queue_volatile_updated"
+
+# WebSocket message types
+MESSAGE_TYPE_EVENT = "EVENT"
+MESSAGE_TYPE_RESULT = "RESULT"
+MESSAGE_TYPE_AUTH = "AUTH"
+
+# Reconnect settings
+RECONNECT_BASE_DELAY = 1.0
+RECONNECT_MAX_DELAY = 30.0
+RECONNECT_BACKOFF_FACTOR = 2.0
+RECONNECT_JITTER = 0.5
+
+# Heartbeat interval (seconds)
+HEARTBEAT_INTERVAL = 15.0
+
+# Command format
+COMMAND_PREFIX = "player/"
+PLAY_MEDIA_COMMAND = f"{COMMAND_PREFIX}play_media"
+
+
+EventCallback = Callable[[str, Dict[str, Any]], None]
+
+
+class MAWebSocketClient:
+    """
+    Async WebSocket client for Music Assistant's WebSocket API.
+
+    Provides:
+    - Persistent connection with auto-reconnect and exponential backoff
+    - Authentication with MA's JWT token
+    - Command dispatch (player/play_media, player/pause, etc.)
+    - Event callbacks for queue/player state changes
+    - Stream URL extraction from QUEUE_UPDATED events
+    """
+
+    def __init__(
+        self,
+        mass_url: str,
+        mass_token: str,
+        reconnect_base_delay: float = RECONNECT_BASE_DELAY,
+        reconnect_max_delay: float = RECONNECT_MAX_DELAY,
+        reconnect_backoff_factor: float = RECONNECT_BACKOFF_FACTOR,
+    ):
+        """
+        Initialize the MA WebSocket client.
+
+        Args:
+            mass_url: MA base URL (e.g., "http://ha.sumemail.com:8095")
+            mass_token: JWT authentication token
+            reconnect_base_delay: Base delay for reconnect attempts (seconds)
+            reconnect_max_delay: Maximum delay between reconnect attempts (seconds)
+            reconnect_backoff_factor: Multiplier for exponential backoff
+        """
+        self._mass_url = mass_url.rstrip("/")
+        self._mass_token = mass_token
+        self._ws_url = f"{self._mass_url}/ws"
+        self._reconnect_base_delay = reconnect_base_delay
+        self._reconnect_max_delay = reconnect_max_delay
+        self._reconnect_backoff_factor = reconnect_backoff_factor
+
+        # Connection state
+        self._ws: Any = None
+        self._connected = False
+        self._auth_token: Optional[str] = None
+        self._last_error: Optional[Exception] = None
+        self._reconnect_count = 0
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._message_handler_task: Optional[asyncio.Task] = None
+        self._shutdown_event = asyncio.Event()
+
+        # Queue state tracking
+        self._queue_state: Dict[str, Any] = {}
+        self._stream_url: Optional[str] = None
+
+        # Event callbacks
+        self._event_callbacks: Dict[str, list] = {}
+
+        # Message ID counter for request/response correlation
+        self._msg_id = 0
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def connected(self) -> bool:
+        """Whether the client is currently connected and authenticated."""
+        return self._connected and self._ws is not None
+
+    @property
+    def is_connected(self) -> bool:
+        """Alias for connected property."""
+        return self.connected
+
+    @property
+    def ws_url(self) -> str:
+        """The WebSocket URL being connected to."""
+        return self._ws_url
+
+    @property
+    def last_error(self) -> Optional[Exception]:
+        """The last error that occurred on the connection."""
+        return self._last_error
+
+    @property
+    def reconnect_count(self) -> int:
+        """Number of reconnect attempts made."""
+        return self._reconnect_count
+
+    @property
+    def queue_state(self) -> Dict[str, Any]:
+        """The latest queue state from MA."""
+        return self._queue_state
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    async def connect(self) -> None:
+        """
+        Connect to MA WebSocket and authenticate.
+
+        Raises:
+            ConnectionError: If the connection or authentication fails.
+        """
+        if self._connected:
+            log.warning("[MA-WS] Already connected, skipping connect")
+            return
+
+        self._shutdown_event.clear()
+        await self._establish_connection()
+
+    async def disconnect(self) -> None:
+        """
+        Gracefully disconnect from MA WebSocket.
+        """
+        self._shutdown_event.set()
+        await self._stop_background_tasks()
+
+        if self._ws:
+            try:
+                await self._ws.close(code=1000, reason="Gateway shutting down")
+            except Exception:
+                pass
+            self._ws = None
+
+        self._connected = False
+        log.info("[MA-WS] Disconnected")
+
+    async def send_command(self, command: str, args: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """
+        Send a command to MA via WebSocket.
+
+        Args:
+            command: Command name (e.g., "player/play_media", "player/pause")
+            args: Command arguments dict
+
+        Returns:
+            Response dict if a response was received, None otherwise.
+
+        Raises:
+            ConnectionError: If not connected.
+        """
+        if not self._connected:
+            raise ConnectionError("MA WebSocket client is not connected")
+
+        msg_id = self._next_msg_id()
+        payload: Dict[str, Any] = {
+            "message_id": msg_id,
+            "command": command,
+        }
+        if args is not None:
+            payload["args"] = args
+
+        try:
+            ws = self._ws
+            await ws.send(self._json_dump(payload))
+            log.info(f"[MA-WS] Sent command '{command}' (msg_id={msg_id})")
+        except Exception as e:
+            log.error(f"[MA-WS] Failed to send command '{command}': {e}")
+            raise
+
+    async def send_command_no_wait(self, command: str, args: Optional[Dict[str, Any]] = None) -> None:
+        """
+        Send a command without waiting for a response (fire-and-forget).
+
+        Args:
+            command: Command name
+            args: Command arguments dict
+        """
+        if not self._connected:
+            raise ConnectionError("MA WebSocket client is not connected")
+
+        msg_id = self._next_msg_id()
+        payload: Dict[str, Any] = {
+            "message_id": msg_id,
+            "command": command,
+        }
+        if args is not None:
+            payload["args"] = args
+
+        try:
+            ws = self._ws
+            await ws.send(self._json_dump(payload))
+            log.info(f"[MA-WS] Sent command '{command}' (no-wait, msg_id={msg_id})")
+        except Exception as e:
+            log.error(f"[MA-WS] Failed to send command '{command}': {e}")
+            raise
+
+    def register_event_callback(self, event_type: str, callback: EventCallback) -> None:
+        """
+        Register a callback for a specific event type.
+
+        Args:
+            event_type: Event type string (e.g., "queue_updated")
+            callback: Async or sync callable receiving (event_type, data)
+        """
+        if event_type not in self._event_callbacks:
+            self._event_callbacks[event_type] = []
+        self._event_callbacks[event_type].append(callback)
+        log.debug(f"[MA-WS] Registered callback for '{event_type}'")
+
+    def unregister_event_callback(self, event_type: str, callback: EventCallback) -> None:
+        """
+        Remove a previously registered event callback.
+
+        Args:
+            event_type: Event type string
+            callback: The callback to remove
+        """
+        if event_type in self._event_callbacks:
+            callbacks = self._event_callbacks[event_type]
+            if callback in callbacks:
+                callbacks.remove(callback)
+                log.debug(f"[MA-WS] Unregistered callback for '{event_type}'")
+
+    def get_stream_url(self) -> Optional[str]:
+        """
+        Get the latest resolved stream URL from the most recent QUEUE_UPDATED event.
+
+        Returns:
+            Stream URL string, or None if not yet available.
+        """
+        return self._stream_url
+
+    def get_queue_state(self) -> Dict[str, Any]:
+        """
+        Get the current queue state snapshot.
+
+        Returns:
+            Dict containing queue state (state, current_item, queue_id, etc.)
+        """
+        return dict(self._queue_state)
+
+    def get_current_item(self) -> Optional[Dict[str, Any]]:
+        """
+        Get the currently playing media item from queue state.
+
+        Returns:
+            Dict with item details, or None.
+        """
+        current = self._queue_state.get("current_item")
+        if isinstance(current, dict):
+            return current
+        return None
+
+    def get_queue_state_description(self) -> str:
+        """
+        Get a human-readable description of the current queue state.
+
+        Returns:
+            String description of queue state.
+        """
+        state = self._queue_state.get("state", "unknown")
+        current = self.get_current_item()
+        if current:
+            name = current.get("name", "Unknown")
+            artist = current.get("artists", [{}])[0].get("name", "") if isinstance(current.get("artists"), list) and current.get("artists") else current.get("artist", "")
+            return f"[{state}] {name}" + (f" by {artist}" if artist else "")
+        return f"[{state}] No current item"
+
+    # ------------------------------------------------------------------
+    # Internal - Connection Management
+    # ------------------------------------------------------------------
+
+    async def _establish_connection(self) -> None:
+        """
+        Establish WebSocket connection and authenticate with MA.
+        """
+        try:
+            log.info(f"[MA-WS] Connecting to {self._ws_url}")
+            headers = {
+                "Authorization": f"Bearer {self._mass_token}",
+            }
+
+            self._ws = await websockets.connect(
+                self._ws_url,
+                additional_headers=headers,
+                ping_interval=HEARTBEAT_INTERVAL,
+                ping_timeout=10.0,
+                close_timeout=5.0,
+            )
+
+            self._connected = True
+            self._reconnect_count = 0
+            log.info("[MA-WS] Connection established")
+
+            # Start background tasks
+            self._message_handler_task = asyncio.create_task(self._message_loop())
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
+
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self._last_error = e
+            self._connected = False
+            log.error(f"[MA-WS] Connection failed: {e}")
+            raise ConnectionError(f"Failed to connect to MA WebSocket: {e}")
+
+    async def _message_loop(self) -> None:
+        """
+        Main message processing loop. Receives messages from MA and
+        dispatches events to registered callbacks.
+        """
+        try:
+            async for message in self._ws:
+                if self._shutdown_event.is_set():
+                    break
+
+                try:
+                    await self._handle_message(message)
+                except Exception as e:
+                    log.error(f"[MA-WS] Error handling message: {e}", exc_info=True)
+        except websockets.ConnectionClosed as e:
+            log.warning(f"[MA-WS] Connection closed: {e}")
+            self._connected = False
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error(f"[MA-WS] Message loop error: {e}", exc_info=True)
+            self._last_error = e
+            self._connected = False
+
+    async def _heartbeat_loop(self) -> None:
+        """
+        Send periodic heartbeat pings to keep the connection alive.
+        """
+        while not self._shutdown_event.is_set():
+            try:
+                await asyncio.sleep(HEARTBEAT_INTERVAL)
+                if self._connected and self._ws:
+                    await self._ws.ping()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                if not self._shutdown_event.is_set():
+                    log.warning(f"[MA-WS] Heartbeat failed: {e}")
+                    break
+
+    async def _handle_message(self, message: str) -> None:
+        """
+        Parse and dispatch an incoming WebSocket message.
+
+        Args:
+            message: Raw JSON string from WebSocket
+        """
+        try:
+            data = self._json_load(message)
+        except json.JSONDecodeError:
+            log.warning(f"[MA-WS] Invalid JSON received: {message[:200]}")
+            return
+
+        if not isinstance(data, dict):
+            log.debug(f"[MA-WS] Non-dict message: {type(data)}")
+            return
+
+        msg_type = data.get("type") or data.get("message_type")
+        event_type = data.get("event") or data.get("event_type")
+
+        # Event message
+        if msg_type == MESSAGE_TYPE_EVENT or event_type:
+            evt = event_type or data.get("event", "")
+            evt_data = data.get("data", {})
+            log.debug(f"[MA-WS] Received event: {evt}")
+            await self._dispatch_event(evt, evt_data)
+
+        # Result message (response to a command)
+        elif msg_type == MESSAGE_TYPE_RESULT or "result" in data:
+            log.debug(f"[MA-WS] Received result: msg_id={data.get('message_id')}")
+
+        # Auth response
+        elif msg_type == MESSAGE_TYPE_AUTH:
+            log.info("[MA-WS] Auth response received")
+            if data.get("success") or "auth_required" not in data:
+                log.info("[MA-WS] Authentication successful")
+            else:
+                log.error("[MA-WS] Authentication failed")
+
+        # State update (not wrapped in EVENT type)
+        elif "event" in data or "queue" in message.lower()[:50]:
+            evt = data.get("event", "unknown")
+            evt_data = data.get("data", data)
+            log.debug(f"[MA-WS] Received event (alt format): {evt}")
+            await self._dispatch_event(evt, evt_data)
+
+    async def _dispatch_event(self, event_type: str, data: Dict[str, Any]) -> None:
+        """
+        Dispatch an event to all registered callbacks.
+
+        Args:
+            event_type: The event type string
+            data: The event data payload
+        """
+        # Update queue state for queue-related events
+        if event_type == EVENT_QUEUE_UPDATED:
+            self._queue_state = data
+            self._extract_stream_url(data)
+        elif event_type == EVENT_PLAYER_UPDATED:
+            self._queue_state = data
+        elif event_type in (EVENT_QUEUE_ENDED, EVENT_QUEUE_STARTED, EVENT_QUEUE_VOLATILE_UPDATED):
+            self._queue_state = data
+            self._extract_stream_url(data)
+
+        # Dispatch to callbacks
+        if event_type in self._event_callbacks:
+            callbacks = list(self._event_callbacks[event_type])
+            for callback in callbacks:
+                try:
+                    if inspect.iscoroutinefunction(callback):
+                        await callback(event_type, data)
+                    else:
+                        callback(event_type, data)
+                except Exception as e:
+                    log.error(f"[MA-WS] Callback error for '{event_type}': {e}", exc_info=True)
+
+    def _extract_stream_url(self, data: Dict[str, Any]) -> None:
+        """
+        Extract the resolved stream URL from queue state data.
+
+        MA resolves URIs to actual stream URLs in the queue state.
+        The URL pattern is typically:
+        http://{mass_url}:8096/flow/{session_id}/{queue_id}/{queue_item_id}/{player_id}.mp3
+
+        Args:
+            data: Queue state data from MA
+        """
+        # Check for stream_url in the current item
+        current_item = data.get("current_item", {})
+        if isinstance(current_item, dict):
+            media_item = current_item.get("media_item", {})
+            stream_url = media_item.get("stream_url") or current_item.get("stream_url")
+            if stream_url:
+                self._stream_url = stream_url
+                log.info(f"[MA-WS] Stream URL resolved: {stream_url[:100]}...")
+                return
+
+        # Check for queue items with stream URLs
+        queue_items = data.get("items", [])
+        if isinstance(queue_items, list):
+            for item in queue_items:
+                if isinstance(item, dict):
+                    stream_url = item.get("stream_url")
+                    if stream_url:
+                        self._stream_url = stream_url
+                        log.info(f"[MA-WS] Stream URL from queue item: {stream_url[:100]}...")
+                        return
+
+        # Check for audio_player stream info
+        audio_player = data.get("audio_player", {})
+        if isinstance(audio_player, dict):
+            stream_url = audio_player.get("stream_url")
+            if stream_url:
+                self._stream_url = stream_url
+                log.info(f"[MA-WS] Stream URL from audio_player: {stream_url[:100]}...")
+                return
+
+        # Clear stream URL if not found (may indicate stopped state)
+        if data.get("state") == "idle":
+            self._stream_url = None
+
+    # ------------------------------------------------------------------
+    # Internal - Reconnect Logic
+    # ------------------------------------------------------------------
+
+    async def _reconnect(self) -> None:
+        """
+        Attempt to reconnect with exponential backoff and jitter.
+        """
+        self._reconnect_count += 1
+        delay = min(
+            self._reconnect_base_delay * (self._reconnect_backoff_factor ** (self._reconnect_count - 1)),
+            self._reconnect_max_delay,
+        )
+        # Add jitter to prevent thundering herd
+        jitter = delay * RECONNECT_JITTER * (1.0 - 2.0 * hash(str(time.time())) % 1)
+        delay = max(0.1, delay + jitter)
+
+        log.warning(
+            f"[MA-WS] Reconnect attempt {self._reconnect_count} in {delay:.1f}s "
+            f"(last error: {self._last_error})"
+        )
+
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            return
+
+        try:
+            await self._establish_connection()
+        except Exception as e:
+            self._last_error = e
+            log.error(f"[MA-WS] Reconnect attempt {self._reconnect_count} failed: {e}")
+            # Schedule another reconnect attempt
+            if not self._shutdown_event.is_set():
+                self._reconnect_task = asyncio.create_task(self._reconnect())
+
+    async def _stop_background_tasks(self) -> None:
+        """
+        Cancel all background tasks gracefully.
+        """
+        for task in (self._reconnect_task, self._heartbeat_task, self._message_handler_task):
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+        self._reconnect_task = None
+        self._heartbeat_task = None
+        self._message_handler_task = None
+
+    # ------------------------------------------------------------------
+    # Internal - Utilities
+    # ------------------------------------------------------------------
+
+    def _next_msg_id(self) -> int:
+        """Generate a unique message ID."""
+        self._msg_id += 1
+        return self._msg_id
+
+    @staticmethod
+    def _json_load(text: str) -> Any:
+        """Parse JSON string."""
+        import json
+        return json.loads(text)
+
+    @staticmethod
+    def _json_dump(obj: Any) -> str:
+        """Serialize to JSON string."""
+        import json
+        return json.dumps(obj)
+
+    # ------------------------------------------------------------------
+    # Context Manager Support
+    # ------------------------------------------------------------------
+
+    async def __aenter__(self):
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.disconnect()
+        return False
+
+    # ------------------------------------------------------------------
+    # String representation
+    # ------------------------------------------------------------------
+
+    def __repr__(self) -> str:
+        status = "connected" if self._connected else "disconnected"
+        return (
+            f"<MAWebSocketClient {status} url={self._ws_url} "
+            f"reconnects={self._reconnect_count} stream_url={'set' if self._stream_url else 'none'}>"
+        )
