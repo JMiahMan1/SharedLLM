@@ -684,18 +684,19 @@ const Media = () => {
     }
   }, [localMuted]);
 
-  // Setup local Audio element event listeners
-useEffect(() => {
-  if (localTrack) {
-    if (localAudioRef.current) {
-      localAudioRef.current.pause();
-      localAudioRef.current.src = '';
-    }
-    localAudioRef.current = new Audio();
-    localAudioRef.current.src = localStreamUrl!;
-    localAudioRef.current.volume = localVolume / 100;
-    localAudioRef.current.muted = localMuted;
-    localAudioRef.current.load();
+// Setup local Audio element event listeners
+   /* eslint-disable react-hooks/exhaustive-deps -- localVolume and localMuted are synced separately by dedicated effects; re-running would recreate Audio and interrupt playback */
+   useEffect(() => {
+     if (localTrack) {
+       if (localAudioRef.current) {
+         localAudioRef.current.pause();
+         localAudioRef.current.src = '';
+       }
+       localAudioRef.current = new Audio();
+       localAudioRef.current.src = localStreamUrl!;
+       localAudioRef.current.volume = localVolume / 100;
+       localAudioRef.current.muted = localMuted;
+       localAudioRef.current.load();
 
     const onLoaded = () => {
       setLocalIsLoaded(true);
@@ -722,6 +723,7 @@ useEffect(() => {
     };
   }
 }, [localStreamUrl]);
+   /* eslint-enable react-hooks/exhaustive-deps */
 
   // Handle local playback progress tracking
   useEffect(() => {
