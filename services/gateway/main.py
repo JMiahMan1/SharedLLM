@@ -441,6 +441,7 @@ HUMAN_READABLE_CAPABILITIES = {
 
 # --- Global Clients ---
 _global_http_client: Optional[httpx.AsyncClient] = None
+_dns_recovery_lock = asyncio.Lock()
 
 def get_http_client() -> httpx.AsyncClient:
     """Lazy initializer for the global httpx client to ensure test compatibility."""
@@ -452,9 +453,61 @@ def get_http_client() -> httpx.AsyncClient:
         )
     return _global_http_client
 
+async def recreate_http_client():
+    """Close the current client and create a new one with fresh DNS resolution.
+    This is needed when DNS changes (e.g., dns-sync restart) cause stale keepalive
+    connections to fail with empty httpx.RequestError messages."""
+    async with _dns_recovery_lock:
+        global _global_http_client
+        if _global_http_client is not None:
+            log.info("[DNSRecovery] Closing stale HTTP client to refresh DNS resolution")
+            await _global_http_client.aclose()
+            _global_http_client = None
+        _global_http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(300.0, connect=30.0),
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
+        )
+        log.info("[DNSRecovery] New HTTP client created with fresh DNS resolution")
+
+def _is_dns_failure(e: httpx.RequestError) -> bool:
+    """Detect DNS-related failures that indicate stale DNS cache.
+    These manifest as httpx.RequestError with empty messages when using
+    keepalive connections that were established before a DNS change."""
+    msg = str(e).strip()
+    # Empty message on a keepalive connection = stale DNS resolution
+    if not msg:
+        return True
+    # Docker DNS failure patterns
+    dns_patterns = ["nodename", "noname", "could not resolve", "getaddrinfo",
+                    "Name or service not known", "DNS", "resolve"]
+    return any(p.lower() in msg.lower() for p in dns_patterns)
+
 @asynccontextmanager
 async def borrow_http_client():
     yield get_http_client()
+
+async def retry_http_request(func, service_name: str, max_retries: int = 2, base_delay: float = 0.1, dns_recovery: bool = True):
+    """Retry an httpx request with exponential backoff for transient errors.
+    Detects DNS-related failures (empty RequestError messages on stale connections)
+    and automatically recreates the HTTP client to refresh DNS resolution."""
+    for attempt in range(max_retries + 1):
+        try:
+            return await func()
+        except httpx.RequestError as e:
+            if attempt == max_retries:
+                log.error(f"{service_name}: All {max_retries + 1} attempts failed: {e}")
+                raise
+            # If this looks like a DNS failure and recovery is enabled, recreate the client
+            if dns_recovery and _is_dns_failure(e) and attempt == 0:
+                log.warning(f"{service_name}: DNS-related failure detected, recreating HTTP client")
+                try:
+                    await recreate_http_client()
+                except Exception as rec_err:
+                    log.error(f"{service_name}: Failed to recreate HTTP client: {rec_err}")
+            delay = base_delay * (2 ** attempt)
+            log.warning(f"{service_name}: RequestError (attempt {attempt+1}/{max_retries+1}): {e}. Retrying in {delay}s")
+            await asyncio.sleep(delay)
+    raise Exception(f"Unexpected: exhausted retries for {service_name}")
 
 # Global config validation state
 _config_validation_result = None
@@ -1576,23 +1629,25 @@ async def decompose_command_query(query: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 async def resolve_identity(body: dict) -> Any:
-    try:
-      async with httpx.AsyncClient() as client:
-          resp = await client.post(
+    client = get_http_client()
+    async def do_resolve():
+        resp = await client.post(
             f"{IDENTITY_SVC}/api/resolve",
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=5.0
-          )
-          if resp.status_code != 200:
+            timeout=httpx.Timeout(300.0, connect=30.0)
+        )
+        if resp.status_code != 200:
             err_detail = f"Identity resolution failed: {resp.status_code} {resp.text}"
             log.error(err_detail)
             raise HTTPException(status_code=resp.status_code, detail=err_detail)
-          data = resp.json()
-          if not isinstance(data, dict):
+        data = resp.json()
+        if not isinstance(data, dict):
             log.error(f"Identity resolution returned non-dict: {data}")
             raise HTTPException(status_code=500, detail="Identity resolution format error")
-          return data
+        return data
+    try:
+        return await retry_http_request(do_resolve, "Identity resolution", max_retries=2, base_delay=0.1)
     except httpx.RequestError as e:
       log.error(f"Identity service unreachable: {e}")
       raise HTTPException(status_code=503, detail="Identity service unreachable")
@@ -4791,17 +4846,19 @@ async def _resolve_user_context(request: Request, body: dict) -> Any:
 @app.post("/execute/media/status")
 async def proxy_media_status(request: Request):
     """Proxy media status requests from UI to execution service."""
+    client = get_http_client()
+    async def do_proxy():
+        body = await request.json() if await request.body() else {}
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/media/status",
+            json=exec_body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            body = await request.json() if await request.body() else {}
-            user_ctx = await _resolve_user_context(request, body)
-            exec_body = {**body, "user_context": user_ctx}
-            resp = await client.post(
-                f"{EXECUTION_SVC}/execute/media/status",
-                json=exec_body,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return await retry_http_request(do_proxy, "Execution service (media status)", max_retries=2, base_delay=0.1)
     except httpx.RequestError as e:
         log.error(f"Execution service unreachable for media status: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
@@ -4810,17 +4867,19 @@ async def proxy_media_status(request: Request):
 @app.post("/execute/media/transport")
 async def proxy_media_transport(request: Request):
     """Proxy media transport requests from UI to execution service."""
+    client = get_http_client()
+    async def do_proxy():
+        body = await request.json() if await request.body() else {}
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/media/transport",
+            json=exec_body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            body = await request.json() if await request.body() else {}
-            user_ctx = await _resolve_user_context(request, body)
-            exec_body = {**body, "user_context": user_ctx}
-            resp = await client.post(
-                f"{EXECUTION_SVC}/execute/media/transport",
-                json=exec_body,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return await retry_http_request(do_proxy, "Execution service (media transport)", max_retries=2, base_delay=0.1)
     except httpx.RequestError as e:
         log.error(f"Execution service unreachable for media transport: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
@@ -4829,17 +4888,19 @@ async def proxy_media_transport(request: Request):
 @app.post("/execute/media/play")
 async def proxy_media_play(request: Request):
     """Proxy media play requests from UI to execution service."""
+    client = get_http_client()
+    async def do_proxy():
+        body = await request.json() if await request.body() else {}
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/media/play",
+            json=exec_body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            body = await request.json() if await request.body() else {}
-            user_ctx = await _resolve_user_context(request, body)
-            exec_body = {**body, "user_context": user_ctx}
-            resp = await client.post(
-                f"{EXECUTION_SVC}/execute/media/play",
-                json=exec_body,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return await retry_http_request(do_proxy, "Execution service (media play)", max_retries=2, base_delay=0.1)
     except httpx.RequestError as e:
         log.error(f"Execution service unreachable for media play: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
@@ -4848,17 +4909,19 @@ async def proxy_media_play(request: Request):
 @app.post("/execute/media/state/sync")
 async def proxy_media_state_sync(request: Request):
     """Proxy media state sync requests from UI to execution service."""
+    client = get_http_client()
+    async def do_proxy():
+        body = await request.json() if await request.body() else {}
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/media/state/sync",
+            json=exec_body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            body = await request.json() if await request.body() else {}
-            user_ctx = await _resolve_user_context(request, body)
-            exec_body = {**body, "user_context": user_ctx}
-            resp = await client.post(
-                f"{EXECUTION_SVC}/execute/media/state/sync",
-                json=exec_body,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return await retry_http_request(do_proxy, "Execution service (media state sync)", max_retries=2, base_delay=0.1)
     except httpx.RequestError as e:
         log.error(f"Execution service unreachable for media state sync: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
@@ -4867,21 +4930,23 @@ async def proxy_media_state_sync(request: Request):
 @app.post("/execute/entity/search")
 async def proxy_entity_search(request: Request):
     """Proxy entity search requests from UI to execution service."""
+    client = get_http_client()
+    async def do_proxy():
+        body = await request.json() if await request.body() else {}
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/entity/search",
+            json=exec_body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        data = resp.json()
+        if isinstance(data, dict):
+            entities = data.get("detail", {}).get("entities", [])
+            data["result"] = entities
+        return JSONResponse(content=data, status_code=resp.status_code)
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            body = await request.json() if await request.body() else {}
-            user_ctx = await _resolve_user_context(request, body)
-            exec_body = {**body, "user_context": user_ctx}
-            resp = await client.post(
-                f"{EXECUTION_SVC}/execute/entity/search",
-                json=exec_body,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            data = resp.json()
-            if isinstance(data, dict):
-                entities = data.get("detail", {}).get("entities", [])
-                data["result"] = entities
-            return JSONResponse(content=data, status_code=resp.status_code)
+        return await retry_http_request(do_proxy, "Execution service (entity search)", max_retries=2, base_delay=0.1)
     except httpx.RequestError as e:
         log.error(f"Execution service unreachable for entity search: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
@@ -4890,17 +4955,19 @@ async def proxy_entity_search(request: Request):
 @app.post("/execute/audiobookshelf")
 async def proxy_audiobookshelf(request: Request):
     """Proxy audiobookshelf requests from UI to execution service."""
+    client = get_http_client()
+    async def do_proxy():
+        body = await request.json() if await request.body() else {}
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/audiobookshelf",
+            json=exec_body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(content=resp.json(), status_code=resp.status_code)
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            body = await request.json() if await request.body() else {}
-            user_ctx = await _resolve_user_context(request, body)
-            exec_body = {**body, "user_context": user_ctx}
-            resp = await client.post(
-                f"{EXECUTION_SVC}/execute/audiobookshelf",
-                json=exec_body,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return await retry_http_request(do_proxy, "Execution service (audiobookshelf)", max_retries=2, base_delay=0.1)
     except httpx.RequestError as e:
         log.error(f"Execution service unreachable for audiobookshelf: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
@@ -4913,7 +4980,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
     try:
         try:
             creds = await _resolve_identity_from_request(request)
-            log.info(f"[stream/abs] Identity resolved successfully for user: {creds.user}")
+            log.info(f"[stream/abs] Identity resolved successfully for user: {creds.get('user')}")
         except HTTPException as e:
             log.error(f"[stream/abs] Identity resolution failed: {e.detail}")
             raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
@@ -4921,10 +4988,10 @@ async def stream_audiobookshelf(book_id: str, request: Request):
             log.error(f"[stream/abs] Identity resolution crashed: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Internal server error resolving identity")
 
-        abs_url = creds.audiobookshelf_url or ""
-        abs_key = creds.audiobookshelf_api_key or ""
-        abs_user = creds.audiobookshelf_user or ""
-        abs_pass = creds.audiobookshelf_pass or ""
+        abs_url = creds.get("audiobookshelf_url") or ""
+        abs_key = creds.get("audiobookshelf_api_key") or ""
+        abs_user = creds.get("audiobookshelf_user") or ""
+        abs_pass = creds.get("audiobookshelf_pass") or ""
 
         log.info(f"[stream/abs] Resolved credentials: url={abs_url}, has_key={bool(abs_key)}, user={abs_user}, has_pass={bool(abs_pass)}")
 
@@ -5040,7 +5107,7 @@ async def stream_music_assistant(uri: str, request: Request):
     try:
         try:
             creds = await _resolve_identity_from_request(request)
-            log.info(f"[stream/ma] Identity resolved for user: {creds.user}")
+            log.info(f"[stream/ma] Identity resolved for user: {creds.get('user')}")
         except HTTPException as e:
             log.error(f"[stream/ma] Identity resolution failed: {e.detail}")
             raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
@@ -5048,8 +5115,8 @@ async def stream_music_assistant(uri: str, request: Request):
             log.error(f"[stream/ma] Identity resolution crashed: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Internal server error resolving identity")
 
-        mass_url = creds.mass_url or ""
-        mass_token = creds.mass_token or ""
+        mass_url = creds.get("mass_url") or ""
+        mass_token = creds.get("mass_token") or ""
 
         log.info(f"[stream/ma] Credentials: url={mass_url}, has_token={bool(mass_token)}")
 
