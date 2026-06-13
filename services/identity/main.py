@@ -121,11 +121,11 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE ravenmission ADD COLUMN slug VARCHAR"))
             conn.commit()
 
-    if "device_assignment" in inspector.get_table_names():
-        da_columns = {column["name"] for column in inspector.get_columns("device_assignment")}
+    if "deviceassignment" in inspector.get_table_names():
+        da_columns = {column["name"] for column in inspector.get_columns("deviceassignment")}
         with engine.connect() as conn:
             if "revoked" not in da_columns:
-                conn.execute(text("ALTER TABLE device_assignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0"))
+                conn.execute(text("ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0"))
             conn.commit()
 
     if "user_widgets" not in inspector.get_table_names():
