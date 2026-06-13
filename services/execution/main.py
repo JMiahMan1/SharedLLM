@@ -2183,12 +2183,12 @@ async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None
         return None, None
     
     url = creds.get("skylight_url") or _SKYLIGHT_BASE
-    pass_enc = creds.get("skylight_pass_enc")
+    password = creds.get("skylight_pass")
     
     # Determine the email/login name to use
     email = username if username else creds.get("skylight_email")
     
-    if not email or not pass_enc:
+    if not email or not password:
         return None, None
         
     # Check if the user has disabled the integration
@@ -2202,15 +2202,6 @@ async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None
     if email in _skylight_tokens:
         return url, _skylight_tokens[email]
 
-    try:
-        from services.identity.crypto import decrypt as _decrypt
-        password = _decrypt(pass_enc)
-    except Exception:
-        log.error("[skylight] Failed to decrypt password")
-        return None, None
-    
-    if not password:
-        return None, None
     
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
