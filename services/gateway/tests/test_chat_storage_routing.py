@@ -13,6 +13,53 @@ from fastapi.testclient import TestClient
 from services.gateway.main import app, STORAGE_SVC
 from services.gateway.config import IDENTITY_SVC, RAG_SVC
 import json
+import os
+from sqlmodel import Session, create_engine, select
+from services.identity.models import GlobalSetting
+
+def get_test_settings():
+    db_path = "/data/identity.db"
+    if not os.path.exists(db_path):
+        _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        db_path = os.path.join(_root, "data", "identity.db")
+
+    settings = {}
+    if os.path.exists(db_path):
+        try:
+            engine = create_engine(f"sqlite:///{db_path}")
+            with Session(engine) as session:
+                for s in session.exec(select(GlobalSetting)).all():
+                    settings[s.key] = s.value
+        except Exception:
+            pass
+
+    # Fallback to env/defaults if DB doesn't have it
+    if not settings.get("assistant_model"):
+        settings["assistant_model"] = os.getenv("ASSISTANT_MODEL") or "qwen3.6-35b-a3b:q4_k_m"
+    if not settings.get("coding_model"):
+        settings["coding_model"] = os.getenv("CODING_MODEL") or "qwen2.5-coder:7b"
+    if not settings.get("llm_local_url"):
+        settings["llm_local_url"] = os.getenv("OLLAMA_URL") or "http://localhost:11434"
+    if not settings.get("embedding_model"):
+        settings["embedding_model"] = os.getenv("EMBEDDING_MODEL") or "BAAI/bge-small-en-v1.5"
+    if not settings.get("active_llm_provider"):
+        settings["active_llm_provider"] = os.getenv("ACTIVE_LLM_PROVIDER") or "ollama"
+
+    # Force service URLs to match the test environment
+    for key, env_var in [
+        ("identity_svc_url", "IDENTITY_SVC_URL"),
+        ("execution_svc_url", "EXECUTION_SVC_URL"),
+        ("rag_svc_url", "RAG_SVC_URL"),
+        ("storage_svc_url", "STORAGE_SVC_URL"),
+        ("logging_svc_url", "LOGGING_SVC_URL"),
+        ("workspace_runtime_svc_url", "WORKSPACE_RUNTIME_SVC_URL"),
+        ("control_plane_url", "CONTROL_PLANE_URL"),
+        ("llama_server_proxy_url", "LLAMA_SERVER_PROXY_URL")
+    ]:
+        if os.getenv(env_var):
+            settings[key] = os.getenv(env_var)
+
+    return settings
 
 client = TestClient(app)
 
@@ -22,19 +69,20 @@ def auth_headers():
 
 @respx.mock
 def test_chat_storage_routing(auth_headers):
+    settings = get_test_settings()
+    identity_svc = settings.get("identity_svc_url") or IDENTITY_SVC
+    rag_svc = settings.get("rag_svc_url") or RAG_SVC
+    storage_svc = settings.get("storage_svc_url") or STORAGE_SVC
+
     # Mock identity settings (needed by get_assistant_model in chat path)
-    respx.get(f"{IDENTITY_SVC}/api/settings").mock(
+    respx.get(f"{identity_svc}/api/settings").mock(
         return_value=httpx.Response(200, json=[
-            {"key": "active_llm_provider", "value": "ollama"},
-            {"key": "ollama_assistant_model", "value": "qwen3:8b"},
-            {"key": "ollama_coding_model", "value": "qwen3:8b"},
-            {"key": "llm_local_url", "value": "http://localhost:11434"},
-            {"key": "embedding_model", "value": "BAAI/bge-small-en-v1.5"}
+            {"key": k, "value": v} for k, v in settings.items()
         ])
     )
     
     # Mock identity resolution
-    respx.post(f"{IDENTITY_SVC}/api/resolve").mock(
+    respx.post(f"{identity_svc}/api/resolve").mock(
         return_value=httpx.Response(200, json={
             "user": "testuser",
             "is_admin": True,
@@ -47,7 +95,7 @@ def test_chat_storage_routing(auth_headers):
     )
     
     # Mock the RAG search
-    respx.post(f"{RAG_SVC}/rag/search").mock(
+    respx.post(f"{rag_svc}/rag/search").mock(
         return_value=httpx.Response(200, json={"results": []})
     )
 
@@ -56,7 +104,7 @@ def test_chat_storage_routing(auth_headers):
     # to avoid infinite loops in the AgentLoop.
     responses = [
         {
-            "model": "qwen3:8b",
+            "model": settings.get("assistant_model"),
             "message": {
                 "role": "assistant",
                 "content": "Sure, I will index your storage.\n```json\n{\"action\": \"storageindexrequest\", \"payload\": {\"path\": \"/myfolder\"}}\n```"
@@ -64,7 +112,7 @@ def test_chat_storage_routing(auth_headers):
             "done": True
         },
         {
-            "model": "qwen3:8b",
+            "model": settings.get("assistant_model"),
             "message": {
                 "role": "assistant",
                 "content": "I have started the indexing process for you. (System Update: Indexing started)"
@@ -80,10 +128,11 @@ def test_chat_storage_routing(auth_headers):
         except StopIteration:
             return httpx.Response(200, json=responses[-1])
 
-    llm_route = respx.post("http://localhost:11434/api/chat").mock(side_effect=ollama_side_effect)
+    llm_local_url = settings.get("llm_local_url")
+    llm_route = respx.post(f"{llm_local_url}/api/chat").mock(side_effect=ollama_side_effect)
 
     # Mock Storage Index call
-    storage_route = respx.post(f"{STORAGE_SVC}/index/full").mock(
+    storage_route = respx.post(f"{storage_svc}/index/full").mock(
         return_value=httpx.Response(200, json={"message": "Indexing started"})
     )
 

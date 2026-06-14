@@ -224,7 +224,7 @@ class TestLiveIdentityState:
         assert len(settings) > 10, "Expected seeded global settings"
 
         keys = {s["key"] for s in settings}
-        assert "assistant_model" in keys or "ollama_assistant_model" in keys
+        assert "assistant_model" in keys
         assert "system_autonomous_protocols" in keys
         assert "fast_path_threshold" in keys
 

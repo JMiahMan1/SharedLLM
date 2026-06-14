@@ -430,8 +430,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     
     # Log relevant model settings for debugging
     log.info(f"[AgentLoop] Settings: active_provider={active_provider_name}, "
-             f"ollama_assistant_model={settings.get('ollama_assistant_model')}, "
-             f"ollama_coding_model={settings.get('ollama_coding_model')}, "
              f"assistant_model={settings.get('assistant_model')}, "
              f"coding_model={settings.get('coding_model')}")
  
@@ -441,17 +439,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         tech_keywords = ["coder", "fix", "repair", "audit", "mission", "raven", "development", "git", "workspace"]
         is_technical = any(word in query.lower() for word in tech_keywords) or "coder" in selected_model
         
-        if active_provider_name == "openrouter":
-            if is_technical:
-                selected_model = settings.get("cloud_coding_model") or ""
-            else:
-                selected_model = settings.get("cloud_assistant_model") or ""
+        if is_technical:
+            selected_model = settings.get("coding_model") or ""
         else:
-            # Both ollama and llama_server use the same model settings
-            if is_technical:
-                selected_model = settings.get("ollama_coding_model") or settings.get("coding_model") or ""
-            else:
-                selected_model = settings.get("ollama_assistant_model") or settings.get("assistant_model") or ""
+            selected_model = settings.get("assistant_model") or ""
         log.info(f"[AgentLoop] Model resolved from '{original_model}' to '{selected_model}' (is_technical={is_technical})")
     else:
         log.info(f"[AgentLoop] Using explicit model: '{selected_model}' (not auto/assistant/coder)")

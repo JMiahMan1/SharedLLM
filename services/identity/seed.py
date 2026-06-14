@@ -240,18 +240,18 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 session.add(existing)
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
 
-    # ── Seed Ollama models from .env (seed-only, overrides DEFAULT_GLOBAL_SETTINGS) ─
+    # ── Seed models from .env (seed-only, overrides DEFAULT_GLOBAL_SETTINGS) ──
     env_models = {
-        "ASSISTANT_MODEL": "ollama_assistant_model",
-        "CODING_MODEL": "ollama_coding_model",
-        "LIBRARIAN_MODEL": "ollama_librarian_model",
+        "ASSISTANT_MODEL": "assistant_model",
+        "CODING_MODEL": "coding_model",
+        "LIBRARIAN_MODEL": "librarian_model",
     }
     for env_key, global_key in env_models.items():
         env_val = os.getenv(env_key)
         if env_val:
             existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
             if not existing:
-                session.add(GlobalSetting(key=global_key, value=env_val, description=f"Ollama {global_key} model. Seeded from .env {env_key} on first startup."))
+                session.add(GlobalSetting(key=global_key, value=env_val, description=f"Global {global_key} model. Seeded from .env {env_key} on first startup."))
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
             elif not existing.value or existing.value == "qwen3:8b" or force:
                 existing.value = env_val
