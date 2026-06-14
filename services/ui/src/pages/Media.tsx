@@ -20,6 +20,9 @@ interface MediaStatus {
   media_album?: string;
   volume_level?: number;
   is_volume_muted?: boolean;
+  position?: number;
+  duration?: number;
+  entity_picture?: string;
 }
 
 interface MediaEntity {
@@ -162,6 +165,8 @@ const NowPlayingCard = ({
   volume,
   muted,
   loading,
+  currentTime = 0,
+  duration = 0,
   onPrevious,
   onTogglePlay,
   onNext,
@@ -174,6 +179,8 @@ const NowPlayingCard = ({
   volume: number;
   muted: boolean;
   loading: string | null;
+  currentTime?: number;
+  duration?: number;
   onPrevious: () => void;
   onTogglePlay: () => void;
   onNext: () => void;
@@ -182,14 +189,37 @@ const NowPlayingCard = ({
 }) => {
   const nowPlaying = mediaStatus?.state === 'playing' || mediaStatus?.state === 'paused';
 
+  const formatTime = (seconds: number) => {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const coverUrl = useMemo(() => {
+    if (!mediaStatus?.entity_picture) return null;
+    const path = mediaStatus.entity_picture;
+    const apiToken = storageGetSync('jarvis_api_key') ?? '';
+    return `/api/media/imageproxy?path=${encodeURIComponent(path)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
+  }, [mediaStatus?.entity_picture]);
+
   return (
     <div className="glass-panel rounded-2xl p-5 border border-cyan-500/20 relative overflow-visible">
       <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-purple-500/5 pointer-events-none rounded-2xl" />
 
       <div className="relative flex flex-col sm:flex-row sm:items-center gap-4">
-        {/* icon */}
-        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gradient-to-br from-cyan-500/30 to-purple-500/30 flex items-center justify-center shrink-0 shadow-lg shadow-cyan-500/10">
-          {nowPlaying ? <Music size={28} className="text-cyan-400" /> : <Play size={28} className="text-cyan-400" />}
+        {/* cover art or icon */}
+        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-xl bg-gradient-to-br from-cyan-500/30 to-purple-500/30 flex items-center justify-center shrink-0 shadow-lg shadow-cyan-500/10 relative overflow-hidden group">
+          {coverUrl ? (
+            <>
+              <div className="absolute inset-0 bg-cyan-500/20 blur-xl opacity-50 group-hover:opacity-80 transition-opacity" />
+              <img src={coverUrl} alt="Cover art" className="w-full h-full object-cover relative z-10" />
+            </>
+          ) : nowPlaying ? (
+            <Music size={28} className="text-cyan-400" />
+          ) : (
+            <Play size={28} className="text-cyan-400" />
+          )}
         </div>
 
         {/* metadata + transport */}
@@ -241,6 +271,21 @@ const NowPlayingCard = ({
           </div>
         </div>
       </div>
+
+      {nowPlaying && duration > 0 && (
+        <div className="mt-4 pt-3 border-t border-white/5">
+          <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden relative">
+            <div
+              className="h-full bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full transition-all"
+              style={{ width: `${Math.min(100, (currentTime / duration) * 100)}%` }}
+            />
+          </div>
+          <div className="flex justify-between mt-1.5 text-[10px] text-slate-500 font-mono">
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(duration)}</span>
+          </div>
+        </div>
+      )}
 
       {localMode ? (
         <div className="relative mt-4 pt-3 border-t border-white/5">
@@ -684,46 +729,56 @@ const Media = () => {
     }
   }, [localMuted]);
 
-// Setup local Audio element event listeners
-   /* eslint-disable react-hooks/exhaustive-deps -- localVolume and localMuted are synced separately by dedicated effects; re-running would recreate Audio and interrupt playback */
-   useEffect(() => {
-     if (localTrack) {
-       if (localAudioRef.current) {
-         localAudioRef.current.pause();
-         localAudioRef.current.src = '';
-       }
-       localAudioRef.current = new Audio();
-       localAudioRef.current.src = localStreamUrl!;
-       localAudioRef.current.volume = localVolume / 100;
-       localAudioRef.current.muted = localMuted;
-       localAudioRef.current.load();
+  // Setup local Audio element event listeners
+  /* eslint-disable react-hooks/exhaustive-deps -- localVolume and localMuted are synced separately by dedicated effects; re-running would recreate Audio and interrupt playback */
+  useEffect(() => {
+    if (localTrack && localStreamUrl) {
+      if (localAudioRef.current) {
+        localAudioRef.current.pause();
+        localAudioRef.current.src = '';
+      }
+      localAudioRef.current = new Audio();
+      localAudioRef.current.src = localStreamUrl;
+      localAudioRef.current.volume = localVolume / 100;
+      localAudioRef.current.muted = localMuted;
+      localAudioRef.current.load();
 
-    const onLoaded = () => {
-      setLocalIsLoaded(true);
-      setLocalDuration(localAudioRef.current?.duration || 0);
-      localAudioRef.current?.play().catch(() => {});
-    };
-    const onEnded = () => {
-      setLocalIsPlaying(false);
-      setLocalIsLoaded(false);
-    };
-    const onError = () => {
-      setLocalIsPlaying(false);
-      setLocalIsLoaded(false);
-      setLocalError('Failed to load stream. Check your connection.');
-    };
+      const onLoaded = () => {
+        setLocalIsLoaded(true);
+        setLocalDuration(localAudioRef.current?.duration || 0);
+        localAudioRef.current?.play().catch(() => {});
+      };
+      const onPlay = () => {
+        setLocalIsPlaying(true);
+      };
+      const onPause = () => {
+        setLocalIsPlaying(false);
+      };
+      const onEnded = () => {
+        setLocalIsPlaying(false);
+        setLocalIsLoaded(false);
+      };
+      const onError = () => {
+        setLocalIsPlaying(false);
+        setLocalIsLoaded(false);
+        setLocalError('Failed to load stream. Check your connection.');
+      };
 
-    localAudioRef.current.addEventListener('loadeddata', onLoaded);
-    localAudioRef.current.addEventListener('ended', onEnded);
-    localAudioRef.current.addEventListener('error', onError);
-    return () => {
-      localAudioRef.current?.removeEventListener('loadeddata', onLoaded);
-      localAudioRef.current?.removeEventListener('ended', onEnded);
-      localAudioRef.current?.removeEventListener('error', onError);
-    };
-  }
-}, [localStreamUrl]);
-   /* eslint-enable react-hooks/exhaustive-deps */
+      localAudioRef.current.addEventListener('loadeddata', onLoaded);
+      localAudioRef.current.addEventListener('play', onPlay);
+      localAudioRef.current.addEventListener('pause', onPause);
+      localAudioRef.current.addEventListener('ended', onEnded);
+      localAudioRef.current.addEventListener('error', onError);
+      return () => {
+        localAudioRef.current?.removeEventListener('loadeddata', onLoaded);
+        localAudioRef.current?.removeEventListener('play', onPlay);
+        localAudioRef.current?.removeEventListener('pause', onPause);
+        localAudioRef.current?.removeEventListener('ended', onEnded);
+        localAudioRef.current?.removeEventListener('error', onError);
+      };
+    }
+  }, [localStreamUrl]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // Handle local playback progress tracking
   useEffect(() => {
@@ -750,6 +805,61 @@ const Media = () => {
       }
     };
   }, []);
+
+  const [remoteCurrentTime, setRemoteCurrentTime] = useState(0);
+  const [remoteDuration, setRemoteDuration] = useState(0);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  // Sync remote time when mediaStatus changes
+  useEffect(() => {
+    if (mediaStatus) {
+      setRemoteCurrentTime(mediaStatus.position || 0);
+      setRemoteDuration(mediaStatus.duration || 0);
+    } else {
+      setRemoteCurrentTime(0);
+      setRemoteDuration(0);
+    }
+  }, [mediaStatus]);
+
+  // Tick remote time locally while playing to keep progress smooth between status polls
+  useEffect(() => {
+    let timer: number | null = null;
+    if (mediaStatus?.state === 'playing' && !localMode) {
+      timer = window.setInterval(() => {
+        setRemoteCurrentTime((prev) => {
+          const dur = mediaStatus.duration || 0;
+          if (dur > 0 && prev >= dur) return dur;
+          return prev + 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [mediaStatus?.state, mediaStatus?.duration, localMode]);
+
+  // If localMode is turned off, pause the local player automatically so it doesn't leak audio
+  useEffect(() => {
+    if (!localMode && localIsPlaying) {
+      setLocalIsPlaying(false);
+      localAudioRef.current?.pause();
+      if (localTrack) {
+        api.syncMediaState({
+          entity_id: 'local',
+          state: 'paused',
+          media_type: localTrack.type,
+          media_content_id: localTrack.id,
+          media_title: localTrack.title,
+          media_artist: localTrack.subtitle,
+          position: localAudioRef.current?.currentTime || 0,
+          duration: localDuration,
+          volume_level: localVolume / 100,
+          is_volume_muted: localMuted
+        }).catch(err => console.error('Failed to sync local pause on mode change:', err));
+      }
+    }
+  }, [localMode, localTrack, localDuration, localVolume, localMuted, localIsPlaying]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const { data: maPlaylists, isLoading: maPlaylistsLoading } = useQuery({
     queryKey: ['ma-playlists'],
@@ -820,10 +930,10 @@ const Media = () => {
             setSelectedTarget('');
             
             // Sync local player states
-            if (!localTrack && active.media_content_id) {
+            if (active.media_content_id && (!localTrack || localTrack.id !== active.media_content_id)) {
               const idClean = active.media_content_id;
-              const title = active.media_title;
-              const subtitle = active.media_artist;
+              const title = active.media_title || 'Unknown Title';
+              const subtitle = active.media_artist || 'Unknown Artist';
               const type = active.media_type as 'audiobook' | 'music';
               const source = active.media_type === 'audiobook' ? 'abs' : 'ma';
               
@@ -837,7 +947,6 @@ const Media = () => {
               if (source === 'abs') {
                 url = `/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`;
               } else if (source === 'ma') {
-                // Use full MA URI (idClean) and include token suffix if present
                 url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`;
               }
               setLocalStreamUrl(url);
@@ -896,7 +1005,7 @@ const Media = () => {
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     fetchMediaStatus();
-    const interval = setInterval(fetchMediaStatus, 10000);
+    const interval = setInterval(fetchMediaStatus, 3000);
     return () => clearInterval(interval);
   }, [fetchMediaStatus]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -1287,6 +1396,8 @@ const Media = () => {
         volume={localMode ? localVolume : volume}
         muted={localMode ? localMuted : muted}
         loading={localMode ? null : loading}
+        currentTime={localMode ? localCurrentTime : remoteCurrentTime}
+        duration={localMode ? localDuration : remoteDuration}
         onPrevious={localMode ? skipLocalBack : () => sendTransport('previous')}
         onTogglePlay={
           localMode

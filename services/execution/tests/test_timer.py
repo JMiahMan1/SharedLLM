@@ -129,7 +129,7 @@ async def test_timer_pause_and_resume(mock_redis_conn, mocker):
     resume_time = paused_at_time + timedelta(minutes=5)
     
     mocker.patch("services.execution.handlers.timer.datetime", mocker.Mock(
-        now=lambda: resume_time,
+        now=lambda *args, **kwargs: resume_time,
         fromisoformat=datetime.fromisoformat
     ))
     
@@ -149,5 +149,9 @@ async def test_timer_pause_and_resume(mock_redis_conn, mocker):
     assert "paused_at" not in t_res
     
     new_expiry = datetime.fromisoformat(t_res["expires_at"])
+    if new_expiry.tzinfo:
+        new_expiry = new_expiry.replace(tzinfo=None)
     expected_expiry = original_expiry + timedelta(minutes=5)
+    if expected_expiry.tzinfo:
+        expected_expiry = expected_expiry.replace(tzinfo=None)
     assert abs((new_expiry - expected_expiry).total_seconds()) < 1.0

@@ -2419,10 +2419,39 @@ async def git_pull_webhook(
             
             # Check if it's a git repo
             if not (workspace_path / ".git").is_dir():
-                log.info(f"Workspace {workspace_id} path {workspace_path} exists but is not a git repo. Attempting clone...")
+                log.info(f"Workspace {workspace_id} path {workspace_path} exists but is not a git repo. Checking for unsaved changes...")
                 repo_url = match.repo_url
                 if not repo_url:
                      raise HTTPException(status_code=400, detail="Cannot clone workspace: repo_url is missing")
+                
+                # Check for uncommitted changes if it's a git repo
+                git_status_result = _run_command(workspace_path, ["git", "status", "--porcelain"])
+                has_unsaved_changes = False
+                if git_status_result["returncode"] == 0 and git_status_result["stdout"].strip():
+                    # Git repo exists but has uncommitted changes
+                    has_unsaved_changes = True
+                    untracked = [line.strip() for line in git_status_result["stdout"].strip().split("\n") if line.strip()]
+                    log.error(f"Workspace {workspace_id} has {len(untracked)} uncommitted/unstaged changes. Aborting to prevent data loss.")
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": "UNSAVED_CHANGES",
+                            "message": "Workspace has uncommitted changes that would be lost. Please commit or stash changes before pulling.",
+                            "uncommitted_files": untracked[:50],
+                            "total_uncommitted": len(untracked)
+                        }
+                    )
+                
+                # Directory exists but is not a git repo - check if it's empty or has content
+                dir_contents = list(workspace_path.iterdir())
+                if dir_contents:
+                    log.info(f"Workspace {workspace_id} directory has existing content ({len(dir_contents)} items), clearing before clone...")
+                    import shutil
+                    for item in dir_contents:
+                        if item.is_dir():
+                            shutil.rmtree(item)
+                        else:
+                            item.unlink()
                 
                 # Use the HTTPS redirector for the clone too if needed
                 clone_url = _git_webhook_pull_remote(repo_url, remote_name)
