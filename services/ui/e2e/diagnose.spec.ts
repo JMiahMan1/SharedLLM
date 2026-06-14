@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 
 const UI_URL = 'http://192.168.2.205:8080';
 

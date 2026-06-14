@@ -4,7 +4,7 @@
  *  - Browser WebPlayer (Local Audio Player)
  *  - Android App WebPlayer (Local Audio Player, mobile viewport)
  */
-import { test, expect, type Page, type APIRequestContext } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 
@@ -453,7 +453,6 @@ test.describe('ABS Audiobook → Local Player (Browser)', () => {
       test.skip();
     }
 
-    const bookId = absResponse.books[0].id;
 
     const localPlayerCard = page.locator('button:has-text("Local Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
@@ -559,7 +558,6 @@ test.describe('MA Music → Local Player (Browser)', () => {
       test.skip();
     }
 
-    const trackUri = maResponse.recent[0].uri;
 
     const localPlayerCard = page.locator('button:has-text("Local Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
