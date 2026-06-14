@@ -446,6 +446,11 @@ _dns_recovery_lock = asyncio.Lock()
 def get_http_client() -> httpx.AsyncClient:
     """Lazy initializer for the global httpx client to ensure test compatibility."""
     global _global_http_client
+    if os.environ.get("TEST_MODE") == "true":
+        return httpx.AsyncClient(
+            timeout=httpx.Timeout(300.0, connect=30.0),
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
+        )
     if _global_http_client is None:
         _global_http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(300.0, connect=30.0),
