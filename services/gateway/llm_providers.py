@@ -57,17 +57,38 @@ class OllamaProvider(BaseLLMProvider):
         return None
 
     async def _wait_for_slot(self, client: httpx.AsyncClient) -> bool:
-        """Poll /api/ps until a slot is available or timeout. Returns True on success."""
+        """Poll /api/ps until a slot is available or timeout.
+        If /api/ps has no slot info, returns immediately (no slot mgmt).
+        If /api/ps is unreachable, returns True (graceful degradation)."""
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + self.slot_wait_timeout
-        poll_interval = 0.5
-        while loop.time() < deadline:
-            slots = await self._check_slots(client)
-            if slots and slots.get("available", 0) > 0:
+        try:
+            resp = await client.get(f"{self.base_url}/api/ps", timeout=3.0)
+            if resp.status_code != 200:
                 return True
-            await asyncio.sleep(poll_interval)
-        log.warning(f"[OllamaProvider] Timed out waiting for slot after {self.slot_wait_timeout}s")
-        return False
+            data = resp.json()
+            if "slots" not in data:
+                log.debug(f"[OllamaProvider] No slot info in /api/ps, proceeding without wait")
+                return True
+            slots = data.get("slots", {})
+            if slots.get("available", 0) > 0:
+                return True
+            # Slots are busy — poll until one opens
+            deadline = loop.time() + self.slot_wait_timeout
+            poll_interval = 1.0
+            while loop.time() < deadline:
+                await asyncio.sleep(poll_interval)
+                resp2 = await client.get(f"{self.base_url}/api/ps", timeout=3.0)
+                if resp2.status_code == 200:
+                    d2 = resp2.json()
+                    s2 = d2.get("slots", {})
+                    if s2.get("available", 0) > 0:
+                        log.info(f"[OllamaProvider] Slot available after waiting")
+                        return True
+            log.warning(f"[OllamaProvider] Timed out waiting for slot after {self.slot_wait_timeout}s")
+            return False
+        except Exception as e:
+            log.warning(f"[OllamaProvider] Could not check slots ({e}), proceeding anyway")
+            return True
 
     async def generate(
         self,
@@ -76,15 +97,10 @@ class OllamaProvider(BaseLLMProvider):
         options: Optional[Dict[str, Any]] = None,
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> str:
-        # Queue-and-wait: check if llama-server has available slots before submitting
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as slot_client:
-                if not await self._wait_for_slot(slot_client):
-                    raise RuntimeError(f"No llama-server slots available within {self.slot_wait_timeout}s")
-        except RuntimeError:
-            raise
-        except Exception as e:
-            log.warning(f"[OllamaProvider] Could not check slots ({e}), proceeding anyway")
+        # Queue-and-wait: check if Ollama has available slots before submitting
+        async with httpx.AsyncClient(timeout=3.0) as slot_client:
+            if not await self._wait_for_slot(slot_client):
+                raise RuntimeError(f"No slots available within {self.slot_wait_timeout}s")
 
         opts = options or {}
         show_thinking = opts.get("show_thinking", False)
