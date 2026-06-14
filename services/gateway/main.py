@@ -440,22 +440,25 @@ HUMAN_READABLE_CAPABILITIES = {
 }
 
 # --- Global Clients ---
+_original_async_client = httpx.AsyncClient
 _global_http_client: Optional[httpx.AsyncClient] = None
+_global_http_client_loop: Optional[asyncio.AbstractEventLoop] = None
 _dns_recovery_lock = asyncio.Lock()
 
 def get_http_client() -> httpx.AsyncClient:
     """Lazy initializer for the global httpx client to ensure test compatibility."""
-    global _global_http_client
-    if os.environ.get("TEST_MODE") == "true":
-        return httpx.AsyncClient(
+    global _global_http_client, _global_http_client_loop
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if _global_http_client is None or _global_http_client_loop != current_loop:
+        _global_http_client = _original_async_client(
             timeout=httpx.Timeout(300.0, connect=30.0),
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
         )
-    if _global_http_client is None:
-        _global_http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(300.0, connect=30.0),
-            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
-        )
+        _global_http_client_loop = current_loop
     return _global_http_client
 
 async def recreate_http_client():
@@ -463,15 +466,20 @@ async def recreate_http_client():
     This is needed when DNS changes (e.g., dns-sync restart) cause stale keepalive
     connections to fail with empty httpx.RequestError messages."""
     async with _dns_recovery_lock:
-        global _global_http_client
+        global _global_http_client, _global_http_client_loop
         if _global_http_client is not None:
             log.info("[DNSRecovery] Closing stale HTTP client to refresh DNS resolution")
             await _global_http_client.aclose()
             _global_http_client = None
-        _global_http_client = httpx.AsyncClient(
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        _global_http_client = _original_async_client(
             timeout=httpx.Timeout(300.0, connect=30.0),
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
         )
+        _global_http_client_loop = current_loop
         log.info("[DNSRecovery] New HTTP client created with fresh DNS resolution")
 
 def _is_dns_failure(e: httpx.RequestError) -> bool:

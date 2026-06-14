@@ -3,12 +3,12 @@ import httpx
 import pytest
 
 # Configuration
-BASE_URL = os.getenv("LIVE_TEST_URL", "http://localhost:8080")
+BASE_URL = os.getenv("LIVE_TEST_URL", "http://localhost:8003")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 
-# Service URLs (Internal routing via Gateway)
-GATEWAY_URL = f"{BASE_URL}/api"
+# Service URLs (Direct to host-networked Execution service)
+GATEWAY_URL = BASE_URL
 
 @pytest.mark.local_only
 @pytest.mark.asyncio

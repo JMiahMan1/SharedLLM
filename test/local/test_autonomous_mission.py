@@ -16,9 +16,27 @@ async def test_autonomous_mission():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=os.getenv("TEST_MODEL", "auto"))
-    args = parser.parse_args()
+    args, _ = parser.parse_known_args()
     
     model_name = args.model
+    if model_name == "auto":
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        hostname = parsed.hostname or "localhost"
+        identity_url = f"{parsed.scheme}://{hostname}:8001"
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(f"{identity_url}/api/settings", headers=headers)
+                if resp.status_code == 200:
+                    settings = {s["key"]: s["value"] for s in resp.json()}
+                    active = settings.get("active_llm_provider", "ollama")
+                    if active == "openrouter":
+                        model_name = settings.get("cloud_coding_model") or "auto"
+                    else:
+                        model_name = settings.get("ollama_coding_model") or settings.get("coding_model") or "auto"
+        except Exception as e:
+            print(f"[Warning] Could not fetch active model from Identity Config: {e}")
+
     print(f"=== Testing Raven Autonomous Mission against {base_url} [Model: {model_name}] ===\n")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
