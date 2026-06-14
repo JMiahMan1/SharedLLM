@@ -3464,7 +3464,8 @@ async def global_search(q: str, request: Request):
         resp = await get_http_client().post(
             f"{RAG_SVC}/rag/search",
             json={"query": q, "user_id": user_id, "collection_name": "nextcloud_files", "k": 5},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=10.0
         )
         if resp.status_code != 200:
             return JSONResponse({"status": "ERROR", "message": "Search failed"}, status_code=502)
