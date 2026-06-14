@@ -2484,7 +2484,7 @@ async def chat_handler(request: Request, background_tasks=None):
     show_thinking = body.get("show_thinking", False)
 
     try:
-        selected_model = explicit_model or await get_assistant_model()
+        selected_model = (explicit_model if explicit_model and explicit_model != "auto" else None) or await get_assistant_model()
         log.info(f"[ChatHandler] Model selection: explicit_model='{explicit_model}' selected_model='{selected_model}'")
     except RuntimeError as e:
         log.error(f"[ChatHandler] Model configuration error: {e}")
@@ -2506,7 +2506,7 @@ async def chat_handler(request: Request, background_tasks=None):
         return JSONResponse({"status": "ERROR", "message": "No query provided."}, status_code=400)
 
     # Dynamic Model Routing: Use specialized coder model for engineering tasks
-    if not explicit_model:
+    if not explicit_model or explicit_model == "auto":
         coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "raven", "audit", "develop", "refactor"]
         if any(k in (query or "").lower() for k in coding_keywords):
             try:
@@ -4056,7 +4056,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         "mission_type": "user_task",
         "priority": body.priority,
         "proposed_mission": body.query,
-        "coding_model": body.coding_model or coding_model,
+        "coding_model": (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or coding_model,
         "user_id": creds.get("user_id")
     }
     
@@ -4072,7 +4072,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         mission_data = resp.json()
         
         # Enqueue the job for execution
-        target_model = body.coding_model or coding_model
+        target_model = (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or coding_model
         system_prompt = "You are Raven, an autonomous agent executing a user-assigned background mission.\n\n"
         system_prompt += SINGLE_TURN_TOOL_GUIDE
         system_prompt += f"\n\nExecute the following task to the best of your ability:\n{mission_data['proposed_mission']}"
