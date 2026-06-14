@@ -2699,7 +2699,8 @@ async def chat_handler(request: Request, background_tasks=None):
                 resp = await client.post(
                     f"{RAG_SVC}/rag/search",
                     json={"collection_name": coll, "query": query, "user_id": user_id, "k": 15},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"}
+                    headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
+                    timeout=10.0
                 )
                 resp.raise_for_status()
                 res = resp.json()
