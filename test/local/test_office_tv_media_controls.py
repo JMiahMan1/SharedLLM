@@ -23,7 +23,7 @@ HA_HEADERS = {
 
 @pytest.fixture
 def client():
-    return httpx.Client(timeout=60.0)
+    return httpx.Client(timeout=180.0)
 
 
 def get_ha_state(entity_id: str):

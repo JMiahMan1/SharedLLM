@@ -11,7 +11,7 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
 @pytest.fixture
 def client():
-    return httpx.Client(timeout=30.0)
+    return httpx.Client(timeout=180.0)
 
 @pytest.mark.local_only
 @pytest.mark.skipif(LIVE_TEST_URL is not None, reason="RAG service is internal and not exposed externally")

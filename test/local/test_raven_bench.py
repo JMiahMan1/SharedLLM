@@ -70,7 +70,24 @@ async def main():
     gateway_url = f"{base_url}/api"
     internal_secret = os.getenv("INTERNAL_SECRET", "change-me-in-production")
     headers = {"X-Internal-Secret": internal_secret}
-    model = os.getenv("TEST_MODEL", "qwen2.5-coder:7b")
+    model = os.getenv("TEST_MODEL", "auto")
+    if model == "auto":
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        hostname = parsed.hostname or "localhost"
+        identity_url = f"{parsed.scheme}://{hostname}:8001"
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get(f"{identity_url}/api/settings", headers=headers)
+                if resp.status_code == 200:
+                    settings = {s["key"]: s["value"] for s in resp.json()}
+                    active = settings.get("active_llm_provider", "ollama")
+                    if active == "openrouter":
+                        model = settings.get("cloud_coding_model") or "auto"
+                    else:
+                        model = settings.get("ollama_coding_model") or settings.get("coding_model") or "auto"
+        except Exception as e:
+            print(f"[Warning] Could not fetch active model from Identity Config: {e}")
 
     print(f"=== Raven Autonomous Benchmark Suite [Model: {model}] ===")
 
