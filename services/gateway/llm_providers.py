@@ -1,4 +1,5 @@
 # services/gateway/llm_providers.py
+import asyncio
 import json
 import logging
 import re
@@ -39,9 +40,34 @@ class BaseLLMProvider(ABC):
 
 
 class OllamaProvider(BaseLLMProvider):
-    def __init__(self, base_url: str, timeout: float = 180.0):
+    def __init__(self, base_url: str, timeout: float = 180.0, slot_wait_timeout: float = 120.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.slot_wait_timeout = slot_wait_timeout
+
+    async def _check_slots(self, client: httpx.AsyncClient) -> Optional[dict]:
+        """Check slot availability via /api/ps. Returns slot info dict or None."""
+        try:
+            resp = await client.get(f"{self.base_url}/api/ps", timeout=3.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("slots")
+        except Exception:
+            pass
+        return None
+
+    async def _wait_for_slot(self, client: httpx.AsyncClient) -> bool:
+        """Poll /api/ps until a slot is available or timeout. Returns True on success."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self.slot_wait_timeout
+        poll_interval = 0.5
+        while loop.time() < deadline:
+            slots = await self._check_slots(client)
+            if slots and slots.get("available", 0) > 0:
+                return True
+            await asyncio.sleep(poll_interval)
+        log.warning(f"[OllamaProvider] Timed out waiting for slot after {self.slot_wait_timeout}s")
+        return False
 
     async def generate(
         self,
@@ -50,6 +76,16 @@ class OllamaProvider(BaseLLMProvider):
         options: Optional[Dict[str, Any]] = None,
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> str:
+        # Queue-and-wait: check if llama-server has available slots before submitting
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as slot_client:
+                if not await self._wait_for_slot(slot_client):
+                    raise RuntimeError(f"No llama-server slots available within {self.slot_wait_timeout}s")
+        except RuntimeError:
+            raise
+        except Exception as e:
+            log.warning(f"[OllamaProvider] Could not check slots ({e}), proceeding anyway")
+
         opts = options or {}
         show_thinking = opts.get("show_thinking", False)
         
