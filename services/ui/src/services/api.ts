@@ -1002,6 +1002,16 @@ export const api = {
     return resp.data;
   },
 
+  async getMediaDetail(uri: string): Promise<Record<string, unknown>> {
+    const resp = await apiClient.get('/api/media/detail', { params: { uri } });
+    return resp.data;
+  },
+
+  async setMediaFavorite(uri: string, favorite: boolean): Promise<{ status: string; favorite: boolean }> {
+    const resp = await apiClient.post('/api/media/favorite', { uri, favorite });
+    return resp.data;
+  },
+
   async getMusicAssistantPlaylists(): Promise<{ status: string; playlists: Array<{ name: string; items: number; uri: string }> }> {
     const resp = await apiClient.get('/api/media/music-assistant/playlists');
     return resp.data;

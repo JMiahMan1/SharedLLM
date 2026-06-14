@@ -4,11 +4,10 @@ import {
   Play, Pause, Volume2, Volume1, VolumeX, Cast,
   Music, BookOpen, List, Loader2, X, Library, Search,
   SkipBack as SkipBackIcon, SkipForward as SkipForwardIcon,
-  ChevronRight, Grid3X3, Clock, Headphones,
+  ChevronRight, Grid3X3, Clock, Headphones, Heart, Square
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
-import { LocalAudioPlayer } from '../components/LocalAudioPlayer';
 import { storageGetSync } from '../lib/storage';
 
 interface MediaStatus {
@@ -23,6 +22,8 @@ interface MediaStatus {
   position?: number;
   duration?: number;
   entity_picture?: string;
+  media_content_id?: string;
+  media_type?: string;
 }
 
 interface MediaEntity {
@@ -30,6 +31,17 @@ interface MediaEntity {
   friendly_name: string;
   state: string;
   domain: string;
+}
+
+interface TrackDetail {
+  item_id: string;
+  name: string;
+  uri: string;
+  favorite: boolean;
+  media_type: string;
+  artists?: Array<{ name: string }>;
+  album?: { name: string };
+  podcast?: { name: string };
 }
 
 /* ── helpers ─────────────────────────────────────────────────────────── */
@@ -167,11 +179,15 @@ const NowPlayingCard = ({
   loading,
   currentTime = 0,
   duration = 0,
+  isFavorite = false,
   onPrevious,
   onTogglePlay,
   onNext,
   onVolumeChange,
   onMuteToggle,
+  onFavoriteToggle,
+  onSeek,
+  onStopPlayback,
 }: {
   mediaStatus: MediaStatus | null;
   selectedTarget: string;
@@ -181,11 +197,15 @@ const NowPlayingCard = ({
   loading: string | null;
   currentTime?: number;
   duration?: number;
+  isFavorite?: boolean;
   onPrevious: () => void;
   onTogglePlay: () => void;
   onNext: () => void;
   onVolumeChange: (v: number) => void;
   onMuteToggle: () => void;
+  onFavoriteToggle?: () => void;
+  onSeek?: (time: number) => void;
+  onStopPlayback?: () => void;
 }) => {
   const nowPlaying = mediaStatus?.state === 'playing' || mediaStatus?.state === 'paused';
 
@@ -225,10 +245,23 @@ const NowPlayingCard = ({
         {/* metadata + transport */}
         <div className="flex-1 min-w-0">
           {nowPlaying ? (
-            <>
-              <p className="text-white font-medium text-lg truncate">{mediaStatus.media_title || 'Unknown Title'}</p>
-              <p className="text-sm text-slate-400 truncate">{mediaStatus.media_artist || 'Unknown Artist'}</p>
-            </>
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-white font-medium text-lg truncate">{mediaStatus.media_title || 'Unknown Title'}</p>
+                <p className="text-sm text-slate-400 truncate">{mediaStatus.media_artist || 'Unknown Artist'}</p>
+              </div>
+              {onFavoriteToggle && (
+                <button
+                  onClick={onFavoriteToggle}
+                  className={`p-2 rounded-xl hover:bg-white/5 transition-all shrink-0 ${
+                    isFavorite ? 'text-red-500 scale-110' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+                >
+                  <Heart size={20} fill={isFavorite ? "currentColor" : "none"} />
+                </button>
+              )}
+            </div>
           ) : (
             <>
               <p className="text-white font-medium text-lg">No Active Playback</p>
@@ -253,6 +286,12 @@ const NowPlayingCard = ({
               className="text-slate-400 hover:text-white transition-colors p-2 disabled:opacity-50 rounded-lg hover:bg-white/5" aria-label="Next track">
               {loading === 'next' ? <Loader2 size={20} className="animate-spin" /> : <SkipForwardIcon size={20} />}
             </button>
+            {onStopPlayback && (
+              <button onClick={onStopPlayback}
+                className="text-red-400 hover:text-red-300 transition-colors p-2 rounded-lg hover:bg-white/5 ml-1" aria-label="Stop playback">
+                <Square size={20} />
+              </button>
+            )}
           </div>
         </div>
 
@@ -274,11 +313,24 @@ const NowPlayingCard = ({
 
       {nowPlaying && duration > 0 && (
         <div className="mt-4 pt-3 border-t border-white/5">
-          <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden relative">
+          <div
+            className={`w-full h-2 bg-white/10 rounded-full relative group ${onSeek ? 'cursor-pointer' : ''}`}
+            onClick={(e) => {
+              if (!onSeek) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              const x = e.clientX - rect.left;
+              const percent = x / rect.width;
+              onSeek(percent * duration);
+            }}
+          >
             <div
-              className="h-full bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full transition-all"
+              className="h-full bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full transition-all relative"
               style={{ width: `${Math.min(100, (currentTime / duration) * 100)}%` }}
-            />
+            >
+              {onSeek && (
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+              )}
+            </div>
           </div>
           <div className="flex justify-between mt-1.5 text-[10px] text-slate-500 font-mono">
             <span>{formatTime(currentTime)}</span>
@@ -705,15 +757,89 @@ const Media = () => {
 
   // Local player states
   const [localIsPlaying, setLocalIsPlaying] = useState(false);
-  const [localIsLoaded, setLocalIsLoaded] = useState(false);
   const [localVolume, setLocalVolume] = useState(70);
   const [localMuted, setLocalMuted] = useState(false);
   const [localCurrentTime, setLocalCurrentTime] = useState(0);
   const [localDuration, setLocalDuration] = useState(0);
   const [localStreamUrl, setLocalStreamUrl] = useState<string | null>(null);
-  const [localError, setLocalError] = useState<string | null>(null);
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
   const localProgressTimerRef = useRef<number | null>(null);
+
+  // Music Assistant metadata & favorites state
+  const [detailedMetadata, setDetailedMetadata] = useState<TrackDetail | null>(null);
+
+  const activeUri = useMemo(() => {
+    if (localMode) {
+      return localTrack?.source === 'ma' ? localTrack.id : null;
+    } else {
+      return mediaStatus?.media_content_id || null;
+    }
+  }, [localMode, localTrack, mediaStatus]);
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!activeUri || !activeUri.includes('://')) {
+      setDetailedMetadata(null);
+      return;
+    }
+    let active = true;
+    api.getMediaDetail(activeUri)
+      .then((data) => {
+        if (active) {
+          const detail = (data && data.result ? data.result : data) as unknown as TrackDetail;
+          setDetailedMetadata(detail);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to fetch media detail:', err);
+        if (active) setDetailedMetadata(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeUri]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const handleFavoriteToggle = useCallback(async () => {
+    if (!activeUri) return;
+    const currentFavorite = Boolean(detailedMetadata?.favorite);
+    const targetFavorite = !currentFavorite;
+    
+    // Optimistic update
+    setDetailedMetadata((prev) => prev ? { ...prev, favorite: targetFavorite } : null);
+    
+    try {
+      const resp = await api.setMediaFavorite(activeUri, targetFavorite);
+      if (resp && (resp.status === 'SUCCESS' || resp.favorite !== undefined)) {
+        setDetailedMetadata((prev) => prev ? { ...prev, favorite: resp.favorite } : null);
+      }
+    } catch (err) {
+      console.error('Failed to toggle favorite:', err);
+      setDetailedMetadata((prev) => prev ? { ...prev, favorite: currentFavorite } : null);
+      setError('Failed to update favorite status');
+    }
+  }, [activeUri, detailedMetadata]);
+
+  const detailedSubtitle = useMemo(() => {
+    const baseArtist = localMode ? localTrack?.subtitle : mediaStatus?.media_artist;
+    const baseAlbum = localMode ? '' : mediaStatus?.media_album;
+    
+    const artist = detailedMetadata?.artists?.map((a) => a.name).join(', ') || baseArtist || '';
+    const album = detailedMetadata?.album?.name || baseAlbum || '';
+    
+    const podcast = detailedMetadata?.podcast?.name;
+    const albumOrPodcast = podcast || album;
+
+    if (artist && albumOrPodcast) {
+      return `${artist} • ${albumOrPodcast}`;
+    }
+    return artist || albumOrPodcast || '';
+  }, [localMode, localTrack, mediaStatus, detailedMetadata]);
+
+  const detailedTitle = useMemo(() => {
+    const baseTitle = localMode ? localTrack?.title : mediaStatus?.media_title;
+    return detailedMetadata?.name || baseTitle || 'Unknown Title';
+  }, [localMode, localTrack, mediaStatus, detailedMetadata]);
 
   // Sync volume with local Audio element
   useEffect(() => {
@@ -744,7 +870,6 @@ const Media = () => {
       localAudioRef.current.load();
 
       const onLoaded = () => {
-        setLocalIsLoaded(true);
         setLocalDuration(localAudioRef.current?.duration || 0);
         localAudioRef.current?.play().catch(() => {});
       };
@@ -756,12 +881,10 @@ const Media = () => {
       };
       const onEnded = () => {
         setLocalIsPlaying(false);
-        setLocalIsLoaded(false);
       };
       const onError = () => {
         setLocalIsPlaying(false);
-        setLocalIsLoaded(false);
-        setLocalError('Failed to load stream. Check your connection.');
+        setError('Failed to load stream. Check your connection.');
       };
 
       localAudioRef.current.addEventListener('loadeddata', onLoaded);
@@ -1147,8 +1270,6 @@ const Media = () => {
     const idClean = id.replace('abs-', '').replace('ma-', '');
     setLocalTrack({ id: idClean, title, subtitle, type, source });
     setLocalIsPlaying(true);
-    setLocalIsLoaded(false);
-    setLocalError(null);
 
     const apiToken = storageGetSync('jarvis_api_key') ?? '';
     const tokenParam = apiToken ? `token=${encodeURIComponent(apiToken)}` : '';
@@ -1327,7 +1448,6 @@ const Media = () => {
     }
     setLocalTrack(null);
     setLocalIsPlaying(false);
-    setLocalIsLoaded(false);
     setLocalStreamUrl(null);
     setLocalCurrentTime(0);
     setLocalDuration(0);
@@ -1382,14 +1502,20 @@ const Media = () => {
               ? {
                   entity_id: 'local_player',
                   state: localIsPlaying ? 'playing' : 'paused',
-                  media_title: localTrack.title,
-                  media_artist: localTrack.subtitle,
+                  media_title: detailedTitle,
+                  media_artist: detailedSubtitle,
                   media_content_type: localTrack.type,
                   volume_level: localVolume / 100,
                   is_volume_muted: localMuted,
                 }
               : null
             : mediaStatus
+              ? {
+                  ...mediaStatus,
+                  media_title: detailedTitle,
+                  media_artist: detailedSubtitle,
+                }
+              : null
         }
         selectedTarget={selectedTarget}
         localMode={localMode}
@@ -1398,6 +1524,7 @@ const Media = () => {
         loading={localMode ? null : loading}
         currentTime={localMode ? localCurrentTime : remoteCurrentTime}
         duration={localMode ? localDuration : remoteDuration}
+        isFavorite={Boolean(detailedMetadata?.favorite)}
         onPrevious={localMode ? skipLocalBack : () => sendTransport('previous')}
         onTogglePlay={
           localMode
@@ -1407,28 +1534,10 @@ const Media = () => {
         onNext={localMode ? skipLocalForward : () => sendTransport('next')}
         onVolumeChange={localMode ? handleLocalVolume : handleVolume}
         onMuteToggle={localMode ? toggleLocalMute : toggleMute}
+        onFavoriteToggle={activeUri ? handleFavoriteToggle : undefined}
+        onSeek={localMode ? handleLocalSeek : undefined}
+        onStopPlayback={localMode && localTrack ? handleStopPlayback : undefined}
       />
-
-      {/* Local Audio Player */}
-      {localTrack && (
-        <LocalAudioPlayer
-          track={localTrack}
-          isPlaying={localIsPlaying}
-          isLoaded={localIsLoaded}
-          volume={localVolume}
-          isMuted={localMuted}
-          currentTime={localCurrentTime}
-          duration={localDuration}
-          error={localError}
-          onTogglePlay={toggleLocalPlay}
-          onVolumeChange={handleLocalVolume}
-          onMuteToggle={toggleLocalMute}
-          onSeek={handleLocalSeek}
-          onSkipBack={skipLocalBack}
-          onSkipForward={skipLocalForward}
-          onStopPlayback={handleStopPlayback}
-        />
-      )}
 
       {/* 3. Jump Back In */}
       <section>
