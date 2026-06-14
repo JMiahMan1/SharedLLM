@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 class BaseRequest(BaseModel):
+    workspace_id: Optional[str] = None
     model_config = {"extra": "ignore"}
 
     @model_validator(mode='before')

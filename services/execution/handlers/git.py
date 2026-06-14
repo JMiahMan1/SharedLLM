@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import shlex
+from fastapi import HTTPException
 from services.config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
 from typing import Optional
 try:
@@ -37,8 +38,12 @@ os.system(f"git config --global --add safe.directory '{WORKSPACE_ROOT}/*'")
 log.info(f"Marked {WORKSPACE_ROOT} and subdirectories as safe.directory")
 
 
-async def _resolve_workspace_path(workspace_id: Optional[str] = None) -> str:
-    """Resolve workspace path from workspace_runtime service.
+async def _resolve_workspace_path(
+    workspace_id: Optional[str] = None,
+    user_context: Optional[dict] = None,
+    required_capability: Optional[str] = None
+) -> str:
+    """Resolve workspace path from workspace_runtime service and check capability.
     
     Priority:
     1. Explicit workspace_id
@@ -52,15 +57,39 @@ async def _resolve_workspace_path(workspace_id: Optional[str] = None) -> str:
     if workspace_id:
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
+                user_ctx = user_context or {"user": "system", "is_admin": True}
+                if hasattr(user_ctx, "model_dump"):
+                    user_ctx = user_ctx.model_dump()
+                elif hasattr(user_ctx, "dict"):
+                    user_ctx = user_ctx.dict()
+                    
                 resp = await client.post(
                     f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
-                    json={"workspace_id": workspace_id, "user_context": {"user": "system", "is_admin": True}},
+                    json={"workspace_id": workspace_id, "user_context": user_ctx},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
                 if resp.status_code == 200:
                     data = resp.json()
                     if data.get("status") == "SUCCESS":
-                        return data["workspace"]["resolved_path"]
+                        workspace = data["workspace"]
+                        if required_capability:
+                            identity = workspace.get("resolved_identity") or {}
+                            if not identity.get("is_admin"):
+                                capabilities = workspace.get("capabilities", [])
+                                if required_capability not in capabilities:
+                                    raise HTTPException(
+                                        status_code=403,
+                                        detail=f"Workspace '{workspace.get('id')}' does not allow capability '{required_capability}'"
+                                    )
+                        return workspace["resolved_path"]
+                else:
+                    try:
+                        err_detail = resp.json().get("detail", resp.text)
+                    except Exception:
+                        err_detail = resp.text
+                    raise HTTPException(status_code=resp.status_code, detail=err_detail)
+        except HTTPException:
+            raise
         except Exception as e:
             log.warning(f"Failed to resolve workspace {workspace_id}: {e}")
     
@@ -188,12 +217,17 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         user_context          — must have is_admin=True for push
         workspace_id: Optional[str] — workspace to operate on (uses default if not specified)
     """
+    action: str = req.action.lower().strip()
+    required_capability = "git_status"
+    if action in {"add", "commit", "pull", "push", "checkout", "merge"}:
+        required_capability = "git_write"
+
     # Resolve workspace path first
     workspace_id = getattr(req, "workspace_id", None)
-    workspace_path = await _resolve_workspace_path(workspace_id)
+    user_context = getattr(req, "user_context", None)
+    workspace_path = await _resolve_workspace_path(workspace_id, user_context, required_capability)
     log.info(f"[Git] Resolved workspace path: {workspace_path} (workspace_id={workspace_id})")
     
-    action: str = req.action.lower().strip()
     path: str = getattr(req, "path", ".") or "."
     # Support both 'message' and 'commit_message' to align with varying schemas
     commit_message: Optional[str] = getattr(req, "message", None) or getattr(req, "commit_message", None)

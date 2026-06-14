@@ -4,7 +4,8 @@ import logging
 import os
 import shlex
 from typing import Optional
-from services.config import WORKSPACE_ROOT
+from fastapi import HTTPException
+from services.config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
 from services.execution.schemas import (
     ExecutionResult,
     WorkspaceFileReadRequest,
@@ -32,18 +33,75 @@ def _ok(message: str, detail: dict | None = None) -> ExecutionResult:
 def _fail(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="FAILURE", message=message, service="workspace", detail=detail)
 
-def resolve_safe_path(path: str) -> str:
-    """Ensure the path stays within WORKSPACE_ROOT."""
+async def _resolve_workspace_info(workspace_id: Optional[str], user_context: Optional[dict] = None) -> tuple[str, dict]:
+    """Resolves workspace path and details from workspace_runtime service, and checks capability."""
+    import httpx
+    # Defaults
+    resolved_path = WORKSPACE_ROOT
+    workspace_details = {}
+    
+    if workspace_id:
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                user_ctx = user_context or {"user": "system", "is_admin": True}
+                if hasattr(user_ctx, "model_dump"):
+                    user_ctx = user_ctx.model_dump()
+                elif hasattr(user_ctx, "dict"):
+                    user_ctx = user_ctx.dict()
+                resp = await client.post(
+                    f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
+                    json={"workspace_id": workspace_id, "user_context": user_ctx},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("status") == "SUCCESS":
+                        workspace_details = data.get("workspace", {})
+                        resolved_path = workspace_details.get("resolved_path") or WORKSPACE_ROOT
+                else:
+                    try:
+                        err_detail = resp.json().get("detail", resp.text)
+                    except Exception:
+                        err_detail = resp.text
+                    raise HTTPException(status_code=resp.status_code, detail=err_detail)
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.warning(f"Failed to resolve workspace {workspace_id}: {e}")
+            
+    return resolved_path, workspace_details
+
+def _require_capability(workspace: dict, capability: str):
+    identity = workspace.get("resolved_identity") or {}
+    if identity.get("is_admin"):
+        return
+    capabilities = workspace.get("capabilities")
+    if capabilities is None:
+        return
+    if capability not in capabilities:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Workspace '{workspace.get('id')}' does not allow capability '{capability}'"
+        )
+
+def resolve_safe_path(path: str, workspace_root: str = WORKSPACE_ROOT) -> str:
+    """Ensure the path stays within workspace_root."""
     # Remove leading slash if present to make it relative to root
     rel_path = path.lstrip("/")
-    abs_path = os.path.abspath(os.path.join(WORKSPACE_ROOT, rel_path))
-    if not abs_path.startswith(os.path.abspath(WORKSPACE_ROOT)):
+    abs_path = os.path.abspath(os.path.join(workspace_root, rel_path))
+    if not abs_path.startswith(os.path.abspath(workspace_root)):
         raise ValueError(f"Path traversal detected: {path}")
     return abs_path
 
 async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResult:
     try:
-        abs_path = resolve_safe_path(req.path)
+        workspace_id = getattr(req, "workspace_id", None)
+        user_ctx = getattr(req, "user_context", None)
+        ws_root, ws_details = await _resolve_workspace_info(workspace_id, user_ctx)
+        if ws_details:
+            _require_capability(ws_details, "read")
+
+        abs_path = resolve_safe_path(req.path, ws_root)
         if not os.path.exists(abs_path):
             return _fail_with_discovery(req.path, f"File not found: {req.path}")
         if not os.path.isfile(abs_path):
@@ -84,6 +142,8 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
             msg += f" | TRUNCATED for context safety: file has {len(lines)} lines total."
             
         return _ok(msg, {"content": content, "path": req.path, "total_lines": len(lines), "start_line": start + 1})
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Workspace read failed: {e}")
         return _fail(str(e))
@@ -122,7 +182,13 @@ def _fail_with_discovery(path: str, message: str) -> ExecutionResult:
 
 async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionResult:
     try:
-        abs_path = resolve_safe_path(req.path)
+        workspace_id = getattr(req, "workspace_id", None)
+        user_ctx = getattr(req, "user_context", None)
+        ws_root, ws_details = await _resolve_workspace_info(workspace_id, user_ctx)
+        if ws_details:
+            _require_capability(ws_details, "write")
+
+        abs_path = resolve_safe_path(req.path, ws_root)
         exists = os.path.exists(abs_path)
         
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
@@ -139,6 +205,8 @@ async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionRes
                 message += f" | WARNING: {suggestion} You may have created a duplicate file in the wrong location."
             
         return _ok(message, {"path": req.path, "bytes": len(req.content), "created_new": not exists})
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Workspace write failed: {e}")
         return _fail(str(e))
@@ -147,7 +215,13 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
     """Performs a ripgrep search in the workspace."""
     import subprocess
     try:
-        abs_search_path = resolve_safe_path(req.path)
+        workspace_id = getattr(req, "workspace_id", None)
+        user_ctx = getattr(req, "user_context", None)
+        ws_root, ws_details = await _resolve_workspace_info(workspace_id, user_ctx)
+        if ws_details:
+            _require_capability(ws_details, "read")
+
+        abs_search_path = resolve_safe_path(req.path, ws_root)
         
         # Build rg command
         cmd = ["rg", "--json", "-i", "--max-count", "100", req.query, abs_search_path]
@@ -179,7 +253,7 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
                 if data.get("type") == "match":
                     match_data = data.get("data", {})
                     matches.append({
-                        "path": os.path.relpath(match_data.get("path", {}).get("text", ""), WORKSPACE_ROOT),
+                        "path": os.path.relpath(match_data.get("path", {}).get("text", ""), ws_root),
                         "line": match_data.get("line_number"),
                         "text": match_data.get("lines", {}).get("text", "").strip()
                     })
@@ -188,7 +262,7 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
                 parts = line.split(":", 2)
                 if len(parts) >= 3:
                     matches.append({
-                        "path": os.path.relpath(parts[0], WORKSPACE_ROOT),
+                        "path": os.path.relpath(parts[0], ws_root),
                         "line": parts[1],
                         "text": parts[2].strip()
                     })
@@ -197,6 +271,8 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
             return _ok(f"No matches found for '{req.query}' in {req.path}", {"matches": []})
             
         return _ok(f"Found {len(matches)} matches for '{req.query}'", {"matches": matches})
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Workspace search failed: {e}")
         return _fail(str(e))
@@ -205,9 +281,13 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
     """Executes an arbitrary shell command in the workspace."""
     import subprocess
     try:
+        workspace_id = getattr(req, "workspace_id", None)
+        user_ctx = getattr(req, "user_context", None)
+        ws_root, ws_details = await _resolve_workspace_info(workspace_id, user_ctx)
+
         # Resolve safe CWD
         safe_cwd = req.cwd if hasattr(req, 'cwd') and req.cwd else "."
-        abs_cwd = resolve_safe_path(safe_cwd)
+        abs_cwd = resolve_safe_path(safe_cwd, ws_root)
         
         # Determine the final command string
         final_cmd = ""
@@ -246,6 +326,15 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         if base_command == "git" and len(parsed) > 1 and parsed[1] not in {"status", "diff", "log", "show"}:
             return _fail("Only read-only git shell commands are allowed")
 
+        # Enforce capability constraints on the workspace
+        if ws_details:
+            required_cap = "read"
+            if base_command in {"python", "python3"} and parsed[1:3] == ["-m", "pytest"]:
+                required_cap = "pytest"
+            elif base_command == "git":
+                required_cap = "git_status"
+            _require_capability(ws_details, required_cap)
+
         log.info(f"Executing shell command: {final_cmd} in {abs_cwd}")
         # Enforce a max timeout of 300s
         safe_timeout = min(req.timeout, 300)
@@ -274,13 +363,21 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
             
     except subprocess.TimeoutExpired:
         return _fail(f"Command timed out after {req.timeout}s")
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Workspace shell execution failed: {e}")
         return _fail(str(e))
 
 async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionResult:
     try:
-        abs_path = resolve_safe_path(req.path)
+        workspace_id = getattr(req, "workspace_id", None)
+        user_ctx = getattr(req, "user_context", None)
+        ws_root, ws_details = await _resolve_workspace_info(workspace_id, user_ctx)
+        if ws_details:
+            _require_capability(ws_details, "write")
+
+        abs_path = resolve_safe_path(req.path, ws_root)
         if not os.path.exists(abs_path):
             return _fail_with_discovery(req.path, f"File not found for patching: {req.path}")
         
@@ -338,6 +435,8 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
             message += " (Commit pending)"
             
         return _ok(message, {"path": req.path, "applied": applied_count, "failed": len(failed_chunks)})
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"Workspace patch failed: {e}")
         return _fail(str(e))
