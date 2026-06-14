@@ -27,10 +27,9 @@ async def run_mission(client, gateway_url, headers, mission, model):
     
     payload = {
         "query": mission["query"],
-        "priority": 1
+        "priority": 1,
+        "coding_model": model
     }
-    if model and model != "auto":
-        payload["coding_model"] = model
     
     resp = await client.post(f"{gateway_url}/raven/missions", json=payload, headers=headers)
     if resp.status_code != 200:
@@ -71,7 +70,24 @@ async def main():
     gateway_url = f"{base_url}/api"
     internal_secret = os.getenv("INTERNAL_SECRET", "change-me-in-production")
     headers = {"X-Internal-Secret": internal_secret}
-    model = os.getenv("TEST_MODEL", "auto")
+    # Fetch the active coding model from the Identity Config Database (single source of truth)
+    from urllib.parse import urlparse
+    parsed = urlparse(base_url)
+    hostname = parsed.hostname or "localhost"
+    identity_url = f"{parsed.scheme}://{hostname}:8001"
+    
+    with httpx.Client(timeout=10.0) as client:
+        resp = client.get(f"{identity_url}/api/settings", headers=headers)
+        assert resp.status_code == 200, f"Failed to fetch Identity settings: {resp.text}"
+        settings = {s["key"]: s["value"] for s in resp.json()}
+        
+        active_provider = settings.get("active_llm_provider", "ollama")
+        if active_provider == "openrouter":
+            model = settings.get("cloud_coding_model")
+        else:
+            model = settings.get("ollama_coding_model") or settings.get("coding_model")
+            
+        assert model, f"No coding model configured in database (provider: {active_provider})"
 
     print(f"=== Raven Autonomous Benchmark Suite [Model: {model}] ===")
 
