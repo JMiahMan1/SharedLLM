@@ -5069,6 +5069,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
                 # Mimic a browser so CDN servers don't reject the proxy request
                 "User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)",
                 "Accept": "audio/*,*/*;q=0.9",
+                "Authorization": f"Bearer {abs_key}",
             }
             if range_header:
                 req_headers["Range"] = range_header
@@ -5374,6 +5375,137 @@ async def media_imageproxy(path: str, request: Request):
     except Exception as e:
         log.error(f"[imageproxy] Exception proxying image: {e}")
         raise HTTPException(status_code=500, detail="Error fetching image")
+
+
+@app.get("/api/media/detail")
+async def get_media_detail(uri: str, request: Request):
+    """Resolve full media details from Music Assistant for a given URI."""
+    log.info(f"[media/detail] Resolving details for uri='{uri}'")
+    try:
+        creds = await _resolve_identity_from_request(request)
+        if not isinstance(creds, dict):
+            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
+    except Exception as e:
+        log.error(f"[media/detail] Identity resolution failed: {e}")
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    mass_url = creds.get("mass_url") or ""
+    mass_token = creds.get("mass_token") or ""
+
+    if not mass_url:
+        raise HTTPException(status_code=400, detail="Music Assistant URL not configured")
+
+    from urllib.parse import urlparse
+    parsed = urlparse(mass_url)
+    ma_host = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}"
+    ma_api = f"{ma_host}/api"
+    auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            resp = await client.post(
+                ma_api,
+                json={"command": "music/item_by_uri", "args": {"uri": uri}},
+                headers={"Content-Type": "application/json", **auth_headers},
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            else:
+                log.error(f"[media/detail] Music Assistant returned status {resp.status_code}: {resp.text}")
+                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch media details from Music Assistant")
+        except Exception as e:
+            log.error(f"[media/detail] Exception: {e}", exc_info=True)
+            raise HTTPException(status_code=502, detail="Error communicating with Music Assistant")
+
+
+class FavoriteRequest(BaseModel):
+    uri: str
+    favorite: bool
+
+
+@app.post("/api/media/favorite")
+async def toggle_media_favorite(req: FavoriteRequest, request: Request):
+    """Add or remove an item from Music Assistant favorites."""
+    log.info(f"[media/favorite] Toggling favorite for uri='{req.uri}' to favorite={req.favorite}")
+    if not req.uri or "://" not in req.uri:
+        log.info(f"[media/favorite] Skipping non-Music-Assistant URI: '{req.uri}'")
+        return {"status": "SKIPPED", "favorite": req.favorite, "reason": "Not a Music Assistant URI"}
+    try:
+        creds = await _resolve_identity_from_request(request)
+        if not isinstance(creds, dict):
+            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
+    except Exception as e:
+        log.error(f"[media/favorite] Identity resolution failed: {e}")
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    mass_url = creds.get("mass_url") or ""
+    mass_token = creds.get("mass_token") or ""
+
+    if not mass_url:
+        raise HTTPException(status_code=400, detail="Music Assistant not configured")
+
+    from urllib.parse import urlparse
+    parsed = urlparse(mass_url)
+    ma_host = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}"
+    ma_api = f"{ma_host}/api"
+    auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            if req.favorite:
+                # Add to favorites
+                resp = await client.post(
+                    ma_api,
+                    json={"command": "music/favorites/add_item", "args": {"item": req.uri}},
+                    headers={"Content-Type": "application/json", **auth_headers},
+                )
+                if resp.status_code == 200:
+                    return {"status": "SUCCESS", "favorite": True}
+                else:
+                    log.error(f"[media/favorite] Add failed: {resp.status_code} - {resp.text}")
+                    raise HTTPException(status_code=resp.status_code, detail="Failed to add to favorites")
+            else:
+                # To remove, first resolve item details to get item_id and media_type
+                resolve_resp = await client.post(
+                    ma_api,
+                    json={"command": "music/item_by_uri", "args": {"uri": req.uri}},
+                    headers={"Content-Type": "application/json", **auth_headers},
+                )
+                if resolve_resp.status_code != 200:
+                    log.error(f"[media/favorite] Resolve failed: {resolve_resp.status_code} - {resolve_resp.text}")
+                    raise HTTPException(status_code=resolve_resp.status_code, detail="Failed to resolve item details")
+
+                item = resolve_resp.json()
+                item_id = item.get("item_id")
+                media_type = item.get("media_type")
+
+                if not item_id or not media_type:
+                    # Try looking under result if the response is wrapped
+                    res = item.get("result", {}) if isinstance(item, dict) else {}
+                    item_id = res.get("item_id")
+                    media_type = res.get("media_type")
+
+                if not item_id or not media_type:
+                    raise HTTPException(status_code=404, detail="Could not resolve library item ID or media type")
+
+                resp = await client.post(
+                    ma_api,
+                    json={
+                        "command": "music/favorites/remove_item",
+                        "args": {"library_item_id": item_id, "media_type": media_type}
+                    },
+                    headers={"Content-Type": "application/json", **auth_headers},
+                )
+                if resp.status_code == 200:
+                    return {"status": "SUCCESS", "favorite": False}
+                else:
+                    log.error(f"[media/favorite] Remove failed: {resp.status_code} - {resp.text}")
+                    raise HTTPException(status_code=resp.status_code, detail="Failed to remove from favorites")
+        except HTTPException as he:
+            raise he
+        except Exception as e:
+            log.error(f"[media/favorite] Exception: {e}", exc_info=True)
+            raise HTTPException(status_code=502, detail="Error communicating with Music Assistant")
 
 
 
