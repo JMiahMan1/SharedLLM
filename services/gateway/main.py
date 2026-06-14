@@ -12,7 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional, Any, Dict
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect # pyright: ignore[reportUnusedImport]
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect, Response # pyright: ignore[reportUnusedImport]
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import UploadFile
@@ -1925,6 +1925,24 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
             "options": {**vram_params, "num_predict": 512}
         }
         log.info(f"[ShadowExecution] Requesting proposal from {assistant} (Timeout: {OLLAMA_TIMEOUT}s)")
+        # Wait for available slot if all are busy
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as slot_client:
+                deadline = asyncio.get_running_loop().time() + 120.0
+                while asyncio.get_running_loop().time() < deadline:
+                    try:
+                        ps_resp = await slot_client.get(f"{ollama_url}/api/ps", timeout=3.0)
+                        if ps_resp.status_code == 200:
+                            slots = ps_resp.json().get("slots", {})
+                            if slots.get("available", 0) > 0:
+                                break
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.5)
+                else:
+                    log.warning("[ShadowExecution] No slots available, proceeding anyway")
+        except Exception:
+            log.warning("[ShadowExecution] Could not check slot availability")
         start_t = asyncio.get_event_loop().time()
         resp = await get_http_client().post(f"{ollama_url}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
         elapsed = asyncio.get_event_loop().time() - start_t
@@ -4980,6 +4998,8 @@ async def stream_audiobookshelf(book_id: str, request: Request):
     try:
         try:
             creds = await _resolve_identity_from_request(request)
+            if not isinstance(creds, dict):
+                creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
             log.info(f"[stream/abs] Identity resolved successfully for user: {creds.get('user')}")
         except HTTPException as e:
             log.error(f"[stream/abs] Identity resolution failed: {e.detail}")
@@ -5107,6 +5127,8 @@ async def stream_music_assistant(uri: str, request: Request):
     try:
         try:
             creds = await _resolve_identity_from_request(request)
+            if not isinstance(creds, dict):
+                creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
             log.info(f"[stream/ma] Identity resolved for user: {creds.get('user')}")
         except HTTPException as e:
             log.error(f"[stream/ma] Identity resolution failed: {e.detail}")
@@ -5313,6 +5335,45 @@ async def stream_music_assistant(uri: str, request: Request):
     except Exception as e:
         log.error(f"[stream/ma] Unhandled exception: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=f"Failed to stream from Music Assistant: {e}")
+
+
+@app.get("/api/media/imageproxy")
+async def media_imageproxy(path: str, request: Request):
+    """Proxy image requests (e.g., entity pictures/covers) from Home Assistant or external sources."""
+    log.info(f"[imageproxy] Proxying image request for path={path}")
+    try:
+        creds = await _resolve_identity_from_request(request)
+        if not isinstance(creds, dict):
+            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
+    except Exception as e:
+        log.error(f"[imageproxy] Identity resolution failed: {e}")
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    ha_url = creds.get("ha_url") or ""
+    ha_token = creds.get("ha_token") or ""
+
+    if not ha_url or not ha_token:
+        log.error("[imageproxy] Home Assistant URL/token not configured")
+        raise HTTPException(status_code=400, detail="Home Assistant not configured")
+
+    if path.startswith("/"):
+        target_url = f"{ha_url.rstrip('/')}{path}"
+    else:
+        target_url = path
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            headers = {"Authorization": f"Bearer {ha_token}"}
+            resp = await client.get(target_url, headers=headers)
+            if resp.status_code == 200:
+                content_type = resp.headers.get("Content-Type", "image/jpeg")
+                return Response(content=resp.content, media_type=content_type)
+            else:
+                log.error(f"[imageproxy] Upstream returned status {resp.status_code}")
+                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch image from upstream")
+    except Exception as e:
+        log.error(f"[imageproxy] Exception proxying image: {e}")
+        raise HTTPException(status_code=500, detail="Error fetching image")
 
 
 
