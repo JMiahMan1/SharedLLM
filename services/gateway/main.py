@@ -304,19 +304,14 @@ def _parse_llm_json_object(raw: Any) -> Any:
             return json.loads(cleaned)
     
     raise ValueError(f"Could not extract JSON from LLM response: {text[:200]}")
-
-
 async def get_assistant_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
-    if active == "openrouter":
-        model = settings.get("cloud_assistant_model")
-    else:
-        model = settings.get("ollama_assistant_model") or settings.get("assistant_model")
+    model = settings.get("assistant_model")
     if not model:
         available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v and v != "auto"}
         log.error(f"[get_assistant_model] No assistant model found. active_provider={active}. Available models: {available_models}")
-        raise RuntimeError(f"No assistant model configured. Set ollama_assistant_model in Identity settings. Available: {available_models}")
+        raise RuntimeError(f"No assistant model configured. Set assistant_model in Identity settings. Available: {available_models}")
     log.info(f"[get_assistant_model] active_provider={active} resolved_model={model}")
     return model
 
@@ -324,14 +319,11 @@ async def get_assistant_model():
 async def get_coding_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
-    if active == "openrouter":
-        model = settings.get("cloud_coding_model")
-    else:
-        model = settings.get("ollama_coding_model") or settings.get("coding_model")
+    model = settings.get("coding_model")
     if not model:
         available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v and v != "auto"}
         log.error(f"[get_coding_model] No coding model found. active_provider={active}. Available models: {available_models}")
-        raise RuntimeError(f"No coding model configured. Set ollama_coding_model in Identity settings. Available: {available_models}")
+        raise RuntimeError(f"No coding model configured. Set coding_model in Identity settings. Available: {available_models}")
     log.info(f"[get_coding_model] active_provider={active} resolved_model={model}")
     return model
 
@@ -353,17 +345,15 @@ async def get_resident_model() -> Optional[str]:
         pass
     return None
 
+
 async def get_librarian_model():
     settings = await get_llm_settings()
     active = settings.get("active_llm_provider", "ollama")
-    if active == "openrouter":
-        model = settings.get("cloud_librarian_model")
-    else:
-        model = settings.get("ollama_librarian_model") or settings.get("librarian_model")
+    model = settings.get("librarian_model")
     if not model:
         available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v and v != "auto"}
         log.error(f"[get_librarian_model] No librarian model found. active_provider={active}. Available models: {available_models}")
-        raise RuntimeError(f"No librarian model configured. Set ollama_librarian_model in Identity settings. Available: {available_models}")
+        raise RuntimeError(f"No librarian model configured. Set librarian_model in Identity settings. Available: {available_models}")
     return model
 
 async def fetch_autonomous_protocols() -> str:

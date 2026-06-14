@@ -17,9 +17,9 @@ GATEWAY_CONFIG_SCHEMA = {
     "redis_url": (CRITICAL, "Redis connection URL", "Job queue and history broken"),
 
     # LLM models — chat endpoint broken without at least one
-    "ollama_assistant_model": (REQUIRED, "Ollama assistant model", "Chat endpoint returns 503"),
-    "ollama_coding_model": (REQUIRED, "Ollama coding model", "Coding tasks fall back to assistant model"),
-    "ollama_librarian_model": (REQUIRED, "Ollama librarian model", "Librarian queries fall back to assistant model"),
+    "assistant_model": (REQUIRED, "Assistant model", "Chat endpoint returns 503"),
+    "coding_model": (REQUIRED, "Coding model", "Coding tasks fall back to assistant model"),
+    "librarian_model": (REQUIRED, "Librarian model", "Librarian queries fall back to assistant model"),
     "active_llm_provider": (REQUIRED, "Active LLM provider", "Cannot route inference requests"),
     "llm_local_url": (REQUIRED, "Local LLM service URL", "Ollama inference unreachable"),
 
@@ -33,9 +33,6 @@ GATEWAY_CONFIG_SCHEMA = {
 
     # Cloud provider (only needed if active_llm_provider=openrouter)
     "llm_cloud_api_key": (OPTIONAL, "Cloud LLM API key", "OpenRouter provider broken"),
-    "cloud_assistant_model": (OPTIONAL, "Cloud assistant model", "OpenRouter assistant broken"),
-    "cloud_coding_model": (OPTIONAL, "Cloud coding model", "OpenRouter coding broken"),
-    "cloud_librarian_model": (OPTIONAL, "Cloud librarian model", "OpenRouter librarian broken"),
 }
 
 
@@ -75,12 +72,12 @@ def validate_config(settings: Dict[str, str]) -> ConfigValidationResult:
 
     for key, (priority, _description, impact) in GATEWAY_CONFIG_SCHEMA.items():
         # Skip cloud keys if not using cloud provider
-        if key.startswith("llm_cloud_") or key.startswith("cloud_"):
+        if key.startswith("llm_cloud_"):
             if active_provider != "openrouter":
                 continue
 
-        # Skip ollama keys if using cloud provider
-        if key.startswith("ollama_") or key == "llm_local_url":
+        # Skip local/ollama keys if using cloud provider
+        if key == "llm_local_url":
             if active_provider == "openrouter":
                 continue
 

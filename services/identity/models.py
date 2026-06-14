@@ -132,21 +132,11 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "llm_cloud_api_key", "value": "", "description": "API Key for cloud fallback (OpenRouter, OpenAI, etc.)"},
     {"key": "llm_cloud_url", "value": "https://openrouter.ai/api/v1/chat/completions", "description": "Base URL for cloud inference"},
     
-    # --- OLLAMA MODELS ---
+    # --- LLM MODELS (SINGLE SOURCE OF TRUTH) ---
     # Model settings default to "" (unconfigured) — they MUST be set explicitly via the UI or .env.
-    {"key": "ollama_assistant_model", "value": "", "description": "Ollama assistant model"},
-    {"key": "ollama_coding_model", "value": "", "description": "Ollama coding model"},
-    {"key": "ollama_librarian_model", "value": "", "description": "Ollama librarian model"},
-
-
-    # --- CLOUD MODELS ---
-    # Not seeded here — must be set explicitly via the UI.
-
-    
-    # --- DEPRECATED MODEL KEYS ---
-    # Not seeded here — if present in DB they are read as fallbacks, but never auto-inserted.
-
-    {"key": "llm_cloud_fallback_model", "value": "", "description": "DEPRECATED: Use cloud_assistant_model."},
+    {"key": "assistant_model", "value": "", "description": "Global assistant model"},
+    {"key": "coding_model", "value": "", "description": "Global coding model"},
+    {"key": "librarian_model", "value": "", "description": "Global librarian/RAG model"},
     
     # --- ANTI-REFUSAL & AGENT PROTOCOLS ---
     {

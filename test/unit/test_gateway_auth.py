@@ -36,8 +36,8 @@ def test_gateway_extracts_bearer_token():
     respx.get(f"{IDENTITY_SVC}/api/settings").mock(
         return_value=httpx.Response(200, json=[
             {"key": "active_llm_provider", "value": "ollama"},
-            {"key": "ollama_assistant_model", "value": "qwen3:8b"},
-            {"key": "ollama_coding_model", "value": "qwen3:8b"},
+            {"key": "assistant_model", "value": "qwen3:8b"},
+            {"key": "coding_model", "value": "qwen3:8b"},
             {"key": "llm_local_url", "value": "http://localhost:11434"},
             {"key": "embedding_model", "value": "BAAI/bge-small-en-v1.5"},
             {"key": "redis_url", "value": "redis://localhost:6379/0"},
