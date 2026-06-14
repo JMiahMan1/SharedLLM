@@ -34,6 +34,9 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         media_artist = attrs.get("media_artist", "")
         media_album = attrs.get("media_album_name", "")
         source = attrs.get("source", "")
+        media_position = attrs.get("media_position")
+        media_duration = attrs.get("media_duration")
+        entity_picture = attrs.get("entity_picture")
 
         # Only include MA-compatible devices (those with MA queue integration)
         # Check integration source and queue presence for MA compatibility
@@ -58,6 +61,9 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
             "source": source,
             "volume_level": round(volume_level, 2) if volume_level is not None else None,
             "is_volume_muted": is_volume_muted,
+            "position": media_position,
+            "duration": media_duration,
+            "entity_picture": entity_picture,
         }
 
         if st in ("playing", "paused", "buffering"):
