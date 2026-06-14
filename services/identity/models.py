@@ -133,10 +133,10 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "llm_cloud_url", "value": "https://openrouter.ai/api/v1/chat/completions", "description": "Base URL for cloud inference"},
     
     # --- OLLAMA MODELS ---
-    # Seeded with small default models for testing. Override via Identity UI or .env.
-    {"key": "ollama_assistant_model", "value": "qwen3:8b", "description": "Ollama assistant model (default: qwen3:8b for testing)"},
-    {"key": "ollama_coding_model", "value": "qwen3:8b", "description": "Ollama coding model (default: qwen3:8b for testing)"},
-    {"key": "ollama_librarian_model", "value": "qwen3:8b", "description": "Ollama librarian model (default: qwen3:8b for testing)"},
+    # Model settings default to "" (unconfigured) — they MUST be set explicitly via the UI or .env.
+    {"key": "ollama_assistant_model", "value": "", "description": "Ollama assistant model"},
+    {"key": "ollama_coding_model", "value": "", "description": "Ollama coding model"},
+    {"key": "ollama_librarian_model", "value": "", "description": "Ollama librarian model"},
 
 
     # --- CLOUD MODELS ---
@@ -146,7 +146,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     # --- DEPRECATED MODEL KEYS ---
     # Not seeded here — if present in DB they are read as fallbacks, but never auto-inserted.
 
-    {"key": "llm_cloud_fallback_model", "value": "google/gemini-2.5-flash-8b", "description": "DEPRECATED: Use cloud_assistant_model."},
+    {"key": "llm_cloud_fallback_model", "value": "", "description": "DEPRECATED: Use cloud_assistant_model."},
     
     # --- ANTI-REFUSAL & AGENT PROTOCOLS ---
     {
