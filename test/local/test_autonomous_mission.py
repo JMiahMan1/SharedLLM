@@ -13,12 +13,25 @@ async def test_autonomous_mission():
     internal_secret = os.getenv("INTERNAL_SECRET", "change-me-in-production")
     headers = {"X-Internal-Secret": internal_secret}
     
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default=os.getenv("TEST_MODEL", "auto"))
-    args, _ = parser.parse_known_args()
+    # Fetch the active coding model from the Identity Config Database (single source of truth)
+    from urllib.parse import urlparse
+    parsed = urlparse(base_url)
+    hostname = parsed.hostname or "localhost"
+    identity_url = f"{parsed.scheme}://{hostname}:8001"
     
-    model_name = args.model
+    with httpx.Client(timeout=10.0) as client:
+        resp = client.get(f"{identity_url}/api/settings", headers=headers)
+        assert resp.status_code == 200, f"Failed to fetch Identity settings: {resp.text}"
+        settings = {s["key"]: s["value"] for s in resp.json()}
+        
+        active_provider = settings.get("active_llm_provider", "ollama")
+        if active_provider == "openrouter":
+            model_name = settings.get("cloud_coding_model")
+        else:
+            model_name = settings.get("ollama_coding_model") or settings.get("coding_model")
+            
+        assert model_name, f"No coding model configured in database (provider: {active_provider})"
+
     print(f"=== Testing Raven Autonomous Mission against {base_url} [Model: {model_name}] ===\n")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -26,10 +39,9 @@ async def test_autonomous_mission():
         print("1. Creating Autonomous Mission...")
         mission_request = {
             "query": "System diagnostic: Check the health of the control_plane and summarize any recent startup logs.",
-            "priority": 1
+            "priority": 1,
+            "coding_model": model_name
         }
-        if model_name and model_name != "auto":
-            mission_request["coding_model"] = model_name
         
         # We need a user session/creds usually, but for this test we'll assume the internal secret bypass works
         # or we use the admin mission endpoint if available
