@@ -68,13 +68,13 @@ async def test_bulk_settings_proxy_forwards_post(monkeypatch):
         headers = {"Authorization": "Bearer test-token"}
 
         async def json(self):
-            return {"ollama_assistant_model": "qwen3.5:14b"}
+            return {"assistant_model": "qwen3.5:14b"}
 
     resp = await main.proxy_update_settings_bulk(cast(Request, FakeRequest()))
 
     assert resp.status_code == 200
     assert captured["url"].endswith("/api/settings")
-    assert captured["json"] == {"ollama_assistant_model": "qwen3.5:14b"}
+    assert captured["json"] == {"assistant_model": "qwen3.5:14b"}
     assert captured["headers"] == {"Authorization": "Bearer test-token"}
 
 @pytest.mark.asyncio
@@ -87,7 +87,7 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     monkeypatch.setattr(main, "get_history", AsyncMock(return_value=[]))
     monkeypatch.setattr(main, "contextualize_query", AsyncMock(return_value="hello"))
     monkeypatch.setattr(main, "decompose_command_query", AsyncMock(return_value=[]))
-    monkeypatch.setattr(main, "get_llm_settings", AsyncMock(return_value={"active_llm_provider": "ollama", "ollama_assistant_model": "qwen3:8b"}))
+    monkeypatch.setattr(main, "get_llm_settings", AsyncMock(return_value={"active_llm_provider": "ollama", "assistant_model": "qwen3:8b"}))
     monkeypatch.setattr(main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
     monkeypatch.setattr(main, "fetch_global_setting", AsyncMock(return_value="0.85"))
     
@@ -140,7 +140,7 @@ async def test_openai_chat_completions(client: TestClient, monkeypatch):
     # Mock resolve_identity, get_llm_settings, get_assistant_model, update_history
     monkeypatch.setattr(main, "resolve_identity", AsyncMock(return_value={"user": "alice"}))
     monkeypatch.setattr(main, "update_history", AsyncMock(return_value=None))
-    monkeypatch.setattr(main, "get_llm_settings", AsyncMock(return_value={"active_llm_provider": "ollama", "ollama_assistant_model": "qwen3:8b"}))
+    monkeypatch.setattr(main, "get_llm_settings", AsyncMock(return_value={"active_llm_provider": "ollama", "assistant_model": "qwen3:8b"}))
     monkeypatch.setattr(main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
     monkeypatch.setattr(main, "fetch_global_setting", AsyncMock(return_value="0.85"))
     

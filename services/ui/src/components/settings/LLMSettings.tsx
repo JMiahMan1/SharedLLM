@@ -208,9 +208,9 @@ const LLMSettings: React.FC = () => {
               </div>
               <div className="space-y-6">
                 {[
-                  { label: 'Assistant', key: 'ollama_assistant_model', icon: Brain },
-                  { label: 'Coding / Repair', key: 'ollama_coding_model', icon: Code },
-                  { label: 'Librarian / RAG', key: 'ollama_librarian_model', icon: Library }
+                  { label: 'Assistant', key: 'assistant_model', icon: Brain },
+                  { label: 'Coding / Repair', key: 'coding_model', icon: Code },
+                  { label: 'Librarian / RAG', key: 'librarian_model', icon: Library }
                 ].map(role => (
                   <div key={role.key} className="glass-card p-4 bg-white/5">
                     <div className="flex items-center gap-2 mb-3">
@@ -218,9 +218,10 @@ const LLMSettings: React.FC = () => {
                       <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">{role.label}</span>
                     </div>
                     <select
-                      value={getSetting(role.key)}
+                      value={activeProvider === 'ollama' ? getSetting(role.key) : ''}
                       onChange={e => setDrafts({...drafts, [role.key]: e.target.value})}
-                      className="glass-input w-full text-xs bg-black/40"
+                      disabled={activeProvider !== 'ollama'}
+                      className="glass-input w-full text-xs bg-black/40 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <option value="">Select Local Model</option>
                       {availableModels.map(m => (
@@ -240,9 +241,9 @@ const LLMSettings: React.FC = () => {
               </div>
               <div className="space-y-6">
                 {[
-                  { label: 'Assistant', key: 'cloud_assistant_model', icon: Brain, placeholder: 'google/gemini-2.0-flash-001' },
-                  { label: 'Coding / Repair', key: 'cloud_coding_model', icon: Code, placeholder: 'anthropic/claude-3.5-sonnet' },
-                  { label: 'Librarian / RAG', key: 'cloud_librarian_model', icon: Library, placeholder: 'google/gemini-2.0-flash-001' }
+                  { label: 'Assistant', key: 'assistant_model', icon: Brain, placeholder: 'google/gemini-2.0-flash-001' },
+                  { label: 'Coding / Repair', key: 'coding_model', icon: Code, placeholder: 'anthropic/claude-3.5-sonnet' },
+                  { label: 'Librarian / RAG', key: 'librarian_model', icon: Library, placeholder: 'google/gemini-2.0-flash-001' }
                 ].map(role => (
                   <div key={role.key} className="glass-card p-4 bg-white/5">
                     <div className="flex items-center gap-2 mb-3">
@@ -251,9 +252,10 @@ const LLMSettings: React.FC = () => {
                     </div>
                     <input 
                       type="text" 
-                      value={getSetting(role.key)} 
+                      value={activeProvider === 'openrouter' ? getSetting(role.key) : ''} 
                       onChange={e => setDrafts({...drafts, [role.key]: e.target.value})}
-                      className="glass-input w-full text-xs"
+                      disabled={activeProvider !== 'openrouter'}
+                      className="glass-input w-full text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                       placeholder={role.placeholder}
                     />
                   </div>

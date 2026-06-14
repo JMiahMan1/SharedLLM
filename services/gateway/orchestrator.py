@@ -63,9 +63,7 @@ async def get_all_settings() -> Dict[str, str]:
                 fetched = {item["key"]: item["value"] for item in resp.json()}
                 # Merge with defaults for non-model keys only
                 model_keys = {
-                    "active_llm_provider", "ollama_assistant_model", "ollama_coding_model",
-                    "ollama_librarian_model", "cloud_assistant_model", "cloud_coding_model",
-                    "cloud_librarian_model", "assistant_model", "coding_model", "librarian_model",
+                    "active_llm_provider", "assistant_model", "coding_model", "librarian_model",
                 }
                 for key, default in _DEFAULTS.items():
                     if key in model_keys:
@@ -103,9 +101,7 @@ def _sync_main_constants(settings: Dict[str, str]) -> None:
 
 
 _MODEL_KEYS = {
-    "active_llm_provider", "ollama_assistant_model", "ollama_coding_model",
-    "ollama_librarian_model", "cloud_assistant_model", "cloud_coding_model",
-    "cloud_librarian_model", "assistant_model", "coding_model", "librarian_model",
+    "active_llm_provider", "assistant_model", "coding_model", "librarian_model",
 }
 
 def _get(settings: Dict[str, str], key: str, default: str = "") -> str:
