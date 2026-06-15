@@ -132,12 +132,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
     Seed the database from environment variables.
     If force is True, clears existing users/assignments first.
     """
-    if not force:
-        existing = session.exec(select(User)).first()
-        if existing:
-            log.info("[seed] Database already seeded — skipping.")
-            return 0
-    else:
+    if force:
         log.info("[seed] Forced re-seed: Clearing existing users/assignments.")
         # Clear using SQLModel to avoid table name mismatches
         for table in ["deviceassignment", "user", "apikey", "globalsetting"]:
@@ -147,47 +142,51 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 pass 
         session.commit()
 
-    env_users = _parse_env_users()
     count = 0
+    has_users = session.exec(select(User)).first() is not None
+    if not has_users or force:
+        env_users = _parse_env_users()
+        for udata in env_users.values():
+            # Set default password for 'default' user if not already set
+            password_hash = None
+            is_admin = udata.get("is_admin", False)
+            if udata["username"] == "default":
+                password_hash = pwd_context.hash(os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme"))
+                is_admin = True # Default user should be admin for first setup
 
-    for udata in env_users.values():
-        # Set default password for 'default' user if not already set
-        password_hash = None
-        is_admin = udata.get("is_admin", False)
-        if udata["username"] == "default":
-            password_hash = pwd_context.hash(os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme"))
-            is_admin = True # Default user should be admin for first setup
-
-        user = User(
-            username=udata["username"],
-            display_name=udata.get("display_name", ""),
-            is_admin=is_admin,
-            is_system_default=udata.get("is_system_default", False),
-            password_hash=password_hash,
-            api_key=udata.get("api_key") or os.urandom(24).hex(), # Ensure API key exists
-            nextcloud_url=udata.get("nextcloud_url"),
-            nextcloud_user=udata.get("nextcloud_user"),
-            ha_url=udata.get("ha_url"),
-            github_url=udata.get("github_url"),
-            github_user=udata.get("github_user"),
-            gitlab_url=udata.get("gitlab_url"),
-            gitlab_user=udata.get("gitlab_user"),
-            audiobookshelf_url=udata.get("audiobookshelf_url"),
-            audiobookshelf_user=udata.get("audiobookshelf_user"),
-            mass_url=udata.get("mass_url"),
-             skylight_url=udata.get("skylight_url"),
-             skylight_email=udata.get("skylight_email"),
-             # Encrypt sensitive fields
-            nextcloud_pass_enc=encrypt(udata.get("nextcloud_pass")),
-            ha_token_enc=encrypt(udata.get("ha_token")),
-            github_token_enc=encrypt(udata.get("github_token")),
-            gitlab_token_enc=encrypt(udata.get("gitlab_token")),
-            audiobookshelf_pass_enc=encrypt(udata.get("audiobookshelf_pass")),
-            mass_token_enc=encrypt(udata.get("mass_token")),
-            skylight_pass_enc=encrypt(udata.get("skylight_pass")),
-        )
-        session.add(user)
-        count += 1
+            user = User(
+                username=udata["username"],
+                display_name=udata.get("display_name", ""),
+                is_admin=is_admin,
+                is_system_default=udata.get("is_system_default", False),
+                password_hash=password_hash,
+                api_key=udata.get("api_key") or os.urandom(24).hex(), # Ensure API key exists
+                nextcloud_url=udata.get("nextcloud_url"),
+                nextcloud_user=udata.get("nextcloud_user"),
+                ha_url=udata.get("ha_url"),
+                github_url=udata.get("github_url"),
+                github_user=udata.get("github_user"),
+                gitlab_url=udata.get("gitlab_url"),
+                gitlab_user=udata.get("gitlab_user"),
+                audiobookshelf_url=udata.get("audiobookshelf_url"),
+                audiobookshelf_user=udata.get("audiobookshelf_user"),
+                mass_url=udata.get("mass_url"),
+                skylight_url=udata.get("skylight_url"),
+                skylight_email=udata.get("skylight_email"),
+                # Encrypt sensitive fields
+                nextcloud_pass_enc=encrypt(udata.get("nextcloud_pass")),
+                ha_token_enc=encrypt(udata.get("ha_token")),
+                github_token_enc=encrypt(udata.get("github_token")),
+                gitlab_token_enc=encrypt(udata.get("gitlab_token")),
+                audiobookshelf_pass_enc=encrypt(udata.get("audiobookshelf_pass")),
+                mass_token_enc=encrypt(udata.get("mass_token")),
+                skylight_pass_enc=encrypt(udata.get("skylight_pass")),
+            )
+            session.add(user)
+            count += 1
+        session.commit()
+    else:
+        log.info("[seed] Users already exist — skipping user seeding.")
 
     # ── Seed Global Settings ──────────────────────────────────────────────────
     for ds in DEFAULT_GLOBAL_SETTINGS:

@@ -16,10 +16,10 @@ GATEWAY_CONFIG_SCHEMA = {
     "identity_svc_url": (CRITICAL, "Identity service URL", "Cannot resolve credentials or settings"),
     "redis_url": (CRITICAL, "Redis connection URL", "Job queue and history broken"),
 
-    # LLM models — chat endpoint broken without at least one
-    "assistant_model": (REQUIRED, "Assistant model", "Chat endpoint returns 503"),
-    "coding_model": (REQUIRED, "Coding model", "Coding tasks fall back to assistant model"),
-    "librarian_model": (REQUIRED, "Librarian model", "Librarian queries fall back to assistant model"),
+    # LLM models — resolved at runtime from UI settings, not required at startup
+    "assistant_model": (OPTIONAL, "Assistant model", "Chat falls back to defaults"),
+    "coding_model": (OPTIONAL, "Coding model", "Coding tasks fall back to assistant model"),
+    "librarian_model": (OPTIONAL, "Librarian model", "Librarian queries fall back to assistant model"),
     "active_llm_provider": (REQUIRED, "Active LLM provider", "Cannot route inference requests"),
     "llm_local_url": (REQUIRED, "Local LLM service URL", "Ollama inference unreachable"),
 
