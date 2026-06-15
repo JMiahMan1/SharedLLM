@@ -5,6 +5,12 @@ Connects to MA's WebSocket API for real-time queue state updates and
 command dispatch. Handles authentication, auto-reconnect, and event
 processing.
 
+Based on the official MA websocket_client.py implementation:
+- Token is passed via URL query parameter (?token=xxx)
+- Server-initiated heartbeats (websockets library handles ping/pong automatically)
+- Message IDs follow MA format: f"counter{num}"
+- Events arrive as clean JSON: {"event": "queue_updated", "data": {...}}
+
 Usage:
     client = MAWebSocketClient(mass_url, mass_token)
     await client.connect()
@@ -31,24 +37,20 @@ EVENT_QUEUE_ENDED = "queue_ended"
 EVENT_QUEUE_STARTED = "queue_started"
 EVENT_QUEUE_VOLATILE_UPDATED = "queue_volatile_updated"
 
-# WebSocket message types
-MESSAGE_TYPE_EVENT = "EVENT"
-MESSAGE_TYPE_RESULT = "RESULT"
-MESSAGE_TYPE_AUTH = "AUTH"
-
 # Reconnect settings
 RECONNECT_BASE_DELAY = 1.0
 RECONNECT_MAX_DELAY = 30.0
 RECONNECT_BACKOFF_FACTOR = 2.0
 RECONNECT_JITTER = 0.5
 
-# Heartbeat interval (seconds)
+# Heartbeat: MA server pings us; websockets library replies with pong automatically.
+# We do NOT send our own pings — the MA server expects to initiate heartbeat.
+# The websockets library's default ping_interval (20s) is sufficient for keep-alive.
 HEARTBEAT_INTERVAL = 15.0
 
 # Command format
 COMMAND_PREFIX = "player/"
 PLAY_MEDIA_COMMAND = f"{COMMAND_PREFIX}play_media"
-
 
 EventCallback = Callable[[str, Dict[str, Any]], None]
 
@@ -59,7 +61,7 @@ class MAWebSocketClient:
 
     Provides:
     - Persistent connection with auto-reconnect and exponential backoff
-    - Authentication with MA's JWT token
+    - Authentication with MA's JWT token (via URL query param)
     - Command dispatch (player/play_media, player/pause, etc.)
     - Event callbacks for queue/player state changes
     - Stream URL extraction from QUEUE_UPDATED events
@@ -85,7 +87,10 @@ class MAWebSocketClient:
         """
         self._mass_url = mass_url.rstrip("/")
         self._mass_token = mass_token
-        self._ws_url = f"{self._mass_url}/ws"
+
+        # Token is passed as a query parameter — this is how MA's WebSocket
+        # middleware expects authentication (not via headers).
+        self._ws_url = f"{self._mass_url}/ws?token={mass_token}"
         self._reconnect_base_delay = reconnect_base_delay
         self._reconnect_max_delay = reconnect_max_delay
         self._reconnect_backoff_factor = reconnect_backoff_factor
@@ -93,11 +98,9 @@ class MAWebSocketClient:
         # Connection state
         self._ws: Any = None
         self._connected = False
-        self._auth_token: Optional[str] = None
         self._last_error: Optional[Exception] = None
         self._reconnect_count = 0
         self._reconnect_task: Optional[asyncio.Task] = None
-        self._heartbeat_task: Optional[asyncio.Task] = None
         self._message_handler_task: Optional[asyncio.Task] = None
         self._shutdown_event = asyncio.Event()
 
@@ -180,16 +183,13 @@ class MAWebSocketClient:
         self._connected = False
         log.info("[MA-WS] Disconnected")
 
-    async def send_command(self, command: str, args: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    async def send_command(self, command: str, args: Optional[Dict[str, Any]] = None) -> None:
         """
         Send a command to MA via WebSocket.
 
         Args:
             command: Command name (e.g., "player/play_media", "player/pause")
             args: Command arguments dict
-
-        Returns:
-            Response dict if a response was received, None otherwise.
 
         Raises:
             ConnectionError: If not connected.
@@ -207,7 +207,7 @@ class MAWebSocketClient:
 
         try:
             ws = self._ws
-            await ws.send(self._json_dump(payload))
+            await ws.send(json.dumps(payload))
             log.info(f"[MA-WS] Sent command '{command}' (msg_id={msg_id})")
         except Exception as e:
             log.error(f"[MA-WS] Failed to send command '{command}': {e}")
@@ -234,7 +234,7 @@ class MAWebSocketClient:
 
         try:
             ws = self._ws
-            await ws.send(self._json_dump(payload))
+            await ws.send(json.dumps(payload))
             log.info(f"[MA-WS] Sent command '{command}' (no-wait, msg_id={msg_id})")
         except Exception as e:
             log.error(f"[MA-WS] Failed to send command '{command}': {e}")
@@ -308,7 +308,11 @@ class MAWebSocketClient:
         current = self.get_current_item()
         if current:
             name = current.get("name", "Unknown")
-            artist = current.get("artists", [{}])[0].get("name", "") if isinstance(current.get("artists"), list) and current.get("artists") else current.get("artist", "")
+            artists = current.get("artists")
+            if isinstance(artists, list) and artists:
+                artist = artists[0].get("name", "") if isinstance(artists[0], dict) else ""
+            else:
+                artist = current.get("artist", "")
             return f"[{state}] {name}" + (f" by {artist}" if artist else "")
         return f"[{state}] No current item"
 
@@ -319,16 +323,17 @@ class MAWebSocketClient:
     async def _establish_connection(self) -> None:
         """
         Establish WebSocket connection and authenticate with MA.
+
+        Authentication is done via the token query parameter in the WebSocket URL.
+        The MA server's WebSocket middleware validates the token on connect.
+        After connection, no explicit auth message is needed — the server
+        begins streaming events immediately.
         """
         try:
             log.info(f"[MA-WS] Connecting to {self._ws_url}")
-            headers = {
-                "Authorization": f"Bearer {self._mass_token}",
-            }
-
+            # Token is in the URL query string; no auth header needed.
             self._ws = await websockets.connect(
                 self._ws_url,
-                additional_headers=headers,
                 ping_interval=HEARTBEAT_INTERVAL,
                 ping_timeout=10.0,
                 close_timeout=5.0,
@@ -338,9 +343,8 @@ class MAWebSocketClient:
             self._reconnect_count = 0
             log.info("[MA-WS] Connection established")
 
-            # Start background tasks
+            # Start background message handler
             self._message_handler_task = asyncio.create_task(self._message_loop())
-            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
         except asyncio.CancelledError:
             raise
@@ -354,6 +358,11 @@ class MAWebSocketClient:
         """
         Main message processing loop. Receives messages from MA and
         dispatches events to registered callbacks.
+
+        MA WebSocket messages are simple JSON:
+        - Events: {"event": "queue_updated", "data": {...}}
+        - Results: {"type": "RESULT", "message_id": "counter123", "result": {...}}
+        - Errors: {"type": "ERROR", "message_id": "counter123", "error": {...}}
         """
         try:
             async for message in self._ws:
@@ -374,22 +383,6 @@ class MAWebSocketClient:
             self._last_error = e
             self._connected = False
 
-    async def _heartbeat_loop(self) -> None:
-        """
-        Send periodic heartbeat pings to keep the connection alive.
-        """
-        while not self._shutdown_event.is_set():
-            try:
-                await asyncio.sleep(HEARTBEAT_INTERVAL)
-                if self._connected and self._ws:
-                    await self._ws.ping()
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                if not self._shutdown_event.is_set():
-                    log.warning(f"[MA-WS] Heartbeat failed: {e}")
-                    break
-
     async def _handle_message(self, message: str) -> None:
         """
         Parse and dispatch an incoming WebSocket message.
@@ -398,7 +391,7 @@ class MAWebSocketClient:
             message: Raw JSON string from WebSocket
         """
         try:
-            data = self._json_load(message)
+            data = json.loads(message)
         except json.JSONDecodeError:
             log.warning(f"[MA-WS] Invalid JSON received: {message[:200]}")
             return
@@ -407,38 +400,33 @@ class MAWebSocketClient:
             log.debug(f"[MA-WS] Non-dict message: {type(data)}")
             return
 
-        msg_type = data.get("type") or data.get("message_type")
-        event_type = data.get("event") or data.get("event_type")
+        # Determine message type
+        msg_type = data.get("type")
+        event_type = data.get("event")
 
-        # Event message
-        if msg_type == MESSAGE_TYPE_EVENT or event_type:
-            evt = event_type or data.get("event", "")
+        # ── Event messages ──────────────────────────────────────────────
+        # MA sends events with or without a "type" field:
+        #   {"event": "queue_updated", "data": {...}}
+        #   {"type": "EVENT", "event": "player_updated", "data": {...}}
+        if event_type:
             evt_data = data.get("data", {})
-            log.debug(f"[MA-WS] Received event: {evt}")
-            await self._dispatch_event(evt, evt_data)
+            log.debug(f"[MA-WS] Received event: {event_type}")
+            await self._dispatch_event(event_type, evt_data)
 
-        # Result message (response to a command)
-        elif msg_type == MESSAGE_TYPE_RESULT or "result" in data:
+        # ── Result messages ─────────────────────────────────────────────
+        # Response to a command we sent
+        elif msg_type == "RESULT":
             log.debug(f"[MA-WS] Received result: msg_id={data.get('message_id')}")
 
-        # Auth response
-        elif msg_type == MESSAGE_TYPE_AUTH:
-            log.info("[MA-WS] Auth response received")
-            if data.get("success") or "auth_required" not in data:
-                log.info("[MA-WS] Authentication successful")
-            else:
-                log.error("[MA-WS] Authentication failed")
-
-        # State update (not wrapped in EVENT type)
-        elif "event" in data or "queue" in message.lower()[:50]:
-            evt = data.get("event", "unknown")
-            evt_data = data.get("data", data)
-            log.debug(f"[MA-WS] Received event (alt format): {evt}")
-            await self._dispatch_event(evt, evt_data)
+        # ── Error messages ──────────────────────────────────────────────
+        elif msg_type == "ERROR":
+            log.error(f"[MA-WS] Received error: msg_id={data.get('message_id')} error={data.get('error')}")
 
     async def _dispatch_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """
         Dispatch an event to all registered callbacks.
+
+        Also updates internal queue state and stream URL tracking.
 
         Args:
             event_type: The event type string
@@ -474,6 +462,12 @@ class MAWebSocketClient:
         The URL pattern is typically:
         http://{mass_url}:8096/flow/{session_id}/{queue_id}/{queue_item_id}/{player_id}.mp3
 
+        Search order (highest priority first):
+        1. current_item.media_item.stream_url
+        2. current_item.stream_url
+        3. items[*].stream_url
+        4. audio_player.stream_url
+
         Args:
             data: Queue state data from MA
         """
@@ -481,7 +475,9 @@ class MAWebSocketClient:
         current_item = data.get("current_item", {})
         if isinstance(current_item, dict):
             media_item = current_item.get("media_item", {})
-            stream_url = media_item.get("stream_url") or current_item.get("stream_url")
+            stream_url = media_item.get("stream_url") if isinstance(media_item, dict) else None
+            if not stream_url:
+                stream_url = current_item.get("stream_url")
             if stream_url:
                 self._stream_url = stream_url
                 log.info(f"[MA-WS] Stream URL resolved: {stream_url[:100]}...")
@@ -551,7 +547,7 @@ class MAWebSocketClient:
         """
         Cancel all background tasks gracefully.
         """
-        for task in (self._reconnect_task, self._heartbeat_task, self._message_handler_task):
+        for task in (self._reconnect_task, self._message_handler_task):
             if task and not task.done():
                 task.cancel()
                 try:
@@ -560,29 +556,16 @@ class MAWebSocketClient:
                     pass
 
         self._reconnect_task = None
-        self._heartbeat_task = None
         self._message_handler_task = None
 
     # ------------------------------------------------------------------
     # Internal - Utilities
     # ------------------------------------------------------------------
 
-    def _next_msg_id(self) -> int:
-        """Generate a unique message ID."""
+    def _next_msg_id(self) -> str:
+        """Generate a unique MA-format message ID: 'counter{n}'."""
         self._msg_id += 1
-        return self._msg_id
-
-    @staticmethod
-    def _json_load(text: str) -> Any:
-        """Parse JSON string."""
-        import json
-        return json.loads(text)
-
-    @staticmethod
-    def _json_dump(obj: Any) -> str:
-        """Serialize to JSON string."""
-        import json
-        return json.dumps(obj)
+        return f"counter{self._msg_id}"
 
     # ------------------------------------------------------------------
     # Context Manager Support
