@@ -34,7 +34,7 @@ Local playback uses the browser's native `<audio>` element (or Capacitor's Nativ
 The current `/api/media/stream/music-assistant` implementation proxies MA's `/preview` endpoint, which only provides **~30 second previews** — not full tracks. To stream full audio, the system must use Music Assistant's native streaming pipeline:
 
 **MA Stream Server (`controllers/streams/controller.py`):**
-- MA hosts an unprotected HTTP-only webserver (default port 8096) for streaming audio packets to players
+- MA hosts an unprotected HTTP-only webserver (default port 8097) for streaming audio packets to players
 - Routes:
   - `/flow/{session_id}/{queue_id}/{queue_item_id}/{player_id}.{fmt}` — continuous flow stream (crossfade, gapless)
   - `/single/{session_id}/{queue_id}/{queue_item_id}/{player_id}.{fmt}` — single track stream

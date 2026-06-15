@@ -5152,19 +5152,19 @@ async def stream_audiobookshelf(book_id: str, request: Request):
 
 @app.get("/api/media/stream/music-assistant")
 async def stream_music_assistant(uri: str, request: Request):
-    """Stream a Music Assistant track to the browser via MA's WebSocket stream pipeline.
+    """Resolve a Music Assistant stream URL for direct browser playback.
 
-    Flow:
+    Flow (MA web-player pattern):
     1. Resolve credentials (mass_url, mass_token) from the Jarvis identity service.
     2. Connect to MA WebSocket and authenticate.
     3. Discover MA players via JSON-RPC player/list and select an idle/playing player.
     4. Send player/play_media with the URI to start playback on the target player.
     5. Listen for the queue_updated event to get the resolved stream URL.
-    6. Proxy the stream URL to the browser with HTTP Range header support for seeking.
-    7. Clean up the WebSocket connection.
+    6. Return the stream URL as JSON — the browser binds directly to MA's stream server (port 8097).
 
-    This enables full-track playback (not ~30s previews) by using MA's native
-    stream server URLs resolved through the queue state pipeline.
+    This matches the official MA web-player architecture: the gateway acts as a
+    WebSocket bridge to resolve the stream URL, then the browser streams directly
+    from MA's native stream server on port 8097 (same LAN, no gateway proxy).
     """
     log.info(f"[stream/ma] Received stream request for uri='{uri}'")
     try:
@@ -5298,86 +5298,18 @@ async def stream_music_assistant(uri: str, request: Request):
                     detail=f"MA did not resolve a stream URL within {stream_timeout}s. Queue state: {queue_desc}"
                 )
 
+            # Return the stream URL for direct browser playback (MA web-player pattern)
+            return {"stream_url": stream_url}
+
         finally:
-            # Close WebSocket — browser will stream directly from MA stream server
             await ma_client.disconnect()
             log.info("[stream/ma] WebSocket closed after stream URL resolved")
-
-        # ── Step 4: Proxy stream to browser ───────────────────────────────────
-        log.info(f"[stream/ma] Proxying stream to browser: {stream_url[:120]}...")
-
-        async def stream_generator(stream_cli: httpx.AsyncClient, stream_resp: httpx.Response):
-            try:
-                bytes_sent = 0
-                async for chunk in stream_resp.aiter_bytes(chunk_size=64 * 1024):
-                    yield chunk
-                    bytes_sent += len(chunk)
-                log.info(f"[stream/ma] Finished — {bytes_sent} bytes for uri='{uri}'")
-            except Exception as e:
-                log.error(f"[stream/ma] Stream error: {e}", exc_info=True)
-                raise
-            finally:
-                await stream_resp.aclose()
-                await stream_cli.aclose()
-
-        stream_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(300.0, connect=15.0),
-            follow_redirects=True,
-        )
-
-        upstream_req_headers = {
-            "Accept": "audio/*,*/*;q=0.9",
-        }
-        range_header = request.headers.get("range")
-        if range_header:
-            upstream_req_headers["Range"] = range_header
-
-        try:
-            upstream = await stream_client.send(
-                stream_client.build_request("GET", stream_url, headers=upstream_req_headers),
-                stream=True,
-            )
-            log.info(
-                f"[stream/ma] Stream response: {upstream.status_code}, "
-                f"content-type: {upstream.headers.get('content-type', 'unknown')}"
-            )
-
-            if upstream.status_code not in (200, 206):
-                await stream_client.aclose()
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"MA stream server returned {upstream.status_code} for uri='{uri}'"
-                )
-
-            content_type = upstream.headers.get("content-type") or "audio/mpeg"
-            response_headers: dict[str, str] = {
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "no-cache",
-                "Content-Type": content_type,
-            }
-            for key in ("Content-Range", "Content-Length"):
-                val = upstream.headers.get(key)
-                if val:
-                    response_headers[key] = val
-
-            return StreamingResponse(
-                stream_generator(stream_client, upstream),
-                status_code=upstream.status_code,
-                media_type=content_type,
-                headers=response_headers,
-            )
-        except HTTPException:
-            raise
-        except Exception as e:
-            log.error(f"[stream/ma] Stream initiation failed: {e}", exc_info=True)
-            await stream_client.aclose()
-            raise HTTPException(status_code=502, detail="Failed to connect to Music Assistant stream server")
 
     except HTTPException:
         raise
     except Exception as e:
         log.error(f"[stream/ma] Unhandled exception: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Failed to stream from Music Assistant: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}")
 
 
 @app.get("/api/media/imageproxy")

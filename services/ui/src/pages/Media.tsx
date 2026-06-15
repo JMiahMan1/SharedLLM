@@ -1066,13 +1066,20 @@ const Media = () => {
               
               const apiToken = storageGetSync('jarvis_api_key') ?? '';
               const tokenParam = apiToken ? `token=${encodeURIComponent(apiToken)}` : '';
-              let url = '';
               if (source === 'abs') {
-                url = `/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`;
+                setLocalStreamUrl(`/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`);
               } else if (source === 'ma') {
-                url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`;
+                // MA endpoint returns {"stream_url": "..."} — resolve it
+                const maApiUrl = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`;
+                fetch(maApiUrl)
+                  .then((r) => r.json())
+                  .then((json) => {
+                    setLocalStreamUrl(json.stream_url || null);
+                  })
+                  .catch((err) => {
+                    console.error('[Media] Failed to resolve MA stream URL in fetchMediaStatus:', err);
+                  });
               }
-              setLocalStreamUrl(url);
             } else if (localTrack) {
               const backendPlaying = active.state === 'playing';
               if (backendPlaying !== localIsPlaying) {
@@ -1274,14 +1281,31 @@ const Media = () => {
     const apiToken = storageGetSync('jarvis_api_key') ?? '';
     const tokenParam = apiToken ? `token=${encodeURIComponent(apiToken)}` : '';
 
-    let url = '';
     if (source === 'abs') {
-      // ABS stream URL already contains token
-      url = `/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`;
+      // ABS stream URL already contains token — proxy works fine as direct <audio src>
+      const absUrl = `/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`;
+      setLocalStreamUrl(absUrl);
     } else if (source === 'ma') {
-      url = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`;
+      // MA endpoint now returns {"stream_url": "..."} — fetch it to get the actual stream URL
+      const maApiUrl = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`;
+      try {
+        const resp = await fetch(maApiUrl);
+        const json = await resp.json();
+        const actualUrl = json.stream_url;
+        if (actualUrl) {
+          console.log('[Media] MA stream URL resolved:', actualUrl.substring(0, 80) + '...');
+          setLocalStreamUrl(actualUrl);
+        } else {
+          console.error('[Media] No stream_url in MA response:', json);
+          setError('Failed to resolve Music Assistant stream URL');
+          setLocalIsPlaying(false);
+        }
+      } catch (err) {
+        console.error('[Media] Failed to resolve MA stream URL:', err);
+        setError('Failed to resolve Music Assistant stream URL');
+        setLocalIsPlaying(false);
+      }
     }
-    setLocalStreamUrl(url);
 
     try {
       await api.syncMediaState({
