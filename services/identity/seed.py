@@ -18,16 +18,18 @@ from passlib.context import CryptContext
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Load legacy .env if available
-from services.config import LEGACY_ENV_PATH as _LEGACY_ENV_PATH
+import sys
+if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
+    from services.config import LEGACY_ENV_PATH as _LEGACY_ENV_PATH
 
-_legacy_env = _LEGACY_ENV_PATH
-if os.path.exists(_legacy_env):
-    load_dotenv(_legacy_env)
-elif os.path.exists(".env"):
-    load_dotenv(".env")
-else:
-    # Try loading .env from current directory as last resort
-    load_dotenv(".env", override=True)
+    _legacy_env = _LEGACY_ENV_PATH
+    if os.path.exists(_legacy_env):
+        load_dotenv(_legacy_env)
+    elif os.path.exists(".env"):
+        load_dotenv(".env")
+    else:
+        # Try loading .env from current directory as last resort
+        load_dotenv(".env", override=True)
 
 log = logging.getLogger("identity.seed")
 
@@ -151,7 +153,10 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             password_hash = None
             is_admin = udata.get("is_admin", False)
             if udata["username"] == "default":
-                password_hash = pwd_context.hash(os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme"))
+                raw_pwd = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme")
+                if len(raw_pwd) > 72:
+                    raw_pwd = raw_pwd[:72]
+                password_hash = pwd_context.hash(raw_pwd)
                 is_admin = True # Default user should be admin for first setup
 
             user = User(

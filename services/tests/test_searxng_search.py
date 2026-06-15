@@ -141,12 +141,12 @@ async def test_handle_web_search_fallback_to_playwright(search_req):
         mock_playwright = AsyncMock()
         mock_playwright.chromium.launch.return_value = mock_browser
 
-        with patch("services.execution.handlers.browser.async_playwright", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_playwright), __aexit__=AsyncMock())):
+        with patch("services.execution.handlers.browser.async_playwright", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_playwright), __aexit__=AsyncMock(return_value=False))):
             result = await browser.handle_web_search(search_req)
 
     assert result is not None
     assert result.status == "SUCCESS"
-    assert "Fallback Result" in result.message
+    assert "Fallback Result" in result.detail["formatted_content"]
 
 
 @pytest.mark.asyncio
@@ -164,7 +164,7 @@ async def test_handle_web_search_total_failure(search_req):
         mock_playwright = AsyncMock()
         mock_playwright.chromium.launch.side_effect = Exception("Browser crash")
 
-        with patch("services.execution.handlers.browser.async_playwright", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_playwright), __aexit__=AsyncMock())):
+        with patch("services.execution.handlers.browser.async_playwright", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_playwright), __aexit__=AsyncMock(return_value=False))):
             result = await browser.handle_web_search(search_req)
 
     assert result.status == "FAILURE"

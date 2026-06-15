@@ -3490,8 +3490,8 @@ async def get_workspaces_proxy(request: Request):
     creds = await _resolve_identity_from_request(request)
     params = {}
     if creds:
-        if creds.get("rag_user"):
-            params["rag_user"] = creds["rag_user"]
+        if creds.get("user"):
+            params["rag_user"] = creds["user"]
         if creds.get("voice_id"):
             params["voice_id"] = creds["voice_id"]
         if creds.get("device_id"):
