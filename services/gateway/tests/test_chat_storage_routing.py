@@ -24,7 +24,7 @@ def get_test_settings():
         db_path = os.path.join(_root, "data", "identity.db")
 
     settings = {}
-    if os.path.exists(db_path):
+    if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
         try:
             engine = create_engine(f"sqlite:///{db_path}")
             with Session(engine) as session:
@@ -33,17 +33,48 @@ def get_test_settings():
         except Exception:
             pass
 
-    # Fallback to env/defaults if DB doesn't have it
+    # If DB has no values or doesn't exist, try querying identity service API directly
+    if not settings.get("assistant_model") or not settings.get("coding_model"):
+        identity_url = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
+        internal_secret = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+        try:
+            import httpx
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.get(
+                    f"{identity_url}/api/settings",
+                    headers={"X-Internal-Secret": internal_secret}
+                )
+                if resp.status_code == 200:
+                    for item in resp.json():
+                        settings[item["key"]] = item["value"]
+        except Exception:
+            pass
+
+    # Fallback to env without hardcoded strings
     if not settings.get("assistant_model"):
-        settings["assistant_model"] = os.getenv("ASSISTANT_MODEL") or "qwen3.6-35b-a3b:q4_k_m"
+        settings["assistant_model"] = os.getenv("ASSISTANT_MODEL")
     if not settings.get("coding_model"):
-        settings["coding_model"] = os.getenv("CODING_MODEL") or "qwen2.5-coder:7b"
+        settings["coding_model"] = os.getenv("CODING_MODEL")
+    if not settings.get("librarian_model"):
+        settings["librarian_model"] = os.getenv("LIBRARIAN_MODEL") or settings.get("assistant_model")
     if not settings.get("llm_local_url"):
         settings["llm_local_url"] = os.getenv("OLLAMA_URL") or "http://localhost:11434"
     if not settings.get("embedding_model"):
         settings["embedding_model"] = os.getenv("EMBEDDING_MODEL") or "BAAI/bge-small-en-v1.5"
     if not settings.get("active_llm_provider"):
         settings["active_llm_provider"] = os.getenv("ACTIVE_LLM_PROVIDER") or "ollama"
+
+    # Validate that we actually got model values
+    if not settings.get("assistant_model"):
+        raise ValueError(
+            "assistant_model could not be loaded from database, identity API, or environment. "
+            "Please configure ASSISTANT_MODEL."
+        )
+    if not settings.get("coding_model"):
+        raise ValueError(
+            "coding_model could not be loaded from database, identity API, or environment. "
+            "Please configure CODING_MODEL."
+        )
 
     # Force service URLs to match the test environment
     for key, env_var in [

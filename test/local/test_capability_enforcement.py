@@ -3,7 +3,7 @@ import httpx
 import pytest
 
 # Configuration
-BASE_URL = os.getenv("LIVE_TEST_URL", "http://localhost:8003")
+BASE_URL = os.getenv("LIVE_TEST_URL", "http://127.0.0.1:8003")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 HEADERS = {"X-Internal-Secret": INTERNAL_SECRET}
 

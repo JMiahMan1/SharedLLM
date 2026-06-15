@@ -34,7 +34,7 @@ class TestConfigBootstrap:
         config_path = os.path.join(PROJECT_ROOT, "services", "config.py")
         source = open(config_path).read()
         runtime_keys = [
-            "FERNET_KEY", "OLLAMA_URL", "HA_URL", "HA_TOKEN",
+            "OLLAMA_URL", "HA_URL", "HA_TOKEN",
             "ASSISTANT_MODEL", "CODING_MODEL", "REDIS_URL",
             "DEFAULT_TTS_VOICE", "EMBEDDING_MODEL",
         ]
@@ -61,7 +61,6 @@ class TestRuntimeConfigResolution:
         monkeypatch.setenv("INTERNAL_SECRET", "test-secret")
         monkeypatch.setenv("IDENTITY_SVC_URL", "http://identity:8001")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-        monkeypatch.delenv("FERNET_KEY", raising=False)
         if "services.config" in sys.modules:
             del sys.modules["services.config"]
         import services.config as config
@@ -71,7 +70,6 @@ class TestRuntimeConfigResolution:
 
         respx_mock.get("http://identity:8001/api/settings").respond(
             json=[
-                {"key": "fernet_key", "value": "test-fernet-key"},
                 {"key": "llm_local_url", "value": "http://ollama:11434"},
                 {"key": "ha_url", "value": "http://homeassistant:8123"},
                 {"key": "ha_token", "value": "test-ha-token"},
@@ -83,7 +81,6 @@ class TestRuntimeConfigResolution:
 
         await config.resolve_runtime_config()
 
-        assert config.FERNET_KEY == "test-fernet-key"
         assert config.OLLAMA_URL == "http://ollama:11434"
         assert config.HA_URL == "http://homeassistant:8123"
         assert config.HA_TOKEN == "test-ha-token"
@@ -98,7 +95,6 @@ class TestRuntimeConfigResolution:
         monkeypatch.setenv("INTERNAL_SECRET", "test-secret")
         monkeypatch.setenv("IDENTITY_SVC_URL", "http://identity:8001")
         monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-        monkeypatch.delenv("FERNET_KEY", raising=False)
         if "services.config" in sys.modules:
             del sys.modules["services.config"]
         import services.config as config
@@ -112,7 +108,7 @@ class TestRuntimeConfigResolution:
         await config.resolve_runtime_config()
 
         # Should retain defaults, not crash
-        assert config.FERNET_KEY == ""
+        assert config.OLLAMA_URL == ""
 
     @pytest.mark.local_only
     @pytest.mark.asyncio
@@ -121,15 +117,14 @@ class TestRuntimeConfigResolution:
         monkeypatch.setenv("INTERNAL_SECRET", "test-secret")
         monkeypatch.setenv("IDENTITY_SVC_URL", "http://identity:8001")
         monkeypatch.setenv("PYTEST_CURRENT_TEST", "1")
-        monkeypatch.setenv("FERNET_KEY", "")
         if "services.config" in sys.modules:
             del sys.modules["services.config"]
         import services.config as config
 
         await config.resolve_runtime_config()
 
-        # Should not have made any network calls; FERNET_KEY stays empty
-        assert config.FERNET_KEY == ""
+        # Should not have made any network calls; OLLAMA_URL stays empty
+        assert config.OLLAMA_URL == ""
 
 
 class TestConfigSettingsMap:
