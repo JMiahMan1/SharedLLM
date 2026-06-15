@@ -1,12 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
   ArrowUpRight,
+  Brain,
   Cpu,
   FileText,
   FolderKanban,
   Globe,
+  Loader2,
   Search,
   Settings2,
   Shield,
@@ -15,7 +17,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
-import type { GlobalSetting, HealthStatus, LogEntry, Workspace } from '../services/api';
+import type { GlobalSetting, HealthStatus, LogEntry, RavenMission, Workspace } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import HaloBanner from '../components/presence/HaloBanner';
@@ -78,6 +80,34 @@ const Dashboard = () => {
     queryKey: ['settings'],
     queryFn: () => api.getSettings(),
   });
+
+  const [ravenMissions, setRavenMissions] = useState<RavenMission[]>([]);
+  const [ravenLoading, setRavenLoading] = useState(true);
+
+  const fetchRavenMissions = useCallback(async () => {
+    try {
+      const resp = await api.getUserMissions();
+      const missions = Array.isArray(resp) ? resp : [];
+      const active = missions.filter((m: RavenMission) =>
+        ['queued', 'running', 'paused'].includes(m.status)
+      );
+      setRavenMissions(active);
+    } catch {
+      setRavenMissions([]);
+    } finally {
+      setRavenLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Defer initial fetch to avoid synchronous setState in effect
+    const timeoutId = setTimeout(() => fetchRavenMissions(), 0);
+    const intervalId = setInterval(fetchRavenMissions, 30000);
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(intervalId);
+    };
+  }, [fetchRavenMissions]);
 
   const serviceSummaries = useMemo<ServiceSummary[]>(() => {
     const services = health?.services || {};
@@ -311,6 +341,63 @@ const Dashboard = () => {
               ))}
             </div>
           </div>
+
+          {user?.is_admin && (
+            <div className="glass-panel p-6 border-l-4 border-l-purple-500">
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Brain size={20} className="text-purple-400" />
+                  <div>
+                    <h3 className="text-xl font-bold text-white">Raven Status</h3>
+                    <p className="text-sm text-slate-400">Autonomous mission monitoring</p>
+                  </div>
+                </div>
+                <span className={`text-[10px] font-black uppercase tracking-widest ${ravenLoading ? 'text-yellow-400' : ravenMissions.length > 0 ? 'text-orange-400' : 'text-emerald-400'}`}>
+                  {ravenLoading ? 'Loading...' : ravenMissions.length > 0 ? 'Active' : 'Idle'}
+                </span>
+              </div>
+              <div className="space-y-3">
+                {ravenLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 size={24} className="animate-spin text-purple-400" />
+                  </div>
+                ) : ravenMissions.length > 0 ? (
+                  ravenMissions.slice(0, 3).map((mission) => (
+                    <div key={mission.id} className="glass-card p-4 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-purple-400">Mission #{mission.id}</span>
+                        <span className={`text-[10px] font-black uppercase tracking-widest ${
+                          mission.status === 'running' ? 'text-orange-400' :
+                          mission.status === 'queued' ? 'text-yellow-400' :
+                          'text-blue-400'
+                        }`}>
+                          {mission.status}
+                        </span>
+                      </div>
+                      <p className="text-sm text-white truncate">{mission.proposed_mission}</p>
+                      {mission.error_summary && (
+                        <p className="text-[10px] text-red-400 truncate">{mission.error_summary}</p>
+                      )}
+                      {mission.progress > 0 && (
+                        <div className="w-full bg-white/10 rounded-full h-1.5 mt-2">
+                          <div
+                            className="bg-purple-500 h-1.5 rounded-full transition-all duration-500"
+                            style={{ width: `${Math.min(mission.progress, 100)}%` }}
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-8">
+                    <Brain size={32} className="mx-auto text-slate-700 mb-2" />
+                    <p className="text-sm text-slate-500">Raven is idle</p>
+                    <p className="text-[10px] text-slate-600 mt-1">Ready to launch missions from the Lab</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </section>
       </div>
 
