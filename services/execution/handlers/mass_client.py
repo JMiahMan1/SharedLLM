@@ -1,5 +1,6 @@
 """Music Assistant REST API client for direct MA service calls."""
 import logging
+import uuid
 from typing import List, Dict, Any
 import httpx
 
@@ -19,10 +20,11 @@ async def _ma_api(mass_url: str, mass_token: str, command: str, params: Dict[str
     if parsed.port:
         base_url = f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"
     
-    # MA v2 REST API requires /api suffix
+    # MA v2 REST API requires /api suffix and message_id in JSON-RPC payload
     urls_to_try = [f"{base_url}/api"]
 
     payload = {
+        "message_id": uuid.uuid4().hex,
         "command": command,
         "args": params or {}
     }

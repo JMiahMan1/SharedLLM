@@ -3,7 +3,7 @@ Comprehensive tests for the MA WebSocket client.
 
 Tests cover:
 - Connection flow (connect/disconnect)
-- Command sending
+- Command sending (with MA-format message IDs)
 - Event handling and dispatching
 - Stream URL extraction from queue state
 - Reconnect logic with exponential backoff
@@ -66,8 +66,9 @@ class TestInitialization:
         assert client._mass_url == mass_url
         assert client._mass_token == mass_token
 
-    def test_init_sets_ws_url(self, client):
-        assert client.ws_url == "http://ha.sumemail.com:8095/ws"
+    def test_init_sets_ws_url_with_token(self, client):
+        # Token is passed as a query parameter
+        assert client.ws_url == "http://ha.sumemail.com:8095/ws?token=test.jwt.token.abc123"
 
     def test_init_default_reconnect_settings(self, client):
         assert client._reconnect_base_delay == 1.0
@@ -106,11 +107,14 @@ class TestInitialization:
     def test_init_reconnect_count_zero(self, client):
         assert client.reconnect_count == 0
 
-    def test_init_represets_as_disconnected(self, client):
+    def test_init_repr_as_disconnected(self, client):
         repr_str = repr(client)
         assert "disconnected" in repr_str
         assert "http://ha.sumemail.com:8095/ws" in repr_str
         assert "reconnects=0" in repr_str
+
+    def test_msg_id_starts_at_zero(self, client):
+        assert client._msg_id == 0
 
 
 # ---------------------------------------------------------------------------
@@ -158,17 +162,24 @@ class TestConnection:
         with patch("websockets.connect", AsyncMock(return_value=mock_websocket)):
             # Call the actual method to verify it creates background tasks
             client._message_handler_task = None
-            client._heartbeat_task = None
             await client._establish_connection()
             assert client._message_handler_task is not None
-            assert client._heartbeat_task is not None
 
     @pytest.mark.asyncio
-    async def test_connect_uses_correct_ws_url(self, client, mock_websocket):
+    async def test_connect_uses_correct_ws_url_with_token(self, client, mock_websocket):
         with patch("websockets.connect", AsyncMock(return_value=mock_websocket)) as mock_connect:
             await client._establish_connection()
-            _, kwargs = mock_connect.call_args
-            assert kwargs["additional_headers"]["Authorization"] == f"Bearer {client._mass_token}"
+            call_args = mock_connect.call_args
+            # Token is in the URL, no auth header
+            assert call_args[0][0] == "http://ha.sumemail.com:8095/ws?token=test.jwt.token.abc123"
+
+    @pytest.mark.asyncio
+    async def test_connect_does_not_use_auth_header(self, client, mock_websocket):
+        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)) as mock_connect:
+            await client._establish_connection()
+            call_kwargs = mock_connect.call_args[1]
+            # No additional_headers with Authorization
+            assert "additional_headers" not in call_kwargs
 
     @pytest.mark.asyncio
     async def test_connect_handles_connection_failure(self, client):
@@ -240,6 +251,8 @@ class TestCommandSending:
         assert data["command"] == "player/play_media"
         assert data["args"]["uri"] == "spotify:track:123"
         assert "message_id" in data
+        # Message ID follows MA format: "counter{n}"
+        assert data["message_id"].startswith("counter")
 
     @pytest.mark.asyncio
     async def test_send_command_without_args(self, client, mock_websocket):
@@ -277,6 +290,9 @@ class TestCommandSending:
         first = json.loads(mock_websocket.send.call_args_list[0][0][0])
         second = json.loads(mock_websocket.send.call_args_list[1][0][0])
         assert first["message_id"] != second["message_id"]
+        # Verify counter format
+        assert first["message_id"] == "counter1"
+        assert second["message_id"] == "counter2"
 
     @pytest.mark.asyncio
     async def test_send_command_logs_message(self, client, mock_websocket):
@@ -552,7 +568,7 @@ class TestQueueState:
 
 class TestMessageParsing:
     @pytest.mark.asyncio
-    async def test_handle_event_message(self, client):
+    async def test_handle_event_message_with_type_field(self, client):
         callback = MagicMock()
         client.register_event_callback("queue_updated", callback)
 
@@ -582,17 +598,18 @@ class TestMessageParsing:
     async def test_handle_result_message(self, client):
         msg = json.dumps({
             "type": "RESULT",
-            "message_id": 1,
+            "message_id": "counter1",
             "result": {"success": True},
         })
         # Should not raise
         await client._handle_message(msg)
 
     @pytest.mark.asyncio
-    async def test_handle_auth_message(self, client):
+    async def test_handle_error_message(self, client):
         msg = json.dumps({
-            "type": "AUTH",
-            "success": True,
+            "type": "ERROR",
+            "message_id": "counter1",
+            "error": {"description": "Player not found"},
         })
         # Should not raise
         await client._handle_message(msg)
@@ -741,16 +758,6 @@ class TestErrorHandling:
         assert client._connected is True
 
     @pytest.mark.asyncio
-    async def test_heartbeat_loop_handles_exception(self, client, mock_websocket):
-        mock_ws = AsyncMock()
-        mock_ws.ping = AsyncMock(side_effect=Exception("ping failed"))
-        client._ws = mock_ws
-        client._connected = True
-
-        with patch("asyncio.sleep", AsyncMock()):
-            await client._heartbeat_loop()
-
-    @pytest.mark.asyncio
     async def test_shutdown_event_stops_message_loop(self, client, mock_websocket):
         mock_ws = AsyncMock()
 
@@ -790,7 +797,6 @@ class TestErrorHandling:
         done_task.done = MagicMock(return_value=True)
 
         client._reconnect_task = done_task
-        client._heartbeat_task = done_task
         client._message_handler_task = done_task
 
         await client._stop_background_tasks()
@@ -798,7 +804,6 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_stop_background_tasks_handles_none(self, client):
         client._reconnect_task = None
-        client._heartbeat_task = None
         client._message_handler_task = None
 
         await client._stop_background_tasks()
@@ -871,6 +876,7 @@ class TestIntegration:
         sent = json.loads(mock_websocket.send.call_args[0][0])
         assert sent["command"] == "player/play_media"
         assert sent["args"]["uri"] == "spotify:track:4uLU6hMCjMI75M1A2tKUQC"
+        assert sent["message_id"] == "counter1"
 
         # Register event callback and process an event
         received_events = []
@@ -1015,3 +1021,25 @@ class TestIntegration:
             "volume_level": 0.5,
         })
         assert client.get_stream_url() == stream_url
+
+    @pytest.mark.asyncio
+    async def test_next_msg_id_format(self, client):
+        """Test that message IDs follow MA format 'counter{n}'."""
+        mid1 = client._next_msg_id()
+        mid2 = client._next_msg_id()
+        mid3 = client._next_msg_id()
+        assert mid1 == "counter1"
+        assert mid2 == "counter2"
+        assert mid3 == "counter3"
+
+    @pytest.mark.asyncio
+    async def test_message_id_reset_after_disconnect(self, client, mock_websocket):
+        """Test that message ID counter resets on reconnect."""
+        client._ws = mock_websocket
+        client._connected = True
+        client._msg_id = 5
+
+        await client.send_command("player/pause")
+
+        sent = json.loads(mock_websocket.send.call_args[0][0])
+        assert sent["message_id"] == "counter6"  # Continues from 5

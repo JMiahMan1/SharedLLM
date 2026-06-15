@@ -5199,18 +5199,20 @@ async def stream_music_assistant(uri: str, request: Request):
         # ── Step 1: Discover MA players via JSON-RPC ──────────────────────────
         log.info("[stream/ma] Discovering MA players...")
         available_players: list[str] = []
+        import uuid as _uuid
         async with httpx.AsyncClient(timeout=15.0) as client:
             try:
                 resp = await client.post(
                     ma_api,
-                    json={"command": "player/list"},
+                    json={"message_id": _uuid.uuid4().hex, "command": "player/list"},
                     headers={"Content-Type": "application/json", **auth_headers},
                 )
                 log.info(f"[stream/ma] player/list status: {resp.status_code}")
                 if resp.status_code == 200:
-                    result = resp.json()
-                    if isinstance(result, dict):
-                        players = result.get("players", [])
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        # MA JSON-RPC returns {"message_id": "...", "result": [...]}
+                        players = data.get("result", [])
                         if isinstance(players, list):
                             for p in players:
                                 if isinstance(p, dict):
@@ -5233,18 +5235,20 @@ async def stream_music_assistant(uri: str, request: Request):
                 try:
                     resp = await client.post(
                         ma_api,
-                        json={"command": "player/status", "args": {"player_id": pid}},
+                        json={"message_id": _uuid.uuid4().hex, "command": "player/status", "args": {"player_id": pid}},
                         headers={"Content-Type": "application/json", **auth_headers},
                     )
                     if resp.status_code == 200:
-                        status = resp.json()
-                        if isinstance(status, dict):
-                            state = str(status.get("state", "")).lower()
-                            has_queue = bool(status.get("queue_id"))
-                            if state in ("idle", "paused") or (state == "playing" and has_queue):
-                                target_player_id = pid
-                                log.info(f"[stream/ma] Selected player '{pid}' (state={state})")
-                                break
+                        data = resp.json()
+                        if isinstance(data, dict):
+                            status = data.get("result", {})
+                            if isinstance(status, dict):
+                                state = str(status.get("state", "")).lower()
+                                has_queue = bool(status.get("queue_id"))
+                                if state in ("idle", "paused") or (state == "playing" and has_queue):
+                                    target_player_id = pid
+                                    log.info(f"[stream/ma] Selected player '{pid}' (state={state})")
+                                    break
                 except Exception:
                     continue
 
