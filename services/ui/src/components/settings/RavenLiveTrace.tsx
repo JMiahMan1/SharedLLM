@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Terminal, Loader } from 'lucide-react';
+import { Terminal, Loader, Download, Play, Square } from 'lucide-react';
 import Modal from '../ui/Modal';
+import { api } from '../../services/api';
 
 interface RavenLiveTraceProps {
   isOpen: boolean;
@@ -16,8 +17,60 @@ interface StreamEvent {
 export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLiveTraceProps) {
   const [logs, setLogs] = useState<StreamEvent[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [missionResult, setMissionResult] = useState<string | null>(null);
+  const [missionStatus, setMissionStatus] = useState<string>('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+
+  const downloadLogs = () => {
+    const allLogs = [...logs];
+    if (missionResult) {
+      allLogs.push({ type: 'system', data: '--- MISSION RESULT ---' });
+      allLogs.push({ type: 'result_success', data: missionResult });
+    }
+    const content = allLogs.map(l => `[${new Date().toISOString().split('T')[1].slice(0, -1)}] [${l.type}] ${l.data}`).join('\n');
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mission-${missionId}-logs.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  useEffect(() => {
+    if (!isOpen || !missionId) return;
+
+    // Fetch historical logs from API
+    api.getMissionLogs(missionId).then((res) => {
+      const parsedLogs: StreamEvent[] = [];
+      res.logs.forEach((logStr) => {
+        try {
+          const parsed = JSON.parse(logStr);
+          parsedLogs.push(parsed);
+        } catch {
+          parsedLogs.push({ type: 'system', data: logStr });
+        }
+      });
+      setLogs(parsedLogs);
+    }).catch(() => {});
+
+    // Poll mission status/result
+    const pollInterval = setInterval(() => {
+      api.getUserMissions().then((missions) => {
+        const mission = missions.find((m: { id: number }) => m.id === missionId);
+        if (mission) {
+          setMissionStatus(mission.status);
+          if (mission.result) {
+            setMissionResult(mission.result);
+          }
+        }
+      }).catch(() => {});
+    }, 5000);
+
+    // Cleanup interval
+    return () => clearInterval(pollInterval);
+  }, [isOpen, missionId]);
 
   useEffect(() => {
     if (!isOpen || !missionId) return;
@@ -26,8 +79,7 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
     const token = localStorage.getItem('jarvis_api_key') || '';
     const wsUrl = `${protocol}//${window.location.host}/api/raven/missions/${missionId}/stream?token=${encodeURIComponent(token)}`;
 
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLogs([{ type: 'system', data: `Initializing connection to Raven Mission #${missionId}...` }]);
+    setLogs((prev) => [...prev, { type: 'system', data: `Initializing connection to Raven Mission #${missionId}...` }]);
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
@@ -115,6 +167,8 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
     return <span>{log.data}</span>;
   };
 
+  const isTerminalState = missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'cancelled';
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={`Raven Live Trace - Mission #${missionId}`} size="4xl">
       <div className="flex flex-col h-[600px] bg-black border border-white/10 rounded-lg overflow-hidden font-mono text-sm shadow-inner shadow-black/50">
@@ -124,18 +178,26 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
             <Terminal size={14} className="text-slate-400" />
             <span className="text-xs uppercase tracking-widest text-slate-400 font-bold">Terminal Output</span>
           </div>
-          <div className="flex items-center gap-2">
-            {isConnected ? (
-              <span className="flex items-center gap-1.5 text-[10px] text-emerald-400 uppercase tracking-widest">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                Connected
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-[10px] text-red-400 uppercase tracking-widest">
-                <span className="w-2 h-2 rounded-full bg-red-400"></span>
-                Disconnected
-              </span>
-            )}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              {isConnected ? (
+                <span className="flex items-center gap-1.5 text-[10px] text-emerald-400 uppercase tracking-widest">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  Connected
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-[10px] text-red-400 uppercase tracking-widest">
+                  <span className="w-2 h-2 rounded-full bg-red-400"></span>
+                  Disconnected
+                </span>
+              )}
+            </div>
+            <button
+              onClick={downloadLogs}
+              className="glass-button bg-slate-500/10 border-slate-500/20 text-slate-400 hover:bg-slate-500/20 hover:text-slate-300 px-2 py-1 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest"
+            >
+              <Download size={12} /> Download
+            </button>
           </div>
         </div>
 
@@ -156,6 +218,23 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
             </div>
           )}
         </div>
+
+        {/* Mission Result (when mission is terminal) */}
+        {isTerminalState && missionResult && (
+          <div className="border-t border-white/10">
+            <div className="bg-white/5 px-3 py-1.5 border-b border-white/10 flex items-center gap-2">
+              <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
+                missionStatus === 'completed' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'
+              }`}>
+                {missionStatus}
+              </span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Final Result</span>
+            </div>
+            <div className="h-32 overflow-y-auto p-3 custom-scrollbar text-xs font-mono text-emerald-300/80 whitespace-pre-wrap bg-black/30">
+              {missionResult}
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );

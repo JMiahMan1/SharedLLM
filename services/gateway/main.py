@@ -4254,6 +4254,29 @@ async def proxy_docker_exec(service_name: str, body: Dict[str, Any], request: Re
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
+@app.get("/api/raven/missions/{id_or_slug}/logs")
+async def get_mission_logs(id_or_slug: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Resolve to real ID
+    async with borrow_http_client() as client:
+        resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        if resp.status_code != 200:
+            raise HTTPException(status_code=404, detail="Mission not found")
+        mission_data = resp.json()
+        real_id = mission_data["id"]
+    
+    from services.gateway.history import REDIS_URL
+    import redis.asyncio as redis
+    r = redis.from_url(REDIS_URL, decode_responses=True)
+    history_key = f"raven:mission:history:{real_id}"
+    existing_logs = await r.lrange(history_key, 0, -1)  # type: ignore[misc]
+    await r.close()
+    
+    return JSONResponse(status_code=200, content={"logs": existing_logs})
+
 @app.websocket("/api/raven/missions/{id_or_slug}/stream")
 async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str = ""):
     # Validate auth token
@@ -4316,16 +4339,30 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
             except Exception as e:
                 log.warning(f"[WebSocket] Pubsub reader error: {e}")
 
+        async def keep_alive():
+            """Send periodic pings to keep the WebSocket connection alive."""
+            try:
+                while True:
+                    await asyncio.sleep(25)
+                    await websocket.send_ping("keepalive")
+            except Exception:
+                pass
+
         reader_task = asyncio.create_task(reader())
+        keep_alive_task = asyncio.create_task(keep_alive())
         try:
             while True:
-                await websocket.receive_text()
-        except WebSocketDisconnect:
-            pass
+                try:
+                    await asyncio.wait_for(websocket.receive_text(), timeout=30)
+                except asyncio.TimeoutError:
+                    pass  # Connection is still alive, handled by ping loop
+                except WebSocketDisconnect:
+                    break
         except Exception as e:
             log.warning(f"[WebSocket] Client disconnect: {e}")
         finally:
             reader_task.cancel()
+            keep_alive_task.cancel()
             try:
                 await pubsub.unsubscribe(channel)
             except Exception:
