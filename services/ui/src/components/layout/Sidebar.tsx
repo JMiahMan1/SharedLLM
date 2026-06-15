@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -11,11 +12,16 @@ import {
   Boxes,
   Music,
   Radio,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Brain,
+  Loader2,
+  ShieldCheck,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api';
+import type { RavenMission } from '../../services/api';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -68,6 +74,9 @@ const Sidebar = () => {
           ))}
       </nav>
 
+      {user?.is_admin && (
+        <RavenStatusSection />
+      )}
       <div className="p-4 mt-auto hidden md:block">
         <div className="glass-card p-4 text-xs text-slate-500">
           <p>System v1.0.0-alpha</p>
@@ -78,6 +87,87 @@ const Sidebar = () => {
         </div>
       </div>
     </aside>
+  );
+};
+
+const RavenStatusSection = () => {
+  const [activeMissions, setActiveMissions] = useState<RavenMission[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchMissions = useCallback(async () => {
+    try {
+      const resp = await api.getUserMissions();
+      const missions = Array.isArray(resp) ? resp : [];
+      const active = missions.filter((m: RavenMission) =>
+        ['queued', 'running', 'paused'].includes(m.status)
+      );
+      setActiveMissions(active);
+    } catch {
+      setActiveMissions([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Defer initial fetch to avoid synchronous setState in effect
+    const timeoutId = setTimeout(() => fetchMissions(), 0);
+    const intervalId = setInterval(fetchMissions, 30000);
+    return () => {
+      clearTimeout(timeoutId);
+      clearInterval(intervalId);
+    };
+  }, [fetchMissions]);
+
+  const handleLaunch = async () => {
+    try {
+      await api.createUserMission('System diagnostic and maintenance scan', 2);
+      await fetchMissions();
+    } catch {
+      // Silently fail - user sees this in Lab
+    }
+  };
+
+  return (
+    <div className="p-4 md:px-4 hidden md:block">
+      <div className="glass-card p-3 md:p-4 text-xs border-l-2 border-l-purple-500">
+        <button
+          onClick={handleLaunch}
+          className="flex items-center gap-2 text-slate-300 hover:text-purple-400 transition-colors w-full"
+          title="Launch Raven mission"
+        >
+          {loading ? (
+            <Loader2 size={14} className="animate-spin text-purple-400" />
+          ) : activeMissions.length > 0 ? (
+            <Brain size={14} className="text-purple-400" />
+          ) : (
+            <ShieldCheck size={14} className="text-green-400" />
+          )}
+          <span className="font-medium hidden md:inline">
+            {loading ? 'Loading...' : activeMissions.length > 0 ? `${activeMissions.length} Mission${activeMissions.length > 1 ? 's' : ''} Active` : 'Raven Idle'}
+          </span>
+        </button>
+        {!loading && activeMissions.length > 0 && (
+          <div className="mt-2 space-y-1 hidden md:block">
+            {activeMissions.slice(0, 2).map((mission: RavenMission) => (
+              <div key={mission.id} className="flex items-center gap-1 text-slate-400">
+                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                  mission.status === 'running' ? 'bg-orange-400 animate-pulse' :
+                  mission.status === 'queued' ? 'bg-yellow-400' :
+                  'bg-blue-400'
+                }`} />
+                <span className="truncate">{mission.proposed_mission.substring(0, 40)}{mission.proposed_mission.length > 40 ? '...' : ''}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {!loading && activeMissions.length === 0 && (
+          <p className="text-slate-500 hidden md:block mt-2">
+            Raven ready to scan workspaces
+          </p>
+        )}
+      </div>
+    </div>
   );
 };
 

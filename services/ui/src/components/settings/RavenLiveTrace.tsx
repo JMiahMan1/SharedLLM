@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Terminal, Loader, Download, Play, Square } from 'lucide-react';
+import { Terminal, Loader, Download } from 'lucide-react';
 import Modal from '../ui/Modal';
 import { api } from '../../services/api';
+import { storageGetSync } from '../../lib/storage';
 
 interface RavenLiveTraceProps {
   isOpen: boolean;
@@ -41,51 +42,20 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
   useEffect(() => {
     if (!isOpen || !missionId) return;
 
-    // Fetch historical logs from API
-    api.getMissionLogs(missionId).then((res) => {
-      const parsedLogs: StreamEvent[] = [];
-      res.logs.forEach((logStr) => {
-        try {
-          const parsed = JSON.parse(logStr);
-          parsedLogs.push(parsed);
-        } catch {
-          parsedLogs.push({ type: 'system', data: logStr });
-        }
-      });
-      setLogs(parsedLogs);
-    }).catch(() => {});
-
-    // Poll mission status/result
-    const pollInterval = setInterval(() => {
-      api.getUserMissions().then((missions) => {
-        const mission = missions.find((m: { id: number }) => m.id === missionId);
-        if (mission) {
-          setMissionStatus(mission.status);
-          if (mission.result) {
-            setMissionResult(mission.result);
-          }
-        }
-      }).catch(() => {});
-    }, 5000);
-
-    // Cleanup interval
-    return () => clearInterval(pollInterval);
-  }, [isOpen, missionId]);
-
-  useEffect(() => {
-    if (!isOpen || !missionId) return;
-
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const token = localStorage.getItem('jarvis_api_key') || '';
+    const token = storageGetSync('jarvis_api_key') || '';
     const wsUrl = `${protocol}//${window.location.host}/api/raven/missions/${missionId}/stream?token=${encodeURIComponent(token)}`;
 
-    setLogs((prev) => [...prev, { type: 'system', data: `Initializing connection to Raven Mission #${missionId}...` }]);
+    // Defer initial log to avoid synchronous setState in effect
+    requestAnimationFrame(() => {
+      setLogs([{ type: 'system', data: `Initializing connection to Raven Mission #${missionId}...` }]);
+    });
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
       setIsConnected(true);
-      setLogs((prev) => [...prev, { type: 'system', data: `Connection established. Listening to stream...` }]);
+      setLogs([]); // Clear loading message, WS will dump the history and stream live
     };
 
     ws.onmessage = (event) => {
@@ -106,7 +76,21 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
       setLogs((prev) => [...prev, { type: 'system', data: `Connection closed.` }]);
     };
 
+    // Poll mission status/result
+    const pollInterval = setInterval(() => {
+      api.getUserMissions().then((missions) => {
+        const mission = missions.find((m: { id: number }) => m.id === missionId);
+        if (mission) {
+          setMissionStatus(mission.status);
+          if (mission.result) {
+            setMissionResult(mission.result);
+          }
+        }
+      }).catch(() => {});
+    }, 5000);
+
     return () => {
+      clearInterval(pollInterval);
       if (ws.readyState === 1) ws.close();
     };
   }, [isOpen, missionId]);

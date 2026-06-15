@@ -16,7 +16,8 @@ import {
   ShieldAlert,
   RotateCcw,
   AlertTriangle,
-  Star
+  Star,
+  Brain
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type Workspace } from '../services/api';
@@ -171,6 +172,38 @@ const Workspaces = () => {
         )}
       </header>
 
+      {isAdmin && (
+        <div className="glass-card p-4 border-l-4 border-l-purple-500 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-purple-500/10">
+              <Brain size={20} className="text-purple-400" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white">Raven Autonomous Scan</h3>
+              <p className="text-[10px] text-slate-400">Deploy Raven to scan workspaces for anomalies, security issues, and stability.</p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              toast.promise(
+                api.createUserMission('System diagnostic and maintenance scan', 2),
+                {
+                  loading: 'Launching Raven mission...',
+                  success: (data) => {
+                    return `Raven mission #${data.mission.id} deployed`;
+                  },
+                  error: 'Failed to launch Raven mission'
+                }
+              );
+            }}
+            className="glass-button px-6 py-2.5 bg-purple-600/20 border-purple-500/30 text-purple-300 font-bold flex items-center gap-2 hover:bg-purple-600/30 transition-colors"
+          >
+            <Brain size={18} />
+            Launch Scan
+          </button>
+        </div>
+      )}
+
       <div className="grid gap-6">
         {isLoading ? (
           <div className="glass-panel p-12 flex items-center justify-center">
@@ -323,18 +356,38 @@ const Workspaces = () => {
                           <p className="text-[10px] text-slate-400">Raven flagged this workspace after Mission #{ws.last_raven_mission_id}. Operations are restricted.</p>
                         </div>
                       </div>
-                      <button 
-                        onClick={() => {
-                          if (confirm('Are you sure you want to revert this workspace to its previous stable state? This will discard the last Raven patch.')) {
-                            revertMutation.mutate(ws.id);
-                          }
-                        }}
-                        disabled={revertMutation.isPending}
-                        className="glass-button bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
-                      >
-                        <RotateCcw size={12} className={revertMutation.isPending ? 'animate-spin' : ''} />
-                        {revertMutation.isPending ? 'Reverting...' : 'Rollback & Restore'}
-                      </button>
+                  <div className="flex items-center gap-2">
+                     <button 
+                       onClick={() => {
+                         if (confirm('Are you sure you want to revert this workspace to its previous stable state? This will discard the last Raven patch.')) {
+                           revertMutation.mutate(ws.id);
+                         }
+                       }}
+                       disabled={revertMutation.isPending}
+                       className="glass-button bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                     >
+                       <RotateCcw size={12} className={revertMutation.isPending ? 'animate-spin' : ''} />
+                       {revertMutation.isPending ? 'Reverting...' : 'Rollback & Restore'}
+                     </button>
+                     {isAdmin && (
+                       <button 
+                         onClick={() => {
+                           toast.promise(
+                             api.createUserMission(`Investigate and fix quarantined workspace: ${ws.display_name}`, 3),
+                             {
+                               loading: 'Sending Raven to investigate...',
+                               success: (data) => `Raven mission #${data.mission.id} deployed`,
+                               error: 'Failed to launch Raven mission'
+                             }
+                           );
+                         }}
+                         className="glass-button bg-purple-500/10 border-purple-500/20 text-purple-300 hover:bg-purple-500/20 px-4 py-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest"
+                       >
+                         <Brain size={12} />
+                         Send Raven
+                       </button>
+                     )}
+                   </div>
                     </div>
                   )}
                 </div>
