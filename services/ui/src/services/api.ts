@@ -832,6 +832,11 @@ export const api = {
     return resp.data;
   },
 
+  async getMissionLogs(id: number | string): Promise<{ logs: string[] }> {
+    const resp = await apiClient.get(`/api/raven/missions/${id}/logs`);
+    return resp.data;
+  },
+
   async getMediaGroups(): Promise<MediaGroup[]> {
     const resp = await apiClient.get('/api/groups/media');
     return resp.data.groups || [];
