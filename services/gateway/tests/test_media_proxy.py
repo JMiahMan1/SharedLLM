@@ -23,6 +23,17 @@ def client_fixture(monkeypatch):
     from services.gateway import main
     main.background_tasks = None  # pyright: ignore[reportAttributeAccessIssue]
     
+    import httpx
+    def mocked_get_http_client():
+        client = httpx.AsyncClient()
+        if isinstance(client, MagicMock) and not isinstance(getattr(client, "post", None), AsyncMock):
+            aenter_mock = getattr(client, "__aenter__", None)
+            if isinstance(aenter_mock, (MagicMock, AsyncMock)):
+                return aenter_mock.return_value
+        return client
+
+    monkeypatch.setattr(main, "get_http_client", mocked_get_http_client)
+    
     return TestClient(app)
 
 

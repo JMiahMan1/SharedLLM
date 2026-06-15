@@ -81,5 +81,75 @@ def test_identity_resolution_by_voice_id(client):
     assert resp.json().get("user") == EXPECTED_USER
     print(f"[Test] Voice ID resolution successful.")
 
+@pytest.mark.local_only
+@pytest.mark.skipif("LIVE_TEST_URL" not in os.environ, reason="Requires running Identity service")
+def test_api_key_generation_resolution_revocation(client):
+    """
+    Test: Verify full API key lifecycle (generate, resolve, revoke) on actual database/service.
+    """
+    print(f"\n[Test] Running live API key lifecycle test...")
+    
+    # 1. Resolve default user to get their existing main API key
+    resolve_resp = client.post(
+        f"{IDENTITY_URL}/api/resolve",
+        json={},
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    )
+    assert resolve_resp.status_code == 200, f"Initial resolve failed: {resolve_resp.text}"
+    resolved_data = resolve_resp.json()
+    resolved_user = resolved_data.get("user")
+    user_api_key = resolved_data.get("api_key")
+    
+    assert resolved_user is not None
+    assert user_api_key is not None, f"Resolved user {resolved_user} has no API key"
+    
+    # 2. Use user_api_key to generate a new custom API key
+    print(f"[Test] Generating a new custom API key for user '{resolved_user}'...")
+    auth_headers = {"Authorization": f"Bearer {user_api_key}"}
+    gen_resp = client.post(
+        f"{IDENTITY_URL}/api/users/me/keys",
+        json={"label": "Live Integration Test Key"},
+        headers=auth_headers
+    )
+    assert gen_resp.status_code == 200, f"API key generation failed: {gen_resp.text}"
+    gen_data = gen_resp.json()
+    key_id = gen_data["id"]
+    new_key = gen_data["key"]
+    
+    assert new_key.startswith("sk-")
+    print(f"[Test] Successfully generated API key (ID: {key_id}, Prefix: {new_key[:8]}...)")
+    
+    try:
+        # 3. Resolve identity using the new custom API key
+        print(f"[Test] Resolving identity using the new custom API key...")
+        resolve_custom = client.post(
+            f"{IDENTITY_URL}/api/resolve",
+            json={"api_key": new_key},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        assert resolve_custom.status_code == 200, f"Resolution with custom key failed: {resolve_custom.text}"
+        assert resolve_custom.json().get("user") == resolved_user
+        print(f"[Test] Successfully resolved to user '{resolved_user}' using custom key.")
+        
+    finally:
+        # 4. Revoke the key to keep the database clean
+        print(f"[Test] Revoking the custom API key (ID: {key_id})...")
+        revoke_resp = client.delete(
+            f"{IDENTITY_URL}/api/users/me/keys/{key_id}",
+            headers=auth_headers
+        )
+        assert revoke_resp.status_code == 200, f"Key revocation failed: {revoke_resp.text}"
+        assert revoke_resp.json().get("success") is True
+        print(f"[Test] Successfully revoked key.")
+        
+    # 5. Verify that resolving with the revoked key no longer resolves to that user
+    resolve_after = client.post(
+        f"{IDENTITY_URL}/api/resolve",
+        json={"api_key": new_key},
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    )
+    assert resolve_after.status_code == 200
+    print(f"[Test] Resolution after revocation output user: {resolve_after.json().get('user')}")
+
 if __name__ == "__main__":
     pytest.main([__file__, "-s"])

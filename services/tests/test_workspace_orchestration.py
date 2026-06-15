@@ -55,6 +55,36 @@ def workspace_env(monkeypatch, tmp_path):
         )
     )
 
+    from sqlmodel import SQLModel, create_engine, StaticPool, Session
+    from services.workspace_runtime.models import Workspace
+    import services.workspace_runtime.database as db
+    import services.workspace_runtime.main as main
+
+    test_engine = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    monkeypatch.setattr(db, "engine", test_engine)
+    monkeypatch.setattr(main, "engine", test_engine)
+
+    SQLModel.metadata.create_all(test_engine)
+
+    with Session(test_engine) as session:
+        ws = Workspace(
+            id="demo",
+            display_name="Demo Workspace",
+            local_path="demo",
+            sync_mode="git",
+            scope="user",
+            capabilities=["read", "write"]
+        )
+        session.add(ws)
+        session.commit()
+
+    from unittest.mock import MagicMock
+    mock_redis = MagicMock()
+    mock_redis.zcard.return_value = 0
+    monkeypatch.setattr(runtime, "_get_redis", lambda: mock_redis)
+
     monkeypatch.setattr(runtime, "WORKSPACE_ROOT", workspace_root)
     monkeypatch.setattr(runtime, "get_workspace_root", lambda: workspace_root)
     monkeypatch.setattr(runtime, "WORKSPACE_REGISTRY_PATH", str(registry_path))

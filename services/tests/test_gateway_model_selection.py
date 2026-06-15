@@ -13,9 +13,65 @@ os.environ.setdefault("FAST_PATH_THRESHOLD", "0.85")
 os.environ.setdefault("IDENTITY_SVC_URL", "http://identity")
 os.environ.setdefault("EXECUTION_SVC_URL", "http://execution")
 os.environ.setdefault("OLLAMA_URL", "http://ollama")
-os.environ.setdefault("ASSISTANT_MODEL", "qwen3:8b")
-os.environ.setdefault("CODING_MODEL", "qwen2.5-coder:7b")
-os.environ.setdefault("LIBRARIAN_MODEL", "qwen3:8b")
+
+from sqlmodel import Session, create_engine, select
+from services.identity.models import GlobalSetting
+
+def get_test_settings():
+    db_path = "/data/identity.db"
+    if not os.path.exists(db_path):
+        _root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        db_path = os.path.join(_root, "data", "identity.db")
+
+    settings = {}
+    if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
+        try:
+            engine = create_engine(f"sqlite:///{db_path}")
+            with Session(engine) as session:
+                for s in session.exec(select(GlobalSetting)).all():
+                    settings[s.key] = s.value
+        except Exception:
+            pass
+
+    # If DB has no values or doesn't exist, try querying identity service API directly
+    if not settings.get("assistant_model") or not settings.get("coding_model"):
+        identity_url = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
+        internal_secret = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+        try:
+            import httpx
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.get(
+                    f"{identity_url}/api/settings",
+                    headers={"X-Internal-Secret": internal_secret}
+                )
+                if resp.status_code == 200:
+                    for item in resp.json():
+                        settings[item["key"]] = item["value"]
+        except Exception:
+            pass
+
+    # Fallback to env without hardcoded strings
+    if not settings.get("assistant_model"):
+        settings["assistant_model"] = os.getenv("ASSISTANT_MODEL")
+    if not settings.get("coding_model"):
+        settings["coding_model"] = os.getenv("CODING_MODEL")
+    if not settings.get("librarian_model"):
+        settings["librarian_model"] = os.getenv("LIBRARIAN_MODEL") or settings.get("assistant_model")
+
+    return settings
+
+try:
+    TEST_SETTINGS = get_test_settings()
+except Exception:
+    TEST_SETTINGS = {}
+
+ASSISTANT_MODEL = TEST_SETTINGS.get("assistant_model") or "test-assistant-model"
+CODING_MODEL = TEST_SETTINGS.get("coding_model") or "test-coding-model"
+LIBRARIAN_MODEL = TEST_SETTINGS.get("librarian_model") or "test-librarian-model"
+
+os.environ["ASSISTANT_MODEL"] = ASSISTANT_MODEL
+os.environ["CODING_MODEL"] = CODING_MODEL
+os.environ["LIBRARIAN_MODEL"] = LIBRARIAN_MODEL
 
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -49,7 +105,7 @@ def client(monkeypatch):
         return SimpleNamespace(status_code=200, json=lambda: {"status": "SUCCESS"}, text="")
 
     monkeypatch.setattr(app.router, "lifespan_context", noop_lifespan)
-    monkeypatch.setattr(gateway_main, "_global_http_client", SimpleNamespace(request=fake_request, post=fake_post, get=fake_get))
+    monkeypatch.setattr(gateway_main, "get_http_client", lambda: SimpleNamespace(request=fake_request, post=fake_post, get=fake_get))
     test_client = TestClient(app)
     try:
         yield test_client
@@ -96,10 +152,10 @@ def _json_request(payload: dict) -> Request:
     ],
 )
 async def test_select_model_for_query_uses_coding_model_for_code_requests(query, monkeypatch):
-    monkeypatch.setattr(gateway_main, "get_coding_model", AsyncMock(return_value="qwen2.5-coder:7b"))
-    monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
-    monkeypatch.setattr(gateway_main, "get_librarian_model", AsyncMock(return_value="qwen3:8b"))
-    assert await select_model_for_query(query) == "qwen2.5-coder:7b"
+    monkeypatch.setattr(gateway_main, "get_coding_model", AsyncMock(return_value=CODING_MODEL))
+    monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value=ASSISTANT_MODEL))
+    monkeypatch.setattr(gateway_main, "get_librarian_model", AsyncMock(return_value=ASSISTANT_MODEL))
+    assert await select_model_for_query(query) == CODING_MODEL
 
 
 @pytest.mark.asyncio
@@ -112,10 +168,10 @@ async def test_select_model_for_query_uses_coding_model_for_code_requests(query,
     ],
 )
 async def test_select_model_for_query_uses_assistant_model_for_general_requests(query, monkeypatch):
-    monkeypatch.setattr(gateway_main, "get_coding_model", AsyncMock(return_value="qwen2.5-coder:7b"))
-    monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
-    monkeypatch.setattr(gateway_main, "get_librarian_model", AsyncMock(return_value="qwen3:8b"))
-    assert await select_model_for_query(query) == "qwen3:8b"
+    monkeypatch.setattr(gateway_main, "get_coding_model", AsyncMock(return_value=CODING_MODEL))
+    monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value=ASSISTANT_MODEL))
+    monkeypatch.setattr(gateway_main, "get_librarian_model", AsyncMock(return_value=ASSISTANT_MODEL))
+    assert await select_model_for_query(query) == ASSISTANT_MODEL
 
 
 def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
@@ -124,7 +180,7 @@ def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
     try:
         select_system_instruction_for_query(
             "Please analyze logs and self repair this service",
-            "qwen2.5-coder:7b",
+            CODING_MODEL,
         )
     finally:
         monkeypatch.setattr(gateway_main, "__package__", original_package)
@@ -134,9 +190,9 @@ def test_select_system_instruction_handles_standalone_main_import(monkeypatch):
 async def test_chat_handler_routes_direct_file_edit_requests_to_code_orchestration(monkeypatch):
     monkeypatch.setattr(gateway_main, "resolve_identity", AsyncMock(return_value={"user": "alice"}))
     monkeypatch.setattr(gateway_main, "update_history", AsyncMock(return_value=None))
-    monkeypatch.setattr(gateway_main, "get_coding_model", AsyncMock(return_value="qwen2.5-coder:7b"))
-    monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
-    mock_orchestrate = AsyncMock(return_value=gateway_main._make_ollama_response("orchestrated", "qwen2.5-coder:7b"))
+    monkeypatch.setattr(gateway_main, "get_coding_model", AsyncMock(return_value=CODING_MODEL))
+    monkeypatch.setattr(gateway_main, "get_assistant_model", AsyncMock(return_value=ASSISTANT_MODEL))
+    mock_orchestrate = AsyncMock(return_value=gateway_main._make_ollama_response("orchestrated", CODING_MODEL))
     monkeypatch.setattr(gateway_main, "orchestrate_code_change", mock_orchestrate)
     mock_jq = AsyncMock()
     mock_jq.enqueue_job = AsyncMock(return_value="test-job-id")
@@ -147,7 +203,7 @@ async def test_chat_handler_routes_direct_file_edit_requests_to_code_orchestrati
             {
                 "query": "Create a pytest file named temp/test_demo.py that asserts 2 + 2 == 4. Verify it with pytest.",
                 "rag_user": "alice",
-                "model": "qwen2.5-coder:7b",
+                "model": CODING_MODEL,
             }
         )
     )
@@ -213,7 +269,7 @@ async def test_workspace_bootstrap_proxy_uses_gateway_route(monkeypatch):
         )
 
     mock_client = SimpleNamespace(request=fake_request)
-    monkeypatch.setattr(gateway_main, "_global_http_client", mock_client)
+    monkeypatch.setattr(gateway_main, "get_http_client", lambda: mock_client)
     monkeypatch.setattr(gateway_main, "resolve_identity", AsyncMock(return_value={"user": "alice"}))
 
     response = await gateway_main.bootstrap_workspace_proxy(
@@ -253,7 +309,7 @@ async def test_workspace_pytest_proxy_uses_gateway_route(monkeypatch):
         )
 
     mock_client = SimpleNamespace(request=fake_request)
-    monkeypatch.setattr(gateway_main, "_global_http_client", mock_client)
+    monkeypatch.setattr(gateway_main, "get_http_client", lambda: mock_client)
     monkeypatch.setattr(gateway_main, "resolve_identity", AsyncMock(return_value={"user": "alice"}))
 
     response = await gateway_main.pytest_workspace_proxy(
@@ -319,7 +375,7 @@ async def test_orchestrate_code_change_uses_review_branch_workflow_payload(monke
         body={},
         user_id="alice",
         refined_query="Add a targeted pytest for the sample module",
-        selected_model="qwen2.5-coder:7b",
+        selected_model=CODING_MODEL,
         should_stream=False,
         is_openai=False,
     )
@@ -432,7 +488,7 @@ async def test_single_turn_inference_supports_capability_index_tool(monkeypatch)
     creds = gateway_main.ResolvedCredentials(user="alice")
     result = await gateway_orchestrator._single_turn_inference(
         query="Refresh your capability index.",
-        model="qwen3:latest",
+        model=ASSISTANT_MODEL,
         system_prompt=ASSIST_SYSTEM_INSTRUCTION,
         rag_context="",
         history=[],
@@ -458,7 +514,7 @@ async def test_single_turn_inference_uses_assist_prompt_with_full_capability_gui
     creds = gateway_main.ResolvedCredentials(user="alice")
     result = await gateway_orchestrator._single_turn_inference(
         query="What is the temperature upstairs?",
-        model="qwen3:latest",
+        model=ASSISTANT_MODEL,
         system_prompt=ASSIST_SYSTEM_INSTRUCTION,
         rag_context="[HA_ENTITIES]\nsensor.upstairs_temperature",
         history=[],
@@ -501,7 +557,7 @@ def test_chat_slow_path_uses_coding_model_for_code_requests(client):
 
     assert response.status_code == 200
     assert captured["use_chat"] is True
-    assert captured["payload"]["model"] == "qwen2.5-coder:7b"
+    assert captured["payload"]["model"] == CODING_MODEL
     assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
     assert "CODE CONTEXT:" in captured["payload"]["messages"][-1]["content"]
     assert "No live local Git workspace is attached to this gateway path." in captured["payload"]["messages"][-1]["content"]
@@ -528,11 +584,11 @@ def test_coding_query_bypasses_fast_path_even_when_intent_engine_misclassifies(c
          patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
         response = client.post(
             "/api/chat",
-            json={"query": "Fix this Python code bug in math_utils.py", "voice_id": "alice", "model": "qwen2.5-coder:7b"},
+            json={"query": "Fix this Python code bug in math_utils.py", "voice_id": "alice", "model": CODING_MODEL},
         )
 
     assert response.status_code == 200
-    assert captured["payload"]["model"] == "qwen2.5-coder:7b"
+    assert captured["payload"]["model"] == CODING_MODEL
     assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
 
 
@@ -561,13 +617,13 @@ def test_chat_slow_path_respects_explicit_coding_model_for_plain_edit_prompts(cl
             json={
                 "query": "Edit this file: greeting.py and change one string.",
                 "voice_id": "alice",
-                "model": "qwen2.5-coder:7b",
+                "model": CODING_MODEL,
             },
         )
 
     assert response.status_code == 200
     assert captured["use_chat"] is True
-    assert captured["payload"]["model"] == "qwen2.5-coder:7b"
+    assert captured["payload"]["model"] == CODING_MODEL
     assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
     assert "CODE CONTEXT:" in captured["payload"]["messages"][-1]["content"]
 
@@ -599,7 +655,7 @@ def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
 
     assert response.status_code == 200
     assert captured["use_chat"] is True
-    assert captured["payload"]["model"] == "qwen3:latest"
+    assert captured["payload"]["model"] == ASSISTANT_MODEL
     assert captured["payload"]["messages"][0]["content"] == ASSIST_SYSTEM_INSTRUCTION
     assert captured["payload"]["messages"][-1]["content"].startswith("CONTEXT:\n")
 
@@ -686,7 +742,7 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
          patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
          patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
          patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)), \
-         patch.object(gateway_main, "_global_http_client", SimpleNamespace(request=fake_request, post=fake_post, get=fake_get)):
+         patch.object(gateway_main, "get_http_client", return_value=SimpleNamespace(request=fake_request, post=fake_post, get=fake_get)):
         response = await gateway_main.generate_workspace_readme_via_coding_model(
             body={
                 "query": "Analyze this git repo and generate a README.md in temp for the workspace.",
@@ -694,16 +750,16 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
             },
             user_id="alice",
             refined_query="Analyze this git repo and generate a README.md in temp for the workspace.",
-            selected_model="qwen2.5-coder:7b",
+            selected_model=CODING_MODEL,
             should_stream=False,
             is_openai=False,
         )
 
     assert isinstance(response, dict), f"Expected dict, got {type(response).__name__}"
-    assert response["model"] == "qwen2.5-coder:7b"
+    assert response["model"] == CODING_MODEL
     assert response["message"]["content"].startswith("I generated temp/README.md")
     assert "# Generated README" in response["message"]["content"]
-    assert cast(dict[str, Any], captured["ollama_payload"])["model"] == "qwen2.5-coder:7b"
+    assert cast(dict[str, Any], captured["ollama_payload"])["model"] == CODING_MODEL
     request_urls = [item["url"] for item in captured["requests"]]
     assert any(url.endswith("/files/list") for url in request_urls)
     assert any(url.endswith("/files/write") for url in request_urls)
@@ -713,7 +769,7 @@ async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_m
 def test_select_system_instruction_for_query_uses_code_helper_prompt_for_coding_queries():
     instruction = select_system_instruction_for_query(
         "Help me fix this Python traceback in the gateway service",
-        "qwen2.5-coder:7b",
+        CODING_MODEL,
     )
     assert instruction == CODE_HELPER_SYSTEM_INSTRUCTION
 
@@ -721,7 +777,7 @@ def test_select_system_instruction_for_query_uses_code_helper_prompt_for_coding_
 def test_select_system_instruction_for_query_uses_assist_prompt_for_general_queries():
     instruction = select_system_instruction_for_query(
         "What should I make for dinner?",
-        "qwen3:latest",
+        ASSISTANT_MODEL,
     )
     assert instruction == ASSIST_SYSTEM_INSTRUCTION
 
@@ -729,7 +785,7 @@ def test_select_system_instruction_for_query_uses_assist_prompt_for_general_quer
 def test_select_system_instruction_for_query_keeps_librarian_alias_for_general_queries():
     instruction = select_system_instruction_for_query(
         "What should I make for dinner?",
-        "qwen3:latest",
+        ASSISTANT_MODEL,
     )
     assert instruction == ASSIST_SYSTEM_INSTRUCTION
     assert LIBRARIAN_SYSTEM_INSTRUCTION == ASSIST_SYSTEM_INSTRUCTION
@@ -738,7 +794,7 @@ def test_select_system_instruction_for_query_keeps_librarian_alias_for_general_q
 def test_select_system_instruction_for_query_uses_raven_prompt_for_explicit_repair_queries():
     instruction = select_system_instruction_for_query(
         "Use Raven to self repair the gateway service",
-        "qwen2.5-coder:7b",
+        CODING_MODEL,
     )
     assert instruction == RAVEN_AUTONOMOUS_PROTOCOL
 

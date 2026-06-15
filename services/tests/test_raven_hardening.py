@@ -194,7 +194,7 @@ async def test_git_handler_allows_autonomous_commit(monkeypatch, tmp_path):
     """After removing the autonomous block, Raven can commit directly."""
     monkeypatch.setattr(git_handler, "WORKSPACE_ROOT", str(tmp_path))
 
-    async def fake_resolve_workspace(workspace_id=None):
+    async def fake_resolve_workspace(*args, **kwargs):
         return str(tmp_path)
 
     async def fake_branch(cwd=None):
@@ -231,7 +231,7 @@ async def test_git_handler_allows_autonomous_commit(monkeypatch, tmp_path):
 async def test_git_handler_blocks_reset_for_all_users(monkeypatch, tmp_path):
     monkeypatch.setattr(git_handler, "WORKSPACE_ROOT", str(tmp_path))
 
-    async def fake_resolve_workspace(workspace_id=None):
+    async def fake_resolve_workspace(*args, **kwargs):
         return str(tmp_path)
 
     async def fake_branch(cwd=None):
