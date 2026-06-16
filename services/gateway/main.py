@@ -5210,16 +5210,14 @@ async def stream_music_assistant(uri: str, request: Request):
                 log.info(f"[stream/ma] players/all status: {resp.status_code}")
                 if resp.status_code == 200:
                     data = resp.json()
-                    if isinstance(data, dict):
-                        # MA JSON-RPC returns {"message_id": "...", "result": [...]}
-                        players = data.get("result", [])
-                        if isinstance(players, list):
-                            for p in players:
-                                if isinstance(p, dict):
-                                    pid = p.get("player_id") or p.get("id")
-                                    if pid:
-                                        available_players.append(str(pid))
-                                        log.info(f"[stream/ma] Found player: {pid}")
+                    # MA v2 REST returns data directly (not wrapped in {"result": ...})
+                    if isinstance(data, list):
+                        for p in data:
+                            if isinstance(p, dict):
+                                pid = p.get("player_id") or p.get("id")
+                                if pid:
+                                    available_players.append(str(pid))
+                                    log.info(f"[stream/ma] Found player: {pid}")
             except Exception as err:
                 log.warning(f"[stream/ma] players/all call failed: {err}", exc_info=True)
 
@@ -5240,19 +5238,18 @@ async def stream_music_assistant(uri: str, request: Request):
                 log.info(f"[stream/ma] player_queues/all status: {resp.status_code}")
                 if resp.status_code == 200:
                     data = resp.json()
-                    if isinstance(data, dict):
-                        queues = data.get("result", [])
-                        if isinstance(queues, list):
-                            for q in queues:
-                                if isinstance(q, dict):
-                                    pid = q.get("active_player_id") or q.get("player_id")
-                                    state = str(q.get("state", "")).lower()
-                                    queue_id = q.get("queue_id")
-                                    if pid and pid in available_players:
-                                        if state in ("idle", "paused") or (state == "playing" and queue_id):
-                                            target_player_id = pid
-                                            log.info(f"[stream/ma] Selected player '{pid}' (state={state}, queue={queue_id})")
-                                            break
+                    # MA v2 REST returns data directly
+                    if isinstance(data, list):
+                        for q in data:
+                            if isinstance(q, dict):
+                                queue_id = q.get("queue_id") or ""
+                                state = str(q.get("state", "")).lower()
+                                # queue_id matches player_id in MA
+                                if queue_id in available_players:
+                                    if state in ("idle", "paused") or (state == "playing"):
+                                        target_player_id = queue_id
+                                        log.info(f"[stream/ma] Selected player '{queue_id}' (state={state})")
+                                        break
             except Exception as err:
                 log.warning(f"[stream/ma] player_queues/all call failed: {err}", exc_info=True)
 
