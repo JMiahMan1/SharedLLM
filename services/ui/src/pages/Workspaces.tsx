@@ -333,7 +333,7 @@ const Workspaces = () => {
                         </div>
                       </div>
                     )}
-                    {ws.excludes && ws.excludes.length > 0 && (
+                    {Array.isArray(ws.excludes) && ws.excludes.length > 0 && (
                       <div className="space-y-1 col-span-2">
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Sync Exclusions</p>
                         <div className="flex flex-wrap gap-1.5">
@@ -574,22 +574,22 @@ const Workspaces = () => {
                 </button>
              </div>
 
-             <div className="pt-2 border-t border-white/5">
+              <div className="pt-2 border-t border-white/5">
                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2">Sync Exclusions</p>
                 <div className="flex flex-wrap gap-2 mb-3">
-                   {(form.excludes || []).map((ex, idx) => (
+                   {(Array.isArray(form.excludes) ? form.excludes : []).map((ex, idx) => (
                       <span key={idx} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-500/10 text-indigo-300 text-[10px] font-bold border border-indigo-500/20">
                          {ex}
                          <button 
                             type="button"
-                            onClick={() => setForm({ ...form, excludes: (form.excludes || []).filter((_, i) => i !== idx) })}
+                            onClick={() => setForm({ ...form, excludes: (Array.isArray(form.excludes) ? form.excludes : []).filter((_, i) => i !== idx) })}
                             className="hover:text-red-400"
                          >
                             <Trash2 size={10} />
                          </button>
                       </span>
                    ))}
-                   {(!form.excludes || form.excludes.length === 0) && (
+                   {(!Array.isArray(form.excludes) || form.excludes.length === 0) && (
                       <p className="text-[10px] text-slate-600 italic">No custom exclusions set.</p>
                    )}
                 </div>
@@ -602,15 +602,16 @@ const Workspaces = () => {
                          if (e.key === 'Enter') {
                             e.preventDefault();
                             const val = e.currentTarget.value.trim();
-                            if (val && !(form.excludes || []).includes(val)) {
-                               setForm({ ...form, excludes: [...(form.excludes || []), val] });
+                            const currentExcludes = Array.isArray(form.excludes) ? form.excludes : [];
+                            if (val && !currentExcludes.includes(val)) {
+                               setForm({ ...form, excludes: [...currentExcludes, val] });
                                e.currentTarget.value = '';
                             }
                          }
                       }}
                    />
                 </div>
-             </div>
+              </div>
 
              {form.auto_pull_enabled && (
                <div className="space-y-4 animate-in slide-in-from-top-2 duration-300">
