@@ -1,4 +1,5 @@
 # services/execution/handlers/workspace.py
+import asyncio
 import difflib
 import logging
 import os
@@ -92,6 +93,42 @@ def resolve_safe_path(path: str, workspace_root: str = WORKSPACE_ROOT) -> str:
     if not abs_path.startswith(os.path.abspath(workspace_root)):
         raise ValueError(f"Path traversal detected: {path}")
     return abs_path
+
+async def _run_command_async(
+    cmd: list[str] | str,
+    cwd: Optional[str] = None,
+    timeout: float = 30.0,
+    shell: bool = False
+) -> tuple[int, str, str]:
+    """Runs a subprocess asynchronously using asyncio to prevent blocking the event loop."""
+    try:
+        if shell:
+            proc = await asyncio.create_subprocess_shell(
+                cmd if isinstance(cmd, str) else " ".join(cmd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd
+            )
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd
+            )
+        
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            return proc.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+        except asyncio.TimeoutExpired:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+            raise TimeoutError(f"Command timed out after {timeout} seconds")
+    except FileNotFoundError as e:
+        return -1, "", f"Executable or directory not found: {e}"
 
 async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResult:
     try:
@@ -213,7 +250,6 @@ async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionRes
 
 async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResult:
     """Performs a ripgrep search in the workspace."""
-    import subprocess
     try:
         workspace_id = getattr(req, "workspace_id", None)
         user_ctx = getattr(req, "user_context", None)
@@ -232,21 +268,25 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
             
         log.info(f"Running search: {' '.join(cmd)}")
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            rc, stdout, stderr = await _run_command_async(cmd, timeout=30.0)
+            if rc == -1 and "Executable or directory not found" in stderr:
+                raise FileNotFoundError()
         except FileNotFoundError:
             log.info("ripgrep (rg) not found, falling back to grep")
             cmd = ["grep", "-rnI", "-e", req.query, abs_search_path]
             if req.include:
                 cmd = ["grep", "-rnI", "--include", req.include, "-e", req.query, abs_search_path]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            rc, stdout, stderr = await _run_command_async(cmd, timeout=30.0)
+        except TimeoutError:
+            return _fail("Search timed out after 30s")
 
         # Ripgrep returns 1 if no matches found, which isn't a failure in our case
-        if proc.returncode not in (0, 1):
-            return _fail(f"Search failed: {proc.stderr}")
+        if rc not in (0, 1):
+            return _fail(f"Search failed: {stderr}")
             
         matches = []
         import json
-        for line in proc.stdout.splitlines():
+        for line in stdout.splitlines():
             try:
                 # Try parsing as JSON (rg output), otherwise treat as raw grep line
                 data = json.loads(line)
@@ -279,7 +319,6 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
 
 async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
     """Executes an arbitrary shell command in the workspace."""
-    import subprocess
     try:
         workspace_id = getattr(req, "workspace_id", None)
         user_ctx = getattr(req, "user_context", None)
@@ -339,30 +378,23 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # Enforce a max timeout of 300s
         safe_timeout = min(req.timeout, 300)
         
-        # Use shell=True to support pipes and redirections (safe due to allowlist validation)
-        proc = subprocess.run(
-            final_cmd,
-            shell=True,
-            cwd=abs_cwd,
-            capture_output=True,
-            text=True,
-            timeout=safe_timeout
-        )
+        try:
+            rc, stdout, stderr = await _run_command_async(final_cmd, cwd=abs_cwd, timeout=safe_timeout, shell=True)
+        except TimeoutError:
+            return _fail(f"Command timed out after {req.timeout}s")
         
         detail = {
-            "stdout": proc.stdout,
-            "stderr": proc.stderr,
-            "returncode": proc.returncode
+            "stdout": stdout,
+            "stderr": stderr,
+            "returncode": rc
         }
         
-        if proc.returncode == 0:
+        if rc == 0:
             cmd_prefix = req.command[:50] if req.command else "<unknown>"
             return _ok(f"Command executed successfully: {cmd_prefix}...", detail)
         else:
-            return _fail(f"Command failed with exit code {proc.returncode}", detail)
+            return _fail(f"Command failed with exit code {rc}", detail)
             
-    except subprocess.TimeoutExpired:
-        return _fail(f"Command timed out after {req.timeout}s")
     except HTTPException:
         raise
     except Exception as e:
@@ -444,7 +476,6 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
 
 async def handle_workspace_lint(req) -> ExecutionResult:
     """Auto-detect and run the appropriate linter for the given file."""
-    import subprocess
     try:
         abs_path = resolve_safe_path(req.path)
         if not os.path.exists(abs_path):
@@ -455,17 +486,21 @@ async def handle_workspace_lint(req) -> ExecutionResult:
         results = []
         passed = True
 
-        def _run(cmd):
+        async def _run(cmd):
             try:
-                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-                return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+                rc, stdout, stderr = await _run_command_async(cmd, timeout=30.0)
+                if rc == -1 and "Executable or directory not found" in stderr:
+                    raise FileNotFoundError()
+                return rc, stdout.strip(), stderr.strip()
+            except TimeoutError:
+                return -2, "", "Timeout expired after 30s"
             except FileNotFoundError:
                 return -1, "", f"Tool not found: {cmd[0]}"
 
         # ── Python ───────────────────────────────────────────────────────────
         if ext == ".py" or forced in ("ruff", "black", "flake8", "python"):
             # Syntax check first — catches malformed files (missing imports, broken syntax)
-            rc, out, err = _run(["python3", "-m", "py_compile", str(abs_path)])
+            rc, out, err = await _run(["python3", "-m", "py_compile", str(abs_path)])
             if rc == -1:
                 return _ok("Python compiler not available — skipping lint.", {"path": req.path, "skipped": True})
             results.append({"tool": "py_compile", "returncode": rc, "output": out or err})
@@ -473,7 +508,7 @@ async def handle_workspace_lint(req) -> ExecutionResult:
                 passed = False
             else:
                 # Ruff: fast modern linter + formatter (replaces flake8, black, isort)
-                rc, out, err = _run(["ruff", "check", str(abs_path)])
+                rc, out, err = await _run(["ruff", "check", str(abs_path)])
                 results.append({"tool": "ruff", "returncode": rc, "output": out or err})
                 if rc != 0:
                     passed = False
@@ -481,21 +516,21 @@ async def handle_workspace_lint(req) -> ExecutionResult:
         # ── JavaScript / TypeScript ───────────────────────────────────────────
         elif ext in (".js", ".ts", ".jsx", ".tsx", ".mjs") or forced == "eslint":
             fix_flag = ["--fix"] if req.fix else []
-            rc, out, err = _run(["eslint"] + fix_flag + [str(abs_path)])
+            rc, out, err = await _run(["eslint"] + fix_flag + [str(abs_path)])
             results.append({"tool": "eslint", "returncode": rc, "output": out or err})
             if rc != 0:
                 passed = False
 
         # ── JSON ─────────────────────────────────────────────────────────────
         elif ext == ".json" or forced == "json":
-            rc, out, err = _run(["python3", "-m", "json.tool", str(abs_path)])
+            rc, out, err = await _run(["python3", "-m", "json.tool", str(abs_path)])
             results.append({"tool": "json.tool", "returncode": rc, "output": out or err})
             if rc != 0:
                 passed = False
 
         # ── YAML ─────────────────────────────────────────────────────────────
         elif ext in (".yaml", ".yml") or forced == "yamllint":
-            rc, out, err = _run(["yamllint", "-d", "relaxed", str(abs_path)])
+            rc, out, err = await _run(["yamllint", "-d", "relaxed", str(abs_path)])
             results.append({"tool": "yamllint", "returncode": rc, "output": out or err})
             if rc != 0:
                 passed = False

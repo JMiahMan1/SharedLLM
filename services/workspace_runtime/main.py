@@ -325,6 +325,35 @@ def _workspace_to_dict(item: Workspace) -> dict[str, Any]:
     data = item.model_dump()
     data["webhook_token"] = decrypt(item.webhook_token_enc) if item.webhook_token_enc else item.webhook_token
     data.pop("webhook_token_enc", None)
+    
+    # Ensure excludes is a parsed list of strings
+    excludes = data.get("excludes")
+    if isinstance(excludes, str):
+        try:
+            parsed = json.loads(excludes)
+            if isinstance(parsed, list):
+                data["excludes"] = parsed
+            else:
+                data["excludes"] = [excludes] if excludes else []
+        except Exception:
+            data["excludes"] = [excludes] if excludes else []
+    elif excludes is None:
+        data["excludes"] = []
+        
+    # Ensure capabilities is a parsed list of strings
+    capabilities = data.get("capabilities")
+    if isinstance(capabilities, str):
+        try:
+            parsed = json.loads(capabilities)
+            if isinstance(parsed, list):
+                data["capabilities"] = parsed
+            else:
+                data["capabilities"] = [capabilities] if capabilities else []
+        except Exception:
+            data["capabilities"] = [capabilities] if capabilities else []
+    elif capabilities is None:
+        data["capabilities"] = []
+        
     return data
 
 
