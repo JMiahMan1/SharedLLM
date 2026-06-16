@@ -90,7 +90,10 @@ class MAWebSocketClient:
 
         # Token is passed as a query parameter — this is how MA's WebSocket
         # middleware expects authentication (not via headers).
-        self._ws_url = f"{self._mass_url}/ws?token={mass_token}"
+        # Convert http:// to ws:// and https:// to wss:// for WebSocket URLs.
+        ws_scheme = "wss://" if self._mass_url.startswith("https://") else "ws://"
+        http_base = self._mass_url.replace("http://", "").replace("https://", "")
+        self._ws_url = f"{ws_scheme}{http_base}/ws?token={mass_token}"
         self._reconnect_base_delay = reconnect_base_delay
         self._reconnect_max_delay = reconnect_max_delay
         self._reconnect_backoff_factor = reconnect_backoff_factor
