@@ -4275,6 +4275,18 @@ async def get_mission_logs(id_or_slug: str, request: Request):
     existing_logs = await r.lrange(history_key, 0, -1)  # type: ignore[misc]
     await r.close()
     
+    if not existing_logs and mission_data.get("output_log"):
+        try:
+            import json
+            parsed = json.loads(mission_data["output_log"])
+            if isinstance(parsed, list):
+                existing_logs = [
+                    json.dumps(item) if isinstance(item, dict) else str(item)
+                    for item in parsed
+                ]
+        except Exception as e:
+            log.warning(f"Failed to parse database output_log for mission {real_id}: {e}")
+    
     return JSONResponse(status_code=200, content={"logs": existing_logs})
 
 @app.websocket("/api/raven/missions/{id_or_slug}/stream")
