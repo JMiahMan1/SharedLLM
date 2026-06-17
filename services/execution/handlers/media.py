@@ -10,10 +10,11 @@ from services.config import MASS_CONFIG_ENTRY_ID
 log = logging.getLogger("execution.media")
 
 # Media type detection patterns
-VIDEO_PATTERNS = [r"youtube\.com", r"youtu\.be", r"vimeo\.com", r"rumble\.com", r"dailymotion\.com", r"tiktok\.com", r"twitch\.tv", r"\byoutube\b", r"\bvideo\b"]
+VIDEO_PATTERNS = [r"youtube\.com/watch", r"youtube\.com", r"youtu\.be", r"vimeo\.com", r"rumble\.com", r"dailymotion\.com", r"tiktok\.com", r"twitch\.tv", r"\bvideo\b"]
 AUDIOBOOK_PATTERNS = [r"audiobookshelf", r"abs", r"audiobook", r"book\s+"]
-PODCAST_PATTERNS = [r"podcast", r"episode", r"show\s+", r"itunes\.apple\.com", r"open\.spotify\.com/show"]
-MUSIC_PATTERNS = [r"spotify\.com/track", r"spotify\.com/album", r"soundcloud\.com", r"bandcamp\.com"]
+PODCAST_PATTERNS = [r"podcast", r"episode", r"show\s+", r"itunes\.apple\.com"]
+# Music comes from Music Assistant (URI-based), no URL patterns needed
+MUSIC_PATTERNS = []
 
 def detect_media_type(query: str, media_type_hint: str | None = None) -> str:
     """Detect media type from query content and hints."""
@@ -27,15 +28,15 @@ def detect_media_type(query: str, media_type_hint: str | None = None) -> str:
     
     # Check if query is a URL
     if query_lower.startswith(("http://", "https://")):
-        for pattern in VIDEO_PATTERNS:
-            if re.search(pattern, query_lower):
-                return "video"
-        for pattern in PODCAST_PATTERNS:
-            if re.search(pattern, query_lower):
-                return "podcast"
         for pattern in MUSIC_PATTERNS:
             if re.search(pattern, query_lower):
                 return "music"
+        for pattern in PODCAST_PATTERNS:
+            if re.search(pattern, query_lower):
+                return "podcast"
+        for pattern in VIDEO_PATTERNS:
+            if re.search(pattern, query_lower):
+                return "video"
         return "url"
     
     # Check for media type keywords in query

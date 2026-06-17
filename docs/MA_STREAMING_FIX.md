@@ -31,7 +31,7 @@ MA's `/preview` endpoint only provides ~30 second previews, not full tracks.
 ### Why Not Direct Subsonic Streaming?
 The original plan (documented below) was to extract OpenSubsonic provider credentials from MA and construct direct Navidrome Subsonic stream URLs. However, MA's official web-player architecture is superior:
 
-1. **Handles all providers natively** — OpenSubsonic, local files, Spotify, Tidal, etc. without credential scraping
+1. **Handles all providers natively** — OpenSubsonic, local files, YouTube, etc. without credential scraping
 2. **Built-in queue management** — MA's WebSocket state sync manages player state, track transitions, seek position
 3. **No credential exposure** — Gateway never needs to know provider passwords
 4. **Seeking & playback control** — MA manages the stream session; browser just binds to the generated URL
