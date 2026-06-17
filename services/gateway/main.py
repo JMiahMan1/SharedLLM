@@ -5158,7 +5158,7 @@ async def stream_music_assistant(uri: str, request: Request):
     1. Resolve credentials (mass_url, mass_token) from the Jarvis identity service.
     2. Connect to MA WebSocket and authenticate.
     3. Discover MA players via JSON-RPC player/list and select an idle/playing player.
-    4. Send player/play_media with the URI to start playback on the target player.
+    4. Send player_queues/play_media with the URI to start playback on the target player.
     5. Listen for the queue_updated event to get the resolved stream URL.
     6. Return the stream URL as JSON — the browser binds directly to MA's stream server (port 8097).
 
@@ -5277,8 +5277,8 @@ async def stream_music_assistant(uri: str, request: Request):
             # Send play_media command
             log.info(f"[stream/ma] Sending play_media for uri='{uri}' on player='{target_player_id}'")
             await ma_client.send_command(
-                "player/play_media",
-                {"uri": uri, "player_id": target_player_id},
+                "player_queues/play_media",
+                {"queue_id": target_player_id, "media": uri},
             )
 
             # Wait for queue_updated event with stream URL

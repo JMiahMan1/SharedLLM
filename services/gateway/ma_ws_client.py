@@ -15,7 +15,7 @@ Usage:
     client = MAWebSocketClient(mass_url, mass_token)
     await client.connect()
     client.register_event_callback("queue_updated", handle_queue_updated)
-    await client.send_command("player/play_media", {"uri": "spotify:track:..."})
+    await client.send_command("player_queues/play_media", {"queue_id": "player_id", "media": "spotify:track:..."})
     # ... use the client ...
     await client.disconnect()
 """
@@ -49,7 +49,7 @@ RECONNECT_JITTER = 0.5
 HEARTBEAT_INTERVAL = 15.0
 
 # Command format
-COMMAND_PREFIX = "player/"
+COMMAND_PREFIX = "player_queues/"
 PLAY_MEDIA_COMMAND = f"{COMMAND_PREFIX}play_media"
 
 EventCallback = Callable[[str, Dict[str, Any]], None]
@@ -62,7 +62,7 @@ class MAWebSocketClient:
     Provides:
     - Persistent connection with auto-reconnect and exponential backoff
     - Authentication with MA's JWT token (via URL query param)
-    - Command dispatch (player/play_media, player/pause, etc.)
+    - Command dispatch (player_queues/play_media, player_queues/pause, etc.)
     - Event callbacks for queue/player state changes
     - Stream URL extraction from QUEUE_UPDATED events
     """
@@ -191,7 +191,7 @@ class MAWebSocketClient:
         Send a command to MA via WebSocket.
 
         Args:
-            command: Command name (e.g., "player/play_media", "player/pause")
+            command: Command name (e.g., "player_queues/play_media", "player_queues/pause")
             args: Command arguments dict
 
         Raises:
