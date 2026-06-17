@@ -15,7 +15,7 @@ Usage:
     client = MAWebSocketClient(mass_url, mass_token)
     await client.connect()
     client.register_event_callback("queue_updated", handle_queue_updated)
-    await client.send_command("player_queues/play_media", {"queue_id": "player_id", "media": "spotify:track:..."})
+    await client.send_command("player_queues/play_media", {"queue_id": "player_id", "media": "youtube.com/watch?v=..."})
     # ... use the client ...
     await client.disconnect()
 """

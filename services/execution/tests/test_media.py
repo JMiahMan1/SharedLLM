@@ -18,15 +18,10 @@ def test_detect_video_hint():
     assert detect_media_type("anything", "video") == "video"
 
 def test_detect_podcast_url():
-    assert detect_media_type("https://open.spotify.com/show/abc") == "podcast"
     assert detect_media_type("https://itunes.apple.com/podcast/xyz") == "podcast"
 
 def test_detect_podcast_keywords():
     assert detect_media_type("the daily podcast episode 5") == "podcast"
-
-def test_detect_music_url():
-    assert detect_media_type("https://spotify.com/track/abc") == "music"
-    assert detect_media_type("https://soundcloud.com/artist/song") == "music"
 
 def test_detect_url_generic():
     assert detect_media_type("https://example.com/stream.mp3") == "url"

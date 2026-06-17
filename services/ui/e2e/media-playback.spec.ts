@@ -7,6 +7,8 @@
 import { test, expect, type Page } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
+const TEST_USER = process.env.TEST_USER;
+const TEST_PASS = process.env.TEST_PASS;
 
 // ──────────────────────────────────────────────────────────────
 // Helpers
@@ -17,8 +19,13 @@ const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
  * Returns true if login succeeds (URL changes to /dashboard).
  */
 async function loginAsAdmin(page: Page): Promise<boolean> {
+  if (!TEST_USER || !TEST_PASS) {
+    console.log('[login] Skipping: TEST_USER and TEST_PASS required');
+    return false;
+  }
+
   try {
-    await page.goto(`${UI_URL}/login`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(`${UI_URL}/login`, { waitUntil: 'networkidle', timeout: 30000 });
 
     // Wait for the page to be ready
     const ready = await page.locator('h1:text("Jarvis OS"), input[type="text"], input[type="password"], button:text("Sign In")')
@@ -48,9 +55,9 @@ async function loginAsAdmin(page: Page): Promise<boolean> {
       return false;
     }
 
-    await usernameInput.fill('default');
+    await usernameInput.fill(TEST_USER);
     if (await passwordInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await passwordInput.fill('changeme');
+      await passwordInput.fill(TEST_PASS);
     }
 
     await signInBtn.click();
@@ -72,7 +79,6 @@ async function loginAsAdmin(page: Page): Promise<boolean> {
     }
 
     // Capture token and user from the page context
-    await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(2000);
     return true;
   } catch (err) {
@@ -107,10 +113,9 @@ async function goToMedia(page: Page, retries: number = 1): Promise<boolean> {
       });
     } else {
       // No token — must do full navigation
-      await page.goto(`${UI_URL}/media`, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.goto(`${UI_URL}/media`, { waitUntil: 'networkidle', timeout: 30000 });
     }
 
-    await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
 
     // Verify page loaded

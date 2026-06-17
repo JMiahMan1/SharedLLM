@@ -321,7 +321,7 @@ async def test_media_status_media_attrs_captured():
                 "media_title": "My Song",
                 "media_artist": "My Artist",
                 "media_album_name": "My Album",
-                "source": "Spotify",
+                "source": "YouTube",
                 **_make_ma_attributes(),
             },
         )
@@ -337,7 +337,7 @@ async def test_media_status_media_attrs_captured():
     assert active["media_title"] == "My Song"
     assert active["media_artist"] == "My Artist"
     assert active["media_album"] == "My Album"
-    assert active["source"] == "Spotify"
+    assert active["source"] == "YouTube"
 
 
 @pytest.mark.asyncio

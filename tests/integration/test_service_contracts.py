@@ -57,7 +57,7 @@ class TestExecutionRequestContracts:
         req = MediaPlayRequest(
             user_context=ctx,
             entity_id="media_player.test",
-            query="spotify:track:123",
+            query="https://www.youtube.com/watch?v=abc123",
             media_type="music",
         )
         assert req.media_type == "music"

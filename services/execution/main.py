@@ -2137,7 +2137,7 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
         return await light.handle_light(light_req)
 
     # Media commands
-    media_keywords = ["play", "pause", "stop", "music", "video", "youtube", "spotify"]
+    media_keywords = ["play", "pause", "stop", "music", "video", "youtube"]
     if any(kw in transcript for kw in media_keywords):
         entity_id = req.get("entity_id", "")
         if not entity_id:

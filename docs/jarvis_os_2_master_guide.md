@@ -1238,7 +1238,7 @@ The Roku handler (`handlers/roku.py`) is the most complex of the brand handlers 
 > * **Roku ECP API reference:** [developer.roku.com/docs/developer-program/debugging/external-control-api.md](https://developer.roku.com/docs/developer-program/debugging/external-control-api.md)
 
 **Roku App ID Registry (built-in):**
-Netflix `12`, YouTube `837`, Hulu `2285`, Disney+ `291097`, Prime Video `13`, Spotify `22297`, Plex `13535`, Tubi `26079`, Peacock `427192`, HBO Max `301921`, Apple TV `472192`, **Media Assistant `782875`**.
+Netflix `12`, YouTube `837`, Hulu `2285`, Disney+ `291097`, Prime Video `13`, Plex `13535`, Tubi `26079`, Peacock `427192`, HBO Max `301921`, Apple TV `472192`, **Media Assistant `782875`**.
 
 ##### Music Playback — Five-Step Pipeline (`roku_play_music`)
 

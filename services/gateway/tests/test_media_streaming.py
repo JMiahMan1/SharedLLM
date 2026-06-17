@@ -96,7 +96,7 @@ async def test_stream_ma_uses_dict_get_not_dot_notation(monkeypatch, client):
         ))
 
         with patch('services.gateway.main.httpx.AsyncClient', return_value=mock_httpx_client):
-            resp = client.get("/api/media/stream/music-assistant?uri=spotify:track:test123")
+            resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
 
             # If dot notation was used, this would 500 with AttributeError
             # We expect 404 (no players) or some other error, but not 500 from credential access
@@ -135,7 +135,7 @@ async def test_stream_ma_missing_credentials_returns_400(monkeypatch, client):
     }
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        resp = client.get("/api/media/stream/music-assistant?uri=spotify:track:test")
+        resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test")
 
         assert resp.status_code == 400
         assert "not configured" in resp.json().get("detail", "")
@@ -161,7 +161,7 @@ async def test_stream_ma_no_players_returns_404(monkeypatch, client):
             ))
             mock_httpx.AsyncClient.return_value = mock_httpx_instance
 
-            resp = client.get("/api/media/stream/music-assistant?uri=spotify:track:test123")
+            resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
 
             assert resp.status_code == 404
             assert "No Music Assistant players" in resp.json().get("detail", "")
@@ -191,7 +191,7 @@ async def test_stream_ma_identity_failure_returns_401(monkeypatch, client):
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(
         side_effect=HTTPException(status_code=401, detail="Unauthorized")
     )):
-        resp = client.get("/api/media/stream/music-assistant?uri=spotify:track:test")
+        resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test")
 
         assert resp.status_code == 401
         assert "Authentication" in resp.json().get("detail", "")
