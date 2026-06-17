@@ -243,13 +243,13 @@ class TestCommandSending:
         client._ws = mock_websocket
         client._connected = True
 
-        await client.send_command("player_queues/play_media", {"queue_id": "player_1", "uri": "spotify:track:123"})
+        await client.send_command("player_queues/play_media", {"queue_id": "player_1", "media": "spotify:track:123"})
 
         mock_websocket.send.assert_called_once()
         sent = mock_websocket.send.call_args[0][0]
         data = json.loads(sent)
         assert data["command"] == "player_queues/play_media"
-        assert data["args"]["uri"] == "spotify:track:123"
+        assert data["args"]["media"] == "spotify:track:123"
         assert "message_id" in data
         # Message ID follows MA format: "counter{n}"
         assert data["message_id"].startswith("counter")
@@ -283,8 +283,8 @@ class TestCommandSending:
         client._ws = mock_websocket
         client._connected = True
 
-        await client.send_command("player_queues/play_media", {"queue_id": "p1", "uri": "a"})
-        await client.send_command("player_queues/play_media", {"queue_id": "p1", "uri": "b"})
+        await client.send_command("player_queues/play_media", {"queue_id": "p1", "media": "a"})
+        await client.send_command("player_queues/play_media", {"queue_id": "p1", "media": "b"})
 
         assert mock_websocket.send.call_count == 2
         first = json.loads(mock_websocket.send.call_args_list[0][0][0])
