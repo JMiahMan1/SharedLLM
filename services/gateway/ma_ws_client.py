@@ -15,7 +15,7 @@ Usage:
     client = MAWebSocketClient(mass_url, mass_token)
     await client.connect()
     client.register_event_callback("queue_updated", handle_queue_updated)
-    await client.send_command("player_queues/play_media", {"queue_id": "player_id", "media": "spotify:track:..."})
+    await client.send_command("player_queues/play_media", {"queue_id": "player_id", "uri": "spotify:track:..."})
     # ... use the client ...
     await client.disconnect()
 """
@@ -413,17 +413,23 @@ class MAWebSocketClient:
         #   {"type": "EVENT", "event": "player_updated", "data": {...}}
         if event_type:
             evt_data = data.get("data", {})
-            log.debug(f"[MA-WS] Received event: {event_type}")
+            log.info(f"[MA-WS] Received event: {event_type}, keys={list(evt_data.keys()) if isinstance(evt_data, dict) else type(evt_data).__name__}")
             await self._dispatch_event(event_type, evt_data)
 
         # ── Result messages ─────────────────────────────────────────────
         # Response to a command we sent
         elif msg_type == "RESULT":
-            log.debug(f"[MA-WS] Received result: msg_id={data.get('message_id')}")
+            result = data.get("result", {})
+            log.info(f"[MA-WS] Received result: msg_id={data.get('message_id')}, result_keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
 
         # ── Error messages ──────────────────────────────────────────────
         elif msg_type == "ERROR":
-            log.error(f"[MA-WS] Received error: msg_id={data.get('message_id')} error={data.get('error')}")
+            error = data.get("error", {})
+            log.error(f"[MA-WS] Received error: msg_id={data.get('message_id')}, error={json.dumps(error) if isinstance(error, dict) else error}")
+
+        # ── Unknown message types ───────────────────────────────────────
+        else:
+            log.warning(f"[MA-WS] Unknown message type: msg_type={msg_type!r}, event={event_type!r}, all_keys={list(data.keys())}")
 
     async def _dispatch_event(self, event_type: str, data: Dict[str, Any]) -> None:
         """
@@ -474,9 +480,12 @@ class MAWebSocketClient:
         Args:
             data: Queue state data from MA
         """
+        log.info(f"[MA-WS] Extracting stream URL from queue state: keys={list(data.keys())}, state={data.get('state')}")
+
         # Check for stream_url in the current item
         current_item = data.get("current_item", {})
         if isinstance(current_item, dict):
+            log.info(f"[MA-WS] current_item keys: {list(current_item.keys())}")
             media_item = current_item.get("media_item", {})
             stream_url = media_item.get("stream_url") if isinstance(media_item, dict) else None
             if not stream_url:
@@ -489,17 +498,20 @@ class MAWebSocketClient:
         # Check for queue items with stream URLs
         queue_items = data.get("items", [])
         if isinstance(queue_items, list):
-            for item in queue_items:
+            for i, item in enumerate(queue_items):
                 if isinstance(item, dict):
                     stream_url = item.get("stream_url")
                     if stream_url:
                         self._stream_url = stream_url
-                        log.info(f"[MA-WS] Stream URL from queue item: {stream_url[:100]}...")
+                        log.info(f"[MA-WS] Stream URL from queue item {i}: {stream_url[:100]}...")
                         return
+                    if i == 0:
+                        log.info(f"[MA-WS] First queue item keys: {list(item.keys())}")
 
         # Check for audio_player stream info
         audio_player = data.get("audio_player", {})
         if isinstance(audio_player, dict):
+            log.info(f"[MA-WS] audio_player keys: {list(audio_player.keys())}")
             stream_url = audio_player.get("stream_url")
             if stream_url:
                 self._stream_url = stream_url
@@ -509,6 +521,7 @@ class MAWebSocketClient:
         # Clear stream URL if not found (may indicate stopped state)
         if data.get("state") == "idle":
             self._stream_url = None
+            log.info(f"[MA-WS] Stream URL cleared (state=idle)")
 
     # ------------------------------------------------------------------
     # Internal - Reconnect Logic

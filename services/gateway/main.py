@@ -5278,7 +5278,7 @@ async def stream_music_assistant(uri: str, request: Request):
             log.info(f"[stream/ma] Sending play_media for uri='{uri}' on player='{target_player_id}'")
             await ma_client.send_command(
                 "player_queues/play_media",
-                {"queue_id": target_player_id, "media": uri},
+                {"queue_id": target_player_id, "uri": uri},
             )
 
             # Wait for queue_updated event with stream URL
@@ -5296,11 +5296,13 @@ async def stream_music_assistant(uri: str, request: Request):
                 await asyncio.sleep(0.2)
 
             if not stream_url:
-                log.error("[stream/ma] Stream URL not resolved within timeout")
+                stream_url_debug = ma_client.get_stream_url()
                 queue_desc = ma_client.get_queue_state_description()
+                queue_state = ma_client.get_queue_state()
+                log.error(f"[stream/ma] Stream URL not resolved within timeout. stream_url={stream_url_debug}, queue_state={queue_state}")
                 raise HTTPException(
                     status_code=502,
-                    detail=f"MA did not resolve a stream URL within {stream_timeout}s. Queue state: {queue_desc}"
+                    detail=f"MA did not resolve a stream URL within {stream_timeout}s. Queue state: {queue_desc}. Full state keys: {list(queue_state.keys()) if isinstance(queue_state, dict) else type(queue_state).__name__}"
                 )
 
             # Return the stream URL for direct browser playback (MA web-player pattern)
