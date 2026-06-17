@@ -46,6 +46,21 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
     const token = storageGetSync('jarvis_api_key') || '';
     const wsUrl = `${protocol}//${window.location.host}/api/raven/missions/${missionId}/stream?token=${encodeURIComponent(token)}`;
 
+    const fetchHttpLogs = () => {
+      api.getMissionLogs(missionId).then((resp) => {
+        if (resp && Array.isArray(resp.logs)) {
+          const parsed = resp.logs.map((logStr) => {
+            try {
+              return JSON.parse(logStr);
+            } catch {
+              return { type: 'system', data: logStr };
+            }
+          });
+          setLogs(parsed);
+        }
+      }).catch(() => {});
+    };
+
     // Defer initial log to avoid synchronous setState in effect
     requestAnimationFrame(() => {
       setLogs([{ type: 'system', data: `Initializing connection to Raven Mission #${missionId}...` }]);
@@ -74,6 +89,7 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
     ws.onclose = () => {
       setIsConnected(false);
       setLogs((prev) => [...prev, { type: 'system', data: `Connection closed.` }]);
+      fetchHttpLogs();
     };
 
     // Poll mission status/result
@@ -87,7 +103,11 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
           }
         }
       }).catch(() => {});
-    }, 5000);
+
+      if (wsRef.current?.readyState !== WebSocket.OPEN) {
+        fetchHttpLogs();
+      }
+    }, 4000);
 
     return () => {
       clearInterval(pollInterval);
