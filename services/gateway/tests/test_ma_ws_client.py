@@ -67,8 +67,8 @@ class TestInitialization:
         assert client._mass_token == mass_token
 
     def test_init_sets_ws_url_with_token(self, client):
-        # Token is passed as a query parameter
-        assert client.ws_url == "http://ha.sumemail.com:8095/ws?token=test.jwt.token.abc123"
+        # Token is passed as a query parameter; http:// is converted to ws://
+        assert client.ws_url == "ws://ha.sumemail.com:8095/ws?token=test.jwt.token.abc123"
 
     def test_init_default_reconnect_settings(self, client):
         assert client._reconnect_base_delay == 1.0
@@ -110,7 +110,7 @@ class TestInitialization:
     def test_init_repr_as_disconnected(self, client):
         repr_str = repr(client)
         assert "disconnected" in repr_str
-        assert "http://ha.sumemail.com:8095/ws" in repr_str
+        assert "ws://ha.sumemail.com:8095/ws" in repr_str
         assert "reconnects=0" in repr_str
 
     def test_msg_id_starts_at_zero(self, client):
@@ -170,8 +170,8 @@ class TestConnection:
         with patch("websockets.connect", AsyncMock(return_value=mock_websocket)) as mock_connect:
             await client._establish_connection()
             call_args = mock_connect.call_args
-            # Token is in the URL, no auth header
-            assert call_args[0][0] == "http://ha.sumemail.com:8095/ws?token=test.jwt.token.abc123"
+            # Token is in the URL, http:// is converted to ws://
+            assert call_args[0][0] == "ws://ha.sumemail.com:8095/ws?token=test.jwt.token.abc123"
 
     @pytest.mark.asyncio
     async def test_connect_does_not_use_auth_header(self, client, mock_websocket):
@@ -231,25 +231,25 @@ class TestCommandSending:
     @pytest.mark.asyncio
     async def test_send_command_raises_when_disconnected(self, client):
         with pytest.raises(ConnectionError, match="not connected"):
-            await client.send_command("player/play_media")
+            await client.send_command("player_queues/play_media")
 
     @pytest.mark.asyncio
     async def test_send_command_no_wait_raises_when_disconnected(self, client):
         with pytest.raises(ConnectionError, match="not connected"):
-            await client.send_command_no_wait("player/pause")
+            await client.send_command_no_wait("player_queues/pause")
 
     @pytest.mark.asyncio
     async def test_send_command_sends_json(self, client, mock_websocket):
         client._ws = mock_websocket
         client._connected = True
 
-        await client.send_command("player/play_media", {"uri": "spotify:track:123"})
+        await client.send_command("player_queues/play_media", {"queue_id": "player_1", "media": "spotify:track:123"})
 
         mock_websocket.send.assert_called_once()
         sent = mock_websocket.send.call_args[0][0]
         data = json.loads(sent)
-        assert data["command"] == "player/play_media"
-        assert data["args"]["uri"] == "spotify:track:123"
+        assert data["command"] == "player_queues/play_media"
+        assert data["args"]["media"] == "spotify:track:123"
         assert "message_id" in data
         # Message ID follows MA format: "counter{n}"
         assert data["message_id"].startswith("counter")
@@ -259,11 +259,11 @@ class TestCommandSending:
         client._ws = mock_websocket
         client._connected = True
 
-        await client.send_command("player/pause")
+        await client.send_command("player_queues/pause")
 
         sent = mock_websocket.send.call_args[0][0]
         data = json.loads(sent)
-        assert data["command"] == "player/pause"
+        assert data["command"] == "player_queues/pause"
         assert "args" not in data
 
     @pytest.mark.asyncio
@@ -271,20 +271,20 @@ class TestCommandSending:
         client._ws = mock_websocket
         client._connected = True
 
-        await client.send_command_no_wait("player/next")
+        await client.send_command_no_wait("player_queues/next")
 
         mock_websocket.send.assert_called_once()
         sent = mock_websocket.send.call_args[0][0]
         data = json.loads(sent)
-        assert data["command"] == "player/next"
+        assert data["command"] == "player_queues/next"
 
     @pytest.mark.asyncio
     async def test_send_command_generates_unique_ids(self, client, mock_websocket):
         client._ws = mock_websocket
         client._connected = True
 
-        await client.send_command("player/play_media", {"uri": "a"})
-        await client.send_command("player/play_media", {"uri": "b"})
+        await client.send_command("player_queues/play_media", {"queue_id": "p1", "media": "a"})
+        await client.send_command("player_queues/play_media", {"queue_id": "p1", "media": "b"})
 
         assert mock_websocket.send.call_count == 2
         first = json.loads(mock_websocket.send.call_args_list[0][0][0])
@@ -299,7 +299,7 @@ class TestCommandSending:
         client._ws = mock_websocket
         client._connected = True
         with patch("services.gateway.ma_ws_client.log") as mock_log:
-            await client.send_command("player/play_media", {"uri": "test"})
+            await client.send_command("player_queues/play_media", {"queue_id": "p1", "media": "test"})
             assert mock_log.info.called
 
 
@@ -847,8 +847,8 @@ class TestConstants:
         assert EVENT_QUEUE_STARTED == "queue_started"
 
     def test_command_constants(self):
-        assert COMMAND_PREFIX == "player/"
-        assert PLAY_MEDIA_COMMAND == "player/play_media"
+        assert COMMAND_PREFIX == "player_queues/"
+        assert PLAY_MEDIA_COMMAND == "player_queues/play_media"
 
     def test_heartbeat_interval(self):
         assert HEARTBEAT_INTERVAL == 15.0
@@ -867,15 +867,15 @@ class TestIntegration:
 
         # Send a play command
         await client.send_command(
-            "player/play_media",
-            {"uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC", "player_id": "player_1"},
+            "player_queues/play_media",
+            {"queue_id": "player_1", "media": "spotify:track:4uLU6hMCjMI75M1A2tKUQC"},
         )
 
         # Verify command was sent
         mock_websocket.send.assert_called_once()
         sent = json.loads(mock_websocket.send.call_args[0][0])
-        assert sent["command"] == "player/play_media"
-        assert sent["args"]["uri"] == "spotify:track:4uLU6hMCjMI75M1A2tKUQC"
+        assert sent["command"] == "player_queues/play_media"
+        assert sent["args"]["media"] == "spotify:track:4uLU6hMCjMI75M1A2tKUQC"
         assert sent["message_id"] == "counter1"
 
         # Register event callback and process an event
@@ -970,21 +970,17 @@ class TestIntegration:
         client._connected = True
 
         complex_args = {
-            "uri": "spotify:playlist:abc123",
-            "player_id": "player_1",
-            "enqueue": "replace",
-            "volume": 0.5,
-            "metadata": {
-                "source": "ui",
-                "request_id": "req_456",
-            },
+            "queue_id": "player_1",
+            "media": "spotify:playlist:abc123",
+            "option": "replace",
+            "radio_mode": False,
         }
-        await client.send_command("player/play_media", complex_args)
+        await client.send_command("player_queues/play_media", complex_args)
 
         sent = json.loads(mock_websocket.send.call_args[0][0])
-        assert sent["args"]["uri"] == "spotify:playlist:abc123"
-        assert sent["args"]["enqueue"] == "replace"
-        assert sent["args"]["metadata"]["source"] == "ui"
+        assert sent["args"]["queue_id"] == "player_1"
+        assert sent["args"]["media"] == "spotify:playlist:abc123"
+        assert sent["args"]["option"] == "replace"
 
     @pytest.mark.asyncio
     async def test_get_stream_url_after_multiple_updates(self, client):
