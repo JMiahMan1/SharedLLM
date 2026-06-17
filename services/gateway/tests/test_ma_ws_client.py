@@ -243,13 +243,13 @@ class TestCommandSending:
         client._ws = mock_websocket
         client._connected = True
 
-        await client.send_command("player_queues/play_media", {"queue_id": "player_1", "media": "spotify:track:123"})
+        await client.send_command("player_queues/play_media", {"queue_id": "player_1", "media": "https://www.youtube.com/watch?v=123"})
 
         mock_websocket.send.assert_called_once()
         sent = mock_websocket.send.call_args[0][0]
         data = json.loads(sent)
         assert data["command"] == "player_queues/play_media"
-        assert data["args"]["media"] == "spotify:track:123"
+        assert data["args"]["media"] == "https://www.youtube.com/watch?v=123"
         assert "message_id" in data
         # Message ID follows MA format: "counter{n}"
         assert data["message_id"].startswith("counter")
@@ -525,11 +525,11 @@ class TestQueueState:
 
     def test_get_current_item(self, client):
         client._queue_state = {
-            "current_item": {"name": "Test Song", "uri": "spotify:track:123"},
+            "current_item": {"name": "Test Song", "uri": "https://www.youtube.com/watch?v=123"},
         }
         item = client.get_current_item()
         assert item["name"] == "Test Song"
-        assert item["uri"] == "spotify:track:123"
+        assert item["uri"] == "https://www.youtube.com/watch?v=123"
 
     def test_get_current_item_returns_none_when_missing(self, client):
         client._queue_state = {}
@@ -868,14 +868,14 @@ class TestIntegration:
         # Send a play command
         await client.send_command(
             "player_queues/play_media",
-            {"queue_id": "player_1", "uri": "spotify:track:4uLU6hMCjMI75M1A2tKUQC"},
+            {"queue_id": "player_1", "uri": "https://www.youtube.com/watch?v=4uLU6hMCjMI"},
         )
 
         # Verify command was sent
         mock_websocket.send.assert_called_once()
         sent = json.loads(mock_websocket.send.call_args[0][0])
         assert sent["command"] == "player_queues/play_media"
-        assert sent["args"]["uri"] == "spotify:track:4uLU6hMCjMI75M1A2tKUQC"
+        assert sent["args"]["uri"] == "https://www.youtube.com/watch?v=4uLU6hMCjMI"
         assert sent["message_id"] == "counter1"
 
         # Register event callback and process an event
@@ -971,7 +971,7 @@ class TestIntegration:
 
         complex_args = {
             "queue_id": "player_1",
-            "uri": "spotify:playlist:abc123",
+            "uri": "https://www.youtube.com/playlist?list=abc123",
             "option": "replace",
             "radio_mode": False,
         }
@@ -979,7 +979,7 @@ class TestIntegration:
 
         sent = json.loads(mock_websocket.send.call_args[0][0])
         assert sent["args"]["queue_id"] == "player_1"
-        assert sent["args"]["uri"] == "spotify:playlist:abc123"
+        assert sent["args"]["uri"] == "https://www.youtube.com/playlist?list=abc123"
         assert sent["args"]["option"] == "replace"
 
     @pytest.mark.asyncio

@@ -1,15 +1,32 @@
 import { test, expect } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
-const ADMIN_USER = 'default';
-const ADMIN_PASS = 'admin';
+const TEST_USER = process.env.TEST_USER;
+const TEST_PASS = process.env.TEST_PASS;
 
 async function loginAsAdmin(page: import('@playwright/test').Page) {
-  await page.goto(`${UI_URL}/login`);
-  await page.getByPlaceholder('Enter username').fill(ADMIN_USER);
-  await page.getByPlaceholder('Enter password').fill(ADMIN_PASS);
+  if (!TEST_USER || !TEST_PASS) {
+    throw new Error('E2E tests require TEST_USER and TEST_PASS environment variables');
+  }
+
+  await page.goto(`${UI_URL}/login`, { waitUntil: 'networkidle', timeout: 30000 });
+
+  // Wait for login form to be visible
+  await page.getByPlaceholder('Enter username').waitFor({ state: 'visible', timeout: 10000 });
+  await page.getByPlaceholder('Enter username').fill(TEST_USER);
+  await page.getByPlaceholder('Enter password').fill(TEST_PASS);
   await page.getByRole('button', { name: /sign in/i }).click();
-  await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
+
+  // Wait for dashboard navigation or accept that SPA handles routing
+  try {
+    await page.waitForURL('**/dashboard', { timeout: 10000 });
+  } catch {
+    // SPA might not navigate, check if we're still on login
+    const currentUrl = page.url();
+    if (currentUrl.includes('/login')) {
+      throw new Error('Login failed - still on login page');
+    }
+  }
   await page.waitForTimeout(2000);
 }
 
@@ -17,7 +34,7 @@ test.describe('Identity Page - Integration Gallery', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.waitForTimeout(3000);
   });
 
   test('integration gallery section is visible', async ({ page }) => {
@@ -66,7 +83,7 @@ test.describe('Identity Page - Integration Configuration Modal', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.waitForTimeout(3000);
   });
 
   test('Manage Integration opens configuration modal', async ({ page }) => {
@@ -138,7 +155,7 @@ test.describe('Identity Page - Vocal Signature', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.waitForTimeout(3000);
   });
 
   test('vocal signature section is visible', async ({ page }) => {
@@ -169,7 +186,7 @@ test.describe('Identity Page - API Keys', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.waitForTimeout(3000);
   });
 
   test('API keys section header is visible', async ({ page }) => {
@@ -200,7 +217,7 @@ test.describe('Identity Page - Digital Persona', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.waitForTimeout(3000);
   });
 
   test('digital persona section is visible', async ({ page }) => {
@@ -233,7 +250,7 @@ test.describe('Identity Page - System Hierarchy', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/identity`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.waitForTimeout(3000);
   });
 
   test('system hierarchy section is visible for admins', async ({ page }) => {

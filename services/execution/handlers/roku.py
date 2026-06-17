@@ -41,7 +41,7 @@ ROKU_KEYS = {
 
 ROKU_APPS = {
     "netflix": "12", "youtube": "837", "hulu": "2285",
-    "disney_plus": "291097", "prime_video": "13", "spotify": "22297",
+    "disney_plus": "291097", "prime_video": "13",
     "plex": "13535", "tubi": "26079", "peacock": "427192",
     "paramount_plus": "428927", "hbo_max": "301921", "apple_tv": "472192",
     "media_assistant": "782875",

@@ -54,8 +54,8 @@ def mock_states():
             "state": "playing",
             "attributes": {
                 "friendly_name": "Living Room Speaker",
-                "source": "Spotify",
-                "integration": "Spotify",
+                "source": "YouTube",
+                "integration": "youtube",
                 "active_queue": "queue://default/12345",
             },
         },
@@ -497,7 +497,7 @@ class TestDetectMediaType:
     def test_detects_podcast_keywords(self):
         """Detect podcast from keywords and URLs."""
         assert detect_media_type("play the daily podcast") == "podcast"
-        assert detect_media_type("https://open.spotify.com/show/abc") == "podcast"
+        assert detect_media_type("https://www.youtube.com/watch?v=abc") == "video"
         assert detect_media_type("episode 5 of joe rogan") == "podcast"
 
     def test_detects_audiobook_keywords(self):
@@ -533,8 +533,8 @@ class TestMediaStatusMAFiltering:
         }
         # Non-MA player without MA attributes should be filtered out
         non_ma_attrs = {
-            "source": "Spotify",
-            "integration": "Spotify",
+            "source": "YouTube",
+            "integration": "youtube",
             "active_queue": None,
         }
 

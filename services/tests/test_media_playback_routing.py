@@ -62,8 +62,8 @@ class TestMediaTypeDetection(unittest.TestCase):
 
     def test_music_detection(self):
         assert detect_media_type("play some music") == "music"
-        assert detect_media_type("play spotify track") == "music"
-        assert detect_media_type("https://spotify.com/track/abc") == "music"
+        assert detect_media_type("play jazz playlist") == "music"
+        assert detect_media_type("favorite songs") == "music"
 
     def test_podcast_detection(self):
         assert detect_media_type("play podcast") == "podcast"

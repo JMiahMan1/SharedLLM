@@ -88,7 +88,7 @@ class TestVoiceCommandLogic:
 
     def test_media_keywords_detection(self):
         """Test media command keyword detection."""
-        media_keywords = ["play", "pause", "stop", "music", "video", "youtube", "spotify"]
+        media_keywords = ["play", "pause", "stop", "music", "video", "youtube"]
         test_cases = [
             ("play music", True),
             ("pause the video", True),
