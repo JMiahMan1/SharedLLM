@@ -5278,7 +5278,7 @@ async def stream_music_assistant(uri: str, request: Request):
             log.info(f"[stream/ma] Sending play_media for uri='{uri}' on player='{target_player_id}'")
             await ma_client.send_command(
                 "player_queues/play_media",
-                {"queue_id": target_player_id, "uri": uri},
+                {"queue_id": target_player_id, "media": uri},
             )
 
             # Wait for queue_updated event with stream URL
