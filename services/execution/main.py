@@ -1821,6 +1821,44 @@ async def get_ma_recent(user_id: str = ""):
         return {"status": "SUCCESS", "recent": []}
 
 
+@app.get("/execute/media/music-assistant/browse")
+async def get_ma_library(user_id: str = "", media_type: str = "TRACKS", offset: int = 0, limit: int = 50, search: str = "", order_by: str = ""):
+    """Browse MA library content via HA proxy (tracks, albums, artists, playlists, radio)."""
+    try:
+        creds = await _resolve_mass_ha_creds(user_id)
+        ha_url = creds.get("ha_url") if creds else None
+        ha_token = creds.get("ha_token") if creds else None
+        
+        if not ha_url or not ha_token:
+            return {"status": "SUCCESS", "items": [], "notice": "MA/HA not configured"}
+        
+        from services.execution.handlers.mass_ha_client import get_library as _ma_get_library
+        items = await _ma_get_library(ha_url, ha_token, media_type, limit=limit, offset=offset, search=search, order_by=order_by)
+        return {"status": "SUCCESS", "items": items, "media_type": media_type, "offset": offset, "limit": limit}
+    except Exception as e:
+        log.error(f"[ma/browse] Error: {e}")
+        return {"status": "SUCCESS", "items": []}
+
+
+@app.get("/execute/media/music-assistant/search")
+async def search_ma(user_id: str = "", query: str = "", media_type: str = "", limit: int = 20, artist: str = "", album: str = ""):
+    """Search MA for media items via HA proxy."""
+    try:
+        creds = await _resolve_mass_ha_creds(user_id)
+        ha_url = creds.get("ha_url") if creds else None
+        ha_token = creds.get("ha_token") if creds else None
+        
+        if not ha_url or not ha_token:
+            return {"status": "SUCCESS", "results": [], "notice": "MA/HA not configured"}
+        
+        from services.execution.handlers.mass_ha_client import search as _ma_search
+        results = await _ma_search(ha_url, ha_token, query, media_types=[media_type] if media_type else None, limit=limit, artist=artist, album=album)
+        return {"status": "SUCCESS", "results": results, "query": query}
+    except Exception as e:
+        log.error(f"[ma/search] Error: {e}")
+        return {"status": "SUCCESS", "results": []}
+
+
 @app.get("/execute/audiobookshelf")
 async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = "", library_id: str = "", query: str = "", limit: int = 25):
     """Handle Audiobookshelf GET requests (per-user credentials)."""

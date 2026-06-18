@@ -4733,7 +4733,45 @@ async def get_ma_recent(request: Request):
         )
         if resp.status_code == 200:
             return resp.json()
-    return {"status": "SUCCESS", "recent": []}
+      return {"status": "SUCCESS", "recent": []}
+
+
+@app.get("/api/media/music-assistant/browse")
+async def get_ma_browse(request: Request, media_type: str = "TRACKS", offset: int = 0, limit: int = 50, search: str = "", order_by: str = ""):
+    """Browse MA library (tracks, albums, artists, playlists, radio) via HA."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[ma/browse] identity resolution failed: {e.detail}")
+        return {"status": "SUCCESS", "items": []}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/media/music-assistant/browse",
+            params={"user_id": creds.get("user") or "", "media_type": media_type, "offset": offset, "limit": limit, "search": search, "order_by": order_by},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    return {"status": "SUCCESS", "items": []}
+
+
+@app.get("/api/media/music-assistant/search")
+async def search_ma(request: Request, query: str = "", media_type: str = "", limit: int = 20, artist: str = "", album: str = ""):
+    """Search MA for media items via HA."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[ma/search] identity resolution failed: {e.detail}")
+        return {"status": "SUCCESS", "results": []}
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/execute/media/music-assistant/search",
+            params={"user_id": creds.get("user") or "", "query": query, "media_type": media_type, "limit": limit, "artist": artist, "album": album},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    return {"status": "SUCCESS", "results": []}
 
 
 @app.get("/api/media/audiobookshelf/libraries")
