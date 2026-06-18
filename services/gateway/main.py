@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional, Any, Dict
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect, Response # pyright: ignore[reportUnusedImport]
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.datastructures import UploadFile
 from pydantic import BaseModel
@@ -5164,6 +5164,16 @@ async def stream_audiobookshelf(book_id: str, request: Request):
     except Exception as e:
         log.error(f"[stream/abs] Unhandled exception in stream_audiobookshelf: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal stream error: {str(e)}")
+
+
+TEST_PAGE_PATH = Path(__file__).parent / "static" / "ma-stream-test.html"
+
+@app.get("/api/media/ma-stream-test.html")
+async def ma_stream_test_page():
+    """Serve the MA stream test page for manual testing."""
+    if TEST_PAGE_PATH.exists():
+        return FileResponse(TEST_PAGE_PATH, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Test page not found")
 
 
 @app.get("/api/media/stream/music-assistant")
