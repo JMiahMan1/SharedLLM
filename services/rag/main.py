@@ -44,6 +44,7 @@ class FastembedEmbeddingFunction(EmbeddingFunction):
 
 
 from services.rag.schemas import SearchRequest, SearchResponse, SearchResultItem, IngestRequest
+from shared.info_endpoint import info_router
 
 log = logging.getLogger("rag")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
@@ -73,6 +74,8 @@ async def lifespan(app: FastAPI):
     log.info("RAG Service shutting down.")
 
 app = FastAPI(title="SharedLLM RAG Service", version="1.0.0", lifespan=lifespan)
+
+app.include_router(info_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

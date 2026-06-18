@@ -60,7 +60,7 @@ def get_test_settings():
     if not settings.get("llm_local_url"):
         settings["llm_local_url"] = os.getenv("OLLAMA_URL") or "http://localhost:11434"
     if not settings.get("embedding_model"):
-        settings["embedding_model"] = os.getenv("EMBEDDING_MODEL") or "BAAI/bge-small-en-v1.5"
+        settings["embedding_model"] = os.getenv("EMBEDDING_MODEL") or "nomic-embed-text-v1.5"
     if not settings.get("active_llm_provider"):
         settings["active_llm_provider"] = os.getenv("ACTIVE_LLM_PROVIDER") or "ollama"
 

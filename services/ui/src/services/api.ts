@@ -15,6 +15,14 @@ export interface HealthStatus {
   services: Record<string, string>;
 }
 
+export interface ServiceInfo {
+  service: string;
+  version: string;
+  git_sha: string;
+  git_branch: string;
+  build_date: string;
+}
+
 export interface LogEntry {
   id?: number;
   timestamp: string;
@@ -390,6 +398,15 @@ export const api = {
   async getHealth(): Promise<HealthStatus> {
     const resp = await apiClient.get('/health/ready');
     return resp.data;
+  },
+
+  async getInfo(): Promise<ServiceInfo | null> {
+    try {
+      const resp = await apiClient.get('/info');
+      return resp.data;
+    } catch {
+      return null;
+    }
   },
 
   async chat(message: string, workspaceId?: string, userId?: string, stream = false): Promise<unknown> {

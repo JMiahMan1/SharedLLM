@@ -42,7 +42,7 @@ def test_fastembed_embedding_function():  # pyright: ignore[reportUnknownVariabl
     try:
         from fastembed import TextEmbedding
 
-        ef = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+        ef = TextEmbedding(model_name="nomic-embed-text-v1.5")
         docs = ["test document 1", "test document 2", "Hello World"]
         vectors = list(ef.embed(docs))  # pyright: ignore[reportUnknownVariableType]
         print(f"✓ Embedding created, count: {len(vectors)}")
