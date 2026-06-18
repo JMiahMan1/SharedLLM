@@ -1,4 +1,5 @@
-FROM ${BASE_IMAGE:-ghcr.io/jmiahman1/sharedllm-base:latest} AS base
+ARG BASE_IMAGE=ghcr.io/jmiahman1/sharedllm-base:latest
+FROM ${BASE_IMAGE} AS base
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
 ARG SERVICE_NAME=control_plane
