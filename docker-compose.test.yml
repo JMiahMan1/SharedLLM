@@ -10,6 +10,8 @@ services:
     build:
       context: .
       dockerfile: services/identity/Dockerfile
+      args:
+        - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_identity
     ports:
       - "8011:8001"
@@ -24,6 +26,8 @@ services:
     build:
       context: .
       dockerfile: services/execution/Dockerfile
+      args:
+        - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_execution
     ports:
       - "8012:8003"
@@ -49,6 +53,8 @@ services:
     build:
       context: .
       dockerfile: services/rag/Dockerfile
+      args:
+        - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_rag
     ports:
       - "8013:8004"
@@ -71,6 +77,8 @@ services:
     build:
       context: .
       dockerfile: services/storage/Dockerfile
+      args:
+        - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_storage
     ports:
       - "8014:8005"
@@ -84,6 +92,8 @@ services:
     build:
       context: .
       dockerfile: services/logging/Dockerfile
+      args:
+        - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_logging
     ports:
       - "8015:8006"
@@ -99,6 +109,8 @@ services:
     build:
       context: .
       dockerfile: services/gateway/Dockerfile
+      args:
+        - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_gateway
     ports:
       - "8016:11435"

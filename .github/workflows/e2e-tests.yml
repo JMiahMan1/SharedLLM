@@ -126,6 +126,10 @@ jobs:
           pip install -r services/logging/requirements.txt
           pip install pytest pytest-asyncio pytest-httpx respx redis testcontainers
 
+      - name: Build shared base image first
+        run: |
+          docker build -f docker/Dockerfile.base -t sharedllm-base:local .
+
       - name: Start test services
         run: |
           docker compose -f docker-compose.test.yml up -d --build
@@ -230,6 +234,10 @@ jobs:
           pip install -r services/storage/requirements.txt
           pip install -r services/logging/requirements.txt
           pip install pytest pytest-asyncio pytest-httpx respx redis testcontainers
+
+      - name: Build shared base image first
+        run: |
+          docker build -f docker/Dockerfile.base -t sharedllm-base:local .
 
       - name: Start full test stack
         run: |
