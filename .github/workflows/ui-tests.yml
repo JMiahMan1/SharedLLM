@@ -2,11 +2,9 @@ name: UI CI
 
 on:
   push:
-    branches: [ main ]
     paths:
       - 'services/ui/**'
   pull_request:
-    branches: [ main ]
     paths:
       - 'services/ui/**'
 
