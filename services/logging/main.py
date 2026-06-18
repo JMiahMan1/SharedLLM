@@ -16,7 +16,7 @@ from pydantic import BaseModel
 import logging as py_logging
 import traceback
 
-from shared.info_endpoint import info_router
+from services.shared.info_endpoint import info_router
 
 _redis_client: Optional[redis.Redis] = None
 

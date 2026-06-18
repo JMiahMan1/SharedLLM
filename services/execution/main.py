@@ -43,7 +43,7 @@ from services.execution.announce_handlers import detect_tv_type as _detect_tv_ty
 from services.execution import device_registry
 from services.execution.media_playback_service import MediaPlaybackService
 
-from shared.info_endpoint import info_router
+from services.shared.info_endpoint import info_router
 
 import threading
 import urllib3
