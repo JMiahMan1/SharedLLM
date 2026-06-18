@@ -1,8 +1,11 @@
-FROM python:3.11-slim
+FROM sharedllm-base:latest AS base
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=unknown
+ARG SERVICE_NAME=identity
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_DATE=${BUILD_DATE}
+ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 COPY . .
-RUN pip install --no-cache-dir -r services/identity/requirements.txt
-ENV PYTHONPATH=/app
 EXPOSE 8001
 CMD ["uvicorn", "services.identity.main:app", "--host", "0.0.0.0", "--port", "8001"]

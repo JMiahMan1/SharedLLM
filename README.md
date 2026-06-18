@@ -10,7 +10,7 @@ Jarvis operates using a three-tier request handling hierarchy to balance speed a
    - **Role**: Immediate keyword and semantic matching for common commands.
    - **Latency**: <100ms.
    - **Use Case**: Simple Home Automation commands (e.g., "Turn off the lights").
-   - **Logic**: Uses a local `BAAI/bge-small-en-v1.5` model to bypass the LLM entirely.
+   - **Logic**: Uses a local `nomic-embed-text-v1.5` model to bypass the LLM entirely.
 
 2. **Tier 2: Librarian (Standard LLM)**:
    - **Role**: Single-turn tool access and general conversational reasoning.

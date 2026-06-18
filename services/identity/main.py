@@ -28,6 +28,7 @@ from services.identity.crypto import encrypt, decrypt, digest_secret
 from services.identity.seed import seed_from_env, pwd_context
 
 import httpx
+from shared.info_endpoint import info_router
 
 # ─── Config ────────────────────────────────────────────────────────────────────
 
@@ -193,6 +194,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(info_router)
 
 # ─── Dependencies ──────────────────────────────────────────────────────────────
 

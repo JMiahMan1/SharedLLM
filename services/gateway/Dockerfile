@@ -1,11 +1,13 @@
-FROM python:3.11-slim
+FROM sharedllm-base:latest AS base
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=unknown
+ARG SERVICE_NAME=gateway
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_DATE=${BUILD_DATE}
+ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
-# Install build deps (for native extensions in dependencies)
-RUN apt-get update && apt-get install -y build-essential curl && rm -rf /var/lib/apt/lists/*
-COPY . .
+# Gateway-specific: install torch CPU-only (large, not shared with other services)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-RUN pip install --no-cache-dir -r services/gateway/requirements.txt
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5')"
 
 # --- Privilege Drop: create dedicated sharedllm user ---
 ARG PUID=1000
@@ -16,7 +18,8 @@ RUN groupadd -g ${PGID} sharedllm || true \
     && mkdir -p /home/sharedllm/.cache/huggingface /home/sharedllm/.cache/qdrant \
     && chown -R ${PUID}:${PGID} /home/sharedllm
 ENV HOME=/home/sharedllm
-ENV PYTHONPATH=/app
+
+COPY . .
 
 EXPOSE 11435
 CMD ["uvicorn", "services.gateway.main:app", "--host", "0.0.0.0", "--port", "11435"]

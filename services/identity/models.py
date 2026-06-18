@@ -182,7 +182,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "skylight_pass_enc", "value": "", "description": "Skylight Calendar login password (encrypted)"},
     {"key": "llama_server_proxy_url", "value": "", "description": "Legacy llama.cpp server proxy URL (deprecated)"},
     {"key": "timezone", "value": "America/Phoenix", "description": "System timezone"},
-    {"key": "embedding_model", "value": "BAAI/bge-small-en-v1.5", "description": "Embedding model for RAG"},
+    {"key": "embedding_model", "value": "nomic-embed-text-v1.5", "description": "Embedding model for RAG"},
     {"key": "phrasebook_path", "value": "", "description": "Path to phrasebook file"},
  
     # --- DNS MAPPINGS (multi-IP fallback support) ---

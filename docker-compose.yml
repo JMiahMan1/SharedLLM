@@ -5,9 +5,14 @@ networks:
 
 services:
   dns-sync:
+    image: ghcr.io/jmiahman1/sharedllm-dns-sync:latest
     build:
       context: .
       dockerfile: services/dns_sync/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_dns_sync
     restart: unless-stopped
     ports:
@@ -44,9 +49,14 @@ services:
       - sharedllm
 
   identity:
+    image: ghcr.io/jmiahman1/sharedllm-identity:latest
     build:
       context: .
       dockerfile: services/identity/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_identity
     restart: unless-stopped
     ports:
@@ -72,9 +82,14 @@ services:
       start_period: 10s
 
   execution:
+    image: ghcr.io/jmiahman1/sharedllm-execution:latest
     build:
       context: .
       dockerfile: services/execution/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_execution
     restart: always
     network_mode: host
@@ -106,9 +121,14 @@ services:
       - execution_data:/data
 
   rag:
+    image: ghcr.io/jmiahman1/sharedllm-rag:latest
     build:
       context: .
       dockerfile: services/rag/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_rag
     restart: unless-stopped
     environment:
@@ -123,6 +143,8 @@ services:
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - CHROMA_PERSIST_DIR=/data/chroma_db
       - TZ=America/Phoenix
+      - HUGGINGFACE_HUB_DISABLE_XET=1
+      - EMBEDDING_MODEL=nomic-embed-text-v1.5
     ports:
       - "8004:8004"
     volumes:
@@ -140,9 +162,14 @@ services:
       - sharedllm
 
   capabilities-sync:
+    image: ghcr.io/jmiahman1/sharedllm-capabilities-sync:latest
     build:
       context: .
       dockerfile: services/rag/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_capabilities_sync
     working_dir: /app
     environment:
@@ -156,9 +183,14 @@ services:
       - sharedllm
 
   gateway:
+    image: ghcr.io/jmiahman1/sharedllm-gateway:latest
     build:
       context: .
       dockerfile: services/gateway/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_gateway
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -198,9 +230,14 @@ services:
       - sharedllm
 
   logging:
+    image: ghcr.io/jmiahman1/sharedllm-logging:latest
     build:
       context: .
       dockerfile: services/logging/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_logging
     restart: unless-stopped
     ports:
@@ -225,9 +262,14 @@ services:
       - sharedllm
 
   automation:
+    image: ghcr.io/jmiahman1/sharedllm-automation:latest
     build:
       context: .
       dockerfile: services/automation/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_automation
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -258,9 +300,14 @@ services:
       - sharedllm
 
   storage:
+    image: ghcr.io/jmiahman1/sharedllm-storage:latest
     build:
       context: .
       dockerfile: services/storage/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_storage
     restart: unless-stopped
     ports:
@@ -282,9 +329,14 @@ services:
       - sharedllm
 
   workspace_runtime:
+    image: ghcr.io/jmiahman1/sharedllm-workspace_runtime:latest
     build:
       context: .
       dockerfile: services/workspace_runtime/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -321,6 +373,7 @@ services:
       - sharedllm
 
   ui:
+    image: ghcr.io/jmiahman1/sharedllm-ui:latest
     build: ./services/ui
     container_name: sharedllm_ui
     restart: unless-stopped
@@ -344,9 +397,14 @@ services:
       - sharedllm
 
   control_plane:
+    image: ghcr.io/jmiahman1/sharedllm-control_plane:latest
     build:
       context: .
       dockerfile: services/control_plane/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_control_plane
     restart: always
     ports:

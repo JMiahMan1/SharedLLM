@@ -21,7 +21,7 @@ The system operates on a highly optimized **Dual-Node Architecture**:
 
 Based on the system `README.md`, Jarvis utilizes a strict semantic routing hierarchy to balance speed and VRAM:
 
-1. **Tier 1 (FastPath):** Local semantic matcher using the `BAAI/bge-small-en-v1.5` embedding model. Bypasses the LLM entirely for common home automation queries (e.g., "Turn off lights"). Latency: `<100ms`.
+1. **Tier 1 (FastPath):** Local semantic matcher using the `nomic-embed-text-v1.5` embedding model. Bypasses the LLM entirely for common home automation queries (e.g., "Turn off lights"). Latency: `<100ms`.
 2. **Tier 2 (Librarian):** Standard single-turn tool access via the LLM context. Latency: `1-3s`.
 3. **Tier 3 (Raven):** Multi-step autonomous agent running up to 30 iterations in a sandboxed `Workspace Runtime`.
 

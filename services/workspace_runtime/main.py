@@ -25,6 +25,8 @@ from services.config import (
     WORKSPACE_REGISTRY_PATH as _WRP, WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS, WORKSPACE_RUNTIME_FILE_READ_LIMIT,
 )
 
+from shared.info_endpoint import info_router
+
 try:
     from .models import Workspace
     from .database import engine, init_db
@@ -433,6 +435,8 @@ async def lifespan(app: FastAPI):
     log.info("Workspace Runtime service shutting down.")
 
 app = FastAPI(title="Jarvis Workspace Runtime", version="1.0.0", lifespan=lifespan)
+
+app.include_router(info_router)
 
 
 def _workspace_access_policy(entry: dict[str, Any]) -> str:

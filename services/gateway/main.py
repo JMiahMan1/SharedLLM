@@ -36,6 +36,8 @@ from services.gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYST
 from services.gateway.messaging import InferenceJobQueue, JobStatus
 from services.gateway.background_worker import worker as raven_worker
 
+from shared.info_endpoint import info_router
+
 # --- Setup Logging IMMEDIATELY ---
 log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
@@ -575,6 +577,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(info_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

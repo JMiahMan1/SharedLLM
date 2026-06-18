@@ -43,6 +43,8 @@ from services.execution.announce_handlers import detect_tv_type as _detect_tv_ty
 from services.execution import device_registry
 from services.execution.media_playback_service import MediaPlaybackService
 
+from shared.info_endpoint import info_router
+
 import threading
 import urllib3
 from typing import Any, Callable
@@ -227,6 +229,8 @@ app = FastAPI(
     lifespan=lifespan,
     dependencies=[Depends(require_internal)],
 )
+
+app.include_router(info_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):

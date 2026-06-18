@@ -9,9 +9,12 @@ import logging
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
 
+from shared.info_endpoint import info_router
+
 TRACEBACK_RE = re.compile(r"^Traceback \(most recent call last\)|^\s+File ", re.MULTILINE)
 
 app = FastAPI(title="Control Plane Service")
+app.include_router(info_router)
 
 # Initialize Docker client
 try:
