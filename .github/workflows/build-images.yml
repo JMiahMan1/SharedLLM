@@ -131,6 +131,7 @@ jobs:
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
             SERVICE_NAME=${{ matrix.service }}
+            BASE_IMAGE=ghcr.io/jmiahman1/sharedllm-base:latest
           platforms: linux/amd64
 
   # UI is special — it's built by Vite, separate from Python services
