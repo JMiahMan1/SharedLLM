@@ -6,6 +6,7 @@ Reads the legacy USER_{USERNAME}_{SETTING} environment variables from the
 monolith's .env and seeds the SQL database if it is empty. Run once on
 first startup or call via the /api/admin/seed endpoint.
 """
+import hashlib
 import os
 import logging
 from sqlmodel import Session, select, text
@@ -14,8 +15,19 @@ from dotenv import load_dotenv
 from services.identity.models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
 from services.identity.crypto import encrypt
 
-from passlib.context import CryptContext
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+def hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    pwd_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260000)
+    return f"pbkdf2_sha256${salt.hex()}${pwd_hash.hex()}"
+
+def verify_password(password: str, stored: str) -> bool:
+    if not stored or not stored.startswith("pbkdf2_sha256$"):
+        return False
+    parts = stored.split("$")
+    salt = bytes.fromhex(parts[1])
+    pwd_hash = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 260000)
+    stored_hash = bytes.fromhex(parts[2])
+    return pwd_hash == stored_hash
 
 # Load legacy .env if available
 import sys
@@ -156,7 +168,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 raw_pwd = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme")
                 if len(raw_pwd) > 72:
                     raw_pwd = raw_pwd[:72]
-                password_hash = pwd_context.hash(raw_pwd)
+                password_hash = hash_password(raw_pwd)
                 is_admin = True # Default user should be admin for first setup
 
             user = User(
