@@ -52,7 +52,7 @@ RUN pip install --no-cache-dir \
     && playwright install --with-deps chromium
 
 # Pre-download nomic-embed-text-v1.5 model (cached across all services)
-RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='nomic-embed-text-v1.5')"
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='nomic-ai/nomic-embed-text-v1.5')"
 
 ENV PYTHONPATH=/app
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
