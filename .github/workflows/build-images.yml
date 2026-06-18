@@ -54,7 +54,8 @@ jobs:
 
       - name: Set base image output
         id: base-output
-        run: echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base" >> $GITHUB_OUTPUT
+        run: |
+          echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base" >> $GITHUB_OUTPUT
           echo "tag=${{ steps.sha.outputs.short }}" >> $GITHUB_OUTPUT
 
       - name: Build and push base
