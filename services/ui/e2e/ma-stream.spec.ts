@@ -417,9 +417,9 @@ test.describe('MA Stream Endpoint', () => {
   });
 
   test('test standalone MA stream test page loads', async () => {
-    // Navigate to the standalone test page - may be intercepted by SPA, skip if so
+    // Navigate to the standalone test page via gateway (avoids SPA catch-all)
     try {
-      await page!.goto(`${UI_URL}/ma-stream-test.html`, { waitUntil: 'networkidle', timeout: 15000 });
+      await page!.goto(`${UI_URL}/api/media/ma-stream-test.html`, { waitUntil: 'networkidle', timeout: 15000 });
       await page!.waitForTimeout(1000);
 
       // Verify the page loaded (may be SPA fallback if not served as static)
