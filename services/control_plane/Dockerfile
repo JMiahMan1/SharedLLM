@@ -1,4 +1,4 @@
-FROM sharedllm-base:latest AS base
+FROM ${BASE_IMAGE:-ghcr.io/jmiahman1/sharedllm-base:latest} AS base
 ARG GIT_SHA=unknown
 ARG BUILD_DATE=unknown
 ARG SERVICE_NAME=control_plane
