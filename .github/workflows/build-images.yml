@@ -52,6 +52,11 @@ jobs:
             type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
 
+      - name: Set base image output
+        id: base-output
+        run: echo "image=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base" >> $GITHUB_OUTPUT
+          echo "tag=${{ steps.sha.outputs.short }}" >> $GITHUB_OUTPUT
+
       - name: Build and push base
         uses: docker/build-push-action@v6
         with:
@@ -61,6 +66,10 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
+
+    outputs:
+      base_image: ${{ steps.base-output.outputs.image }}
+      base_tag: ${{ steps.base-output.outputs.tag }}
 
   build-services:
     name: Build & Push (${{ matrix.service }})
@@ -131,7 +140,7 @@ jobs:
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
             SERVICE_NAME=${{ matrix.service }}
-            BASE_IMAGE=ghcr.io/jmiahman1/sharedllm-base:latest
+            BASE_IMAGE=${{ needs.build-base.outputs.base_image }}:${{ needs.build-base.outputs.base_tag }}
           platforms: linux/amd64
 
   # UI is special — it's built by Vite, separate from Python services
