@@ -1,0 +1,153 @@
+name: Build & Push Images
+
+on:
+  push:
+    branches: [ main, master, microservices ]
+  pull_request:
+    branches: [ main, master, microservices ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAMESPACE: jmiahman1
+  REPO_NAME: sharedllm
+
+jobs:
+  build-services:
+    name: Build & Push (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - identity
+          - gateway
+          - rag
+          - execution
+          - storage
+          - logging
+          - automation
+          - workspace_runtime
+          - dns_sync
+          - control_plane
+          - ui
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set git short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Get branch slug
+        id: slug
+        run: echo "slug=$(echo ${{ github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-${{ matrix.service }}
+          tags: |
+            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=sha,prefix=,format=short,enable=${{ github.event_name == 'push' }}
+            type=ref,event=branch
+
+      - name: Set build args
+        id: build-args
+        run: |
+          echo "GIT_SHA=${{ steps.sha.outputs.short }}" >> $GITHUB_OUTPUT
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
+            BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
+            SERVICE_NAME=${{ matrix.service }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+
+  # UI is special — it's built by Vite, separate from Python services
+  build-ui:
+    name: Build & Push UI
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set git short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Get branch slug
+        id: slug
+        run: echo "slug=$(echo ${{ github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-ui
+          tags: |
+            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=sha,prefix=,format=short,enable=${{ github.event_name == 'push' }}
+            type=ref,event=branch
+
+      - name: Set build args
+        id: build-args
+        run: |
+          echo "GIT_SHA=${{ steps.sha.outputs.short }}" >> $GITHUB_OUTPUT
+          echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+
+      - name: Build and push UI
+        uses: docker/build-push-action@v6
+        with:
+          context: services/ui
+          file: services/ui/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
+            BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64

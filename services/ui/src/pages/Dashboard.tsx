@@ -65,6 +65,12 @@ const Dashboard = () => {
     refetchInterval: 5000,
   });
 
+  const { data: serviceInfo } = useQuery<{ service: string; version: string; git_sha: string; git_branch: string } | null>({
+    queryKey: ['service-info'],
+    queryFn: () => api.getInfo(),
+    refetchOnWindowFocus: false,
+  });
+
   const { data: logs = [] } = useQuery<LogEntry[]>({
     queryKey: ['recent-logs'],
     queryFn: () => api.getLogs(8),
@@ -154,6 +160,11 @@ const Dashboard = () => {
           <p className="mt-1 text-sm text-slate-400">
             Welcome back, <span className="font-bold text-purple-400">{user?.full_name || user?.username}</span>
           </p>
+          {serviceInfo && serviceInfo.git_sha !== 'unknown' && (
+            <p className="mt-1 text-[10px] font-mono text-slate-600">
+              {serviceInfo.service} · {serviceInfo.git_sha} · {serviceInfo.git_branch}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center gap-3 w-full">

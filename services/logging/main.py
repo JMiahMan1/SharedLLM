@@ -16,6 +16,8 @@ from pydantic import BaseModel
 import logging as py_logging
 import traceback
 
+from shared.info_endpoint import info_router
+
 _redis_client: Optional[redis.Redis] = None
 
 async def retention_cleanup_task():
@@ -43,6 +45,8 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 app = FastAPI(title="SOA Logging Service", lifespan=lifespan)
+
+app.include_router(info_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

@@ -1,0 +1,58 @@
+FROM python:3.11-slim
+
+# Install system deps once
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    wget \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# Heavy ML/vector packages (fastembed, onnxruntime, chromadb) — only needed by RAG and gateway
+# Installing in base so they're cached across all service builds
+RUN pip install --no-cache-dir \
+    fastembed \
+    chromadb \
+    sqlmodel \
+    cryptography \
+    pydantic \
+    fastapi \
+    "uvicorn[standard]>=0.29.0" \
+    httpx \
+    websockets \
+    redis \
+    python-dotenv \
+    passlib[bcrypt] \
+    pydantic-settings \
+    python-multipart \
+    requests \
+    docker \
+    playwright \
+    yt-dlp \
+    "kokoro-onnx" \
+    soundfile \
+    caldav \
+    dateparser \
+    vobject \
+    python-dateutil \
+    aiosqlite \
+    rokuecp \
+    aiowebostv \
+    samsungtvws \
+    pybravia \
+    pychromecast \
+    androidtv \
+    wakeonlan \
+    aioesphomeapi \
+    paho-mqtt \
+    openai-whisper \
+    dnspython \
+    easywebdav \
+    html2text \
+    && playwright install --with-deps chromium
+
+# Pre-download nomic-embed-text-v1.5 model (cached across all services)
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='nomic-embed-text-v1.5')"
+
+ENV PYTHONPATH=/app
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
