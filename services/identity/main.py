@@ -25,7 +25,7 @@ from services.identity.schemas import (
     UserWidgetRead, UserWidgetUpdate, WidgetSettingsRead
 )
 from services.identity.crypto import encrypt, decrypt, digest_secret
-from services.identity.seed import seed_from_env, pwd_context
+from services.identity.seed import seed_from_env, hash_password, verify_password
 
 import httpx
 from services.shared.info_endpoint import info_router
@@ -317,7 +317,7 @@ def admin_set_password(username: str, req: dict, session: Session = Depends(get_
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    user.password_hash = pwd_context.hash(new_password)
+    user.password_hash = hash_password(new_password)
     session.add(user)
     session.commit()
     return {"status": "SUCCESS", "message": f"Password for @{username} updated"}
@@ -570,7 +570,7 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
         display_name=body.display_name,
         is_admin=body.is_admin,
         is_system_default=body.is_system_default,
-        password_hash=pwd_context.hash(body.password) if body.password else None,
+        password_hash=hash_password(body.password) if body.password else None,
         nextcloud_url=_coerce(body.nextcloud_url),
         nextcloud_user=_coerce(body.nextcloud_user),
         nextcloud_pass_enc=encrypt(_coerce(body.nextcloud_pass)) if _coerce(body.nextcloud_pass) else None,
@@ -714,7 +714,7 @@ def login(req: LoginRequest, session: Session = Depends(get_session)):
     if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="Invalid username or password")
     
-    if not pwd_context.verify(req.password, user.password_hash):
+    if not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
     
     session_key = _get_user_api_key(user)
@@ -732,7 +732,7 @@ def login(req: LoginRequest, session: Session = Depends(get_session)):
 
 @app.post("/api/auth/change-password")
 def change_password(new_password: str, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
-    user.password_hash = pwd_context.hash(new_password)
+    user.password_hash = hash_password(new_password)
     session.add(user)
     session.commit()
     return {"status": "SUCCESS", "message": "Password updated"}
@@ -1486,7 +1486,7 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
                 username=username,
                 display_name=display_name,
                 is_admin=False,
-                password_hash=pwd_context.hash(temp_password),
+                password_hash=hash_password(temp_password),
                 nextcloud_url=nc_url if in_nc else None,
                 nextcloud_user=nc_data.get("nc_username") if in_nc else None,
                 ha_url=ha_url if in_ha else None,
