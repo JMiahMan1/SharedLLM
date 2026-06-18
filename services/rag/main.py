@@ -44,7 +44,7 @@ class FastembedEmbeddingFunction(EmbeddingFunction):
 
 
 from services.rag.schemas import SearchRequest, SearchResponse, SearchResultItem, IngestRequest
-from shared.info_endpoint import info_router
+from services.shared.info_endpoint import info_router
 
 log = logging.getLogger("rag")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")

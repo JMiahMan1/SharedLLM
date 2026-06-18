@@ -15,7 +15,7 @@ from services.storage.indexer import (
 from services.storage.providers import build_provider, ProviderConfig
 from services.storage.models import ProviderWriteRequest, ProviderMirrorRequest
 
-from shared.info_endpoint import info_router
+from services.shared.info_endpoint import info_router
 
 log = logging.getLogger("storage")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
