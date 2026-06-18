@@ -36,7 +36,7 @@ from services.gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYST
 from services.gateway.messaging import InferenceJobQueue, JobStatus
 from services.gateway.background_worker import worker as raven_worker
 
-from shared.info_endpoint import info_router
+from services.shared.info_endpoint import info_router
 
 # --- Setup Logging IMMEDIATELY ---
 log = logging.getLogger("gateway")

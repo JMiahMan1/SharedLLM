@@ -3,7 +3,7 @@
 Exposes service version, git commit, and build time.
 Each service should mount this on their FastAPI app:
 
-    from shared.info_endpoint import info_router
+    from services.shared.info_endpoint import info_router
     app.include_router(info_router)
 """
 

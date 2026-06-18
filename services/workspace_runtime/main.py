@@ -25,7 +25,7 @@ from services.config import (
     WORKSPACE_REGISTRY_PATH as _WRP, WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS, WORKSPACE_RUNTIME_FILE_READ_LIMIT,
 )
 
-from shared.info_endpoint import info_router
+from services.shared.info_endpoint import info_router
 
 try:
     from .models import Workspace
