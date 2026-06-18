@@ -88,8 +88,6 @@ jobs:
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
             SERVICE_NAME=${{ matrix.service }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           platforms: linux/amd64
 
   # UI is special — it's built by Vite, separate from Python services
@@ -148,6 +146,4 @@ jobs:
           build-args: |
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
           platforms: linux/amd64
