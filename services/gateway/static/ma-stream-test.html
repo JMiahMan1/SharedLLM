@@ -16,6 +16,8 @@
         button.primary { background: #0284c7; color: white; }
         button.primary:hover { background: #0369a1; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.secondary { background: #334155; color: #e2e8f0; }
+        button.secondary:hover { background: #475569; }
         .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
         .status { padding: 0.75rem; border-radius: 4px; font-size: 0.875rem; margin-top: 0.75rem; }
         .status.info { background: #0c4a6e; border: 1px solid #0284c7; }
@@ -32,10 +34,45 @@
         #audio-container { margin-top: 1rem; }
         audio { width: 100%; max-width: 600px; }
         .result { margin-top: 0.5rem; font-size: 0.8rem; color: #94a3b8; }
+        .tabs { display: flex; gap: 0.25rem; margin-bottom: 0.75rem; }
+        .tab { padding: 0.5rem 1rem; border-radius: 4px; border: 1px solid #334155; background: #1e293b; color: #94a3b8; cursor: pointer; font-size: 0.875rem; }
+        .tab.active { background: #0284c7; color: white; border-color: #0284c7; }
+        .tab:hover:not(.active) { background: #334155; }
+        #library-list { max-height: 300px; overflow-y: auto; border: 1px solid #334155; border-radius: 4px; }
+        .library-item { padding: 0.625rem 0.75rem; border-bottom: 1px solid #1e293b; cursor: pointer; font-size: 0.875rem; display: flex; justify-content: space-between; align-items: center; }
+        .library-item:hover { background: #334155; }
+        .library-item:last-child { border-bottom: none; }
+        .library-item .item-name { flex: 1; }
+        .library-item .item-type { color: #64748b; font-size: 0.75rem; margin-left: 0.5rem; }
+        .search-row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+        .search-row input { flex: 1; }
     </style>
 </head>
 <body>
     <h1>MA Stream Test</h1>
+
+    <div class="card">
+        <label style="font-weight: 600; color: #e2e8f0; margin-bottom: 0.5rem;">Library Browse</label>
+        <div class="tabs" id="media-tabs">
+            <div class="tab active" data-type="TRACKS">Tracks</div>
+            <div class="tab" data-type="PLAYLISTS">Playlists</div>
+            <div class="tab" data-type="ALBUMS">Albums</div>
+            <div class="tab" data-type="ARTISTS">Artists</div>
+            <div class="tab" data-type="RADIOS">Radio</div>
+        </div>
+
+        <div id="library-list">
+            <div style="padding: 1rem; text-align: center; color: #64748b;">Loading...</div>
+        </div>
+
+        <div class="search-row">
+            <input type="text" id="search-input" placeholder="Search within library...">
+            <button class="secondary" id="btn-search">Search</button>
+            <button class="secondary" id="btn-refresh">Refresh</button>
+        </div>
+
+        <div class="result" id="library-info" style="margin-top: 0.5rem;"></div>
+    </div>
 
     <div class="card">
         <label for="uri">MA URI</label>
@@ -68,10 +105,19 @@
         const btnResolve = document.getElementById('btn-resolve');
         const btnPlay = document.getElementById('btn-play');
         const btnStop = document.getElementById('btn-stop');
+        const btnSearch = document.getElementById('btn-search');
+        const btnRefresh = document.getElementById('btn-refresh');
         const resultEl = document.getElementById('result');
         const uriInput = document.getElementById('uri');
+        const searchInput = document.getElementById('search-input');
+        const libraryList = document.getElementById('library-list');
+        const libraryInfo = document.getElementById('library-info');
+        const mediaTabs = document.getElementById('media-tabs');
 
         let streamUrl = null;
+        let currentMediaType = 'TRACKS';
+        let currentOffset = 0;
+        const PAGE_SIZE = 50;
 
         function log(msg, type = 'info') {
             const time = new Date().toISOString().split('T')[1].slice(0, -1);
@@ -86,6 +132,104 @@
             statusContainer.innerHTML = `<div class="status ${type}">${msg}</div>`;
         }
 
+        function getHeaders() {
+            const token = localStorage.getItem('jarvis_api_key');
+            const headers = {};
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            return headers;
+        }
+
+        async function loadLibrary(type, offset = 0, search = '') {
+            currentMediaType = type;
+            currentOffset = offset;
+
+            // Update tab UI
+            mediaTabs.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.type === type);
+            });
+
+            libraryList.innerHTML = '<div style="padding: 1rem; text-align: center; color: #64748b;">Loading...</div>';
+            log(`Loading ${type} (offset=${offset}, search="${search}")`);
+
+            try {
+                const params = new URLSearchParams({
+                    media_type: type,
+                    offset: offset,
+                    limit: PAGE_SIZE,
+                    search: search
+                });
+                const resp = await fetch(`/api/media/music-assistant/browse?${params}`, {
+                    method: 'GET',
+                    headers: getHeaders(),
+                });
+
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    log(`HTTP ${resp.status} loading library`, 'error');
+                    libraryList.innerHTML = `<div style="padding: 1rem; text-align: center; color: #f87171;">Error loading library: ${text}</div>`;
+                    return;
+                }
+
+                const data = await resp.json();
+                const items = data.items || [];
+
+                if (items.length === 0) {
+                    libraryList.innerHTML = '<div style="padding: 1rem; text-align: center; color: #64748b;">No items found</div>';
+                    libraryInfo.textContent = '';
+                    return;
+                }
+
+                libraryInfo.textContent = `Showing ${offset + 1}–${offset + items.length} of ${items.length}+ items`;
+
+                libraryList.innerHTML = '';
+                for (const item of items) {
+                    const div = document.createElement('div');
+                    div.className = 'library-item';
+                    const name = item.name || item.uri || '(unnamed)';
+                    const uri = item.uri || '';
+                    const duration = item.duration ? formatDuration(item.duration) : '';
+                    div.innerHTML = `<span class="item-name">${escapeHtml(name)}</span>${duration ? `<span class="item-type">${duration}</span>` : ''}<span class="item-type">${item.type || type}</span>`;
+                    div.addEventListener('click', () => {
+                        uriInput.value = uri;
+                        log(`Selected: ${name} (${uri.substring(0, 80)}...)`, 'success');
+                    });
+                    libraryList.appendChild(div);
+                }
+
+                log(`Loaded ${items.length} ${type} items`, 'success');
+            } catch (err) {
+                log(`Library error: ${err.message}`, 'error');
+                libraryList.innerHTML = `<div style="padding: 1rem; text-align: center; color: #f87171;">Error: ${err.message}</div>`;
+            }
+        }
+
+        async function searchLibrary() {
+            const query = searchInput.value.trim();
+            if (!query) {
+                loadLibrary(currentMediaType, 0, '');
+                return;
+            }
+            log(`Searching ${currentMediaType} for "${query}"`);
+            await loadLibrary(currentMediaType, 0, query);
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds || seconds <= 0) return '';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+            return `${m}:${String(s).padStart(2, '0')}`;
+        }
+
+        function escapeHtml(str) {
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
         async function resolveStream() {
             const uri = uriInput.value.trim();
             if (!uri) {
@@ -97,20 +241,9 @@
             log(`Resolving stream URL for: ${uri}`);
 
             try {
-                // Get API token from localStorage
-                const token = localStorage.getItem('jarvis_api_key');
-                if (!token) {
-                    log('No API token found in localStorage. Login to the UI first.', 'warn');
-                }
-
-                const headers = {};
-                if (token) {
-                    headers['Authorization'] = `Bearer ${token}`;
-                }
-
                 const resp = await fetch(`/api/media/stream/music-assistant?uri=${encodeURIComponent(uri)}`, {
                     method: 'GET',
-                    headers,
+                    headers: getHeaders(),
                 });
 
                 if (!resp.ok) {
@@ -172,6 +305,18 @@
         btnResolve.addEventListener('click', resolveStream);
         btnPlay.addEventListener('click', playStream);
         btnStop.addEventListener('click', stopStream);
+        btnSearch.addEventListener('click', searchLibrary);
+        btnRefresh.addEventListener('click', () => loadLibrary(currentMediaType, 0, ''));
+
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') searchLibrary();
+        });
+
+        mediaTabs.addEventListener('click', (e) => {
+            if (e.target.classList.contains('tab')) {
+                loadLibrary(e.target.dataset.type, 0, '');
+            }
+        });
 
         // Audio event listeners
         audioPlayer.addEventListener('playing', () => log('Audio: playing', 'success'));
@@ -184,9 +329,10 @@
         audioPlayer.addEventListener('waiting', () => log('Audio: buffering...', 'warn'));
         audioPlayer.addEventListener('canplay', () => log('Audio: ready to play', 'success'));
 
-        // Log page load
+        // Initial load
         log('MA Stream Test page loaded', 'info');
         log(`Base URL: ${window.location.origin}`, 'info');
+        loadLibrary('TRACKS', 0, '');
     </script>
 </body>
 </html>
