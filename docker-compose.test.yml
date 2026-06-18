@@ -18,7 +18,7 @@ services:
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////tmp/identity_test.db
       - INTERNAL_SECRET=test-secret-ci
-      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
+      - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - INIT_DB=true
       - TEST_MODE=true
 
@@ -33,7 +33,7 @@ services:
       - "8012:8003"
     environment:
       - INTERNAL_SECRET=test-secret-ci
-      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
+      - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
       - RAG_SVC_URL=http://rag:8004
@@ -60,7 +60,7 @@ services:
       - "8013:8004"
     environment:
       - INTERNAL_SECRET=test-secret-ci
-      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
+      - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - OLLAMA_URL=http://ollama_mock:11434
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
@@ -84,7 +84,7 @@ services:
       - "8014:8005"
     environment:
       - INTERNAL_SECRET=test-secret-ci
-      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
+      - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - IDENTITY_SVC_URL=http://identity:8001
       - TEST_MODE=true
 
@@ -99,7 +99,7 @@ services:
       - "8015:8006"
     environment:
       - INTERNAL_SECRET=test-secret-ci
-      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
+      - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - REDIS_URL=redis://redis:6379/0
       - TEST_MODE=true
     depends_on:
@@ -116,7 +116,7 @@ services:
       - "8016:11435"
     environment:
       - INTERNAL_SECRET=test-secret-ci
-      - FERNET_KEY=${FERNET_KEY:-test-fernet-key-for-ci-pipelines-only}
+      - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
       - RAG_SVC_URL=http://rag:8004
