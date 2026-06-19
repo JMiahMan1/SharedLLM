@@ -559,15 +559,24 @@ class MAWebSocketClient:
                 # Normalize content_type: mpeg -> mp3, flac -> flac, etc.
                 ct_map = {"mpeg": "mp3", "mp4a": "m4a", "webm": "webm"}
                 ext = ct_map.get(content_type, content_type or "mp3")
-                # Try MA Flow API URL: /flow/{queue_id}/{queue_item_id}/{track_index}/{provider}/{item_id}.{ext}
                 queue_id = data.get("queue_id", "")
                 queue_item_id = current_item.get("queue_item_id", "")
                 track_index = current_item.get("index", 0)
                 http_base = self._mass_url.replace("http://", "").replace("https://", "")
-                # Primary: Flow API URL (what MA web player uses)
-                stream_url = f"http://{http_base}/flow/{queue_id}/{queue_item_id}/{track_index}/{provider}/{item_id}.{ext}"
-                self._stream_url = stream_url
-                log.info(f"[MA-WS] Stream URL from flow: {stream_url[:200]}")
+                extra_attrs = data.get("extra_attributes", {})
+                if isinstance(extra_attrs, dict):
+                    log.info(f"[MA-WS] extra_attributes keys: {list(extra_attrs.keys())}")
+                    for k, v in extra_attrs.items():
+                        log.info(f"[MA-WS] extra_attributes.{k} = {v}")
+                # Try flow with queue_id as session_id
+                flow_url1 = f"http://{http_base}/flow/{queue_id}/{queue_item_id}/{track_index}/{provider}/{item_id}.{ext}"
+                # Try flow with queue_item_id as session_id
+                flow_url2 = f"http://{http_base}/flow/{queue_item_id}/{queue_id}/{track_index}/{provider}/{item_id}.{ext}"
+                log.info(f"[MA-WS] Trying flow URL patterns: {flow_url1[:150]}")
+                log.info(f"[MA-WS] Trying flow URL patterns: {flow_url2[:150]}")
+                # Use the first one for now
+                self._stream_url = flow_url1
+                log.info(f"[MA-WS] Stream URL from flow: {self._stream_url[:200]}")
                 log.info(f"[MA-WS] streamdetails full: {json.dumps(streamdetails)[:500]}")
                 log.info(f"[MA-WS] media_item keys: {list(media_item.keys()) if isinstance(media_item, dict) else 'none'}")
                 return
