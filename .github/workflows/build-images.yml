@@ -50,7 +50,7 @@ jobs:
           tags: |
             type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' }}
             type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
 
       - name: Set base image output
         id: base-output
@@ -121,7 +121,7 @@ jobs:
           tags: |
             type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' }}
             type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
 
       - name: Set build args
         id: build-args
@@ -179,7 +179,7 @@ jobs:
           tags: |
             type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' }}
             type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
 
       - name: Set build args
         id: build-args
