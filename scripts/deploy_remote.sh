@@ -64,8 +64,9 @@ if ssh "$HOST" << EOF
     git reset --hard origin/$BRANCH
     git pull origin $BRANCH
 
-    echo "Rebuilding and starting Docker containers..."
-    docker compose up -d --build
+    echo "Pulling latest images from GHCR and starting Docker containers..."
+    docker compose pull
+    docker compose up -d
 
     echo "Waiting for application startup..."
     # Monitor logs for success or failure
