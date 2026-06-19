@@ -101,6 +101,8 @@ class MAWebSocketClient:
         # Connection state
         self._ws: Any = None
         self._connected = False
+        self._authenticated = False
+        self._server_info: Optional[Dict[str, Any]] = None
         self._last_error: Optional[Exception] = None
         self._ma_error_code: Optional[str] = None
         self._ma_error_details: Optional[str] = None
@@ -126,7 +128,17 @@ class MAWebSocketClient:
     @property
     def connected(self) -> bool:
         """Whether the client is currently connected and authenticated."""
-        return self._connected and self._ws is not None
+        return self._connected and self._authenticated and self._ws is not None
+
+    @property
+    def authenticated(self) -> bool:
+        """Whether the client has completed MA authentication."""
+        return self._authenticated
+
+    @property
+    def server_info(self) -> Optional[Dict[str, Any]]:
+        """The server info received from MA after authentication."""
+        return self._server_info
 
     @property
     def is_connected(self) -> bool:
@@ -357,13 +369,6 @@ class MAWebSocketClient:
             self._reconnect_count = 0
             log.info("[MA-WS] Connection established")
 
-            # Send server_info to complete authentication (MA requires explicit auth after WebSocket connect)
-            try:
-                await self.send_command("server_info", {"version": "2.0"})
-                log.info("[MA-WS] Sent server_info auth command")
-            except Exception as e:
-                log.warning(f"[MA-WS] server_info auth command failed (will retry on next command): {e}")
-
             # Start background message handler
             self._message_handler_task = asyncio.create_task(self._message_loop())
 
@@ -444,6 +449,12 @@ class MAWebSocketClient:
         elif msg_type == "ERROR":
             error = data.get("error", {})
             log.error(f"[MA-WS] Received error: msg_id={data.get('message_id')}, error={json.dumps(error) if isinstance(error, dict) else error}")
+
+        # ── MA server_info response (sent automatically after connect) ────
+        elif data.get("server_id") is not None and data.get("server_version") is not None:
+            log.info(f"[MA-WS] Received MA server_info: name={data.get('name')}, version={data.get('server_version')}")
+            self._server_info = data
+            self._authenticated = True
 
         # ── MA error responses without type field ───────────────────────
         elif data.get("error_code") is not None or ("message_id" in data and "details" in data):
