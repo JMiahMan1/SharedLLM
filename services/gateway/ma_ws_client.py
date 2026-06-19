@@ -341,8 +341,7 @@ class MAWebSocketClient:
 
         Authentication is done via the token query parameter in the WebSocket URL.
         The MA server's WebSocket middleware validates the token on connect.
-        After connection, no explicit auth message is needed — the server
-        begins streaming events immediately.
+        After connection, a server_info command is sent to complete authentication.
         """
         try:
             log.info(f"[MA-WS] Connecting to {self._ws_url}")
@@ -357,6 +356,13 @@ class MAWebSocketClient:
             self._connected = True
             self._reconnect_count = 0
             log.info("[MA-WS] Connection established")
+
+            # Send server_info to complete authentication (MA requires explicit auth after WebSocket connect)
+            try:
+                await self.send_command("server_info", {"version": "2.0"})
+                log.info("[MA-WS] Sent server_info auth command")
+            except Exception as e:
+                log.warning(f"[MA-WS] server_info auth command failed (will retry on next command): {e}")
 
             # Start background message handler
             self._message_handler_task = asyncio.create_task(self._message_loop())
