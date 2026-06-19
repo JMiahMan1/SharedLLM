@@ -1,12 +1,45 @@
 FROM python:3.11-slim
 
-# Install system deps once
+# Install system deps once — common tools for all containers
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     wget \
-    ffmpeg \
+    jq \
+    iputils-ping \
+    iputils-tracepath \
+    dnsutils \
+    net-tools \
+    iproute2 \
+    strace \
+    ltrace \
+    lsof \
+    procps \
+    tcpdump \
+    nano \
+    vim-tiny \
+    ssh-client \
+    gnupg \
+    tesseract-ocr \
+    poppler-utils \
+    file \
+    less \
+    tree \
+    xxd \
+    ripgrep \
+    fd-find \
+    fzf \
+    traceroute \
+    nmap \
+    ss \
+    netcat-openbsd \
+    xz-utils \
+    zip \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# CPU-only PyTorch (no CUDA libs) — needed by RAG/gateway for embedding models
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 # Heavy ML/vector packages (fastembed, onnxruntime, chromadb) — only needed by RAG and gateway
 # Installing in base so they're cached across all service builds
@@ -50,6 +83,25 @@ RUN pip install --no-cache-dir \
     easywebdav \
     html2text \
     && playwright install --with-deps chromium
+
+# Testing and dev tools — available in all containers for debugging
+RUN pip install --no-cache-dir \
+    pytest \
+    pytest-asyncio \
+    pytest-mock \
+    respx \
+    ruff \
+    mypy \
+    flake8 \
+    black \
+    isort \
+    pre-commit \
+    bandit \
+    safety \
+    pip-audit \
+    httpx \
+    requests-mock \
+    responses
 
 # Pre-download nomic-embed-text-v1.5 model (cached across all services)
 RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='nomic-ai/nomic-embed-text-v1.5')"
