@@ -559,11 +559,17 @@ class MAWebSocketClient:
                 # Normalize content_type: mpeg -> mp3, flac -> flac, etc.
                 ct_map = {"mpeg": "mp3", "mp4a": "m4a", "webm": "webm"}
                 ext = ct_map.get(content_type, content_type or "mp3")
-                # Build stream URL: http://mass_url/media/provider_instance/item_id.ext
+                # Try MA Flow API URL: /flow/{queue_id}/{queue_item_id}/{track_index}/{provider}/{item_id}.{ext}
+                queue_id = data.get("queue_id", "")
+                queue_item_id = current_item.get("queue_item_id", "")
+                track_index = current_item.get("index", 0)
                 http_base = self._mass_url.replace("http://", "").replace("https://", "")
-                stream_url = f"http://{http_base}/media/{provider}/{item_id}.{ext}"
+                # Primary: Flow API URL (what MA web player uses)
+                stream_url = f"http://{http_base}/flow/{queue_id}/{queue_item_id}/{track_index}/{provider}/{item_id}.{ext}"
                 self._stream_url = stream_url
-                log.info(f"[MA-WS] Stream URL constructed from streamdetails: {stream_url[:150]}")
+                log.info(f"[MA-WS] Stream URL from flow: {stream_url[:200]}")
+                log.info(f"[MA-WS] streamdetails full: {json.dumps(streamdetails)[:500]}")
+                log.info(f"[MA-WS] media_item keys: {list(media_item.keys()) if isinstance(media_item, dict) else 'none'}")
                 return
 
         # Check for queue items with stream URLs
