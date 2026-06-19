@@ -5369,12 +5369,80 @@ async def stream_music_assistant(uri: str, request: Request):
                     detail=f"MA did not resolve a stream URL within {stream_timeout}s. Queue state: {queue_desc}. Full state keys: {list(queue_state.keys()) if isinstance(queue_state, dict) else type(queue_state).__name__}"
                 )
 
-            # Return the stream URL for direct browser playback (MA web-player pattern)
-            return {"stream_url": stream_url}
-
-        finally:
+            # ── Step 4: Disconnect MA WebSocket (no longer needed) ──────────────
             await ma_client.disconnect()
             log.info("[stream/ma] WebSocket closed after stream URL resolved")
+
+            # ── Step 5: Proxy MA stream bytes through the Gateway ──────────────
+            log.info(f"[stream/ma] Initiating byte proxy from: {stream_url[:120]}...")
+
+            async def stream_generator_ma(cli, r):
+                try:
+                    bytes_sent = 0
+                    async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                        yield chunk
+                        bytes_sent += len(chunk)
+                    log.info(f"[stream/ma/generator] Finished streaming {bytes_sent} bytes")
+                except Exception as e:
+                    log.error(f"[stream/ma/generator] Error streaming chunks: {e}", exc_info=True)
+                    raise
+                finally:
+                    await r.aclose()
+                    await cli.aclose()
+
+            range_header = request.headers.get("range")
+            log.info(f"[stream/ma] Client requested range: {range_header}")
+            proxy_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(300.0, connect=15.0),
+                follow_redirects=False,
+            )
+            try:
+                proxy_headers: dict[str, str] = {
+                    "User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)",
+                    "Accept": "audio/*,*/*;q=0.9",
+                }
+                if range_header:
+                    proxy_headers["Range"] = range_header
+
+                proxy_resp = await proxy_client.send(
+                    proxy_client.build_request("GET", stream_url, headers=proxy_headers),
+                    stream=True
+                )
+                log.info(f"[stream/ma] MA stream response status: {proxy_resp.status_code}")
+
+                proxy_response_headers = {
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-cache",
+                }
+                for key in ("Content-Range", "Content-Length", "Content-Type"):
+                    val = proxy_resp.headers.get(key)
+                    if val:
+                        proxy_response_headers[key] = val
+
+                proxy_status_code = proxy_resp.status_code
+
+                return StreamingResponse(
+                    stream_generator_ma(proxy_client, proxy_resp),
+                    status_code=proxy_status_code,
+                    media_type=proxy_response_headers.get("Content-Type", "audio/mpeg"),
+                    headers=proxy_response_headers,
+                )
+            except HTTPException as he:
+                raise he
+            except Exception as e:
+                log.error(f"[stream/ma] Stream proxy failed: {e}", exc_info=True)
+                await proxy_client.aclose()
+                raise HTTPException(status_code=502, detail=f"Failed to proxy MA stream: {e}")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            log.error(f"[stream/ma] WebSocket/stream handling failed: {e}", exc_info=True)
+            try:
+                await ma_client.disconnect()
+            except Exception:
+                pass
+            raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}")
 
     except HTTPException:
         raise
