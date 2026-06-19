@@ -27,7 +27,7 @@ os.environ.setdefault("CONTROL_PLANE_URL", "http://localhost:8008")
 os.environ.setdefault("SEARXNG_URL", "http://localhost:8080")
 os.environ.setdefault("LLAMA_SERVER_PROXY_URL", "http://localhost:8009")
 os.environ.setdefault("FAST_PATH_THRESHOLD", "0.85")
-os.environ.setdefault("EMBEDDING_MODEL", "nomic-embed-text-v1.5")
+os.environ.setdefault("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
 os.environ.setdefault("TEST_MODE", "true")
 
 
