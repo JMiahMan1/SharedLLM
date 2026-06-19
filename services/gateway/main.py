@@ -5351,6 +5351,14 @@ async def stream_music_assistant(uri: str, request: Request):
             start_time = asyncio.get_event_loop().time()
 
             while (asyncio.get_event_loop().time() - start_time) < stream_timeout:
+                ma_error = ma_client.get_ma_error()
+                if ma_error:
+                    log.error(f"[stream/ma] MA returned error: {ma_error}")
+                    await ma_client.disconnect()
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"MA error: {ma_error['code']}: {ma_error['details']}"
+                    )
                 if ma_client.connected:
                     current_url = ma_client.get_stream_url()
                     if current_url:
