@@ -103,6 +103,7 @@ class MAWebSocketClient:
         self._connected = False
         self._authenticated = False
         self._server_info: Optional[Dict[str, Any]] = None
+        self._auth_event = asyncio.Event()
         self._last_error: Optional[Exception] = None
         self._ma_error_code: Optional[str] = None
         self._ma_error_details: Optional[str] = None
@@ -372,6 +373,13 @@ class MAWebSocketClient:
             # Start background message handler
             self._message_handler_task = asyncio.create_task(self._message_loop())
 
+            # Wait for MA server_info response (completes authentication)
+            try:
+                await asyncio.wait_for(self._auth_event.wait(), timeout=5.0)
+                log.info("[MA-WS] Authentication complete via server_info")
+            except asyncio.TimeoutError:
+                log.warning("[MA-WS] Timeout waiting for server_info, proceeding anyway")
+
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -455,6 +463,7 @@ class MAWebSocketClient:
             log.info(f"[MA-WS] Received MA server_info: name={data.get('name')}, version={data.get('server_version')}")
             self._server_info = data
             self._authenticated = True
+            self._auth_event.set()
 
         # ── MA error responses without type field ───────────────────────
         elif data.get("error_code") is not None or ("message_id" in data and "details" in data):
