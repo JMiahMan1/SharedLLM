@@ -36,7 +36,7 @@ _DEFAULTS = {
     "raven_check_interval": "300",
     "raven_error_threshold": "5",
     "timezone": "",  # Resolved at runtime from Identity settings
-    "embedding_model": "nomic-embed-text-v1.5",
+    "embedding_model": "nomic-ai/nomic-embed-text-v1.5",
 }
 
 # --- Settings cache (refreshed periodically) ---

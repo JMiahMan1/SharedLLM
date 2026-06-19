@@ -62,7 +62,7 @@ ABS_TIMEOUT = _safe_int("ABS_TIMEOUT", 8)
 
 # --- Misc ---
 FAST_PATH_THRESHOLD = _safe_float("FAST_PATH_THRESHOLD", 0.85)
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text-v1.5")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
 PHRASEBOOK_PATH = os.getenv("PHRASEBOOK_PATH", "")
 TIMEZONE = os.getenv("TIMEZONE", "")  # Resolved at runtime from Identity settings
 
