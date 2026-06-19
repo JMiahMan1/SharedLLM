@@ -102,6 +102,8 @@ class MAWebSocketClient:
         self._ws: Any = None
         self._connected = False
         self._last_error: Optional[Exception] = None
+        self._ma_error_code: Optional[str] = None
+        self._ma_error_details: Optional[str] = None
         self._reconnect_count = 0
         self._reconnect_task: Optional[asyncio.Task] = None
         self._message_handler_task: Optional[asyncio.Task] = None
@@ -300,6 +302,16 @@ class MAWebSocketClient:
             return current
         return None
 
+    def has_error(self) -> bool:
+        """Whether an MA error response was received."""
+        return self._ma_error_code is not None
+
+    def get_ma_error(self) -> Optional[Dict[str, str]]:
+        """Get the last MA error if one was received."""
+        if self._ma_error_code:
+            return {"code": self._ma_error_code, "details": self._ma_error_details or ""}
+        return None
+
     def get_queue_state_description(self) -> str:
         """
         Get a human-readable description of the current queue state.
@@ -426,6 +438,16 @@ class MAWebSocketClient:
         elif msg_type == "ERROR":
             error = data.get("error", {})
             log.error(f"[MA-WS] Received error: msg_id={data.get('message_id')}, error={json.dumps(error) if isinstance(error, dict) else error}")
+
+        # ── MA error responses without type field ───────────────────────
+        elif data.get("error_code") is not None or ("message_id" in data and "details" in data):
+            error_code = data.get("error_code", "unknown")
+            details = data.get("details", "")
+            msg_id = data.get("message_id")
+            self._ma_error_code = error_code
+            self._ma_error_details = str(details)
+            self._last_error = RuntimeError(f"MA error: {error_code}: {details}")
+            log.error(f"[MA-WS] MA error response (no type field): msg_id={msg_id}, error_code={error_code!r}, details={details!r}")
 
         # ── Unknown message types ───────────────────────────────────────
         else:
