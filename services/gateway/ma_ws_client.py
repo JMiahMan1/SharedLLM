@@ -490,15 +490,16 @@ class MAWebSocketClient:
             log.error(f"[MA-WS] Received error: msg_id={data.get('message_id')}, error={json.dumps(error) if isinstance(error, dict) else error}")
 
         # ── Partial results (no type field, from commands like play_media) ─
-        elif "message_id" in data and "result" in data and data.get("partial"):
+        elif "message_id" in data and "result" in data:
+            partial = data.get("partial")
             result = data.get("result", {})
             msg_id = data.get("message_id", "")
-            log.info(f"[MA-WS] Partial result: msg_id={msg_id}, keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
+            log.info(f"[MA-WS] Message with message_id+result: partial={partial} (type={type(partial).__name__}), msg_id={msg_id}, result_keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
             if msg_id in self._pending_responses:
                 future = self._pending_responses[msg_id]
                 if not future.done():
                     future.set_result(result)
-                    log.info(f"[MA-WS] Resolved partial response for msg_id={msg_id}")
+                    log.info(f"[MA-WS] Resolved response for msg_id={msg_id}")
 
         # ── MA server_info response (sent automatically after connect) ────
         elif data.get("server_id") is not None and data.get("server_version") is not None:
