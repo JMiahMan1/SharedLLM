@@ -14,14 +14,8 @@ ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
 # Workspace-specific: ALL coding tools agentic AIs use
-# Core search/navigation tools (Claude Code, OpenCode, Hermes use these)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ripgrep \
-    fd-find \
-    fzf \
-    jq \
-    && update-alternatives --install /usr/bin/fd fd /usr/bin/fd-find 100 \
-    && rm -rf /var/lib/apt/lists/*
+# fd alias (base image already provides fd-find at /usr/bin/fd-find)
+RUN update-alternatives --install /usr/bin/fd fd /usr/bin/fd-find 100 2>/dev/null || true
 
 # Install Node.js for frontend/tooling support (npm packages)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
