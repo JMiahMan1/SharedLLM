@@ -4733,7 +4733,7 @@ async def get_ma_recent(request: Request):
         )
         if resp.status_code == 200:
             return resp.json()
-      return {"status": "SUCCESS", "recent": []}
+    return {"status": "SUCCESS", "recent": []}
 
 
 @app.get("/api/media/music-assistant/browse")
