@@ -96,21 +96,25 @@ fi
 
 log "Changes detected in: $CHANGED_FILES"
 
-# --- Step 2: Restart or Rebuild ---
+# --- Step 2: Pull and Restart ---
 if [ -n "$INFRA_CHANGE" ]; then
-    log "Infrastructure changes detected — full rebuild required."
-    log "Running: $COMPOSE up -d --build"
-    $COMPOSE up -d --build 2>&1 | tee -a "$LOG_FILE"
+    log "Infrastructure changes detected — pulling all images."
+    log "Running: $COMPOSE pull && $COMPOSE up -d"
+    $COMPOSE pull 2>&1 | tee -a "$LOG_FILE"
+    $COMPOSE up -d 2>&1 | tee -a "$LOG_FILE"
 elif [ "$SHARED_FILE_CHANGE" = true ]; then
-    log "Shared config change detected — rebuilding all services."
-    log "Running: $COMPOSE up -d --build"
-    $COMPOSE up -d --build 2>&1 | tee -a "$LOG_FILE"
+    log "Shared config change detected — pulling all images."
+    log "Running: $COMPOSE pull && $COMPOSE up -d"
+    $COMPOSE pull 2>&1 | tee -a "$LOG_FILE"
+    $COMPOSE up -d 2>&1 | tee -a "$LOG_FILE"
 elif [ -n "$MODIFIED_SERVICES" ]; then
     log "Service changes detected: $MODIFIED_SERVICES"
+    # Always pull all since base image changes affect all services
+    log "Pulling all images (base image may affect all services)."
+    $COMPOSE pull 2>&1 | tee -a "$LOG_FILE"
     for SVC in $MODIFIED_SERVICES; do
-        # Map directory name to service name if different (currently they match)
-        log "Rebuilding and restarting: $SVC"
-        $COMPOSE up -d --build "$SVC" 2>&1 | tee -a "$LOG_FILE"
+        log "Restarting: $SVC"
+        $COMPOSE up -d "$SVC" 2>&1 | tee -a "$LOG_FILE"
     done
 else
     log "No service or infra changes detected."
