@@ -1,9 +1,12 @@
 # Dockerfile
 # Use official Python slim image
-FROM pytorch/pytorch:2.9.0-cuda12.8-cudnn9-runtime
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
+
+# Install CPU-only PyTorch (no CUDA libs)
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 # Copy requirements first to leverage caching
 COPY requirements.txt .
@@ -11,10 +14,16 @@ COPY requirements.txt .
 # Install dependencies
 RUN apt-get update && apt-get install --fix-missing --no-install-recommends -y \
     curl \
+    gnupg \
+    ffmpeg \
     iputils-ping \
     tesseract-ocr \
     poppler-utils \
-    ffmpeg \
+    ripgrep \
+    unzip \
+    snmp \
+    arp-scan \
+    iproute2 \
     libnss3 \
     libnspr4 \
     libatk1.0-0 \
