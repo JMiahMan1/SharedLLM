@@ -5338,15 +5338,17 @@ async def stream_music_assistant(uri: str, request: Request):
             )
 
         try:
-            # Send play_media command
-            log.info(f"[stream/ma] Sending play_media for uri='{uri}' on player='{target_player_id}'")
+            # Generate session_id for MA stream URL construction
+            session_id = str(_uuid.uuid4())
+            # Send play_media command with custom_data containing session_id
+            log.info(f"[stream/ma] Sending play_media for uri='{uri}' on player='{target_player_id}' (session_id={session_id})")
             play_media_response = await ma_client.send_command(
                 "player_queues/play_media",
-                {"queue_id": target_player_id, "media": uri},
+                {"queue_id": target_player_id, "media": uri, "custom_data": {"session_id": session_id}},
             )
             log.info(f"[stream/ma] play_media response: {play_media_response}")
 
-            # Wait for queue_updated event with stream URL
+            # Wait for queue_updated event, then construct stream URL from session_id + queue state
             stream_url: str | None = None
             stream_timeout = 15.0
             start_time = asyncio.get_event_loop().time()
@@ -5361,21 +5363,25 @@ async def stream_music_assistant(uri: str, request: Request):
                         detail=f"MA error: {ma_error['code']}: {ma_error['details']}"
                     )
                 if ma_client.connected:
-                    current_url = ma_client.get_stream_url()
-                    if current_url:
-                        stream_url = current_url
-                        log.info(f"[stream/ma] Stream URL resolved: {stream_url[:120]}...")
+                    queue_state = ma_client.get_queue_state()
+                    current_item = queue_state.get("current_item", {})
+                    if isinstance(current_item, dict) and current_item.get("queue_item_id"):
+                        queue_item_id = current_item["queue_item_id"]
+                        queue_id = queue_state.get("queue_id", target_player_id)
+                        player_id = queue_state.get("player_id", target_player_id)
+                        http_base = mass_url.replace("http://", "").replace("https://", "")
+                        stream_url = f"http://{http_base}/flow/{session_id}/{queue_id}/{queue_item_id}/{player_id}.mp3"
+                        log.info(f"[stream/ma] Stream URL constructed: {stream_url[:150]}")
                         break
                 await asyncio.sleep(0.2)
 
             if not stream_url:
-                stream_url_debug = ma_client.get_stream_url()
-                queue_desc = ma_client.get_queue_state_description()
                 queue_state = ma_client.get_queue_state()
-                log.error(f"[stream/ma] Stream URL not resolved within timeout. stream_url={stream_url_debug}, queue_state={queue_state}")
+                queue_desc = ma_client.get_queue_state_description()
+                log.error(f"[stream/ma] Stream URL not resolved within timeout. queue_state={queue_state}")
                 raise HTTPException(
                     status_code=502,
-                    detail=f"MA did not resolve a stream URL within {stream_timeout}s. Queue state: {queue_desc}. Full state keys: {list(queue_state.keys()) if isinstance(queue_state, dict) else type(queue_state).__name__}"
+                    detail=f"MA did not resolve queue state within {stream_timeout}s. Queue state: {queue_desc}. Session ID: {session_id}"
                 )
 
             # ── Step 4: Disconnect MA WebSocket (no longer needed) ──────────────
