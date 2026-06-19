@@ -121,6 +121,7 @@ class MAWebSocketClient:
 
         # Message ID counter for request/response correlation
         self._msg_id = 0
+        self._pending_responses: Dict[str, asyncio.Future] = {}
 
     # ------------------------------------------------------------------
     # Properties
@@ -201,13 +202,17 @@ class MAWebSocketClient:
         self._connected = False
         log.info("[MA-WS] Disconnected")
 
-    async def send_command(self, command: str, args: Optional[Dict[str, Any]] = None) -> None:
+    async def send_command(self, command: str, args: Optional[Dict[str, Any]] = None, timeout: float = 10.0) -> Optional[Any]:
         """
-        Send a command to MA via WebSocket.
+        Send a command to MA via WebSocket and wait for the response.
 
         Args:
             command: Command name (e.g., "player_queues/play_media", "player_queues/pause")
             args: Command arguments dict
+            timeout: Seconds to wait for response
+
+        Returns:
+            The response result, or None on timeout/error
 
         Raises:
             ConnectionError: If not connected.
@@ -223,13 +228,26 @@ class MAWebSocketClient:
         if args is not None:
             payload["args"] = args
 
+        loop = asyncio.get_event_loop()
+        future = loop.create_future()
+        self._pending_responses[msg_id] = future
+
         try:
             ws = self._ws
             await ws.send(json.dumps(payload))
             log.info(f"[MA-WS] Sent command '{command}' (msg_id={msg_id})")
+            try:
+                result = await asyncio.wait_for(future, timeout=timeout)
+                log.info(f"[MA-WS] Received response for '{command}' (msg_id={msg_id}): {str(result)[:200]}")
+                return result
+            except asyncio.TimeoutError:
+                log.warning(f"[MA-WS] Timeout waiting for response to '{command}' (msg_id={msg_id})")
+                return None
         except Exception as e:
             log.error(f"[MA-WS] Failed to send command '{command}': {e}")
             raise
+        finally:
+            self._pending_responses.pop(msg_id, None)
 
     async def send_command_no_wait(self, command: str, args: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -457,7 +475,14 @@ class MAWebSocketClient:
         # Response to a command we sent
         elif msg_type == "RESULT":
             result = data.get("result", {})
-            log.info(f"[MA-WS] Received result: msg_id={data.get('message_id')}, result_keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
+            msg_id = data.get("message_id", "")
+            log.info(f"[MA-WS] Received result: msg_id={msg_id}, result_keys={list(result.keys()) if isinstance(result, dict) else type(result).__name__}")
+            # Resolve pending response future
+            if msg_id in self._pending_responses:
+                future = self._pending_responses[msg_id]
+                if not future.done():
+                    future.set_result(result)
+                    log.info(f"[MA-WS] Resolved pending response for msg_id={msg_id}")
 
         # ── Error messages ──────────────────────────────────────────────
         elif msg_type == "ERROR":
