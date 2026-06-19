@@ -373,10 +373,16 @@ class MAWebSocketClient:
             # Start background message handler
             self._message_handler_task = asyncio.create_task(self._message_loop())
 
-            # Wait for MA server_info response (completes authentication)
+           # Wait for MA server_info response (completes authentication)
             try:
                 await asyncio.wait_for(self._auth_event.wait(), timeout=5.0)
                 log.info("[MA-WS] Authentication complete via server_info")
+                # Send explicit auth command with token to complete MA auth
+                try:
+                    await self.send_command("auth", {"token": self._mass_token})
+                    log.info("[MA-WS] Sent auth command with token")
+                except Exception as e:
+                    log.warning(f"[MA-WS] Auth command failed: {e}")
             except asyncio.TimeoutError:
                 log.warning("[MA-WS] Timeout waiting for server_info, proceeding anyway")
 
