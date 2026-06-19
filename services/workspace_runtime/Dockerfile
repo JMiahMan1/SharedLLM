@@ -28,7 +28,7 @@ RUN npm install -g \
     typescript-language-server \
     vscode-langservers-extracted \
     shfmt \
-    shellcheck \
+    shellcheck
 
 # Install Docker CLI for container management
 RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz | \
