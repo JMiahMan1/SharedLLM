@@ -530,6 +530,7 @@ class MAWebSocketClient:
         2. current_item.stream_url
         3. items[*].stream_url
         4. audio_player.stream_url
+        5. current_item.streamdetails (for opensubsonic/library tracks)
 
         Args:
             data: Queue state data from MA
@@ -547,6 +548,22 @@ class MAWebSocketClient:
             if stream_url:
                 self._stream_url = stream_url
                 log.info(f"[MA-WS] Stream URL resolved: {stream_url[:100]}...")
+                return
+
+            # ── Construct stream URL from streamdetails for opensubsonic/library ──
+            streamdetails = current_item.get("streamdetails", {})
+            if isinstance(streamdetails, dict) and streamdetails.get("item_id"):
+                provider = streamdetails.get("provider", "")
+                item_id = streamdetails.get("item_id", "")
+                content_type = streamdetails.get("audio_format", {}).get("content_type", "mp3")
+                # Normalize content_type: mpeg -> mp3, flac -> flac, etc.
+                ct_map = {"mpeg": "mp3", "mp4a": "m4a", "webm": "webm"}
+                ext = ct_map.get(content_type, content_type or "mp3")
+                # Build stream URL: http://mass_url/media/provider_instance/item_id.ext
+                http_base = self._mass_url.replace("http://", "").replace("https://", "")
+                stream_url = f"http://{http_base}/media/{provider}/{item_id}.{ext}"
+                self._stream_url = stream_url
+                log.info(f"[MA-WS] Stream URL constructed from streamdetails: {stream_url[:150]}")
                 return
 
         # Check for queue items with stream URLs
