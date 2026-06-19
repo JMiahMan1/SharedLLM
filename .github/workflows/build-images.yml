@@ -66,6 +66,7 @@ jobs:
     name: Build & Push (${{ matrix.service }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: build-base
     strategy:
       fail-fast: false
       matrix:
