@@ -10,7 +10,6 @@ WORKDIR /app
 ENV PYTHONPATH=/app
 RUN mkdir -p /home/sharedllm && chown 1000:1000 /home/sharedllm
 COPY services/ /app/services/
-COPY services/workspace_runtime/ /app/
 EXPOSE 8007
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
@@ -58,4 +57,4 @@ RUN pip install --no-cache-dir \
     memory-profiler \
     line-profiler
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8007"]
+CMD ["uvicorn", "services.workspace_runtime.main:app", "--host", "0.0.0.0", "--port", "8007"]

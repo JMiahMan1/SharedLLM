@@ -9,7 +9,6 @@ ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
 COPY services/ /app/services/
-COPY services/automation/ /app/
 ENV PYTHONUNBUFFERED=1
 
 # Automation-specific: scheduled task debugging
@@ -17,4 +16,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
-CMD ["python", "main.py"]
+CMD ["python", "services/automation/main.py"]

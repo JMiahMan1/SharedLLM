@@ -7,8 +7,7 @@ ENV GIT_SHA=${GIT_SHA}
 ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
-COPY services/config.py services/__init__.py services/shim_users.py /app/services/
-COPY services/rag/ /app/
+COPY services/ /app/services/
 ENV PYTHONPATH=/app
 EXPOSE 8004
 ENV PYTHONUNBUFFERED=1
@@ -19,4 +18,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8004"]
+CMD ["uvicorn", "services.rag.main:app", "--host", "0.0.0.0", "--port", "8004"]

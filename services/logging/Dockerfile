@@ -9,7 +9,6 @@ ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
 COPY services/ /app/services/
-COPY services/logging/ /app/
 EXPOSE 8006
 ENV PYTHONUNBUFFERED=1
 
@@ -18,4 +17,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8006"]
+CMD ["uvicorn", "services.logging.main:app", "--host", "0.0.0.0", "--port", "8006"]

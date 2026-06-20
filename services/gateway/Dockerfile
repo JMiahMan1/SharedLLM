@@ -18,7 +18,6 @@ RUN groupadd -g ${PGID} sharedllm || true \
     && chown -R ${PUID}:${PGID} /home/sharedllm
 ENV HOME=/home/sharedllm
 COPY services/ /app/services/
-COPY services/gateway/ /app/
 EXPOSE 11435
 ENV PYTHONUNBUFFERED=1
 ENV TOKENIZERS_PARALLELISM=false
@@ -30,4 +29,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "11435"]
+CMD ["uvicorn", "services.gateway.main:app", "--host", "0.0.0.0", "--port", "11435"]
