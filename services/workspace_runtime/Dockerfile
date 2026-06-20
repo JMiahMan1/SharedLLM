@@ -7,7 +7,9 @@ ENV GIT_SHA=${GIT_SHA}
 ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
+ENV PYTHONPATH=/app
 RUN mkdir -p /home/sharedllm && chown 1000:1000 /home/sharedllm
+COPY services/ /app/services/
 COPY services/workspace_runtime/ /app/
 EXPOSE 8007
 ENV PYTHONPATH=/app
