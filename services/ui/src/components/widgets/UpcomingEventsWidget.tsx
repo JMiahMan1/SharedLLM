@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useWidgetData } from '../../hooks/useWidgetData';
+import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
 import type { CalendarEvent } from '../../types/widget';
 
@@ -89,132 +90,93 @@ const formatRelativeTime = (date: Date): string => {
 };
 
 const UpcomingEventsWidget = () => {
-  const [events, setEvents] = useState<ParsedEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const fetchEvents = async () => {
+    const result = await api.getCalendarEvents() as { status: string; message?: string; events?: CalendarEvent[] };
+    if (result.status !== 'SUCCESS') {
+      throw new Error(result.message || 'Failed to fetch events');
+    }
 
-  useEffect(() => {
-    let cancelled = false;
+    let parsed: ParsedEvent[] = [];
+    if (result.events) {
+      parsed = result.events.map(parseEvent);
+    } else if (typeof result.message === 'string') {
+      const lines = result.message.split('\n');
+      parsed = lines
+        .map(parseStringEvent)
+        .filter((e): e is ParsedEvent => e !== null);
+    }
 
-    const load = async () => {
-      const result = await api.getCalendarEvents() as { status: string; message?: string; events?: CalendarEvent[] };
-      if (cancelled) return;
+    return parsed
+      .filter((e) => new Date(e.start_time).getTime() > Date.now() - 3600000)
+      .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
+      .slice(0, 8);
+  };
 
-      if (result.status === 'SUCCESS') {
-        let parsed: ParsedEvent[] = [];
-        if (result.events) {
-          parsed = result.events.map(parseEvent);
-        } else if (typeof result.message === 'string') {
-          const lines = result.message.split('\n');
-          parsed = lines
-            .map(parseStringEvent)
-            .filter((e): e is ParsedEvent => e !== null);
-        }
+  const { data: events = [], isLoading, error, refetch } = useWidgetData<ParsedEvent[]>(
+    ['calendar-events'],
+    fetchEvents,
+    300000 // 5 minutes
+  );
 
-        const filteredAndSorted = parsed
-          .filter((e) => new Date(e.start_time).getTime() > Date.now() - 3600000)
-          .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-          .slice(0, 8);
-
-        setEvents(filteredAndSorted);
-        setLoading(false);
-        setError(null);
-      } else {
-        setError(result.message || 'Failed to fetch events');
-        setEvents([]);
-        setLoading(false);
-      }
-    };
-
-    load();
-    const interval = setInterval(load, 300000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="glass-card h-full p-5 relative flex items-center justify-center">
-        <p className="text-sm text-slate-500 animate-pulse">Loading events...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="glass-card h-full p-5 relative flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-sm text-red-400 mb-2">{error}</p>
-          <p className="text-xs text-slate-500">Calendar may not be configured</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (events.length === 0) {
-    return (
-      <div className="glass-card h-full p-5 relative flex items-center justify-center">
-        <div className="text-center">
+  return (
+    <WidgetCard
+      title="Upcoming Events"
+      isLoading={isLoading}
+      error={error}
+      onRetry={refetch}
+      actions={<span className="text-xs text-slate-400">{events.length} events</span>}
+    >
+      {events.length === 0 ? (
+        <div className="flex flex-col items-center justify-center text-center h-full">
           <p className="text-sm text-slate-400">No upcoming events</p>
           <p className="text-xs text-slate-500">Your schedule is clear</p>
         </div>
-      </div>
-    );
-  }
+      ) : (
+        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+          {events.map((event, index) => {
+            const relativeTime = formatRelativeTime(new Date(event.start_time));
+            const isVerySoon = event.isVerySoon;
 
-  return (
-    <div className="glass-card h-full p-5 relative">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-bold text-white text-lg">Upcoming</h3>
-        <span className="text-xs text-slate-400">{events.length} events</span>
-      </div>
+            return (
+              <div
+                key={`${event.summary}-${index}`}
+                className={`p-3 rounded-lg border transition-all ${
+                  isVerySoon
+                    ? 'bg-amber-500/10 border-amber-500/30'
+                    : 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="flex flex-col items-center min-w-[3rem]">
+                    <span className={`text-sm font-bold ${isVerySoon ? 'text-amber-400' : 'text-white'}`}>
+                      {formatTime(event.startHour, event.startMinute)}
+                    </span>
+                    <span className={`text-xs ${isVerySoon ? 'text-amber-500' : 'text-slate-500'}`}>
+                      {relativeTime}
+                    </span>
+                  </div>
 
-      <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-        {events.map((event, index) => {
-          const relativeTime = formatRelativeTime(new Date(event.start_time));
-          const isVerySoon = event.isVerySoon;
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-medium truncate ${isVerySoon ? 'text-amber-300' : 'text-white'}`}>
+                      {event.summary}
+                    </p>
+                    {event.location && (
+                      <p className="text-xs text-slate-500 truncate">{event.location}</p>
+                    )}
+                  </div>
 
-          return (
-            <div
-              key={`${event.summary}-${index}`}
-              className={`p-3 rounded-lg border transition-all ${
-                isVerySoon
-                  ? 'bg-amber-500/10 border-amber-500/30'
-                  : 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                <div className="flex flex-col items-center min-w-[3rem]">
-                  <span className={`text-sm font-bold ${isVerySoon ? 'text-amber-400' : 'text-white'}`}>
-                    {formatTime(event.startHour, event.startMinute)}
-                  </span>
-                  <span className={`text-xs ${isVerySoon ? 'text-amber-500' : 'text-slate-500'}`}>
-                    {relativeTime}
-                  </span>
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <p className={`text-sm font-medium truncate ${isVerySoon ? 'text-amber-300' : 'text-white'}`}>
-                    {event.summary}
-                  </p>
-                  {event.location && (
-                    <p className="text-xs text-slate-500 truncate">{event.location}</p>
+                  {isVerySoon && (
+                    <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full shrink-0">
+                      Soon
+                    </span>
                   )}
                 </div>
-
-                {isVerySoon && (
-                  <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full shrink-0">
-                    Soon
-                  </span>
-                )}
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+            );
+          })}
+        </div>
+      )}
+    </WidgetCard>
   );
 };
 
