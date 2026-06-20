@@ -9,7 +9,6 @@ ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
 COPY services/ /app/services/
-COPY services/execution/ /app/
 EXPOSE 8003
 ENV PYTHONUNBUFFERED=1
 
@@ -21,4 +20,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     arp-scan \
     && rm -rf /var/lib/apt/lists/*
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8003"]
+CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]

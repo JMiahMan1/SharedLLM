@@ -9,7 +9,6 @@ ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
 COPY services/ /app/services/
-COPY services/storage/ /app/
 EXPOSE 8005
 ENV PYTHONUNBUFFERED=1
 
@@ -20,4 +19,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005"]
+CMD ["uvicorn", "services.storage.main:app", "--host", "0.0.0.0", "--port", "8005"]
