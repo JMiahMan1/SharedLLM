@@ -87,6 +87,7 @@ const Communication = () => {
   const [talkTargetUser, setTalkTargetUser] = useState('');
   const [selectedTalkToken, setSelectedTalkToken] = useState('');
   const [talkMessage, setTalkMessage] = useState('');
+  const [isExpanded, setIsExpanded] = useState(false);
   const [voiceCaption, setVoiceCaption] = useState('');
   const [isRecording, setIsRecording] = useState(false);
   const [recordedAudio, setRecordedAudio] = useState<{ base64: string; mimeType: string; fileName: string } | null>(null);
@@ -530,13 +531,23 @@ const Communication = () => {
         </section>
       </div>
 
-      <section className="glass-panel p-6">
-        <div className="mb-6 flex items-center gap-3">
-          <MessageSquare size={20} className="text-fuchsia-300" />
-          <div>
-            <h3 className="text-xl font-bold text-white">Nextcloud Talk</h3>
-            <p className="text-sm text-slate-400">Open live conversations, chat with users, and record voice messages into Talk.</p>
+      <section className={`glass-panel p-6 ${isExpanded ? 'fixed inset-0 h-full w-full z-50 bg-slate-950/95 overflow-y-auto' : ''}`}>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <MessageSquare size={20} className="text-fuchsia-300" />
+            <div>
+              <h3 className="text-xl font-bold text-white">Nextcloud Talk</h3>
+              <p className="text-sm text-slate-400">Open live conversations, chat with users, and record voice messages into Talk.</p>
+            </div>
           </div>
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="glass-button p-2 text-slate-400 hover:text-white transition-colors"
+            title={isExpanded ? 'Collapse' : 'Expand'}
+            id="nextcloud-talk-expand-toggle"
+          >
+            {isExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          </button>
         </div>
 
         <div className="mb-5 grid gap-3 grid-cols-1 md:grid-cols-[1fr_auto]">

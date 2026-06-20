@@ -3,7 +3,7 @@ import base64
 import json
 import logging
 import urllib.parse
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 try:
     from schemas import ExecutionResult, TalkRequest
@@ -64,6 +64,72 @@ def _message_summary(message: dict[str, Any]) -> dict[str, Any]:
         "message": message.get("message"),
         "is_replyable": message.get("isReplyable", False),
     }
+
+def validate_jarvis_mention(message: Optional[str]) -> bool:
+    """Parses real-time text input configurations looking for the identifier prefix: @Jarvis."""
+    if not message:
+        return False
+    return message.startswith("@Jarvis")
+
+
+async def run_jarvis_orchestration(query: str, token: str, user_context: Any):
+    """Invokes the execution loop orchestrator and delivers the result back to NextCloud Talk."""
+    try:
+        from services.gateway.orchestrator import process_full_orchestration, strip_json_from_response
+        from services.execution.websearch import web_search  # Bound tools module
+
+        provider = resolve_personal_data_provider(user_context)
+        if not provider:
+            log.error("[Jarvis] Personal data provider not found for user context.")
+            return
+
+        creds = user_context.model_dump() if hasattr(user_context, "model_dump") else user_context.dict()
+
+        # Build custom system prompt that binds local SharedLLM setup and websearch tools
+        system_prompt = (
+            "You are Jarvis, the automated companion utilizing the local SharedLLM toolchains.\n"
+            "You are operating within the SharedLLM framework.\n"
+            "You have access to the web search tools module (web_search) found in services/execution/websearch.py.\n"
+            "Whenever you need to look up current events, facts, or search the web, you must output a tool call for WebSearchRequest.\n"
+            "WebSearchRequest schema:\n"
+            "```json\n"
+            "{\n"
+            "  \"action\": \"WebSearchRequest\",\n"
+            "  \"payload\": {\n"
+            "    \"query\": \"search query string\",\n"
+            "    \"category\": \"general\"\n"
+            "  }\n"
+            "}\n"
+            "```\n"
+            "Always respond in a wise, warm, and helpful manner. Place the JSON block at the end of your response for tool executions."
+        )
+
+        job_payload = {
+            "query": query,
+            "model": "auto",
+            "creds": creds,
+            "system": system_prompt,
+            "show_thinking": False
+        }
+
+        # Invoke the execution loop orchestrator
+        ans = await process_full_orchestration(job_payload)
+
+        # Output pipeline delivery back into the Nextcloud Talk room session stream
+        cleaned_ans = strip_json_from_response(ans)
+
+        ok, data, message = await asyncio.to_thread(
+            provider.request,
+            "POST",
+            f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(token)}",
+            data={"message": cleaned_ans},
+        )
+        if not ok:
+            log.error(f"[Jarvis] Failed to post answer to Nextcloud Talk: {message}")
+        else:
+            log.info(f"[Jarvis] Successfully posted answer to room {token}")
+    except Exception as e:
+        log.error(f"[Jarvis] Orchestration failed: {e}", exc_info=True)
 
 
 async def handle_talk(req: TalkRequest) -> ExecutionResult:
@@ -147,6 +213,12 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             )
             if not ok:
                 return ExecutionResult(status="FAILURE", message=message or "Failed to send message.", service="talk_send")
+            
+            # Check for @Jarvis mention and run background task
+            if validate_jarvis_mention(req.message):
+                query = req.message[len("@Jarvis"):].strip()
+                asyncio.create_task(run_jarvis_orchestration(query, req.token, req.user_context))
+
             return ExecutionResult(
                 status="SUCCESS",
                 message="Chat message sent.",
