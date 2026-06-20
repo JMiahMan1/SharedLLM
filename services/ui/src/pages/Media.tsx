@@ -1289,6 +1289,7 @@ const Media = () => {
       setLocalStreamUrl(absUrl);
     } else if (source === 'ma') {
       setLocalStreamUrl(`/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`);
+    }
 
     try {
       await api.syncMediaState({
