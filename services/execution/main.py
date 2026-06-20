@@ -384,7 +384,7 @@ async def execute_light(req: LightControlRequest):
 
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
-    if req.entity_id and req.entity_id.lower() not in ("local", "local_player", "browser", "android"):
+    if req.entity_id and req.entity_id.lower() not in ("local", "web_player", "browser", "android"):
         if not await verify_entity_access(req.user_context, req.entity_id):
             raise HTTPException(status_code=403, detail="Access denied to this device")
     # Resolve HA credentials via Identity service if not in context

@@ -9,6 +9,12 @@ import {
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
 import { storageGetSync } from '../lib/storage';
+import {
+  destroy as destroyWebPlayer,
+  installPageHideListener,
+  releaseControl,
+  handleVisibilityChange,
+} from '../lib/webPlayer';
 
 interface MediaStatus {
   entity_id?: string;
@@ -113,7 +119,7 @@ const DeviceSelector = ({
         <span className="text-[10px] text-slate-600">{localMode ? '1 mode' : `${targets.filter((t) => t.online).length} online`}</span>
       </div>
       <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
-        {/* Local Player */}
+        {/* Web Player */}
         <button
           onClick={handleLocalSelect}
           className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] ${
@@ -124,7 +130,7 @@ const DeviceSelector = ({
         >
           <div className="w-2.5 h-2.5 rounded-full shrink-0 bg-green-400" />
           <div className="min-w-0 flex-1">
-            <p className="text-white text-sm font-medium truncate">Local Player</p>
+            <p className="text-white text-sm font-medium truncate">Web Player</p>
             <p className="text-[10px] text-slate-500 truncate">Browser / Android App</p>
           </div>
           {localMode && (
@@ -343,7 +349,7 @@ const NowPlayingCard = ({
         <div className="relative mt-4 pt-3 border-t border-white/5">
           <div className="flex items-center justify-center gap-2 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-sm">
             <Music size={14} className="animate-pulse" />
-            Local Player (Browser Audio) Active. Ready to stream locally.
+            Web Player (Browser Audio) Active. Ready to stream locally.
           </div>
         </div>
       ) : !selectedTarget ? (
@@ -921,11 +927,16 @@ const Media = () => {
 
   // Cleanup local Audio on unmount
   useEffect(() => {
+    installPageHideListener();
+    const handleVis = () => handleVisibilityChange();
+    document.addEventListener('visibilitychange', handleVis);
     return () => {
+      document.removeEventListener('visibilitychange', handleVis);
       if (localAudioRef.current) {
         localAudioRef.current.pause();
         localAudioRef.current.src = '';
       }
+      destroyWebPlayer();
     };
   }, []);
 
@@ -968,7 +979,7 @@ const Media = () => {
       localAudioRef.current?.pause();
       if (localTrack) {
         api.syncMediaState({
-          entity_id: 'local',
+          entity_id: 'web_player',
           state: 'paused',
           media_type: localTrack.type,
           media_content_id: localTrack.id,
@@ -1048,7 +1059,7 @@ const Media = () => {
         const active = detail.active;
         
         if (active) {
-          if (active.entity_id === 'local_player') {
+          if (active.entity_id === 'web_player') {
             setLocalMode(true);
             setSelectedTarget('');
             
@@ -1069,16 +1080,7 @@ const Media = () => {
               if (source === 'abs') {
                 setLocalStreamUrl(`/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`);
               } else if (source === 'ma') {
-                // MA endpoint returns {"stream_url": "..."} — resolve it
-                const maApiUrl = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`;
-                fetch(maApiUrl)
-                  .then((r) => r.json())
-                  .then((json) => {
-                    setLocalStreamUrl(json.stream_url || null);
-                  })
-                  .catch((err) => {
-                    console.error('[Media] Failed to resolve MA stream URL in fetchMediaStatus:', err);
-                  });
+                setLocalStreamUrl(`/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`);
               }
             } else if (localTrack) {
               const backendPlaying = active.state === 'playing';
@@ -1153,7 +1155,7 @@ const Media = () => {
           if (counter >= 5 && localTrack) {
             counter = 0;
             api.syncMediaState({
-              entity_id: 'local',
+              entity_id: 'web_player',
               state: 'playing',
               media_type: localTrack.type,
               media_content_id: localTrack.id,
@@ -1193,7 +1195,7 @@ const Media = () => {
     if (mode) {
       setSelectedTarget('');
       api.syncMediaState({
-        entity_id: 'local',
+        entity_id: 'web_player',
         state: localTrack ? (localIsPlaying ? 'playing' : 'paused') : 'idle',
         media_type: localTrack?.type,
         media_content_id: localTrack?.id,
@@ -1286,30 +1288,11 @@ const Media = () => {
       const absUrl = `/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`;
       setLocalStreamUrl(absUrl);
     } else if (source === 'ma') {
-      // MA endpoint now returns {"stream_url": "..."} — fetch it to get the actual stream URL
-      const maApiUrl = `/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`;
-      try {
-        const resp = await fetch(maApiUrl);
-        const json = await resp.json();
-        const actualUrl = json.stream_url;
-        if (actualUrl) {
-          console.log('[Media] MA stream URL resolved:', actualUrl.substring(0, 80) + '...');
-          setLocalStreamUrl(actualUrl);
-        } else {
-          console.error('[Media] No stream_url in MA response:', json);
-          setError('Failed to resolve Music Assistant stream URL');
-          setLocalIsPlaying(false);
-        }
-      } catch (err) {
-        console.error('[Media] Failed to resolve MA stream URL:', err);
-        setError('Failed to resolve Music Assistant stream URL');
-        setLocalIsPlaying(false);
-      }
-    }
+      setLocalStreamUrl(`/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`);
 
     try {
       await api.syncMediaState({
-        entity_id: 'local',
+        entity_id: 'web_player',
         state: 'playing',
         media_type: type,
         media_content_id: idClean,
@@ -1333,6 +1316,7 @@ const Media = () => {
       localAudioRef.current?.pause();
     } else {
       setLocalIsPlaying(true);
+      (document.activeElement as HTMLElement)?.setAttribute('data-webplayer-interact', 'true');
       if (localAudioRef.current) {
         localAudioRef.current.play().catch(() => {
           setLocalIsPlaying(false);
@@ -1340,7 +1324,7 @@ const Media = () => {
       }
     }
     api.syncMediaState({
-      entity_id: 'local',
+      entity_id: 'web_player',
       state: nextPlaying ? 'playing' : 'paused',
       media_type: localTrack.type,
       media_content_id: localTrack.id,
@@ -1358,7 +1342,7 @@ const Media = () => {
     setLocalMuted(false);
     if (localTrack) {
       api.syncMediaState({
-        entity_id: 'local',
+        entity_id: 'web_player',
         state: localIsPlaying ? 'playing' : 'paused',
         media_type: localTrack.type,
         media_content_id: localTrack.id,
@@ -1377,7 +1361,7 @@ const Media = () => {
     setLocalMuted(nextMuted);
     if (localTrack) {
       api.syncMediaState({
-        entity_id: 'local',
+        entity_id: 'web_player',
         state: localIsPlaying ? 'playing' : 'paused',
         media_type: localTrack.type,
         media_content_id: localTrack.id,
@@ -1397,7 +1381,7 @@ const Media = () => {
       setLocalCurrentTime(time);
       if (localTrack) {
         api.syncMediaState({
-          entity_id: 'local',
+          entity_id: 'web_player',
           state: localIsPlaying ? 'playing' : 'paused',
           media_type: localTrack.type,
           media_content_id: localTrack.id,
@@ -1418,7 +1402,7 @@ const Media = () => {
       setLocalCurrentTime(0);
       if (localTrack) {
         api.syncMediaState({
-          entity_id: 'local',
+          entity_id: 'web_player',
           state: localIsPlaying ? 'playing' : 'paused',
           media_type: localTrack.type,
           media_content_id: localTrack.id,
@@ -1440,7 +1424,7 @@ const Media = () => {
       setLocalCurrentTime(newTime);
       if (localTrack) {
         api.syncMediaState({
-          entity_id: 'local',
+          entity_id: 'web_player',
           state: localIsPlaying ? 'playing' : 'paused',
           media_type: localTrack.type,
           media_content_id: localTrack.id,
@@ -1457,8 +1441,9 @@ const Media = () => {
 
   const handleStopPlayback = useCallback(() => {
     if (localTrack) {
+      releaseControl(false);
       api.syncMediaState({
-        entity_id: 'local',
+        entity_id: 'web_player',
         state: 'idle',
         media_type: localTrack.type,
         media_content_id: localTrack.id,
@@ -1524,7 +1509,7 @@ const Media = () => {
           localMode
             ? localTrack
               ? {
-                  entity_id: 'local_player',
+                  entity_id: 'web_player',
                   state: localIsPlaying ? 'playing' : 'paused',
                   media_title: detailedTitle,
                   media_artist: detailedSubtitle,

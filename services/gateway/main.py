@@ -5144,6 +5144,12 @@ async def stream_audiobookshelf(book_id: str, request: Request):
             try:
                 bytes_sent = 0
                 async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                    try:
+                        if request.client and await request.client.disconnect():
+                            log.info(f"[stream/abs/generator] Client disconnected after {bytes_sent} bytes for book {book_id}")
+                            break
+                    except Exception:
+                        pass
                     yield chunk
                     bytes_sent += len(chunk)
                 log.info(f"[stream/abs/generator] Finished streaming {bytes_sent} bytes for book {book_id}")
@@ -5216,19 +5222,18 @@ async def ma_stream_test_page():
 
 @app.get("/api/media/stream/music-assistant")
 async def stream_music_assistant(uri: str, request: Request):
-    """Resolve a Music Assistant stream URL for direct browser playback.
+    """Proxy Music Assistant audio stream to browser.
 
     Flow (MA web-player pattern):
     1. Resolve credentials (mass_url, mass_token) from the Jarvis identity service.
     2. Connect to MA WebSocket and authenticate.
     3. Discover MA players via JSON-RPC player/list and select an idle/playing player.
     4. Send player_queues/play_media with the URI to start playback on the target player.
-    5. Listen for the queue_updated event to get the resolved stream URL.
-    6. Return the stream URL as JSON — the browser binds directly to MA's stream server (port 8097).
+    5. Listen for the queue_updated event to construct the stream URL from queue state.
+    6. Proxy audio bytes from MA stream server (port 8097) through the gateway.
 
-    This matches the official MA web-player architecture: the gateway acts as a
-    WebSocket bridge to resolve the stream URL, then the browser streams directly
-    from MA's native stream server on port 8097 (same LAN, no gateway proxy).
+    The browser binds <audio src> directly to this gateway endpoint which proxies
+    audio from MA's native stream server on port 8097.
     """
     log.info(f"[stream/ma] Received stream request for uri='{uri}'")
     try:
@@ -5395,6 +5400,12 @@ async def stream_music_assistant(uri: str, request: Request):
                 try:
                     bytes_sent = 0
                     async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                        try:
+                            if request.client and await request.client.disconnect():
+                                log.info(f"[stream/ma/generator] Client disconnected after {bytes_sent} bytes")
+                                break
+                        except Exception:
+                            pass
                         yield chunk
                         bytes_sent += len(chunk)
                     log.info(f"[stream/ma/generator] Finished streaming {bytes_sent} bytes")

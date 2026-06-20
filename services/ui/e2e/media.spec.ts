@@ -75,20 +75,20 @@ test.describe('Device Selector — Rendering', () => {
     expect(count).toBeGreaterThan(0);
   });
 
-  test('shows Local Player card as first option', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('shows Web Player card as first option', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
   });
 
-  test('Local Player card shows Browser / Android App subtitle', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('Web Player card shows Browser / Android App subtitle', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     const subtitle = localPlayerCard.locator('p:text-is("Browser / Android App")');
     await expect(subtitle).toBeVisible({ timeout: 10000 });
   });
 
-  test('Local Player card has online indicator', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('Web Player card has online indicator', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     // Green dot indicator
     const dot = localPlayerCard.locator('.rounded-full.bg-green-400');
@@ -154,12 +154,12 @@ test.describe('Device Selector — Selection', () => {
     }
   });
 
-  test('clicking Local Player card highlights it', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('clicking Web Player card highlights it', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(500);
-    // Local Player card should get cyan highlight
+    // Web Player card should get cyan highlight
     await expect(localPlayerCard).toHaveClass(/cyan-500/);
   });
 });
@@ -804,9 +804,9 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('MA music plays via Local Player', async ({ page }) => {
-    // Click Local Player card first
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('MA music plays via Web Player', async ({ page }) => {
+    // Click Web Player card first
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(500);
@@ -834,9 +834,9 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('ABS audiobook plays via Local Player', async ({ page }) => {
-    // Click Local Player card first
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('ABS audiobook plays via Web Player', async ({ page }) => {
+    // Click Web Player card first
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(500);
@@ -864,9 +864,9 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('transport controls work in Local Player', async ({ page }) => {
-    // Click Local Player card first
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('transport controls work in Web Player', async ({ page }) => {
+    // Click Web Player card first
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(500);
@@ -895,9 +895,9 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('Local Player can play from playlists', async ({ page }) => {
-    // Click Local Player card first
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('Web Player can play from playlists', async ({ page }) => {
+    // Click Web Player card first
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(500);
