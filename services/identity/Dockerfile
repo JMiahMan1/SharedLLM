@@ -12,9 +12,10 @@ COPY services/ /app/services/
 EXPOSE 8001
 ENV PYTHONUNBUFFERED=1
 
-# Identity-specific: JWT/token debugging tools
+# Identity-specific: JWT/token debugging tools and SQLite
 RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 CMD ["uvicorn", "services.identity.main:app", "--host", "0.0.0.0", "--port", "8001"]
