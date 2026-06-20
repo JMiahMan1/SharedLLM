@@ -6,8 +6,8 @@ import type { WidgetSize, UserWidgetSettings } from '../../types/widget';
 const SIZE_CLASSES: Record<WidgetSize, { gridCol: string; gridRow: string }> = {
   small: { gridCol: 'col-span-1', gridRow: 'row-span-1' },
   medium: { gridCol: 'col-span-1', gridRow: 'row-span-2' },
-  wide: { gridCol: 'col-span-2', gridRow: 'row-span-1' },
-  tall: { gridCol: 'col-span-1', gridRow: 'row-span-3' },
+  wide: { gridCol: 'col-span-1 md:col-span-2', gridRow: 'row-span-1' },
+  tall: { gridCol: 'col-span-1', gridRow: 'row-span-2 md:row-span-3' },
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,7 +75,7 @@ const BentoBoxDashboard = () => {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {widgets.map((widget) => {
             const LazyWidget = LazyWidgets[widget.def.key];
             const sizeClass = SIZE_CLASSES[widget.userSettings.size] || SIZE_CLASSES.medium;

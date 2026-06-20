@@ -10,6 +10,14 @@ import type {
 } from '../types/widget';
 import { api } from '../services/api';
 
+export interface WidgetStateItem {
+  id: string;
+  type: string;
+  isVisible: boolean;
+  size: WidgetSize | 'normal' | 'large';
+  config: Record<string, unknown>;
+}
+
 const defaultSizes: Record<WidgetKey, WidgetSize> = {
   energy_insights: 'medium',
   ambient_timer: 'small',
@@ -49,6 +57,7 @@ const defaultWidgetDefs: WidgetDef[] = [
 interface WidgetState {
   widgetRegistry: WidgetDef[];
   userWidgets: Record<string, UserWidgetSettings>;
+  activeWidgets: WidgetStateItem[];
   quickAssistantEnabled: boolean;
   mounting: boolean;
   error: string | null;
@@ -66,6 +75,7 @@ interface WidgetState {
   syncWithServer: () => Promise<void>;
   getActiveWidgets: (capabilities: CapabilityPayload) => WidgetInstance[];
   getVisibleWidgets: () => WidgetInstance[];
+  updateWidgetConfig: (id: string, config: Record<string, unknown>) => Promise<void>;
 }
 
 const defaultCapabilities: CapabilityPayload = {
@@ -85,6 +95,7 @@ const defaultCapabilities: CapabilityPayload = {
 export const useWidgetStore = create<WidgetState>((set, get) => ({
   widgetRegistry: defaultWidgetDefs,
   userWidgets: {},
+  activeWidgets: [],
   quickAssistantEnabled: false,
   mounting: false,
   error: null,
@@ -98,10 +109,26 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
       for (const w of response.widgets) {
         widgetsMap[w.widget_key] = w;
       }
-      set({ userWidgets: widgetsMap, quickAssistantEnabled: response.quick_assistant_enabled || false });
+      
+      const activeWidgets: WidgetStateItem[] = defaultWidgetDefs.map((def, index) => {
+        const w = widgetsMap[def.key] || createDefaultSettings(def.key, index);
+        return {
+          id: def.key,
+          type: def.key,
+          isVisible: w.visibility === 'visible',
+          size: w.size,
+          config: w.config || {},
+        };
+      });
+
+      set({
+        userWidgets: widgetsMap,
+        activeWidgets,
+        quickAssistantEnabled: response.quick_assistant_enabled || false,
+      });
     } catch (e) {
       const error = e instanceof Error ? e.message : 'Failed to sync widget settings';
-      set({ error, userWidgets: {} });
+      set({ error, userWidgets: {}, activeWidgets: [] });
     } finally {
       set({ mounting: false });
     }
@@ -139,11 +166,22 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
     const current = get().userWidgets[widgetKey];
     if (!current) return;
     const updated = { ...current, size: newSize, updated_at: Date.now() };
-    set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
+    const updatedActiveWidgets = get().activeWidgets.map((item) =>
+      item.id === widgetKey ? { ...item, size: newSize } : item
+    );
+    set({
+      userWidgets: { ...get().userWidgets, [widgetKey]: updated },
+      activeWidgets: updatedActiveWidgets,
+    });
     try {
       await api.updateWidgetSettings(widgetKey, { size: newSize });
     } catch {
-      set({ userWidgets: { ...get().userWidgets, [widgetKey]: current } });
+      set({
+        userWidgets: { ...get().userWidgets, [widgetKey]: current },
+        activeWidgets: get().activeWidgets.map((item) =>
+          item.id === widgetKey ? { ...item, size: current.size } : item
+        ),
+      });
     }
   },
 
@@ -151,11 +189,22 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
     const current = get().userWidgets[widgetKey];
     if (!current) return;
     const updated = { ...current, visibility: 'hidden' as const, is_pinned: false, updated_at: Date.now() };
-    set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
+    const updatedActiveWidgets = get().activeWidgets.map((item) =>
+      item.id === widgetKey ? { ...item, isVisible: false } : item
+    );
+    set({
+      userWidgets: { ...get().userWidgets, [widgetKey]: updated },
+      activeWidgets: updatedActiveWidgets,
+    });
     try {
       await api.updateWidgetSettings(widgetKey, { visibility: 'hidden' });
     } catch {
-      set({ userWidgets: { ...get().userWidgets, [widgetKey]: current } });
+      set({
+        userWidgets: { ...get().userWidgets, [widgetKey]: current },
+        activeWidgets: get().activeWidgets.map((item) =>
+          item.id === widgetKey ? { ...item, isVisible: current.visibility === 'visible' } : item
+        ),
+      });
     }
   },
 
@@ -163,11 +212,22 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
     const current = get().userWidgets[widgetKey];
     if (!current) return;
     const updated = { ...current, visibility: 'visible' as const, updated_at: Date.now() };
-    set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
+    const updatedActiveWidgets = get().activeWidgets.map((item) =>
+      item.id === widgetKey ? { ...item, isVisible: true } : item
+    );
+    set({
+      userWidgets: { ...get().userWidgets, [widgetKey]: updated },
+      activeWidgets: updatedActiveWidgets,
+    });
     try {
       await api.updateWidgetSettings(widgetKey, { visibility: 'visible' });
     } catch {
-      set({ userWidgets: { ...get().userWidgets, [widgetKey]: current } });
+      set({
+        userWidgets: { ...get().userWidgets, [widgetKey]: current },
+        activeWidgets: get().activeWidgets.map((item) =>
+          item.id === widgetKey ? { ...item, isVisible: current.visibility === 'visible' } : item
+        ),
+      });
     }
   },
 
@@ -175,11 +235,22 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
     const current = get().userWidgets[widgetKey];
     if (!current) return;
     const updated = { ...current, visibility: 'removed' as const, updated_at: Date.now() };
-    set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
+    const updatedActiveWidgets = get().activeWidgets.map((item) =>
+      item.id === widgetKey ? { ...item, isVisible: false } : item
+    );
+    set({
+      userWidgets: { ...get().userWidgets, [widgetKey]: updated },
+      activeWidgets: updatedActiveWidgets,
+    });
     try {
       await api.updateWidgetSettings(widgetKey, { visibility: 'removed' });
     } catch {
-      set({ userWidgets: { ...get().userWidgets, [widgetKey]: current } });
+      set({
+        userWidgets: { ...get().userWidgets, [widgetKey]: current },
+        activeWidgets: get().activeWidgets.map((item) =>
+          item.id === widgetKey ? { ...item, isVisible: current.visibility === 'visible' } : item
+        ),
+      });
     }
   },
 
@@ -241,5 +312,31 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
       has_quick_assistant: false,
       has_assignable_devices: false,
     });
+  },
+
+  updateWidgetConfig: async (id: string, config: Record<string, unknown>) => {
+    const current = get().userWidgets[id] || createDefaultSettings(id as never, 0);
+    const updatedConfig = { ...(current.config || {}), ...config };
+    const updatedWidget = { ...current, config: updatedConfig, updated_at: Date.now() };
+
+    const updatedActiveWidgets = get().activeWidgets.map((item) =>
+      item.id === id ? { ...item, config: updatedConfig } : item
+    );
+
+    set({
+      userWidgets: { ...get().userWidgets, [id]: updatedWidget },
+      activeWidgets: updatedActiveWidgets,
+    });
+
+    try {
+      await api.updateWidgetSettings(id as never, { config: updatedConfig });
+    } catch {
+      set({
+        userWidgets: { ...get().userWidgets, [id]: current },
+        activeWidgets: get().activeWidgets.map((item) =>
+          item.id === id ? { ...item, config: current.config || {} } : item
+        ),
+      });
+    }
   },
 }));
