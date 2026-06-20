@@ -25,7 +25,7 @@ print(f"Target: {ROKU_IP}")
 # - u (URL - older param)
 params = {
     "contentId": VIDEO_URL,
-    "mediaType": "movie"
+    "mediaType": "movie",
     # "u": VIDEO_URL # Try adding this if the above fails
 }
 
