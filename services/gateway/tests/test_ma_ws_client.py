@@ -136,6 +136,7 @@ class TestConnection:
             with patch.object(client, "_establish_connection") as mock_establish:
                 async def setup_connected():
                     client._connected = True
+                    client._authenticated = True
                     client._ws = mock_websocket
                 mock_establish.side_effect = setup_connected
                 await client.connect()
@@ -827,6 +828,7 @@ class TestContextManager:
         with patch("websockets.connect", AsyncMock(return_value=mock_websocket)):
             with patch.object(client, "_establish_connection"):
                 client._connected = True
+                client._authenticated = True
                 mock_ws = AsyncMock()
                 client._ws = mock_ws
                 async with client:

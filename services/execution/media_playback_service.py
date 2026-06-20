@@ -32,7 +32,7 @@ class MediaPlaybackService:
         
         # Determine target
         target = req.entity_id or ""
-        is_local = target.lower() in ("local", "local_player", "browser", "android")
+        is_local = target.lower() in ("local", "web_player", "browser", "android")
         
         log.info(f"[MediaPlaybackService] Play request for user={username}, target={target} (local={is_local}), query={req.query}")
         
@@ -50,7 +50,7 @@ class MediaPlaybackService:
                 "volume_level": req.volume if req.volume is not None else 0.7,
                 "is_volume_muted": False,
                 "media_title": req.query or "Local Stream",
-                "media_artist": "Local Player",
+                "media_artist": "Web Player",
                 "updated_at": registry.get_az_timestamp_str()
             }
             
@@ -117,7 +117,7 @@ class MediaPlaybackService:
             db_state = await registry.get_playback_state(username)
             target = db_state.get("entity_id") if db_state else "local"
         
-        is_local = target.lower() in ("local", "local_player", "browser", "android")
+        is_local = target.lower() in ("local", "web_player", "browser", "android")
         
         log.info(f"[MediaPlaybackService] Transport request user={username}, command={req.command}, target={target} (local={is_local})")
         
@@ -164,7 +164,7 @@ class MediaPlaybackService:
         db_state = await registry.get_playback_state(username)
         active_target = db_state.get("entity_id") if db_state else ""
         
-        is_local = active_target.lower() in ("local", "local_player")
+        is_local = active_target.lower() in ("local", "web_player")
         
         log.debug(f"[MediaPlaybackService] Status request user={username}, active_target={active_target} (is_local={is_local})")
         
@@ -173,9 +173,9 @@ class MediaPlaybackService:
         
         # If the active target choice is local, override the 'active' player with local state
         if is_local and db_state:
-            local_player = {
-                "entity_id": "local_player",
-                "friendly_name": "Local Player",
+            web_player = {
+                "entity_id": "web_player",
+                "friendly_name": "Web Player",
                 "state": db_state.get("state", "idle"),
                 "media_title": db_state.get("media_title", "Unknown Title"),
                 "media_artist": db_state.get("media_artist", "Unknown Artist"),
@@ -196,17 +196,17 @@ class MediaPlaybackService:
             if ha_active:
                 ha_available.insert(0, ha_active)
             
-            detail["active"] = local_player
+            detail["active"] = web_player
             detail["available"] = ha_available
-            detail["all_players"] = [local_player] + ha_available
+            detail["all_players"] = [web_player] + ha_available
             
             ha_res.detail = detail
             
             # Format high-level status message
-            vol_pct = int(local_player["volume_level"] * 100)
+            vol_pct = int(web_player["volume_level"] * 100)
             ha_res.message = (
                 f"**Currently Playing (Local):**\n"
-                f"- **Local Player**: {local_player['media_title']} - {local_player['media_artist']} ({local_player['state']}) | Vol: {vol_pct}%"
+                f"- **Web Player**: {web_player['media_title']} - {web_player['media_artist']} ({web_player['state']}) | Vol: {vol_pct}%"
             )
         elif active_target and ha_res.detail:
             # If target is specific HA player, make sure it is selected as the 'active' one in response

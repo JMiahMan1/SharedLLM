@@ -409,7 +409,7 @@ test.describe('MA Music → Office TV', () => {
   });
 });
 
-test.describe('ABS Audiobook → Local Player (Browser)', () => {
+test.describe('ABS Audiobook → Web Player (Browser)', () => {
   test.beforeEach(async ({ page }) => {
     const logged = await loginAsAdmin(page);
     if (!logged) test.skip();
@@ -417,13 +417,13 @@ test.describe('ABS Audiobook → Local Player (Browser)', () => {
     if (!ok) test.skip();
   });
 
-  test('ABS audiobook plays via Local Player — audio loads from streaming endpoint', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('ABS audiobook plays via Web Player — audio loads from streaming endpoint', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
 
-    await expect(page.getByText('Local Player (Browser Audio) Active')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Web Player (Browser Audio) Active')).toBeVisible({ timeout: 5000 });
 
     const jumpBackInHeading = page.getByRole('heading', { name: 'Jump Back In' });
     await expect(jumpBackInHeading).toBeVisible({ timeout: 10000 });
@@ -459,7 +459,7 @@ test.describe('ABS Audiobook → Local Player (Browser)', () => {
     }
 
 
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
@@ -484,8 +484,8 @@ test.describe('ABS Audiobook → Local Player (Browser)', () => {
     }
   });
 
-  test('ABS audiobook — Local Player transport controls work', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('ABS audiobook — Web Player transport controls work', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
@@ -517,7 +517,7 @@ test.describe('ABS Audiobook → Local Player (Browser)', () => {
   });
 });
 
-test.describe('MA Music → Local Player (Browser)', () => {
+test.describe('MA Music → Web Player (Browser)', () => {
   test.beforeEach(async ({ page }) => {
     const logged = await loginAsAdmin(page);
     if (!logged) test.skip();
@@ -525,13 +525,13 @@ test.describe('MA Music → Local Player (Browser)', () => {
     if (!ok) test.skip();
   });
 
-  test('MA music plays via Local Player — audio loads from streaming endpoint', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('MA music plays via Web Player — audio loads from streaming endpoint', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
 
-    await expect(page.getByText('Local Player (Browser Audio) Active')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Web Player (Browser Audio) Active')).toBeVisible({ timeout: 5000 });
 
     const maTrack = page.getByText('Does Anybody Hear Her').first();
     const hasTrack = await maTrack.isVisible({ timeout: 5000 }).catch(() => false);
@@ -564,7 +564,7 @@ test.describe('MA Music → Local Player (Browser)', () => {
     }
 
 
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
@@ -585,7 +585,7 @@ test.describe('MA Music → Local Player (Browser)', () => {
   });
 });
 
-test.describe('ABS Audiobook → Local Player (Android App / Mobile)', () => {
+test.describe('ABS Audiobook → Web Player (Android App / Mobile)', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test.beforeEach(async ({ page }) => {
@@ -595,13 +595,13 @@ test.describe('ABS Audiobook → Local Player (Android App / Mobile)', () => {
     if (!ok) test.skip();
   });
 
-  test('ABS audiobook plays via Local Player on mobile viewport', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('ABS audiobook plays via Web Player on mobile viewport', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
 
-    const localIndicator = page.getByText('Local Player (Browser Audio) Active');
+    const localIndicator = page.getByText('Web Player (Browser Audio) Active');
     if (await localIndicator.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(localIndicator).toBeVisible();
     }
@@ -636,7 +636,7 @@ test.describe('ABS Audiobook → Local Player (Android App / Mobile)', () => {
       test.skip();
     }
 
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
@@ -655,8 +655,8 @@ test.describe('ABS Audiobook → Local Player (Android App / Mobile)', () => {
     }
   });
 
-  test('Local Player transport controls work on mobile', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('Web Player transport controls work on mobile', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
@@ -689,7 +689,7 @@ test.describe('ABS Audiobook → Local Player (Android App / Mobile)', () => {
   });
 });
 
-test.describe('MA Music → Local Player (Android App / Mobile)', () => {
+test.describe('MA Music → Web Player (Android App / Mobile)', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test.beforeEach(async ({ page }) => {
@@ -699,8 +699,8 @@ test.describe('MA Music → Local Player (Android App / Mobile)', () => {
     if (!ok) test.skip();
   });
 
-  test('MA music plays via Local Player on mobile viewport', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('MA music plays via Web Player on mobile viewport', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
@@ -735,7 +735,7 @@ test.describe('MA Music → Local Player (Android App / Mobile)', () => {
       test.skip();
     }
 
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
@@ -845,7 +845,7 @@ test.describe('Playback Controls — Device', () => {
   });
 });
 
-test.describe('Playback Controls — Local Player', () => {
+test.describe('Playback Controls — Web Player', () => {
   test.beforeEach(async ({ page }) => {
     const logged = await loginAsAdmin(page);
     if (!logged) test.skip();
@@ -853,8 +853,8 @@ test.describe('Playback Controls — Local Player', () => {
     if (!ok) test.skip();
   });
 
-  test('volume slider works in Local Player overlay', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('volume slider works in Web Player overlay', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
@@ -892,8 +892,8 @@ test.describe('Playback Controls — Local Player', () => {
     }
   });
 
-  test('skip forward/back buttons are present in Local Player', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('skip forward/back buttons are present in Web Player', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);
@@ -921,8 +921,8 @@ test.describe('Playback Controls — Local Player', () => {
     expect(count).toBe(3);
   });
 
-  test('stop playback button closes Local Player', async ({ page }) => {
-    const localPlayerCard = page.locator('button:has-text("Local Player")').first();
+  test('stop playback button closes Web Player', async ({ page }) => {
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
     await page.waitForTimeout(1000);

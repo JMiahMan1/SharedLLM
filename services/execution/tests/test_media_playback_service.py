@@ -62,7 +62,7 @@ async def test_sync_local_and_status(mocker):
     
     active = status_res.detail.get("active")
     assert active is not None
-    assert active["entity_id"] == "local_player"
+    assert active["entity_id"] == "web_player"
     assert active["media_title"] == "Yesterday"
     assert active["media_artist"] == "The Beatles"
     assert active["position"] == 10.5
