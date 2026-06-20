@@ -9,7 +9,6 @@ ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
 COPY services/ /app/services/
-COPY services/control_plane/ /app/
 EXPOSE 8008
 ENV PYTHONUNBUFFERED=1
 
@@ -30,4 +29,4 @@ RUN wget -q https://github.com/docker/compose/releases/latest/download/docker-co
 RUN curl -fsSL https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl -o /usr/local/bin/kubectl && \
     chmod +x /usr/local/bin/kubectl
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8008"]
+CMD ["uvicorn", "services.control_plane.main:app", "--host", "0.0.0.0", "--port", "8008"]
