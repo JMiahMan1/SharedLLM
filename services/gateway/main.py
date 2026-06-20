@@ -5345,11 +5345,19 @@ async def stream_music_assistant(uri: str, request: Request):
         try:
             # Generate session_id for MA stream URL construction
             session_id = str(_uuid.uuid4())
+            # Convert ABS book IDs to MA-compatible URIs
+            import re as _re
+            ma_uri = uri
+            if not _re.match(r'^[a-z]+://', uri):
+                # URI has no scheme - check if it looks like an ABS book ID (UUID)
+                if _re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', uri, _re.IGNORECASE):
+                    ma_uri = f"library://audiobookshelf/book/{uri}"
+                    log.info(f"[stream/ma] Detected ABS book ID, converted to MA URI: {ma_uri}")
             # Send play_media command with custom_data containing session_id
-            log.info(f"[stream/ma] Sending play_media for uri='{uri}' on player='{target_player_id}' (session_id={session_id})")
+            log.info(f"[stream/ma] Sending play_media for uri='{ma_uri}' on player='{target_player_id}' (session_id={session_id})")
             play_media_response = await ma_client.send_command(
                 "player_queues/play_media",
-                {"queue_id": target_player_id, "media": uri, "custom_data": {"session_id": session_id}},
+                {"queue_id": target_player_id, "media": ma_uri, "custom_data": {"session_id": session_id}},
             )
             log.info(f"[stream/ma] play_media response: {play_media_response}")
 

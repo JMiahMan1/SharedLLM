@@ -1284,9 +1284,8 @@ const Media = () => {
     const tokenParam = apiToken ? `token=${encodeURIComponent(apiToken)}` : '';
 
     if (source === 'abs') {
-      // ABS stream URL already contains token — proxy works fine as direct <audio src>
-      const absUrl = `/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`;
-      setLocalStreamUrl(absUrl);
+      // Route ABS books through MA streaming (ABS is integrated into MA)
+      setLocalStreamUrl(`/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`);
     } else if (source === 'ma') {
       setLocalStreamUrl(`/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`);
     }
