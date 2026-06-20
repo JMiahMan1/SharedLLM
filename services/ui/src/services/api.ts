@@ -1182,12 +1182,12 @@ export const api = {
   },
 
   async getDeviceStates(domains?: string[]): Promise<DeviceEntry[]> {
-    const params = new URLSearchParams();
-    if (domains && domains.length > 0) {
-      params.set('domain', domains.join(','));
-    }
-    const query = params.toString();
-    const resp = await apiClient.post(`/execute/entity/search${query ? `?${query}` : ''}`, { query: '', domain: null, area: null, state: null });
+    const resp = await apiClient.post('/execute/entity/search', {
+      query: '',
+      domain: domains && domains.length > 0 ? domains.join(',') : null,
+      area: null,
+      state: null,
+    });
     return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string }) => ({
       entity_id: e.entity_id,
       friendly_name: e.friendly_name,

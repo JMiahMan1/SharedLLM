@@ -1382,8 +1382,11 @@ async def execute_entity_search(req: EntitySearchRequest):
         current_state = state.get("state", "")
         
         # Apply filters
-        if req.domain and not eid.startswith(f"{req.domain}."):
-            continue
+        if req.domain:
+            allowed_domains = [d.strip() for d in req.domain.split(',') if d.strip()]
+            entity_domain = eid.split('.')[0] if '.' in eid else ''
+            if allowed_domains and entity_domain not in allowed_domains:
+                continue
         if req.area and req.area.lower() not in area.lower():
             continue
         if req.state and req.state.lower() != current_state.lower():

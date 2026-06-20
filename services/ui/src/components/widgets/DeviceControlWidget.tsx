@@ -61,6 +61,8 @@ const DeviceControlWidget = () => {
  
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['light', 'switch', 'media_player']));
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [domainFilters, setDomainFilters] = useState<Set<string>>(new Set(['light', 'switch', 'media_player', 'cover', 'climate', 'lock', 'fan']));
+  const [showFilters, setShowFilters] = useState(false);
 
   const sort_mode = useWidgetStore((s) => s.userWidgets['device_control']?.sort_mode);
 
@@ -128,7 +130,7 @@ const DeviceControlWidget = () => {
   );
 
   const groupedDevices = useMemo(() => {
-    const list = [...devices];
+    const list = [...devices].filter((d) => domainFilters.has(d.domain || ''));
 
     if (sort_mode === 'favorites') {
       list.sort((a, b) => (b.isFavorite ? 1 : 0) - (a.isFavorite ? 1 : 0));
@@ -151,19 +153,41 @@ const DeviceControlWidget = () => {
       result.push({ domain, label: getDomainLabel(domain), devices: devs });
     }
     return result.sort((a, b) => a.label.localeCompare(b.label));
-  }, [devices, sort_mode]);
+  }, [devices, sort_mode, domainFilters]);
 
   const toggleGroup = useCallback((domain: string) => {
-    setExpandedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(domain)) {
-        next.delete(domain);
-      } else {
-        next.add(domain);
-      }
-      return next;
-    });
-  }, []);
+     setExpandedGroups((prev) => {
+       const next = new Set(prev);
+       if (next.has(domain)) {
+         next.delete(domain);
+       } else {
+         next.add(domain);
+       }
+       return next;
+     });
+   }, []);
+
+   const toggleDomainFilter = useCallback((domain: string) => {
+     setDomainFilters((prev) => {
+       const next = new Set(prev);
+       if (next.has(domain)) {
+         next.delete(domain);
+       } else {
+         next.add(domain);
+       }
+       return next;
+     });
+   }, []);
+
+   const toggleAllDomains = useCallback(() => {
+     const allDomains = ['light', 'switch', 'media_player', 'cover', 'climate', 'lock', 'fan'];
+     const allSelected = allDomains.every(d => domainFilters.has(d));
+     if (allSelected) {
+       setDomainFilters(new Set());
+     } else {
+       setDomainFilters(new Set(allDomains));
+     }
+   }, [domainFilters]);
 
   const activeCount = devices.filter((d) => isActive(d.state)).length;
 
@@ -186,7 +210,7 @@ const DeviceControlWidget = () => {
         </div>
       </div>
 
-      <div className="flex gap-1 mb-3">
+      <div className="flex gap-1 mb-3 flex-wrap">
         {(Object.keys(SortModeButtons) as DeviceSortMode[]).map((mode) => {
           const btn = SortModeButtons[mode];
           const active = sort_mode === mode;
@@ -206,6 +230,34 @@ const DeviceControlWidget = () => {
             </button>
           );
         })}
+      </div>
+
+      <div className="flex gap-1 mb-3 flex-wrap items-center">
+        <button
+          onClick={() => setShowFilters(!showFilters)}
+          className="text-xs px-2 py-1 rounded-md bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors"
+        >
+          {showFilters ? '▼' : '▸'} Filter Types
+        </button>
+        <button
+          onClick={toggleAllDomains}
+          className="text-xs px-2 py-1 rounded-md bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-700/50 transition-colors"
+        >
+          {domainFilters.size === 0 ? 'All' : domainFilters.size === 7 ? 'None' : `${domainFilters.size}/7`}
+        </button>
+        {showFilters && ['light', 'switch', 'media_player', 'cover', 'climate', 'lock', 'fan', 'sensor', 'camera', 'vacuum'].map((domain) => (
+          <button
+            key={domain}
+            onClick={() => toggleDomainFilter(domain)}
+            className={`text-xs px-2 py-1 rounded-md transition-colors ${
+              domainFilters.has(domain)
+                ? 'bg-indigo-600 text-white'
+                : 'bg-slate-800/30 text-slate-500 hover:text-slate-300 hover:bg-slate-700/30'
+            }`}
+          >
+            {getDeviceIcon(domain)} {getDomainLabel(domain)}
+          </button>
+        ))}
       </div>
 
       {error && (
