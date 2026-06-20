@@ -7,6 +7,7 @@ ENV GIT_SHA=${GIT_SHA}
 ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
+ENV PYTHONPATH=/app
 # --- Privilege Drop: create dedicated sharedllm user ---
 ARG PUID=1000
 ARG PGID=1000
@@ -16,6 +17,7 @@ RUN groupadd -g ${PGID} sharedllm || true \
     && mkdir -p /home/sharedllm/.cache/huggingface /home/sharedllm/.cache/qdrant \
     && chown -R ${PUID}:${PGID} /home/sharedllm
 ENV HOME=/home/sharedllm
+COPY services/ /app/services/
 COPY services/gateway/ /app/
 EXPOSE 11435
 ENV PYTHONUNBUFFERED=1
