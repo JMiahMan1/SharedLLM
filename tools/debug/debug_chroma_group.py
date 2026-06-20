@@ -31,8 +31,6 @@ async def debug_group_lookup():
     # Actually, running this effectively requires the DB to be populated.
     # The ChromaDB is persistent? Yes.
     
-    # from app.logic.rag.chroma import ChromaDBClient  <-- Invalid
-    
     # Re-instantiate client to read existing DB
     import chromadb
     client = chromadb.PersistentClient(path=CHROMA_DB_PATH)  # type: ignore[attr-defined]

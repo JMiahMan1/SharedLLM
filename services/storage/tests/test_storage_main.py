@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 
 from services.storage.main import app, health  # noqa: E402
-# noqa: E402
 from services.storage.providers import StorageProvider  # noqa: E402
 
 client = TestClient(app)

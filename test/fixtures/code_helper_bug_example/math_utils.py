@@ -12,10 +12,10 @@ def parse_port(value: str | None, default: int = 8000) -> int:
     if not cleaned:
         return default
 
-    # BUG: values like "11435\n" or " 8002 " should parse, but decimal-only
+    # BUG: values like "11435\\n" or " 8002 " should parse, but decimal-only
     # validation is being applied too late and the function accidentally
     # returns the default for valid numeric strings.
-    if cleaned.isdigit():
+    if not cleaned.isdigit():
         return default
 
     port = int(cleaned)
