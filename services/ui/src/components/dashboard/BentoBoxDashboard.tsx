@@ -80,6 +80,20 @@ const BentoBoxDashboard = () => {
             const LazyWidget = LazyWidgets[widget.def.key];
             const sizeClass = SIZE_CLASSES[widget.userSettings.size] || SIZE_CLASSES.medium;
 
+            const settingsButton = (
+              <WidgetContextMenu
+                widgetKey={widget.def.key as never}
+                userSettings={widget.userSettings}
+                def={widget.def}
+                onToggleVisibility={handleToggleVisibility}
+                onTogglePin={handleTogglePin}
+                onResize={handleResize}
+                onReorder={handleReorder}
+                totalWidgets={totalWidgets}
+                onRemove={handleRemove}
+              />
+            );
+
             const renderWidget = () => {
               if (!LazyWidget) return null;
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -92,6 +106,7 @@ const BentoBoxDashboard = () => {
                     <WidgetComponent
                       userSettings={widget.userSettings as UserWidgetSettings}
                       onTogglePin={() => handleTogglePin(widget.def.key)}
+                      settingsButton={settingsButton}
                     />
                   );
                 case 'active_media':
@@ -100,10 +115,15 @@ const BentoBoxDashboard = () => {
                       userSettings={widget.userSettings as UserWidgetSettings}
                       onTogglePin={() => handleTogglePin(widget.def.key)}
                       onMediaStop={() => {}}
+                      settingsButton={settingsButton}
                     />
                   );
                 default:
-                  return <WidgetComponent />;
+                  return (
+                    <WidgetComponent
+                      settingsButton={settingsButton}
+                    />
+                  );
               }
             };
 
@@ -113,17 +133,6 @@ const BentoBoxDashboard = () => {
                 className={`${sizeClass.gridCol} ${sizeClass.gridRow}`}
               >
                 <div className="h-full relative">
-                  <WidgetContextMenu
-                    widgetKey={widget.def.key as never}
-                    userSettings={widget.userSettings}
-                    def={widget.def}
-                    onToggleVisibility={handleToggleVisibility}
-                    onTogglePin={handleTogglePin}
-                    onResize={handleResize}
-                    onReorder={handleReorder}
-                    totalWidgets={totalWidgets}
-                    onRemove={handleRemove}
-                  />
                   <Suspense fallback={<WidgetSkeleton />}>
                     {renderWidget()}
                   </Suspense>

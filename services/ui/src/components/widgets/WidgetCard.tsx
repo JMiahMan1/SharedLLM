@@ -1,4 +1,5 @@
-import React, { Component, type ReactNode } from 'react';
+import React, { Component, useState, useEffect, type ReactNode } from 'react';
+import { Maximize2, Minimize2 } from 'lucide-react';
 
 // Error Boundary implementation
 interface ErrorBoundaryProps {
@@ -39,7 +40,11 @@ interface WidgetCardProps {
   error?: Error | string | null;
   onRetry?: () => void;
   actions?: ReactNode;
+  icon?: ReactNode;
+  settingsButton?: ReactNode;
+  isExpandable?: boolean;
   children: ReactNode;
+  expandedChildren?: ReactNode;
 }
 
 export const WidgetCard: React.FC<WidgetCardProps> = ({
@@ -48,8 +53,26 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
   error = null,
   onRetry,
   actions,
+  icon,
+  settingsButton,
+  isExpandable = false,
   children,
+  expandedChildren,
 }) => {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Prevent background scrolling when widget is expanded
+  useEffect(() => {
+    if (isExpanded) {
+      document.body.classList.add('overflow-hidden');
+    } else {
+      document.body.classList.remove('overflow-hidden');
+    }
+    return () => {
+      document.body.classList.remove('overflow-hidden');
+    };
+  }, [isExpanded]);
+
   const fallbackUI = (
     <div className="flex flex-col items-center justify-center p-6 text-center h-full bg-red-950/20 border border-red-500/20 rounded-2xl">
       <p className="text-sm font-semibold text-red-400 mb-2">Widget Crashed</p>
@@ -65,14 +88,32 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
     </div>
   );
 
-  return (
-    <div className="glass-panel overflow-hidden p-5 flex flex-col h-full w-full select-none relative transition-all duration-300 hover:border-white/10">
+  const cardContent = (
+    <>
       <div className="flex items-center justify-between mb-4 shrink-0">
-        <h4 className="text-sm font-bold text-white tracking-wide truncate">{title}</h4>
-        {actions && <div className="flex items-center gap-2">{actions}</div>}
+        <div className="flex items-center gap-2 min-w-0">
+          {icon && <span className="text-slate-400 shrink-0 flex items-center justify-center">{icon}</span>}
+          <h4 className="text-sm font-bold text-white tracking-wide truncate">{title}</h4>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0 relative z-20">
+          {actions}
+          {isExpandable && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsExpanded(!isExpanded);
+              }}
+              className="text-slate-400 hover:text-white transition-colors p-1 rounded hover:bg-white/5"
+              title={isExpanded ? 'Collapse' : 'Expand'}
+            >
+              {isExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+            </button>
+          )}
+          {settingsButton}
+        </div>
       </div>
 
-      <div className="flex-1 min-h-0 relative">
+      <div className="flex-1 min-h-0 relative flex flex-col">
         <WidgetErrorBoundary fallback={fallbackUI}>
           {isLoading ? (
             <div className="flex flex-col gap-3 h-full justify-center">
@@ -95,10 +136,28 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
               )}
             </div>
           ) : (
-            children
+            <div className="flex-1 min-h-0 overflow-y-auto">
+              {isExpanded && expandedChildren ? expandedChildren : children}
+            </div>
           )}
         </WidgetErrorBoundary>
       </div>
+    </>
+  );
+
+  if (isExpanded) {
+    return (
+      <div className="fixed inset-0 z-50 bg-slate-950/98 p-6 md:p-8 flex flex-col backdrop-blur-md animate-in fade-in zoom-in duration-200">
+        <div className="max-w-7xl mx-auto w-full h-full flex flex-col">
+          {cardContent}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="glass-panel overflow-hidden p-5 flex flex-col h-full w-full select-none relative transition-all duration-300 hover:border-white/10">
+      {cardContent}
     </div>
   );
 };

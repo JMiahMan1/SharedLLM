@@ -135,7 +135,7 @@ function timedOut(): boolean {
   return Date.now() - state.lastUpdate >= TIMEOUT_DURATION_MS;
 }
 
-async function isAnotherTabActive(): Promise<boolean> {
+export async function _isAnotherTabActive(): Promise<boolean> {
   return new Promise((resolve) => {
     const timeout = window.setTimeout(() => {
       activePlayerChecks = activePlayerChecks.filter((c) => c.timeout !== timeout);
@@ -153,7 +153,7 @@ function genPriority(): string {
   return (interacted ? '1' : '0') + (visible ? '1' : '0') + uid;
 }
 
-async function canTakeControl(): Promise<boolean> {
+export async function _canTakeControl(): Promise<boolean> {
   const priority = genPriority();
   if (highestPriority !== undefined) {
     highestPriority = highestPriority > priority ? highestPriority : priority;
@@ -219,11 +219,12 @@ export function installPageHideListener(): void {
 
 export function subscribe(fn: (data: unknown) => void): () => void {
   const handler = (event: MessageEvent) => fn(event.data);
-  // We can't override bc.onmessage, but we expose bc for direct use
-  // This is a simplified approach — for full subscription support the caller
-  // should use the provided hooks instead
-  unsubCallbacks.push(() => {}); // placeholder
-  return () => {};
+  bc.addEventListener('message', handler);
+  const unsub = () => {
+    bc.removeEventListener('message', handler);
+  };
+  unsubCallbacks.push(unsub);
+  return unsub;
 }
 
 // Expose the channel directly for subscribe/unsubscribe patterns
