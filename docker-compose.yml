@@ -177,6 +177,7 @@ services:
     environment:
       - RAG_SVC_URL=http://rag:8004
       - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
     depends_on:
       rag:
         condition: service_healthy
