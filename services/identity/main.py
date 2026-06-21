@@ -71,6 +71,8 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE user ADD COLUMN github_user VARCHAR"))
             if "github_token_enc" not in columns:
                 conn.execute(text("ALTER TABLE user ADD COLUMN github_token_enc VARCHAR"))
+            if "huggingface_token_enc" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN huggingface_token_enc VARCHAR"))
             if "gitlab_url" not in columns:
                 conn.execute(text("ALTER TABLE user ADD COLUMN gitlab_url VARCHAR"))
             if "gitlab_user" not in columns:
@@ -397,6 +399,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         git_url=user.git_url,
         git_user=user.git_user,
         git_token=decrypt(user.git_token_enc) if user.git_token_enc else None,
+        huggingface_token=decrypt(user.huggingface_token_enc) if user.huggingface_token_enc else None,
         skylight_url=sys_user.skylight_url if sys_user else None,
         skylight_email=sys_user.skylight_email if sys_user else user.username,
         skylight_pass=decrypt(sys_user.skylight_pass_enc) if (sys_user and sys_user.skylight_pass_enc) else None,
@@ -460,6 +463,7 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
         "audiobookshelf_pass": "audiobookshelf_pass_enc",
         "mass_token": "mass_token_enc",
         "git_token": "git_token_enc",
+        "huggingface_token": "huggingface_token_enc",
         "skylight_pass": "skylight_pass_enc"
     }
     
@@ -507,6 +511,7 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         "audiobookshelf_pass": "audiobookshelf_pass_enc",
         "mass_token": "mass_token_enc",
         "git_token": "git_token_enc",
+        "huggingface_token": "huggingface_token_enc",
         "skylight_pass": "skylight_pass_enc"
     }
     
@@ -587,6 +592,7 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
         audiobookshelf_pass_enc=encrypt(_coerce(body.audiobookshelf_pass)) if _coerce(body.audiobookshelf_pass) else None,
         mass_url=_coerce(body.mass_url),
         mass_token_enc=encrypt(_coerce(body.mass_token)) if _coerce(body.mass_token) else None,
+        huggingface_token_enc=encrypt(_coerce(body.huggingface_token)) if _coerce(body.huggingface_token) else None,
         skylight_url=_coerce(body.skylight_url),
         skylight_email=_coerce(body.skylight_email),
         skylight_pass_enc=encrypt(_coerce(body.skylight_pass)) if _coerce(body.skylight_pass) else None,

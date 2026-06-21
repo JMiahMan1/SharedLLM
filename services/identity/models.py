@@ -46,6 +46,7 @@ class User(SQLModel, table=True):
     mass_token_enc: Optional[str] = None
     skylight_pass_enc: Optional[str] = None
     git_token_enc: Optional[str] = None
+    huggingface_token_enc: Optional[str] = None
     
     # Biometric voice profile (stored as a JSON string of embeddings)
     voice_fingerprint: Optional[str] = None
@@ -184,6 +185,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "timezone", "value": "America/Phoenix", "description": "System timezone"},
     {"key": "embedding_model", "value": "nomic-ai/nomic-embed-text-v1.5", "description": "Embedding model for RAG"},
     {"key": "phrasebook_path", "value": "", "description": "Path to phrasebook file"},
+    {"key": "huggingface_token", "value": "", "description": "Hugging Face Hub API Token (read-access, for private models and fast downloads)"},
  
     # --- DNS MAPPINGS (multi-IP fallback support) ---
     # Format: {"hostname": ["primary_ip", "fallback_ip", ...]}

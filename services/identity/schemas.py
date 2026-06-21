@@ -45,6 +45,7 @@ class ResolvedCredentials(BaseModel):
     git_url: Optional[str] = None
     git_user: Optional[str] = None
     git_token: Optional[str] = None
+    huggingface_token: Optional[str] = None
     skylight_url: Optional[str] = None
     skylight_email: Optional[str] = None
     skylight_pass: Optional[str] = None
@@ -77,6 +78,7 @@ class UserCreate(BaseModel):
     audiobookshelf_pass: Optional[str] = None
     mass_url: Optional[str] = None
     mass_token: Optional[str] = None
+    huggingface_token: Optional[str] = None
     skylight_url: Optional[str] = None
     skylight_email: Optional[str] = None
     skylight_pass: Optional[str] = None
@@ -105,6 +107,7 @@ class UserUpdate(BaseModel):
     git_url: Optional[str] = None
     git_user: Optional[str] = None
     git_token: Optional[str] = None
+    huggingface_token: Optional[str] = None
     skylight_url: Optional[str] = None
     skylight_email: Optional[str] = None
     skylight_pass: Optional[str] = None
