@@ -25,6 +25,7 @@
     "@capacitor/preferences": "^8.0.1",
     "@capawesome/capacitor-background-task": "^8.0.2",
     "@monaco-editor/react": "^4.7.0",
+    "@sendspin/sendspin-js": "^3.2.0",
     "@tailwindcss/vite": "^4.2.4",
     "@tanstack/react-query": "^5.100.9",
     "axios": "^1.16.0",

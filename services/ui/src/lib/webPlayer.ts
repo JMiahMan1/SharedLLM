@@ -41,7 +41,7 @@ const defaultState: WebPlayerState = {
 
 /* ── Persistence helpers ───────────────────────────────────────────────── */
 
-const STORAGE_KEY = 'jarvis_web_player_id';
+const STORAGE_KEY = 'sendspin_webplayer_id';
 
 export function getPlayerId(): string | null {
   try {

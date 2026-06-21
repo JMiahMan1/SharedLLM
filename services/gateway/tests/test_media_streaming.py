@@ -328,6 +328,9 @@ async def test_stream_ma_mutes_and_pauses_player_for_browser_only(monkeypatch, c
     unified_httpx.build_request = MagicMock(return_value=MagicMock())
 
     class MockAsyncClient:
+        def __init__(self, **kwargs):
+            pass  # Accept all httpx.AsyncClient kwargs (timeout, follow_redirects, etc.)
+
         async def __aenter__(self):
             return unified_httpx
 
