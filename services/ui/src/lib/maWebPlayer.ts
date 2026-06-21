@@ -275,28 +275,27 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       audio.crossOrigin = 'anonymous';
       audioRef.current = audio;
 
-      // 4. Create SendspinPlayer
-      const player = new SendspinPlayer({
-        audioElement: audio,
-        playerId,
-        baseUrl: 'ws://localhost',
-        webSocket: sendspinWs,
-        codecs: ['opus', 'flac'],
-        onStateChange: (newState) => {
-          setStateLocal(s => ({
-            ...s,
-            isPlaying: newState === 'playing',
-            playerState: newState,
-            error: null,
-          }));
-          onStateChange?.({
-            ...s,
-            isPlaying: newState === 'playing',
-            playerState: newState,
-            error: null,
-          });
-        },
-      });
+        // 4. Create SendspinPlayer
+        const player = new SendspinPlayer({
+          audioElement: audio,
+          playerId,
+          webSocket: sendspinWs,
+          codecs: ['opus', 'flac'],
+          onStateChange: (newState) => {
+            setStateLocal(s => ({
+              ...s,
+              isPlaying: newState === 'playing',
+              playerState: newState,
+              error: null,
+            }));
+            onStateChange?.({
+              ...s,
+              isPlaying: newState === 'playing',
+              playerState: newState,
+              error: null,
+            });
+          },
+        });
 
       playerRef.current = player;
 
