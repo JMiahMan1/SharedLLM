@@ -773,15 +773,7 @@ const Media = () => {
   const [localDuration, setLocalDuration] = useState(0);
   const localProgressTimerRef = useRef<number | null>(null);
 
-  // Debug state for troubleshooting
-  const [audioDebug, setAudioDebug] = useState<{
-    events: Array<{ time: string; type: string; message?: string; code?: number }>;
-    streamUrl: string | null;
-    audioState: string;
-  }>({ events: [], streamUrl: null, audioState: 'idle' });
-  const [showDebug, setShowDebug] = useState(false);
-
-    // Music Assistant metadata & favorites state
+  // Music Assistant metadata & favorites state
   const [detailedMetadata, setDetailedMetadata] = useState<TrackDetail | null>(null);
 
   const activeUri = useMemo(() => {
@@ -859,17 +851,17 @@ const Media = () => {
 
   // Sync volume with sendspin player
   useEffect(() => {
-    if (maPlayer.connected) {
+    if (maPlayer.isConnected) {
       maPlayer.setVolume(localVolume / 100);
     }
-  }, [localVolume, maPlayer.connected, maPlayer]);
+  }, [localVolume, maPlayer.isConnected, maPlayer]);
 
   // Sync mute with sendspin player
   useEffect(() => {
-    if (maPlayer.connected) {
+    if (maPlayer.isConnected) {
       maPlayer.setMuted(localMuted);
     }
-  }, [localMuted, maPlayer.connected, maPlayer]);
+  }, [localMuted, maPlayer.isConnected, maPlayer]);
 
   // Handle local playback progress tracking
   useEffect(() => {
@@ -1055,7 +1047,7 @@ const Media = () => {
               const backendPlaying = active.state === 'playing';
               if (backendPlaying !== localIsPlaying) {
                 setLocalIsPlaying(backendPlaying);
-                if (maPlayer.connected) {
+                if (maPlayer.isConnected) {
                   if (backendPlaying) {
                     maPlayer.cmdPlay().catch(() => {});
                   } else {
@@ -1613,54 +1605,6 @@ const Media = () => {
         localMode={localMode}
       />
 
-      {/* Debug Panel - Audio Events */}
-      <div className="mt-6">
-        <button
-          onClick={() => setShowDebug(!showDebug)}
-          className="text-xs text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1"
-        >
-          {showDebug ? '▼' : '▶'} Audio Debug ({audioDebug.events.length} events)
-        </button>
-        {showDebug && (
-          <div className="mt-2 glass-panel rounded-xl p-4 max-h-96 overflow-y-auto">
-            <div className="flex items-center justify-between mb-3">
-              <span className="text-xs text-slate-400">
-                Stream URL: {audioDebug.streamUrl ? audioDebug.streamUrl.substring(0, 60) + '...' : 'None'}
-              </span>
-              <button
-                onClick={() => setAudioDebug(prev => ({ ...prev, events: [] }))}
-                className="text-xs text-red-400 hover:text-red-300"
-              >
-                Clear
-              </button>
-            </div>
-            {audioDebug.events.length === 0 ? (
-              <p className="text-xs text-slate-500 text-center py-4">No audio events yet. Play a track to see debugging info.</p>
-            ) : (
-              <div className="space-y-1">
-                {[...audioDebug.events].reverse().map((evt, i) => (
-                  <div
-                    key={i}
-                    className={`text-xs font-mono py-1 px-2 rounded ${
-                      evt.type === 'ERROR'
-                        ? 'bg-red-500/10 text-red-400'
-                        : evt.type === 'PLAYING' || evt.type === 'PLAY' || evt.type === 'CANPLAY' || evt.type === 'CANPLAYTHROUGH'
-                        ? 'bg-green-500/10 text-green-400'
-                        : evt.type === 'WAITING' || evt.type === 'STALLED'
-                        ? 'bg-yellow-500/10 text-yellow-400'
-                        : 'text-slate-300'
-                    }`}
-                  >
-                    <span className="text-slate-500">{evt.time.split('T')[1]?.split('.')[0] || evt.time}</span>{' '}
-                    <span className="font-bold">{evt.type}</span>
-                    {evt.message && <span className="ml-1">— {evt.message}</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
     </div>
   );
 };
