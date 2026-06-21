@@ -77,6 +77,7 @@ def _parse_env_users() -> dict:
         "skylight_url": os.getenv("SKYLIGHT_URL"),
         "skylight_email": os.getenv("SKYLIGHT_EMAIL"),
         "skylight_pass": os.getenv("SKYLIGHT_PASS"),
+        "huggingface_token": os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_TOKEN"),
     }
     users["default"] = default
 
@@ -198,6 +199,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 audiobookshelf_pass_enc=encrypt(udata.get("audiobookshelf_pass")),
                 mass_token_enc=encrypt(udata.get("mass_token")),
                 skylight_pass_enc=encrypt(udata.get("skylight_pass")),
+                huggingface_token_enc=encrypt(udata.get("huggingface_token")),
             )
             session.add(user)
             count += 1
@@ -243,6 +245,8 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         "HA_DEFAULT_USER": "ha_default_user",
         "SKYLIGHT_URL": "skylight_url",
         "SKYLIGHT_EMAIL": "skylight_email",
+        "HF_TOKEN": "huggingface_token",
+        "HUGGING_FACE_TOKEN": "huggingface_token",
     }
     for env_key, global_key in env_to_global.items():
         env_val = os.getenv(env_key)
