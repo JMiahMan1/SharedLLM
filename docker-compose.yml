@@ -5,7 +5,7 @@ networks:
 
 services:
   dns-sync:
-    image: ghcr.io/jmiahman1/sharedllm-dns-sync:latest
+    image: ghcr.io/jmiahman1/sharedllm-dns_sync:latest
     build:
       context: .
       dockerfile: services/dns_sync/Dockerfile
@@ -162,7 +162,7 @@ services:
       - sharedllm
 
   capabilities-sync:
-    image: ghcr.io/jmiahman1/sharedllm-capabilities-sync:latest
+    image: ghcr.io/jmiahman1/sharedllm-rag:latest
     build:
       context: .
       dockerfile: services/rag/Dockerfile
@@ -172,6 +172,8 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_capabilities_sync
     working_dir: /app
+    volumes:
+      - ./scripts:/app/scripts:ro
     environment:
       - RAG_SVC_URL=http://rag:8004
       - INTERNAL_SECRET=${INTERNAL_SECRET}
