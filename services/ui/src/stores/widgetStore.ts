@@ -76,6 +76,7 @@ interface WidgetState {
   getActiveWidgets: (capabilities: CapabilityPayload) => WidgetInstance[];
   getVisibleWidgets: () => WidgetInstance[];
   updateWidgetConfig: (id: string, config: Record<string, unknown>) => Promise<void>;
+  togglePinnedDevice: (widgetKey: WidgetKey, deviceId: string) => Promise<void>;
 }
 
 const defaultCapabilities: CapabilityPayload = {
@@ -337,6 +338,22 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
           item.id === id ? { ...item, config: current.config || {} } : item
         ),
       });
+    }
+  },
+
+  togglePinnedDevice: async (widgetKey: WidgetKey, deviceId: string) => {
+    const current = get().userWidgets[widgetKey];
+    if (!current) return;
+    const pinned = current.pinned_devices || [];
+    const updatedPinned = pinned.includes(deviceId)
+      ? pinned.filter((id) => id !== deviceId)
+      : [...pinned, deviceId];
+    const updated = { ...current, pinned_devices: updatedPinned, updated_at: Date.now() };
+    set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
+    try {
+      await api.updateWidgetSettings(widgetKey, { pinned_devices: updatedPinned });
+    } catch {
+      set({ userWidgets: { ...get().userWidgets, [widgetKey]: current } });
     }
   },
 }));

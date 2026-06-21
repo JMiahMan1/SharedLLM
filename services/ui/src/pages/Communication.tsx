@@ -417,19 +417,19 @@ const Communication = () => {
             </div>
           </div>
 
-          <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_140px_auto]">
+          <div className="mb-4 flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               value={timerTitle}
               onChange={(event) => setTimerTitle(event.target.value)}
-              className="glass-input"
+              className="glass-input flex-1 min-w-0"
               placeholder="Timer name"
             />
             <input
               type="text"
               value={timerDuration}
               onChange={(event) => setTimerDuration(event.target.value)}
-              className="glass-input"
+              className="glass-input w-full sm:w-36 shrink-0"
               placeholder="Duration or time expression"
             />
             <button
@@ -441,7 +441,7 @@ const Communication = () => {
                 createTimerMutation.mutate();
                 trigger('success');
               }}
-              className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+              className="glass-button shrink-0 px-4 py-3 text-[10px] font-black uppercase tracking-widest"
             >
               <Plus size={14} />
               Add Timer
@@ -749,12 +749,12 @@ const Communication = () => {
             </label>
           </div>
 
-          <div className="mt-4 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_auto]">
+          <div className="mt-4 flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               value={eventForm.start}
               onChange={(e) => setEventForm({ ...eventForm, start: e.target.value })}
-              className="glass-input"
+              className="glass-input flex-1 min-w-0"
               placeholder="Start time (e.g. tomorrow at 2pm)"
             />
             <button
@@ -766,7 +766,7 @@ const Communication = () => {
                 calendarMutation.mutate();
                 trigger('success');
               }}
-              className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+              className="glass-button shrink-0 px-4 py-3 text-[10px] font-black uppercase tracking-widest"
             >
               <Plus size={14} />
               Add Event

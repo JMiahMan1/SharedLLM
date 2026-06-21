@@ -89,7 +89,11 @@ const formatRelativeTime = (date: Date): string => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-const UpcomingEventsWidget = () => {
+interface UpcomingEventsWidgetProps {
+  settingsButton?: React.ReactNode;
+}
+
+const UpcomingEventsWidget = ({ settingsButton }: UpcomingEventsWidgetProps) => {
   const fetchEvents = async () => {
     const result = await api.getCalendarEvents() as { status: string; message?: string; events?: CalendarEvent[] };
     if (result.status !== 'SUCCESS') {
@@ -118,13 +122,91 @@ const UpcomingEventsWidget = () => {
     300000 // 5 minutes
   );
 
+  const eventList = (isExpanded: boolean) => (
+    <div className={isExpanded ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" : "space-y-3 max-h-64 overflow-y-auto pr-1"}>
+      {events.map((event, index) => {
+        const relativeTime = formatRelativeTime(new Date(event.start_time));
+        const isVerySoon = event.isVerySoon;
+
+        return (
+          <div
+            key={`${event.summary}-${index}`}
+            className={`p-4 rounded-xl border transition-all ${
+              isVerySoon
+                ? 'bg-amber-500/10 border-amber-500/30 shadow-lg shadow-amber-500/5'
+                : 'bg-slate-900/50 border-slate-800 hover:border-slate-700/50'
+            }`}
+          >
+            <div className="flex items-start gap-4">
+              <div className="flex flex-col items-center min-w-[3.5rem] bg-slate-950/40 p-2 rounded-lg border border-white/5">
+                <span className={`text-sm font-bold ${isVerySoon ? 'text-amber-400' : 'text-purple-400'}`}>
+                  {formatTime(event.startHour, event.startMinute)}
+                </span>
+                <span className={`text-[10px] mt-0.5 ${isVerySoon ? 'text-amber-500/80' : 'text-slate-500'}`}>
+                  {relativeTime}
+                </span>
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <p className={`text-sm font-semibold truncate ${isVerySoon ? 'text-amber-300' : 'text-white'}`}>
+                  {event.summary}
+                </p>
+                {event.location && (
+                  <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                    <span>📍</span> <span className="truncate">{event.location}</span>
+                  </p>
+                )}
+                {event.end_time && (
+                  <p className="text-[10px] text-slate-600 mt-1">
+                    Ends: {new Date(event.end_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                  </p>
+                )}
+              </div>
+
+              {isVerySoon && (
+                <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full shrink-0 font-bold">
+                  Soon
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
   return (
     <WidgetCard
       title="Upcoming Events"
       isLoading={isLoading}
       error={error}
       onRetry={refetch}
+      settingsButton={settingsButton}
+      isExpandable={true}
+      icon="📅"
       actions={<span className="text-xs text-slate-400">{events.length} events</span>}
+      expandedChildren={
+        <div className="space-y-6 py-2">
+          <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-white">Calendar Details</p>
+              <p className="text-xs text-slate-500">View and manage your upcoming schedule. Connected via local system services.</p>
+            </div>
+            <button onClick={() => refetch()} className="glass-button px-4 py-2 text-xs font-bold text-indigo-400 self-start md:self-auto">
+              Sync Calendar
+            </button>
+          </div>
+          {events.length === 0 ? (
+            <div className="flex flex-col items-center justify-center text-center py-20 bg-slate-900/10 rounded-2xl border border-dashed border-slate-800">
+              <span className="text-4xl mb-4">📅</span>
+              <p className="text-sm text-slate-400">No upcoming events found</p>
+              <p className="text-xs text-slate-500">Your agenda is fully clear</p>
+            </div>
+          ) : (
+            eventList(true)
+          )}
+        </div>
+      }
     >
       {events.length === 0 ? (
         <div className="flex flex-col items-center justify-center text-center h-full">
@@ -132,49 +214,7 @@ const UpcomingEventsWidget = () => {
           <p className="text-xs text-slate-500">Your schedule is clear</p>
         </div>
       ) : (
-        <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
-          {events.map((event, index) => {
-            const relativeTime = formatRelativeTime(new Date(event.start_time));
-            const isVerySoon = event.isVerySoon;
-
-            return (
-              <div
-                key={`${event.summary}-${index}`}
-                className={`p-3 rounded-lg border transition-all ${
-                  isVerySoon
-                    ? 'bg-amber-500/10 border-amber-500/30'
-                    : 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="flex flex-col items-center min-w-[3rem]">
-                    <span className={`text-sm font-bold ${isVerySoon ? 'text-amber-400' : 'text-white'}`}>
-                      {formatTime(event.startHour, event.startMinute)}
-                    </span>
-                    <span className={`text-xs ${isVerySoon ? 'text-amber-500' : 'text-slate-500'}`}>
-                      {relativeTime}
-                    </span>
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium truncate ${isVerySoon ? 'text-amber-300' : 'text-white'}`}>
-                      {event.summary}
-                    </p>
-                    {event.location && (
-                      <p className="text-xs text-slate-500 truncate">{event.location}</p>
-                    )}
-                  </div>
-
-                  {isVerySoon && (
-                    <span className="text-xs bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full shrink-0">
-                      Soon
-                    </span>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        eventList(false)
       )}
     </WidgetCard>
   );

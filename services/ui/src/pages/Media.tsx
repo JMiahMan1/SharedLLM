@@ -1513,7 +1513,7 @@ const Media = () => {
                   state: localIsPlaying ? 'playing' : 'paused',
                   media_title: detailedTitle,
                   media_artist: detailedSubtitle,
-                  media_content_type: localTrack.type,
+                  media_type: localTrack.type,
                   volume_level: localVolume / 100,
                   is_volume_muted: localMuted,
                 }

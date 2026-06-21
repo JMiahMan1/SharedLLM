@@ -2,22 +2,19 @@ import { test, expect } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 const ADMIN_USER = 'default';
-const ADMIN_PASS = 'admin';
+const ADMIN_PASS = process.env.ADMIN_PASS || 'changeme';
 
 async function loginAsAdmin(page: import('@playwright/test').Page) {
-  await page.goto(`${UI_URL}/login`);
+  await page.goto(`${UI_URL}/login`, { waitUntil: 'domcontentloaded', timeout: 15000 });
   await page.getByPlaceholder('Enter username').fill(ADMIN_USER);
   await page.getByPlaceholder('Enter password').fill(ADMIN_PASS);
-  await page.getByRole('button', { name: /sign in/i }).click();
+  await page.getByRole('button', { name: /sign in/i }).click({ force: true });
   await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
-  await page.waitForTimeout(2000);
 }
 
 test.describe('Dashboard - Halo Banner', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('halo banner is visible', async ({ page }) => {
@@ -29,8 +26,6 @@ test.describe('Dashboard - Halo Banner', () => {
 test.describe('Dashboard - Header and Search', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('dashboard title is visible', async ({ page }) => {
@@ -85,8 +80,6 @@ test.describe('Dashboard - Header and Search', () => {
 test.describe('Dashboard - Service Status Cards', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('live service status section is visible', async ({ page }) => {
@@ -140,8 +133,6 @@ test.describe('Dashboard - Service Status Cards', () => {
 test.describe('Dashboard - Recent Logs', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('recent logs section is visible', async ({ page }) => {
@@ -162,8 +153,6 @@ test.describe('Dashboard - Recent Logs', () => {
 test.describe('Dashboard - Workspace Summary', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('workspace summary section is visible', async ({ page }) => {
@@ -179,8 +168,6 @@ test.describe('Dashboard - Workspace Summary', () => {
 test.describe('Dashboard - Settings Management', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('settings section is visible', async ({ page }) => {
@@ -204,8 +191,6 @@ test.describe('Dashboard - Settings Management', () => {
 test.describe('Dashboard - Voice Assistant', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('voice assistant overlay opens', async ({ page }) => {
@@ -220,13 +205,11 @@ test.describe('Dashboard - Voice Assistant', () => {
 test.describe('Dashboard - Bento Widgets', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/dashboard`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
   });
 
   test('widget registry loads and bento widgets are visible', async ({ page }) => {
     const widgetCards = page.locator('.glass-card');
-    await expect(widgetCards.count()).toBeGreaterThanOrEqual(1);
+    expect(await widgetCards.count()).toBeGreaterThanOrEqual(1);
   });
 
   test('device control widget loads and displays devices', async ({ page }) => {

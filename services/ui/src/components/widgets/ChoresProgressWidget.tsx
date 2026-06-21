@@ -15,7 +15,11 @@ const isChoreAssignedToUser = (chore: ChoreItem, username: string): boolean => {
   );
 };
 
-const ChoresProgressWidget = () => {
+interface ChoresProgressWidgetProps {
+  settingsButton?: React.ReactNode;
+}
+
+const ChoresProgressWidget = ({ settingsButton }: ChoresProgressWidgetProps) => {
   const { user } = useAuth();
   const [completedOverrides, setCompletedOverrides] = useState<Record<string, boolean>>({});
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
@@ -104,6 +108,9 @@ const ChoresProgressWidget = () => {
       isLoading={isLoading}
       error={error}
       onRetry={refetch}
+      settingsButton={settingsButton}
+      isExpandable={true}
+      icon="🧹"
       actions={
         <span className="text-xs text-slate-400">
           {completedCount}/{totalCount}
