@@ -18,6 +18,8 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
   const [menuPos, setMenuPos] = useState<ContextMenuPosition>({ x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
 
+  const containerClassName = props.className !== undefined ? props.className : "relative z-20";
+
   const handleRightClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -77,7 +79,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
       <div
         onContextMenu={handleRightClick}
         onTouchStart={handleLongPressStart}
-        className="absolute top-2 right-2 z-10"
+        className={containerClassName}
       >
         <button
           onClick={(e) => {
@@ -85,7 +87,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
             setMenuPos({ x: e.clientX || 0, y: e.clientY || 0 });
             setMenuOpen(true);
           }}
-          className="text-slate-500 hover:text-white transition-colors p-1"
+          className="text-slate-500 hover:text-white transition-colors p-1 rounded hover:bg-white/5"
           title="Widget options"
         >
           ⚙

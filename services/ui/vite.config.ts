@@ -45,16 +45,16 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: 'http://192.168.2.205:8080',
         changeOrigin: true,
         ws: true,
       },
       '/health': {
-        target: 'http://localhost:8080',
+        target: 'http://192.168.2.205:8080',
         changeOrigin: true,
       },
       '/v1': {
-        target: 'http://localhost:8080',
+        target: 'http://192.168.2.205:8080',
         changeOrigin: true,
       },
     }

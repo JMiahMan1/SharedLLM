@@ -2,22 +2,20 @@ import { test, expect } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 const ADMIN_USER = 'default';
-const ADMIN_PASS = 'admin';
+const ADMIN_PASS = process.env.ADMIN_PASS || 'changeme';
 
 async function loginAsAdmin(page: import('@playwright/test').Page) {
-  await page.goto(`${UI_URL}/login`);
+  await page.goto(`${UI_URL}/login`, { waitUntil: 'domcontentloaded', timeout: 15000 });
   await page.getByPlaceholder('Enter username').fill(ADMIN_USER);
   await page.getByPlaceholder('Enter password').fill(ADMIN_PASS);
-  await page.getByRole('button', { name: /sign in/i }).click();
+  await page.getByRole('button', { name: /sign in/i }).click({ force: true });
   await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
-  await page.waitForTimeout(2000);
 }
 
 test.describe('Communication Page - Timer CRUD', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.goto(`${UI_URL}/communication`, { waitUntil: 'domcontentloaded' });
   });
 
   test('creates a new timer with title and duration', async ({ page }) => {
@@ -64,8 +62,7 @@ test.describe('Communication Page - Timer CRUD', () => {
 test.describe('Communication Page - Announcements', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.goto(`${UI_URL}/communication`, { waitUntil: 'domcontentloaded' });
   });
 
   test('announcement volume slider updates value', async ({ page }) => {
@@ -97,7 +94,6 @@ test.describe('Communication Page - Announcements', () => {
   });
 
   test('announcement textarea accepts multi-line content', async ({ page }) => {
-    await page.getByRole('label', { name: /select a target device/i }).click();
     const select = page.getByLabel('Announcement target device');
     const options = await select.evaluateAll(
       (els) => (els as HTMLSelectElement[])
@@ -118,12 +114,11 @@ test.describe('Communication Page - Announcements', () => {
 test.describe('Communication Page - Notes CRUD', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.goto(`${UI_URL}/communication`, { waitUntil: 'domcontentloaded' });
   });
 
   test('notes section with Monaco editor is visible', async ({ page }) => {
-    await expect(page.getByText('Notes')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Notes', exact: true })).toBeVisible();
     const editorContainer = page.locator('.monaco-editor, [class*="overflow-hidden"]').first();
     await expect(editorContainer).toBeVisible();
   });
@@ -187,8 +182,7 @@ test.describe('Communication Page - Notes CRUD', () => {
 test.describe('Communication Page - Talk Chat', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.goto(`${UI_URL}/communication`, { waitUntil: 'domcontentloaded' });
   });
 
   test('talk section shows conversation feed', async ({ page }) => {
@@ -215,8 +209,7 @@ test.describe('Communication Page - Talk Chat', () => {
 test.describe('Communication Page - Calendar', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.goto(`${UI_URL}/communication`, { waitUntil: 'domcontentloaded' });
   });
 
   test('calendar event title input is editable', async ({ page }) => {
@@ -241,8 +234,7 @@ test.describe('Communication Page - Calendar', () => {
 test.describe('Communication Page - Voice Recording', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.goto(`${UI_URL}/communication`, { waitUntil: 'domcontentloaded' });
   });
 
   test('record voice button is visible', async ({ page }) => {
@@ -270,8 +262,7 @@ test.describe('Communication Page - Voice Recording', () => {
 test.describe('Communication Page - Markdown Formatting', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
-    await page.goto(`${UI_URL}/communication`);
-    await page.waitForLoadState('domcontentloaded'); await page.waitForTimeout(3000);
+    await page.goto(`${UI_URL}/communication`, { waitUntil: 'domcontentloaded' });
   });
 
   test('markdown toolbar appears in fullscreen notes', async ({ page }) => {

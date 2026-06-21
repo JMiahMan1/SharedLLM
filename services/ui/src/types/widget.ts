@@ -101,6 +101,7 @@ export interface WidgetContextMenuProps {
   onReorder: (widgetKey: WidgetKey, newIndex: number) => void;
   totalWidgets: number;
   onRemove: (widgetKey: WidgetKey) => void;
+  className?: string;
 }
 
 export interface DeviceControlGroup {
