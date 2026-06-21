@@ -15,6 +15,7 @@ import {
   releaseControl,
   handleVisibilityChange,
 } from '../lib/webPlayer';
+import { useMAWebPlayer } from '../lib/maWebPlayer';
 
 interface MediaStatus {
   entity_id?: string;
@@ -761,14 +762,15 @@ const Media = () => {
   const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
   const [localMode, setLocalMode] = useState(false);
 
+  // MA Web Player (sendspin-js)
+  const maPlayer = useMAWebPlayer();
+
   // Local player states
   const [localIsPlaying, setLocalIsPlaying] = useState(false);
   const [localVolume, setLocalVolume] = useState(70);
   const [localMuted, setLocalMuted] = useState(false);
   const [localCurrentTime, setLocalCurrentTime] = useState(0);
   const [localDuration, setLocalDuration] = useState(0);
-  const [localStreamUrl, setLocalStreamUrl] = useState<string | null>(null);
-  const localAudioRef = useRef<HTMLAudioElement | null>(null);
   const localProgressTimerRef = useRef<number | null>(null);
 
   // Debug state for troubleshooting
@@ -779,19 +781,7 @@ const Media = () => {
   }>({ events: [], streamUrl: null, audioState: 'idle' });
   const [showDebug, setShowDebug] = useState(false);
 
-  const addDebugEvent = useCallback((type: string, message?: string, code?: number) => {
-    setAudioDebug(prev => {
-      const newEvents = [...prev.events, {
-        time: new Date().toISOString(),
-        type,
-        message,
-        code,
-      }].slice(-50); // Keep last 50 events
-      return { ...prev, events: newEvents };
-    });
-  }, []);
-
-  // Music Assistant metadata & favorites state
+    // Music Assistant metadata & favorites state
   const [detailedMetadata, setDetailedMetadata] = useState<TrackDetail | null>(null);
 
   const activeUri = useMemo(() => {
@@ -867,154 +857,45 @@ const Media = () => {
     return detailedMetadata?.name || baseTitle || 'Unknown Title';
   }, [localMode, localTrack, mediaStatus, detailedMetadata]);
 
-  // Sync volume with local Audio element
+  // Sync volume with sendspin player
   useEffect(() => {
-    if (localAudioRef.current) {
-      localAudioRef.current.volume = localVolume / 100;
+    if (maPlayer.connected) {
+      maPlayer.setVolume(localVolume / 100);
     }
-  }, [localVolume]);
+  }, [localVolume, maPlayer.connected, maPlayer]);
 
-  // Sync mute with local Audio element
+  // Sync mute with sendspin player
   useEffect(() => {
-    if (localAudioRef.current) {
-      localAudioRef.current.muted = localMuted;
+    if (maPlayer.connected) {
+      maPlayer.setMuted(localMuted);
     }
-  }, [localMuted]);
-
-  // Setup local Audio element event listeners
-  /* eslint-disable react-hooks/exhaustive-deps -- localVolume and localMuted are synced separately by dedicated effects; re-running would recreate Audio and interrupt playback */
-  useEffect(() => {
-    if (localTrack && localStreamUrl) {
-      if (localAudioRef.current) {
-        localAudioRef.current.pause();
-        localAudioRef.current.src = '';
-      }
-      localAudioRef.current = new Audio();
-      localAudioRef.current.src = localStreamUrl;
-      localAudioRef.current.volume = localVolume / 100;
-      localAudioRef.current.muted = localMuted;
-      localAudioRef.current.load();
-
-      addDebugEvent('AUDIO_INIT', `Created Audio element, src=${localStreamUrl.substring(0, 100)}...`);
-
-      const onCanplay = () => {
-        addDebugEvent('CANPLAY', 'Audio can play (buffered enough data)');
-        setLocalDuration(localAudioRef.current?.duration || 0);
-      };
-      const onCanplaythrough = () => {
-        addDebugEvent('CANPLAYTHROUGH', 'Audio can play through to end without buffering');
-      };
-      const onLoadeddata = () => {
-        addDebugEvent('LOADEDDATA', `First frame loaded, duration=${localAudioRef.current?.duration || 0}s`);
-        setLocalDuration(localAudioRef.current?.duration || 0);
-      };
-      const onLoadedmetadata = () => {
-        addDebugEvent('LOADEDMETADATA', `Metadata loaded, duration=${localAudioRef.current?.duration || 0}s`);
-      };
-      const onWaiting = () => {
-        addDebugEvent('WAITING', 'Audio buffering (waiting for more data)');
-      };
-      const onPlaying = () => {
-        addDebugEvent('PLAYING', 'Audio has started playing');
-        setLocalIsPlaying(true);
-      };
-      const onPlay = () => {
-        addDebugEvent('PLAY', 'play() event fired');
-      };
-      const onPause = () => {
-        addDebugEvent('PAUSE', 'pause() event fired');
-        setLocalIsPlaying(false);
-      };
-      const onEnded = () => {
-        addDebugEvent('ENDED', 'Audio playback ended naturally');
-        setLocalIsPlaying(false);
-      };
-      const onStalled = () => {
-        addDebugEvent('STALLED', 'Audio stream stalled (network issue?)');
-      };
-      const onSuspend = () => {
-        addDebugEvent('SUSPEND', 'Audio loading suspended');
-      };
-      const onAbort = () => {
-        addDebugEvent('ABORT', 'Audio loading aborted');
-      };
-      const onTimeupdate = () => {
-        setLocalCurrentTime(localAudioRef.current?.currentTime || 0);
-      };
-      const onSeeked = () => {
-        addDebugEvent('SEEKED', `Seeked to ${localAudioRef.current?.currentTime || 0}s`);
-      };
-      const onError = () => {
-        const err = localAudioRef.current?.error;
-        let errorMsg = 'Failed to load audio stream';
-        let errorCode: number | undefined;
-
-        if (err) {
-          errorCode = err.code;
-          switch (err.code) {
-            case 1: errorMsg = 'AUDIO_ERR_ABORTED: Loading was aborted'; break;
-            case 2: errorMsg = 'NETWORK_ERR: Network error occurred'; break;
-            case 3: errorMsg = 'DECODE_ERR: Audio could not be decoded'; break;
-            case 4: errorMsg = 'SRC_NOT_SUPPORTED_ERR: Media type not supported'; break;
-            default: errorMsg = `AUDIO_ERR: Unknown error (code=${err.code})`;
-          }
-          addDebugEvent('ERROR', `${errorMsg} (code=${err.code}, message=${err.message})`, errorCode);
-          setError(`Audio Error: ${errorMsg}`);
-        } else {
-          addDebugEvent('ERROR', 'AUDIO_ERR_NULL: error property is null but error event fired');
-          setError('Audio Error: Unknown (error event fired but no error details)');
-        }
-        setLocalIsPlaying(false);
-        console.error('[WebPlayer] Audio error:', err, 'Full error event:', localAudioRef.current?.error);
-      };
-
-      localAudioRef.current.addEventListener('canplay', onCanplay);
-      localAudioRef.current.addEventListener('canplaythrough', onCanplaythrough);
-      localAudioRef.current.addEventListener('loadeddata', onLoadeddata);
-      localAudioRef.current.addEventListener('loadedmetadata', onLoadedmetadata);
-      localAudioRef.current.addEventListener('waiting', onWaiting);
-      localAudioRef.current.addEventListener('playing', onPlaying);
-      localAudioRef.current.addEventListener('play', onPlay);
-      localAudioRef.current.addEventListener('pause', onPause);
-      localAudioRef.current.addEventListener('ended', onEnded);
-      localAudioRef.current.addEventListener('stalled', onStalled);
-      localAudioRef.current.addEventListener('suspend', onSuspend);
-      localAudioRef.current.addEventListener('abort', onAbort);
-      localAudioRef.current.addEventListener('timeupdate', onTimeupdate);
-      localAudioRef.current.addEventListener('seeked', onSeeked);
-      localAudioRef.current.addEventListener('error', onError);
-
-      return () => {
-        localAudioRef.current?.removeEventListener('canplay', onCanplay);
-        localAudioRef.current?.removeEventListener('canplaythrough', onCanplaythrough);
-        localAudioRef.current?.removeEventListener('loadeddata', onLoadeddata);
-        localAudioRef.current?.removeEventListener('loadedmetadata', onLoadedmetadata);
-        localAudioRef.current?.removeEventListener('waiting', onWaiting);
-        localAudioRef.current?.removeEventListener('playing', onPlaying);
-        localAudioRef.current?.removeEventListener('play', onPlay);
-        localAudioRef.current?.removeEventListener('pause', onPause);
-        localAudioRef.current?.removeEventListener('ended', onEnded);
-        localAudioRef.current?.removeEventListener('stalled', onStalled);
-        localAudioRef.current?.removeEventListener('suspend', onSuspend);
-        localAudioRef.current?.removeEventListener('abort', onAbort);
-        localAudioRef.current?.removeEventListener('timeupdate', onTimeupdate);
-        localAudioRef.current?.removeEventListener('seeked', onSeeked);
-        localAudioRef.current?.removeEventListener('error', onError);
-        if (localAudioRef.current) {
-          localAudioRef.current.pause();
-          localAudioRef.current.src = '';
-        }
-      };
-    }
-  }, [localStreamUrl, addDebugEvent]);
-  /* eslint-enable react-hooks/exhaustive-deps */
+  }, [localMuted, maPlayer.connected, maPlayer]);
 
   // Handle local playback progress tracking
   useEffect(() => {
-    if (localIsPlaying && localAudioRef.current) {
+    if (localIsPlaying && maPlayer.audioRef.current) {
+      let counter = 0;
       localProgressTimerRef.current = window.setInterval(() => {
-        if (localAudioRef.current && !localAudioRef.current.paused) {
-          setLocalCurrentTime(localAudioRef.current.currentTime);
+        if (maPlayer.audioRef.current && !maPlayer.audioRef.current.paused) {
+          const pos = maPlayer.audioRef.current.currentTime;
+          setLocalCurrentTime(pos);
+          
+          counter++;
+          if (counter >= 5 && localTrack) {
+            counter = 0;
+            api.syncMediaState({
+              entity_id: 'web_player',
+              state: 'playing',
+              media_type: localTrack.type,
+              media_content_id: localTrack.id,
+              media_title: localTrack.title,
+              media_artist: localTrack.subtitle,
+              position: pos,
+              duration: maPlayer.audioRef.current.duration || 0,
+              volume_level: localVolume / 100,
+              is_volume_muted: localMuted
+            }).catch(err => console.error('Failed to sync progress:', err));
+          }
         }
       }, 1000);
     }
@@ -1023,19 +904,15 @@ const Media = () => {
         clearInterval(localProgressTimerRef.current);
       }
     };
-  }, [localIsPlaying]);
+  }, [localIsPlaying, maPlayer.audioRef, localTrack, localVolume, localMuted]);
 
-  // Cleanup local Audio on unmount
+  // Cleanup on unmount
   useEffect(() => {
     installPageHideListener();
     const handleVis = () => handleVisibilityChange();
     document.addEventListener('visibilitychange', handleVis);
     return () => {
       document.removeEventListener('visibilitychange', handleVis);
-      if (localAudioRef.current) {
-        localAudioRef.current.pause();
-        localAudioRef.current.src = '';
-      }
       destroyWebPlayer();
     };
   }, []);
@@ -1076,7 +953,7 @@ const Media = () => {
   useEffect(() => {
     if (!localMode && localIsPlaying) {
       setLocalIsPlaying(false);
-      localAudioRef.current?.pause();
+      maPlayer.pause();
       if (localTrack) {
         api.syncMediaState({
           entity_id: 'web_player',
@@ -1085,14 +962,14 @@ const Media = () => {
           media_content_id: localTrack.id,
           media_title: localTrack.title,
           media_artist: localTrack.subtitle,
-          position: localAudioRef.current?.currentTime || 0,
+          position: maPlayer.position || 0,
           duration: localDuration,
           volume_level: localVolume / 100,
           is_volume_muted: localMuted
         }).catch(err => console.error('Failed to sync local pause on mode change:', err));
       }
     }
-  }, [localMode, localTrack, localDuration, localVolume, localMuted, localIsPlaying]);
+  }, [localMode, localTrack, localDuration, localVolume, localMuted, localIsPlaying, maPlayer]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const { data: maPlaylists, isLoading: maPlaylistsLoading } = useQuery({
@@ -1174,23 +1051,15 @@ const Media = () => {
               setLocalTrack({ id: idClean, title, subtitle, type, source });
               setLocalIsPlaying(active.state === 'playing');
               setLocalCurrentTime(active.position || 0);
-              
-              const apiToken = storageGetSync('jarvis_api_key') ?? '';
-              const tokenParam = apiToken ? `token=${encodeURIComponent(apiToken)}` : '';
-              if (source === 'abs') {
-                setLocalStreamUrl(`/api/media/stream/audiobookshelf/${idClean}${tokenParam ? `?${tokenParam}` : ''}`);
-              } else if (source === 'ma') {
-                setLocalStreamUrl(`/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`);
-              }
             } else if (localTrack) {
               const backendPlaying = active.state === 'playing';
               if (backendPlaying !== localIsPlaying) {
                 setLocalIsPlaying(backendPlaying);
-                if (localAudioRef.current) {
+                if (maPlayer.connected) {
                   if (backendPlaying) {
-                    localAudioRef.current.play().catch(() => {});
+                    maPlayer.cmdPlay().catch(() => {});
                   } else {
-                    localAudioRef.current.pause();
+                    maPlayer.cmdPause();
                   }
                 }
               }
@@ -1232,6 +1101,7 @@ const Media = () => {
         }
       }
     } catch { /* ignore */ }
+    /* eslint-disable react-hooks/exhaustive-deps -- maPlayer is accessed for current value, not as a dependency */
   }, [selectedTarget, localTrack, localIsPlaying]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -1242,40 +1112,7 @@ const Media = () => {
   }, [fetchMediaStatus]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Periodically sync local progress
-  useEffect(() => {
-    if (localIsPlaying && localAudioRef.current) {
-      let counter = 0;
-      localProgressTimerRef.current = window.setInterval(() => {
-        if (localAudioRef.current && !localAudioRef.current.paused) {
-          const pos = localAudioRef.current.currentTime;
-          setLocalCurrentTime(pos);
-          
-          counter++;
-          if (counter >= 5 && localTrack) {
-            counter = 0;
-            api.syncMediaState({
-              entity_id: 'web_player',
-              state: 'playing',
-              media_type: localTrack.type,
-              media_content_id: localTrack.id,
-              media_title: localTrack.title,
-              media_artist: localTrack.subtitle,
-              position: pos,
-              duration: localAudioRef.current.duration || 0,
-              volume_level: localVolume / 100,
-              is_volume_muted: localMuted
-            }).catch(err => console.error('Failed to sync progress:', err));
-          }
-        }
-      }, 1000);
-    }
-    return () => {
-      if (localProgressTimerRef.current) {
-        clearInterval(localProgressTimerRef.current);
-      }
-    };
-  }, [localIsPlaying, localTrack, localVolume, localMuted]);
+  
 
   /* ── device selection ───────────────────────────────────────────── */
 
@@ -1373,22 +1210,31 @@ const Media = () => {
     }
   }, [selectedTarget, trigger, fetchMediaStatus]);
 
-  const playLocal = useCallback(async (id: string, title: string, subtitle: string, type: 'audiobook' | 'music', source: 'abs' | 'ma') => {
+ const playLocal = useCallback(async (id: string, title: string, subtitle: string, type: 'audiobook' | 'music', source: 'abs' | 'ma') => {
     trigger('heavy');
     setError(null);
     const idClean = id.replace('abs-', '').replace('ma-', '');
     setLocalTrack({ id: idClean, title, subtitle, type, source });
-    setLocalIsPlaying(true);
+    setLocalVolume((prev) => { setLocalIsPlaying(true); return prev; });
 
-    const apiToken = storageGetSync('jarvis_api_key') ?? '';
-    const tokenParam = apiToken ? `token=${encodeURIComponent(apiToken)}` : '';
-
-    if (source === 'abs') {
-      // Route ABS books through MA streaming (ABS is integrated into MA)
-      setLocalStreamUrl(`/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`);
-    } else if (source === 'ma') {
-      setLocalStreamUrl(`/api/media/stream/music-assistant?uri=${encodeURIComponent(idClean)}${tokenParam ? `&${tokenParam}` : ''}`);
+    // Initialize player if not connected (establishes Sendspin + JSON-RPC)
+    if (!maPlayer.isConnected) {
+      await maPlayer.connect();
     }
+
+    // Set initial volume and muted state
+    maPlayer.setVolume(localVolume);
+    maPlayer.setMuted(localMuted);
+
+    // Build the MA-compatible URI (ABS books get converted)
+    let mediaUri = idClean;
+    if (source === 'abs') {
+      // ABS books need to be converted to MA URIs for play_media
+      mediaUri = `audiobookshelf://${idClean}`;
+    }
+
+    // Send play_media via JSON-RPC to tell MA to queue and start this track
+    await maPlayer.playMedia(mediaUri);
 
     try {
       await api.syncMediaState({
@@ -1406,22 +1252,25 @@ const Media = () => {
     } catch (err) {
       console.error('Failed to sync local play:', err);
     }
-  }, [trigger, localVolume, localMuted]);
+  }, [trigger, localVolume, localMuted, maPlayer]);
 
   const toggleLocalPlay = useCallback(() => {
     if (!localTrack) return;
     const nextPlaying = !localIsPlaying;
     if (localIsPlaying) {
       setLocalIsPlaying(false);
-      localAudioRef.current?.pause();
+      maPlayer.pause();
     } else {
       setLocalIsPlaying(true);
       (document.activeElement as HTMLElement)?.setAttribute('data-webplayer-interact', 'true');
-      if (localAudioRef.current) {
-        localAudioRef.current.play().catch(() => {
-          setLocalIsPlaying(false);
-        });
+      if (!maPlayer.isConnected) {
+        maPlayer.connect();
       }
+      // Re-send play_media in case it was lost
+      const mediaUri = localTrack.source === 'abs'
+        ? `audiobookshelf://${localTrack.id}`
+        : localTrack.id;
+      maPlayer.playMedia(mediaUri);
     }
     api.syncMediaState({
       entity_id: 'web_player',
@@ -1430,16 +1279,17 @@ const Media = () => {
       media_content_id: localTrack.id,
       media_title: localTrack.title,
       media_artist: localTrack.subtitle,
-      position: localAudioRef.current?.currentTime || 0,
+      position: localCurrentTime,
       duration: localDuration,
       volume_level: localVolume / 100,
       is_volume_muted: localMuted
     }).catch(err => console.error('Failed to sync toggleLocalPlay:', err));
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, localCurrentTime, maPlayer]);
 
   const handleLocalVolume = useCallback((v: number) => {
     setLocalVolume(v);
     setLocalMuted(false);
+    maPlayer.setVolume(v);
     if (localTrack) {
       api.syncMediaState({
         entity_id: 'web_player',
@@ -1454,11 +1304,12 @@ const Media = () => {
         is_volume_muted: false
       }).catch(err => console.error('Failed to sync volume:', err));
     }
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration]);
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, maPlayer]);
 
   const toggleLocalMute = useCallback(() => {
     const nextMuted = !localMuted;
     setLocalMuted(nextMuted);
+    maPlayer.setMuted(nextMuted);
     if (localTrack) {
       api.syncMediaState({
         entity_id: 'web_player',
@@ -1473,32 +1324,31 @@ const Media = () => {
         is_volume_muted: nextMuted
       }).catch(err => console.error('Failed to sync mute:', err));
     }
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted]);
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted, maPlayer]);
 
   const handleLocalSeek = useCallback((time: number) => {
-    if (localAudioRef.current) {
-      localAudioRef.current.currentTime = time;
-      setLocalCurrentTime(time);
-      if (localTrack) {
-        api.syncMediaState({
-          entity_id: 'web_player',
-          state: localIsPlaying ? 'playing' : 'paused',
-          media_type: localTrack.type,
-          media_content_id: localTrack.id,
-          media_title: localTrack.title,
-          media_artist: localTrack.subtitle,
-          position: time,
-          duration: localDuration,
-          volume_level: localVolume / 100,
-          is_volume_muted: localMuted
-        }).catch(err => console.error('Failed to sync seek:', err));
-      }
+    maPlayer.seek(time);
+    setLocalCurrentTime(time);
+    if (localTrack) {
+      api.syncMediaState({
+        entity_id: 'web_player',
+        state: localIsPlaying ? 'playing' : 'paused',
+        media_type: localTrack.type,
+        media_content_id: localTrack.id,
+        media_title: localTrack.title,
+        media_artist: localTrack.subtitle,
+        position: time,
+        duration: localDuration,
+        volume_level: localVolume / 100,
+        is_volume_muted: localMuted
+      }).catch(err => console.error('Failed to sync seek:', err));
     }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
 
   const skipLocalBack = useCallback(() => {
-    if (localAudioRef.current && localAudioRef.current.currentTime > 5) {
-      localAudioRef.current.currentTime = 0;
+    const currentTime = maPlayer.position || 0;
+    if (currentTime > 5) {
+      maPlayer.seek(0);
       setLocalCurrentTime(0);
       if (localTrack) {
         api.syncMediaState({
@@ -1515,12 +1365,14 @@ const Media = () => {
         }).catch(err => console.error('Failed to sync skip back:', err));
       }
     }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
 
   const skipLocalForward = useCallback(() => {
-    if (localAudioRef.current && localDuration > 0) {
-      const newTime = Math.min(localAudioRef.current.currentTime + 30, localDuration);
-      localAudioRef.current.currentTime = newTime;
+    const currentTime = maPlayer.position || 0;
+    const dur = localDuration || 0;
+    if (dur > 0) {
+      const newTime = Math.min(currentTime + 30, dur);
+      maPlayer.seek(newTime);
       setLocalCurrentTime(newTime);
       if (localTrack) {
         api.syncMediaState({
@@ -1537,7 +1389,7 @@ const Media = () => {
         }).catch(err => console.error('Failed to sync skip forward:', err));
       }
     }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
 
   const handleStopPlayback = useCallback(() => {
     if (localTrack) {
@@ -1557,14 +1409,10 @@ const Media = () => {
     }
     setLocalTrack(null);
     setLocalIsPlaying(false);
-    setLocalStreamUrl(null);
     setLocalCurrentTime(0);
     setLocalDuration(0);
-    if (localAudioRef.current) {
-      localAudioRef.current.pause();
-      localAudioRef.current.src = '';
-    }
-  }, [localTrack, localDuration, localVolume, localMuted]);
+    maPlayer.disconnect();
+  }, [localTrack, localDuration, localVolume, localMuted, maPlayer]);
 
   const handleVolume = useCallback(async (v: number) => {
     if (!selectedTarget) return;

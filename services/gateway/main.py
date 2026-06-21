@@ -5220,6 +5220,207 @@ async def ma_stream_test_page():
     raise HTTPException(status_code=404, detail="Test page not found")
 
 
+@app.websocket("/api/sendspin")
+async def sendspin_proxy(websocket: WebSocket):
+    """Proxy WebSocket for MA Sendspin audio streaming.
+
+    The browser connects here via sendspin-js. The gateway:
+    1. Authenticates the browser client (token from ?token= query param)
+    2. Resolves MA credentials from the identity service
+    3. Connects to MA's sendspin endpoint (ws://ma_host/sendspin)
+    4. Forwards the browser's auth message to MA
+    5. Proxies all sendspin protocol data bidirectionally
+
+    This mirrors the MA frontend's sendspin-proxy pattern.
+    """
+    import websockets
+    from urllib.parse import urlparse
+
+    # Extract API token from query params (WebSocket can't set headers)
+    api_token = websocket.query_params.get("token")
+    if not api_token:
+        await websocket.close(code=1008, reason="Missing token")
+        return
+
+    await websocket.accept()
+
+    # Resolve MA credentials via identity service
+    try:
+        creds = await resolve_identity({"api_key": api_token})
+        if not isinstance(creds, dict):
+            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
+        mass_url = creds.get("mass_url") or ""
+        mass_token = creds.get("mass_token") or ""
+    except HTTPException:
+        await websocket.close(code=1008, reason="Authentication failed")
+        return
+    except Exception as e:
+        log.error(f"[sendspin] Identity resolution failed: {e}")
+        await websocket.close(code=1011, reason="Identity service error")
+        return
+
+    if not mass_url or not mass_token:
+        log.error("[sendspin] MA credentials not configured")
+        await websocket.close(code=1008, reason="MA not configured")
+        return
+
+    # Build MA sendspin URL
+    parsed = urlparse(mass_url)
+    ma_sendspin_url = f"{'wss' if parsed.scheme == 'https' else 'ws'}://{parsed.hostname}:{parsed.port or 8095}/sendspin"
+    log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url[:80]}...")
+
+    # Connect to MA sendspin with auth headers
+    extra_headers = {"Authorization": f"Bearer {mass_token}"}
+    try:
+        async with websockets.connect(
+            ma_sendspin_url,
+            additional_headers=extra_headers,
+            ping_interval=30,
+            ping_timeout=10,
+        ) as ma_ws:
+            log.info("[sendspin] Connected to MA sendspin")
+
+            async def forward_client_to_ma():
+                """Forward browser messages to MA."""
+                try:
+                    async for message in websocket.iter_bytes():
+                        await ma_ws.send(message)
+                except WebSocketDisconnect:
+                    pass
+                except Exception as e:
+                    log.warning(f"[sendspin] Client→MA forward error: {e}")
+
+            async def forward_ma_to_client():
+                """Forward MA messages to browser."""
+                try:
+                    async for message in ma_ws:
+                        await websocket.send_bytes(message)
+                except Exception as e:
+                    log.warning(f"[sendspin] MA→Client forward error: {e}")
+
+            # Run both directions in parallel
+            await asyncio.gather(
+                forward_client_to_ma(),
+                forward_ma_to_client(),
+            )
+    except websockets.exceptions.InvalidStatusCode as e:
+        log.error(f"[sendspin] MA sendspin connection failed (status {e.status_code}): {e}")
+        try:
+            await websocket.close(code=1011, reason=f"MA connection failed: {e}")
+        except Exception:
+            pass
+    except Exception as e:
+        log.error(f"[sendspin] Sendspin proxy error: {e}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason=str(e))
+        except Exception:
+            pass
+
+
+@app.websocket("/api/ma-jsonrpc")
+async def ma_jsonrpc_proxy(websocket: WebSocket):
+    """Proxy WebSocket for MA JSON-RPC control API.
+
+    The browser connects here to send play/pause/seek commands to MA.
+    The gateway:
+    1. Authenticates the browser client (token from ?token= query param)
+    2. Resolves MA credentials from the identity service
+    3. Connects to MA's JSON-RPC WebSocket (ws://ma_host:8095/ws?token=...)
+    4. Forwards all JSON-RPC messages bidirectionally
+
+    Browser sends JSON-RPC commands like:
+    - {"message_id": "counter1", "command": "players/play_media", "args": {"player_id": "...", "media": "spotify://track/..."}}
+    - {"message_id": "counter2", "command": "players/cmd_play", "args": {"player_id": "..."}}
+    - {"message_id": "counter3", "command": "players/cmd_pause", "args": {"player_id": "..."}}
+    - {"message_id": "counter4", "command": "players/cmd_seek", "args": {"player_id": "...", "position": 30}}
+
+    MA responds with:
+    - {"type": "RESULT", "message_id": "counter1", "result": {...}}
+    - {"event": "queue_updated", "data": {...}}
+    - {"event": "player_updated", "data": {...}}
+    """
+    import websockets
+    from urllib.parse import urlparse
+
+    # Extract API token from query params
+    api_token = websocket.query_params.get("token")
+    if not api_token:
+        await websocket.close(code=1008, reason="Missing token")
+        return
+
+    await websocket.accept()
+
+    # Resolve MA credentials via identity service
+    try:
+        creds = await resolve_identity({"api_key": api_token})
+        if not isinstance(creds, dict):
+            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
+        mass_url = creds.get("mass_url") or ""
+        mass_token = creds.get("mass_token") or ""
+    except HTTPException:
+        await websocket.close(code=1008, reason="Authentication failed")
+        return
+    except Exception as e:
+        log.error(f"[ma-jsonrpc] Identity resolution failed: {e}")
+        await websocket.close(code=1011, reason="Identity service error")
+        return
+
+    if not mass_url or not mass_token:
+        log.error("[ma-jsonrpc] MA credentials not configured")
+        await websocket.close(code=1008, reason="MA not configured")
+        return
+
+    # Build MA JSON-RPC URL
+    parsed = urlparse(mass_url)
+    ws_scheme = 'wss' if parsed.scheme == 'https' else 'ws'
+    ma_jsonrpc_url = f"{ws_scheme}://{parsed.hostname}:{parsed.port or 8095}/ws?token={mass_token}"
+    log.info(f"[ma-jsonrpc] Connecting to MA JSON-RPC: {ma_jsonrpc_url[:100]}...")
+
+    try:
+        async with websockets.connect(
+            ma_jsonrpc_url,
+            ping_interval=15,
+            ping_timeout=10,
+        ) as ma_ws:
+            log.info("[ma-jsonrpc] Connected to MA JSON-RPC")
+
+            async def forward_client_to_ma():
+                """Forward browser JSON-RPC commands to MA."""
+                try:
+                    async for message in websocket.iter_text():
+                        await ma_ws.send(message)
+                except WebSocketDisconnect:
+                    pass
+                except Exception as e:
+                    log.warning(f"[ma-jsonrpc] Client→MA forward error: {e}")
+
+            async def forward_ma_to_client():
+                """Forward MA events/responses to browser."""
+                try:
+                    async for message in ma_ws:
+                        await websocket.send_text(message)
+                except Exception as e:
+                    log.warning(f"[ma-jsonrpc] MA→Client forward error: {e}")
+
+            # Run both directions in parallel
+            await asyncio.gather(
+                forward_client_to_ma(),
+                forward_ma_to_client(),
+            )
+    except websockets.exceptions.InvalidStatusCode as e:
+        log.error(f"[ma-jsonrpc] MA JSON-RPC connection failed (status {e.status_code}): {e}")
+        try:
+            await websocket.close(code=1011, reason=f"MA connection failed: {e}")
+        except Exception:
+            pass
+    except Exception as e:
+        log.error(f"[ma-jsonrpc] JSON-RPC proxy error: {e}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason=str(e))
+        except Exception:
+            pass
+
+
 @app.get("/api/media/stream/music-assistant")
 async def stream_music_assistant(uri: str, request: Request):
     """Proxy Music Assistant audio stream to browser.
@@ -5387,7 +5588,7 @@ async def stream_music_assistant(uri: str, request: Request):
             )
             log.info(f"[stream/ma] play_media response: {play_media_response}")
 
-            # Wait for queue_updated event, then construct stream URL from session_id + queue state
+            # Wait for queue_updated event and extract stream URL from MA's queue state
             stream_url: str | None = None
             stream_timeout = 15.0
             start_time = asyncio.get_event_loop().time()
@@ -5402,15 +5603,33 @@ async def stream_music_assistant(uri: str, request: Request):
                         detail=f"MA error: {ma_error['code']}: {ma_error['details']}"
                     )
                 if ma_client.connected:
+                    # Priority 1: Use stream URL that MA provides in queue state events
+                    ma_provided_url = ma_client.get_stream_url()
+                    if ma_provided_url:
+                        stream_url = ma_provided_url
+                        log.info(f"[stream/ma] Stream URL from MA: {stream_url[:150]}")
+                        break
+                    # Priority 2: Check queue state directly for stream_url in current_item
                     queue_state = ma_client.get_queue_state()
                     current_item = queue_state.get("current_item", {})
                     if isinstance(current_item, dict) and current_item.get("queue_item_id"):
+                        media_item = current_item.get("media_item", {})
+                        if isinstance(media_item, dict) and media_item.get("stream_url"):
+                            stream_url = media_item["stream_url"]
+                            log.info(f"[stream/ma] Stream URL from media_item: {stream_url[:150]}")
+                            break
+                        if current_item.get("stream_url"):
+                            stream_url = current_item["stream_url"]
+                            log.info(f"[stream/ma] Stream URL from current_item: {stream_url[:150]}")
+                            break
+                        # Last resort: construct flow URL using MA's actual queue_id + queue_item_id
+                        # Use MA's generated session (queue_id), not the gateway-generated one
                         queue_item_id = current_item["queue_item_id"]
                         queue_id = queue_state.get("queue_id", target_player_id)
                         player_id = queue_state.get("player_id", target_player_id)
                         http_base = mass_url.replace("http://", "").replace("https://", "")
-                        stream_url = f"http://{http_base}/flow/{session_id}/{queue_id}/{queue_item_id}/{player_id}.mp3"
-                        log.info(f"[stream/ma] Stream URL constructed: {stream_url[:150]}")
+                        stream_url = f"http://{http_base}/flow/{queue_id}/{queue_item_id}/{player_id}.mp3"
+                        log.info(f"[stream/ma] Stream URL constructed (fallback): {stream_url[:150]}")
                         break
                 await asyncio.sleep(0.2)
 
