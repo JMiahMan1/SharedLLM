@@ -771,6 +771,26 @@ const Media = () => {
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
   const localProgressTimerRef = useRef<number | null>(null);
 
+  // Debug state for troubleshooting
+  const [audioDebug, setAudioDebug] = useState<{
+    events: Array<{ time: string; type: string; message?: string; code?: number }>;
+    streamUrl: string | null;
+    audioState: string;
+  }>({ events: [], streamUrl: null, audioState: 'idle' });
+  const [showDebug, setShowDebug] = useState(false);
+
+  const addDebugEvent = useCallback((type: string, message?: string, code?: number) => {
+    setAudioDebug(prev => {
+      const newEvents = [...prev.events, {
+        time: new Date().toISOString(),
+        type,
+        message,
+        code,
+      }].slice(-50); // Keep last 50 events
+      return { ...prev, events: newEvents };
+    });
+  }, []);
+
   // Music Assistant metadata & favorites state
   const [detailedMetadata, setDetailedMetadata] = useState<TrackDetail | null>(null);
 
@@ -875,38 +895,118 @@ const Media = () => {
       localAudioRef.current.muted = localMuted;
       localAudioRef.current.load();
 
-      const onLoaded = () => {
+      addDebugEvent('AUDIO_INIT', `Created Audio element, src=${localStreamUrl.substring(0, 100)}...`);
+
+      const onCanplay = () => {
+        addDebugEvent('CANPLAY', 'Audio can play (buffered enough data)');
         setLocalDuration(localAudioRef.current?.duration || 0);
-        localAudioRef.current?.play().catch(() => {});
       };
-      const onPlay = () => {
+      const onCanplaythrough = () => {
+        addDebugEvent('CANPLAYTHROUGH', 'Audio can play through to end without buffering');
+      };
+      const onLoadeddata = () => {
+        addDebugEvent('LOADEDDATA', `First frame loaded, duration=${localAudioRef.current?.duration || 0}s`);
+        setLocalDuration(localAudioRef.current?.duration || 0);
+      };
+      const onLoadedmetadata = () => {
+        addDebugEvent('LOADEDMETADATA', `Metadata loaded, duration=${localAudioRef.current?.duration || 0}s`);
+      };
+      const onWaiting = () => {
+        addDebugEvent('WAITING', 'Audio buffering (waiting for more data)');
+      };
+      const onPlaying = () => {
+        addDebugEvent('PLAYING', 'Audio has started playing');
         setLocalIsPlaying(true);
       };
+      const onPlay = () => {
+        addDebugEvent('PLAY', 'play() event fired');
+      };
       const onPause = () => {
+        addDebugEvent('PAUSE', 'pause() event fired');
         setLocalIsPlaying(false);
       };
       const onEnded = () => {
+        addDebugEvent('ENDED', 'Audio playback ended naturally');
         setLocalIsPlaying(false);
+      };
+      const onStalled = () => {
+        addDebugEvent('STALLED', 'Audio stream stalled (network issue?)');
+      };
+      const onSuspend = () => {
+        addDebugEvent('SUSPEND', 'Audio loading suspended');
+      };
+      const onAbort = () => {
+        addDebugEvent('ABORT', 'Audio loading aborted');
+      };
+      const onTimeupdate = () => {
+        setLocalCurrentTime(localAudioRef.current?.currentTime || 0);
+      };
+      const onSeeked = () => {
+        addDebugEvent('SEEKED', `Seeked to ${localAudioRef.current?.currentTime || 0}s`);
       };
       const onError = () => {
+        const err = localAudioRef.current?.error;
+        let errorMsg = 'Failed to load audio stream';
+        let errorCode: number | undefined;
+
+        if (err) {
+          errorCode = err.code;
+          switch (err.code) {
+            case 1: errorMsg = 'AUDIO_ERR_ABORTED: Loading was aborted'; break;
+            case 2: errorMsg = 'NETWORK_ERR: Network error occurred'; break;
+            case 3: errorMsg = 'DECODE_ERR: Audio could not be decoded'; break;
+            case 4: errorMsg = 'SRC_NOT_SUPPORTED_ERR: Media type not supported'; break;
+            default: errorMsg = `AUDIO_ERR: Unknown error (code=${err.code})`;
+          }
+          addDebugEvent('ERROR', `${errorMsg} (code=${err.code}, message=${err.message})`, errorCode);
+          setError(`Audio Error: ${errorMsg}`);
+        } else {
+          addDebugEvent('ERROR', 'AUDIO_ERR_NULL: error property is null but error event fired');
+          setError('Audio Error: Unknown (error event fired but no error details)');
+        }
         setLocalIsPlaying(false);
-        setError('Failed to load stream. Check your connection.');
+        console.error('[WebPlayer] Audio error:', err, 'Full error event:', localAudioRef.current?.error);
       };
 
-      localAudioRef.current.addEventListener('loadeddata', onLoaded);
+      localAudioRef.current.addEventListener('canplay', onCanplay);
+      localAudioRef.current.addEventListener('canplaythrough', onCanplaythrough);
+      localAudioRef.current.addEventListener('loadeddata', onLoadeddata);
+      localAudioRef.current.addEventListener('loadedmetadata', onLoadedmetadata);
+      localAudioRef.current.addEventListener('waiting', onWaiting);
+      localAudioRef.current.addEventListener('playing', onPlaying);
       localAudioRef.current.addEventListener('play', onPlay);
       localAudioRef.current.addEventListener('pause', onPause);
       localAudioRef.current.addEventListener('ended', onEnded);
+      localAudioRef.current.addEventListener('stalled', onStalled);
+      localAudioRef.current.addEventListener('suspend', onSuspend);
+      localAudioRef.current.addEventListener('abort', onAbort);
+      localAudioRef.current.addEventListener('timeupdate', onTimeupdate);
+      localAudioRef.current.addEventListener('seeked', onSeeked);
       localAudioRef.current.addEventListener('error', onError);
+
       return () => {
-        localAudioRef.current?.removeEventListener('loadeddata', onLoaded);
+        localAudioRef.current?.removeEventListener('canplay', onCanplay);
+        localAudioRef.current?.removeEventListener('canplaythrough', onCanplaythrough);
+        localAudioRef.current?.removeEventListener('loadeddata', onLoadeddata);
+        localAudioRef.current?.removeEventListener('loadedmetadata', onLoadedmetadata);
+        localAudioRef.current?.removeEventListener('waiting', onWaiting);
+        localAudioRef.current?.removeEventListener('playing', onPlaying);
         localAudioRef.current?.removeEventListener('play', onPlay);
         localAudioRef.current?.removeEventListener('pause', onPause);
         localAudioRef.current?.removeEventListener('ended', onEnded);
+        localAudioRef.current?.removeEventListener('stalled', onStalled);
+        localAudioRef.current?.removeEventListener('suspend', onSuspend);
+        localAudioRef.current?.removeEventListener('abort', onAbort);
+        localAudioRef.current?.removeEventListener('timeupdate', onTimeupdate);
+        localAudioRef.current?.removeEventListener('seeked', onSeeked);
         localAudioRef.current?.removeEventListener('error', onError);
+        if (localAudioRef.current) {
+          localAudioRef.current.pause();
+          localAudioRef.current.src = '';
+        }
       };
     }
-  }, [localStreamUrl]);
+  }, [localStreamUrl, addDebugEvent]);
   /* eslint-enable react-hooks/exhaustive-deps */
 
   // Handle local playback progress tracking
@@ -1664,6 +1764,55 @@ const Media = () => {
         selectedTarget={selectedTarget}
         localMode={localMode}
       />
+
+      {/* Debug Panel - Audio Events */}
+      <div className="mt-6">
+        <button
+          onClick={() => setShowDebug(!showDebug)}
+          className="text-xs text-slate-500 hover:text-slate-300 transition-colors flex items-center gap-1"
+        >
+          {showDebug ? '▼' : '▶'} Audio Debug ({audioDebug.events.length} events)
+        </button>
+        {showDebug && (
+          <div className="mt-2 glass-panel rounded-xl p-4 max-h-96 overflow-y-auto">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs text-slate-400">
+                Stream URL: {audioDebug.streamUrl ? audioDebug.streamUrl.substring(0, 60) + '...' : 'None'}
+              </span>
+              <button
+                onClick={() => setAudioDebug(prev => ({ ...prev, events: [] }))}
+                className="text-xs text-red-400 hover:text-red-300"
+              >
+                Clear
+              </button>
+            </div>
+            {audioDebug.events.length === 0 ? (
+              <p className="text-xs text-slate-500 text-center py-4">No audio events yet. Play a track to see debugging info.</p>
+            ) : (
+              <div className="space-y-1">
+                {[...audioDebug.events].reverse().map((evt, i) => (
+                  <div
+                    key={i}
+                    className={`text-xs font-mono py-1 px-2 rounded ${
+                      evt.type === 'ERROR'
+                        ? 'bg-red-500/10 text-red-400'
+                        : evt.type === 'PLAYING' || evt.type === 'PLAY' || evt.type === 'CANPLAY' || evt.type === 'CANPLAYTHROUGH'
+                        ? 'bg-green-500/10 text-green-400'
+                        : evt.type === 'WAITING' || evt.type === 'STALLED'
+                        ? 'bg-yellow-500/10 text-yellow-400'
+                        : 'text-slate-300'
+                    }`}
+                  >
+                    <span className="text-slate-500">{evt.time.split('T')[1]?.split('.')[0] || evt.time}</span>{' '}
+                    <span className="font-bold">{evt.type}</span>
+                    {evt.message && <span className="ml-1">— {evt.message}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 };
