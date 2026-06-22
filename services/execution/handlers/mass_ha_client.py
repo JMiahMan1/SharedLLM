@@ -100,23 +100,24 @@ async def search(
 
     log.info(f"[mass_ha] raw search response: {result}")
 
-    # HA response format: {"changed_states": [], "service_response": {artists: [...], albums: [...], ...}}
+    # HA response format: {"changed_states": [], "service_response": {artists: [...], albums: [...], tracks: [...]}}
     # Or sometimes {"results": [...]} at top level
     items = []
-    results = []
+    results: Any = []
     if result:
-        results = result.get("results", [])
-        if not results:
-            # Check nested response keys
-            for key in ("service_response", "response"):
-                inner = result.get(key, {})
-                if isinstance(inner, dict):
-                    results = inner.get("results", [])
-                    if results:
-                        break
-                elif isinstance(inner, list):
-                    results = inner
-                    break
+        # Case 1: {"results": [...]} at top level
+        top_results = result.get("results", [])
+        if isinstance(top_results, list) and top_results:
+            results = top_results
+        elif isinstance(top_results, dict):
+            results = top_results
+        else:
+            # Case 2: {"service_response": {artists: [...], albums: [...], ...}}
+            # service_response IS the results dict (keys are media types)
+            results = result.get("service_response", {})
+            if not results:
+                # Case 3: {"response": {...}}
+                results = result.get("response", {})
     if isinstance(results, dict):
         for media_type, items_list in results.items():
             if isinstance(items_list, list):
