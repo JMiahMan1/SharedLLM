@@ -12,7 +12,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { getPlayerId, savePlayerId, setState } from './webPlayer';
 import type { SendspinPlayer, PlayerState } from '@sendspin/sendspin-js';
-import { WebSocketManager } from './wsManager';
+import { WebSocketManager, ConnectionState } from './wsManager';
 
 const STORAGE_KEY = 'sendspin_webplayer_id';
 
@@ -27,9 +27,13 @@ interface MAWebPlayerState {
   mediaArtist: string | null;
   position: number;
   duration: number;
+  connectionState: ConnectionState;
+  reconnectAttempts: number;
+  maxReconnectAttempts: number;
 }
 
 const API_KEY_STORAGE = 'jarvis_api_key' as const;
+const MAX_RECONNECT_ATTEMPTS = 10;
 
 function storageGetSync(key: string): string | null {
   try {
@@ -43,38 +47,15 @@ function storageGetSync(key: string): string | null {
  *
  * Connects to gateway's /api/sendspin, which authenticates with MA and
  * proxies the raw sendspin protocol bidirectionally.
+ * WebSocketManager handles auto-reconnection with exponential backoff.
  */
-function createSendspinProxy(baseUrl: string, apiToken: string): Promise<WebSocketManager> {
-  return new Promise((resolve, reject) => {
-    const wsUrl = new URL('/api/sendspin', baseUrl);
-    wsUrl.searchParams.set('token', apiToken);
-
-    const ws = new WebSocketManager(wsUrl.toString());
-    let ready = false;
-
-    ws.addEventListener('open', () => {
-      // SendspinPlayer will send its own auth message via the WebSocket.
-      // We just need to signal that the connection is open.
-      ready = true;
-      resolve(ws);
-    });
-
-    ws.addEventListener('error', () => {
-      console.error('[MAWebPlayer] Sendspin proxy WebSocket error');
-      if (!ready) reject(new Error('Sendspin proxy WebSocket error'));
-    });
-
-    ws.addEventListener('close', (event) => {
-      const closeEv = event as CloseEvent;
-      if (!ready) reject(new Error(`Sendspin proxy WebSocket closed: ${closeEv.code} ${closeEv.reason}`));
-    });
-
-    setTimeout(() => {
-      if (!ready) {
-        ws.close();
-        reject(new Error('Sendspin proxy WebSocket timeout'));
-      }
-    }, 10000);
+function createSendspinProxy(baseUrl: string, apiToken: string): WebSocketManager {
+  const wsUrl = new URL('/api/sendspin', baseUrl);
+  wsUrl.searchParams.set('token', apiToken);
+  return new WebSocketManager(wsUrl.toString(), {
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
+    heartbeatIntervalMs: 20000,
+    heartbeatTimeoutMs: 8000,
   });
 }
 
@@ -87,48 +68,27 @@ function createSendspinProxy(baseUrl: string, apiToken: string): Promise<WebSock
  * MA responds:   {"type": "RESULT", "message_id": "counter1", "result": {...}}
  * MA events:     {"event": "queue_updated", "data": {...}}
  */
-function createJsonRpcProxy(baseUrl: string, apiToken: string, onEvent: (event: string, data: Record<string, unknown>) => void): Promise<WebSocketManager> {
-  return new Promise((resolve, reject) => {
-    const wsUrl = new URL('/api/ma-jsonrpc', baseUrl);
-    wsUrl.searchParams.set('token', apiToken);
-
-    const ws = new WebSocketManager(wsUrl.toString());
-    let ready = false;
-
-    ws.addEventListener('open', () => {
-      ready = true;
-      resolve(ws);
-    });
-
-    ws.addEventListener('message', (event: MessageEvent) => {
+function createJsonRpcProxy(
+  baseUrl: string,
+  apiToken: string,
+  onEvent: (event: string, data: Record<string, unknown>) => void,
+): WebSocketManager {
+  const wsUrl = new URL('/api/ma-jsonrpc', baseUrl);
+  wsUrl.searchParams.set('token', apiToken);
+  return new WebSocketManager(wsUrl.toString(), {
+    onMessage: (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data as string);
         if (data && typeof data === 'object' && 'event' in data) {
-          // MA event: { "event": "queue_updated", "data": {...} }
           onEvent(data.event, data.data);
         }
       } catch {
         // Non-JSON or unparseable — ignore
       }
-    });
-
-    ws.addEventListener('error', () => {
-      console.error('[MAWebPlayer] JSON-RPC proxy WebSocket error');
-      if (!ready) reject(new Error('JSON-RPC proxy WebSocket error'));
-    });
-
-    ws.addEventListener('close', (event) => {
-      const closeEv = event as CloseEvent;
-      console.error('[MAWebPlayer] JSON-RPC proxy WebSocket closed:', closeEv.code, closeEv.reason);
-      if (!ready) reject(new Error(`JSON-RPC proxy WebSocket closed: ${closeEv.code} ${closeEv.reason}`));
-    });
-
-    setTimeout(() => {
-      if (!ready) {
-        ws.close();
-        reject(new Error('JSON-RPC proxy WebSocket timeout'));
-      }
-    }, 10000);
+    },
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
+    heartbeatIntervalMs: 20000,
+    heartbeatTimeoutMs: 8000,
   });
 }
 
@@ -138,7 +98,9 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const playerRef = useRef<SendspinPlayer | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const jsonrpcWsRef = useRef<WebSocketManager | null>(null);
+  const sendspinWsRef = useRef<WebSocketManager | null>(null);
   const playerIdRef = useRef<string>('');
+  const reconnectAttemptsRef = useRef(0);
   const [msgId, setMsgId] = useState(0);
   const [state, setStateLocal] = useState<MAWebPlayerState>({
     isConnected: false,
@@ -151,6 +113,9 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     mediaArtist: null,
     position: 0,
     duration: 0,
+    connectionState: 'DISCONNECTED',
+    reconnectAttempts: 0,
+    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
   });
 
   const getPlayerIdRef = useCallback(() => {
@@ -165,6 +130,26 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     playerIdRef.current = id;
     return id;
   }, []);
+
+  // Track connection state changes
+  const updateConnectionState = useCallback((connState: ConnectionState, reconnectAttempts: number) => {
+    const isConnected = connState === 'CONNECTED';
+    const isFailed = connState === 'FAILED';
+
+    console.log('[MAWebPlayer] Connection state:', connState, 'attempts:', reconnectAttempts);
+
+    setStateLocal(s => {
+      const next = {
+        ...s,
+        isConnected,
+        connectionState: connState,
+        reconnectAttempts,
+        error: isFailed ? `Connection failed after ${MAX_RECONNECT_ATTEMPTS} attempts. Please refresh.` : null,
+      };
+      onStateChange?.({ ...next });
+      return next;
+    });
+  }, [onStateChange]);
 
   // Handle MA JSON-RPC events (queue_updated, player_updated)
   const handleMaEvent = useCallback((eventType: string, data: Record<string, unknown>) => {
@@ -208,9 +193,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
       return next;
     });
-
-    onStateChange?.({ ...state, mediaTitle: null, mediaArtist: null, position: 0, duration: 0 });
-  }, [onStateChange, state]);
+  }, []);
 
   // JSON-RPC helper: send command and optionally wait for response
   const sendJsonRpc = useCallback((command: string, args: Record<string, unknown>): Promise<unknown> => {
@@ -272,11 +255,73 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       const baseUrl = window.location.origin;
 
       // 1. Create Sendspin proxy WebSocket (audio transport)
-      const sendspinWs = await createSendspinProxy(baseUrl, apiToken);
+      console.log('[MAWebPlayer] Creating Sendspin proxy...');
+      const sendspinWs = createSendspinProxy(baseUrl, apiToken);
+      sendspinWsRef.current = sendspinWs;
+
+      // Listen for connection state changes
+      sendspinWs.addEventListener('open', () => {
+        updateConnectionState('CONNECTED', 0);
+        reconnectAttemptsRef.current = 0;
+      });
+
+      sendspinWs.addEventListener('close', (event) => {
+        const closeEv = event as CloseEvent;
+        console.log('[MAWebPlayer] Sendspin proxy closed:', closeEv.code, closeEv.reason);
+        // WebSocketManager will auto-reconnect, don't set error yet
+      });
+
+      sendspinWs.addEventListener('error', () => {
+        console.error('[MAWebPlayer] Sendspin proxy error');
+      });
 
       // 2. Create JSON-RPC proxy WebSocket (control API)
-      const jsonrpcWs = await createJsonRpcProxy(baseUrl, apiToken, handleMaEvent);
+      console.log('[MAWebPlayer] Creating JSON-RPC proxy...');
+      const jsonrpcWs = createJsonRpcProxy(baseUrl, apiToken, handleMaEvent);
       jsonrpcWsRef.current = jsonrpcWs;
+
+      // Listen for JSON-RPC connection state changes
+      jsonrpcWs.addEventListener('open', () => {
+        console.log('[MAWebPlayer] JSON-RPC proxy connected');
+      });
+
+      jsonrpcWs.addEventListener('close', (event) => {
+        const closeEv = event as CloseEvent;
+        console.log('[MAWebPlayer] JSON-RPC proxy closed:', closeEv.code, closeEv.reason);
+      });
+
+      jsonrpcWs.addEventListener('error', () => {
+        console.error('[MAWebPlayer] JSON-RPC proxy error');
+      });
+
+      // Wait for at least one connection to establish before proceeding
+      // Use a promise that resolves when either WebSocket connects
+      const connectionTimeout = 15000;
+      let resolved = false;
+
+      const waitForConnection = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          if (!resolved) reject(new Error('Connection timeout after 15s'));
+        }, connectionTimeout);
+
+        const checkConnection = () => {
+          if (sendspinWs.readyState === WebSocket.OPEN || jsonrpcWs.readyState === WebSocket.OPEN) {
+            resolved = true;
+            clearTimeout(timeout);
+            console.log('[MAWebPlayer] At least one WebSocket connection established');
+            resolve();
+          }
+        };
+
+        // Check immediately and then poll
+        checkConnection();
+        const pollInterval = setInterval(() => {
+          checkConnection();
+          if (resolved) clearInterval(pollInterval);
+        }, 500);
+      });
+
+      await waitForConnection;
 
       // 3. Create audio element and attach to DOM
       console.log('[MAWebPlayer] Creating audio element...');
@@ -301,7 +346,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
               playerState: newState.playerState,
               volume: newState.volume,
               muted: newState.muted,
-              error: null,
+              error: newState.playerState === 'error' ? 'Playback error - attempting recovery' : null,
             };
             onStateChange?.({ ...updated });
             return updated;
@@ -313,10 +358,15 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
       // 5. Connect SendspinPlayer (registers with MA, starts audio transport)
       console.log('[MAWebPlayer] Calling player.connect()...');
-      setStateLocal(s => ({ ...s, isConnected: true, error: null }));
       await player.connect();
       console.log('[MAWebPlayer] player.connect() completed, volume:', player.volume, 'muted:', player.muted);
-      setStateLocal(s => ({ ...s, volume: player.volume, muted: player.muted }));
+      setStateLocal(s => ({
+        ...s,
+        isConnected: true,
+        volume: player.volume,
+        muted: player.muted,
+        error: null,
+      }));
 
       console.log('[MAWebPlayer] Player initialized and connected');
 
@@ -325,13 +375,15 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       console.error('[MAWebPlayer] Init failed:', msg, err);
       setStateLocal(s => ({ ...s, error: msg }));
     }
-  }, [getPlayerIdRef, handleMaEvent, onStateChange]);
+  }, [getPlayerIdRef, handleMaEvent, onStateChange, updateConnectionState]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       playerRef.current?.disconnect('shutdown');
       playerRef.current = null;
+      sendspinWsRef.current?.close();
+      sendspinWsRef.current = null;
       jsonrpcWsRef.current?.close();
       jsonrpcWsRef.current = null;
       audioRef.current = null;
@@ -487,10 +539,37 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const disconnect = useCallback(() => {
     playerRef.current?.disconnect('shutdown');
     playerRef.current = null;
+    sendspinWsRef.current?.close();
+    sendspinWsRef.current = null;
     jsonrpcWsRef.current?.close();
     jsonrpcWsRef.current = null;
     setStateLocal(s => ({ ...s, isConnected: false, isPlaying: false }));
   }, []);
+
+  // Reconnect: reinitialize the player when connection fails or drops
+  const reconnect = useCallback(async () => {
+    console.log('[MAWebPlayer] Reconnecting...');
+    // Clean up existing connections
+    playerRef.current?.disconnect('shutdown');
+    playerRef.current = null;
+    sendspinWsRef.current?.close();
+    sendspinWsRef.current = null;
+    jsonrpcWsRef.current?.close();
+    jsonrpcWsRef.current = null;
+    audioRef.current = null;
+
+    setStateLocal(s => ({
+      ...s,
+      isConnected: false,
+      isPlaying: false,
+      error: null,
+      reconnectAttempts: 0,
+    }));
+
+    // Wait a moment before reconnecting
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await initPlayer();
+  }, [initPlayer]);
 
   return {
     ...state,
@@ -501,12 +580,14 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     setVolume,
     setMuted,
     disconnect,
+    reconnect,
     playMedia,
     cmdPlay,
     cmdPause,
     cmdSeek,
     audioRef,
     jsonrpcWs: jsonrpcWsRef,
+    sendspinWs: sendspinWsRef,
   };
 }
 
