@@ -12,46 +12,57 @@
 import { test, expect } from '@playwright/test';
 import type { Page, WebSocket } from '@playwright/test';
 
-const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
+const UI_URL = process.env.UI_URL;
+if (!UI_URL) {
+  throw new Error(
+    'Environment variable UI_URL is not set.\n' +
+    'Set UI_URL to the target server URL (e.g., http://192.168.2.205:8080).'
+  );
+}
+
 const TEST_USER = process.env.TEST_USER;
+if (!TEST_USER) {
+  throw new Error(
+    'Environment variable TEST_USER is not set.\n' +
+    'Set TEST_USER to the username for Playwright E2E tests.'
+  );
+}
+
 const TEST_PASS = process.env.TEST_PASS;
+if (!TEST_PASS) {
+  throw new Error(
+    'Environment variable TEST_PASS is not set.\n' +
+    'Set TEST_PASS to the password for Playwright E2E tests.'
+  );
+}
 
 async function loginAsDefault(page: Page) {
-  if (!TEST_USER || !TEST_PASS) {
-    // Use default credentials from login page if no env vars set
-    await page.goto(`${UI_URL}/login`);
-    await page.getByPlaceholder('Enter username').fill('default');
-    await page.getByPlaceholder('Enter password').fill('admin');
-    await page.getByRole('button', { name: /sign in/i }).click();
-    await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
-  } else {
-    await page.goto(`${UI_URL}/login`);
+  await page.goto(`${UI_URL}/login`);
 
-    // Handle biometric auth if present
-    const useDifferent = page.locator('button:text("Use different account")').first();
-    if (await useDifferent.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await useDifferent.click();
-      await page.waitForTimeout(500);
-    }
-
-    const usernameInput = page.locator('input[type="text"], input[placeholder*="user"], input[name="username"]').first();
-    const passwordInput = page.locator('input[type="password"], input[placeholder*="pass"]').first();
-
-    await usernameInput.fill(TEST_USER);
-    if (await passwordInput.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await passwordInput.fill(TEST_PASS);
-    }
-
-    const signInBtn = page.locator('button:has-text("Sign In"), button:has-text("Signin")').first();
-    await signInBtn.click();
-    await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
+  // Handle biometric auth if present
+  const useDifferent = page.locator('button:text("Use different account")').first();
+  if (await useDifferent.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await useDifferent.click();
+    await page.waitForTimeout(500);
   }
+
+  const usernameInput = page.locator('input[type="text"], input[placeholder*="user"], input[name="username"]').first();
+  const passwordInput = page.locator('input[type="password"], input[placeholder*="pass"]').first();
+
+  await usernameInput.fill(TEST_USER);
+  if (await passwordInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await passwordInput.fill(TEST_PASS);
+  }
+
+  const signInBtn = page.locator('button:has-text("Sign In"), button:has-text("Signin")').first();
+  await signInBtn.click();
+  await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
 
   await page.waitForTimeout(2000);
 }
 
 test.describe('MA Web Player (Sendspin)', () => {
-  test('Web Player selection and MA track playback flow', async ({ page, browser }) => {
+  test('Web Player selection and MA track playback flow', async ({ page }) => {
     await loginAsDefault(page);
     await page.goto(`${UI_URL}/media`);
     await page.waitForLoadState('domcontentloaded');

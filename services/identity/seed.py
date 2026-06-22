@@ -166,7 +166,13 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             password_hash = None
             is_admin = udata.get("is_admin", False)
             if udata["username"] == "default":
-                raw_pwd = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme")
+                raw_pwd = os.getenv("DEFAULT_ADMIN_PASSWORD")
+                if raw_pwd is None:
+                    raise EnvironmentError(
+                        "Environment variable DEFAULT_ADMIN_PASSWORD is not set.\n"
+                        "The default admin user cannot be created without a password.\n"
+                        "Set DEFAULT_ADMIN_PASSWORD in the .env file before starting the identity service."
+                    )
                 if len(raw_pwd) > 72:
                     raw_pwd = raw_pwd[:72]
                 password_hash = hash_password(raw_pwd)

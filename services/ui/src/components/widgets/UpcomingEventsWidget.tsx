@@ -1,7 +1,7 @@
 import { useWidgetData } from '../../hooks/useWidgetData';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
-import type { CalendarEvent } from '../../types/widget';
+import type { CalendarEvent, IWidgetProps } from '../../types/widget';
 
 interface ParsedEvent {
   summary: string;
@@ -89,11 +89,7 @@ const formatRelativeTime = (date: Date): string => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-interface UpcomingEventsWidgetProps {
-  settingsButton?: React.ReactNode;
-}
-
-const UpcomingEventsWidget = ({ settingsButton }: UpcomingEventsWidgetProps) => {
+const UpcomingEventsWidget = ({ settingsButton }: IWidgetProps) => {
   const fetchEvents = async () => {
     const result = await api.getCalendarEvents() as { status: string; message?: string; events?: CalendarEvent[] };
     if (result.status !== 'SUCCESS') {

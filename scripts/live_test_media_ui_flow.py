@@ -4,7 +4,13 @@ import os
 import sys
 import httpx
 
-BASE_URL = os.getenv("LIVE_TEST_URL", "http://192.168.2.205:8080")
+BASE_URL = os.getenv("BASE_URL")
+if BASE_URL is None:
+    raise EnvironmentError(
+        "Environment variable BASE_URL is not set.\n"
+        "Set BASE_URL to the target server URL (e.g., http://192.168.2.205:8080)."
+    )
+
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
 def log_test(name, success, info=""):
@@ -15,9 +21,21 @@ def run_tests():
     print(f"=== Starting Media & UI API Flow Verification on {BASE_URL} ===")
     
     # 1. Login to retrieve Token
+    TEST_USER = os.getenv("TEST_USER")
+    if TEST_USER is None:
+        raise EnvironmentError(
+            "Environment variable TEST_USER is not set.\n"
+            "Set TEST_USER to the username for authentication."
+        )
+    TEST_PASSWORD = os.getenv("TEST_PASSWORD")
+    if TEST_PASSWORD is None:
+        raise EnvironmentError(
+            "Environment variable TEST_PASSWORD is not set.\n"
+            "Set TEST_PASSWORD to the password for authentication."
+        )
     login_url = f"{BASE_URL}/api/auth/login"
     try:
-        resp = httpx.post(login_url, json={"username": "default", "password": "admin"}, timeout=10.0)
+        resp = httpx.post(login_url, json={"username": TEST_USER, "password": TEST_PASSWORD}, timeout=10.0)
         if resp.status_code == 200:
             token = resp.json().get("api_key") or resp.json().get("token")
             log_test("Auth Login", True, f"Token: {token[:10]}..." if token else "No token in response")

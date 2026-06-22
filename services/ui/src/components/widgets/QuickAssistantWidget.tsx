@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import toast from 'react-hot-toast';
 
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';

@@ -12,6 +12,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { getPlayerId, savePlayerId, setState } from './webPlayer';
 import type { SendspinPlayer, PlayerState } from '@sendspin/sendspin-js';
+import { WebSocketManager } from './wsManager';
 
 const STORAGE_KEY = 'sendspin_webplayer_id';
 
@@ -43,29 +44,30 @@ function storageGetSync(key: string): string | null {
  * Connects to gateway's /api/sendspin, which authenticates with MA and
  * proxies the raw sendspin protocol bidirectionally.
  */
-function createSendspinProxy(baseUrl: string, apiToken: string): Promise<WebSocket> {
+function createSendspinProxy(baseUrl: string, apiToken: string): Promise<WebSocketManager> {
   return new Promise((resolve, reject) => {
     const wsUrl = new URL('/api/sendspin', baseUrl);
     wsUrl.searchParams.set('token', apiToken);
 
-    const ws = new WebSocket(wsUrl.toString());
+    const ws = new WebSocketManager(wsUrl.toString());
     let ready = false;
 
-    ws.onopen = () => {
+    ws.addEventListener('open', () => {
       // SendspinPlayer will send its own auth message via the WebSocket.
       // We just need to signal that the connection is open.
       ready = true;
       resolve(ws);
-    };
+    });
 
-    ws.onerror = () => {
+    ws.addEventListener('error', () => {
       console.error('[MAWebPlayer] Sendspin proxy WebSocket error');
       if (!ready) reject(new Error('Sendspin proxy WebSocket error'));
-    };
+    });
 
-    ws.onclose = (event) => {
-      if (!ready) reject(new Error(`Sendspin proxy WebSocket closed: ${event.code} ${event.reason}`));
-    };
+    ws.addEventListener('close', (event) => {
+      const closeEv = event as CloseEvent;
+      if (!ready) reject(new Error(`Sendspin proxy WebSocket closed: ${closeEv.code} ${closeEv.reason}`));
+    });
 
     setTimeout(() => {
       if (!ready) {
@@ -85,18 +87,20 @@ function createSendspinProxy(baseUrl: string, apiToken: string): Promise<WebSock
  * MA responds:   {"type": "RESULT", "message_id": "counter1", "result": {...}}
  * MA events:     {"event": "queue_updated", "data": {...}}
  */
-function createJsonRpcProxy(baseUrl: string, apiToken: string, onEvent: (event: string, data: Record<string, unknown>) => void): Promise<WebSocket> {
+function createJsonRpcProxy(baseUrl: string, apiToken: string, onEvent: (event: string, data: Record<string, unknown>) => void): Promise<WebSocketManager> {
   return new Promise((resolve, reject) => {
     const wsUrl = new URL('/api/ma-jsonrpc', baseUrl);
     wsUrl.searchParams.set('token', apiToken);
 
-    const ws = new WebSocket(wsUrl.toString());
+    const ws = new WebSocketManager(wsUrl.toString());
+    let ready = false;
 
-    ws.onopen = () => {
+    ws.addEventListener('open', () => {
+      ready = true;
       resolve(ws);
-    };
+    });
 
-    ws.onmessage = (event) => {
+    ws.addEventListener('message', (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data as string);
         if (data && typeof data === 'object' && 'event' in data) {
@@ -106,20 +110,21 @@ function createJsonRpcProxy(baseUrl: string, apiToken: string, onEvent: (event: 
       } catch {
         // Non-JSON or unparseable — ignore
       }
-    };
+    });
 
-    ws.onerror = () => {
+    ws.addEventListener('error', () => {
       console.error('[MAWebPlayer] JSON-RPC proxy WebSocket error');
-      reject(new Error('JSON-RPC proxy WebSocket error'));
-    };
+      if (!ready) reject(new Error('JSON-RPC proxy WebSocket error'));
+    });
 
-    ws.onclose = (event) => {
-      console.error('[MAWebPlayer] JSON-RPC proxy WebSocket closed:', event.code, event.reason);
-      reject(new Error(`JSON-RPC proxy WebSocket closed: ${event.code} ${event.reason}`));
-    };
+    ws.addEventListener('close', (event) => {
+      const closeEv = event as CloseEvent;
+      console.error('[MAWebPlayer] JSON-RPC proxy WebSocket closed:', closeEv.code, closeEv.reason);
+      if (!ready) reject(new Error(`JSON-RPC proxy WebSocket closed: ${closeEv.code} ${closeEv.reason}`));
+    });
 
     setTimeout(() => {
-      if (ws.readyState !== WebSocket.OPEN) {
+      if (!ready) {
         ws.close();
         reject(new Error('JSON-RPC proxy WebSocket timeout'));
       }
@@ -132,7 +137,7 @@ function createJsonRpcProxy(baseUrl: string, apiToken: string, onEvent: (event: 
 export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void) {
   const playerRef = useRef<SendspinPlayer | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const jsonrpcWsRef = useRef<WebSocket | null>(null);
+  const jsonrpcWsRef = useRef<WebSocketManager | null>(null);
   const playerIdRef = useRef<string>('');
   const [msgId, setMsgId] = useState(0);
   const [state, setStateLocal] = useState<MAWebPlayerState>({
@@ -285,7 +290,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       const player = new SendspinPlayer({
         audioElement: audio,
         playerId,
-        webSocket: sendspinWs,
+        webSocket: sendspinWs as unknown as WebSocket,
         codecs: ['opus', 'flac'],
         onStateChange: (newState) => {
           console.log('[MAWebPlayer] onStateChange:', newState);
