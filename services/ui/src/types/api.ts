@@ -80,8 +80,9 @@ export interface UserProfileRaw {
   gitlab_user?: string | null;
   git_url?: string | null;
   git_user?: string | null;
-  audiobookshelf_url?: string | null;
+ audiobookshelf_url?: string | null;
   audiobookshelf_user?: string | null;
+  audiobookshelf_api_key?: string | null;
   skylight_url?: string | null;
   skylight_email?: string | null;
   skylight_enabled?: boolean;

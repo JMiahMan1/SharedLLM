@@ -40,6 +40,7 @@ class ResolvedCredentials(BaseModel):
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
     audiobookshelf_pass: Optional[str] = None  # decrypted at resolution time
+    audiobookshelf_api_key: Optional[str] = None  # decrypted at resolution time
     mass_url: Optional[str] = None
     mass_token: Optional[str] = None           # decrypted at resolution time
     git_url: Optional[str] = None
@@ -76,6 +77,7 @@ class UserCreate(BaseModel):
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
     audiobookshelf_pass: Optional[str] = None
+    audiobookshelf_api_key: Optional[str] = None
     mass_url: Optional[str] = None
     mass_token: Optional[str] = None
     huggingface_token: Optional[str] = None
@@ -102,6 +104,7 @@ class UserUpdate(BaseModel):
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
     audiobookshelf_pass: Optional[str] = None
+    audiobookshelf_api_key: Optional[str] = None
     mass_url: Optional[str] = None
     mass_token: Optional[str] = None
     git_url: Optional[str] = None
@@ -133,6 +136,7 @@ class UserRead(BaseModel):
     gitlab_user: Optional[str] = None
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
+    audiobookshelf_api_key: Optional[str] = None
     mass_url: Optional[str] = None
     git_url: Optional[str] = None
     git_user: Optional[str] = None

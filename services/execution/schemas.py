@@ -83,6 +83,7 @@ class UserContext(BaseModel):
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
     audiobookshelf_pass: Optional[str] = None
+    audiobookshelf_api_key: Optional[str] = None
     preferred_tts_voice: Optional[str] = None
 
 
