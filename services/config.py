@@ -210,10 +210,6 @@ async def resolve_runtime_config():
                         elif var_name == "FAST_PATH_THRESHOLD":
                             value = float(value)
                         
-                        # Rewrite legacy execution hostname to use .local DNS container resolution
-                        if var_name == "EXECUTION_SVC_URL" and isinstance(value, str) and "://execution:" in value:
-                            value = value.replace("://execution:", "://execution.local:")
-                            
                         globals()[var_name] = value
                 
                 log.info("Runtime configuration loaded from Identity service")

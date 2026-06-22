@@ -852,7 +852,8 @@ const Media = () => {
   // Sync volume with sendspin player
   useEffect(() => {
     if (maPlayer.isConnected) {
-      maPlayer.setVolume(localVolume / 100);
+      console.log('[Media] Syncing volume:', localVolume);
+      maPlayer.setVolume(localVolume);
     }
   }, [localVolume, maPlayer.isConnected, maPlayer]);
 
