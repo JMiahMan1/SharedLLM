@@ -1164,8 +1164,6 @@ def _run_git_with_optional_askpass(
             pass
 
 
-import time
-import os
 START_TIME = time.time()
 
 @app.get("/health")

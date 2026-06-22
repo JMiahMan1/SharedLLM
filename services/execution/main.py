@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, status, Header, Request, File, UploadFile
 from fastapi.responses import JSONResponse
 import traceback
+import time
 
 # Suppress InsecureRequestWarning for internal self-signed certs (homelab)
 from urllib3.exceptions import InsecureRequestWarning
@@ -1624,8 +1625,6 @@ async def discovery_control_methods():
     import device_profiler
     return {"control_methods": device_profiler.CONTROL_METHODS}
 
-import time
-import os
 START_TIME = time.time()
 
 @app.get("/health")

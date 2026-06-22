@@ -26,6 +26,7 @@ env:
   INTERNAL_SECRET: test-secret-ci
   FERNET_KEY: g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=
   TEST_MODE: "true"
+  DEFAULT_ADMIN_PASSWORD: mock-admin-password-for-testing
 
 jobs:
   lint:
