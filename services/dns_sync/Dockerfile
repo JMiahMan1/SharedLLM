@@ -7,7 +7,7 @@ ENV GIT_SHA=${GIT_SHA}
 ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
-COPY . .
+COPY config/dns_sync.py /app/config/dns_sync.py
 ENV PYTHONUNBUFFERED=1
 
 # DNS sync-specific: DNS/network tools (dnsutils already provides dig, host, nslookup)
