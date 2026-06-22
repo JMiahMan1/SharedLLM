@@ -38,6 +38,8 @@ from services.gateway.background_worker import worker as raven_worker
 
 from services.shared.info_endpoint import info_router
 
+START_TIME = time.time()
+
 # --- Setup Logging IMMEDIATELY ---
 log = logging.getLogger("gateway")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
@@ -627,7 +629,8 @@ async def readiness():
     }
 
     services_status: dict[str, str] = {}
-    results: dict[str, Any] = {"status": "READY", "services": services_status}
+    service_details: dict[str, dict] = {}
+    results: dict[str, Any] = {"status": "READY", "services": services_status, "service_details": service_details}
     all_ok = True
 
     async with httpx.AsyncClient(timeout=2.0) as client:
@@ -636,6 +639,15 @@ async def readiness():
             resp = await client.get(url)
             if resp.status_code == 200:
                 services_status[name] = "OK"
+                try:
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        service_details[name] = {
+                            "git_sha": data.get("git_sha", "unknown"),
+                            "start_time": data.get("start_time", None)
+                        }
+                except Exception:
+                    pass
             else:
                 services_status[name] = f"ERROR ({resp.status_code})"
                 all_ok = False
@@ -645,9 +657,17 @@ async def readiness():
 
     # The Gateway itself is running if we are responding to this request
     services_status["gateway"] = "OK"
+    service_details["gateway"] = {
+        "git_sha": os.getenv("GIT_SHA", "unknown"),
+        "start_time": START_TIME
+    }
 
     if ping_redis():
       services_status["redis"] = "OK"
+      service_details["redis"] = {
+          "git_sha": "n/a",
+          "start_time": None
+      }
     else:
       services_status["redis"] = "ERROR"
       all_ok = False

@@ -246,6 +246,15 @@ async def websocket_endpoint(websocket: WebSocket):
 async def websocket_endpoint_direct(websocket: WebSocket):
     await _ws_handler(websocket)
 
+import time
+import os
+START_TIME = time.time()
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "logging"}
+    return {
+        "status": "ok",
+        "service": "logging",
+        "git_sha": os.getenv("GIT_SHA", "unknown"),
+        "start_time": START_TIME
+    }

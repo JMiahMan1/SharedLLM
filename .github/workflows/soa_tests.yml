@@ -3,8 +3,18 @@ name: SOA Microservices CI
 on:
   push:
     branches: [ main, master, microservices ]
+    paths:
+      - 'services/**'
+      - '!services/ui/**'
+      - 'requirements.txt'
+      - '.github/workflows/soa_tests.yml'
   pull_request:
     branches: [ main, master ]
+    paths:
+      - 'services/**'
+      - '!services/ui/**'
+      - 'requirements.txt'
+      - '.github/workflows/soa_tests.yml'
 
 jobs:
   test:

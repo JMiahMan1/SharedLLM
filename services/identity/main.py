@@ -407,9 +407,17 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         preferred_tts_voice=user.preferred_tts_voice or "af_heart"
     )
 
+import time
+START_TIME = time.time()
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "identity"}
+    return {
+        "status": "ok",
+        "service": "identity",
+        "git_sha": os.getenv("GIT_SHA", "unknown"),
+        "start_time": START_TIME
+    }
 
 # ─── Public/Admin API ──────────────────────────────────────────────────────────
 

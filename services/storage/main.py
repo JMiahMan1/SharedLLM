@@ -31,9 +31,18 @@ class IndexScanRequest(BaseModel):
     path: str = "/"
     recursive: bool = True
 
+import time
+import os
+START_TIME = time.time()
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "storage"}
+    return {
+        "status": "ok",
+        "service": "storage",
+        "git_sha": os.getenv("GIT_SHA", "unknown"),
+        "start_time": START_TIME
+    }
 
 @app.get("/status")
 async def get_storage_status():
