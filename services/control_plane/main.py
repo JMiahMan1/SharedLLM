@@ -37,9 +37,18 @@ def verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Interna
 
 # ─── Health ────────────────────────────────────────────────────────────────────
 
+import time
+import os
+START_TIME = time.time()
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "control_plane"}
+    return {
+        "status": "ok",
+        "service": "control_plane",
+        "git_sha": os.getenv("GIT_SHA", "unknown"),
+        "start_time": START_TIME
+    }
 
 @app.get("/control_plane/health")
 def health_prefixed():

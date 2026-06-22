@@ -117,9 +117,16 @@ const Dashboard = () => {
 
   const serviceSummaries = useMemo<ServiceSummary[]>(() => {
     const services = health?.services || {};
+    const detailsMap = health?.service_details || {};
     return Object.entries(services).map(([key, status]) => {
       const Icon = SERVICE_ICON_MAP[key as keyof typeof SERVICE_ICON_MAP] ?? Activity;
       const relatedLogs = logs.filter((log) => log.service === key).slice(0, 2);
+      const meta = detailsMap[key];
+      const gitSha = meta?.git_sha || 'unknown';
+      const lastRestart = meta?.start_time
+        ? new Date(meta.start_time * 1000).toLocaleString()
+        : 'unknown';
+
       return {
         key,
         label: key.replace(/_/g, ' '),
@@ -127,6 +134,8 @@ const Dashboard = () => {
         status,
         details: [
           { label: 'Status', value: status },
+          { label: 'Git Revision', value: gitSha },
+          { label: 'Last Restart', value: lastRestart },
           { label: 'Recent Logs', value: String(relatedLogs.length) },
           { label: 'Updated', value: new Date().toLocaleTimeString() },
         ],
