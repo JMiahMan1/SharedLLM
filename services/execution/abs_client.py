@@ -35,7 +35,7 @@ def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[
 
 async def abs_login(abs_url: str, username: str, password: str) -> Optional[str]:
     """Login to ABS with username/password and return API token."""
-    url = f"{abs_url.rstrip('/')}/login"
+    url = f"{abs_url.rstrip('/')}/audiobookshelf/login"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
             resp = await client.post(url, json={"username": username, "password": password})
@@ -51,7 +51,7 @@ async def abs_get(
     abs_url: str, abs_api_key: str, path: str, params: Optional[dict] = None
 ) -> dict:
     """GET request to ABS API."""
-    url = f"{abs_url.rstrip('/')}/api{path}"
+    url = f"{abs_url.rstrip('/')}/audiobookshelf{path}"
     headers = {"Authorization": f"Bearer {abs_api_key}"}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
@@ -70,7 +70,7 @@ async def abs_post(
     abs_url: str, abs_api_key: str, path: str, json: Optional[dict] = None
 ) -> dict:
     """POST request to ABS API."""
-    url = f"{abs_url.rstrip('/')}/api{path}"
+    url = f"{abs_url.rstrip('/')}/audiobookshelf{path}"
     headers = {"Authorization": f"Bearer {abs_api_key}", "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
