@@ -1157,6 +1157,28 @@ const Media = () => {
 
   const playMedia = useCallback(async (query: string, mediaType?: string) => {
     if (!selectedTarget) { setError('Select a device first'); return; }
+    if (selectedTarget === 'web_player') {
+      trigger('heavy');
+      setLoading('play');
+      setError(null);
+      try {
+        if (!maPlayer.isConnected) {
+          console.log('[Media] Connecting MA WebPlayer before play...');
+          await maPlayer.connect();
+        }
+        maPlayer.setVolume(localVolume);
+        maPlayer.setMuted(localMuted);
+        console.log('[Media] Sending play_media for:', query);
+        await maPlayer.playMedia(query);
+      } catch (err) {
+        console.error('[Media] WebPlayer play failed:', err);
+        setError(err instanceof Error ? err.message : 'Playback failed');
+        return;
+      } finally {
+        setLoading(null);
+      }
+      return;
+    }
     trigger('heavy');
     setLoading('play');
     setError(null);
@@ -1169,10 +1191,34 @@ const Media = () => {
     } finally {
       setLoading(null);
     }
-  }, [selectedTarget, trigger, fetchMediaStatus]);
+  }, [selectedTarget, trigger, fetchMediaStatus, maPlayer, localVolume, localMuted]);
 
   const playAudiobook = useCallback(async (bookId: string) => {
     if (!selectedTarget) { setError('Select a device first'); return; }
+    if (selectedTarget === 'web_player') {
+      trigger('heavy');
+      setLoading('play');
+      setError(null);
+      const idClean = bookId.replace('abs-', '').replace('ma-', '');
+      const mediaUri = `audiobookshelf://${idClean}`;
+      try {
+        if (!maPlayer.isConnected) {
+          console.log('[Media] Connecting MA WebPlayer before play...');
+          await maPlayer.connect();
+        }
+        maPlayer.setVolume(localVolume);
+        maPlayer.setMuted(localMuted);
+        console.log('[Media] Sending play_media for ABS book:', mediaUri);
+        await maPlayer.playMedia(mediaUri);
+      } catch (err) {
+        console.error('[Media] WebPlayer play failed:', err);
+        setError(err instanceof Error ? err.message : 'Playback failed');
+        return;
+      } finally {
+        setLoading(null);
+      }
+      return;
+    }
     trigger('heavy');
     setLoading('play');
     setError(null);
@@ -1185,10 +1231,32 @@ const Media = () => {
     } finally {
       setLoading(null);
     }
-  }, [selectedTarget, trigger, fetchMediaStatus]);
+  }, [selectedTarget, trigger, fetchMediaStatus, maPlayer, localVolume, localMuted]);
 
   const playPlaylist = useCallback(async (uri: string) => {
     if (!selectedTarget) { setError('Select a device first'); return; }
+    if (selectedTarget === 'web_player') {
+      trigger('heavy');
+      setLoading('play');
+      setError(null);
+      try {
+        if (!maPlayer.isConnected) {
+          console.log('[Media] Connecting MA WebPlayer before play...');
+          await maPlayer.connect();
+        }
+        maPlayer.setVolume(localVolume);
+        maPlayer.setMuted(localMuted);
+        console.log('[Media] Sending play_media for playlist:', uri);
+        await maPlayer.playMedia(uri);
+      } catch (err) {
+        console.error('[Media] WebPlayer play failed:', err);
+        setError(err instanceof Error ? err.message : 'Playback failed');
+        return;
+      } finally {
+        setLoading(null);
+      }
+      return;
+    }
     trigger('heavy');
     setLoading('play');
     setError(null);
@@ -1201,7 +1269,7 @@ const Media = () => {
     } finally {
       setLoading(null);
     }
-  }, [selectedTarget, trigger, fetchMediaStatus]);
+  }, [selectedTarget, trigger, fetchMediaStatus, maPlayer, localVolume, localMuted]);
 
  const playLocal = useCallback(async (id: string, title: string, subtitle: string, type: 'audiobook' | 'music', source: 'abs' | 'ma') => {
     trigger('heavy');
