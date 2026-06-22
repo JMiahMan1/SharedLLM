@@ -4783,7 +4783,7 @@ async def search_ma(request: Request, query: str = "", media_type: str = "", lim
     except HTTPException as e:
         log.error(f"[ma/search] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "results": []}
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/search",
             params={"user_id": creds.get("user") or "", "query": query, "media_type": media_type, "limit": limit, "artist": artist, "album": album},
