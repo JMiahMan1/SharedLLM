@@ -55,9 +55,9 @@
     <div class="grid-2">
         <div class="card">
             <label style="font-weight: 600; color: #e2e8f0;">Configuration</label>
-            <label for="api-token">API Token (from localStorage)</label>
-            <input type="text" id="api-token" placeholder="Paste your API token here">
-            <div class="endpoint-info">Token is read from localStorage.jarvis_api_key by default</div>
+            <label for="api-token">Gateway API Token</label>
+            <input type="text" id="api-token" placeholder="jarvis_api_key from localStorage">
+            <div class="endpoint-info">The gateway API key from UI login (same as localStorage jarvis_api_key). The gateway resolves this to MA credentials automatically.</div>
 
             <label for="test-mode" style="margin-top: 0.75rem;">Test Mode</label>
             <select id="test-mode">
