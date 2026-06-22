@@ -1,6 +1,5 @@
-import { useEffect, useCallback, lazy, Suspense, Component, type ReactNode } from 'react';
+import { useEffect, useCallback, useMemo, lazy, Suspense, Component, type ReactNode } from 'react';
 import { useWidgetStore } from '../../stores/widgetStore';
-import { shallow } from 'zustand/shallow';
 import WidgetContextMenu from '../widgets/WidgetContextMenu';
 import type { WidgetSize, WidgetKey, IActiveMediaWidgetProps } from '../../types/widget';
 import { WidgetSkeletonSelector } from '../widgets/skeletons/WidgetSkeletons';
@@ -75,7 +74,10 @@ class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
 const BentoBoxDashboard = () => {
   const userWidgets = useWidgetStore((s) => s.userWidgets);
 
-  const widgets = useMemo(() => {
+   const widgets = useMemo(() => {
+    // userWidgets is used as dependency to trigger re-compute when store changes
+    // getVisibleWidgets reads from getState() internally, so React can't detect implicit dep
+    void userWidgets;
     return useWidgetStore.getState().getVisibleWidgets();
   }, [userWidgets]);
 
