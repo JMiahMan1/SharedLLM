@@ -73,7 +73,11 @@ class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
 }
 
 const BentoBoxDashboard = () => {
-  const widgets = useWidgetStore((s) => s.getVisibleWidgets(), shallow);
+  const userWidgets = useWidgetStore((s) => s.userWidgets);
+
+  const widgets = useMemo(() => {
+    return useWidgetStore.getState().getVisibleWidgets();
+  }, [userWidgets]);
 
   useEffect(() => {
     useWidgetStore.getState().syncWithServer();
