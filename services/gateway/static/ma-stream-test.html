@@ -3,225 +3,186 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MA Stream Test</title>
+    <title>Sendspin Test</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 2rem; min-height: 100vh; }
-        h1 { font-size: 1.5rem; margin-bottom: 1.5rem; color: #38bdf8; }
-        .card { background: #1e293b; border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem; border: 1px solid #334155; }
-        label { display: block; font-size: 0.875rem; color: #94a3b8; margin-bottom: 0.25rem; }
-        input[type="text"] { width: 100%; padding: 0.5rem; background: #0f172a; border: 1px solid #475569; border-radius: 4px; color: #e2e8f0; font-size: 0.875rem; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; padding: 1.5rem; min-height: 100vh; }
+        h1 { font-size: 1.3rem; margin-bottom: 1rem; color: #38bdf8; }
+        h2 { font-size: 1rem; color: #94a3b8; margin-bottom: 0.5rem; margin-top: 1rem; }
+        .card { background: #1e293b; border-radius: 8px; padding: 1.25rem; margin-bottom: 0.75rem; border: 1px solid #334155; }
+        label { display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.25rem; }
+        input[type="text"] { width: 100%; padding: 0.5rem; background: #0f172a; border: 1px solid #475569; border-radius: 4px; color: #e2e8f0; font-size: 0.85rem; }
         input[type="text"]:focus { outline: none; border-color: #38bdf8; }
-        button { padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; font-size: 0.875rem; font-weight: 500; }
+        button { padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; font-size: 0.8rem; font-weight: 500; }
         button.primary { background: #0284c7; color: white; }
         button.primary:hover { background: #0369a1; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.success { background: #16a34a; color: white; }
+        button.danger { background: #dc2626; color: white; }
         button.secondary { background: #334155; color: #e2e8f0; }
-        button.secondary:hover { background: #475569; }
-        .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
-        .status { padding: 0.75rem; border-radius: 4px; font-size: 0.875rem; margin-top: 0.75rem; }
-        .status.info { background: #0c4a6e; border: 1px solid #0284c7; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0; }
+        .status { padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.8rem; margin: 0.5rem 0; }
+        .status.info { background: #0c4a6e; border: 1px solid #0284c7; color: #7dd3fc; }
         .status.success { background: #052e16; border: 1px solid #16a34a; color: #4ade80; }
         .status.error { background: #450a0a; border: 1px solid #dc2626; color: #f87171; }
         .status.warn { background: #422006; border: 1px solid #d97706; color: #fbbf24; }
-        #log { max-height: 400px; overflow-y: auto; font-family: monospace; font-size: 0.75rem; line-height: 1.6; padding: 0.75rem; background: #020617; border-radius: 4px; }
-        #log .log-entry { padding: 2px 0; border-bottom: 1px solid #1e293b; }
-        #log .log-time { color: #64748b; }
+        .status.active { background: #172554; border: 1px solid #3b82f6; color: #93c5fd; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.7; } }
+        #log { max-height: 500px; overflow-y: auto; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.72rem; line-height: 1.5; padding: 0.75rem; background: #020617; border-radius: 4px; }
+        #log .log-entry { padding: 1px 0; border-bottom: 1px solid #1e293b; word-break: break-all; }
+        #log .log-time { color: #475569; }
         #log .log-info { color: #38bdf8; }
         #log .log-error { color: #f87171; }
         #log .log-success { color: #4ade80; }
         #log .log-warn { color: #fbbf24; }
-        #audio-container { margin-top: 1rem; }
-        audio { width: 100%; max-width: 600px; }
-        .result { margin-top: 0.5rem; font-size: 0.8rem; color: #94a3b8; }
-        .tabs { display: flex; gap: 0.25rem; margin-bottom: 0.75rem; }
-        .tab { padding: 0.5rem 1rem; border-radius: 4px; border: 1px solid #334155; background: #1e293b; color: #94a3b8; cursor: pointer; font-size: 0.875rem; }
-        .tab.active { background: #0284c7; color: white; border-color: #0284c7; }
-        .tab:hover:not(.active) { background: #334155; }
-        #library-list { max-height: 300px; overflow-y: auto; border: 1px solid #334155; border-radius: 4px; }
-        .library-item { padding: 0.625rem 0.75rem; border-bottom: 1px solid #1e293b; cursor: pointer; font-size: 0.875rem; display: flex; justify-content: space-between; align-items: center; }
-        .library-item:hover { background: #334155; }
-        .library-item:last-child { border-bottom: none; }
-        .library-item .item-name { flex: 1; }
-        .library-item .item-type { color: #64748b; font-size: 0.75rem; margin-left: 0.5rem; }
-        .search-row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
-        .search-row input { flex: 1; }
+        #log .log-binary { color: #a78bfa; }
+        .frame-type { font-weight: bold; margin-right: 0.25rem; }
+        .frame-text { color: #38bdf8; }
+        .frame-binary { color: #a78bfa; }
+        #player-info { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; font-size: 0.8rem; }
+        #player-info .info-item { background: #0f172a; padding: 0.4rem 0.6rem; border-radius: 4px; }
+        #player-info .info-label { color: #64748b; font-size: 0.7rem; }
+        #player-info .info-value { color: #e2e8f0; }
+        audio { width: 100%; max-width: 500px; margin-top: 0.5rem; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .endpoint-info { font-size: 0.75rem; color: #64748b; margin-top: 0.25rem; }
+        select { padding: 0.5rem; background: #0f172a; border: 1px solid #475569; border-radius: 4px; color: #e2e8f0; font-size: 0.85rem; }
     </style>
 </head>
 <body>
-    <h1>MA Stream Test</h1>
+    <h1>Sendspin WebSocket Test</h1>
 
-    <div class="card">
-        <label style="font-weight: 600; color: #e2e8f0; margin-bottom: 0.5rem;">Library Browse</label>
-        <div class="tabs" id="media-tabs">
-            <div class="tab active" data-type="TRACKS">Tracks</div>
-            <div class="tab" data-type="PLAYLISTS">Playlists</div>
-            <div class="tab" data-type="ALBUMS">Albums</div>
-            <div class="tab" data-type="ARTISTS">Artists</div>
-            <div class="tab" data-type="RADIOS">Radio</div>
+    <div class="grid-2">
+        <div class="card">
+            <label style="font-weight: 600; color: #e2e8f0;">Configuration</label>
+            <label for="api-token">API Token (from localStorage)</label>
+            <input type="text" id="api-token" placeholder="Paste your API token here">
+            <div class="endpoint-info">Token is read from localStorage.jarvis_api_key by default</div>
+
+            <label for="test-mode" style="margin-top: 0.75rem;">Test Mode</label>
+            <select id="test-mode">
+                <option value="raw">Raw WebSocket (no sendspin-js)</option>
+                <option value="sendspin" selected>Sendspin Protocol (with sendspin-js)</option>
+            </select>
+            <div class="endpoint-info">Raw mode: manually send frames. Sendspin mode: full protocol.</div>
         </div>
 
-        <div id="library-list">
-            <div style="padding: 1rem; text-align: center; color: #64748b;">Loading...</div>
+        <div class="card">
+            <label style="font-weight: 600; color: #e2e8f0;">Connection State</label>
+            <div id="connection-status">
+                <div class="status info">Disconnected</div>
+            </div>
+            <div id="player-info">
+                <div class="info-item"><div class="info-label">Title</div><div class="info-value" id="info-title">-</div></div>
+                <div class="info-item"><div class="info-label">Artist</div><div class="info-value" id="info-artist">-</div></div>
+                <div class="info-item"><div class="info-label">Position</div><div class="info-value" id="info-position">0s</div></div>
+                <div class="info-item"><div class="info-label">Duration</div><div class="info-value" id="info-duration">0s</div></div>
+                <div class="info-item"><div class="info-label">Volume</div><div class="info-value" id="info-volume">-</div></div>
+                <div class="info-item"><div class="info-label">State</div><div class="info-value" id="info-state">-</div></div>
+            </div>
         </div>
-
-        <div class="search-row">
-            <input type="text" id="search-input" placeholder="Search within library...">
-            <button class="secondary" id="btn-search">Search</button>
-            <button class="secondary" id="btn-refresh">Refresh</button>
-        </div>
-
-        <div class="result" id="library-info" style="margin-top: 0.5rem;"></div>
     </div>
 
     <div class="card">
-        <label for="uri">MA URI</label>
-        <input type="text" id="uri" placeholder="youtube.com/watch?v=..." value="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
-        
-        <div class="controls" style="margin-top: 1rem;">
-            <button class="primary" id="btn-resolve">Resolve Stream URL</button>
+        <h2>Controls</h2>
+        <div class="controls">
+            <button class="primary" id="btn-connect">Connect</button>
+            <button class="danger" id="btn-disconnect" disabled>Disconnect</button>
+            <button class="secondary" id="btn-clear" disabled>Clear Log</button>
+            <button class="secondary" id="btn-send-auth" disabled>Send Auth</button>
+        </div>
+        <div class="controls">
             <button class="primary" id="btn-play" disabled>Play</button>
-            <button class="primary" id="btn-stop" disabled>Stop</button>
+            <button class="secondary" id="btn-pause" disabled>Pause</button>
+            <button class="secondary" id="btn-seek-10" disabled>Seek -10s</button>
+            <button class="secondary" id="btn-seek+10" disabled>Seek +10s</button>
         </div>
-
-        <div class="result" id="result"></div>
-
-        <div id="status-container"></div>
-
-        <div id="audio-container">
-            <audio id="audio-player" controls></audio>
+        <div class="controls">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                Volume: <input type="range" id="volume-slider" min="0" max="100" value="70" style="width: 150px;">
+                <span id="volume-value">70</span>
+            </label>
         </div>
+        <div id="result"></div>
     </div>
 
     <div class="card">
-        <h2 style="font-size: 1rem; color: #94a3b8; margin-bottom: 0.75rem;">Log</h2>
+        <h2>WebSocket Frames</h2>
         <div id="log"></div>
     </div>
 
+    <div class="card">
+        <h2>Audio</h2>
+        <audio id="audio-player" controls></audio>
+    </div>
+
+    <!-- Load sendspin-js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@sendspin/sendspin-js@3.2.0/dist/bundle.min.js"></script>
+
     <script>
+        // ── State ──
+        let ws = null;
+        let player = null;
+        let audio = document.getElementById('audio-player');
+        let frameCount = { sent: 0, received: 0 };
+
+        // ── DOM refs ──
         const logEl = document.getElementById('log');
-        const statusContainer = document.getElementById('status-container');
-        const audioPlayer = document.getElementById('audio-player');
-        const btnResolve = document.getElementById('btn-resolve');
+        const statusEl = document.getElementById('connection-status');
+        const apiTokenInput = document.getElementById('api-token');
+        const testModeSelect = document.getElementById('test-mode');
+        const btnConnect = document.getElementById('btn-connect');
+        const btnDisconnect = document.getElementById('btn-disconnect');
+        const btnClear = document.getElementById('btn-clear');
+        const btnSendAuth = document.getElementById('btn-send-auth');
         const btnPlay = document.getElementById('btn-play');
-        const btnStop = document.getElementById('btn-stop');
-        const btnSearch = document.getElementById('btn-search');
-        const btnRefresh = document.getElementById('btn-refresh');
+        const btnPause = document.getElementById('btn-pause');
+        const btnSeek10 = document.getElementById('btn-seek-10');
+        const btnSeekP10 = document.getElementById('btn-seek+10');
+        const volumeSlider = document.getElementById('volume-slider');
+        const volumeValue = document.getElementById('volume-value');
         const resultEl = document.getElementById('result');
-        const uriInput = document.getElementById('uri');
-        const searchInput = document.getElementById('search-input');
-        const libraryList = document.getElementById('library-list');
-        const libraryInfo = document.getElementById('library-info');
-        const mediaTabs = document.getElementById('media-tabs');
 
-        let streamUrl = null;
-        let currentMediaType = 'TRACKS';
-        let currentOffset = 0;
-        const PAGE_SIZE = 50;
-
-        function log(msg, type = 'info') {
+        // ── Logging ──
+        function log(msg, type = 'info', raw = null) {
             const time = new Date().toISOString().split('T')[1].slice(0, -1);
             const entry = document.createElement('div');
             entry.className = 'log-entry';
-            entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-${type}">${msg}</span>`;
+            let content = `<span class="log-time">[${time}]</span>`;
+
+            if (raw !== null) {
+                const isText = typeof raw === 'string';
+                const preview = isText ? raw.substring(0, 300) : `<binary ${raw.byteLength} bytes>`;
+                content += `<span class="frame-type frame-${isText ? 'text' : 'binary'}">${isText ? 'RX TEXT' : 'RX BIN'}</span> <span class="log-${type}">${escapeHtml(preview)}</span>`;
+            } else {
+                content += `<span class="log-${type}">${escapeHtml(msg)}</span>`;
+            }
+
+            entry.innerHTML = content;
             logEl.appendChild(entry);
             logEl.scrollTop = logEl.scrollHeight;
+
+            // Keep log manageable
+            while (logEl.children.length > 500) {
+                logEl.removeChild(logEl.firstChild);
+            }
+        }
+
+        function logSent(msg) {
+            const isText = typeof msg === 'string';
+            const raw = isText ? msg : new Uint8Array(msg);
+            log('SENT', 'info', msg);
+            frameCount.sent++;
+        }
+
+        function logReceived(msg) {
+            const isText = typeof msg === 'string';
+            log('RECV', isText ? 'info' : 'binary', msg);
+            frameCount.received++;
         }
 
         function setStatus(msg, type = 'info') {
-            statusContainer.innerHTML = `<div class="status ${type}">${msg}</div>`;
-        }
-
-        function getHeaders() {
-            const token = localStorage.getItem('jarvis_api_key');
-            const headers = {};
-            if (token) {
-                headers['Authorization'] = `Bearer ${token}`;
-            }
-            return headers;
-        }
-
-        async function loadLibrary(type, offset = 0, search = '') {
-            currentMediaType = type;
-            currentOffset = offset;
-
-            // Update tab UI
-            mediaTabs.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.toggle('active', tab.dataset.type === type);
-            });
-
-            libraryList.innerHTML = '<div style="padding: 1rem; text-align: center; color: #64748b;">Loading...</div>';
-            log(`Loading ${type} (offset=${offset}, search="${search}")`);
-
-            try {
-                const params = new URLSearchParams({
-                    media_type: type,
-                    offset: offset,
-                    limit: PAGE_SIZE,
-                    search: search
-                });
-                const resp = await fetch(`/api/media/music-assistant/browse?${params}`, {
-                    method: 'GET',
-                    headers: getHeaders(),
-                });
-
-                if (!resp.ok) {
-                    const text = await resp.text();
-                    log(`HTTP ${resp.status} loading library`, 'error');
-                    libraryList.innerHTML = `<div style="padding: 1rem; text-align: center; color: #f87171;">Error loading library: ${text}</div>`;
-                    return;
-                }
-
-                const data = await resp.json();
-                const items = data.items || [];
-
-                if (items.length === 0) {
-                    libraryList.innerHTML = '<div style="padding: 1rem; text-align: center; color: #64748b;">No items found</div>';
-                    libraryInfo.textContent = '';
-                    return;
-                }
-
-                libraryInfo.textContent = `Showing ${offset + 1}–${offset + items.length} of ${items.length}+ items`;
-
-                libraryList.innerHTML = '';
-                for (const item of items) {
-                    const div = document.createElement('div');
-                    div.className = 'library-item';
-                    const name = item.name || item.uri || '(unnamed)';
-                    const uri = item.uri || '';
-                    const duration = item.duration ? formatDuration(item.duration) : '';
-                    div.innerHTML = `<span class="item-name">${escapeHtml(name)}</span>${duration ? `<span class="item-type">${duration}</span>` : ''}<span class="item-type">${item.type || type}</span>`;
-                    div.addEventListener('click', () => {
-                        uriInput.value = uri;
-                        log(`Selected: ${name} (${uri.substring(0, 80)}...)`, 'success');
-                    });
-                    libraryList.appendChild(div);
-                }
-
-                log(`Loaded ${items.length} ${type} items`, 'success');
-            } catch (err) {
-                log(`Library error: ${err.message}`, 'error');
-                libraryList.innerHTML = `<div style="padding: 1rem; text-align: center; color: #f87171;">Error: ${err.message}</div>`;
-            }
-        }
-
-        async function searchLibrary() {
-            const query = searchInput.value.trim();
-            if (!query) {
-                loadLibrary(currentMediaType, 0, '');
-                return;
-            }
-            log(`Searching ${currentMediaType} for "${query}"`);
-            await loadLibrary(currentMediaType, 0, query);
-        }
-
-        function formatDuration(seconds) {
-            if (!seconds || seconds <= 0) return '';
-            const h = Math.floor(seconds / 3600);
-            const m = Math.floor((seconds % 3600) / 60);
-            const s = Math.floor(seconds % 60);
-            if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-            return `${m}:${String(s).padStart(2, '0')}`;
+            statusEl.innerHTML = `<div class="status ${type}">${msg}</div>`;
         }
 
         function escapeHtml(str) {
@@ -230,109 +191,416 @@
             return div.innerHTML;
         }
 
-        async function resolveStream() {
-            const uri = uriInput.value.trim();
-            if (!uri) {
-                log('URI is required', 'error');
-                return;
-            }
+        function setConnected(connected) {
+            btnConnect.disabled = connected;
+            btnDisconnect.disabled = !connected;
+            btnClear.disabled = !connected;
+            btnSendAuth.disabled = !connected;
+            btnPlay.disabled = !connected;
+            btnPause.disabled = !connected;
+            btnSeek10.disabled = !connected;
+            btnSeekP10.disabled = !connected;
 
-            btnResolve.disabled = true;
-            log(`Resolving stream URL for: ${uri}`);
-
-            try {
-                const resp = await fetch(`/api/media/stream/music-assistant?uri=${encodeURIComponent(uri)}`, {
-                    method: 'GET',
-                    headers: getHeaders(),
-                });
-
-                if (!resp.ok) {
-                    const text = await resp.text();
-                    log(`HTTP ${resp.status}: ${text}`, 'error');
-                    setStatus(`Error: ${resp.status} - ${text}`, 'error');
-                    log('Stream resolution failed', 'error');
-                    return;
-                }
-
-                const data = await resp.json();
-                streamUrl = data.stream_url;
-
-                if (streamUrl) {
-                    log(`Stream URL resolved: ${streamUrl.substring(0, 120)}...`, 'success');
-                    setStatus(`Stream URL resolved successfully`, 'success');
-                    resultEl.textContent = `Stream URL: ${streamUrl.substring(0, 80)}...`;
-                    btnPlay.disabled = false;
-                } else {
-                    log('No stream URL in response', 'error');
-                    setStatus('No stream URL in response', 'error');
-                    log('Stream resolution failed', 'error');
-                }
-            } catch (err) {
-                log(`Resolve error: ${err.message}`, 'error');
-                setStatus(`Error: ${err.message}`, 'error');
-            } finally {
-                btnResolve.disabled = false;
+            if (connected) {
+                setStatus('Connected', 'active');
+            } else {
+                setStatus('Disconnected', 'info');
             }
         }
 
-        function playStream() {
-            if (!streamUrl) {
-                log('No stream URL to play', 'warn');
+        // ── Get token ──
+        function getToken() {
+            const inputVal = apiTokenInput.value.trim();
+            if (inputVal) return inputVal;
+            return localStorage.getItem('jarvis_api_key') || '';
+        }
+
+        // ── Connect ──
+        async function connect() {
+            const token = getToken();
+            if (!token) {
+                setStatus('No API token provided', 'error');
                 return;
             }
 
-            log(`Playing stream: ${streamUrl.substring(0, 120)}...`, 'info');
-            audioPlayer.src = streamUrl;
-            audioPlayer.play().then(() => {
-                log('Audio playback started', 'success');
-                btnPlay.disabled = true;
-                btnStop.disabled = false;
-            }).catch(err => {
-                log(`Playback error: ${err.message}`, 'error');
-                setStatus(`Playback error: ${err.message}`, 'error');
+            const mode = testModeSelect.value;
+            log(`Connecting via ${window.location.origin} ...`, 'info');
+
+            setStatus('Connecting...', 'warn');
+
+            try {
+                if (mode === 'sendspin') {
+                    await connectSendspinMode(token);
+                } else {
+                    await connectRawMode(token);
+                }
+            } catch (err) {
+                log(`Connection failed: ${err.message}`, 'error');
+                setStatus(`Error: ${err.message}`, 'error');
+            }
+        }
+
+        // ── Raw WebSocket mode ──
+        function connectRawMode(token) {
+            return new Promise((resolve, reject) => {
+                const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/sendspin?token=${encodeURIComponent(token)}`;
+                log(`Connecting to: ${wsUrl.substring(0, 80)}...`, 'info');
+
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    setConnected(true);
+                    log('WebSocket connected (raw mode)', 'success');
+
+                    // Auto-send auth
+                    const playerId = generatePlayerId();
+                    const authMsg = JSON.stringify({
+                        type: 'auth',
+                        token: token,
+                        client_id: playerId,
+                    });
+                    ws.send(authMsg);
+                    logSent(authMsg);
+                    log('Sent auth message', 'success');
+                };
+
+                ws.onmessage = (event) => {
+                    logReceived(event.data);
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'ack') {
+                            log('Received ACK from MA', 'success');
+                            setStatus('Connected - auth acknowledged', 'success');
+                            // Send codec config
+                            const codecMsg = JSON.stringify({
+                                type: 'codec_config',
+                                codecs: ['opus', 'flac'],
+                            });
+                            ws.send(codecMsg);
+                            logSent(codecMsg);
+                            log('Sent codec config', 'info');
+                        }
+                        if (data.type === 'codec_ack') {
+                            log('Codec config acknowledged', 'success');
+                            setStatus('Ready - send play_media via JSON-RPC', 'success');
+                        }
+                    } catch {
+                        // Binary audio data or unparseable - expected
+                    }
+                };
+
+                ws.onclose = (event) => {
+                    setConnected(false);
+                    log(`WebSocket closed: code=${event.code}, reason=${event.reason || 'none'}`, event.code === 1000 ? 'success' : 'error');
+                    setStatus(`Closed: ${event.code} ${event.reason || ''}`, event.code === 1000 ? 'success' : 'error');
+                    player = null;
+                };
+
+                ws.onerror = () => {
+                    log('WebSocket error', 'error');
+                    reject(new Error('WebSocket error'));
+                };
+
+                // Timeout
+                setTimeout(() => {
+                    if (ws && ws.readyState === WebSocket.CONNECTING) {
+                        ws.close();
+                        reject(new Error('Connection timeout after 15s'));
+                    }
+                }, 15000);
             });
         }
 
-        function stopStream() {
-            log('Stopping playback', 'info');
-            audioPlayer.pause();
-            audioPlayer.src = '';
-            btnPlay.disabled = false;
-            btnStop.disabled = true;
+        // ── Sendspin mode (with sendspin-js library) ──
+        function connectSendspinMode(token) {
+            return new Promise((resolve, reject) => {
+                const playerId = generatePlayerId();
+                log(`Creating SendspinPlayer with id: ${playerId}`, 'info');
+
+                // Create WebSocket connection to gateway
+                const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/sendspin?token=${encodeURIComponent(token)}`;
+                log(`Connecting to: ${wsUrl.substring(0, 80)}...`, 'info');
+
+                ws = new WebSocket(wsUrl);
+
+                ws.onopen = () => {
+                    log('WebSocket connected (sendspin mode)', 'success');
+                };
+
+                ws.onmessage = (event) => {
+                    logReceived(event.data);
+                };
+
+                ws.onclose = (event) => {
+                    setConnected(false);
+                    log(`WebSocket closed: code=${event.code}`, event.code === 1000 ? 'success' : 'error');
+                    player = null;
+                };
+
+                ws.onerror = () => {
+                    log('WebSocket error', 'error');
+                };
+
+                // Wait for connection, then create SendspinPlayer
+                ws.onopen = () => {
+                    try {
+                        // Create SendspinPlayer
+                        if (typeof SendspinPlayer === 'undefined') {
+                            log('ERROR: @sendspin/sendspin-js not loaded from CDN', 'error');
+                            reject(new Error('sendspin-js library not found. Check CDN connection.'));
+                            return;
+                        }
+
+                        player = new SendspinPlayer({
+                            audioElement: audio,
+                            playerId: playerId,
+                            webSocket: ws,
+                            codecs: ['opus', 'flac'],
+                            onStateChange: (state) => {
+                                log(`SendspinPlayer state: ${state.playerState}, playing: ${state.isPlaying}`, state.playerState === 'error' ? 'error' : 'info');
+                                updatePlayerInfo(state);
+                            },
+                        });
+
+                        log('SendspinPlayer created, calling connect()...', 'info');
+                        player.connect().then(() => {
+                            log('SendspinPlayer connected!', 'success');
+                            setConnected(true);
+                            setStatus('SendspinPlayer connected', 'success');
+                            updatePlayerInfo(player);
+                            resolve();
+                        }).catch((err) => {
+                            log(`SendspinPlayer connect failed: ${err.message}`, 'error');
+                            setStatus(`Connect failed: ${err.message}`, 'error');
+                            reject(err);
+                        });
+                    } catch (err) {
+                        log(`SendspinPlayer creation failed: ${err.message}`, 'error');
+                        reject(err);
+                    }
+                };
+
+                // Timeout
+                setTimeout(() => {
+                    if (ws && ws.readyState === WebSocket.CONNECTING) {
+                        ws.close();
+                        reject(new Error('Connection timeout after 15s'));
+                    }
+                }, 15000);
+            });
         }
 
-        // Event listeners
-        btnResolve.addEventListener('click', resolveStream);
-        btnPlay.addEventListener('click', playStream);
-        btnStop.addEventListener('click', stopStream);
-        btnSearch.addEventListener('click', searchLibrary);
-        btnRefresh.addEventListener('click', () => loadLibrary(currentMediaType, 0, ''));
-
-        searchInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') searchLibrary();
-        });
-
-        mediaTabs.addEventListener('click', (e) => {
-            if (e.target.classList.contains('tab')) {
-                loadLibrary(e.target.dataset.type, 0, '');
+        // ── Disconnect ──
+        function disconnect() {
+            if (player) {
+                try { player.disconnect('shutdown'); } catch {}
+                player = null;
             }
-        });
+            if (ws) {
+                ws.close(1000, 'User disconnect');
+                ws = null;
+            }
+            setConnected(false);
+            log('Disconnected by user', 'info');
+            setStatus('Disconnected', 'info');
+        }
 
-        // Audio event listeners
-        audioPlayer.addEventListener('playing', () => log('Audio: playing', 'success'));
-        audioPlayer.addEventListener('pause', () => log('Audio: paused', 'info'));
-        audioPlayer.addEventListener('error', (e) => {
-            const err = audioPlayer.error;
-            log(`Audio error: code=${err?.code || 'unknown'}, message=${err?.message || 'unknown'}`, 'error');
-            setStatus(`Audio error: ${err?.message || 'unknown'}`, 'error');
-        });
-        audioPlayer.addEventListener('waiting', () => log('Audio: buffering...', 'warn'));
-        audioPlayer.addEventListener('canplay', () => log('Audio: ready to play', 'success'));
+        // ── Send auth (manual, raw mode) ──
+        function sendAuth() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('WebSocket not connected', 'error');
+                return;
+            }
+            const token = getToken();
+            const playerId = generatePlayerId();
+            const authMsg = JSON.stringify({
+                type: 'auth',
+                token: token,
+                client_id: playerId,
+            });
+            ws.send(authMsg);
+            logSent(authMsg);
+            log('Manual auth sent', 'success');
+        }
 
-        // Initial load
-        log('MA Stream Test page loaded', 'info');
-        log(`Base URL: ${window.location.origin}`, 'info');
-        loadLibrary('TRACKS', 0, '');
+        // ── Play / Pause ──
+        function play() {
+            if (!player) {
+                log('No SendspinPlayer instance', 'error');
+                return;
+            }
+            try {
+                player.play();
+                log('Player.play() called', 'success');
+            } catch (err) {
+                log(`Play failed: ${err.message}`, 'error');
+            }
+        }
+
+        function pause() {
+            if (!player) {
+                log('No SendspinPlayer instance', 'error');
+                return;
+            }
+            try {
+                player.pause();
+                log('Player.pause() called', 'info');
+            } catch (err) {
+                log(`Pause failed: ${err.message}`, 'error');
+            }
+        }
+
+        // ── Seek ──
+        function seek(delta) {
+            if (!player) {
+                log('No SendspinPlayer instance', 'error');
+                return;
+            }
+            try {
+                const newPos = (player.position || 0) + delta;
+                player.seek(Math.max(0, newPos));
+                log(`Seek to ${newPos}s`, 'info');
+            } catch (err) {
+                log(`Seek failed: ${err.message}`, 'error');
+            }
+        }
+
+        // ── Volume ──
+        function setVolume(val) {
+            volumeValue.textContent = val;
+            if (player) {
+                try {
+                    player.setVolume(parseInt(val));
+                    log(`Volume set to ${val}`, 'info');
+                } catch (err) {
+                    log(`Volume set failed: ${err.message}`, 'error');
+                }
+            }
+        }
+
+        // ── JSON-RPC helpers ──
+        async function sendJsonRpc(command, args) {
+            const token = getToken();
+            if (!token) {
+                log('No API token for JSON-RPC', 'error');
+                return;
+            }
+
+            const wsUrl = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/ma-jsonrpc?token=${encodeURIComponent(token)}`;
+            const jsonRpcWs = new WebSocket(wsUrl);
+
+            return new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    jsonRpcWs.close();
+                    reject(new Error('JSON-RPC timeout'));
+                }, 10000);
+
+                jsonRpcWs.onopen = () => {
+                    const msgId = `test_${Date.now()}`;
+                    const msg = JSON.stringify({
+                        message_id: msgId,
+                        command: command,
+                        args: args,
+                    });
+                    jsonRpcWs.send(msg);
+                    logSent(msg);
+                    log(`JSON-RPC: ${command}`, 'info');
+                };
+
+                jsonRpcWs.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data?.message_id?.startsWith('test_') && data?.type === 'RESULT') {
+                            clearTimeout(timeout);
+                            jsonRpcWs.close();
+                            resolve(data.result);
+                        }
+                    } catch {}
+                };
+
+                jsonRpcWs.onerror = () => {
+                    clearTimeout(timeout);
+                    reject(new Error('JSON-RPC error'));
+                };
+
+                jsonRpcWs.onclose = () => {
+                    clearTimeout(timeout);
+                };
+            });
+        }
+
+        async function playMedia(uri) {
+            try {
+                await sendJsonRpc('players/play_media', {
+                    player_id: generatePlayerId(),
+                    media: uri,
+                    enqueue: 'play',
+                });
+                await sendJsonRpc('players/cmd_play', {
+                    player_id: generatePlayerId(),
+                });
+                log(`play_media: ${uri.substring(0, 60)}...`, 'success');
+            } catch (err) {
+                log(`play_media failed: ${err.message}`, 'error');
+            }
+        }
+
+        // ── Update player info display ──
+        function updatePlayerInfo(playerState) {
+            if (playerState) {
+                document.getElementById('info-title').textContent = playerState.title || '-';
+                document.getElementById('info-artist').textContent = playerState.artist || '-';
+                document.getElementById('info-position').textContent = `${Math.round(playerState.position || 0)}s`;
+                document.getElementById('info-duration').textContent = `${Math.round(playerState.duration || 0)}s`;
+                document.getElementById('info-volume').textContent = `${playerState.volume || 0}%`;
+                document.getElementById('info-state').textContent = playerState.playerState || '-';
+            }
+        }
+
+        // ── Generate player ID ──
+        function generatePlayerId() {
+            const arr = new Uint32Array(10);
+            crypto.getRandomValues(arr);
+            return arr.join('');
+        }
+
+        // ── Auto-fill token from localStorage ──
+        function autoFillToken() {
+            const saved = localStorage.getItem('jarvis_api_key');
+            if (saved && !apiTokenInput.value) {
+                apiTokenInput.value = saved;
+            }
+        }
+
+        // ── Event listeners ──
+        btnConnect.addEventListener('click', connect);
+        btnDisconnect.addEventListener('click', disconnect);
+        btnClear.addEventListener('click', () => { logEl.innerHTML = ''; });
+        btnSendAuth.addEventListener('click', sendAuth);
+        btnPlay.addEventListener('click', play);
+        btnPause.addEventListener('click', pause);
+        btnSeek10.addEventListener('click', () => seek(-10));
+        btnSeekP10.addEventListener('click', () => seek(10));
+        volumeSlider.addEventListener('input', (e) => setVolume(e.target.value));
+        volumeSlider.addEventListener('change', (e) => setVolume(e.target.value));
+
+        // Audio events
+        audio.addEventListener('playing', () => log('Audio: playing', 'success'));
+        audio.addEventListener('pause', () => log('Audio: paused', 'info'));
+        audio.addEventListener('error', (e) => {
+            const err = audio.error;
+            log(`Audio error: code=${err?.code}, message=${err?.message || 'unknown'}`, 'error');
+        });
+        audio.addEventListener('waiting', () => log('Audio: buffering...', 'warn'));
+        audio.addEventListener('canplay', () => log('Audio: ready to play', 'success'));
+
+        // ── Init ──
+        autoFillToken();
+        log('Sendspin Test page loaded', 'info');
+        log(`Server: ${window.location.origin}`, 'info');
+        log(`sendspin-js loaded: ${typeof SendspinPlayer !== 'undefined'}`, 'info');
+        log(`Test mode: ${testModeSelect.value}`, 'info');
+        log('Click "Connect" to start testing', 'info');
     </script>
 </body>
 </html>

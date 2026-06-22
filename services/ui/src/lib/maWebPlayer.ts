@@ -48,14 +48,20 @@ function storageGetSync(key: string): string | null {
  * Connects to gateway's /api/sendspin, which authenticates with MA and
  * proxies the raw sendspin protocol bidirectionally.
  * WebSocketManager handles auto-reconnection with exponential backoff.
+ *
+ * NOTE: Heartbeat is disabled (set to 0) because the sendspin protocol has
+ * its own keepalive mechanism inside SendspinPlayer. The WebSocketManager's
+ * application-level { type: 'ping' } heartbeat would be forwarded to MA as
+ * raw data, which MA doesn't understand and may reject.
  */
 function createSendspinProxy(baseUrl: string, apiToken: string): WebSocketManager {
   const wsUrl = new URL('/api/sendspin', baseUrl);
   wsUrl.searchParams.set('token', apiToken);
   return new WebSocketManager(wsUrl.toString(), {
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
-    heartbeatIntervalMs: 20000,
-    heartbeatTimeoutMs: 8000,
+    // Disable application-level heartbeat — sendspin protocol has its own keepalive
+    heartbeatIntervalMs: 0,
+    heartbeatTimeoutMs: 0,
   });
 }
 
