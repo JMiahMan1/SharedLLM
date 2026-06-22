@@ -2,6 +2,7 @@
 import json
 import re
 import time
+import os
 import asyncio
 
 from services.config import INTERNAL_SECRET, REDIS_URL, LOG_RETENTION_DAYS, LOG_MAX_ENTRIES
@@ -246,8 +247,6 @@ async def websocket_endpoint(websocket: WebSocket):
 async def websocket_endpoint_direct(websocket: WebSocket):
     await _ws_handler(websocket)
 
-import time
-import os
 START_TIME = time.time()
 
 @app.get("/health")

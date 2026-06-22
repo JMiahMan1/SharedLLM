@@ -578,8 +578,6 @@ async def sync_capabilities(payload: dict):
     return {"status": "SUCCESS", "count": 0}
 
 
-import time
-import os
 START_TIME = time.time()
 
 @app.get("/health")
