@@ -98,7 +98,7 @@ async def search(
     if not result:
         return []
 
-    log.debug(f"[mass_ha] raw search response: {result}")
+    log.info(f"[mass_ha] raw search response: {result}")
 
     # MA search returns {"results": [...]} or HA wraps it as {"response": {"results": ...}}
     items = []
