@@ -46,6 +46,12 @@
     handle /api/media* {
         reverse_proxy gateway:11435
     }
+    handle /api/sendspin {
+        reverse_proxy gateway:11435
+    }
+    handle /api/ma-jsonrpc {
+        reverse_proxy gateway:11435
+    }
     handle /api/presence* {
         reverse_proxy gateway:11435
     }

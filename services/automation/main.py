@@ -20,6 +20,10 @@ redis_client = None
 async def scheduler_loop():
     global redis_client
     log.info(f"Automation Scheduler Started. Connecting to Redis: {REDIS_URL}")
+
+    from services.config import resolve_runtime_config
+    await resolve_runtime_config()
+
     redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     
     while True:
