@@ -163,6 +163,7 @@ export class WebSocketManager {
 
   private startHeartbeat() {
     this.cleanupHeartbeat();
+    if (!this.heartbeatIntervalMs || this.heartbeatIntervalMs <= 0) return;
     this.pingTimer = setInterval(() => {
       this.sendPing();
     }, this.heartbeatIntervalMs);

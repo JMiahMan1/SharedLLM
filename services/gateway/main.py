@@ -5245,13 +5245,14 @@ async def sendspin_proxy(websocket: WebSocket):
     """Proxy WebSocket for MA Sendspin audio streaming.
 
     The browser connects here via sendspin-js. The gateway:
-    1. Authenticates the browser client (token from ?token= query param)
-    2. Resolves MA credentials from the identity service
-    3. Connects to MA's sendspin endpoint (ws://ma_host/sendspin)
+    1. Resolves MA credentials from the identity service
+    2. Connects to MA's sendspin endpoint (ws://ma_host/sendspin)
+    3. Accepts the browser WebSocket connection
     4. Forwards the browser's auth message to MA
     5. Proxies all sendspin protocol data bidirectionally
 
-    This mirrors the MA frontend's sendspin-proxy pattern.
+    Key: MA connection must be established BEFORE accepting the browser,
+    because the browser sends its auth message immediately on connect.
     """
     import websockets
     from urllib.parse import urlparse
@@ -5261,8 +5262,6 @@ async def sendspin_proxy(websocket: WebSocket):
     if not api_token:
         await websocket.close(code=1008, reason="Missing token")
         return
-
-    await websocket.accept()
 
     # Resolve MA credentials via identity service
     try:
@@ -5289,53 +5288,57 @@ async def sendspin_proxy(websocket: WebSocket):
     ma_sendspin_url = f"{'wss' if parsed.scheme == 'https' else 'ws'}://{parsed.hostname}:{parsed.port or 8095}/sendspin"
     log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url[:80]}...")
 
-    # Connect to MA sendspin with auth headers
+    # Connect to MA sendspin with auth headers BEFORE accepting browser
+    # This ensures MA is ready when the browser sends its auth message
     extra_headers = {"Authorization": f"Bearer {mass_token}"}
+    ma_ws = None
     try:
-        async with websockets.connect(
+        ma_ws = await websockets.connect(
             ma_sendspin_url,
             additional_headers=extra_headers,
-            ping_interval=30,
-            ping_timeout=10,
-        ) as ma_ws:
-            log.info("[sendspin] Connected to MA sendspin")
+        )
+        log.info("[sendspin] Connected to MA sendspin")
 
-            async def forward_client_to_ma():
-                """Forward browser messages to MA (handles both text and binary frames)."""
-                try:
-                    while True:
-                        message = await websocket.receive()
-                        data = message.get("text") or message.get("bytes")
-                        if data is None:
-                            break
-                        if isinstance(data, str):
-                            data = data.encode("utf-8")
-                        await ma_ws.send(data)
-                except WebSocketDisconnect:
-                    pass
-                except Exception as e:
-                    log.warning(f"[sendspin] Client→MA forward error: {e}")
+        # NOW accept browser connection - MA is ready to receive auth
+        await websocket.accept()
+        log.info("[sendspin] Browser connection accepted, starting proxy")
 
-            async def forward_ma_to_client():
-                """Forward MA messages to browser (handles both text and binary frames)."""
-                try:
-                    while True:
-                        message = await ma_ws.receive()
-                        data = message.get("text") or message.get("bytes")
-                        if data is None:
-                            break
-                        if isinstance(data, str):
-                            await websocket.send_text(data)
-                        else:
-                            await websocket.send_bytes(data)
-                except Exception as e:
-                    log.warning(f"[sendspin] MA→Client forward error: {e}")
+        async def forward_client_to_ma():
+            """Forward browser messages to MA (handles both text and binary frames)."""
+            try:
+                while True:
+                    message = await websocket.receive()
+                    data = message.get("text") or message.get("bytes")
+                    if data is None:
+                        break
+                    if isinstance(data, str):
+                        data = data.encode("utf-8")
+                    await ma_ws.send(data)
+            except WebSocketDisconnect:
+                log.info("[sendspin] Browser disconnected")
+            except Exception as e:
+                log.warning(f"[sendspin] Client→MA forward error: {e}")
 
-            # Run both directions in parallel
-            await asyncio.gather(
-                forward_client_to_ma(),
-                forward_ma_to_client(),
-            )
+        async def forward_ma_to_client():
+            """Forward MA messages to browser (handles both text and binary frames)."""
+            try:
+                while True:
+                    message = await ma_ws.receive()
+                    data = message.get("text") or message.get("bytes")
+                    if data is None:
+                        break
+                    if isinstance(data, str):
+                        await websocket.send_text(data)
+                    else:
+                        await websocket.send_bytes(data)
+            except Exception as e:
+                log.warning(f"[sendspin] MA→Client forward error: {e}")
+
+        # Run both directions in parallel
+        await asyncio.gather(
+            forward_client_to_ma(),
+            forward_ma_to_client(),
+        )
     except websockets.exceptions.InvalidStatusCode as e:
         log.error(f"[sendspin] MA sendspin connection failed (status {e.status_code}): {e}")
         try:
@@ -5348,6 +5351,12 @@ async def sendspin_proxy(websocket: WebSocket):
             await websocket.close(code=1011, reason=str(e))
         except Exception:
             pass
+    finally:
+        if ma_ws:
+            try:
+                await ma_ws.close()
+            except Exception:
+                pass
 
 
 @app.websocket("/api/ma-jsonrpc")
