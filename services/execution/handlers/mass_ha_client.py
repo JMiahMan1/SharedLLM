@@ -98,9 +98,18 @@ async def search(
     if not result:
         return []
 
-    # MA search returns {"results": [...]} with MediaType as keys
+    # MA search returns {"results": [...]} or HA wraps it as {"response": {"results": ...}}
     items = []
-    results = result.get("results", []) if result else []
+    results = []
+    if result:
+        results = result.get("results", [])
+        if not results:
+            # Check if HA wrapped the response
+            inner = result.get("response", {})
+            if isinstance(inner, dict):
+                results = inner.get("results", [])
+            elif isinstance(inner, list):
+                results = inner
     if isinstance(results, dict):
         for media_type, items_list in results.items():
             if isinstance(items_list, list):
