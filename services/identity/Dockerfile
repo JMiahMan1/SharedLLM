@@ -8,7 +8,10 @@ ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
-COPY services/ /app/services/
+COPY services/__init__.py /app/services/
+COPY services/config.py /app/services/
+COPY services/shared/ /app/services/shared/
+COPY services/identity/ /app/services/identity/
 EXPOSE 8001
 ENV PYTHONUNBUFFERED=1
 

@@ -17,7 +17,10 @@ RUN groupadd -g ${PGID} sharedllm || true \
     && mkdir -p /home/sharedllm/.cache/huggingface /home/sharedllm/.cache/qdrant \
     && chown -R ${PUID}:${PGID} /home/sharedllm
 ENV HOME=/home/sharedllm
-COPY services/ /app/services/
+COPY services/__init__.py /app/services/
+COPY services/config.py /app/services/
+COPY services/shared/ /app/services/shared/
+COPY services/gateway/ /app/services/gateway/
 EXPOSE 11435
 ENV PYTHONUNBUFFERED=1
 ENV TOKENIZERS_PARALLELISM=false
