@@ -578,22 +578,32 @@
             if (!token) return;
 
             const domain = searchDomain.value;
-            const url = `/api/media/search?q=${encodeURIComponent(query)}&domain=${encodeURIComponent(domain)}`;
+            let url;
+            let resultsKey = 'results';
+
+            if (domain === 'music_assistant') {
+                url = `/api/media/music-assistant/search?q=${encodeURIComponent(query)}&limit=20`;
+            } else {
+                url = `/api/media/audiobookshelf/search?q=${encodeURIComponent(query)}&limit=20`;
+                resultsKey = 'books';
+            }
 
             try {
+                log(`[MAWebPlayer] Searching ${domain}: ${query}`, 'info');
                 const resp = await fetch(url, {
                     headers: { 'Authorization': `Bearer ${token}` },
                 });
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
-                renderSearchResults(data);
+                const results = data?.[resultsKey] || [];
+                log(`[MAWebPlayer] Search returned ${results.length} results from ${domain}`, results.length ? 'success' : 'warn');
+                renderSearchResults(results, domain);
             } catch (err) {
                 log(`[MAWebPlayer] Search failed: ${err.message}`, 'error');
             }
         }
 
-        function renderSearchResults(data) {
-            const results = data?.results || [];
+        function renderSearchResults(results, domain) {
             searchResults.innerHTML = '';
             if (!results.length) {
                 searchResults.innerHTML = '<div style="padding: 0.5rem; color: #64748b; font-size: 0.8rem;">No results found</div>';
@@ -603,18 +613,19 @@
             results.forEach(r => {
                 const div = document.createElement('div');
                 div.className = 'search-item';
-                const uri = r.uri || r.item_id || '';
+                const uri = r.uri || r.id || '';
+                const name = domain === 'music_assistant' ? (r.name || uri) : (r.title || uri);
+                const meta = domain === 'music_assistant' ? (r.artist || r.type || '') : (r.author || r.narrator || '');
+                const safeUri = uri.replace(/'/g, "\\'");
                 div.innerHTML = `
                     <div>
-                        <div class="search-item-name">${escapeHtml(r.name || r.title || uri)}</div>
-                        <div class="search-item-meta">${escapeHtml(r.artist || r.description || '')}</div>
+                        <div class="search-item-name">${escapeHtml(name)}</div>
+                        <div class="search-item-meta">${escapeHtml(meta)}${r.duration ? ` · ${Math.round(r.duration / 60)}m` : ''}</div>
                     </div>
-                    <button class="search-item-btn" onclick="playFromSearch('${uri.replace(/'/g, "\\'")}')">▶ Play</button>
+                    <button class="search-item-btn" onclick="playFromSearch('${safeUri}')">▶ Play</button>
                 `;
                 searchResults.appendChild(div);
             });
-
-            log(`[MAWebPlayer] Search returned ${results.length} results`, 'success');
         }
 
         async function playFromSearch(uri) {
@@ -758,12 +769,17 @@
             btnSearch.addEventListener('click', () => {
                 const q = searchInput.value.trim();
                 if (!q) { log('Enter search query', 'warn'); return; }
+                log(`[MAWebPlayer] Search button clicked, query: "${q}"`, 'info');
                 searchMedia(q);
             });
 
-            // Enter key on search
+            // Enter key on search input
             searchInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') btnSearch.click();
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    log('[MAWebPlayer] Enter key pressed on search input', 'info');
+                    btnSearch.click();
+                }
             });
 
             // Enter key on URI input
