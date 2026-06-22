@@ -56,7 +56,7 @@ async function loginAsDefault(page: Page) {
 
   const signInBtn = page.locator('button:has-text("Sign In"), button:has-text("Signin")').first();
   await signInBtn.click();
-  await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
 
   await page.waitForTimeout(2000);
 }
@@ -77,17 +77,7 @@ test.describe('MA Web Player (Sendspin)', () => {
     // Verify Web Player card gets selected (cyan highlight)
     await expect(localPlayerCard).toHaveClass(/cyan-500/);
 
-    // 2. Track WebSocket connections before playing
-    const [sendspinWs, maJsonRpcWs] = await Promise.all([
-      page.waitForEvent('websocket', (ws: WebSocket) =>
-        ws.url().includes('/api/sendspin'),
-      ),
-      page.waitForEvent('websocket', (ws: WebSocket) =>
-        ws.url().includes('/api/ma-jsonrpc'),
-      ),
-    ]);
-
-    // 3. Play an MA track from Jump Back In
+    // 2. Play an MA track from Jump Back In
     const maRecentItem = page.getByText('Does Anybody Hear Her').first();
     if (!await maRecentItem.isVisible({ timeout: 5000 }).catch(() => false)) {
       test.skip();
@@ -99,6 +89,16 @@ test.describe('MA Web Player (Sendspin)', () => {
     if (!await playBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       test.skip();
     }
+
+    // 3. Track WebSocket connections (established when play() is called)
+    const [sendspinWs, maJsonRpcWs] = await Promise.all([
+      page.waitForEvent('websocket', (ws: WebSocket) =>
+        ws.url().includes('/api/sendspin'),
+      ),
+      page.waitForEvent('websocket', (ws: WebSocket) =>
+        ws.url().includes('/api/ma-jsonrpc'),
+      ),
+    ]);
 
     // Listen for console messages to verify sendspin protocol
     const consoleMessages: string[] = [];
@@ -189,6 +189,15 @@ test.describe('MA Web Player (Sendspin)', () => {
     if (!await playBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       test.skip();
     }
+
+    await Promise.all([
+      page.waitForEvent('websocket', (ws: WebSocket) =>
+        ws.url().includes('/api/sendspin'),
+      ),
+      page.waitForEvent('websocket', (ws: WebSocket) =>
+        ws.url().includes('/api/ma-jsonrpc'),
+      ),
+    ]);
 
     await playBtn.click();
     await page.waitForTimeout(3000);
