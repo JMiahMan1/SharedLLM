@@ -53,6 +53,7 @@ async def search(
     ha_url: str,
     ha_token: str,
     query: str,
+    mass_entry_id: str = "",
     media_types: List[str] | None = None,
     limit: int = 10,
     artist: str = "",
@@ -62,6 +63,7 @@ async def search(
     
     Args:
         query: Search query string
+        mass_entry_id: MA config entry ID from HA
         media_types: List of MediaType strings (TRACK, ALBUM, ARTIST, PLAYLIST, etc.) or None for ALL
         limit: Max results to return
         artist: Artist name to refine search
@@ -78,8 +80,14 @@ async def search(
         "limit": limit,
     }
     
+    if mass_entry_id:
+        service_data["config_entry_id"] = mass_entry_id
+    
     if media_types:
-        service_data["media_type"] = media_types if len(media_types) > 1 else media_types[0]
+        # MA HA integration expects lowercase media type strings as a list
+        service_data["media_type"] = [mt.lower() for mt in media_types] if len(media_types) > 1 else [media_types[0].lower()]
+    else:
+        service_data["media_type"] = ["track", "artist", "album", "playlist", "radio"]
     
     if artist:
         service_data["artist"] = artist
