@@ -1211,7 +1211,14 @@ const Media = () => {
 
     // Initialize player if not connected (establishes Sendspin + JSON-RPC)
     if (!maPlayer.isConnected) {
-      await maPlayer.connect();
+      console.log('[Media] Connecting MA WebPlayer before play...');
+      try {
+        await maPlayer.connect();
+      } catch (err) {
+        console.error('[Media] WebPlayer connect failed:', err);
+        setError('Failed to connect Web Player');
+        return;
+      }
     }
 
     // Set initial volume and muted state
@@ -1225,6 +1232,7 @@ const Media = () => {
       mediaUri = `audiobookshelf://${idClean}`;
     }
 
+    console.log('[Media] Sending play_media for:', mediaUri);
     // Send play_media via JSON-RPC to tell MA to queue and start this track
     await maPlayer.playMedia(mediaUri);
 
@@ -1242,7 +1250,7 @@ const Media = () => {
         is_volume_muted: localMuted
       });
     } catch (err) {
-      console.error('Failed to sync local play:', err);
+      console.error('[Media] Failed to sync local play:', err);
     }
   }, [trigger, localVolume, localMuted, maPlayer]);
 
@@ -1251,17 +1259,23 @@ const Media = () => {
     const nextPlaying = !localIsPlaying;
     if (localIsPlaying) {
       setLocalIsPlaying(false);
+      console.log('[Media] Pausing WebPlayer...');
       maPlayer.pause();
     } else {
       setLocalIsPlaying(true);
       (document.activeElement as HTMLElement)?.setAttribute('data-webplayer-interact', 'true');
       if (!maPlayer.isConnected) {
-        maPlayer.connect();
+        console.log('[Media] Connecting WebPlayer for toggle play...');
+        maPlayer.connect().catch(err => {
+          console.error('[Media] WebPlayer connect failed:', err);
+          setError('Failed to connect Web Player');
+        });
       }
       // Re-send play_media in case it was lost
       const mediaUri = localTrack.source === 'abs'
         ? `audiobookshelf://${localTrack.id}`
         : localTrack.id;
+      console.log('[Media] Re-sending play_media:', mediaUri);
       maPlayer.playMedia(mediaUri);
     }
     api.syncMediaState({
@@ -1275,12 +1289,13 @@ const Media = () => {
       duration: localDuration,
       volume_level: localVolume / 100,
       is_volume_muted: localMuted
-    }).catch(err => console.error('Failed to sync toggleLocalPlay:', err));
+    }).catch(err => console.error('[Media] Failed to sync toggleLocalPlay:', err));
   }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, localCurrentTime, maPlayer]);
 
   const handleLocalVolume = useCallback((v: number) => {
     setLocalVolume(v);
     setLocalMuted(false);
+    console.log('[Media] Setting volume to:', v);
     maPlayer.setVolume(v);
     if (localTrack) {
       api.syncMediaState({
@@ -1294,13 +1309,14 @@ const Media = () => {
         duration: localDuration,
         volume_level: v / 100,
         is_volume_muted: false
-      }).catch(err => console.error('Failed to sync volume:', err));
+      }).catch(err => console.error('[Media] Failed to sync volume:', err));
     }
   }, [localTrack, localIsPlaying, localCurrentTime, localDuration, maPlayer]);
 
   const toggleLocalMute = useCallback(() => {
     const nextMuted = !localMuted;
     setLocalMuted(nextMuted);
+    console.log('[Media] Muting:', nextMuted);
     maPlayer.setMuted(nextMuted);
     if (localTrack) {
       api.syncMediaState({
@@ -1314,11 +1330,12 @@ const Media = () => {
         duration: localDuration,
         volume_level: localVolume / 100,
         is_volume_muted: nextMuted
-      }).catch(err => console.error('Failed to sync mute:', err));
+      }).catch(err => console.error('[Media] Failed to sync mute:', err));
     }
   }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted, maPlayer]);
 
   const handleLocalSeek = useCallback((time: number) => {
+    console.log('[Media] Seek to:', time);
     maPlayer.seek(time);
     setLocalCurrentTime(time);
     if (localTrack) {
@@ -1333,13 +1350,14 @@ const Media = () => {
         duration: localDuration,
         volume_level: localVolume / 100,
         is_volume_muted: localMuted
-      }).catch(err => console.error('Failed to sync seek:', err));
+      }).catch(err => console.error('[Media] Failed to sync seek:', err));
     }
   }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
 
   const skipLocalBack = useCallback(() => {
     const currentTime = maPlayer.position || 0;
     if (currentTime > 5) {
+      console.log('[Media] Skip back to 0');
       maPlayer.seek(0);
       setLocalCurrentTime(0);
       if (localTrack) {
@@ -1354,7 +1372,7 @@ const Media = () => {
           duration: localDuration,
           volume_level: localVolume / 100,
           is_volume_muted: localMuted
-        }).catch(err => console.error('Failed to sync skip back:', err));
+        }).catch(err => console.error('[Media] Failed to sync skip back:', err));
       }
     }
   }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
@@ -1364,6 +1382,7 @@ const Media = () => {
     const dur = localDuration || 0;
     if (dur > 0) {
       const newTime = Math.min(currentTime + 30, dur);
+      console.log('[Media] Skip forward to:', newTime);
       maPlayer.seek(newTime);
       setLocalCurrentTime(newTime);
       if (localTrack) {
@@ -1378,12 +1397,13 @@ const Media = () => {
           duration: localDuration,
           volume_level: localVolume / 100,
           is_volume_muted: localMuted
-        }).catch(err => console.error('Failed to sync skip forward:', err));
+        }).catch(err => console.error('[Media] Failed to sync skip forward:', err));
       }
     }
   }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
 
   const handleStopPlayback = useCallback(() => {
+    console.log('[Media] Stop playback');
     if (localTrack) {
       releaseControl(false);
       api.syncMediaState({
@@ -1397,7 +1417,7 @@ const Media = () => {
         duration: localDuration,
         volume_level: localVolume / 100,
         is_volume_muted: localMuted
-      }).catch(err => console.error('Failed to sync stop:', err));
+      }).catch(err => console.error('[Media] Failed to sync stop:', err));
     }
     setLocalTrack(null);
     setLocalIsPlaying(false);
