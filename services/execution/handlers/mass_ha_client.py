@@ -100,18 +100,23 @@ async def search(
 
     log.info(f"[mass_ha] raw search response: {result}")
 
-    # MA search returns {"results": [...]} or HA wraps it as {"response": {"results": ...}}
+    # HA response format: {"changed_states": [], "service_response": {artists: [...], albums: [...], ...}}
+    # Or sometimes {"results": [...]} at top level
     items = []
     results = []
     if result:
         results = result.get("results", [])
         if not results:
-            # Check if HA wrapped the response
-            inner = result.get("response", {})
-            if isinstance(inner, dict):
-                results = inner.get("results", [])
-            elif isinstance(inner, list):
-                results = inner
+            # Check nested response keys
+            for key in ("service_response", "response"):
+                inner = result.get(key, {})
+                if isinstance(inner, dict):
+                    results = inner.get("results", [])
+                    if results:
+                        break
+                elif isinstance(inner, list):
+                    results = inner
+                    break
     if isinstance(results, dict):
         for media_type, items_list in results.items():
             if isinstance(items_list, list):
