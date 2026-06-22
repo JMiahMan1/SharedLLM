@@ -33,6 +33,28 @@ body { font-family: 'Outfit', 'Inter', sans-serif; }
     @apply bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/30 rounded-lg px-4 py-2 transition-all duration-300 flex items-center justify-center gap-2;
   }
 
+  .neon-border {
+    @apply border border-white/10 transition-all duration-300;
+    box-shadow: 0 0 15px rgba(139, 92, 246, 0.1), inset 0 0 10px rgba(139, 92, 246, 0.05);
+  }
+
+  .neon-border:hover {
+    @apply border-purple-500/40;
+    box-shadow: 0 0 25px rgba(168, 85, 247, 0.25), inset 0 0 15px rgba(168, 85, 247, 0.1);
+  }
+
+  .neon-glow {
+    text-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+  }
+
+  .glass-sidebar {
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-right: 1px solid rgba(255, 255, 255, 0.05);
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.3);
+  }
+
   .safe-area-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }

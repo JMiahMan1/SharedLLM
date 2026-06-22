@@ -1,6 +1,37 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <script>
+      (function() {
+        try {
+          const saved = localStorage.getItem('jarvis_dark_mode') || localStorage.getItem('jarvis_theme') || 'dark';
+          let dark = saved === 'dark';
+          if (saved === 'system') {
+            dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          }
+          if (dark) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+          
+          // Apply to body as soon as it mounts to prevent background gradient FOUC
+          if (document.body) {
+            document.body.classList.add(dark ? 'night-mode' : 'day-mode');
+          } else {
+            const observer = new MutationObserver(function(mutations, obs) {
+              if (document.body) {
+                document.body.classList.add(dark ? 'night-mode' : 'day-mode');
+                obs.disconnect();
+              }
+            });
+            observer.observe(document.documentElement, { childList: true, subtree: true });
+          }
+        } catch (e) {
+          console.error('FOUC prevention script failed:', e);
+        }
+      })();
+    </script>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />

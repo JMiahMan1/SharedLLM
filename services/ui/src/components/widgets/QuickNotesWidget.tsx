@@ -1,13 +1,8 @@
 import { useState } from 'react';
 import { FileText, Plus, Trash2 } from 'lucide-react';
-import type { UserWidgetSettings } from '../../types/widget';
+import type { IWidgetProps } from '../../types/widget';
 import { api } from '../../services/api';
 import toast from 'react-hot-toast';
-
-interface QuickNotesWidgetProps {
-  userSettings: UserWidgetSettings;
-  onTogglePin: () => void;
-}
 
 interface NoteItem {
   id: string;
@@ -16,7 +11,7 @@ interface NoteItem {
   category: string;
 }
 
-const QuickNotesWidget = ({ userSettings, onTogglePin }: QuickNotesWidgetProps) => {
+const QuickNotesWidget = ({ userSettings, onTogglePin, settingsButton }: IWidgetProps) => {
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [newNote, setNewNote] = useState('');
   const [newTitle, setNewTitle] = useState('');
@@ -51,13 +46,16 @@ const QuickNotesWidget = ({ userSettings, onTogglePin }: QuickNotesWidgetProps) 
 
   return (
     <div className="glass-card h-full p-5 relative">
-      <button
-        onClick={onTogglePin}
-        className="absolute top-3 right-3 text-slate-500 hover:text-purple-400 transition-colors"
-        title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
-      >
-        <FileText size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
-      </button>
+      <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+        <button
+          onClick={onTogglePin}
+          className="text-slate-500 hover:text-purple-400 transition-colors"
+          title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
+        >
+          <FileText size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
+        </button>
+        {settingsButton}
+      </div>
 
       <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
         <FileText size={18} className="text-blue-400" />

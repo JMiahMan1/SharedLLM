@@ -93,6 +93,10 @@ const defaultCapabilities: CapabilityPayload = {
   has_assignable_devices: false,
 };
 
+let activeSyncPromise: Promise<void> | null = null;
+let lastSyncTime = 0;
+const SYNC_COOLDOWN_MS = 5000;
+
 export const useWidgetStore = create<WidgetState>((set, get) => ({
   widgetRegistry: defaultWidgetDefs,
   userWidgets: {},
@@ -103,36 +107,51 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   mountCapabilities: defaultCapabilities,
 
   syncWithServer: async () => {
-    set({ mounting: true, error: null });
-    try {
-      const response = await api.getWidgetSettings() as { widgets: UserWidgetSettings[]; quick_assistant_enabled: boolean };
-      const widgetsMap: Record<string, UserWidgetSettings> = {};
-      for (const w of response.widgets) {
-        widgetsMap[w.widget_key] = w;
-      }
-      
-      const activeWidgets: WidgetStateItem[] = defaultWidgetDefs.map((def, index) => {
-        const w = widgetsMap[def.key] || createDefaultSettings(def.key, index);
-        return {
-          id: def.key,
-          type: def.key,
-          isVisible: w.visibility === 'visible',
-          size: w.size,
-          config: w.config || {},
-        };
-      });
-
-      set({
-        userWidgets: widgetsMap,
-        activeWidgets,
-        quickAssistantEnabled: response.quick_assistant_enabled || false,
-      });
-    } catch (e) {
-      const error = e instanceof Error ? e.message : 'Failed to sync widget settings';
-      set({ error, userWidgets: {}, activeWidgets: [] });
-    } finally {
-      set({ mounting: false });
+    if (activeSyncPromise) {
+      return activeSyncPromise;
     }
+
+    const now = Date.now();
+    if (now - lastSyncTime < SYNC_COOLDOWN_MS && Object.keys(get().userWidgets).length > 0) {
+      return;
+    }
+
+    activeSyncPromise = (async () => {
+      set({ mounting: true, error: null });
+      try {
+        const response = await api.getWidgetSettings() as { widgets: UserWidgetSettings[]; quick_assistant_enabled: boolean };
+        const widgetsMap: Record<string, UserWidgetSettings> = {};
+        for (const w of response.widgets) {
+          widgetsMap[w.widget_key] = w;
+        }
+        
+        const activeWidgets: WidgetStateItem[] = defaultWidgetDefs.map((def, index) => {
+          const w = widgetsMap[def.key] || createDefaultSettings(def.key, index);
+          return {
+            id: def.key,
+            type: def.key,
+            isVisible: w.visibility === 'visible',
+            size: w.size,
+            config: w.config || {},
+          };
+        });
+
+        set({
+          userWidgets: widgetsMap,
+          activeWidgets,
+          quickAssistantEnabled: response.quick_assistant_enabled || false,
+        });
+        lastSyncTime = Date.now();
+      } catch (e) {
+        const error = e instanceof Error ? e.message : 'Failed to sync widget settings';
+        set({ error, userWidgets: {}, activeWidgets: [] });
+      } finally {
+        set({ mounting: false });
+        activeSyncPromise = null;
+      }
+    })();
+
+    return activeSyncPromise;
   },
 
   evaluateMountConditions: (capabilities: CapabilityPayload) => {
@@ -357,3 +376,7 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
     }
   },
 }));
+
+export function useWidget(key: WidgetKey): UserWidgetSettings | undefined {
+  return useWidgetStore((state) => state.userWidgets[key]);
+}

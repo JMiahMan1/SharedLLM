@@ -8,8 +8,17 @@ function getSystemPreference(): boolean {
 }
 
 export function useDarkModeSync() {
-  const [theme, setTheme] = useState<ThemeMode>('dark');
-  const [isDark, setIsDark] = useState(true);
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const saved = localStorage.getItem('jarvis_dark_mode') || localStorage.getItem('jarvis_theme');
+    return (saved as ThemeMode) || 'dark';
+  });
+  const [isDark, setIsDark] = useState<boolean>(() => {
+    const saved = localStorage.getItem('jarvis_dark_mode') || localStorage.getItem('jarvis_theme') || 'dark';
+    if (saved === 'system') {
+      return getSystemPreference();
+    }
+    return saved === 'dark';
+  });
 
   const applyTheme = useCallback((mode: ThemeMode) => {
     let dark = mode === 'dark';
@@ -18,11 +27,18 @@ export function useDarkModeSync() {
     }
     setIsDark(dark);
     document.documentElement.classList.toggle('dark', dark);
+    if (dark) {
+      document.body.classList.add('night-mode');
+      document.body.classList.remove('day-mode');
+    } else {
+      document.body.classList.add('day-mode');
+      document.body.classList.remove('night-mode');
+    }
   }, []);
 
   useEffect(() => {
     const loadTheme = async () => {
-      const saved = await storageGet('jarvis_theme');
+      const saved = await storageGet('jarvis_dark_mode') || await storageGet('jarvis_theme');
       const initialTheme = (saved as ThemeMode) || 'dark';
       setTheme(initialTheme);
       applyTheme(initialTheme);
@@ -44,6 +60,7 @@ export function useDarkModeSync() {
   const setThemeMode = async (mode: ThemeMode) => {
     setTheme(mode);
     applyTheme(mode);
+    await storageSet('jarvis_dark_mode', mode);
     await storageSet('jarvis_theme', mode);
   };
 

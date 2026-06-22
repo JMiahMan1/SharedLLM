@@ -1,7 +1,9 @@
-import { useEffect, useCallback, useMemo, lazy, Suspense } from 'react';
+import { useEffect, useCallback, lazy, Suspense, Component, type ReactNode } from 'react';
 import { useWidgetStore } from '../../stores/widgetStore';
+import { shallow } from 'zustand/shallow';
 import WidgetContextMenu from '../widgets/WidgetContextMenu';
-import type { WidgetSize, UserWidgetSettings } from '../../types/widget';
+import type { WidgetSize, WidgetKey, IActiveMediaWidgetProps } from '../../types/widget';
+import { WidgetSkeletonSelector } from '../widgets/skeletons/WidgetSkeletons';
 
 const SIZE_CLASSES: Record<WidgetSize, { gridCol: string; gridRow: string }> = {
   small: { gridCol: 'col-span-1', gridRow: 'row-span-1' },
@@ -10,8 +12,7 @@ const SIZE_CLASSES: Record<WidgetSize, { gridCol: string; gridRow: string }> = {
   tall: { gridCol: 'col-span-1', gridRow: 'row-span-2 md:row-span-3' },
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const LazyWidgets: Record<string, React.LazyExoticComponent<React.ComponentType<any>>> = {
+const LazyWidgets: Record<WidgetKey, React.LazyExoticComponent<React.ComponentType<IActiveMediaWidgetProps>>> = {
   energy_insights: lazy(() => import('../widgets/EnergyInsightsWidget')),
   ambient_timer: lazy(() => import('../widgets/AmbientTimerWidget')),
   quick_notes: lazy(() => import('../widgets/QuickNotesWidget')),
@@ -22,45 +23,84 @@ const LazyWidgets: Record<string, React.LazyExoticComponent<React.ComponentType<
   device_control: lazy(() => import('../widgets/DeviceControlWidget')),
 };
 
-const WidgetSkeleton = () => (
-  <div className="glass-card h-full p-5 flex items-center justify-center">
-    <div className="animate-pulse text-sm text-slate-500">Loading...</div>
-  </div>
-);
+interface ErrorBoundaryProps {
+  children: ReactNode;
+  widgetKey: string;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
+
+class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): ErrorBoundaryState {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error(`Error in widget ${this.props.widgetKey}:`, error, errorInfo);
+  }
+
+  handleReset = () => {
+    this.setState({ hasError: false });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="glass-panel p-5 flex flex-col items-center justify-center text-center h-full min-h-[150px] bg-red-950/20 border border-red-500/20 rounded-2xl">
+          <p className="text-sm font-semibold text-red-400 mb-2">Widget Failed</p>
+          <p className="text-xs text-red-300/80 mb-4 max-w-xs">
+            Failed to render dynamic widget interface.
+          </p>
+          <button
+            onClick={this.handleReset}
+            className="glass-button px-3 py-1.5 text-xs text-red-400 hover:text-red-300 font-semibold"
+          >
+            Reset Widget
+          </button>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 const BentoBoxDashboard = () => {
-  const userWidgets = useWidgetStore((s) => s.userWidgets);
-  const widgets = useMemo(() => {
-    return useWidgetStore.getState().getVisibleWidgets();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userWidgets]);
+  const widgets = useWidgetStore((s) => s.getVisibleWidgets(), shallow);
 
   useEffect(() => {
     useWidgetStore.getState().syncWithServer();
   }, []);
 
-  const handleToggleVisibility = useCallback((widgetKey: string, visible: boolean) => {
+  const handleToggleVisibility = useCallback((widgetKey: WidgetKey, visible: boolean) => {
     if (visible) {
-      useWidgetStore.getState().showWidget(widgetKey as never);
+      useWidgetStore.getState().showWidget(widgetKey);
     } else {
-      useWidgetStore.getState().hideWidget(widgetKey as never);
+      useWidgetStore.getState().hideWidget(widgetKey);
     }
   }, []);
 
-  const handleTogglePin = useCallback((widgetKey: string) => {
-    useWidgetStore.getState().togglePin(widgetKey as never);
+  const handleTogglePin = useCallback((widgetKey: WidgetKey) => {
+    useWidgetStore.getState().togglePin(widgetKey);
   }, []);
 
-  const handleResize = useCallback((widgetKey: string, size: WidgetSize) => {
-    useWidgetStore.getState().updateSize(widgetKey as never, size);
+  const handleResize = useCallback((widgetKey: WidgetKey, size: WidgetSize) => {
+    useWidgetStore.getState().updateSize(widgetKey, size);
   }, []);
 
-  const handleReorder = useCallback((widgetKey: string, newIndex: number) => {
-    useWidgetStore.getState().updateOrder(widgetKey as never, newIndex);
+  const handleReorder = useCallback((widgetKey: WidgetKey, newIndex: number) => {
+    useWidgetStore.getState().updateOrder(widgetKey, newIndex);
   }, []);
 
-  const handleRemove = useCallback((widgetKey: string) => {
-    useWidgetStore.getState().removeWidget(widgetKey as never);
+  const handleRemove = useCallback((widgetKey: WidgetKey) => {
+    useWidgetStore.getState().removeWidget(widgetKey);
   }, []);
 
   const totalWidgets = widgets.length;
@@ -82,7 +122,7 @@ const BentoBoxDashboard = () => {
 
             const settingsButton = (
               <WidgetContextMenu
-                widgetKey={widget.def.key as never}
+                widgetKey={widget.def.key}
                 userSettings={widget.userSettings}
                 def={widget.def}
                 onToggleVisibility={handleToggleVisibility}
@@ -96,35 +136,15 @@ const BentoBoxDashboard = () => {
 
             const renderWidget = () => {
               if (!LazyWidget) return null;
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const WidgetComponent = LazyWidget as React.ComponentType<any>;
-              switch (widget.def.key) {
-                case 'energy_insights':
-                case 'ambient_timer':
-                case 'quick_notes':
-                  return (
-                    <WidgetComponent
-                      userSettings={widget.userSettings as UserWidgetSettings}
-                      onTogglePin={() => handleTogglePin(widget.def.key)}
-                      settingsButton={settingsButton}
-                    />
-                  );
-                case 'active_media':
-                  return (
-                    <WidgetComponent
-                      userSettings={widget.userSettings as UserWidgetSettings}
-                      onTogglePin={() => handleTogglePin(widget.def.key)}
-                      onMediaStop={() => {}}
-                      settingsButton={settingsButton}
-                    />
-                  );
-                default:
-                  return (
-                    <WidgetComponent
-                      settingsButton={settingsButton}
-                    />
-                  );
-              }
+              const WidgetComponent = LazyWidget;
+              return (
+                <WidgetComponent
+                  settingsButton={settingsButton}
+                  userSettings={widget.userSettings}
+                  onTogglePin={() => handleTogglePin(widget.def.key)}
+                  onMediaStop={() => {}}
+                />
+              );
             };
 
             return (
@@ -133,9 +153,11 @@ const BentoBoxDashboard = () => {
                 className={`${sizeClass.gridCol} ${sizeClass.gridRow}`}
               >
                 <div className="h-full relative">
-                  <Suspense fallback={<WidgetSkeleton />}>
-                    {renderWidget()}
-                  </Suspense>
+                  <WidgetErrorBoundary widgetKey={widget.def.key}>
+                    <Suspense fallback={<WidgetSkeletonSelector widgetKey={widget.def.key} />}>
+                      {renderWidget()}
+                    </Suspense>
+                  </WidgetErrorBoundary>
                 </div>
               </div>
             );

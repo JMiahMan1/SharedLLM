@@ -108,3 +108,13 @@ export interface DeviceControlGroup {
   title: string;
   devices: DeviceEntry[];
 }
+
+export interface IWidgetProps {
+  settingsButton: React.ReactNode;
+  userSettings: UserWidgetSettings;
+  onTogglePin: () => void;
+}
+
+export interface IActiveMediaWidgetProps extends IWidgetProps {
+  onMediaStop?: () => void;
+}

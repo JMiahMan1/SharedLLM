@@ -2,6 +2,39 @@ import axios from 'axios';
 import { storageGetSync } from '../lib/storage';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry } from '../types/widget';
+import type {
+  HealthStatus,
+  ServiceInfo,
+  LogEntry,
+  Workspace,
+  WorkspaceListResponse,
+  UserProfileRaw,
+  UserProfile,
+  APIKey,
+  DiscoveredUser,
+  DeviceAssignment,
+  GlobalSetting,
+  GatewayConfig,
+  ExecutionResponse,
+  TimerRecord,
+  SmokeTestResult,
+  StorageEntry,
+  RagStats,
+  RavenMission,
+  RavenConfig,
+  MediaGroup,
+  LightCluster,
+  LightPattern,
+  TelemetryEnrollment,
+  IntercomSessionData,
+  IntercomConfigData
+} from '../types/api';
+
+declare module 'axios' {
+  export interface InternalAxiosRequestConfig {
+    __retryCount?: number;
+  }
+}
 
 function getBaseUrl(): string {
   if (Capacitor.isNativePlatform()) {
@@ -9,232 +42,6 @@ function getBaseUrl(): string {
   }
   return window.location.origin;
 }
-
-export interface HealthStatus {
-  status: 'READY' | 'NOT_READY';
-  services: Record<string, string>;
-}
-
-export interface ServiceInfo {
-  service: string;
-  version: string;
-  git_sha: string;
-  git_branch: string;
-  build_date: string;
-}
-
-export interface LogEntry {
-  id?: number;
-  timestamp: string;
-  service: string;
-  level: string;
-  message: string;
-  context?: Record<string, unknown> | null;
-}
-
-export interface Workspace {
-  id: string;
-  display_name: string;
-  local_path: string;
-  host_mount_path?: string | null;
-  container_mount_path?: string | null;
-  resolved_path?: string | null;
-  available?: boolean;
-  nextcloud_path?: string | null;
-  repo_url?: string | null;
-  git_remote?: string | null;
-  default_branch?: string | null;
-  sync_mode: string;
-  scope: string;
-  capabilities: string[];
-  owner_user?: string | null;
-  is_default?: boolean;
-  auto_pull_enabled: boolean;
-  auto_backup_enabled?: boolean;
-  webhook_token?: string | null;
-  quarantined?: boolean;
-  last_raven_mission_id?: number | null;
-  excludes?: string[];
-}
-
-type WorkspaceListResponse =
-  | Workspace[]
-  | {
-      status?: string;
-      workspaces?: Workspace[];
-    };
-
-interface UserProfileRaw {
-  id: string | number;
-  username: string;
-  display_name?: string;
-  full_name?: string;
-  role?: 'admin' | 'user';
-  is_admin?: boolean;
-  is_system_default?: boolean;
-  nextcloud_url?: string | null;
-  nextcloud_user?: string | null;
-  ha_url?: string | null;
-  github_url?: string | null;
-  github_user?: string | null;
-  gitlab_url?: string | null;
-  gitlab_user?: string | null;
-  git_url?: string | null;
-  git_user?: string | null;
-  audiobookshelf_url?: string | null;
-  audiobookshelf_user?: string | null;
-  skylight_url?: string | null;
-  skylight_email?: string | null;
-  skylight_enabled?: boolean;
-  voice_fingerprint?: string | null;
-  voice_id?: string | null;
-  avatar_url?: string | null;
-  share_with_all?: boolean;
-  [key: string]: unknown;
-}
-
-export interface UserProfile extends UserProfileRaw {
-  full_name?: string;
-  role: 'admin' | 'user';
-  is_admin: boolean;
-  voice_id?: string | null;
-}
-
-export interface APIKey {
-  id: string | number;
-  label: string;
-  prefix: string;
-  created_at?: string;
-  key?: string;
-  owner_username?: string;
-  owner_id?: number;
-}
-
-export interface DiscoveredUser {
-  username: string;
-  source: string;
-  display_name?: string;
-}
-
-export interface DeviceAssignment {
-  id: number;
-  device_id: string;
-  user_id: number;
-  username: string;
-}
-
-export interface GlobalSetting {
-  key: string;
-  value: string;
-  description?: string;
-}
-
-export interface GatewayConfig {
-  assistant_model: string;
-  coding_model: string;
-  librarian_model: string;
-}
-
-export interface ExecutionResponse {
-  status: 'SUCCESS' | 'FAILURE' | 'PARTIAL';
-  message: string;
-  service: string;
-  detail?: Record<string, unknown> | null;
-}
-
-export interface TimerRecord {
-  id: string;
-  type: string;
-  title: string;
-  expires_at: string;
-  active: boolean;
-  recurrence?: string | null;
-  target_device?: string | null;
-}
-
-export interface TalkConversation {
-  id?: number;
-  token: string;
-  display_name: string;
-  name?: string | null;
-  description?: string | null;
-  unread_messages?: number;
-  last_activity?: number | null;
-  last_message?: string | null;
-}
-
-export interface TalkMessage {
-  id?: number;
-  token: string;
-  actor_type?: string | null;
-  actor_id?: string | null;
-  actor_display_name: string;
-  timestamp?: number | null;
-  message_type?: string | null;
-  system_message?: string | null;
-  message?: string | null;
-  is_replyable?: boolean;
-}
-
-export interface SmokeTestResult {
-  status: string;
-  passed: boolean;
-  results: string;
-}
-
-export interface StorageEntry {
-  path: string;
-  name: string;
-  is_dir: boolean;
-  size?: number | null;
-  mtime?: string | null;
-  content_type?: string | null;
-  indexed?: boolean;
-}
-
-export interface RagStats {
-  total_chunks: number;
-  total_documents: number;
-  last_indexed?: string;
-  providers?: string[];
-  breakdown?: Record<string, { chunks: number; documents: number }>;
-  status?: string;
-  message?: string;
-}
-
-export interface RavenMission {
-  id: number;
-  mission_type: string;
-  priority: number;
-  target_container?: string | null;
-  error_summary?: string | null;
-  proposed_mission: string;
-  coding_model?: string | null;
-  status: string;
-  progress: number;
-  scheduled_for?: string | null;
-  created_at: string;
-  output_log?: string | null;
-  result?: string | null;
-  user_id?: number | null;
-}
-
-export interface RavenConfig {
-  raven_suspended: boolean;
-  raven_scan_interval: number;
-  raven_error_threshold: number;
-  active_coding_model: string | null;
-  system_default_tts_voice: string;
-  system_default_tts_engine: string;
-  cleanup_interval_seconds?: number;
-}
-
-export interface MediaGroup { name: string; member_entity_ids?: string[] }
-export interface LightCluster { name: string; member_entity_ids?: string[] }
-export interface LightPattern { name: string; steps?: unknown[] }
-export interface TelemetryEnrollment { entity_id: string; power_tracking: boolean; availability_tracking: boolean; offline_alert_threshold_minutes: number }
-export interface IntercomSessionData { session_id: string; caller_user_id: string; target_user_id?: string; target_room?: string; session_type: string; status: string }
-export interface IntercomConfigData { default_tts_engine?: string; default_voice?: string; default_volume?: number; enable_espresense_routing?: boolean }
 
 const normalizeUser = (raw: UserProfileRaw): UserProfile => ({
   ...raw,
@@ -302,29 +109,84 @@ let lastConnectivityToast = 0;
 
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const isAxiosError = axios.isAxiosError(error);
-    const isConnectivityError = isAxiosError && (
-      error.code === 'ECONNABORTED' ||
-      error.code === 'ENOTFOUND' ||
-      error.code === 'ECONNREFUSED' ||
-      error.code === 'ERR_NETWORK'
+    const config = error.config;
+
+    // Check if error is retryable
+    const status = error.response?.status;
+    const code = error.code;
+    const isRetryable = isAxiosError && (
+      (status && [408, 503, 504].includes(status)) ||
+      (code && ['ECONNABORTED', 'ERR_NETWORK', 'ECONNREFUSED', 'ENOTFOUND'].includes(code))
     );
 
-    if (isConnectivityError && Capacitor.isNativePlatform()) {
-      const now = Date.now();
-      if (now - lastConnectivityToast > 15000) {
-        lastConnectivityToast = now;
-        import('react-hot-toast').then(({ toast: t }) => {
-          t.error('Cannot connect to Jarvis server. Check your network connection.', {
-            duration: 8000,
+    if (config && isRetryable) {
+      const currentRetry = config.__retryCount || 0;
+      if (currentRetry < 3) {
+        config.__retryCount = currentRetry + 1;
+
+        const toastId = 'api-reconnecting';
+        const { toast: t } = await import('react-hot-toast');
+        t.loading(`Reconnecting to Jarvis server (attempt ${currentRetry + 1}/3)...`, {
+          id: toastId,
+          style: {
+            background: 'rgba(59, 130, 246, 0.2)',
+            color: '#93c5fd',
+            border: '1px solid rgba(59, 130, 246, 0.3)',
+            fontSize: '12px',
+          },
+        });
+
+        // 1s, 2s, 4s backoff + 0-1s random jitter
+        const delay = Math.pow(2, currentRetry) * 1000 + Math.random() * 1000;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+
+        try {
+          const res = await apiClient(config);
+          t.dismiss(toastId);
+          t.success('Reconnected successfully!', {
+            duration: 2000,
             style: {
-              background: 'rgba(239, 68, 68, 0.2)',
-              color: '#fca5a5',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
+              background: 'rgba(16, 185, 129, 0.2)',
+              color: '#a7f3d0',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
               fontSize: '12px',
             },
           });
+          return res;
+        } catch (retryErr) {
+          // Pass the error down to the next retry or final error handler
+          return Promise.reject(retryErr);
+        }
+      } else {
+        // Exceeded retries, dismiss the loading toast
+        const { toast: t } = await import('react-hot-toast');
+        t.dismiss('api-reconnecting');
+      }
+    }
+
+    // Connectivity error toast check (throttled, now on ALL platforms)
+    const isConnectivityError = isAxiosError && (
+      code === 'ECONNABORTED' ||
+      code === 'ENOTFOUND' ||
+      code === 'ECONNREFUSED' ||
+      code === 'ERR_NETWORK'
+    );
+
+    if (isConnectivityError) {
+      const now = Date.now();
+      if (now - lastConnectivityToast > 15000) {
+        lastConnectivityToast = now;
+        const { toast: t } = await import('react-hot-toast');
+        t.error('Cannot connect to Jarvis server. Check your network connection.', {
+          duration: 8000,
+          style: {
+            background: 'rgba(239, 68, 68, 0.2)',
+            color: '#fca5a5',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            fontSize: '12px',
+          },
         });
       }
     }
@@ -334,10 +196,9 @@ apiClient.interceptors.response.use(
       const isLoginRequest = error.config?.url?.includes('/api/auth/login');
       if (!isLoginRequest) {
         isLoggingOut = true;
-        import('../lib/storage').then(({ storageRemove }) => {
-          storageRemove('jarvis_api_key');
-          storageRemove('jarvis_user');
-        });
+        const { storageRemove } = await import('../lib/storage');
+        await storageRemove('jarvis_api_key');
+        await storageRemove('jarvis_user');
         window.location.href = '/login';
       }
     }
@@ -453,11 +314,18 @@ export const api = {
     return resp.data;
   },
 
-  getLogWebSocket(): WebSocket {
+  getLogWebSocketUrl(): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const token = storageGetSync('jarvis_api_key') || '';
-    return new WebSocket(`${protocol}//${host}/api/logs/stream?token=${encodeURIComponent(token)}`);
+    return `${protocol}//${host}/api/logs/stream?token=${encodeURIComponent(token)}`;
+  },
+
+  /**
+   * @deprecated Use useWebSocket + getLogWebSocketUrl() instead
+   */
+  getLogWebSocket(): WebSocket {
+    return new WebSocket(this.getLogWebSocketUrl());
   },
 
   async getSettings(): Promise<GlobalSetting[]> {

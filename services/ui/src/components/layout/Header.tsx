@@ -73,7 +73,7 @@ const Header = () => {
           <div className={`w-1.5 h-1.5 rounded-full ${isTracking ? 'bg-green-400' : 'bg-red-500'}`} />
         </div>
 
-        <div className="hidden sm:flex items-center gap-2 glass-panel px-4 py-2 text-sm">
+        <div className="hidden sm:flex items-center gap-2 glass-panel neon-border px-4 py-2 text-sm">
           <div className={`w-2 h-2 rounded-full ${statusColor} animate-pulse`} />
           <span className="text-slate-300">Pulse:</span>
           <span className={`font-semibold uppercase ${isReady ? 'text-green-400' : 'text-yellow-400'}`}>
@@ -98,7 +98,7 @@ const Header = () => {
                 <button 
                   onClick={handleClearLogs}
                   disabled={notifications.length === 0 || clearMutation.isPending}
-                  className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-red-400 hover:text-red-300 transition-colors disabled:opacity-30"
+                  className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-red-400 hover:text-red-300 transition-colors disabled:opacity-30 p-2 -m-2"
                 >
                   <Trash2 size={12} />
                   {clearMutation.isPending ? '...' : 'Clear All'}
@@ -124,7 +124,7 @@ const Header = () => {
               </div>
               <button 
                 onClick={() => setShowNotifications(false)}
-                className="w-full mt-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-colors border-t border-white/5 pt-3"
+                className="w-full mt-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-500 hover:text-white transition-colors border-t border-white/5 pt-3"
               >
                 Dismiss
               </button>
@@ -139,7 +139,7 @@ const Header = () => {
           </div>
           <button 
             onClick={logout}
-            className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold border border-white/20 hover:scale-110 transition-transform group relative"
+            className="w-11 h-11 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold border border-white/20 hover:scale-110 transition-transform group relative"
           >
             {user?.username?.[0].toUpperCase() || 'G'}
             <div className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">

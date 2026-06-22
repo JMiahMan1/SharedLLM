@@ -1,16 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Music, Play, Pause, SkipBack, SkipForward, Volume2 } from 'lucide-react';
-import type { UserWidgetSettings, MediaState } from '../../types/widget';
+import type { IActiveMediaWidgetProps, MediaState } from '../../types/widget';
 import { api } from '../../services/api';
 import toast from 'react-hot-toast';
 
-interface ActiveMediaWidgetProps {
-  userSettings: UserWidgetSettings;
-  onTogglePin: () => void;
-  onMediaStop: () => void;
-}
-
-const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop }: ActiveMediaWidgetProps) => {
+const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsButton }: IActiveMediaWidgetProps) => {
   const [media, setMedia] = useState<MediaState | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -73,13 +67,16 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop }: ActiveMed
 
   return (
     <div className="glass-card h-full p-5 relative">
-      <button
-        onClick={onTogglePin}
-        className="absolute top-3 right-3 text-slate-500 hover:text-purple-400 transition-colors"
-        title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
-      >
-        <Music size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
-      </button>
+      <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+        <button
+          onClick={onTogglePin}
+          className="text-slate-500 hover:text-purple-400 transition-colors"
+          title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
+        >
+          <Music size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
+        </button>
+        {settingsButton}
+      </div>
 
       {isLoading ? (
         <div className="flex items-center justify-center h-32">

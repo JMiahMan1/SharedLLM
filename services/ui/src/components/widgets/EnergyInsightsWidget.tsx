@@ -1,14 +1,8 @@
 import React, { useMemo } from 'react';
 import { Activity, Zap, TrendingUp } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import type { UserWidgetSettings } from '../../types/widget';
+import type { IWidgetProps } from '../../types/widget';
 import { api } from '../../services/api';
-
-interface EnergyInsightsWidgetProps {
-  userSettings: UserWidgetSettings;
-  onTogglePin: () => void;
-  isPinned?: boolean;
-}
 
 interface EnergyDataPoint {
   time: string;
@@ -31,7 +25,7 @@ interface TelemetrySummary {
   }>;
 }
 
-const EnergyInsightsWidget = ({ userSettings, onTogglePin }: EnergyInsightsWidgetProps) => {
+const EnergyInsightsWidget = ({ userSettings, onTogglePin, settingsButton }: IWidgetProps) => {
   const [summaries, setSummaries] = React.useState<Record<string, TelemetrySummary>>({});
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -144,13 +138,16 @@ const EnergyInsightsWidget = ({ userSettings, onTogglePin }: EnergyInsightsWidge
 
   return (
     <div className="glass-card h-full p-5 relative">
-      <button
-        onClick={onTogglePin}
-        className="absolute top-3 right-3 text-slate-500 hover:text-purple-400 transition-colors"
-        title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
-      >
-        <Activity size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
-      </button>
+      <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+        <button
+          onClick={onTogglePin}
+          className="text-slate-500 hover:text-purple-400 transition-colors"
+          title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
+        >
+          <Activity size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
+        </button>
+        {settingsButton}
+      </div>
 
       <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
         <Zap size={18} className="text-amber-400" />

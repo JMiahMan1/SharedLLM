@@ -23,7 +23,7 @@ export function useVoiceAssistant() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number>(0);
-  const onVolumeChangeRef = useRef<((level: number) => void) | null>(null);
+  const onVolumeChangeRef = useRef<((frequencies: number[]) => void) | null>(null);
 
   const startListening = useCallback(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -67,7 +67,7 @@ export function useVoiceAssistant() {
     setState((s) => ({ ...s, isListening: false }));
   }, []);
 
-  const startAudioVisualization = useCallback(async (onVolumeChange: (level: number) => void) => {
+  const startAudioVisualization = useCallback(async (onVolumeChange: (frequencies: number[]) => void) => {
     onVolumeChangeRef.current = onVolumeChange;
 
     try {
@@ -85,10 +85,26 @@ export function useVoiceAssistant() {
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
       const analyze = () => {
-        analyser.getByteFrequencyData(dataArray);
-        const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
-        const level = average / 255;
-        onVolumeChangeRef.current?.(level);
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        
+        // Downsample frequency data to 32 bands
+        const barCount = 32;
+        const groupSize = Math.floor(dataArray.length / barCount) || 1;
+        const frequencies: number[] = [];
+        
+        for (let i = 0; i < barCount; i++) {
+          let sum = 0;
+          const start = i * groupSize;
+          for (let j = 0; j < groupSize; j++) {
+            sum += dataArray[start + j] || 0;
+          }
+          const avg = sum / groupSize;
+          // Scale to percentage (0 - 100)
+          frequencies.push((avg / 255) * 100);
+        }
+
+        onVolumeChangeRef.current?.(frequencies);
         animationFrameRef.current = requestAnimationFrame(analyze);
       };
       analyze();
@@ -99,8 +115,10 @@ export function useVoiceAssistant() {
 
   const stopAudioVisualization = useCallback(() => {
     cancelAnimationFrame(animationFrameRef.current);
-    audioContextRef.current?.close();
-    audioContextRef.current = null;
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
     analyserRef.current = null;
   }, []);
 

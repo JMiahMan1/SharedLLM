@@ -1,11 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Timer, X, Plus } from 'lucide-react';
-import type { UserWidgetSettings } from '../../types/widget';
-
-interface AmbientTimerWidgetProps {
-  userSettings: UserWidgetSettings;
-  onTogglePin: () => void;
-}
+import type { IWidgetProps } from '../../types/widget';
 
 interface ActiveTimer {
   id: string;
@@ -15,7 +10,7 @@ interface ActiveTimer {
   createdAt: number;
 }
 
-const AmbientTimerWidget = ({ userSettings, onTogglePin }: AmbientTimerWidgetProps) => {
+const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidgetProps) => {
   const [timers, setTimers] = useState<ActiveTimer[]>([]);
   const [newDuration, setNewDuration] = useState(300);
   const [newTitle, setNewTitle] = useState('');
@@ -64,13 +59,16 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin }: AmbientTimerWidgetPro
 
   return (
     <div className="glass-card h-full p-5 relative">
-      <button
-        onClick={onTogglePin}
-        className="absolute top-3 right-3 text-slate-500 hover:text-purple-400 transition-colors"
-        title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
-      >
-        <Timer size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
-      </button>
+      <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
+        <button
+          onClick={onTogglePin}
+          className="text-slate-500 hover:text-purple-400 transition-colors"
+          title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
+        >
+          <Timer size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
+        </button>
+        {settingsButton}
+      </div>
 
       <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
         <Timer size={18} className="text-purple-400" />

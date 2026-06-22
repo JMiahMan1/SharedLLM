@@ -45,7 +45,7 @@ const navItems = [
 const Sidebar = () => {
   const { user } = useAuth();
   return (
-    <aside className="w-20 md:w-64 glass-panel m-2 md:m-4 md:mr-0 flex flex-col transition-all duration-300">
+    <aside className="w-20 md:w-64 glass-sidebar m-2 md:m-4 md:mr-0 flex flex-col transition-all duration-300 rounded-2xl">
       <div className="p-4 md:p-6 flex justify-center md:justify-start">
         <h1 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent flex items-center gap-2">
           <Activity className="text-purple-400" />
@@ -63,7 +63,7 @@ const Sidebar = () => {
               className={({ isActive }) => cn(
                 "flex items-center justify-center md:justify-start gap-3 px-3 md:px-4 py-3 rounded-xl transition-all duration-200",
                 isActive 
-                  ? "bg-purple-600/30 text-white border border-purple-500/30 shadow-lg shadow-purple-500/10" 
+                  ? "bg-purple-600/30 text-white border border-purple-500/40 neon-border shadow-lg shadow-purple-500/10" 
                   : "text-slate-400 hover:text-white hover:bg-white/5"
               )}
               title={item.label}

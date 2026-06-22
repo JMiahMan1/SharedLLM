@@ -44,9 +44,9 @@ const BottomNav = () => {
             onClick={handleTap}
             className={({ isActive }) =>
               cn(
-                'flex flex-col items-center justify-center gap-1 px-2 py-2 min-w-0 flex-1 transition-colors',
+                'flex flex-col items-center justify-center gap-1 px-2 py-3 min-w-0 flex-1 transition-colors',
                 isActive
-                  ? 'text-purple-400'
+                  ? 'text-purple-400 neon-glow font-bold'
                   : 'text-slate-500 hover:text-slate-300'
               )
             }
