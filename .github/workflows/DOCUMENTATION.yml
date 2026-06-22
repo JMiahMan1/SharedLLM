@@ -1,0 +1,32 @@
+name: Documentation Check
+
+on:
+  push:
+    paths:
+      - docs/**/*.md
+      - README.md
+  pull_request:
+    paths:
+      - docs/**/*.md
+      - README.md
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install markdownlint-cli
+        run: npm install -g markdownlint-cli
+
+      - name: Lint Markdown Files
+        run: markdownlint docs/**/*.md README.md
+
+      - name: Run custom documentation validation
+        run: |
+          if [ -f "./doc_validator.sh" ]; then
+            ./doc_validator.sh
+          else
+            echo "Validation script not found"
+            exit 1
+          fi
