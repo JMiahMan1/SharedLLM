@@ -55,9 +55,11 @@
     <div class="grid-2">
         <div class="card">
             <label style="font-weight: 600; color: #e2e8f0;">Configuration</label>
-            <label for="api-token">Gateway API Token</label>
-            <input type="text" id="api-token" placeholder="jarvis_api_key from localStorage">
-            <div class="endpoint-info">The gateway API key from UI login (same as localStorage jarvis_api_key). The gateway resolves this to MA credentials automatically.</div>
+            <div id="auth-status">
+                <div class="status info">No token detected — <a href="/login" target="_blank" style="color: #38bdf8; text-decoration: underline;">Login to UI first</a></div>
+            </div>
+            <input type="text" id="api-token" placeholder="jarvis_api_key (auto-filled from localStorage)" style="display: none;">
+            <div class="endpoint-info">Token auto-detected if you're logged into the UI. Otherwise, login at /login first.</div>
 
             <label for="test-mode" style="margin-top: 0.75rem;">Test Mode</label>
             <select id="test-mode">
@@ -219,7 +221,8 @@
         async function connect() {
             const token = getToken();
             if (!token) {
-                setStatus('No API token provided', 'error');
+                setStatus('No token — login to the UI first, then refresh this page', 'error');
+                log('No token found. Login to the UI first.', 'error');
                 return;
             }
 
@@ -567,8 +570,13 @@
         // ── Auto-fill token from localStorage ──
         function autoFillToken() {
             const saved = localStorage.getItem('jarvis_api_key');
-            if (saved && !apiTokenInput.value) {
+            const authStatus = document.getElementById('auth-status');
+            if (saved) {
                 apiTokenInput.value = saved;
+                if (authStatus) authStatus.style.display = 'none';
+                log('Token auto-detected from localStorage', 'success');
+            } else {
+                log('No token found — login to UI first', 'warn');
             }
         }
 
