@@ -1858,12 +1858,13 @@ async def search_ma(user_id: str = "", query: str = "", media_type: str = "", li
         creds = await _resolve_mass_ha_creds(user_id)
         ha_url = creds.get("ha_url") if creds else None
         ha_token = creds.get("ha_token") if creds else None
+        mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
         
         if not ha_url or not ha_token:
             return {"status": "SUCCESS", "results": [], "notice": "MA/HA not configured"}
         
         from services.execution.handlers.mass_ha_client import search as _ma_search
-        results = await _ma_search(ha_url, ha_token, query, media_types=[media_type] if media_type else None, limit=limit, artist=artist, album=album)
+        results = await _ma_search(ha_url, ha_token, query, mass_entry_id=mass_entry_id, media_types=[media_type] if media_type else None, limit=limit, artist=artist, album=album)
         return {"status": "SUCCESS", "results": results, "query": query}
     except Exception as e:
         log.error(f"[ma/search] Error: {e}")
