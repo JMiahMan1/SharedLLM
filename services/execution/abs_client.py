@@ -89,32 +89,32 @@ async def search_library(
     abs_url: str, abs_api_key: str, query: str, limit: int = 10
 ) -> dict:
     """Search the ABS library for audiobooks matching the query."""
-    return await abs_get(abs_url, abs_api_key, "/search", params={"q": query, "limit": limit})
+    return await abs_get(abs_url, abs_api_key, "/api/v1/search", params={"q": query, "limit": limit})
 
 
 async def get_library_items(
     abs_url: str, abs_api_key: str, library_id: str = "", limit: int = 25, page: int = 0
 ) -> dict:
     """Get items from a specific ABS library."""
-    path = f"/libraries/{library_id}/items" if library_id else "/libraries/items"
+    path = f"/api/v1/libraries/{library_id}/items" if library_id else "/api/v1/libraries/items"
     return await abs_get(abs_url, abs_api_key, path, params={"limit": limit, "page": page})
 
 
 async def get_book(abs_url: str, abs_api_key: str, book_id: str) -> dict:
     """Get full details for a specific audiobook."""
-    return await abs_get(abs_url, abs_api_key, f"/items/{book_id}")
+    return await abs_get(abs_url, abs_api_key, f"/api/v1/items/{book_id}")
 
 
 async def get_progress(abs_url: str, abs_api_key: str, user_id: str = "me") -> dict:
     """Get the user's playback progress for all books."""
-    return await abs_get(abs_url, abs_api_key, "/me/progress")
+    return await abs_get(abs_url, abs_api_key, f"/api/v1/users/{user_id}/progress")
 
 
 async def get_book_progress(
     abs_url: str, abs_api_key: str, item_id: str, user_id: str = "me"
 ) -> dict:
     """Get playback progress for a specific book."""
-    return await abs_get(abs_url, abs_api_key, f"/me/progress/{item_id}")
+    return await abs_get(abs_url, abs_api_key, f"/api/v1/users/{user_id}/progress/{item_id}")
 
 
 async def update_progress(
