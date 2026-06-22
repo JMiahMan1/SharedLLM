@@ -71,9 +71,10 @@ type UserFormState = {
   gitlab_url: string;
   gitlab_user: string;
   gitlab_token: string;
-  audiobookshelf_url: string;
+audiobookshelf_url: string;
   audiobookshelf_user: string;
   audiobookshelf_pass: string;
+  audiobookshelf_api_key: string;
 };
 
 const emptyUserForm: UserFormState = {
@@ -92,9 +93,10 @@ const emptyUserForm: UserFormState = {
   gitlab_url: '',
   gitlab_user: '',
   gitlab_token: '',
-  audiobookshelf_url: '',
+ audiobookshelf_url: '',
   audiobookshelf_user: '',
   audiobookshelf_pass: '',
+  audiobookshelf_api_key: '',
 };
 
 const toUserForm = (user?: UserProfile | null): UserFormState => ({
@@ -116,6 +118,7 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
   audiobookshelf_url: String(user?.audiobookshelf_url ?? ''),
   audiobookshelf_user: String(user?.audiobookshelf_user ?? ''),
   audiobookshelf_pass: '',
+  audiobookshelf_api_key: String(user?.audiobookshelf_api_key ?? ''),
 });
 
 const Admin = () => {
@@ -212,6 +215,7 @@ const Admin = () => {
         audiobookshelf_url: form.audiobookshelf_url,
         audiobookshelf_user: form.audiobookshelf_user,
         audiobookshelf_pass: form.audiobookshelf_pass,
+        audiobookshelf_api_key: form.audiobookshelf_api_key,
       };
 
       if (editingUser) {
@@ -1591,11 +1595,12 @@ const Admin = () => {
               ['Audiobookshelf URL', 'audiobookshelf_url'],
               ['Audiobookshelf Username', 'audiobookshelf_user'],
               ['Audiobookshelf Password', 'audiobookshelf_pass'],
+              ['Audiobookshelf API Key', 'audiobookshelf_api_key'],
             ].map(([label, key]) => (
               <label key={key} className="space-y-2">
                 <span className="text-xs font-black uppercase tracking-widest text-slate-500">{label}</span>
                 <input
-                  type={label.toLowerCase().includes('token') || label.toLowerCase().includes('password') ? 'password' : 'text'}
+                  type={label.toLowerCase().includes('token') || label.toLowerCase().includes('password') || label.toLowerCase().includes('api_key') || key.includes('api_key') ? 'password' : 'text'}
                   value={userForm[key as keyof UserFormState] as string}
                   aria-label={label}
                   onChange={(event) => setUserForm((current) => ({

@@ -85,6 +85,8 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_user VARCHAR"))
             if "audiobookshelf_pass_enc" not in columns:
                 conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_pass_enc VARCHAR"))
+            if "audiobookshelf_api_key_enc" not in columns:
+                conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_api_key_enc VARCHAR"))
             if "mass_url" not in columns:
                 conn.execute(text("ALTER TABLE user ADD COLUMN mass_url VARCHAR"))
             if "mass_token_enc" not in columns:
@@ -394,6 +396,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         audiobookshelf_url=user.audiobookshelf_url,
         audiobookshelf_user=user.audiobookshelf_user,
         audiobookshelf_pass=decrypt(user.audiobookshelf_pass_enc) if user.audiobookshelf_pass_enc else None,
+        audiobookshelf_api_key=decrypt(user.audiobookshelf_api_key_enc) if user.audiobookshelf_api_key_enc else None,
         mass_url=user.mass_url,
         mass_token=decrypt(user.mass_token_enc) if user.mass_token_enc else None,
         git_url=user.git_url,
@@ -505,9 +508,9 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         
     update_data = body.model_dump(exclude_unset=True)
     
-    # Prevent non-default users from changing system skylight integration credentials
+# Prevent non-default users from changing system skylight integration credentials
     if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]):
-        if admin.id != 1 and admin.username != "default":
+        if user.id != 1 and user.username != "default":
             raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
 
     # Handle encrypted fields
@@ -517,6 +520,7 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         "github_token": "github_token_enc",
         "gitlab_token": "gitlab_token_enc",
         "audiobookshelf_pass": "audiobookshelf_pass_enc",
+        "audiobookshelf_api_key": "audiobookshelf_api_key_enc",
         "mass_token": "mass_token_enc",
         "git_token": "git_token_enc",
         "huggingface_token": "huggingface_token_enc",
@@ -598,6 +602,7 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
         audiobookshelf_url=_coerce(body.audiobookshelf_url),
         audiobookshelf_user=_coerce(body.audiobookshelf_user),
         audiobookshelf_pass_enc=encrypt(_coerce(body.audiobookshelf_pass)) if _coerce(body.audiobookshelf_pass) else None,
+        audiobookshelf_api_key_enc=encrypt(_coerce(body.audiobookshelf_api_key)) if _coerce(body.audiobookshelf_api_key) else None,
         mass_url=_coerce(body.mass_url),
         mass_token_enc=encrypt(_coerce(body.mass_token)) if _coerce(body.mass_token) else None,
         huggingface_token_enc=encrypt(_coerce(body.huggingface_token)) if _coerce(body.huggingface_token) else None,
