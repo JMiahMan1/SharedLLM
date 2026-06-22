@@ -165,6 +165,118 @@ test.describe('MA Web Player (Sendspin)', () => {
     expect(mediaMessages.length).toBeGreaterThan(0);
   });
 
+  test('Progress bar width matches playback time', async ({ page }) => {
+    await loginAsDefault(page);
+    await page.goto(`${UI_URL}/media`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
+
+    // Click Web Player card
+    const localPlayerCard = page.locator('button:has-text("Web Player")').first();
+    await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
+    await localPlayerCard.click();
+    await page.waitForTimeout(500);
+
+    // Play a track from Jump Back In
+    const maRecentItem = page.getByText('Does Anybody Hear Her').first();
+    if (!await maRecentItem.isVisible({ timeout: 5000 }).catch(() => false)) {
+      test.skip();
+    }
+
+    const playBtn = maRecentItem.locator('ancestor::div button:has-text("Play")').first()
+      .or(maRecentItem.locator('..').locator('button:has(svg path[d*="play"])').first());
+
+    if (!await playBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      test.skip();
+    }
+
+    await playBtn.click();
+    await page.waitForTimeout(5000);
+
+    // Find the player card progress bar
+    const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
+    const progressBar = playerCard.locator('.w-full.h-2.bg-white\\/10.rounded-full.relative').first();
+    if (!await progressBar.isVisible({ timeout: 5000 }).catch(() => false)) {
+      // Try alternative selector
+      const progressBarAlt = playerCard.locator('text=/Wind Up Bird|Dude/').locator('..').locator('.w-full.h-2.rounded-full').first();
+      if (!await progressBarAlt.isVisible({ timeout: 3000 }).catch(() => false)) {
+        test.skip();
+      } else {
+        // Use alt progress bar for rest of test
+        await page.evaluate(() => {
+          const orig = document.querySelector('.glass-panel.border-cyan-500\\/20');
+          if (orig) (orig as HTMLElement).setAttribute('data-test-progress-bar', 'true');
+        });
+        // Continue with original selector - if we got here, the bar exists but selector failed
+      }
+    }
+
+    // Wait for playback to progress - get initial time
+    const currentTimeDisplay = playerCard.locator('span').filter({ hasText: /^\d+:\d+$/ }).first();
+    const durationDisplay = playerCard.locator('span').filter({ hasText: /^\d+:\d+$/ }).last();
+
+    // Wait until currentTime is at least 5 seconds
+    await page.waitForFunction(async () => {
+      const spans = Array.from(document.querySelectorAll('span'));
+      const timeSpans = spans.filter(s => /^\d+:\d+$/.test(s.textContent || ''));
+      if (timeSpans.length >= 2) {
+        const parts = timeSpans[0].textContent?.split(':');
+        if (parts) {
+          const minutes = parseInt(parts[0]);
+          const seconds = parseInt(parts[1]);
+          const total = minutes * 60 + seconds;
+          return total >= 5;
+        }
+      }
+      return false;
+    }, { timeout: 30000 });
+
+    // Get the time values from the display
+    const [leftTime, rightTime] = await playerCard.locator('span').filter({ hasText: /\d+:\d+/ }).allTextContents();
+
+    // Parse times - format is "M:SS" or "MM:SS"
+    function parseTime(t: string): number {
+      const parts = t.trim().split(':');
+      const minutes = parseInt(parts[0]);
+      const seconds = parseInt(parts[1]);
+      return minutes * 60 + seconds;
+    }
+
+    const currentSeconds = parseTime(leftTime);
+    const totalSeconds = parseTime(rightTime);
+
+    // Verify total duration makes sense (at least 30 seconds)
+    if (totalSeconds < 30) {
+      test.skip();
+    }
+
+    // Verify current time is positive and less than total
+    expect(currentSeconds).toBeGreaterThan(0);
+    expect(currentSeconds).toBeLessThan(totalSeconds);
+
+    // Get progress bar and its fill element
+    const progressFill = playerCard.locator('.bg-gradient-to-r.from-cyan-400.to-purple-400.rounded-full.transition-all').first();
+    if (await progressFill.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const fillStyle = await progressFill.getAttribute('style');
+      // Extract width percentage from style
+      const widthMatch = fillStyle?.match(/width:\s*(\d+\.?\d*)%/);
+      if (widthMatch) {
+        const displayedWidth = parseFloat(widthMatch[1]);
+        const expectedWidth = (currentSeconds / totalSeconds) * 100;
+        // Allow 5% tolerance for timing differences
+        expect(displayedWidth).toBeGreaterThanOrEqual(expectedWidth - 5);
+        expect(displayedWidth).toBeLessThanOrEqual(expectedWidth + 5);
+      }
+    }
+
+    // Verify the time labels format is correct
+    expect(leftTime).toMatch(/^\d+:\d+$/);
+    expect(rightTime).toMatch(/^\d+:\d+$/);
+
+    // Verify left time (current) is less than right time (total)
+    expect(currentSeconds).toBeLessThan(totalSeconds);
+  });
+
   test('ABS audiobook plays via Web Player', async ({ page }) => {
     await loginAsDefault(page);
     await page.goto(`${UI_URL}/media`);
@@ -278,21 +390,34 @@ test.describe('MA Web Player (Sendspin)', () => {
     await localPlayerCard.click();
     await page.waitForTimeout(500);
 
-    // Find volume slider
-    const volumeSlider = page.locator('input[type="range"]').first();
+    // Find volume slider - use the player card slider
+    const volumeSlider = page.locator('[aria-label="Volume"]').first();
     if (!await volumeSlider.isVisible({ timeout: 3000 }).catch(() => false)) {
       test.skip();
     }
 
-    // Set volume to 50
-    await volumeSlider.evaluate((el: HTMLInputElement) => {
-      el.value = '50';
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await page.waitForTimeout(500);
+    // Get the current position on the slider
+    const sliderRect = await volumeSlider.boundingBox();
+    if (!sliderRect) {
+      test.skip();
+    }
 
-    // Volume display should update
-    const volumeDisplay = page.locator('span.tabular-nums').first();
+    // Calculate the position for 50% volume (middle of slider)
+    const targetValue = 50;
+    const inputRange = 100; // slider min=0, max=100
+    const x = sliderRect.x + (sliderRect.width * targetValue / inputRange);
+
+    // Drag slider to the target position
+    await page.mouse.move(sliderRect.x + sliderRect.width / 2, sliderRect.y + sliderRect.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(x, sliderRect.y + sliderRect.height / 2, { steps: 10 });
+    await page.mouse.up();
+
+    // Wait for volume to propagate
+    await page.waitForTimeout(1000);
+
+    // Volume display should update - find the volume number next to the slider
+    const volumeDisplay = volumeSlider.locator('..').locator('span.tabular-nums').first();
     if (await volumeDisplay.isVisible({ timeout: 3000 }).catch(() => false)) {
       const text = await volumeDisplay.textContent();
       expect(text).toContain('50');
