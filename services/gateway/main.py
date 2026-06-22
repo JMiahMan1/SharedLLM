@@ -5301,20 +5301,33 @@ async def sendspin_proxy(websocket: WebSocket):
             log.info("[sendspin] Connected to MA sendspin")
 
             async def forward_client_to_ma():
-                """Forward browser messages to MA."""
+                """Forward browser messages to MA (handles both text and binary frames)."""
                 try:
-                    async for message in websocket.iter_bytes():
-                        await ma_ws.send(message)
+                    while True:
+                        message = await websocket.receive()
+                        data = message.get("text") or message.get("bytes")
+                        if data is None:
+                            break
+                        if isinstance(data, str):
+                            data = data.encode("utf-8")
+                        await ma_ws.send(data)
                 except WebSocketDisconnect:
                     pass
                 except Exception as e:
                     log.warning(f"[sendspin] Client→MA forward error: {e}")
 
             async def forward_ma_to_client():
-                """Forward MA messages to browser."""
+                """Forward MA messages to browser (handles both text and binary frames)."""
                 try:
-                    async for message in ma_ws:
-                        await websocket.send_bytes(message)
+                    while True:
+                        message = await ma_ws.receive()
+                        data = message.get("text") or message.get("bytes")
+                        if data is None:
+                            break
+                        if isinstance(data, str):
+                            await websocket.send_text(data)
+                        else:
+                            await websocket.send_bytes(data)
                 except Exception as e:
                     log.warning(f"[sendspin] MA→Client forward error: {e}")
 
@@ -5407,8 +5420,12 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
             async def forward_client_to_ma():
                 """Forward browser JSON-RPC commands to MA."""
                 try:
-                    async for message in websocket.iter_text():
-                        await ma_ws.send(message)
+                    while True:
+                        message = await websocket.receive()
+                        data = message.get("text") or message.get("bytes")
+                        if data is None:
+                            break
+                        await ma_ws.send(data)
                 except WebSocketDisconnect:
                     pass
                 except Exception as e:
@@ -5417,8 +5434,15 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
             async def forward_ma_to_client():
                 """Forward MA events/responses to browser."""
                 try:
-                    async for message in ma_ws:
-                        await websocket.send_text(message)
+                    while True:
+                        message = await ma_ws.receive()
+                        data = message.get("text") or message.get("bytes")
+                        if data is None:
+                            break
+                        if isinstance(data, str):
+                            await websocket.send_text(data)
+                        else:
+                            await websocket.send_bytes(data)
                 except Exception as e:
                     log.warning(f"[ma-jsonrpc] MA→Client forward error: {e}")
 

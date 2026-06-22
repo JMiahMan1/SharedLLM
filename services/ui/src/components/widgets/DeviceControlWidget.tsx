@@ -82,11 +82,9 @@ const resolveDeviceRoom = (device: DeviceEntry): string => {
 const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   const { user, role } = useAuth();
   const togglePinnedDevice = useWidgetStore((s) => s.togglePinnedDevice);
-  const userWidgets = useWidgetStore((s) => s.userWidgets);
-  
-  const pinnedDevices = useMemo(() => {
-    return userWidgets['device_control']?.pinned_devices || [];
-  }, [userWidgets]);
+  const pinnedDevices = useWidgetStore(
+    (s) => s.userWidgets['device_control']?.pinned_devices || []
+  );
 
   const [devices, setDevices] = useState<DeviceEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -213,13 +211,14 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   const toggleFavorite = useCallback(
     async (entityId: string) => {
       try {
+        const currentPinned = useWidgetStore.getState().userWidgets['device_control']?.pinned_devices || [];
         await togglePinnedDevice('device_control', entityId);
-        toast.success(pinnedDevices.includes(entityId) ? 'Removed from favorites' : 'Added to favorites');
+        toast.success(currentPinned.includes(entityId) ? 'Removed from favorites' : 'Added to favorites');
       } catch {
         toast.error('Failed to update favorite status');
       }
     },
-    [togglePinnedDevice, pinnedDevices]
+    [togglePinnedDevice]
   );
 
   // Scan BLE room beacon simulator
