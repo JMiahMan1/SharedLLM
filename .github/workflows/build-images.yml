@@ -3,8 +3,18 @@ name: Build & Push Images
 on:
   push:
     branches: [ main, master, microservices ]
+    paths:
+      - 'services/**'
+      - 'docker/**'
+      - 'requirements.txt'
+      - '.github/workflows/build-images.yml'
   pull_request:
     branches: [ main, master, microservices ]
+    paths:
+      - 'services/**'
+      - 'docker/**'
+      - 'requirements.txt'
+      - '.github/workflows/build-images.yml'
   workflow_dispatch:
 
 permissions:
@@ -17,9 +27,74 @@ env:
   REPO_NAME: sharedllm
 
 jobs:
+  detect-changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      build_base: ${{ steps.set-outputs.outputs.build_base }}
+      services: ${{ steps.set-outputs.outputs.services }}
+      ui: ${{ steps.filter.outputs.ui }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Filter Paths
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            base:
+              - 'docker/Dockerfile.base'
+              - 'requirements.txt'
+              - '.github/workflows/build-images.yml'
+            ui:
+              - 'services/ui/**'
+              - '.github/workflows/build-images.yml'
+            identity:
+              - 'services/identity/**'
+            gateway:
+              - 'services/gateway/**'
+            rag:
+              - 'services/rag/**'
+            execution:
+              - 'services/execution/**'
+            storage:
+              - 'services/storage/**'
+            logging:
+              - 'services/logging/**'
+            automation:
+              - 'services/automation/**'
+            workspace_runtime:
+              - 'services/workspace_runtime/**'
+            dns_sync:
+              - 'services/dns_sync/**'
+            control_plane:
+              - 'services/control_plane/**'
+
+      - name: Set Outputs
+        id: set-outputs
+        run: |
+          CHANGES='${{ steps.filter.outputs.changes }}'
+          echo "Changes detected: $CHANGES"
+          
+          # If base changed, build all services
+          if echo "$CHANGES" | grep -q '"base"'; then
+            SERVICES_JSON='["identity","gateway","rag","execution","storage","logging","automation","workspace_runtime","dns_sync","control_plane"]'
+            BUILD_BASE='true'
+          else
+            # Filter out base and ui from changes to build only changed services
+            SERVICES_JSON=$(echo "$CHANGES" | jq -c '[.[] | select(. != "base" and . != "ui")]')
+            BUILD_BASE='false'
+          fi
+          
+          echo "build_base=$BUILD_BASE" >> $GITHUB_OUTPUT
+          echo "services=$SERVICES_JSON" >> $GITHUB_OUTPUT
+
   build-base:
     name: Build & Push Shared Base
     runs-on: ubuntu-latest
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.build_base == 'true' }}
     timeout-minutes: 30
     steps:
       - name: Checkout
@@ -66,21 +141,17 @@ jobs:
     name: Build & Push (${{ matrix.service }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: build-base
+    needs: [detect-changes, build-base]
+    if: |
+      always() &&
+      needs.detect-changes.result == 'success' &&
+      (needs.build-base.result == 'success' || needs.build-base.result == 'skipped') &&
+      needs.detect-changes.outputs.services != '[]' &&
+      needs.detect-changes.outputs.services != ''
     strategy:
       fail-fast: false
       matrix:
-        service:
-          - identity
-          - gateway
-          - rag
-          - execution
-          - storage
-          - logging
-          - automation
-          - workspace_runtime
-          - dns_sync
-          - control_plane
+        service: ${{ fromJSON(needs.detect-changes.outputs.services) }}
 
     steps:
       - name: Checkout
@@ -134,11 +205,11 @@ jobs:
             SERVICE_NAME=${{ steps.build-args.outputs.SERVICE_NAME }}
           platforms: linux/amd64
 
-  # UI is special — it's built by Vite, separate from Python services
   build-ui:
     name: Build & Push UI
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    needs: detect-changes
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.detect-changes.outputs.ui == 'true' }}
     timeout-minutes: 30
     steps:
       - name: Checkout

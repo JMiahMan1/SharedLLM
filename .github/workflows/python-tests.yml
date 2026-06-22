@@ -2,8 +2,18 @@ name: Python Tests
 on:
   push:
     branches: [ "main", "annoucements" ]
+    paths:
+      - 'app/**'
+      - 'test/**'
+      - 'requirements.txt'
+      - '.github/workflows/python-tests.yml'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - 'app/**'
+      - 'test/**'
+      - 'requirements.txt'
+      - '.github/workflows/python-tests.yml'
 
 jobs:
   test:

@@ -3,9 +3,15 @@
  * Synchronized with backend schemas in services/gateway/schemas.py
  */
 
+export interface ServiceDetail {
+  git_sha?: string;
+  start_time?: number | null;
+}
+
 export interface HealthStatus {
   status: 'READY' | 'NOT_READY';
   services: Record<string, string>;
+  service_details?: Record<string, ServiceDetail>;
 }
 
 export interface ServiceInfo {

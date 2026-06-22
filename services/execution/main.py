@@ -1624,9 +1624,18 @@ async def discovery_control_methods():
     import device_profiler
     return {"control_methods": device_profiler.CONTROL_METHODS}
 
+import time
+import os
+START_TIME = time.time()
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "execution"}
+    return {
+        "status": "ok",
+        "service": "execution",
+        "git_sha": os.getenv("GIT_SHA", "unknown"),
+        "start_time": START_TIME
+    }
 
 @app.post("/execute/ha_logbook", response_model=ExecutionResult)
 async def execute_ha_logbook(req: LogbookRequest):

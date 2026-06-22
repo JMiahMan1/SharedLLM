@@ -1164,9 +1164,19 @@ def _run_git_with_optional_askpass(
             pass
 
 
+import time
+import os
+START_TIME = time.time()
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "workspace_runtime", "workspace_root": str(get_workspace_root())}
+    return {
+        "status": "ok",
+        "service": "workspace_runtime",
+        "workspace_root": str(get_workspace_root()),
+        "git_sha": os.getenv("GIT_SHA", "unknown"),
+        "start_time": START_TIME
+    }
 
 
 @app.get("/workspaces")
