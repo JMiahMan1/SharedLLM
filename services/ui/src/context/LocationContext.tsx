@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { storageGet } from '../lib/storage';
@@ -169,8 +169,14 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const contextValue = useMemo(() => ({
+    ...state,
+    startTracking,
+    stopTracking
+  }), [state, startTracking, stopTracking]);
+
   return (
-    <LocationContext.Provider value={{ ...state, startTracking, stopTracking }}>
+    <LocationContext.Provider value={contextValue}>
       {children}
     </LocationContext.Provider>
   );

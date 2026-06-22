@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useWidgetStore } from '../../stores/widgetStore';
 import { api, apiClient } from '../../services/api';
-import type { DeviceEntry } from '../../types/widget';
+import type { DeviceEntry, IWidgetProps } from '../../types/widget';
 import { WidgetCard } from './WidgetCard';
 import { 
   Star, 
@@ -79,11 +79,7 @@ const resolveDeviceRoom = (device: DeviceEntry): string => {
   return 'Living Room'; // Fallback
 };
 
-interface DeviceControlWidgetProps {
-  settingsButton?: React.ReactNode;
-}
-
-const DeviceControlWidget = ({ settingsButton }: DeviceControlWidgetProps) => {
+const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   const { user, role } = useAuth();
   const togglePinnedDevice = useWidgetStore((s) => s.togglePinnedDevice);
   const userWidgets = useWidgetStore((s) => s.userWidgets);

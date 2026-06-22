@@ -3,7 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useWidgetData } from '../../hooks/useWidgetData';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
-import type { ChoreItem } from '../../types/widget';
+import type { ChoreItem, IWidgetProps } from '../../types/widget';
 import toast from 'react-hot-toast';
 
 const isChoreAssignedToUser = (chore: ChoreItem, username: string): boolean => {
@@ -15,11 +15,7 @@ const isChoreAssignedToUser = (chore: ChoreItem, username: string): boolean => {
   );
 };
 
-interface ChoresProgressWidgetProps {
-  settingsButton?: React.ReactNode;
-}
-
-const ChoresProgressWidget = ({ settingsButton }: ChoresProgressWidgetProps) => {
+const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
   const { user } = useAuth();
   const [completedOverrides, setCompletedOverrides] = useState<Record<string, boolean>>({});
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());

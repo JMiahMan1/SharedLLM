@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { api } from '../services/api';
 import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
@@ -93,7 +93,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     loadProfile();
   }, [token, refreshProfile]);
 
-  const login = async (credentials: { username: string; password: string }) => {
+  const login = useCallback(async (credentials: { username: string; password: string }) => {
     try {
       const data = await api.login(credentials.username, credentials.password);
       const authToken = data.api_key;
@@ -116,21 +116,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
       throw error;
     }
-  };
+  }, []);
 
-  const role = user?.role || (user?.is_admin ? 'admin' : 'user');
+  const role = useMemo(() => user?.role || (user?.is_admin ? 'admin' : 'user'), [user]);
+
+  const contextValue = useMemo(() => ({
+    user,
+    token,
+    role: role as 'admin' | 'user' | null,
+    login,
+    logout,
+    isLoading,
+    initError,
+    refreshProfile
+  }), [user, token, role, login, logout, isLoading, initError, refreshProfile]);
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      token, 
-      role: role as 'admin' | 'user' | null, 
-      login, 
-      logout, 
-      isLoading,
-      initError,
-      refreshProfile
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

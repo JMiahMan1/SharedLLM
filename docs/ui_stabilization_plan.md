@@ -22,6 +22,11 @@
 - [x] Verify and test local Android APK build settings
 - [x] Implement fallback to user's phone/browser coordinates to create "Not Home" or "Home" presence modes when BLE localization is not found
 - [x] Add dynamic GPS/BLE badges to HaloBanner UI component based on active presence source
+- [x] Implement Per-Widget Error Boundaries wrapping lazy-loaded component Suspense blocks
+- [x] Design and map custom widget skeleton loaders to eliminate CLS (Cumulative Layout Shift)
+- [x] Apply neon-glass layout improvements (.glass-sidebar, .neon-border, .neon-glow) to layout components
+- [x] Wire Voice Assistant Overlay visualizer to actual frequencies and animate entrances with spring configurations
+- [x] Audit all layout touch targets to ensure >= 44x44px sizing
 - [ ] Monitor GHA pipelines after push
 
 ## Remaining
