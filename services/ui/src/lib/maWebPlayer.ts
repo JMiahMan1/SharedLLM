@@ -59,6 +59,7 @@ function createSendspinProxy(baseUrl: string, apiToken: string): Promise<WebSock
     };
 
     ws.onerror = () => {
+      console.error('[MAWebPlayer] Sendspin proxy WebSocket error');
       if (!ready) reject(new Error('Sendspin proxy WebSocket error'));
     };
 
@@ -108,10 +109,12 @@ function createJsonRpcProxy(baseUrl: string, apiToken: string, onEvent: (event: 
     };
 
     ws.onerror = () => {
+      console.error('[MAWebPlayer] JSON-RPC proxy WebSocket error');
       reject(new Error('JSON-RPC proxy WebSocket error'));
     };
 
     ws.onclose = (event) => {
+      console.error('[MAWebPlayer] JSON-RPC proxy WebSocket closed:', event.code, event.reason);
       reject(new Error(`JSON-RPC proxy WebSocket closed: ${event.code} ${event.reason}`));
     };
 
@@ -270,45 +273,51 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       const jsonrpcWs = await createJsonRpcProxy(baseUrl, apiToken, handleMaEvent);
       jsonrpcWsRef.current = jsonrpcWs;
 
-      // 3. Create audio element
+      // 3. Create audio element and attach to DOM
+      console.log('[MAWebPlayer] Creating audio element...');
       const audio = new Audio();
       audio.crossOrigin = 'anonymous';
+      document.body.appendChild(audio);
       audioRef.current = audio;
 
-        // 4. Create SendspinPlayer
-        const player = new SendspinPlayer({
-          audioElement: audio,
-          playerId,
-          webSocket: sendspinWs,
-          codecs: ['opus', 'flac'],
-          onStateChange: (newState) => {
-            setStateLocal(s => ({
+      // 4. Create SendspinPlayer
+      console.log('[MAWebPlayer] Creating SendspinPlayer with playerId:', playerId);
+      const player = new SendspinPlayer({
+        audioElement: audio,
+        playerId,
+        webSocket: sendspinWs,
+        codecs: ['opus', 'flac'],
+        onStateChange: (newState) => {
+          console.log('[MAWebPlayer] onStateChange:', newState);
+          setStateLocal(s => {
+            const updated = {
               ...s,
-              isPlaying: newState === 'playing',
-              playerState: newState,
+              isPlaying: newState.isPlaying,
+              playerState: newState.playerState,
+              volume: newState.volume,
+              muted: newState.muted,
               error: null,
-            }));
-            onStateChange?.({
-              ...s,
-              isPlaying: newState === 'playing',
-              playerState: newState,
-              error: null,
-            });
-          },
-        });
+            };
+            onStateChange?.({ ...updated });
+            return updated;
+          });
+        },
+      });
 
       playerRef.current = player;
 
       // 5. Connect SendspinPlayer (registers with MA, starts audio transport)
+      console.log('[MAWebPlayer] Calling player.connect()...');
       setStateLocal(s => ({ ...s, isConnected: true, error: null }));
       await player.connect();
+      console.log('[MAWebPlayer] player.connect() completed, volume:', player.volume, 'muted:', player.muted);
       setStateLocal(s => ({ ...s, volume: player.volume, muted: player.muted }));
 
       console.log('[MAWebPlayer] Player initialized and connected');
 
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] Init failed:', msg);
+      console.error('[MAWebPlayer] Init failed:', msg, err);
       setStateLocal(s => ({ ...s, error: msg }));
     }
   }, [getPlayerIdRef, handleMaEvent, onStateChange]);
@@ -330,17 +339,18 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const playMedia = useCallback(async (mediaUri: string, player_id?: string) => {
     const pid = player_id || playerIdRef.current;
     if (!pid) {
-      console.warn('[MAWebPlayer] No player_id available for play_media');
+      console.error('[MAWebPlayer] No player_id available for play_media');
       return;
     }
     try {
       console.log('[MAWebPlayer] play_media:', mediaUri, 'player:', pid);
-      await sendJsonRpc('players/play_media', {
+      const result = await sendJsonRpc('players/play_media', {
         player_id: pid,
         media: mediaUri,
         play_handle: null,
         enqueue: 'play',
       });
+      console.log('[MAWebPlayer] play_media result:', result);
     } catch (err) {
       console.error('[MAWebPlayer] play_media failed:', err);
     }
@@ -349,7 +359,10 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   // Send players/cmd_play to resume playback
   const cmdPlay = useCallback(async (player_id?: string) => {
     const pid = player_id || playerIdRef.current;
-    if (!pid) return;
+    if (!pid) {
+      console.error('[MAWebPlayer] No player_id for cmd_play');
+      return;
+    }
     try {
       console.log('[MAWebPlayer] cmd_play:', pid);
       await sendJsonRpc('players/cmd_play', { player_id: pid });
@@ -361,7 +374,10 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   // Send players/cmd_pause to pause playback
   const cmdPause = useCallback(async (player_id?: string) => {
     const pid = player_id || playerIdRef.current;
-    if (!pid) return;
+    if (!pid) {
+      console.error('[MAWebPlayer] No player_id for cmd_pause');
+      return;
+    }
     try {
       console.log('[MAWebPlayer] cmd_pause:', pid);
       await sendJsonRpc('players/cmd_pause', { player_id: pid });
@@ -373,7 +389,10 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   // Send players/cmd_seek to seek to a position
   const cmdSeek = useCallback(async (position: number, player_id?: string) => {
     const pid = player_id || playerIdRef.current;
-    if (!pid) return;
+    if (!pid) {
+      console.error('[MAWebPlayer] No player_id for cmd_seek');
+      return;
+    }
     try {
       console.log('[MAWebPlayer] cmd_seek:', position, 'player:', pid);
       await sendJsonRpc('players/cmd_seek', { player_id: pid, position });
@@ -386,44 +405,77 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
   // Play: ensure connected, send play_media (if URI provided), then cmd_play
   const play = useCallback(async (mediaUri?: string) => {
-    if (!playerRef.current) {
-      await initPlayer();
+    console.log('[MAWebPlayer] play called, player exists:', !!playerRef.current);
+    try {
+      if (!playerRef.current) {
+        console.log('[MAWebPlayer] Initializing player before play...');
+        await initPlayer();
+      }
+      if (mediaUri) {
+        console.log('[MAWebPlayer] Sending play_media with URI:', mediaUri);
+        await playMedia(mediaUri);
+      }
+      console.log('[MAWebPlayer] Sending cmd_play...');
+      await cmdPlay();
+    } catch (err) {
+      console.error('[MAWebPlayer] play failed:', err);
     }
-    if (mediaUri) {
-      await playMedia(mediaUri);
-    }
-    await cmdPlay();
   }, [initPlayer, playMedia, cmdPlay]);
 
   // Pause: send cmd_pause
   const pause = useCallback(async () => {
-    await cmdPause();
-    playerRef.current?.sendCommand('pause', {});
+    console.log('[MAWebPlayer] pause called');
+    try {
+      await cmdPause();
+      playerRef.current?.sendCommand('pause', {});
+    } catch (err) {
+      console.error('[MAWebPlayer] pause failed:', err);
+    }
   }, [cmdPause]);
 
   // Seek: send cmd_seek via JSON-RPC
   const seek = useCallback(async (position: number) => {
-    await cmdSeek(position);
+    console.log('[MAWebPlayer] seek called:', position);
+    try {
+      await cmdSeek(position);
+    } catch (err) {
+      console.error('[MAWebPlayer] seek failed:', err);
+    }
   }, [cmdSeek]);
 
   const setVolume = useCallback((volume: number) => {
-    playerRef.current?.setVolume(Math.round(volume));
-    // Also sync via JSON-RPC if connected
-    if (playerIdRef.current && jsonrpcWsRef.current?.readyState === WebSocket.OPEN) {
-      sendJsonRpc('players/set_volume', {
-        player_id: playerIdRef.current,
-        volume_level: volume / 100,
-      }).catch(() => {});
+    console.log('[MAWebPlayer] setVolume called:', volume);
+    try {
+      playerRef.current?.setVolume(Math.round(volume));
+      // Also sync via JSON-RPC if connected
+      if (playerIdRef.current && jsonrpcWsRef.current?.readyState === WebSocket.OPEN) {
+        sendJsonRpc('players/set_volume', {
+          player_id: playerIdRef.current,
+          volume_level: volume / 100,
+        }).catch((err) => console.error('[MAWebPlayer] setVolume JSON-RPC failed:', err));
+      }
+    } catch (err) {
+      console.error('[MAWebPlayer] setVolume failed:', err);
     }
   }, [sendJsonRpc]);
 
   const setMuted = useCallback((muted: boolean) => {
-    playerRef.current?.setMuted(muted);
+    console.log('[MAWebPlayer] setMuted called:', muted);
+    try {
+      playerRef.current?.setMuted(muted);
+    } catch (err) {
+      console.error('[MAWebPlayer] setMuted failed:', err);
+    }
   }, []);
 
   const connect = useCallback(async () => {
-    if (!playerRef.current) {
-      await initPlayer();
+    console.log('[MAWebPlayer] connect called');
+    try {
+      if (!playerRef.current) {
+        await initPlayer();
+      }
+    } catch (err) {
+      console.error('[MAWebPlayer] connect failed:', err);
     }
   }, [initPlayer]);
 
