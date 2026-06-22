@@ -121,11 +121,12 @@ async def search(
     if isinstance(results, dict):
         for media_type, items_list in results.items():
             if isinstance(items_list, list):
+                singular = media_type.rstrip("s") if media_type.endswith("s") and not media_type.endswith("us") else media_type
                 for item in items_list:
                     items.append({
                         "name": item.get("name", ""),
                         "uri": item.get("uri", ""),
-                        "type": media_type,
+                        "type": singular,
                         "artist": item.get("artists", [{}])[0].get("name", "") if item.get("artists") else item.get("artist", ""),
                         "duration": item.get("duration", 0),
                     })
