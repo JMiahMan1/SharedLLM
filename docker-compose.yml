@@ -131,6 +131,9 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_rag
     restart: unless-stopped
+    dns:
+      - "172.26.0.10"
+      - "192.168.1.1"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -243,6 +246,9 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_logging
     restart: unless-stopped
+    dns:
+      - "172.26.0.10"
+      - "192.168.1.1"
     ports:
       - "8006:8006"
     environment:
@@ -275,6 +281,9 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_automation
     restart: unless-stopped
+    dns:
+      - "172.26.0.10"
+      - "192.168.1.1"
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
@@ -313,6 +322,9 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_storage
     restart: unless-stopped
+    dns:
+      - "172.26.0.10"
+      - "192.168.1.1"
     ports:
       - 8005:8005
     environment:
@@ -342,6 +354,9 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
+    dns:
+      - "172.26.0.10"
+      - "192.168.1.1"
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
@@ -410,6 +425,9 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_control_plane
     restart: always
+    dns:
+      - "172.26.0.10"
+      - "192.168.1.1"
     ports:
       - 8008:8008
     user: "${PUID:-1000}:${PGID:-1000}"
