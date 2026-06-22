@@ -8,10 +8,7 @@ ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
-COPY services/__init__.py /app/services/
-COPY services/config.py /app/services/
-COPY services/shared/ /app/services/shared/
-COPY services/automation/ /app/services/automation/
+COPY services/ /app/services/
 ENV PYTHONUNBUFFERED=1
 
 # Automation-specific: scheduled task debugging
