@@ -4380,7 +4380,7 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
             try:
                 while True:
                     await asyncio.sleep(25)
-                    await websocket.send_ping("keepalive")
+                    await websocket.ping("keepalive")
             except Exception:
                 pass
 
@@ -5323,14 +5323,11 @@ async def sendspin_proxy(websocket: WebSocket):
             """Forward MA messages to browser (handles both text and binary frames)."""
             try:
                 while True:
-                    message = await ma_ws.receive()
-                    data = message.get("text") or message.get("bytes")
-                    if data is None:
-                        break
-                    if isinstance(data, str):
-                        await websocket.send_text(data)
+                    message = await ma_ws.recv()
+                    if isinstance(message, str):
+                        await websocket.send_text(message)
                     else:
-                        await websocket.send_bytes(data)
+                        await websocket.send_bytes(message)
             except Exception as e:
                 log.warning(f"[sendspin] MA→Client forward error: {e}")
 
@@ -5430,8 +5427,8 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                 """Forward browser JSON-RPC commands to MA."""
                 try:
                     while True:
-                        message = await websocket.receive()
-                        data = message.get("text") or message.get("bytes")
+                        msg = await websocket.receive()
+                        data = msg.get("text") or msg.get("bytes")
                         if data is None:
                             break
                         await ma_ws.send(data)
@@ -5444,14 +5441,11 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                 """Forward MA events/responses to browser."""
                 try:
                     while True:
-                        message = await ma_ws.receive()
-                        data = message.get("text") or message.get("bytes")
-                        if data is None:
-                            break
-                        if isinstance(data, str):
-                            await websocket.send_text(data)
+                        message = await ma_ws.recv()
+                        if isinstance(message, str):
+                            await websocket.send_text(message)
                         else:
-                            await websocket.send_bytes(data)
+                            await websocket.send_bytes(message)
                 except Exception as e:
                     log.warning(f"[ma-jsonrpc] MA→Client forward error: {e}")
 
