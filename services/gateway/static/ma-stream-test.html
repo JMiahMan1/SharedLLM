@@ -582,7 +582,7 @@
             let resultsKey = 'results';
 
             if (domain === 'music_assistant') {
-                url = `/api/media/music-assistant/search?q=${encodeURIComponent(query)}&limit=20`;
+                url = `/api/media/music-assistant/search?query=${encodeURIComponent(query)}&limit=20`;
             } else {
                 url = `/api/media/audiobookshelf/search?q=${encodeURIComponent(query)}&limit=20`;
                 resultsKey = 'books';

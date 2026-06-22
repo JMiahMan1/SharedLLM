@@ -30,6 +30,7 @@ class User(SQLModel, table=True):
     gitlab_user: Optional[str] = None
     audiobookshelf_url: Optional[str] = None
     audiobookshelf_user: Optional[str] = None
+    audiobookshelf_api_key_enc: Optional[str] = None
     mass_url: Optional[str] = None
     skylight_url: Optional[str] = None
     skylight_email: Optional[str] = None
