@@ -9,7 +9,8 @@ The current local browser music playback in Jarvis uses a Flow proxy architectur
 ## Current Architecture
 
 ### Flow
-```
+
+```text
 Browser <--> Gateway (port 8000) <--> MA Stream Server (port 8097)
                ^
                |
@@ -17,6 +18,7 @@ Browser <--> Gateway (port 8000) <--> MA Stream Server (port 8097)
 ```
 
 ### Implementation
+
 - **Endpoint:** `GET /api/media/stream/music-assistant?uri=library://track/1759`
 - **Handler:** `services/gateway/main.py` → `stream_music_assistant()` (lines 5218-5466)
 - **Steps:**
@@ -29,6 +31,7 @@ Browser <--> Gateway (port 8000) <--> MA Stream Server (port 8097)
   7. Proxy audio bytes from MA stream server (port 8097) through the gateway
 
 ### Problem (Resolved)
+
 MA's `/preview` endpoint only provides ~30 second previews, not full tracks. This was replaced with the WebSocket flow stream proxy approach.
 
 ---
@@ -44,8 +47,9 @@ The gateway acts as a WebSocket bridge to resolve the stream URL, then proxies a
 **Source:** `music-assistant/frontend/src/` components
 
 #### Key Components Mapped
+
 | Component | File | Purpose |
-|-----------|------|---------|
+| --- | --- | --- |
 | PlayerBrowserMediaControls | `layouts/default/PlayerOSD/PlayerBrowserMediaControls.vue` | Native `<audio :src="audio">` element |
 | WebSocket Client | `plugins/api/index.ts` | Connects to `ws://ma:8095/ws`, handles auth + command dispatch |
 | Active Audio Source | `composables/activeAudioSource.ts` + `activeSource.ts` | Reactive track/state tracking |
@@ -53,7 +57,8 @@ The gateway acts as a WebSocket bridge to resolve the stream URL, then proxies a
 | Play Button | `layouts/default/PlayerOSD/PlayBtn.vue` | Sends `player/play_media` via WebSocket |
 
 #### WebSocket Protocol (URL Resolution)
-```
+
+```text
 ws://ma-server:8095/ws
 ```
 
@@ -68,7 +73,9 @@ ws://ma-server:8095/ws
 5. **Browser:** Receives audio stream from gateway, plays via native HTML5 audio
 
 #### Stream URL Construction (Gateway-side)
+
 The gateway constructs the MA stream URL from the queue state after `player_queues/play_media`:
+
 ```python
 session_id = str(uuid.uuid4())  # Generated per request
 queue_item_id = current_item["queue_item_id"]
@@ -79,7 +86,9 @@ stream_url = f"http://{http_base}/flow/{session_id}/{queue_id}/{queue_item_id}/{
 ```
 
 #### Stream URL Extraction Order
+
 The `MAWebSocketClient._extract_stream_url()` method checks these sources (highest priority first):
+
 1. `current_item.media_item.stream_url`
 2. `current_item.stream_url`
 3. `items[*].stream_url`
@@ -90,19 +99,22 @@ The `MAWebSocketClient._extract_stream_url()` method checks these sources (highe
 ## MA Streaming Server Reference
 
 ### Music Assistant Stream Server
+
 **Source:** `music_assistant/controllers/streams/controller.py`
 
 MA hosts an unprotected HTTP-only webserver (default port 8097) for streaming audio packets to players.
 
 **Routes:**
+
 | Route | Purpose |
-|-------|---------|
+| --- | --- |
 | `/flow/{session_id}/{queue_id}/{queue_item_id}/{player_id}.{fmt}` | Continuous flow stream (crossfade, gapless) |
 | `/single/{session_id}/{queue_id}/{queue_item_id}/{player_id}.{fmt}` | Single track stream |
 | `/command/{queue_id}/{command}.mp3` | Command responses (next/silence) |
 | `/announcement/{player_id}.{fmt}` | Announcement audio |
 
 **Stream URL Generation:**
+
 ```python
 # From StreamsController.resolve_stream_url()
 base_path = "flow" if flow_mode else "single"
@@ -116,13 +128,15 @@ These URLs require valid `session_id`, `queue_id`, `queue_item_id`, and `player_
 ## Testing Plan
 
 ### Test URIs
+
 | URI | Track | Artist |
-|-----|-------|--------|
+| --- | --- | --- |
 | `library://track/1759` | Thank You | Brandon Lake |
 | `library://track/1011` | Just Like Heaven | The Cure |
 | `library://track/735` | Help! | The Beatles |
 
 ### Verification Steps
+
 1. Connect to MA WebSocket (`ws://ma:8095/ws`) with JWT token
 2. Send `player_queues/play_media` with a known URI
 3. Receive `queue_updated` event with queue state
@@ -133,6 +147,7 @@ These URLs require valid `session_id`, `queue_id`, `queue_item_id`, and `player_
 8. Deploy via CI/CD
 
 ### Unit Tests
+
 - `test_stream_abs_uses_dict_get_not_dot_notation` — ABS credential access via `.get()`
 - `test_stream_ma_uses_dict_get_not_dot_notation` — MA credential access via `.get()`
 - `test_stream_abs_missing_credentials_returns_400` — Graceful error for missing ABS config
@@ -147,7 +162,7 @@ These URLs require valid `session_id`, `queue_id`, `queue_item_id`, and `player_
 ## Key Files
 
 | File | Purpose |
-|------|---------|
+| --- | --- |
 | `services/gateway/main.py` | `stream_music_assistant()` endpoint (lines 5218-5466), `stream_audiobookshelf()` (lines 5091-5204) |
 | `services/gateway/ma_ws_client.py` | MA WebSocket client for stream URL resolution (607 lines) |
 | `services/ui/src/pages/Media.tsx` | Frontend media player — local playback resolves MA stream URLs via gateway |
@@ -157,7 +172,7 @@ These URLs require valid `session_id`, `queue_id`, `queue_item_id`, and `player_
 ## Environment Details
 
 | Setting | Value |
-|---------|-------|
+| --- | --- |
 | MA Server | `192.168.2.20:8095` (v2.8.9, HA addon) |
 | MA Stream Port | 8097 (default) |
 | MA WebSocket Port | 8095 (default) |
