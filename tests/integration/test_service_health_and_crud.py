@@ -7,6 +7,7 @@ IDENTITY_URL = os.getenv("IDENTITY_URL", "http://localhost:8011")
 STORAGE_URL = os.getenv("STORAGE_URL", "http://localhost:8014")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6399/0")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "test-secret")
+DEFAULT_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme")
 
 
 @pytest.fixture
@@ -47,7 +48,7 @@ class TestIdentityService:
     def test_user_login_returns_token(self, http_client):
         login_payload = {
             "username": "default",
-            "password": "changeme",
+            "password": DEFAULT_PASSWORD,
         }
         resp = http_client.post(
             f"{IDENTITY_URL}/api/auth/login",
@@ -95,7 +96,7 @@ class TestIdentityService:
         import httpx
         login_resp = httpx.post(
             f"{IDENTITY_URL}/api/auth/login",
-            json={"username": "default", "password": "changeme"},
+            json={"username": "default", "password": DEFAULT_PASSWORD},
             timeout=10.0,
         )
         assert login_resp.status_code == 200
