@@ -7,10 +7,7 @@ ENV GIT_SHA=${GIT_SHA}
 ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
-COPY services/__init__.py /app/services/
-COPY services/config.py /app/services/
-COPY services/shared/ /app/services/shared/
-COPY services/rag/ /app/services/rag/
+COPY services/ /app/services/
 ENV PYTHONPATH=/app
 EXPOSE 8004
 ENV PYTHONUNBUFFERED=1

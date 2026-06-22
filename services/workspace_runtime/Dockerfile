@@ -9,10 +9,7 @@ ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
 RUN mkdir -p /home/sharedllm && chown 1000:1000 /home/sharedllm
-COPY services/__init__.py /app/services/
-COPY services/config.py /app/services/
-COPY services/shared/ /app/services/shared/
-COPY services/workspace_runtime/ /app/services/workspace_runtime/
+COPY services/ /app/services/
 EXPOSE 8007
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
