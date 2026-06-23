@@ -5230,16 +5230,6 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"Internal stream error: {str(e)}")
 
 
-TEST_PAGE_PATH = Path(__file__).parent / "static" / "ma-stream-test.html"
-
-@app.get("/api/media/ma-stream-test.html")
-async def ma_stream_test_page():
-    """Serve the MA stream test page for manual testing."""
-    if TEST_PAGE_PATH.exists():
-        return FileResponse(TEST_PAGE_PATH, media_type="text/html")
-    raise HTTPException(status_code=404, detail="Test page not found")
-
-
 @app.websocket("/api/sendspin")
 async def sendspin_proxy(websocket: WebSocket):
     """Proxy WebSocket for MA Sendspin audio streaming.
