@@ -199,61 +199,50 @@ async function connect() {
         const sendspinUrl = `${baseUrl === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/sendspin?token=${encodeURIComponent(token)}`
         const jsonrpcUrl = `${baseUrl === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/ma-jsonrpc?token=${encodeURIComponent(token)}`
 
-        log(`[MAWebPlayer] Creating sendspin proxy: ${sendspinUrl.substring(0, 60)}...`, 'info')
-        log(`[MAWebPlayer] Creating JSON-RPC proxy: ${jsonrpcUrl.substring(0, 60)}...`, 'info')
+        log(`[MAWebPlayer] Sendspin URL: ${sendspinUrl.substring(0, 60)}...`, 'info')
+        log(`[MAWebPlayer] JSON-RPC URL: ${jsonrpcUrl.substring(0, 60)}...`, 'info')
 
-        // ── Sendspin WebSocket (audio transport) ──
-        sendspinWs = new WebSocket(sendspinUrl)
+        audioElement = audioPlayer
 
-        sendspinWs.onopen = () => {
-            log(`[MAWebPlayer] Sendspin proxy connected`, 'info')
-            updateConnectionStatus(true, false)
-        }
-
-        sendspinWs.onmessage = (event) => {
-            if (typeof event.data === 'string') {
-                try {
-                    const msg = JSON.parse(event.data)
-                    if (logsEnabled.sendspin) {
-                        log(`[MAWebPlayer] Sendspin: ${msg.type}`, 'info', { data: JSON.stringify(msg).substring(0, 300) })
-                    }
-                    // Handle server/state (periodic updates)
-                    if (msg.type === 'server/state') {
-                        const state = msg.payload?.player
-                        if (state) {
-                            setState({
-                                playerState: state.state || null,
-                                isPlaying: state.state === 'playing',
-                            })
-                        }
-                    }
-                    // Handle stream/start (audio stream started)
-                    if (msg.type === 'stream/start') {
-                        const format = msg.payload?.player
-                        if (format) {
-                            log(`[MAWebPlayer] Stream started: ${format.codec} ${format.sample_rate}Hz ${format.channels}ch ${format.bit_depth}bit`, 'success')
-                            setState({ isPlaying: true, duration: msg.payload?.duration || 0 })
-                        }
-                    }
-                } catch (e) {
-                    log(`[MAWebPlayer] Sendspin parse error: ${e}`, 'error')
-                }
-            } else {
-                // Binary audio data
+        // ── Create SendspinPlayer (it creates and owns the WebSocket internally) ──
+        log(`[MAWebPlayer] Creating SendspinPlayer...`, 'info')
+        player = new SendspinPlayer({
+            playerId: playerId,
+            baseUrl: sendspinUrl,
+            audioElement: audioElement,
+            onStateChange: (state) => {
+                console.log('[SendspinPlayer] State change:', state)
                 if (logsEnabled.sendspin) {
-                    log(`[MAWebPlayer] Sendspin: ${event.data.byteLength} bytes audio`, 'info')
+                    const prevState = player?.isConnected ? (state.isPlaying ? 'playing' : 'idle') : 'disconnected'
+                    const newState = state.isPlaying ? 'playing' : 'idle'
+                    if (prevState !== newState) {
+                        log(`[MAWebPlayer] State: ${prevState} → ${newState}`, 'info')
+                    }
+                    if (state.currentStreamFormat) {
+                        const fmt = state.currentStreamFormat
+                        log(`[MAWebPlayer] Stream: ${fmt.codec} ${fmt.sample_rate}Hz ${fmt.channels}ch ${fmt.bit_depth}bit`, 'success')
+                    }
+                    if (state.serverState?.metadata?.title) {
+                        log(`[MAWebPlayer] Now playing: ${state.serverState.metadata.title}`, 'success')
+                    }
                 }
-            }
-        }
+                setState({
+                    isPlaying: state.isPlaying,
+                    volume: Math.round(state.volume),
+                    muted: state.muted,
+                    playerState: state.isPlaying ? 'playing' : (state.isConnected ? 'idle' : null),
+                    mediaTitle: state.serverState?.metadata?.title || null,
+                    mediaArtist: state.serverState?.metadata?.artist || null,
+                    duration: state.serverState?.metadata?.duration || 0,
+                    position: state.serverState?.position || 0,
+                })
+            },
+        })
 
-        sendspinWs.onclose = (event) => {
-            log(`[MAWebPlayer] Sendspin closed: code=${event.code} reason=${event.reason || 'none'}`, event.code === 1000 ? 'success' : 'warn')
-            updateConnectionStatus(false, jsonrpcWs && jsonrpcWs.readyState === WebSocket.OPEN)
-        }
-
-        sendspinWs.onerror = () => {
-            log(`[MAWebPlayer] Sendspin proxy error`, 'error')
-        }
+        // Connect SendspinPlayer (this creates the WebSocket and sends client/hello)
+        await player.connect()
+        sendspinWs = player.core.wsManager.ws as unknown as WebSocket
+        log(`[MAWebPlayer] SendspinPlayer connected`, 'success')
 
         // ── JSON-RPC WebSocket (control) ──
         jsonrpcWs = new WebSocket(jsonrpcUrl)
@@ -309,46 +298,18 @@ async function connect() {
             heartbeatInterval = null
         }
 
-        // Wait for at least one connection
+        // Wait for connections
         const connTimeout = 15000
         const start = Date.now()
         while (Date.now() - start < connTimeout) {
             const sReady = sendspinWs && sendspinWs.readyState === WebSocket.OPEN
             const jReady = jsonrpcWs && jsonrpcWs.readyState === WebSocket.OPEN
-            if (sReady || jReady) {
-                log(`[MAWebPlayer] At least one WebSocket connection established`, 'success')
+            if (sReady && jReady) {
+                log(`[MAWebPlayer] Both WebSocket connections established`, 'success')
                 break
             }
             await new Promise(r => setTimeout(r, 500))
         }
-
-        if (sendspinWs!.readyState !== WebSocket.OPEN && jsonrpcWs!.readyState !== WebSocket.OPEN) {
-            throw new Error('Connection timeout after 15s')
-        }
-
-        // ── Create SendspinPlayer ──
-        log(`[MAWebPlayer] Creating SendspinPlayer...`, 'info')
-        audioElement = audioPlayer
-        player = new SendspinPlayer({
-            playerId: playerId,
-            webSocket: sendspinWs as unknown as WebSocket,
-            audioElement: audioElement,
-            onStateChange: (state) => {
-                console.log('[SendspinPlayer] State change:', state)
-                setState({
-                    isPlaying: state.isPlaying,
-                    volume: Math.round(state.volume),
-                    muted: state.muted,
-                    playerState: state.isPlaying ? 'playing' : 'idle',
-                    mediaTitle: state.serverState?.metadata?.title || null,
-                    mediaArtist: state.serverState?.metadata?.artist || null,
-                    duration: state.serverState?.metadata?.duration || 0,
-                    position: state.serverState?.position || 0,
-                })
-            },
-        })
-        await player.connect()
-        log(`[MAWebPlayer] SendspinPlayer created and connected`, 'success')
 
         setState({
             isConnected: true,
