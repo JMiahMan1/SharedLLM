@@ -5289,7 +5289,12 @@ async def sendspin_proxy(websocket: WebSocket):
         )
         log.info("[sendspin] Connected to MA sendspin")
 
-        # NOW accept browser connection - MA is ready to receive auth
+        # Send auth message to MA on behalf of the browser (browser has no auth headers)
+        auth_msg = json.dumps({"message_id": "gateway-auth", "command": "auth", "args": {"token": mass_token}})
+        await ma_ws.send(auth_msg)
+        log.info("[sendspin] Sent auth to MA on behalf of browser")
+
+        # NOW accept browser connection - MA is ready to receive client/hello
         await websocket.accept()
         log.info("[sendspin] Browser connection accepted, starting proxy")
 
