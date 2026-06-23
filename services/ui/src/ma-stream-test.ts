@@ -28,9 +28,13 @@ const btnConnect = document.getElementById('btn-connect') as HTMLButtonElement
 const btnDisconnect = document.getElementById('btn-disconnect') as HTMLButtonElement
 const btnReconnect = document.getElementById('btn-reconnect') as HTMLButtonElement
 const btnClearLog = document.getElementById('btn-clear-log') as HTMLButtonElement
-const btnToggleSendspin = document.getElementById('btn-toggle-sendspin') as HTMLButtonElement
-const btnToggleJsonrpc = document.getElementById('btn-toggle-jsonrpc') as HTMLButtonElement
-const btnPlay = document.getElementById('btn-play') as HTMLButtonElement
+   const btnToggleSendspin = document.getElementById('btn-toggle-sendspin') as HTMLButtonElement
+    const btnToggleJsonrpc = document.getElementById('btn-toggle-jsonrpc') as HTMLButtonElement
+    const btnListPlayers = document.getElementById('btn-list-players') as HTMLButtonElement
+    const btnListQueues = document.getElementById('btn-list-queues') as HTMLButtonElement
+    const btnTestPlayerQuery = document.getElementById('btn-test-player-query') as HTMLButtonElement
+    const btnRegisterPlayer = document.getElementById('btn-register-player') as HTMLButtonElement
+    const btnPlay = document.getElementById('btn-play') as HTMLButtonElement
 const btnPause = document.getElementById('btn-pause') as HTMLButtonElement
 const btnPlayUri = document.getElementById('btn-play-uri') as HTMLButtonElement
 const volumeSlider = document.getElementById('volume-slider') as HTMLInputElement
@@ -38,9 +42,10 @@ const volumeValue = document.getElementById('volume-value') as HTMLSpanElement
 const searchInput = document.getElementById('search-input') as HTMLInputElement
 const searchDomain = document.getElementById('search-domain') as HTMLSelectElement
 const btnSearch = document.getElementById('btn-search') as HTMLButtonElement
-const searchResults = document.getElementById('search-results') as HTMLElement
-const uriInput = document.getElementById('uri-input') as HTMLInputElement
-const audioPlayer = document.getElementById('audio-player') as HTMLAudioElement
+  const searchResults = document.getElementById('search-results') as HTMLElement
+    const uriInput = document.getElementById('uri-input') as HTMLInputElement
+    const debugOutput = document.getElementById('debug-output') as HTMLElement
+    const audioPlayer = document.getElementById('audio-player') as HTMLAudioElement
 
 // ═══════════════════════════════════════════════════════════
 // Logging
@@ -441,17 +446,32 @@ async function setVolumeVolume(volume: number) {
 async function playMedia(mediaUri: string) {
     log(`[MAWebPlayer] play_media: ${mediaUri.substring(0, 80)}..., player: ${playerId}`, 'info')
     try {
-        await sendJsonRpc('players/play_media', {
-            player_id: playerId,
+        // Use player_queues/play_media (the MA web player pattern) with queue_id
+        const playResult = await sendJsonRpc('player_queues/play_media', {
+            queue_id: playerId,
             media: mediaUri,
-            play_handle: null,
-            enqueue: 'play',
-        })
-        log(`[MAWebPlayer] play_media sent, calling cmd_play...`, 'info')
-        await cmdPlay()
+            custom_data: { source_change: false },
+        }, true)
+        log(`[MAWebPlayer] play_media response: ${JSON.stringify(playResult).substring(0, 200)}`, 'info')
+        // Now start playback with cmd_play on the same player
+        await sendJsonRpc('players/cmd_play', { player_id: playerId }, false)
         log(`[MAWebPlayer] play_media + cmd_play sent`, 'success')
     } catch (err) {
         log(`[MAWebPlayer] play_media failed: ${(err as Error).message}`, 'error')
+        // Fallback: try players/play_media as backup
+        try {
+            log(`[MAWebPlayer] Trying fallback: players/play_media`, 'warn')
+            const playResult = await sendJsonRpc('players/play_media', {
+                player_id: playerId,
+                media: mediaUri,
+                play_handle: null,
+                enqueue: 'play',
+            }, true)
+            log(`[MAWebPlayer] Fallback play_media response: ${JSON.stringify(playResult).substring(0, 200)}`, 'info')
+            await sendJsonRpc('players/cmd_play', { player_id: playerId }, false)
+        } catch (fallbackErr) {
+            log(`[MAWebPlayer] Fallback also failed: ${(fallbackErr as Error).message}`, 'error')
+        }
     }
 }
 
@@ -604,6 +624,82 @@ function setState(updates: any) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// Debug helpers
+// ═══════════════════════════════════════════════════════════
+async function listPlayers() {
+    const token = localStorage.getItem('jarvis_api_key')
+    if (!token) { log('No token', 'error'); return }
+    try {
+        const resp = await fetch('/api/ma-jsonrpc/debug/players', {
+            headers: { 'Authorization': `Bearer ${token}` },
+        })
+        const data = await resp.json()
+        debugOutput.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`
+        log(`[MAWebPlayer] Players: ${JSON.stringify(data).substring(0, 500)}`, 'info')
+    } catch (err) {
+        debugOutput.innerHTML = `<pre style="color: #f87171;">Error: ${(err as Error).message}</pre>`
+        log(`[MAWebPlayer] List players failed: ${(err as Error).message}`, 'error')
+    }
+}
+
+async function listQueues() {
+    const token = localStorage.getItem('jarvis_api_key')
+    if (!token) { log('No token', 'error'); return }
+    try {
+        const resp = await fetch('/api/ma-jsonrpc/debug/queues', {
+            headers: { 'Authorization': `Bearer ${token}` },
+        })
+        const data = await resp.json()
+        debugOutput.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`
+        log(`[MAWebPlayer] Queues: ${JSON.stringify(data).substring(0, 500)}`, 'info')
+    } catch (err) {
+        debugOutput.innerHTML = `<pre style="color: #f87171;">Error: ${(err as Error).message}</pre>`
+        log(`[MAWebPlayer] List queues failed: ${(err as Error).message}`, 'error')
+    }
+}
+
+async function testPlayerQuery() {
+    const token = localStorage.getItem('jarvis_api_key')
+    if (!token) { log('No token', 'error'); return }
+    try {
+        const resp = await fetch(`/api/ma-jsonrpc/debug/player/${encodeURIComponent(playerId)}`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+        })
+        const data = await resp.json()
+        debugOutput.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`
+        log(`[MAWebPlayer] Player query: ${JSON.stringify(data).substring(0, 500)}`, 'info')
+    } catch (err) {
+        debugOutput.innerHTML = `<pre style="color: #f87171;">Error: ${(err as Error).message}</pre>`
+        log(`[MAWebPlayer] Player query failed: ${(err as Error).message}`, 'error')
+    }
+}
+
+async function registerPlayer() {
+    log(`[MAWebPlayer] registerPlayer: sending client/hello via sendspin...`, 'info')
+    if (!sendspinWs || sendspinWs.readyState !== WebSocket.OPEN) {
+        log(`[MAWebPlayer] Sendspin not connected`, 'error')
+        return
+    }
+    const hello = {
+        type: "client/hello",
+        payload: {
+            client_id: playerId,
+            name: "Test Browser Player",
+            version: 1,
+            supported_roles: ["player@v1", "controller@v1", "metadata@v1"],
+            device_info: { product_name: "Test Browser", manufacturer: "Test", software_version: "1.0" },
+            "player@v1_support": {
+                supported_formats: [{ codec: "opus", sample_rate: 48000, channels: 2, bit_depth: 16 }],
+                buffer_capacity: 5242880,
+                supported_commands: ["volume", "mute"],
+            },
+        },
+    }
+    sendspinWs.send(JSON.stringify(hello))
+    log(`[MAWebPlayer] Sent client/hello: ${JSON.stringify(hello).substring(0, 200)}`, 'info')
+}
+
+// ═══════════════════════════════════════════════════════════
 // Init
 // ═══════════════════════════════════════════════════════════
 function init() {
@@ -651,6 +747,12 @@ function init() {
         log(`[MAWebPlayer] Search button clicked, query: "${q}"`, 'info')
         searchMedia(q)
     })
+
+    // Debug buttons
+    btnListPlayers.addEventListener('click', listPlayers)
+    btnListQueues.addEventListener('click', listQueues)
+    btnTestPlayerQuery.addEventListener('click', testPlayerQuery)
+    btnRegisterPlayer.addEventListener('click', registerPlayer)
 
     // Enter key on search input
     searchInput.addEventListener('keydown', (e) => {
