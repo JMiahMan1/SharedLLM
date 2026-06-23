@@ -2,34 +2,22 @@
 # deploy_remote.sh
 # Usage: ./deploy_remote.sh [user@machine_ip] [path_to_app]
 
-# Load variables from .env
-if [ -f .env ]; then
-    set -a
-    # shellcheck disable=SC1091
-    source .env
-    set +a
-fi
-
-# Fallback or Override
-# Prioritize Argument -> RAG_ADDRESS -> Hardcoded Default
 ARG_HOST=$1
-# Default to RAG_ADDRESS from env, but fail if not set
-if [ -z "$RAG_ADDRESS" ] && [ -z "$ARG_HOST" ]; then
-    echo "ERROR: RAG_ADDRESS not set in .env and no host argument provided."
+if [ -z "$ARG_HOST" ]; then
+    echo "ERROR: No host argument provided."
     echo "Usage: ./deploy_remote.sh [user@machine_ip] [path_to_app]"
     exit 1
 fi
-TARGET_IP=${RAG_ADDRESS}
-HOST="${ARG_HOST:-jeremiah@$TARGET_IP}"
+HOST="$ARG_HOST"
 DIR="${2:-/home/jeremiah/SharedLLM}"
-
-echo "Deploying to $HOST:$DIR"
 
 # Sync local .env to remote to ensure config match
 if [ -f .env ]; then
     echo "Syncing local .env to remote..."
     scp .env "$HOST:$DIR/.env"
 fi
+
+echo "Deploying to $HOST:$DIR"
 
 # Detect current branch locally
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
