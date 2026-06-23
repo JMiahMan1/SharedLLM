@@ -5257,6 +5257,11 @@ async def sendspin_proxy(websocket: WebSocket):
         await websocket.close(code=1008, reason="Missing token")
         return
 
+    # Accept browser connection FIRST (before resolving identity to avoid
+    # FastAPI rejecting the WebSocket with 403 before we can call accept())
+    await websocket.accept()
+    log.info("[sendspin] Browser connection accepted")
+
     # Resolve MA credentials via identity service
     try:
         creds = await resolve_identity({"api_key": api_token})
@@ -5265,6 +5270,7 @@ async def sendspin_proxy(websocket: WebSocket):
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
     except HTTPException:
+        log.error("[sendspin] Identity resolution failed")
         await websocket.close(code=1008, reason="Authentication failed")
         return
     except Exception as e:
@@ -5284,10 +5290,6 @@ async def sendspin_proxy(websocket: WebSocket):
 
     ma_ws = None
     try:
-        # Accept browser connection first
-        await websocket.accept()
-        log.info("[sendspin] Browser connection accepted")
-
         # Receive the first message from the browser
         message = await websocket.receive()
         first_data = message.get("text") or message.get("bytes")
