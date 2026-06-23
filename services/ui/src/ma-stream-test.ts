@@ -123,7 +123,7 @@ function getPlayerId(): string {
 // ═══════════════════════════════════════════════════════════
 // JSON-RPC
 // ═══════════════════════════════════════════════════════════
-function sendJsonRpc(command: string, args: any): Promise<any> {
+function sendJsonRpc(command: string, args: any, expectResult: boolean = true): Promise<any> {
     return new Promise((resolve, reject) => {
         if (!jsonrpcWs || jsonrpcWs.readyState !== WebSocket.OPEN) {
             reject(new Error('JSON-RPC WebSocket not connected'))
@@ -140,6 +140,12 @@ function sendJsonRpc(command: string, args: any): Promise<any> {
         })
 
         log(`JSON-RPC: ${command}`, 'info', { frameType: 'send', data: payload })
+
+        // For fire-and-forget commands, don't wait for result
+        if (!expectResult) {
+            jsonrpcWs.send(payload)
+            return
+        }
 
         const timeout = setTimeout(() => {
             reject(new Error(`JSON-RPC ${command} timed out`))
