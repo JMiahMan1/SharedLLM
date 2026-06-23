@@ -5279,7 +5279,7 @@ async def sendspin_proxy(websocket: WebSocket):
     log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url[:80]}...")
 
     # Connect to MA sendspin with auth headers BEFORE accepting browser
-    # MA sendspin uses the Authorization header for auth, then sends server/hello
+    # MA sendspin uses the Authorization header for auth, then waits for client/hello
     extra_headers = {"Authorization": f"Bearer {mass_token}"}
     ma_ws = None
     try:
@@ -5287,32 +5287,9 @@ async def sendspin_proxy(websocket: WebSocket):
             ma_sendspin_url,
             additional_headers=extra_headers,
         )
-        log.info("[sendspin] Connected to MA sendspin, waiting for server/hello")
+        log.info("[sendspin] Connected to MA sendspin")
 
-        # Wait for MA to send server/hello (auth completed, ready for client/hello)
-        # MA sends server/hello immediately after successful auth via header
-        server_hello_received = False
-        while True:
-            server_response = await ma_ws.recv()
-            log.info(f"[sendspin] Received from MA: {server_response}")
-            try:
-                resp_data = json.loads(server_response)
-                if resp_data.get("type") == "server/hello":
-                    server_hello_received = True
-                    break
-                # Ignore non-hello messages, keep waiting
-            except (json.JSONDecodeError, AttributeError):
-                # Not a JSON message, ignore
-                continue
-            # Timeout for server/hello response
-            if not server_hello_received:
-                log.warning("[sendspin] Timeout - did not receive server/hello from MA")
-                await websocket.close(code=1011, reason="Timeout - MA did not respond with server/hello")
-                return
-
-        log.info("[sendspin] server/hello received, MA is ready for client connections")
-
-        # NOW accept browser connection - MA has completed its auth and is waiting for client/hello
+        # Accept browser connection immediately - MA will send server/hello after receiving client/hello from browser
         await websocket.accept()
         log.info("[sendspin] Browser connection accepted, starting proxy")
 
