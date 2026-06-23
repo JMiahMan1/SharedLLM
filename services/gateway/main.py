@@ -5278,15 +5278,11 @@ async def sendspin_proxy(websocket: WebSocket):
     ma_sendspin_url = f"{'wss' if parsed.scheme == 'https' else 'ws'}://{parsed.hostname}:{parsed.port or 8095}/sendspin"
     log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url[:80]}...")
 
-    # Connect to MA sendspin with auth headers BEFORE accepting browser
-    # MA sendspin uses the Authorization header for auth, then waits for client/hello
-    extra_headers = {"Authorization": f"Bearer {mass_token}"}
+    # Connect to MA sendspin without auth headers
+    # Authentication happens via client/hello message from the browser
     ma_ws = None
     try:
-        ma_ws = await websockets.connect(
-            ma_sendspin_url,
-            additional_headers=extra_headers,
-        )
+        ma_ws = await websockets.connect(ma_sendspin_url)
         log.info("[sendspin] Connected to MA sendspin")
 
         # Accept browser connection immediately - MA will send server/hello after receiving client/hello from browser
