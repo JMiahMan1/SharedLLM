@@ -1889,6 +1889,7 @@ async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = 
                     audiobookshelf_url=creds.get("audiobookshelf_url"),
                     audiobookshelf_user=creds.get("audiobookshelf_user"),
                     audiobookshelf_pass=creds.get("audiobookshelf_pass"),
+                    audiobookshelf_api_key=creds.get("audiobookshelf_api_key"),
                 )
         
         req = AudiobookshelfRequest(

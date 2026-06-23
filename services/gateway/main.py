@@ -5297,8 +5297,25 @@ async def sendspin_proxy(websocket: WebSocket):
         log.info("[sendspin] Sent auth to MA on behalf of browser")
 
         # Wait for MA to respond with auth_ok (and connect to internal sendspin)
-        auth_response = await ma_ws.recv()
-        log.info(f"[sendspin] Received from MA: {auth_response}")
+        # MA may send multiple messages during auth (e.g., auth_required, then auth_ok)
+        auth_ok_found = False
+        while True:
+            auth_response = await ma_ws.recv()
+            log.info(f"[sendspin] Received from MA: {auth_response}")
+            try:
+                resp_data = json.loads(auth_response)
+                if resp_data.get("type") == "auth_ok":
+                    auth_ok_found = True
+                    break
+                # Ignore non-auth messages, keep waiting for auth_ok
+            except (json.JSONDecodeError, AttributeError):
+                # Not a JSON message, ignore
+                continue
+            # Timeout for auth response
+            if not auth_ok_found:
+                log.warning("[sendspin] Auth timeout - did not receive auth_ok from MA")
+                await websocket.close(code=1011, reason="Auth timeout - MA did not respond with auth_ok")
+                return
 
         # NOW accept browser connection - MA has authenticated and connected to internal sendspin
         await websocket.accept()
