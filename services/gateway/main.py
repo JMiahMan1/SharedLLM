@@ -573,7 +573,8 @@ app.add_middleware(
         "http://ai.local",
         "http://ai.local:8080",
         "https://ai.local",
-        "http://ai.local"
+        "http://ai.local",
+        "https://jarvis.sumemail.com"
     ],
     allow_credentials=True,
     allow_methods=["*"],
