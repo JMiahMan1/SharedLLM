@@ -240,6 +240,7 @@ async function connect() {
         })
 
         // Connect SendspinPlayer (this creates the WebSocket and sends client/hello)
+        // The gateway intercepts client/hello and sends auth to MA on behalf of the client
         await player.connect()
         sendspinWs = player.core.wsManager.ws as unknown as WebSocket
         log(`[MAWebPlayer] SendspinPlayer connected`, 'success')
