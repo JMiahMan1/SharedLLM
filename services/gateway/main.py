@@ -5279,7 +5279,7 @@ async def sendspin_proxy(websocket: WebSocket):
     log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url[:80]}...")
 
     # Connect to MA sendspin with auth headers BEFORE accepting browser
-    # This ensures MA is ready when the browser sends its auth message
+    # MA sendspin uses the Authorization header for auth, then sends server/hello
     extra_headers = {"Authorization": f"Bearer {mass_token}"}
     ma_ws = None
     try:
@@ -5287,37 +5287,32 @@ async def sendspin_proxy(websocket: WebSocket):
             ma_sendspin_url,
             additional_headers=extra_headers,
         )
-        log.info("[sendspin] Connected to MA sendspin")
+        log.info("[sendspin] Connected to MA sendspin, waiting for server/hello")
 
-        # Send auth message to MA on behalf of the browser (browser has no auth headers)
-        # MA sendspin proxy expects: {"type": "auth", "token": "<access_token>", "client_id": "..."}
-        # Wait for auth_ok response before accepting browser connection
-        auth_msg = json.dumps({"type": "auth", "token": mass_token, "client_id": "gateway-proxy"})
-        await ma_ws.send(auth_msg)
-        log.info("[sendspin] Sent auth to MA on behalf of browser")
-
-        # Wait for MA to respond with auth_ok (and connect to internal sendspin)
-        # MA may send multiple messages during auth (e.g., auth_required, then auth_ok)
-        auth_ok_found = False
+        # Wait for MA to send server/hello (auth completed, ready for client/hello)
+        # MA sends server/hello immediately after successful auth via header
+        server_hello_received = False
         while True:
-            auth_response = await ma_ws.recv()
-            log.info(f"[sendspin] Received from MA: {auth_response}")
+            server_response = await ma_ws.recv()
+            log.info(f"[sendspin] Received from MA: {server_response}")
             try:
-                resp_data = json.loads(auth_response)
-                if resp_data.get("type") == "auth_ok":
-                    auth_ok_found = True
+                resp_data = json.loads(server_response)
+                if resp_data.get("type") == "server/hello":
+                    server_hello_received = True
                     break
-                # Ignore non-auth messages, keep waiting for auth_ok
+                # Ignore non-hello messages, keep waiting
             except (json.JSONDecodeError, AttributeError):
                 # Not a JSON message, ignore
                 continue
-            # Timeout for auth response
-            if not auth_ok_found:
-                log.warning("[sendspin] Auth timeout - did not receive auth_ok from MA")
-                await websocket.close(code=1011, reason="Auth timeout - MA did not respond with auth_ok")
+            # Timeout for server/hello response
+            if not server_hello_received:
+                log.warning("[sendspin] Timeout - did not receive server/hello from MA")
+                await websocket.close(code=1011, reason="Timeout - MA did not respond with server/hello")
                 return
 
-        # NOW accept browser connection - MA has authenticated and connected to internal sendspin
+        log.info("[sendspin] server/hello received, MA is ready for client connections")
+
+        # NOW accept browser connection - MA has completed its auth and is waiting for client/hello
         await websocket.accept()
         log.info("[sendspin] Browser connection accepted, starting proxy")
 
@@ -5372,6 +5367,99 @@ async def sendspin_proxy(websocket: WebSocket):
                 await ma_ws.close()
             except Exception:
                 pass
+
+
+@app.get("/api/ma-jsonrpc/debug/players")
+async def debug_list_players(request: Request):
+    """Debug endpoint: list all MA players."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+        if not isinstance(creds, dict):
+            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
+        mass_url = creds.get("mass_url") or ""
+        mass_token = creds.get("mass_token") or ""
+    except HTTPException as e:
+        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}")
+    
+    if not mass_token:
+        raise HTTPException(status_code=400, detail="MA token not configured")
+    
+    from urllib.parse import urlparse
+    parsed = urlparse(mass_url)
+    ma_api = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}/api"
+    auth_headers = {"Authorization": f"Bearer {mass_token}"}
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            ma_api,
+            json={"message_id": "debug_players", "command": "players/all"},
+            headers={"Content-Type": "application/json", **auth_headers},
+        )
+    return {"status": resp.status_code, "result": resp.json()} if resp.status_code == 200 else {"status": resp.status_code, "error": resp.text}
+
+
+@app.get("/api/ma-jsonrpc/debug/queues")
+async def debug_list_queues(request: Request):
+    """Debug endpoint: list all MA queues."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+        if not isinstance(creds, dict):
+            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
+        mass_url = creds.get("mass_url") or ""
+        mass_token = creds.get("mass_token") or ""
+    except HTTPException as e:
+        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}")
+    
+    if not mass_token:
+        raise HTTPException(status_code=400, detail="MA token not configured")
+    
+    from urllib.parse import urlparse
+    parsed = urlparse(mass_url)
+    ma_api = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}/api"
+    auth_headers = {"Authorization": f"Bearer {mass_token}"}
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            ma_api,
+            json={"message_id": "debug_queues", "command": "player_queues/all"},
+            headers={"Content-Type": "application/json", **auth_headers},
+        )
+    return {"status": resp.status_code, "result": resp.json()} if resp.status_code == 200 else {"status": resp.status_code, "error": resp.text}
+
+
+@app.get("/api/ma-jsonrpc/debug/player/{player_id}")
+async def debug_get_player(request: Request, player_id: str):
+    """Debug endpoint: get specific player info."""
+    try:
+        creds = await _resolve_identity_from_request(request)
+        if not isinstance(creds, dict):
+            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
+        mass_url = creds.get("mass_url") or ""
+        mass_token = creds.get("mass_token") or ""
+    except HTTPException as e:
+        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}")
+    
+    if not mass_token:
+        raise HTTPException(status_code=400, detail="MA token not configured")
+    
+    from urllib.parse import urlparse
+    parsed = urlparse(mass_url)
+    ma_api = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}/api"
+    auth_headers = {"Authorization": f"Bearer {mass_token}"}
+    
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            ma_api,
+            json={"message_id": "debug_player", "command": "players/get", "args": {"player_id": player_id}},
+            headers={"Content-Type": "application/json", **auth_headers},
+        )
+    return {"status": resp.status_code, "result": resp.json()} if resp.status_code == 200 else {"status": resp.status_code, "error": resp.text}
 
 
 @app.websocket("/api/ma-jsonrpc")
