@@ -12,6 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Optional, Any, Dict
+from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect, Response # pyright: ignore[reportUnusedImport]
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -1704,6 +1705,20 @@ def _auth_body_from_request(request: Request, body: dict | None = None) -> Any:
         if token_qp:
             merged["api_key"] = token_qp
     return merged
+
+
+def _normalize_ma_url(mass_url: str) -> tuple[str, str, int]:
+    """Normalize MA URL for direct connections to the gateway.
+
+    Port 8095 is MA's direct HTTP port (never behind Caddy TLS).
+    If the user stored https://ha.sumemail.com:8095, returns ('http', hostname, 8095).
+    If the user stored https://ha.sumemail.com (port 443, through Caddy),
+    returns ('https', hostname, 443).
+    """
+    parsed = urlparse(mass_url)
+    port = parsed.port or 8095
+    scheme = "http" if port == 8095 else parsed.scheme
+    return scheme, parsed.hostname or "", port
 
 
 async def _resolve_identity_from_request(request: Request, body: dict | None = None) -> Any:
@@ -5250,7 +5265,6 @@ async def sendspin_proxy(websocket: WebSocket):
     6. Proxy begins bidirectional forwarding
     """
     import websockets
-    from urllib.parse import urlparse
     from fastapi.websockets import WebSocketDisconnect
 
     # Accept browser connection FIRST (required by FastAPI before any close())
@@ -5290,8 +5304,8 @@ async def sendspin_proxy(websocket: WebSocket):
         return
 
     # Build MA sendspin URL (NO query string token — auth via message)
-    parsed = urlparse(mass_url)
-    ma_sendspin_url = f"{'wss' if parsed.scheme == 'https' else 'ws'}://{parsed.hostname}:{parsed.port or 8095}/sendspin"
+    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
+    ma_sendspin_url = f"{ma_scheme}://{ma_host}:{ma_port}/sendspin"
     log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url}...")
 
     # Receive the first message from the browser (client/hello)
@@ -5438,9 +5452,8 @@ async def debug_list_players(request: Request):
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
     
-    from urllib.parse import urlparse
-    parsed = urlparse(mass_url)
-    ma_api = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}/api"
+    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
+    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
     
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -5469,9 +5482,8 @@ async def debug_list_queues(request: Request):
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
     
-    from urllib.parse import urlparse
-    parsed = urlparse(mass_url)
-    ma_api = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}/api"
+    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
+    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
     
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -5500,9 +5512,8 @@ async def debug_get_player(request: Request, player_id: str):
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
     
-    from urllib.parse import urlparse
-    parsed = urlparse(mass_url)
-    ma_api = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}/api"
+    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
+    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
     
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -5537,7 +5548,6 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
     - {"event": "player_updated", "data": {...}}
     """
     import websockets
-    from urllib.parse import urlparse
 
     # Extract API token from query params
     api_token = websocket.query_params.get("token")
@@ -5568,9 +5578,8 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
         return
 
     # Build MA JSON-RPC URL
-    parsed = urlparse(mass_url)
-    ws_scheme = 'wss' if parsed.scheme == 'https' else 'ws'
-    ma_jsonrpc_url = f"{ws_scheme}://{parsed.hostname}:{parsed.port or 8095}/ws?token={mass_token}"
+    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
+    ma_jsonrpc_url = f"{ma_scheme}://{ma_host}:{ma_port}/ws?token={mass_token}"
     log.info(f"[ma-jsonrpc] Connecting to MA JSON-RPC: {ma_jsonrpc_url[:100]}...")
 
     try:
@@ -5667,10 +5676,8 @@ async def stream_music_assistant(uri: str, request: Request):
             log.error("[stream/ma] Music Assistant URL not configured")
             raise HTTPException(status_code=400, detail="Music Assistant not configured")
 
-        from urllib.parse import urlparse
-        parsed = urlparse(mass_url)
-        ma_host = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}"
-        ma_api = f"{ma_host}/api"
+        ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
+        ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
 
         auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
 
@@ -6016,10 +6023,8 @@ async def get_media_detail(uri: str, request: Request):
     if not mass_url:
         raise HTTPException(status_code=400, detail="Music Assistant URL not configured")
 
-    from urllib.parse import urlparse
-    parsed = urlparse(mass_url)
-    ma_host = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}"
-    ma_api = f"{ma_host}/api"
+    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
+    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
 
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -6065,10 +6070,8 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
     if not mass_url:
         raise HTTPException(status_code=400, detail="Music Assistant not configured")
 
-    from urllib.parse import urlparse
-    parsed = urlparse(mass_url)
-    ma_host = f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 8095}"
-    ma_api = f"{ma_host}/api"
+    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
+    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
 
     async with httpx.AsyncClient(timeout=10.0) as client:
