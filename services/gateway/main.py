@@ -5236,17 +5236,18 @@ async def sendspin_proxy(websocket: WebSocket):
     """Proxy WebSocket for MA Sendspin audio streaming.
 
     The browser connects here via @sendspin/sendspin-js, which sends client/hello
-    as its first WebSocket message. MA's sendspin endpoint uses aiosendspin which
-    expects client/hello as the FIRST message — auth is handled via the query
-    string token. The gateway intercepts client/hello, connects to MA with the
-    resolved MA token, forwards client/hello, and begins bidirectional proxying.
+    as its first WebSocket message. MA's sendspin endpoint requires an auth message
+    ({"type":"auth","token":"..."}) as the FIRST message before any protocol
+    messages. The gateway intercepts client/hello, sends auth to MA, forwards
+    client/hello, and begins bidirectional proxying.
 
     Flow:
     1. Browser sends client/hello → gateway buffers it
-    2. Gateway connects to MA with token in query string for auth
-    3. Gateway forwards client/hello to MA
-    4. MA sends server/hello → gateway forwards to browser
-    5. Proxy begins bidirectional forwarding
+    2. Gateway connects to MA sendspin (no query string token)
+    3. Gateway sends {"type":"auth","token":"<MA_TOKEN>"} to MA
+    4. Gateway forwards buffered client/hello to MA
+    5. MA sends server/hello → gateway forwards to browser
+    6. Proxy begins bidirectional forwarding
     """
     import websockets
     from urllib.parse import urlparse
@@ -5283,35 +5284,43 @@ async def sendspin_proxy(websocket: WebSocket):
         await websocket.close(code=1008, reason="MA not configured")
         return
 
-    # Build MA sendspin URL (include token in query for auth)
+    # Build MA sendspin URL (NO query string token — auth via message)
     parsed = urlparse(mass_url)
-    ma_sendspin_url = f"{'wss' if parsed.scheme == 'https' else 'ws'}://{parsed.hostname}:{parsed.port or 8095}/sendspin?token={mass_token}"
-    log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url[:80]}...")
+    ma_sendspin_url = f"{'wss' if parsed.scheme == 'https' else 'ws'}://{parsed.hostname}:{parsed.port or 8095}/sendspin"
+    log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url}...")
+
+    # Receive the first message from the browser (client/hello)
+    message = await websocket.receive()
+    first_data = message.get("text") or message.get("bytes")
+    if first_data is None or isinstance(first_data, bytes):
+        await websocket.close(code=4001, message=b"Expected text message")
+        return
+
+    first_msg = json.loads(first_data)
+    client_id = first_msg.get("payload", {}).get("client_id", "") if first_msg.get("type") == "client/hello" else "unknown"
+    log.info(f"[sendspin] Received {first_msg.get('type', 'unknown')} from browser (client_id={client_id})")
 
     ma_ws = None
     try:
-        # Receive the first message from the browser
-        message = await websocket.receive()
-        first_data = message.get("text") or message.get("bytes")
-        if first_data is None or isinstance(first_data, bytes):
-            await websocket.close(code=4001, message=b"Expected text message")
-            return
-
-        first_msg = json.loads(first_data)
-        client_id = first_msg.get("payload", {}).get("client_id", "") if first_msg.get("type") == "client/hello" else "unknown"
-        log.info(f"[sendspin] Received {first_msg.get('type', 'unknown')} from browser (client_id={client_id})")
-
-        # Connect to MA's sendspin endpoint (token in query string handles auth)
+        # Connect to MA's sendspin endpoint (no query string)
         ma_ws = await websockets.connect(ma_sendspin_url)
         log.info("[sendspin] Connected to MA sendspin")
 
-        # aiosendspin expects client/hello as the FIRST message — no auth needed
-        # since token is in the query string
+        # MA sendspin requires {"type":"auth","token":"..."} as FIRST message
+        auth_msg = json.dumps({"type": "auth", "token": mass_token})
+        log.info("[sendspin] Sending auth to MA")
+        await ma_ws.send(auth_msg)
+
+        # MA responds to auth — expect server/hello
+        auth_response = await ma_ws.recv()
+        log.info(f"[sendspin] MA auth response: {auth_response[:200]}")
+
+        # Now forward the buffered client/hello to MA
         if first_msg.get("type") == "client/hello":
             log.info("[sendspin] Forwarding client/hello to MA")
             await ma_ws.send(first_data)
 
-            # MA responds with server/hello — forward to browser
+            # MA sends server/hello back — forward to browser
             hello_response = await ma_ws.recv()
             log.info(f"[sendspin] MA server/hello: {hello_response[:200]}")
             await websocket.send_text(hello_response)
