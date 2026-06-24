@@ -5251,12 +5251,16 @@ async def sendspin_proxy(websocket: WebSocket):
     """
     import websockets
     from urllib.parse import urlparse
+    from fastapi.websockets import WebSocketDisconnect
 
     # Extract API token from query params (WebSocket can't set headers)
     api_token = websocket.query_params.get("token")
     if not api_token:
+        log.error("[sendspin] Browser connected with no token in query params")
         await websocket.close(code=1008, reason="Missing token")
         return
+
+    log.info(f"[sendspin] Browser connection received (token={api_token[:8]}...{api_token[-4:]})")
 
     # Accept browser connection FIRST (before resolving identity to avoid
     # FastAPI rejecting the WebSocket with 403 before we can call accept())
@@ -5264,23 +5268,25 @@ async def sendspin_proxy(websocket: WebSocket):
     log.info("[sendspin] Browser connection accepted")
 
     # Resolve MA credentials via identity service
+    creds = None
     try:
         creds = await resolve_identity({"api_key": api_token})
         if not isinstance(creds, dict):
             creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
-    except HTTPException:
-        log.error("[sendspin] Identity resolution failed")
+        log.info(f"[sendspin] Identity resolved: user={creds.get('user', 'unknown')}, mass_url={mass_url}, mass_token={'set' if mass_token else 'NOT SET'}")
+    except HTTPException as e:
+        log.error(f"[sendspin] Identity resolution HTTP error: status={e.status_code}, detail={e.detail}")
         await websocket.close(code=1008, reason="Authentication failed")
         return
     except Exception as e:
-        log.error(f"[sendspin] Identity resolution failed: {e}")
+        log.error(f"[sendspin] Identity resolution failed: {type(e).__name__}: {e}", exc_info=True)
         await websocket.close(code=1011, reason="Identity service error")
         return
 
     if not mass_url or not mass_token:
-        log.error("[sendspin] MA credentials not configured")
+        log.error(f"[sendspin] MA credentials not configured: mass_url={'set' if mass_url else 'NOT SET'}, mass_token={'set' if mass_token else 'NOT SET'}")
         await websocket.close(code=1008, reason="MA not configured")
         return
 
@@ -5293,27 +5299,40 @@ async def sendspin_proxy(websocket: WebSocket):
     message = await websocket.receive()
     first_data = message.get("text") or message.get("bytes")
     if first_data is None or isinstance(first_data, bytes):
+        log.error(f"[sendspin] First message from browser was empty or binary: {type(first_data)}")
         await websocket.close(code=4001, message=b"Expected text message")
         return
 
     first_msg = json.loads(first_data)
     client_id = first_msg.get("payload", {}).get("client_id", "") if first_msg.get("type") == "client/hello" else "unknown"
-    log.info(f"[sendspin] Received {first_msg.get('type', 'unknown')} from browser (client_id={client_id})")
+    log.info(f"[sendspin] Received {first_msg.get('type', 'unknown')} from browser (client_id={client_id}, full_msg={first_data[:500]})")
 
     ma_ws = None
     try:
         # Connect to MA's sendspin endpoint (no query string)
+        log.info("[sendspin] Attempting WebSocket connection to MA...")
         ma_ws = await websockets.connect(ma_sendspin_url)
         log.info("[sendspin] Connected to MA sendspin")
 
         # MA sendspin requires {"type":"auth","token":"..."} as FIRST message
         auth_msg = json.dumps({"type": "auth", "token": mass_token})
-        log.info("[sendspin] Sending auth to MA")
+        log.info(f"[sendspin] Sending auth to MA (token={mass_token[:8]}...{mass_token[-4:]})")
         await ma_ws.send(auth_msg)
 
         # MA responds to auth — expect server/hello
         auth_response = await ma_ws.recv()
-        log.info(f"[sendspin] MA auth response: {auth_response[:200]}")
+        log.info(f"[sendspin] MA auth response: {auth_response[:500]}")
+        
+        # Check if auth response is an error
+        try:
+            auth_json = json.loads(auth_response)
+            if auth_json.get("type") in ("error", "auth/reject", "auth/failure"):
+                log.error(f"[sendspin] MA auth REJECTED: {auth_json}")
+                await ma_ws.close()
+                await websocket.close(code=1008, reason="MA auth rejected")
+                return
+        except json.JSONDecodeError:
+            pass  # Not JSON, likely a protocol message
 
         # Now forward the buffered client/hello to MA
         if first_msg.get("type") == "client/hello":
@@ -5322,10 +5341,10 @@ async def sendspin_proxy(websocket: WebSocket):
 
             # MA sends server/hello back — forward to browser
             hello_response = await ma_ws.recv()
-            log.info(f"[sendspin] MA server/hello: {hello_response[:200]}")
+            log.info(f"[sendspin] MA server/hello: {hello_response[:500]}")
             await websocket.send_text(hello_response)
         else:
-            log.warning(f"[sendspin] Unexpected first message type: {first_msg.get('type')}")
+            log.warning(f"[sendspin] Unexpected first message type: {first_msg.get('type')}, msg={first_data[:200]}")
             await ma_ws.close()
             await websocket.close(code=4001, message=b"Unexpected message type")
             return
@@ -5366,15 +5385,27 @@ async def sendspin_proxy(websocket: WebSocket):
             forward_ma_to_client(),
         )
     except websockets.exceptions.InvalidStatusCode as e:
-        log.error(f"[sendspin] MA sendspin connection failed (status {e.status_code}): {e}")
+        log.error(f"[sendspin] MA sendspin connection failed (status {e.status_code}): {e}", exc_info=True)
         try:
             await websocket.close(code=1011, reason=f"MA connection failed: {e}")
         except Exception:
             pass
-    except Exception as e:
-        log.error(f"[sendspin] Sendspin proxy error: {e}", exc_info=True)
+    except websockets.exceptions.ConnectionClosed as e:
+        log.error(f"[sendspin] MA sendspin connection closed: code={e.code}, reason={e.reason}", exc_info=True)
         try:
-            await websocket.close(code=1011, reason=str(e))
+            await websocket.close(code=1011, reason=f"MA connection closed: {e}")
+        except Exception:
+            pass
+    except websockets.exceptions.WebSocketException as e:
+        log.error(f"[sendspin] MA sendspin WebSocket error: {type(e).__name__}: {e}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason=f"MA WebSocket error: {e}")
+        except Exception:
+            pass
+    except Exception as e:
+        log.error(f"[sendspin] Sendspin proxy error: {type(e).__name__}: {e}", exc_info=True)
+        try:
+            await websocket.close(code=1011, reason=f"{type(e).__name__}: {e}")
         except Exception:
             pass
     finally:
