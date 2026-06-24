@@ -5311,10 +5311,17 @@ async def sendspin_proxy(websocket: WebSocket):
 
     # Receive the first message from the browser (client/hello)
     message = await websocket.receive()
-    first_data = message.get("text") or message.get("bytes")
-    if first_data is None or isinstance(first_data, bytes):
-        log.error(f"[sendspin] First message from browser was empty or binary: {type(first_data)}")
-        await websocket.close(code=4001, reason="Expected text message")
+    first_text = message.get("text")
+    first_bytes = message.get("bytes")
+    if first_text is not None:
+        first_data = first_text
+    elif first_bytes is not None:
+        first_data = first_bytes.decode("utf-8")
+    else:
+        first_data = None
+    if first_data is None:
+        log.error(f"[sendspin] First message from browser was empty: keys={list(message.keys())}")
+        await websocket.close(code=1008, reason="Empty message")
         return
 
     first_msg = json.loads(first_data)
