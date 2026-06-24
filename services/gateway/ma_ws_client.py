@@ -432,7 +432,10 @@ class MAWebSocketClient:
                 except Exception as e:
                     log.error(f"[MA-WS] Error handling message: {e}", exc_info=True)
         except websockets.ConnectionClosed as e:
-            log.warning(f"[MA-WS] Connection closed: {e}")
+            if e.code != 1000 and e.code != 1001:  # Non-normal close
+                log.error(f"[MA-WS] Connection closed abnormally: code={e.code}, reason={e.reason}", exc_info=True)
+            else:
+                log.warning(f"[MA-WS] Connection closed normally: {e}")
             self._connected = False
         except asyncio.CancelledError:
             raise

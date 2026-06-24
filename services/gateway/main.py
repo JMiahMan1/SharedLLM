@@ -5392,7 +5392,7 @@ async def sendspin_proxy(websocket: WebSocket):
             except WebSocketDisconnect:
                 log.info("[sendspin] Browser disconnected")
             except Exception as e:
-                log.warning(f"[sendspin] Client→MA forward error: {e}")
+                log.error(f"[sendspin] Client→MA forward error: {e}", exc_info=True)
 
         async def forward_ma_to_client():
             """Forward MA messages to browser (handles both text and binary frames)."""
@@ -5404,7 +5404,7 @@ async def sendspin_proxy(websocket: WebSocket):
                     else:
                         await websocket.send_bytes(message)
             except Exception as e:
-                log.warning(f"[sendspin] MA→Client forward error: {e}")
+                log.error(f"[sendspin] MA→Client forward error: {e}", exc_info=True)
 
         # Run both directions in parallel
         await asyncio.gather(
@@ -5572,7 +5572,8 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
             creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
-    except HTTPException:
+    except HTTPException as e:
+        log.error(f"[ma-jsonrpc] Identity resolution HTTP error: status={e.status_code}, detail={e.detail}")
         await websocket.close(code=1008, reason="Authentication failed")
         return
     except Exception as e:
@@ -5609,9 +5610,9 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                             break
                         await ma_ws.send(data)
                 except WebSocketDisconnect:
-                    pass
+                    log.info("[ma-jsonrpc] Browser disconnected from JSON-RPC proxy")
                 except Exception as e:
-                    log.warning(f"[ma-jsonrpc] Client→MA forward error: {e}")
+                    log.error(f"[ma-jsonrpc] Client→MA forward error: {e}", exc_info=True)
 
             async def forward_ma_to_client():
                 """Forward MA events/responses to browser."""
@@ -5623,7 +5624,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                         else:
                             await websocket.send_bytes(message)
                 except Exception as e:
-                    log.warning(f"[ma-jsonrpc] MA→Client forward error: {e}")
+                    log.error(f"[ma-jsonrpc] MA→Client forward error: {e}", exc_info=True)
 
             # Run both directions in parallel
             await asyncio.gather(
@@ -5799,7 +5800,7 @@ async def stream_music_assistant(uri: str, request: Request):
                 )
                 log.info(f"[stream/ma] Muted player '{target_player_id}' before play_media")
             except Exception as mute_err:
-                log.warning(f"[stream/ma] Failed to mute player before play_media: {mute_err}")
+                log.error(f"[stream/ma] Failed to mute player before play_media - audio may leak to physical device: {mute_err}", exc_info=True)
 
             # Send play_media command with custom_data containing session_id
             log.info(f"[stream/ma] Sending play_media for uri='{ma_uri}' on player='{target_player_id}' (session_id={session_id})")
