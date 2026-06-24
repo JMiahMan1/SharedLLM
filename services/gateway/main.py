@@ -5336,7 +5336,13 @@ async def sendspin_proxy(websocket: WebSocket):
         # Now forward the buffered client/hello to MA
         if first_msg.get("type") == "client/hello":
             log.info("[sendspin] Forwarding client/hello to MA")
-            await ma_ws.send(first_data)
+            # MA's CommandMessage schema requires a message_id field
+            # The browser's sendspin-js client doesn't include one, so we inject it
+            import uuid as _uuid
+            hello_msg = json.loads(first_data)
+            hello_msg["message_id"] = _uuid.uuid4().hex
+            log.info(f"[sendspin] client/hello with message_id={hello_msg['message_id']}")
+            await ma_ws.send(json.dumps(hello_msg))
 
             # MA sends server/hello back — forward to browser
             hello_response = await ma_ws.recv()
