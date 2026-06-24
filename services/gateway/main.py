@@ -5272,9 +5272,11 @@ async def sendspin_proxy(websocket: WebSocket):
     log.info("[sendspin] Browser connection accepted")
 
     # Extract API token from query params (WebSocket can't set headers)
+    all_params = dict(websocket.query_params)
+    log.info(f"[sendspin] Debug: query_params={all_params}, raw_path={websocket.scope.get('path','')}, raw_query={websocket.scope.get('query_string', b'').decode()}")
     api_token = websocket.query_params.get("token")
     if not api_token:
-        log.error("[sendspin] Browser connected with no token in query params")
+        log.error(f"[sendspin] Browser connected with no token in query params (all_params={all_params})")
         await websocket.close(code=1008, reason="Missing token")
         return
 
