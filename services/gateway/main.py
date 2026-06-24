@@ -5299,7 +5299,7 @@ async def sendspin_proxy(websocket: WebSocket):
     first_data = message.get("text") or message.get("bytes")
     if first_data is None or isinstance(first_data, bytes):
         log.error(f"[sendspin] First message from browser was empty or binary: {type(first_data)}")
-        await websocket.close(code=4001, message=b"Expected text message")
+        await websocket.close(code=4001, reason="Expected text message")
         return
 
     first_msg = json.loads(first_data)
@@ -5351,7 +5351,7 @@ async def sendspin_proxy(websocket: WebSocket):
         else:
             log.warning(f"[sendspin] Unexpected first message type: {first_msg.get('type')}, msg={first_data[:200]}")
             await ma_ws.close()
-            await websocket.close(code=4001, message=b"Unexpected message type")
+            await websocket.close(code=4001, reason="Unexpected message type")
             return
 
         log.info("[sendspin] Handshake complete, starting proxy")
