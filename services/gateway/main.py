@@ -5236,18 +5236,17 @@ async def sendspin_proxy(websocket: WebSocket):
     """Proxy WebSocket for MA Sendspin audio streaming.
 
     The browser connects here via @sendspin/sendspin-js, which sends client/hello
-    as its first WebSocket message. MA's sendspin proxy requires auth as the
-    FIRST message. The gateway intercepts client/hello, authenticates with MA
-    on behalf of the client, then forwards client/hello — so the browser sees
-    the expected server/hello response and proceeds normally.
+    as its first WebSocket message. MA's sendspin endpoint uses aiosendspin which
+    expects client/hello as the FIRST message — auth is handled via the query
+    string token. The gateway intercepts client/hello, connects to MA with the
+    resolved MA token, forwards client/hello, and begins bidirectional proxying.
 
     Flow:
     1. Browser sends client/hello → gateway buffers it
-    2. Gateway connects to MA, sends auth (using resolved MA token)
-    3. MA sends auth_ok → gateway discards it
-    4. Gateway forwards client/hello to MA
-    5. MA sends server/hello → gateway forwards to browser
-    6. Proxy begins bidirectional forwarding
+    2. Gateway connects to MA with token in query string for auth
+    3. Gateway forwards client/hello to MA
+    4. MA sends server/hello → gateway forwards to browser
+    5. Proxy begins bidirectional forwarding
     """
     import websockets
     from urllib.parse import urlparse
@@ -5299,37 +5298,16 @@ async def sendspin_proxy(websocket: WebSocket):
             return
 
         first_msg = json.loads(first_data)
+        client_id = first_msg.get("payload", {}).get("client_id", "") if first_msg.get("type") == "client/hello" else "unknown"
+        log.info(f"[sendspin] Received {first_msg.get('type', 'unknown')} from browser (client_id={client_id})")
 
-        # Connect to MA's sendspin endpoint
+        # Connect to MA's sendspin endpoint (token in query string handles auth)
         ma_ws = await websockets.connect(ma_sendspin_url)
         log.info("[sendspin] Connected to MA sendspin")
 
-        if first_msg.get("type") == "auth":
-            # Browser sent auth directly (e.g., manual auth or custom client)
-            log.info("[sendspin] Browser sent auth message, forwarding to MA")
-            await ma_ws.send(first_data)
-            server_response = await ma_ws.recv()
-            log.info(f"[sendspin] Auth response: {server_response[:200]}")
-            await websocket.send_text(server_response)
-        elif first_msg.get("type") == "client/hello":
-            # @sendspin/sendspin-js sends client/hello first — gateway handles auth
-            client_id = first_msg.get("payload", {}).get("client_id", "")
-            log.info(f"[sendspin] Received client/hello, authenticating on behalf of client {client_id}")
-
-            # Send auth to MA first (on behalf of the browser client)
-            auth_msg = json.dumps({
-                "type": "auth",
-                "token": mass_token,
-                "client_id": client_id,
-            })
-            await ma_ws.send(auth_msg)
-            log.info("[sendspin] Auth sent to MA, waiting for response...")
-
-            # MA sends auth_ok — discard it (browser expects server/hello)
-            auth_response = await ma_ws.recv()
-            log.info(f"[sendspin] MA auth response (discarded): {auth_response[:200]}")
-
-            # Now forward the browser's client/hello to MA
+        # aiosendspin expects client/hello as the FIRST message — no auth needed
+        # since token is in the query string
+        if first_msg.get("type") == "client/hello":
             log.info("[sendspin] Forwarding client/hello to MA")
             await ma_ws.send(first_data)
 
