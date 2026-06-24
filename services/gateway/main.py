@@ -5284,9 +5284,9 @@ async def sendspin_proxy(websocket: WebSocket):
         await websocket.close(code=1008, reason="MA not configured")
         return
 
-    # Build MA sendspin URL
+    # Build MA sendspin URL (include token in query for auth)
     parsed = urlparse(mass_url)
-    ma_sendspin_url = f"{'wss' if parsed.scheme == 'https' else 'ws'}://{parsed.hostname}:{parsed.port or 8095}/sendspin"
+    ma_sendspin_url = f"{'wss' if parsed.scheme == 'https' else 'ws'}://{parsed.hostname}:{parsed.port or 8095}/sendspin?token={mass_token}"
     log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url[:80]}...")
 
     ma_ws = None
