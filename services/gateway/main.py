@@ -5310,6 +5310,7 @@ async def sendspin_proxy(websocket: WebSocket):
     log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url}...")
 
     # Receive the first message from the browser (client/hello)
+    log.info("[sendspin] STEP 1: Waiting for browser to send first message...")
     message = await websocket.receive()
     first_text = message.get("text")
     first_bytes = message.get("bytes")
@@ -5326,24 +5327,31 @@ async def sendspin_proxy(websocket: WebSocket):
 
     first_msg = json.loads(first_data)
     client_id = first_msg.get("payload", {}).get("client_id", "") if first_msg.get("type") == "client/hello" else "unknown"
-    log.info(f"[sendspin] Received {first_msg.get('type', 'unknown')} from browser (client_id={client_id}, full_msg={first_data[:500]})")
+    log.info(f"[sendspin] STEP 2: Received {first_msg.get('type', 'unknown')} from browser (client_id={client_id}, full_msg={first_data[:500]})")
 
     ma_ws = None
     try:
         # Connect to MA's sendspin endpoint (no query string)
-        log.info("[sendspin] Attempting WebSocket connection to MA...")
+        log.info(f"[sendspin] STEP 3: Connecting to MA sendspin URL: {ma_sendspin_url}")
         ma_ws = await websockets.connect(ma_sendspin_url)
-        log.info("[sendspin] Connected to MA sendspin")
+        log.info("[sendspin] STEP 4: WebSocket connected to MA")
 
         # MA sendspin requires {"type":"auth","token":"..."} as FIRST message
         auth_msg = json.dumps({"type": "auth", "token": mass_token})
-        log.info(f"[sendspin] Sending auth to MA (token={mass_token[:8]}...{mass_token[-4:]})")
+        log.info(f"[sendspin] STEP 5: Sending auth to MA (token={mass_token[:8]}...{mass_token[-4:]})")
         await ma_ws.send(auth_msg)
 
         # MA responds to auth — expect server/hello
-        auth_response = await ma_ws.recv()
-        log.info(f"[sendspin] MA auth response: {auth_response[:500]}")
-        
+        log.info("[sendspin] STEP 6: Waiting for MA auth response...")
+        try:
+            auth_response = await asyncio.wait_for(ma_ws.recv(), timeout=10.0)
+            log.info(f"[sendspin] STEP 7: MA auth response received: {auth_response[:500]}")
+        except asyncio.TimeoutError:
+            log.error("[sendspin] STEP 6 FAILED: MA auth response timed out after 10s")
+            await ma_ws.close()
+            await websocket.close(code=1008, reason="MA auth timeout")
+            return
+
         # Check if auth response is an error
         try:
             auth_json = json.loads(auth_response)
@@ -5357,7 +5365,7 @@ async def sendspin_proxy(websocket: WebSocket):
 
         # Now forward the buffered client/hello to MA
         if first_msg.get("type") == "client/hello":
-            log.info("[sendspin] Forwarding client/hello to MA")
+            log.info("[sendspin] STEP 8: Forwarding client/hello to MA")
             # MA's CommandMessage schema requires a message_id field
             # The browser's sendspin-js client doesn't include one, so we inject it
             import uuid as _uuid
@@ -5367,50 +5375,77 @@ async def sendspin_proxy(websocket: WebSocket):
             await ma_ws.send(json.dumps(hello_msg))
 
             # MA sends server/hello back — forward to browser
-            hello_response = await ma_ws.recv()
-            log.info(f"[sendspin] MA server/hello: {hello_response[:500]}")
-            await websocket.send_text(hello_response)
+            log.info("[sendspin] STEP 9: Waiting for MA server/hello response...")
+            try:
+                hello_response = await asyncio.wait_for(ma_ws.recv(), timeout=10.0)
+                log.info(f"[sendspin] STEP 10: MA server/hello received: {hello_response[:500]}")
+            except asyncio.TimeoutError:
+                log.error("[sendspin] STEP 9 FAILED: MA server/hello timed out after 10s")
+                await ma_ws.close()
+                await websocket.send_text(json.dumps({"type": "error", "message": "MA did not respond to client/hello"}))
+                return
+
+            log.info("[sendspin] STEP 11: Forwarding server/hello to browser")
+            try:
+                await websocket.send_text(hello_response)
+                log.info("[sendspin] STEP 12: server/hello sent to browser successfully")
+            except Exception as send_err:
+                log.error(f"[sendspin] STEP 11 FAILED: Failed to send server/hello to browser: {send_err}", exc_info=True)
+                await ma_ws.close()
+                return
         else:
             log.warning(f"[sendspin] Unexpected first message type: {first_msg.get('type')}, msg={first_data[:200]}")
             await ma_ws.close()
             await websocket.close(code=4001, reason="Unexpected message type")
             return
 
-        log.info("[sendspin] Handshake complete, starting proxy")
+        log.info("[sendspin] Handshake complete, starting proxy loop")
 
         async def forward_client_to_ma():
             """Forward browser messages to MA (handles both text and binary frames)."""
+            log.info("[sendspin] STEP 13: Proxy loop started — browser→MA direction active")
             try:
                 while True:
                     message = await websocket.receive()
                     data = message.get("text") or message.get("bytes")
                     if data is None:
+                        log.info("[sendspin] Proxy: browser connection closed by remote")
                         break
                     if isinstance(data, str):
                         data = data.encode("utf-8")
+                    log.info(f"[sendspin] Proxy: browser→MA ({len(data)} bytes)")
                     await ma_ws.send(data)
             except WebSocketDisconnect:
-                log.info("[sendspin] Browser disconnected")
+                log.info("[sendspin] Proxy: Browser disconnected from gateway")
             except Exception as e:
-                log.error(f"[sendspin] Client→MA forward error: {e}", exc_info=True)
+                log.error(f"[sendspin] Proxy: Client→MA forward error: {e}", exc_info=True)
+            finally:
+                log.info("[sendspin] Proxy: browser→MA direction ended")
 
         async def forward_ma_to_client():
             """Forward MA messages to browser (handles both text and binary frames)."""
+            log.info("[sendspin] STEP 13: Proxy loop started — MA→browser direction active")
             try:
                 while True:
                     message = await ma_ws.recv()
                     if isinstance(message, str):
+                        log.info(f"[sendspin] Proxy: MA→browser ({len(message)} chars, first 100='{message[:100]}')")
                         await websocket.send_text(message)
                     else:
+                        log.info(f"[sendspin] Proxy: MA→browser ({len(message)} bytes binary)")
                         await websocket.send_bytes(message)
             except Exception as e:
-                log.error(f"[sendspin] MA→Client forward error: {e}", exc_info=True)
+                log.error(f"[sendspin] Proxy: MA→Client forward error: {e}", exc_info=True)
+            finally:
+                log.info("[sendspin] Proxy: MA→browser direction ended")
 
         # Run both directions in parallel
+        log.info("[sendspin] STEP 14: Starting asyncio.gather for proxy loops")
         await asyncio.gather(
             forward_client_to_ma(),
             forward_ma_to_client(),
         )
+        log.info("[sendspin] STEP 15: Proxy loops complete — both directions ended")
     except websockets.exceptions.InvalidStatusCode as e:
         log.error(f"[sendspin] MA sendspin connection failed (status {e.status_code}): {e}", exc_info=True)
         try:
@@ -5563,26 +5598,28 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
         await websocket.close(code=1008, reason="Missing token")
         return
 
-    await websocket.accept()
+    log.info("[ma-jsonrpc] STEP 1: Browser WebSocket connection accepted")
 
     # Resolve MA credentials via identity service
+    log.info("[ma-jsonrpc] STEP 2: Resolving MA credentials...")
     try:
         creds = await resolve_identity({"api_key": api_token})
         if not isinstance(creds, dict):
             creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
+        log.info(f"[ma-jsonrpc] STEP 2 PASS: Identity resolved — user={creds.get('user', 'unknown')}")
     except HTTPException as e:
-        log.error(f"[ma-jsonrpc] Identity resolution HTTP error: status={e.status_code}, detail={e.detail}")
+        log.error(f"[ma-jsonrpc] STEP 2 FAIL: Identity resolution HTTP error: status={e.status_code}, detail={e.detail}")
         await websocket.close(code=1008, reason="Authentication failed")
         return
     except Exception as e:
-        log.error(f"[ma-jsonrpc] Identity resolution failed: {e}")
+        log.error(f"[ma-jsonrpc] STEP 2 FAIL: Identity resolution failed: {e}")
         await websocket.close(code=1011, reason="Identity service error")
         return
 
     if not mass_url or not mass_token:
-        log.error("[ma-jsonrpc] MA credentials not configured")
+        log.error("[ma-jsonrpc] STEP 2 FAIL: MA credentials not configured")
         await websocket.close(code=1008, reason="MA not configured")
         return
 
@@ -5590,47 +5627,60 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
     ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
     ws_scheme = "ws" if ma_scheme == "http" else "wss"
     ma_jsonrpc_url = f"{ws_scheme}://{ma_host}:{ma_port}/ws?token={mass_token}"
-    log.info(f"[ma-jsonrpc] Connecting to MA JSON-RPC: {ma_jsonrpc_url[:100]}...")
+    log.info(f"[ma-jsonrpc] STEP 3: Connecting to MA JSON-RPC: {ma_jsonrpc_url[:100]}...")
 
     try:
+        log.info("[ma-jsonrpc] STEP 4: Opening WebSocket to MA...")
         async with websockets.connect(
             ma_jsonrpc_url,
             ping_interval=15,
             ping_timeout=10,
         ) as ma_ws:
-            log.info("[ma-jsonrpc] Connected to MA JSON-RPC")
+            log.info("[ma-jsonrpc] STEP 4 PASS: WebSocket connected to MA JSON-RPC")
 
             async def forward_client_to_ma():
                 """Forward browser JSON-RPC commands to MA."""
+                log.info("[ma-jsonrpc] STEP 5: Proxy loop started — browser→MA direction active")
                 try:
                     while True:
                         msg = await websocket.receive()
                         data = msg.get("text") or msg.get("bytes")
                         if data is None:
+                            log.info("[ma-jsonrpc] Proxy: browser connection closed")
                             break
+                        log.info(f"[ma-jsonrpc] Proxy: browser→MA ({len(data)} bytes)")
                         await ma_ws.send(data)
                 except WebSocketDisconnect:
-                    log.info("[ma-jsonrpc] Browser disconnected from JSON-RPC proxy")
+                    log.info("[ma-jsonrpc] Proxy: Browser disconnected from gateway")
                 except Exception as e:
-                    log.error(f"[ma-jsonrpc] Client→MA forward error: {e}", exc_info=True)
+                    log.error(f"[ma-jsonrpc] Proxy: Client→MA forward error: {e}", exc_info=True)
+                finally:
+                    log.info("[ma-jsonrpc] Proxy: browser→MA direction ended")
 
             async def forward_ma_to_client():
                 """Forward MA events/responses to browser."""
+                log.info("[ma-jsonrpc] STEP 5: Proxy loop started — MA→browser direction active")
                 try:
                     while True:
                         message = await ma_ws.recv()
                         if isinstance(message, str):
+                            log.info(f"[ma-jsonrpc] Proxy: MA→browser ({len(message)} chars, first 100='{message[:100]}')")
                             await websocket.send_text(message)
                         else:
+                            log.info(f"[ma-jsonrpc] Proxy: MA→browser ({len(message)} bytes binary)")
                             await websocket.send_bytes(message)
                 except Exception as e:
-                    log.error(f"[ma-jsonrpc] MA→Client forward error: {e}", exc_info=True)
+                    log.error(f"[ma-jsonrpc] Proxy: MA→Client forward error: {e}", exc_info=True)
+                finally:
+                    log.info("[ma-jsonrpc] Proxy: MA→browser direction ended")
 
             # Run both directions in parallel
+            log.info("[ma-jsonrpc] STEP 6: Starting asyncio.gather for proxy loops")
             await asyncio.gather(
                 forward_client_to_ma(),
                 forward_ma_to_client(),
             )
+            log.info("[ma-jsonrpc] STEP 7: Proxy loops complete — both directions ended")
     except websockets.exceptions.InvalidStatusCode as e:
         log.error(f"[ma-jsonrpc] MA JSON-RPC connection failed (status {e.status_code}): {e}")
         try:
