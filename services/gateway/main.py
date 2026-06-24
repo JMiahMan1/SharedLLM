@@ -5580,7 +5580,8 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
 
     # Build MA JSON-RPC URL
     ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
-    ma_jsonrpc_url = f"{ma_scheme}://{ma_host}:{ma_port}/ws?token={mass_token}"
+    ws_scheme = "ws" if ma_scheme == "http" else "wss"
+    ma_jsonrpc_url = f"{ws_scheme}://{ma_host}:{ma_port}/ws?token={mass_token}"
     log.info(f"[ma-jsonrpc] Connecting to MA JSON-RPC: {ma_jsonrpc_url[:100]}...")
 
     try:
