@@ -5253,6 +5253,10 @@ async def sendspin_proxy(websocket: WebSocket):
     from urllib.parse import urlparse
     from fastapi.websockets import WebSocketDisconnect
 
+    # Accept browser connection FIRST (required by FastAPI before any close())
+    await websocket.accept()
+    log.info("[sendspin] Browser connection accepted")
+
     # Extract API token from query params (WebSocket can't set headers)
     api_token = websocket.query_params.get("token")
     if not api_token:
@@ -5261,11 +5265,6 @@ async def sendspin_proxy(websocket: WebSocket):
         return
 
     log.info(f"[sendspin] Browser connection received (token={api_token[:8]}...{api_token[-4:]})")
-
-    # Accept browser connection FIRST (before resolving identity to avoid
-    # FastAPI rejecting the WebSocket with 403 before we can call accept())
-    await websocket.accept()
-    log.info("[sendspin] Browser connection accepted")
 
     # Resolve MA credentials via identity service
     creds = None
