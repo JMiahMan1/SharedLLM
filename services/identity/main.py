@@ -174,12 +174,30 @@ async def _ensure_default_settings(session: Session) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Check DB file state before initialization
+    db_path = DATABASE_URL.replace("sqlite:///", "") if "sqlite" in DATABASE_URL else "unknown"
+    try:
+        import os.path as osp
+        db_exists = osp.exists(db_path)
+        db_size = osp.getsize(db_path) if db_exists else 0
+        log.info(f"[lifespan] DB file: path={db_path}, exists={db_exists}, size={db_size} bytes")
+    except Exception as e:
+        log.warning(f"[lifespan] Could not check DB file state: {e}")
+    
     # Ensure tables exist
+    log.info("[lifespan] Creating tables via SQLModel.metadata.create_all()...")
     SQLModel.metadata.create_all(engine)
+    log.info("[lifespan] Tables creation complete")
+    
     _ensure_schema_upgrades()
+    log.info("[lifespan] Schema upgrades applied")
     
     # Run initial seed if needed
     with Session(engine) as session:
+        # Check actual DB state before seeding
+        user_count = session.exec(select(User)).count() if hasattr(session.exec(select(User)), "count") else len(session.exec(select(User)).all())
+        log.info(f"[lifespan] User count before seed: {user_count}")
+        
         force_reseed = os.getenv("FORCE_RESEED", "false").lower() == "true"
         if force_reseed:
             log.info("[lifespan] FORCE_RESEED=true — re-seeding all data")
@@ -236,28 +254,47 @@ def _store_generated_api_key(record: APIKey, key_value: str | None) -> str | Non
 
 
 def _find_user_for_api_key(session: Session, key_value: str) -> User | None:
+    if not key_value:
+        return None
     key_hash = digest_secret(key_value)
 
     api_key_obj = session.exec(select(APIKey).where(APIKey.key_hash == key_hash)).first() if key_hash else None
-    if not api_key_obj:
-        api_key_obj = session.exec(select(APIKey).where(APIKey.key_value == key_value)).first()
-        if api_key_obj and not api_key_obj.key_hash:
+    if api_key_obj:
+        log.info(f"[auth] API key lookup: matched by hash in APIKey table (user={api_key_obj.user.username})")
+        return api_key_obj.user
+
+    api_key_obj = session.exec(select(APIKey).where(APIKey.key_value == key_value)).first()
+    if api_key_obj:
+        if not api_key_obj.key_hash:
             _store_generated_api_key(api_key_obj, key_value)
             session.add(api_key_obj)
             session.commit()
             session.refresh(api_key_obj)
-    if api_key_obj:
+        log.info(f"[auth] API key lookup: matched by value in APIKey table (user={api_key_obj.user.username})")
         return api_key_obj.user
 
     user = session.exec(select(User).where(User.api_key_hash == key_hash)).first() if key_hash else None
-    if not user:
-        user = session.exec(select(User).where(User.api_key == key_value)).first()
-        if user and not user.api_key_hash:
+    if user:
+        if not user.api_key_hash:
             _store_user_api_key(user, key_value)
             session.add(user)
             session.commit()
             session.refresh(user)
-    return user
+        log.info(f"[auth] API key lookup: matched by hash in User table (user={user.username})")
+        return user
+
+    user = session.exec(select(User).where(User.api_key == key_value)).first()
+    if user:
+        if not user.api_key_hash:
+            _store_user_api_key(user, key_value)
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+        log.info(f"[auth] API key lookup: matched by value in User table (user={user.username})")
+        return user
+
+    log.warning(f"[auth] API key lookup: no match for provided key")
+    return None
 
 
 def _migrate_api_key_material(session: Session) -> None:
@@ -344,10 +381,15 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     Downstream services call this to get decrypted credentials for a user.
     """
     user = None
+    log.debug(f"[resolve] Input: user_id={req.user_id}, api_key={'***' + req.api_key[-4:] if req.api_key and len(req.api_key) > 4 else req.api_key}, rag_user={req.rag_user}, voice_id={req.voice_id}, device_id={req.device_id}")
     
     # Resolve by user ID (integer primary key)
     if req.user_id is not None:
         user = session.exec(select(User).where(User.id == req.user_id)).first()
+        if user:
+            log.info(f"[resolve] Resolved by user_id={req.user_id}: user={user.username}")
+        else:
+            log.warning(f"[resolve] No user found for user_id={req.user_id}")
 
     # Resolve by API Key first (for OpenWebUI & UI clients)
     if not user and req.api_key:
@@ -355,21 +397,42 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
 
     if not user and req.rag_user:
         user = session.exec(select(User).where(User.username == req.rag_user.lower())).first()
+        if user:
+            log.info(f"[resolve] Resolved by rag_user={req.rag_user}: user={user.username}")
+        else:
+            log.warning(f"[resolve] No user found for rag_user={req.rag_user}")
+            
     if not user and req.voice_id:
         # Search for user by voice_id (username or biometric match)
         user = session.exec(select(User).where(User.username == req.voice_id.lower())).first()
+        if user:
+            log.info(f"[resolve] Resolved by voice_id={req.voice_id}: user={user.username}")
+        else:
+            log.warning(f"[resolve] No user found for voice_id={req.voice_id}")
+            
     if not user and req.device_id:
         assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == req.device_id)).first()
         if assignment and not assignment.revoked:
             user = assignment.user
+            log.info(f"[resolve] Resolved by device_id={req.device_id}: user={user.username}")
+        elif assignment and assignment.revoked:
+            log.warning(f"[resolve] Device {req.device_id} assignment revoked, skipping")
+        else:
+            log.warning(f"[resolve] No device assignment found for device_id={req.device_id}")
 
     if not user:
+        log.warning(f"[resolve] No resolution path matched, falling back to system default")
         # Fallback to system account (ID 1)
         user = session.exec(select(User).where(User.id == 1)).first()
-        if not user:
+        if user:
+            log.info(f"[resolve] Fallback resolved to system default (ID=1): user={user.username}")
+        else:
             # Last resort fallback to "default" username if ID 1 somehow missing
             user = session.exec(select(User).where(User.username == "default")).first()
-            if not user:
+            if user:
+                log.info(f"[resolve] Fallback resolved to system default (username='default'): user={user.username}")
+            else:
+                log.error(f"[resolve] No system default user found in database!")
                 raise HTTPException(status_code=404, detail="No valid identity found")
 
     # Fetch system user for shared skylight credentials
@@ -378,6 +441,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         sys_user = session.exec(select(User).where(User.username == "default")).first()
 
     # Decrypt sensitive fields
+    log.info(f"[resolve] Returning credentials for user={user.username}, mass_token={'set' if user.mass_token_enc else 'NOT SET'}")
     return ResolvedCredentials(
         user=user.username,
         is_admin=user.is_admin,
