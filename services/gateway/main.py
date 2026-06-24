@@ -5305,7 +5305,8 @@ async def sendspin_proxy(websocket: WebSocket):
 
     # Build MA sendspin URL (NO query string token — auth via message)
     ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
-    ma_sendspin_url = f"{ma_scheme}://{ma_host}:{ma_port}/sendspin"
+    ws_scheme = "ws" if ma_scheme == "http" else "wss"
+    ma_sendspin_url = f"{ws_scheme}://{ma_host}:{ma_port}/sendspin"
     log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url}...")
 
     # Receive the first message from the browser (client/hello)
