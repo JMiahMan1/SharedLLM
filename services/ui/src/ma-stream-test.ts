@@ -181,12 +181,21 @@ function sendJsonRpc(command: string, args: any, expectResult: boolean = true): 
 // Connect
 // ═══════════════════════════════════════════════════════════
 async function connect() {
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlToken = urlParams.get('token')?.trim()
+    if (urlToken) {
+        apiTokenInput.value = urlToken
+    }
+
     let token = localStorage.getItem('jarvis_api_key')
+    if (!token && urlToken) {
+        token = urlToken
+    }
     if (!token && apiTokenInput?.value) {
         token = apiTokenInput.value.trim()
     }
     if (!token) {
-        setStatus('No token — login to UI first or enter API key above', 'error')
+        setStatus('No token — login to UI first, pass ?token=xxx in URL, or enter API key above', 'error')
         return
     }
 

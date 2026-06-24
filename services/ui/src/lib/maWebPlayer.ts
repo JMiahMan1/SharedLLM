@@ -250,10 +250,12 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const initPlayer = useCallback(async () => {
     if (playerRef.current) return;
 
-    const apiToken = storageGetSync(API_KEY_STORAGE) ?? '';
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlToken = urlParams.get('token')?.trim();
+    let apiToken = urlToken || storageGetSync(API_KEY_STORAGE) || '';
     const playerId = getPlayerIdRef();
     if (!apiToken) {
-      setStateLocal(s => ({ ...s, error: 'No API token available' }));
+      setStateLocal(s => ({ ...s, error: 'No API token available — use ?token=xxx in URL or login to UI' }));
       return;
     }
 
