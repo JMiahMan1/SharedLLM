@@ -5246,6 +5246,46 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         raise HTTPException(status_code=500, detail=f"Internal stream error: {str(e)}")
 
 
+def _fix_sendspin_client_hello(msg: dict) -> dict:
+    """Convert browser sendspin-js client/hello format to MA's expected format.
+
+    @sendspin/sendspin-js sends supported_formats as string arrays like
+    ['mp3', 'aac', 'opus'] but MA expects SupportedAudioFormat objects:
+    {codec: 'opus', channels: 2, sample_rate: 48000, bit_depth: 16}
+
+    MA only supports opus, flac, pcm codecs. Map/filter browser formats accordingly.
+    """
+    payload = msg.get("payload", {})
+    player_support = payload.get("player@v1_support") or payload.get("player_support")
+
+    if player_support:
+        sf = player_support.get("supported_formats")
+        if sf and isinstance(sf, list) and sf and isinstance(sf[0], str):
+            log.info(f"[sendspin] Converting string supported_formats to SupportedAudioFormat objects: {sf}")
+            fixed = []
+            for fmt_str in sf:
+                codec_lower = fmt_str.lower()
+                if codec_lower == "wav":
+                    codec_lower = "pcm"
+                if codec_lower in ("opus", "flac", "pcm"):
+                    fixed.append({"codec": codec_lower, "channels": 2, "sample_rate": 48000, "bit_depth": 16})
+                elif codec_lower in ("mp3", "aac"):
+                    # MA doesn't support mp3/aac in sendspin protocol - skip these
+                    log.info(f"[sendspin] Skipping unsupported sendspin codec: {codec_lower}")
+            if not fixed:
+                log.warning("[sendspin] No valid sendspin codecs found, defaulting to opus")
+                fixed = [{"codec": "opus", "channels": 2, "sample_rate": 48000, "bit_depth": 16}]
+            player_support["supported_formats"] = fixed
+            log.info(f"[sendspin] Fixed supported_formats: {fixed}")
+
+        payload["player@v1_support"] = player_support
+        if "player_support" in payload:
+            del payload["player_support"]
+
+    msg["payload"] = payload
+    return msg
+
+
 @app.websocket("/api/sendspin")
 async def sendspin_proxy(websocket: WebSocket):
     """Proxy WebSocket for MA Sendspin audio streaming.
@@ -5370,6 +5410,7 @@ async def sendspin_proxy(websocket: WebSocket):
             # The browser's sendspin-js client doesn't include one, so we inject it
             import uuid as _uuid
             hello_msg = json.loads(first_data)
+            hello_msg = _fix_sendspin_client_hello(hello_msg)
             hello_msg["message_id"] = _uuid.uuid4().hex
             log.info(f"[sendspin] client/hello with message_id={hello_msg['message_id']}")
             await ma_ws.send(json.dumps(hello_msg))
