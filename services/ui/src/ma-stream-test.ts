@@ -181,9 +181,12 @@ function sendJsonRpc(command: string, args: any, expectResult: boolean = true): 
 // Connect
 // ═══════════════════════════════════════════════════════════
 async function connect() {
-    const token = localStorage.getItem('jarvis_api_key')
+    let token = localStorage.getItem('jarvis_api_key')
+    if (!token && apiTokenInput?.value) {
+        token = apiTokenInput.value.trim()
+    }
     if (!token) {
-        setStatus('No token — login to UI first', 'error')
+        setStatus('No token — login to UI first or enter API key above', 'error')
         return
     }
 
@@ -195,9 +198,9 @@ async function connect() {
     setStatus('Connecting...', 'warn')
 
     try {
-        const baseUrl = window.location.origin
-        const sendspinUrl = `${baseUrl === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/sendspin?token=${encodeURIComponent(token)}`
-        const jsonrpcUrl = `${baseUrl === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/ma-jsonrpc?token=${encodeURIComponent(token)}`
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+        const sendspinUrl = `${protocol}://${window.location.host}/api/sendspin?token=${encodeURIComponent(token)}`
+        const jsonrpcUrl = `${protocol}://${window.location.host}/api/ma-jsonrpc?token=${encodeURIComponent(token)}`
 
         log(`[MAWebPlayer] Sendspin URL: ${sendspinUrl.substring(0, 60)}...`, 'info')
         log(`[MAWebPlayer] JSON-RPC URL: ${jsonrpcUrl.substring(0, 60)}...`, 'info')
