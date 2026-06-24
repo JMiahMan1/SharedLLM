@@ -74,6 +74,54 @@ The frontend uses generic Capability Widgets (MediaWidget, ChoreWidget). The bac
   * **Raven Ops Panel (Admin Center):** Subscribes to the Redis stream (raven:mission:stream:{mission_id}) and transforms raw JSON logs into a sleek, vertical Operations Timeline. It also natively integrates with the Control Plane, providing UI buttons for Admins to view live Docker logs or restart crashed services directly from the React dashboard. Admins can toggle Raven between Plan and Build modes directly from this panel.
   * **Interactive Commits:** When Raven executes /execute/git (git_commit), the UI generates a "Commit Card" linking directly to the GitHub PR. Admins can view a visual diff natively before allowing Raven to push.
 
+## 3.4 Raven 2.0 (Fable 5-Worthy) Autonomous Harness
+
+### Core Architecture
+
+* **Temporal DAG Execution:** Long-running tasks are now Directed Acyclic Graphs (DAGs) of state transitions, persisting in Redis. If a worker crashes at iteration 42, it resumes exactly where it left off. This enables truly long-duration tasks like full codebase migrations or video rendering that can span multiple days.
+
+* **Hierarchical Swarm Routing:** The monolithic AgentLoop is replaced by an Orchestrator Node that delegates to specialized sub-agents: Coder, MediaCreator, SysAdmin, and DataAnalyst. They share a central RAG memory bank but use smaller, specialized local models to save VRAM.
+
+* **VRAM-Aware Context Paging:** To handle strict memory constraints, Raven 2.0 uses "Context Splitting." When the action log exceeds the context window, it spawns a synchronous background thread to summarize memory into a Workspace Context Vector in ChromaDB, keeping the active context window hyper-lean.
+
+* **Multi-Modal Creation Pipelines:** The workspace runtime extends beyond text files to include:
+  * **TTS/STT:** Direct binding to local Kokoro/Whisper microservices for audio asset generation
+  * **Graphics:** Integration with local ComfyUI/Stable Diffusion API for dashboard icons, background art, and visual notifications
+  * **Data Management:** Autonomous Nextcloud sync with content-aware deduplication
+
+### Architecture Blueprint
+
+* **Core Substrate Redesign:**
+  * **State Machine:** Implemented as langgraph or lightweight asynchronous state machine in `services/gateway/state_machine.py`. The global INFERENCE_LOCK is removed.
+  * **Event-Driven Pauses:** Long-running tasks (Docker container builds, video rendering) yield worker threads back to the pool, persisting in "WAITING_ON_EXTERNAL_SYSTEM" state in Redis.
+  * **Tool Registration Registry:** Abstracted `ALLOWED_TOOLS` into dynamic registry using Redis PubSub. Services broadcast capabilities on startup, enabling Raven to discover new tools without gateway updates.
+
+* **Tiered Queue System:** Librarian fast-path bypasses Raven's heavy queue, ensuring UI interactions remain sub-200ms while Raven compiles code in the background.
+
+* **VRAM Spillover Guardrails:** Proactively monitors `/api/ps` VRAM usage. If constrained, Raven automatically downgrades active context window size or pauses until Librarian tasks complete.
+
+### Swarm Agent Implementation
+
+* **Orchestrator:** `services/gateway/orchestrator_v2.py` - Task decomposition, delegation, RAG context retrieval
+* **Coder Agent:** Code generation, testing, refactoring using strict TDD
+* **MediaCreator Agent:** Multi-modal asset generation (TTS, images, video)
+* **SysAdmin Agent:** Container management, system administration
+* **DataAnalyst Agent:** Data processing, analysis, reporting
+
+### Enhanced Workspace Runtime
+
+* **Media Workspace Mounts:** `docker-compose.yml` and `services/workspace_runtime/main.py` updated for binary asset manipulation (images, audio)
+* **Creation Tools:** Added to `services/execution/`:
+  * `GraphicGenerationRequest`: Generates images via local SD endpoint, saves to Nextcloud
+  * `AudioGenerationRequest`: Generates TTS, saves `.wav`, orchestrates MediaPlayRequest
+  * Enhanced `WorkspaceShellRequest`: Async mode returns job ID and webhook on completion
+
+### Guardrail Directives
+
+* **No Assumptions:** All service calls use multi-approach validation (different parameter names, HTTP methods, retry strategies)
+* **Multi-Approach Validation:** If service returns 500, agent explicitly uses DockerLogsRequest on that service before retry
+* **Prompt Engineering:** Rewritten `services/gateway/prompts.py` for swarm mentality with strict constraints
+
 ## 4. Communication Systems
 
 ### 4.1 Nextcloud Talk Integration
@@ -96,8 +144,60 @@ The frontend uses generic Capability Widgets (MediaWidget, ChoreWidget). The bac
   * handlers/calendar.py directly interfaces with Nextcloud CalDAV (via calendarrequest) to parse dates (dateparser) and inject events.
   * *Deep-Dive Architecture Finding:* The system also runs an asynchronous background task (extract_user_facts) that continuously monitors conversation history in Redis. It autonomously extracts durable preferences and saves them into a specialized user_facts ChromaDB collection.
 
+## 6. State Machine & DAG Implementation
+
+### Core State Graph Design
+
+```mermaid
+graph TD
+    A[Start] --> B[Plan]
+    B --> C{Choose Agent}
+    C --> D[Coder]
+    C --> E[MediaCreator]
+    C --> F[SysAdmin]
+    C --> G[DataAnalyst]
+    D --> H[Act]
+    E --> H
+    F --> H
+    G --> H
+    H --> I[Observe]
+    I --> J{Summarize}
+    J --> K[Summarize]
+    J --> L[Check DAG Completion]
+    K --> M[Update Context]
+    L --> N{More Steps?}
+    N --> O[Continue] --> B
+    N --> P[End]
+```
+
+### State Transitions
+
+1. **Plan:** Analyze task, decompose into sub-tasks, select appropriate agent
+2. **Act:** Execute agent-specific tools and operations
+3. **Observe:** Capture results, detect failures, gather tool outputs
+4. **Reflect:** Evaluate progress, identify next steps
+5. **Summarize:** Update action log, persist state to Redis, check for completion
+6. **Continue/End:** Loop back to Plan or terminate
+
+### Redis Checkpointing
+
+Each state transition persists:
+- Current state and parameters
+- Action log summaries (last 20 entries)
+- External tool results
+- VRAM context vectors
+- Estimated completion time
+
+### Scalability & Resilience
+
+* **Parallel Execution:** Sub-tasks from different agents can run simultaneously
+* **Fault Tolerance:** Any node failure triggers DAG-based state restoration
+* **Resource Management:** VRAM-aware agent selection based on current memory pressure
+* **Context Management:** Automatic summarization and ChromaDB vector storage
+
 ## References
 
 * jarvis_os_2_master_guide_detailed.md: Complete technical implementation details (2,029 lines)
 * jarvis_os_2_ui_wireframes.md: UI wireframes and component specifications
 * docs/roadmap.md: Feature roadmap and progress tracking
+* RAVEN_AUDIT_BLUEPRINT.md: Raven 2.0 architectural overhaul and hardening blueprint
