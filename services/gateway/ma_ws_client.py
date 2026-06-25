@@ -603,6 +603,9 @@ class MAWebSocketClient:
                 ct_map = {"mpeg": "mp3", "mp4a": "m4a", "webm": "webm"}
                 ext = ct_map.get(content_type, content_type or "mp3")
                 item_base = os.path.splitext(str(item_id))[0]
+                suffix = f".{ext}"
+                while item_base.lower().endswith(suffix.lower()):
+                    item_base = item_base[: -len(suffix)]
                 queue_id = data.get("queue_id", "")
                 queue_item_id = current_item.get("queue_item_id", "")
                 track_index = current_item.get("index", 0)
