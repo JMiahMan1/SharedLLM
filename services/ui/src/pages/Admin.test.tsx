@@ -101,7 +101,7 @@ describe('Admin page', () => {
     renderWithProviders(<Admin />);
 
     fireEvent.click(await screen.findByText('Raven Ops'));
-    expect(await screen.findByText('Autonomous Ops (Raven)')).toBeInTheDocument();
+    expect(await screen.findByText('Raven Mission Control')).toBeInTheDocument();
     expect(screen.getByText('Pending Triage Queue')).toBeInTheDocument();
     expect(screen.getByText('Active Missions Monitor')).toBeInTheDocument();
   });
