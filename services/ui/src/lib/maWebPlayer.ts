@@ -203,7 +203,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   }, []);
 
   // JSON-RPC helper: send command and optionally wait for response
-  const sendJsonRpc = useCallback((command: string, args: Record<string, unknown>): Promise<unknown> => {
+  const sendJsonRpc = useCallback((command: string, args: Record<string, unknown>, expectResult: boolean = true): Promise<unknown> => {
     return new Promise((resolve, reject) => {
       const ws = jsonrpcWsRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -219,6 +219,12 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         command,
         args,
       });
+
+      if (!expectResult) {
+        ws.send(payload);
+        resolve(undefined);
+        return;
+      }
 
       // Wait for response with timeout
       const timeout = setTimeout(() => {
@@ -410,12 +416,11 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
     try {
       console.log('[MAWebPlayer] play_media:', mediaUri, 'player:', pid);
-      const result = await sendJsonRpc('player_queues/play_media', {
+      await sendJsonRpc('player_queues/play_media', {
         queue_id: pid,
         media: mediaUri,
         custom_data: { source_change: false },
-      });
-      console.log('[MAWebPlayer] play_media result:', result);
+      }, false);
       playerRef.current?.sendCommand('play');
     } catch (err) {
       console.error('[MAWebPlayer] play_media failed:', err);
@@ -512,7 +517,9 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const setVolume = useCallback((volume: number) => {
     console.log('[MAWebPlayer] setVolume called:', volume);
     try {
-      playerRef.current?.setVolume(Math.round(volume));
+      if (audioRef.current) {
+        audioRef.current.volume = Math.max(0, Math.min(1, volume / 100));
+      }
     } catch (err) {
       console.error('[MAWebPlayer] setVolume failed:', err);
     }
@@ -521,7 +528,9 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const setMuted = useCallback((muted: boolean) => {
     console.log('[MAWebPlayer] setMuted called:', muted);
     try {
-      playerRef.current?.setMuted(muted);
+      if (audioRef.current) {
+        audioRef.current.muted = muted;
+      }
     } catch (err) {
       console.error('[MAWebPlayer] setMuted failed:', err);
     }
