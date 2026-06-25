@@ -380,6 +380,51 @@ test.describe('Media Explorer Modal', () => {
     expect((hasBooks || hasPodcasts) && !hasEmpty).toBe(true);
   });
 
+  test('Audiobooks tab live search returns ABS results', async ({ page }) => {
+    await page.getByRole('button', { name: 'Browse All Media' }).click();
+    await page.waitForTimeout(2000);
+    await page.getByRole('button', { name: /Audiobooks/i }).click();
+    await page.waitForTimeout(3000);
+
+    const liveAbs = await page.evaluate(async () => {
+      try {
+        const resp = await fetch('/api/media/audiobookshelf/last-played');
+        return resp.status === 200 ? await resp.json() : null;
+      } catch {
+        return null;
+      }
+    });
+
+    const book = liveAbs?.books?.[0];
+    if (!book?.title && !book?.author) {
+      test.skip();
+      return;
+    }
+
+    const query = (process.env.TEST_ABS_QUERY?.trim() || book.title || book.author).trim();
+    const modal = page.locator('div.fixed.inset-0');
+    const searchInput = modal.locator('input[type="text"]').first();
+
+    await expect(searchInput).toBeVisible({ timeout: 10000 });
+    await searchInput.fill(query);
+    await page.waitForTimeout(2500);
+
+    const apiSearch = await page.evaluate(async (searchQuery) => {
+      try {
+        const resp = await fetch(`/api/media/audiobookshelf/search?q=${encodeURIComponent(searchQuery)}&limit=20`);
+        return resp.status === 200 ? await resp.json() : null;
+      } catch {
+        return null;
+      }
+    }, query);
+
+    expect(Array.isArray(apiSearch?.books)).toBe(true);
+    expect(apiSearch.books.length).toBeGreaterThan(0);
+
+    await expect(modal.getByRole('heading', { name: /Search Results/i, level: 3 })).toBeVisible({ timeout: 10000 });
+    await expect(modal.getByText(book.title || query, { exact: false })).toBeVisible({ timeout: 10000 });
+  });
+
   test('search input filters content', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(3000);
