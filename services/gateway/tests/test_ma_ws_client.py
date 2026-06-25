@@ -300,7 +300,7 @@ class TestCommandSending:
         client._ws = mock_websocket
         client._connected = True
         with patch("services.gateway.ma_ws_client.log") as mock_log:
-            await client.send_command("player_queues/play_media", {"queue_id": "p1", "uri": "test"})
+            await client.send_command("player_queues/play_media", {"queue_id": "p1", "media": "test"})
             assert mock_log.info.called
 
 
@@ -893,14 +893,14 @@ class TestIntegration:
         # Send a play command
         await client.send_command(
             "player_queues/play_media",
-            {"queue_id": "player_1", "uri": "https://www.youtube.com/watch?v=4uLU6hMCjMI"},
+            {"queue_id": "player_1", "media": "https://www.youtube.com/watch?v=4uLU6hMCjMI"},
         )
 
         # Verify command was sent
         mock_websocket.send.assert_called_once()
         sent = json.loads(mock_websocket.send.call_args[0][0])
         assert sent["command"] == "player_queues/play_media"
-        assert sent["args"]["uri"] == "https://www.youtube.com/watch?v=4uLU6hMCjMI"
+        assert sent["args"]["media"] == "https://www.youtube.com/watch?v=4uLU6hMCjMI"
         assert sent["message_id"] == "counter1"
 
         # Register event callback and process an event
@@ -996,7 +996,7 @@ class TestIntegration:
 
         complex_args = {
             "queue_id": "player_1",
-            "uri": "https://www.youtube.com/playlist?list=abc123",
+            "media": "https://www.youtube.com/playlist?list=abc123",
             "option": "replace",
             "radio_mode": False,
         }
@@ -1004,7 +1004,7 @@ class TestIntegration:
 
         sent = json.loads(mock_websocket.send.call_args[0][0])
         assert sent["args"]["queue_id"] == "player_1"
-        assert sent["args"]["uri"] == "https://www.youtube.com/playlist?list=abc123"
+        assert sent["args"]["media"] == "https://www.youtube.com/playlist?list=abc123"
         assert sent["args"]["option"] == "replace"
 
     @pytest.mark.asyncio
