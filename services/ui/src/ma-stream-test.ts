@@ -401,9 +401,8 @@ async function setVolumeVolume(volume: number) {
     log(`[MAWebPlayer] setVolume called: ${volume}`, 'info')
     try {
         if (audioElement) {
-            audioElement.volume = volume / 100
+            audioElement.volume = Math.max(0, Math.min(1, volume / 100))
         }
-        player?.setVolume(volume)
     } catch (err) {
         log(`[MAWebPlayer] setVolume failed: ${(err as Error).message}`, 'error')
     }
@@ -416,31 +415,16 @@ async function playMedia(mediaUri: string) {
     log(`[MAWebPlayer] play_media: ${mediaUri.substring(0, 80)}..., player: ${playerId}`, 'info')
     try {
         // Use player_queues/play_media (the MA web player pattern) with queue_id
-        const playResult = await sendJsonRpc('player_queues/play_media', {
+        await sendJsonRpc('player_queues/play_media', {
             queue_id: playerId,
             media: mediaUri,
             custom_data: { source_change: false },
-        }, true)
-        log(`[MAWebPlayer] play_media response: ${JSON.stringify(playResult).substring(0, 200)}`, 'info')
+        }, false)
         // Start local browser playback via Sendspin
         player?.sendCommand('play')
         log(`[MAWebPlayer] play_media + cmd_play sent`, 'success')
     } catch (err) {
         log(`[MAWebPlayer] play_media failed: ${(err as Error).message}`, 'error')
-        // Fallback: try players/play_media as backup
-        try {
-            log(`[MAWebPlayer] Trying fallback: players/play_media`, 'warn')
-            const playResult = await sendJsonRpc('players/play_media', {
-                player_id: playerId,
-                media: mediaUri,
-                play_handle: null,
-                enqueue: 'play',
-            }, true)
-            log(`[MAWebPlayer] Fallback play_media response: ${JSON.stringify(playResult).substring(0, 200)}`, 'info')
-            player?.sendCommand('play')
-        } catch (fallbackErr) {
-            log(`[MAWebPlayer] Fallback also failed: ${(fallbackErr as Error).message}`, 'error')
-        }
     }
 }
 
