@@ -1104,4 +1104,9 @@ export const api = {
     const resp = await apiClient.post(`/api/admin/services/${serviceName}/pull`);
     return resp.data;
   },
+
+  async restartService(serviceName: string): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post(`/api/admin/services/${serviceName}/restart`);
+    return resp.data;
+  },
 };
