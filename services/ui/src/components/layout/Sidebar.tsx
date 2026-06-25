@@ -38,7 +38,7 @@ const navItems = [
   { icon: SlidersHorizontal, label: 'Settings', path: '/settings' },
   { icon: HelpCircle, label: 'Help Hub', path: '/docs' },
   // Admin-only: System Ops & Raven
-  { icon: Settings, label: 'System Ops & Raven', path: '/admin', adminOnly: true },
+  { icon: Settings, label: 'System Ops & Raven', path: '/admin/ops', adminOnly: true },
   { icon: FlaskConical, label: 'Jarvis Lab', path: '/lab', adminOnly: true },
 ];
 

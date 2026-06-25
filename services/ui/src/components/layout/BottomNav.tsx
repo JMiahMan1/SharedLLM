@@ -26,7 +26,7 @@ const BottomNav = () => {
       ? [{ icon: Brain, label: 'Lab', path: '/lab', roles: ['admin'] as const }]
       : []),
     ...(isAdmin
-      ? [{ icon: Shield, label: 'Admin', path: '/admin', roles: ['admin'] as const }]
+      ? [{ icon: Shield, label: 'Raven Ops', path: '/admin/ops', roles: ['admin'] as const }]
       : [{ icon: Settings, label: 'Settings', path: '/settings', roles: ['user', 'child'] as const }]),
   ];
 

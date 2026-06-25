@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ShieldAlert, Search, Terminal, Clock } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ShieldAlert, Search, Terminal } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type RavenMission } from '../../services/api';
 import HelpTooltip from '../ui/HelpTooltip';
@@ -26,7 +26,7 @@ export default function RavenWorkspaceInvestigationPanel({
   const [selectedMission, setSelectedMission] = useState<RavenMission | null>(null);
   const [correctionContext, setCorrectionContext] = useState<{ message: string; timestamp: string; level: string; } | null>(null);
 
-  const { data: missions = [], isLoading: missionsLoading } = useQuery<RavenMission[]>({
+  const { data: missions = [] } = useQuery<RavenMission[]>({
     queryKey: ['workspace-raven-missions', workspaceId],
     queryFn: () => api.getWorkspaceRavenMissions(workspaceId),
     refetchInterval: 3000,
@@ -260,7 +260,7 @@ export default function RavenWorkspaceInvestigationPanel({
               >
                 ✖️ Cancel
               </button>
-            )
+            )}
           </div>
         </div>
         
@@ -275,7 +275,7 @@ export default function RavenWorkspaceInvestigationPanel({
               </span>
             </div>
           </div>
-        }
+        )}
       </div>
 
       {activeMissions.length > 0 && (
@@ -311,7 +311,7 @@ export default function RavenWorkspaceInvestigationPanel({
             ))}
           </div>
         </div>
-      }
+      )}
 
       {showCorrectionModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 transition-all">
@@ -367,7 +367,7 @@ export default function RavenWorkspaceInvestigationPanel({
             </div>
           </div>
         </div>
-      }
+      )}
     </div>
   );
 }

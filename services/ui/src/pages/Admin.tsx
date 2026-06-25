@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Cpu,
   Edit3,
@@ -45,15 +46,27 @@ import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 
 type AdminTab = 'users' | 'groups' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database';
 
-const tabs: { id: AdminTab; label: string; icon: React.ElementType }[] = [
-  { id: 'users', label: 'Users & Devices', icon: Shield },
-  { id: 'groups', label: 'Device Groups', icon: Layers },
-  { id: 'telemetry', label: 'Telemetry', icon: Activity },
-  { id: 'intercom', label: 'Intercom', icon: Phone },
-  { id: 'raven', label: 'Raven Ops', icon: ShieldAlert },
-  { id: 'settings', label: 'LLM & Settings', icon: Code2 },
-  { id: 'database', label: 'Database & Audit', icon: BarChart3 },
+const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string }[] = [
+  { id: 'users', label: 'Users & Devices', icon: Shield, path: '/admin/users' },
+  { id: 'groups', label: 'Device Groups', icon: Layers, path: '/admin/groups' },
+  { id: 'telemetry', label: 'Telemetry', icon: Activity, path: '/admin/monitor' },
+  { id: 'intercom', label: 'Intercom', icon: Phone, path: '/admin/intercom' },
+  { id: 'raven', label: 'Raven Ops', icon: ShieldAlert, path: '/admin/ops' },
+  { id: 'settings', label: 'LLM & Settings', icon: Code2, path: '/admin/integrations' },
+  { id: 'database', label: 'Database & Audit', icon: BarChart3, path: '/admin/database' },
 ];
+
+const adminTabFromPathname = (pathname: string): AdminTab => {
+  if (pathname.startsWith('/admin/ops')) return 'raven';
+  if (pathname.startsWith('/admin/groups')) return 'groups';
+  if (pathname.startsWith('/admin/monitor')) return 'telemetry';
+  if (pathname.startsWith('/admin/integrations')) return 'settings';
+  if (pathname.startsWith('/admin/sounds')) return 'database';
+  if (pathname.startsWith('/admin/database')) return 'database';
+  if (pathname.startsWith('/admin/intercom')) return 'intercom';
+  if (pathname.startsWith('/admin/users')) return 'users';
+  return 'users';
+};
 
 type UserFormState = {
   username: string;
@@ -71,7 +84,7 @@ type UserFormState = {
   gitlab_url: string;
   gitlab_user: string;
   gitlab_token: string;
-audiobookshelf_url: string;
+  audiobookshelf_url: string;
   audiobookshelf_user: string;
   audiobookshelf_pass: string;
   audiobookshelf_api_key: string;
@@ -93,7 +106,7 @@ const emptyUserForm: UserFormState = {
   gitlab_url: '',
   gitlab_user: '',
   gitlab_token: '',
- audiobookshelf_url: '',
+  audiobookshelf_url: '',
   audiobookshelf_user: '',
   audiobookshelf_pass: '',
   audiobookshelf_api_key: '',
@@ -123,7 +136,9 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
 
 const Admin = () => {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<AdminTab>('users');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeTab = adminTabFromPathname(location.pathname);
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [userForm, setUserForm] = useState<UserFormState>(emptyUserForm);
@@ -536,7 +551,7 @@ const Admin = () => {
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => navigate(tab.path)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition whitespace-nowrap ${
                 activeTab === tab.id
                   ? 'bg-purple-600/30 text-white border border-purple-500/30'

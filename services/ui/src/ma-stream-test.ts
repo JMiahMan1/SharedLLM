@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars */
 import { SendspinPlayer } from '@sendspin/sendspin-js'
 
 // Expose for the HTML page to use
