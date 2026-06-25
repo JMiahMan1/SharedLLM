@@ -180,12 +180,11 @@ def system_health():
                     unhealthy += 1
 
         # Get control plane git info and uptime
-        cp_start_time = time.time()
         control_plane_info = {
             "status": "running",
             "git_sha": "unknown",
-            "start_time": cp_start_time,
-            "uptime": _format_uptime(time.time() - cp_start_time)
+            "start_time": START_TIME,
+            "uptime": _format_uptime(time.time() - START_TIME)
         }
         try:
             from services.shared.info_endpoint import _get_git_commit
