@@ -207,9 +207,10 @@ async function connect() {
     setStatus('Connecting...', 'warn')
 
     try {
-        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-        const sendspinUrl = `${protocol}://${window.location.host}/api/sendspin?token=${encodeURIComponent(token)}`
-        const jsonrpcUrl = `${protocol}://${window.location.host}/api/ma-jsonrpc?token=${encodeURIComponent(token)}`
+        const httpProtocol = window.location.protocol === 'https:' ? 'https' : 'http'
+        const sendspinUrl = `${httpProtocol}://${window.location.host}/api/sendspin?token=${encodeURIComponent(token)}`
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+        const jsonrpcUrl = `${wsProtocol}://${window.location.host}/api/ma-jsonrpc?token=${encodeURIComponent(token)}`
 
         log(`[MAWebPlayer] Sendspin URL: ${sendspinUrl.substring(0, 60)}...`, 'info')
         log(`[MAWebPlayer] JSON-RPC URL: ${jsonrpcUrl.substring(0, 60)}...`, 'info')

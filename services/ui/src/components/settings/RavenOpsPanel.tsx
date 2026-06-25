@@ -164,6 +164,10 @@ export default function RavenOpsPanel() {
 
   const activeMissions = missions.filter(m => ['running', 'executing', 'queued'].includes(m.status));
 
+  const investigationBtnClass = isInvestigating
+    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-wait'
+    : 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 shadow-lg hover:shadow-emerald-500/20';
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -603,11 +607,7 @@ export default function RavenOpsPanel() {
               <button
                 onClick={startManualInvestigation}
                 disabled={!investigationPrompt.trim() || isInvestigating}
-                className={`flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
-                  isInvestigating
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 cursor-wait'
-                    : 'bg-gradient-to-r from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 hover:from-emerald-500/30 hover:to-teal-500/30 text-emerald-300 shadow-lg hover:shadow-emerald-500/20'
-                }`
+                className={`flex-1 py-3 px-4 rounded-xl font-black text-xs uppercase tracking-wider transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${investigationBtnClass}`}
               >
                 {isInvestigating ? (
                   <>
@@ -696,8 +696,9 @@ export default function RavenOpsPanel() {
                     >
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-bold text-white">Mission #{mission.id}</span>
-                        <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${'                   mission.status === 'running' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
-                      }`}
+                        <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${
+                      mission.status === 'running' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-slate-700/50 text-slate-300'
+                    }`}
                       >
                         {mission.status}
                       </span>
@@ -796,5 +797,6 @@ The agent will use this correction alongside its investigation prompt.`}
         missionId={liveMissionId}
       />
     </div>
+  </div>
   );
 }
