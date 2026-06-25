@@ -2396,4 +2396,121 @@ async def redeem_skylight_reward(
         return {"status": "SUCCESS", "message": "Reward redeemed"}
     return {"status": "FAILURE", "message": "Failed to redeem reward"}
 
-    return {"status": "SUCCESS", "message": f"Voice command received: '{transcript}'", "transcript": transcript}
+
+# Manual Investigation and Correction Endpoints
+# These endpoints support workspace-scoped investigation and manual correction injection
+
+# In-memory store for investigation missions (in production, this would be a database)
+investigation_missions: Dict[str, Any] = {}
+mission_counter = 0
+
+class ManualInvestigationRequest(BaseModel):
+    prompt: str
+    workspace_id: str
+    mission_id: Optional[int] = None
+    type: str = "manual"
+
+class ManualCorrectionRequest(BaseModel):
+    workspace_id: str
+    mission_id: int
+    correction: str
+    context: Optional[Dict[str, Any]] = None
+
+@app.post("/api/manual/investigation")
+async def manual_investigation(
+    request: ManualInvestigationRequest,
+    x_internal_secret: str = Header(None)
+):
+    """Start a manual investigation for a workspace."""
+    global mission_counter
+    
+    # Validate internal secret
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    mission_counter += 1
+    mission_id = mission_counter
+    
+    # Create investigation mission
+    mission = {
+        "id": mission_id,
+        "workspace_id": request.workspace_id,
+        "type": request.type,
+        "prompt": request.prompt,
+        "parent_mission_id": request.mission_id,
+        "status": "queued",
+        "created_at": time.time(),
+        "updated_at": time.time()
+    }
+    
+    investigation_missions[str(mission_id)] = mission
+    
+    log.info(f"[ManualInvestigation] Started investigation mission {mission_id} for workspace {request.workspace_id}")
+    
+    return {
+        "status": "SUCCESS",
+        "message": "Manual investigation started successfully",
+        "mission_id": mission_id
+    }
+
+@app.post("/api/manual/correction")
+async def manual_correction(
+    request: ManualCorrectionRequest,
+    x_internal_secret: str = Header(None)
+):
+    """Inject a manual correction into an active Raven mission."""
+    
+    # Validate internal secret
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Check if mission exists
+    mission = investigation_missions.get(str(request.mission_id))
+    if not mission:
+        return {"status": "FAILURE", "message": f"Mission {request.mission_id} not found"}
+    
+    # Update mission with correction
+    correction_data = {
+        "correction_id": str(uuid4()),
+        "mission_id": request.mission_id,
+        "workspace_id": request.workspace_id,
+        "correction": request.correction,
+        "context": request.context or {},
+        "injected_at": time.time()
+    }
+    
+    if "corrections" not in mission:
+        mission["corrections"] = []
+    mission["corrections"].append(correction_data)
+    mission["updated_at"] = time.time()
+    mission["status"] = "corrected"
+    
+    log.info(f"[ManualCorrection] Injected correction into mission {request.mission_id} for workspace {request.workspace_id}")
+    
+    return {
+        "status": "SUCCESS",
+        "message": "Manual correction injected successfully",
+        "correction_id": correction_data["correction_id"]
+    }
+
+@app.get("/api/manual/missions/{workspace_id}")
+async def get_workspace_missions(
+    workspace_id: str,
+    x_internal_secret: str = Header(None)
+):
+    """Get all investigation missions for a workspace."""
+    
+    # Validate internal secret
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Filter missions by workspace
+    workspace_missions = [
+        m for m in investigation_missions.values()
+        if m.get("workspace_id") == workspace_id
+    ]
+    
+    return {
+        "status": "SUCCESS",
+        "missions": workspace_missions
+    }
