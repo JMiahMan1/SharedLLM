@@ -208,9 +208,8 @@ async function connect() {
     setStatus('Connecting...', 'warn')
 
     try {
-        const httpProtocol = window.location.protocol === 'https:' ? 'https' : 'http'
-        const sendspinUrl = `${httpProtocol}://${window.location.host}/api/sendspin?token=${encodeURIComponent(token)}`
         const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+        const sendspinUrl = `${wsProtocol}://${window.location.host}/api/sendspin?token=${encodeURIComponent(token)}`
         const jsonrpcUrl = `${wsProtocol}://${window.location.host}/api/ma-jsonrpc?token=${encodeURIComponent(token)}`
 
         log(`[MAWebPlayer] Sendspin URL: ${sendspinUrl.substring(0, 60)}...`, 'info')
@@ -218,11 +217,12 @@ async function connect() {
 
         audioElement = audioPlayer
 
-        // ── Create SendspinPlayer (it creates and owns the WebSocket internally) ──
+        // ── Create SendspinPlayer with an explicit tokenized WebSocket ──
         log(`[MAWebPlayer] Creating SendspinPlayer...`, 'info')
+        sendspinWs = new WebSocket(sendspinUrl)
         player = new SendspinPlayer({
             playerId: playerId,
-            baseUrl: sendspinUrl,
+            webSocket: sendspinWs,
             audioElement: audioElement,
             onStateChange: (state) => {
                 console.log('[SendspinPlayer] State change:', state)
