@@ -5503,11 +5503,6 @@ async def sendspin_proxy(websocket: WebSocket):
                     })
                     try:
                         await ma_ws.send(goodbye_msg)
-                        try:
-                            server_goodbye = await asyncio.wait_for(ma_ws.recv(), timeout=5.0)
-                            log.info(f"[sendspin] Proxy: received server/goodbye from MA: {server_goodbye[:200]}")
-                        except asyncio.TimeoutError:
-                            log.warning("[sendspin] Proxy: no server/goodbye received from MA within 5s")
                     except Exception as e:
                         log.error(f"[sendspin] Proxy: failed to send goodbye to MA: {e}", exc_info=True)
             except Exception as e:
@@ -6270,4 +6265,3 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
         except Exception as e:
             log.error(f"[media/favorite] Exception: {e}", exc_info=True)
             raise HTTPException(status_code=502, detail="Error communicating with Music Assistant")
-
