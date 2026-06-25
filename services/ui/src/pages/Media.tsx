@@ -1170,7 +1170,6 @@ const Media = () => {
         maPlayer.setMuted(localMuted);
         console.log('[Media] Sending play_media for:', query);
         await maPlayer.playMedia(query);
-        await maPlayer.cmdPlay();
       } catch (err) {
         console.error('[Media] WebPlayer play failed:', err);
         setError(err instanceof Error ? err.message : 'Playback failed');
@@ -1305,8 +1304,6 @@ const Media = () => {
     console.log('[Media] Sending play_media for:', mediaUri);
     // Send play_media via JSON-RPC to tell MA to queue this track
     await maPlayer.playMedia(mediaUri);
-    // Send cmd_play to actually start playback and audio transport
-    await maPlayer.cmdPlay();
 
     try {
       await api.syncMediaState({

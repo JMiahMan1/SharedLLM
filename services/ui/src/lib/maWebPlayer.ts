@@ -5,7 +5,7 @@
  * 2. JSON-RPC control API for play/pause/seek commands (via /api/ma-jsonrpc proxy)
  *
  * The Sendspin connection registers the browser as a playback device.
- * The JSON-RPC connection sends play_media/cmd_play/cmd_pause/cmd_seek commands.
+ * The JSON-RPC connection queues media in MA; Sendspin commands drive browser playback.
  * Audio plays directly through the browser's <audio> element via sendspin-js.
  */
 
@@ -70,7 +70,7 @@ function createSendspinProxy(baseUrl: string, apiToken: string): WebSocketManage
  * Connects to gateway's /api/ma-jsonrpc, which authenticates with MA and
  * proxies JSON-RPC messages bidirectionally.
  *
- * Browser sends: {"message_id": "counter1", "command": "players/play_media", "args": {...}}
+ * Browser sends: {"message_id": "counter1", "command": "player_queues/play_media", "args": {...}}
  * MA responds:   {"type": "RESULT", "message_id": "counter1", "result": {...}}
  * MA events:     {"event": "queue_updated", "data": {...}}
  */
@@ -401,7 +401,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
   /* ── JSON-RPC Control Methods ──────────────────────────────────────── */
 
-  // Send players/play_media to queue and start playing a specific URI
+  // Queue a URI in MA and then start local browser playback.
   const playMedia = useCallback(async (mediaUri: string, player_id?: string) => {
     const pid = player_id || playerIdRef.current;
     if (!pid) {
@@ -410,19 +410,19 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
     try {
       console.log('[MAWebPlayer] play_media:', mediaUri, 'player:', pid);
-      const result = await sendJsonRpc('players/play_media', {
-        player_id: pid,
+      const result = await sendJsonRpc('player_queues/play_media', {
+        queue_id: pid,
         media: mediaUri,
-        play_handle: null,
-        enqueue: 'play',
+        custom_data: { source_change: false },
       });
       console.log('[MAWebPlayer] play_media result:', result);
+      playerRef.current?.sendCommand('play');
     } catch (err) {
       console.error('[MAWebPlayer] play_media failed:', err);
     }
   }, [sendJsonRpc]);
 
-  // Send players/cmd_play to resume playback
+  // Resume local browser playback.
   const cmdPlay = useCallback(async (player_id?: string) => {
     const pid = player_id || playerIdRef.current;
     if (!pid) {
@@ -431,13 +431,13 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
     try {
       console.log('[MAWebPlayer] cmd_play:', pid);
-      await sendJsonRpc('players/cmd_play', { player_id: pid });
+      playerRef.current?.sendCommand('play');
     } catch (err) {
       console.error('[MAWebPlayer] cmd_play failed:', err);
     }
-  }, [sendJsonRpc]);
+  }, []);
 
-  // Send players/cmd_pause to pause playback
+  // Pause local browser playback.
   const cmdPause = useCallback(async (player_id?: string) => {
     const pid = player_id || playerIdRef.current;
     if (!pid) {
@@ -446,11 +446,11 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
     try {
       console.log('[MAWebPlayer] cmd_pause:', pid);
-      await sendJsonRpc('players/cmd_pause', { player_id: pid });
+      playerRef.current?.sendCommand('pause');
     } catch (err) {
       console.error('[MAWebPlayer] cmd_pause failed:', err);
     }
-  }, [sendJsonRpc]);
+  }, []);
 
   // Send players/cmd_seek to seek to a position
   const cmdSeek = useCallback(async (position: number, player_id?: string) => {
@@ -469,7 +469,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
   /* ── Convenience Methods ───────────────────────────────────────────── */
 
-  // Play: ensure connected, send play_media (if URI provided), then cmd_play
+  // Play: ensure connected, send play_media (if URI provided), then local play.
   const play = useCallback(async (mediaUri?: string) => {
     console.log('[MAWebPlayer] play called, player exists:', !!playerRef.current);
     try {
@@ -480,9 +480,10 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       if (mediaUri) {
         console.log('[MAWebPlayer] Sending play_media with URI:', mediaUri);
         await playMedia(mediaUri);
+      } else {
+        console.log('[MAWebPlayer] Resuming local playback...');
+        await cmdPlay();
       }
-      console.log('[MAWebPlayer] Sending cmd_play...');
-      await cmdPlay();
     } catch (err) {
       console.error('[MAWebPlayer] play failed:', err);
     }
@@ -493,7 +494,6 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     console.log('[MAWebPlayer] pause called');
     try {
       await cmdPause();
-      playerRef.current?.sendCommand('pause', {});
     } catch (err) {
       console.error('[MAWebPlayer] pause failed:', err);
     }
