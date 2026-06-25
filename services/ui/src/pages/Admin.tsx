@@ -215,7 +215,7 @@ const Admin = () => {
     enabled: !!inspectingCollection,
   });
 
-  const { data: systemHealth, isFetching: isFetchingHealth } = useQuery({
+  const { data: systemHealth, isFetching: isFetchingHealth, isError: healthError, error: healthErrorData } = useQuery({
     queryKey: ['system-health'],
     queryFn: () => api.getSystemHealth(),
     refetchInterval: 10000,
@@ -1594,6 +1594,24 @@ const Admin = () => {
             {isFetchingHealth && !systemHealth ? (
               <div className="flex h-48 items-center justify-center">
                 <RefreshCcw className="animate-spin text-emerald-400" size={32} />
+              </div>
+            ) : healthError ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-12">
+                <ShieldAlert size={32} className="text-red-400" />
+                <p className="text-sm font-semibold text-red-400">Failed to load system health</p>
+                {healthErrorData && (
+                  <p className="max-w-md text-center text-xs text-slate-500">
+                    {(healthErrorData as { response?: { status?: number; data?: { detail?: string } } })?.response?.status === 403
+                      ? 'Admin access required. Please verify your account has admin privileges.'
+                      : (healthErrorData as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Control plane may be unreachable.'}
+                  </p>
+                )}
+                <button
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ['system-health'] })}
+                  className="mt-2 glass-button px-4 py-2 text-[10px] font-black uppercase tracking-widest"
+                >
+                  <RefreshCcw size={12} className="inline mr-1" /> Retry
+                </button>
               </div>
             ) : systemHealth ? (
               <>
