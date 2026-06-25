@@ -24,7 +24,7 @@ def get_remote_logs():
     print("\nXXX SERVER STARTUP FAILED - FETCHING LOGS XXX")
     try:
         # Fetch last 100 lines to catch startup errors
-        cmd = ["ssh", "jeremiah@ai.local", "docker logs --tail 100 unified_rag_api"]
+        cmd = ["ssh", "jeremiah@ai.local", "docker logs --tail 100 rag"]
         result = subprocess.run(cmd, capture_output=True, text=True)
         print("--- REMOTE LOGS START ---")
         print(result.stdout)
