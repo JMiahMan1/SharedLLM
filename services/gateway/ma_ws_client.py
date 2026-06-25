@@ -23,6 +23,7 @@ import asyncio
 import inspect
 import json
 import logging
+import os.path
 import time
 from urllib.parse import urlparse
 from typing import Any, Callable, Dict, Optional
@@ -592,14 +593,6 @@ class MAWebSocketClient:
         if isinstance(current_item, dict):
             log.info(f"[MA-WS] current_item keys: {list(current_item.keys())}")
             media_item = current_item.get("media_item", {})
-            stream_url = media_item.get("stream_url") if isinstance(media_item, dict) else None
-            if not stream_url:
-                stream_url = current_item.get("stream_url")
-            if stream_url:
-                self._stream_url = stream_url
-                log.info(f"[MA-WS] Stream URL resolved: {stream_url[:100]}...")
-                return
-
             # ── Construct stream URL from streamdetails for opensubsonic/library ──
             streamdetails = current_item.get("streamdetails", {})
             if isinstance(streamdetails, dict) and streamdetails.get("item_id"):
@@ -609,6 +602,7 @@ class MAWebSocketClient:
                 # Normalize content_type: mpeg -> mp3, flac -> flac, etc.
                 ct_map = {"mpeg": "mp3", "mp4a": "m4a", "webm": "webm"}
                 ext = ct_map.get(content_type, content_type or "mp3")
+                item_base = os.path.splitext(str(item_id))[0]
                 queue_id = data.get("queue_id", "")
                 queue_item_id = current_item.get("queue_item_id", "")
                 track_index = current_item.get("index", 0)
@@ -619,9 +613,9 @@ class MAWebSocketClient:
                     for k, v in extra_attrs.items():
                         log.info(f"[MA-WS] extra_attributes.{k} = {v}")
                 # Try flow with queue_id as session_id
-                flow_url1 = f"http://{http_base}/flow/{queue_id}/{queue_item_id}/{track_index}/{provider}/{item_id}.{ext}"
+                flow_url1 = f"http://{http_base}/flow/{queue_id}/{queue_item_id}/{track_index}/{provider}/{item_base}.{ext}"
                 # Try flow with queue_item_id as session_id
-                flow_url2 = f"http://{http_base}/flow/{queue_item_id}/{queue_id}/{track_index}/{provider}/{item_id}.{ext}"
+                flow_url2 = f"http://{http_base}/flow/{queue_item_id}/{queue_id}/{track_index}/{provider}/{item_base}.{ext}"
                 log.info(f"[MA-WS] Trying flow URL patterns: {flow_url1[:150]}")
                 log.info(f"[MA-WS] Trying flow URL patterns: {flow_url2[:150]}")
                 # Use the first one for now
@@ -629,6 +623,14 @@ class MAWebSocketClient:
                 log.info(f"[MA-WS] Stream URL from flow: {self._stream_url[:200]}")
                 log.info(f"[MA-WS] streamdetails full: {json.dumps(streamdetails)[:500]}")
                 log.info(f"[MA-WS] media_item keys: {list(media_item.keys()) if isinstance(media_item, dict) else 'none'}")
+                return
+
+            stream_url = media_item.get("stream_url") if isinstance(media_item, dict) else None
+            if not stream_url:
+                stream_url = current_item.get("stream_url")
+            if stream_url:
+                self._stream_url = stream_url
+                log.info(f"[MA-WS] Stream URL resolved: {stream_url[:100]}...")
                 return
 
         # Check for queue items with stream URLs

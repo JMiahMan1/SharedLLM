@@ -470,6 +470,29 @@ class TestStreamURLExtraction:
         assert client.get_stream_url() == stream_url
 
     @pytest.mark.asyncio
+    async def test_extract_stream_url_from_streamdetails_strips_duplicate_extension(self, client):
+        data = {
+            "state": "playing",
+            "current_item": {
+                "queue_item_id": "queue-item-1",
+                "index": 0,
+                "stream_url": "http://ha.sumemail.com:8096/flow/queue-item-1/player1.mp3",
+                "streamdetails": {
+                    "provider": "filesystem_local",
+                    "item_id": "filesystem_local--Xk7dNqpq/03 Does Anybody Hear Her.mp3",
+                    "audio_format": {"content_type": "mpeg"},
+                },
+            },
+        }
+
+        await client._dispatch_event("queue_updated", data)
+
+        stream_url = client.get_stream_url()
+        assert stream_url is not None
+        assert stream_url.endswith("03 Does Anybody Hear Her.mp3")
+        assert ".mp3.mp3" not in stream_url
+
+    @pytest.mark.asyncio
     async def test_clears_stream_url_on_idle(self, client):
         stream_url = "http://ha.sumemail.com:8096/flow/abc/queue/1/player.mp3"
         data = {
