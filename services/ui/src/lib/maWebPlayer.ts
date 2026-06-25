@@ -93,8 +93,9 @@ function createJsonRpcProxy(
       }
     },
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
-    heartbeatIntervalMs: 20000,
-    heartbeatTimeoutMs: 8000,
+    // MA's websocket API does not accept ad-hoc ping messages on the command channel.
+    heartbeatIntervalMs: 0,
+    heartbeatTimeoutMs: 0,
   });
 }
 
