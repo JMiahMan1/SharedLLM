@@ -211,10 +211,6 @@ test.describe('MA Web Player (Sendspin)', () => {
       }
     }
 
-    // Wait for playback to progress - get initial time
-    const currentTimeDisplay = playerCard.locator('span').filter({ hasText: /^\d+:\d+$/ }).first();
-    const durationDisplay = playerCard.locator('span').filter({ hasText: /^\d+:\d+$/ }).last();
-
     // Wait until currentTime is at least 5 seconds
     await page.waitForFunction(async () => {
       const spans = Array.from(document.querySelectorAll('span'));
