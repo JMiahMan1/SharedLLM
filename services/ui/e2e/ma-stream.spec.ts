@@ -149,6 +149,48 @@ async function getRecentMATracks(page: Page, token: string): Promise<unknown[] |
   }
 }
 
+function isUnsupportedPlaybackUri(uri: string): boolean {
+  return /youtube\.com|youtu\.be|spotify:|open\.spotify\.com/i.test(uri);
+}
+
+async function getLiveMATestUri(page: Page, token: string): Promise<string | null> {
+  const configuredUri = process.env.TEST_MA_URI?.trim();
+  if (configuredUri && !isUnsupportedPlaybackUri(configuredUri)) {
+    return configuredUri;
+  }
+
+  const recentTracks = await getRecentMATracks(page, token);
+  const recentUri = (recentTracks ?? [])
+    .map((track: { uri?: string }) => track?.uri?.trim() || '')
+    .find((uri: string) => uri && !isUnsupportedPlaybackUri(uri));
+  if (recentUri) {
+    return recentUri;
+  }
+
+  const query = process.env.TEST_MA_QUERY?.trim() || 'Brandon Lake';
+  const searchResult = await page.evaluate(async ({ token, query }) => {
+    try {
+      const resp = await fetch(`/api/media/music-assistant/search?query=${encodeURIComponent(query)}&limit=20`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!resp.ok) return null;
+      return await resp.json();
+    } catch {
+      return null;
+    }
+  }, { token, query });
+
+  const searchUri = (searchResult?.results ?? [])
+    .filter((item: { uri?: string; type?: string }) => item?.type === 'track' || item?.type === 'song' || item?.type === 'library')
+    .map((item: { uri?: string }) => item?.uri?.trim() || '')
+    .find((uri: string) => uri && !isUnsupportedPlaybackUri(uri));
+  if (searchUri) {
+    return searchUri;
+  }
+
+  return null;
+}
+
 // ──────────────────────────────────────────────────────────────
 // Test Suites
 // ──────────────────────────────────────────────────────────────
@@ -170,18 +212,16 @@ test.describe('MA Stream Endpoint', () => {
     expect(token).toBeTruthy();
   });
 
-  test('resolve MA stream URL from recent tracks', async () => {
+  test('resolve MA stream URL from live MA data', async () => {
     test.skip(!token || !page, 'Skipping: no token');
 
-    // Get a recent track URI
-    const recentTracks = await getRecentMATracks(page!, token!);
-
-    if (!recentTracks || recentTracks.length === 0) {
-      console.log('[stream] No recent tracks found, using fallback URI');
+    const testUri = await getLiveMATestUri(page!, token!);
+    if (!testUri) {
+      console.log('[stream] No live MA track URI available; skipping');
+      test.skip();
+      return;
     }
 
-    // Use a track URI from recent tracks, or fall back to a known YouTube URL
-    const testUri = recentTracks?.[0]?.uri || 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
     console.log(`[stream] Testing with URI: ${testUri}`);
 
     const result = await resolveStreamUrl(page!, testUri, token!);
@@ -199,9 +239,12 @@ test.describe('MA Stream Endpoint', () => {
   test('play audio from resolved stream URL', async () => {
     test.skip(!token || !page, 'Skipping: no token');
 
-    // Get a recent track URI
-    const recentTracks = await getRecentMATracks(page!, token!);
-    const testUri = recentTracks?.[0]?.uri || 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    const testUri = await getLiveMATestUri(page!, token!);
+    if (!testUri) {
+      console.log('[play] No live MA track URI available; skipping');
+      test.skip();
+      return;
+    }
 
     // Resolve stream URL
     const result = await resolveStreamUrl(page!, testUri, token!);
@@ -217,7 +260,25 @@ test.describe('MA Stream Endpoint', () => {
     const audioEvents = await page!.evaluate(async (url) => {
       return new Promise<Record<string, unknown>[]>((resolve) => {
         const audio = new Audio();
+        audio.preload = 'auto';
+        audio.playsInline = true;
+        audio.controls = false;
+        document.body.appendChild(audio);
+
         const events: Record<string, unknown>[] = [];
+        let settled = false;
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+        const finish = (value: Record<string, unknown>[]) => {
+          if (settled) return;
+          settled = true;
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+          audio.pause();
+          audio.remove();
+          resolve(value);
+        };
 
         audio.addEventListener('canplay', () => {
           events.push({ type: 'canplay', timestamp: Date.now() });
@@ -225,6 +286,13 @@ test.describe('MA Stream Endpoint', () => {
 
         audio.addEventListener('playing', () => {
           events.push({ type: 'playing', timestamp: Date.now(), duration: audio.duration });
+        });
+
+        audio.addEventListener('timeupdate', () => {
+          if (audio.currentTime > 0) {
+            events.push({ type: 'current-time', timestamp: Date.now(), currentTime: audio.currentTime });
+            finish(events);
+          }
         });
 
         audio.addEventListener('progress', () => {
@@ -236,16 +304,6 @@ test.describe('MA Stream Endpoint', () => {
               duration: audio.duration,
             });
           }
-        });
-
-        audio.addEventListener('error', () => {
-          const error = audio.error;
-          events.push({
-            type: 'error',
-            timestamp: Date.now(),
-            code: error?.code,
-            message: error?.message,
-          });
         });
 
         audio.addEventListener('waiting', () => {
@@ -260,21 +318,30 @@ test.describe('MA Stream Endpoint', () => {
           events.push({ type: 'pause', timestamp: Date.now() });
         });
 
+        audio.addEventListener('error', () => {
+          const error = audio.error;
+          events.push({
+            type: 'error',
+            timestamp: Date.now(),
+            code: error?.code,
+            message: error?.message,
+          });
+          finish(events);
+        });
+
         audio.src = url;
 
-        // Try to play with a timeout
-        const playPromise = audio.play();
-        const timeout = new Promise<void>((r) => setTimeout(r, 5000));
+        timeoutId = setTimeout(() => {
+          finish([
+            ...events,
+            { type: 'timeout', timestamp: Date.now(), message: 'Audio never reached playing state' },
+          ]);
+        }, 12000);
 
-        Promise.race([playPromise, timeout]).then(() => {
-          // Give it a moment to generate events
-          setTimeout(() => {
-            audio.pause();
-            resolve(events);
-          }, 1000);
+        audio.play().then(() => {
+          // Wait for the `playing` event to confirm media actually started.
         }).catch((error: unknown) => {
-          audio.pause();
-          resolve([...events, { type: 'play-error', timestamp: Date.now(), message: (error as Error).message || String(error) }]);
+          finish([...events, { type: 'play-error', timestamp: Date.now(), message: (error as Error).message || String(error) }]);
         });
       });
     }, streamUrl);
@@ -284,12 +351,12 @@ test.describe('MA Stream Endpoint', () => {
 
     // Check for success events
     const playingEvents = audioEvents.filter((e: Record<string, unknown>) => e.type === 'playing');
-    const canplayEvents = audioEvents.filter((e: Record<string, unknown>) => e.type === 'canplay');
     const errorEvents = audioEvents.filter((e: Record<string, unknown>) => e.type === 'error');
+    const timeoutEvents = audioEvents.filter((e: Record<string, unknown>) => e.type === 'timeout');
 
-    // At minimum, we should see canplay or playing events
-    const successEvents = playingEvents.length + canplayEvents.length;
-    expect(successEvents).toBeGreaterThan(0);
+    expect(timeoutEvents).toHaveLength(0);
+    expect(errorEvents).toHaveLength(0);
+    expect(playingEvents.length).toBeGreaterThan(0);
 
     // If we have a playing event, verify duration is available
     const playingEvent = playingEvents[playingEvents.length - 1];
@@ -298,6 +365,8 @@ test.describe('MA Stream Endpoint', () => {
       // Duration should be a number (could be Infinity for live streams)
       expect(typeof playingEvent.duration).toBe('number');
     }
+    const currentTimeEvents = audioEvents.filter((e: Record<string, unknown>) => e.type === 'current-time');
+    expect(currentTimeEvents.length).toBeGreaterThan(0);
 
     console.log(`[play] Audio events captured: ${JSON.stringify(audioEvents.map((e: Record<string, unknown>) => e.type))}`);
 
@@ -310,9 +379,12 @@ test.describe('MA Stream Endpoint', () => {
   test('verify stream endpoint returns non-empty audio data (bytes)', async ({ request }) => {
     test.skip(!token, 'Skipping: no token');
 
-    // Get a recent track URI
-    const recentTracks = await getRecentMATracks(page!, token);
-    const testUri = recentTracks?.[0]?.uri || 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    const testUri = await getLiveMATestUri(page!, token);
+    if (!testUri) {
+      console.log('[bytes] No live MA track URI available; skipping');
+      test.skip();
+      return;
+    }
 
     // First resolve the stream URL
     const resolveResult = await resolveStreamUrl(page!, testUri, token);
@@ -377,9 +449,12 @@ test.describe('MA Stream Endpoint', () => {
   test('verify stream endpoint supports Range requests (progressive download)', async ({ request }) => {
     test.skip(!token, 'Skipping: no token');
 
-    // Get a recent track URI
-    const recentTracks = await getRecentMATracks(page!, token);
-    const testUri = recentTracks?.[0]?.uri || 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    const testUri = await getLiveMATestUri(page!, token);
+    if (!testUri) {
+      console.log('[range] No live MA track URI available; skipping');
+      test.skip();
+      return;
+    }
 
     // First resolve the stream URL
     const resolveResult = await resolveStreamUrl(page!, testUri, token);
