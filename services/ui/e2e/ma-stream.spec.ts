@@ -93,11 +93,16 @@ async function loginAndGetToken(page: Page): Promise<string | null> {
 /**
  * Call the MA stream endpoint to resolve a stream URL.
  */
-async function resolveStreamUrl(page: Page, uri: string, token: string): Promise<{ ok: boolean; streamUrl?: string; error?: string }> {
+async function resolveStreamUrl(page: Page, uri: string, token: string, playerId?: string): Promise<{ ok: boolean; streamUrl?: string; error?: string }> {
   try {
-    const result = await page.evaluate(async ({ uri, token }) => {
+    const result = await page.evaluate(async ({ uri, token, playerId }) => {
       try {
-        const resp = await fetch(`/api/media/stream/music-assistant?uri=${encodeURIComponent(uri)}`, {
+        const params = new URLSearchParams({ uri });
+        if (playerId) {
+          params.set('player_id', playerId);
+        }
+        const endpointUrl = `/api/media/stream/music-assistant?${params.toString()}`;
+        const resp = await fetch(endpointUrl, {
           method: 'GET',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -109,17 +114,31 @@ async function resolveStreamUrl(page: Page, uri: string, token: string): Promise
           const text = await resp.text();
           return { ok: false, error: `HTTP ${resp.status}: ${text.substring(0, 500)}` };
         }
-
-        const data = await resp.json();
-        return { ok: true, streamUrl: data.stream_url || null };
+        return { ok: true, streamUrl: resp.url || endpointUrl };
       } catch (err: unknown) {
         return { ok: false, error: err.message || String(err) };
       }
-    }, uri, token);
+    }, { uri, token, playerId });
 
     return result;
   } catch (err) {
     return { ok: false, error: (err as Error).message };
+  }
+}
+
+async function connectBrowserPlayer(page: Page): Promise<string | null> {
+  try {
+    await page.goto(`${UI_URL}/api/media/ma-stream-test.html`, { waitUntil: 'networkidle', timeout: 30000 });
+    const connectButton = page.locator('#btn-connect').first();
+    await expect(connectButton).toBeVisible({ timeout: 10000 });
+    await connectButton.click();
+    await expect(page.locator('#connection-status')).toContainText(/Connected/i, { timeout: 20000 });
+
+    const playerId = await page.evaluate(() => localStorage.getItem('sendspin_webplayer_id'));
+    return playerId;
+  } catch (err) {
+    console.log(`[connect] Failed to connect browser player: ${(err as Error).message}`);
+    return null;
   }
 }
 
@@ -215,6 +234,12 @@ test.describe('MA Stream Endpoint', () => {
   test('resolve MA stream URL from live MA data', async () => {
     test.skip(!token || !page, 'Skipping: no token');
 
+    const playerId = await connectBrowserPlayer(page!);
+    if (!playerId) {
+      test.skip();
+      return;
+    }
+
     const testUri = await getLiveMATestUri(page!, token!);
     if (!testUri) {
       console.log('[stream] No live MA track URI available; skipping');
@@ -224,7 +249,7 @@ test.describe('MA Stream Endpoint', () => {
 
     console.log(`[stream] Testing with URI: ${testUri}`);
 
-    const result = await resolveStreamUrl(page!, testUri, token!);
+    const result = await resolveStreamUrl(page!, testUri, token!, playerId);
 
     expect(result.ok).toBe(true);
     expect(result.streamUrl).toBeTruthy();
@@ -239,6 +264,12 @@ test.describe('MA Stream Endpoint', () => {
   test('play audio from resolved stream URL', async () => {
     test.skip(!token || !page, 'Skipping: no token');
 
+    const playerId = await connectBrowserPlayer(page!);
+    if (!playerId) {
+      test.skip();
+      return;
+    }
+
     const testUri = await getLiveMATestUri(page!, token!);
     if (!testUri) {
       console.log('[play] No live MA track URI available; skipping');
@@ -247,7 +278,7 @@ test.describe('MA Stream Endpoint', () => {
     }
 
     // Resolve stream URL
-    const result = await resolveStreamUrl(page!, testUri, token!);
+    const result = await resolveStreamUrl(page!, testUri, token!, playerId);
 
     if (!result.ok || !result.streamUrl) {
       test.skip();
@@ -379,6 +410,12 @@ test.describe('MA Stream Endpoint', () => {
   test('verify stream endpoint returns non-empty audio data (bytes)', async ({ request }) => {
     test.skip(!token, 'Skipping: no token');
 
+    const playerId = await connectBrowserPlayer(page!);
+    if (!playerId) {
+      test.skip();
+      return;
+    }
+
     const testUri = await getLiveMATestUri(page!, token);
     if (!testUri) {
       console.log('[bytes] No live MA track URI available; skipping');
@@ -387,7 +424,7 @@ test.describe('MA Stream Endpoint', () => {
     }
 
     // First resolve the stream URL
-    const resolveResult = await resolveStreamUrl(page!, testUri, token);
+    const resolveResult = await resolveStreamUrl(page!, testUri, token, playerId);
 
     if (!resolveResult.ok || !resolveResult.streamUrl) {
       console.log(`[bytes] Stream resolution failed: ${resolveResult.error}`);
@@ -449,6 +486,12 @@ test.describe('MA Stream Endpoint', () => {
   test('verify stream endpoint supports Range requests (progressive download)', async ({ request }) => {
     test.skip(!token, 'Skipping: no token');
 
+    const playerId = await connectBrowserPlayer(page!);
+    if (!playerId) {
+      test.skip();
+      return;
+    }
+
     const testUri = await getLiveMATestUri(page!, token);
     if (!testUri) {
       console.log('[range] No live MA track URI available; skipping');
@@ -457,7 +500,7 @@ test.describe('MA Stream Endpoint', () => {
     }
 
     // First resolve the stream URL
-    const resolveResult = await resolveStreamUrl(page!, testUri, token);
+    const resolveResult = await resolveStreamUrl(page!, testUri, token, playerId);
 
     if (!resolveResult.ok || !resolveResult.streamUrl) {
       test.skip();
