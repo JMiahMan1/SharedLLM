@@ -5442,6 +5442,9 @@ async def sendspin_proxy(websocket: WebSocket):
 
         log.info("[sendspin] Handshake complete, starting proxy loop")
 
+        client_goodbye_sent = asyncio.Event()
+        proxy_done = asyncio.Event()
+
         async def forward_client_to_ma():
             """Forward browser messages to MA (handles both text and binary frames)."""
             log.info("[sendspin] STEP 13: Proxy loop started — browser→MA direction active")
@@ -5454,6 +5457,13 @@ async def sendspin_proxy(websocket: WebSocket):
                         break
                     if isinstance(data, str):
                         data = data.encode("utf-8")
+                    try:
+                        parsed = json.loads(data)
+                        if parsed.get("type") == "client/goodbye":
+                            log.info("[sendspin] Proxy: received client/goodbye from browser")
+                            client_goodbye_sent.set()
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
                     log.info(f"[sendspin] Proxy: browser→MA ({len(data)} bytes)")
                     await ma_ws.send(data)
             except WebSocketDisconnect:
@@ -5462,6 +5472,7 @@ async def sendspin_proxy(websocket: WebSocket):
                 log.error(f"[sendspin] Proxy: Client→MA forward error: {e}", exc_info=True)
             finally:
                 log.info("[sendspin] Proxy: browser→MA direction ended")
+                proxy_done.set()
 
         async def forward_ma_to_client():
             """Forward MA messages to browser (handles both text and binary frames)."""
@@ -5480,11 +5491,39 @@ async def sendspin_proxy(websocket: WebSocket):
             finally:
                 log.info("[sendspin] Proxy: MA→browser direction ended")
 
-        # Run both directions in parallel
+        async def graceful_disconnect():
+            """Handle graceful disconnect: send goodbye to MA if not already sent."""
+            try:
+                await proxy_done.wait()
+                if not client_goodbye_sent.is_set():
+                    log.info("[sendspin] Proxy: browser did not send goodbye, sending client/goodbye to MA")
+                    goodbye_msg = json.dumps({
+                        "type": "client/goodbye",
+                        "payload": {"reason": "shutdown"}
+                    })
+                    try:
+                        await ma_ws.send(goodbye_msg)
+                        try:
+                            server_goodbye = await asyncio.wait_for(ma_ws.recv(), timeout=5.0)
+                            log.info(f"[sendspin] Proxy: received server/goodbye from MA: {server_goodbye[:200]}")
+                        except asyncio.TimeoutError:
+                            log.warning("[sendspin] Proxy: no server/goodbye received from MA within 5s")
+                    except Exception as e:
+                        log.error(f"[sendspin] Proxy: failed to send goodbye to MA: {e}", exc_info=True)
+            except Exception as e:
+                log.error(f"[sendspin] Proxy: graceful disconnect error: {e}", exc_info=True)
+            finally:
+                try:
+                    await ma_ws.close()
+                except Exception:
+                    pass
+
+        # Run all three tasks in parallel
         log.info("[sendspin] STEP 14: Starting asyncio.gather for proxy loops")
         await asyncio.gather(
             forward_client_to_ma(),
             forward_ma_to_client(),
+            graceful_disconnect(),
         )
         log.info("[sendspin] STEP 15: Proxy loops complete — both directions ended")
     except websockets.exceptions.InvalidStatusCode as e:
