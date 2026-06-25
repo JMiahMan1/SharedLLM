@@ -62,7 +62,7 @@ def _format_uptime(uptime_seconds: float) -> str:
     delta = int(uptime_seconds)
     days, remainder = divmod(delta, 86400)
     hours, remainder = divmod(remainder, 3600)
-    minutes = remainder
+    minutes = remainder // 60
     parts = []
     if days:
         parts.append(f"{days}d")
@@ -72,7 +72,7 @@ def _format_uptime(uptime_seconds: float) -> str:
         parts.append(f"{minutes}m")
     if not parts:
         return "<1m"
-    return f"{parts[-1]} ago"
+    return " ".join(parts)
 
 
 def _get_image_pull_time(container) -> str | None:
@@ -179,12 +179,13 @@ def system_health():
                 if info.get("health_status") == "unhealthy":
                     unhealthy += 1
 
-        # Get control plane git info
+        # Get control plane git info and uptime
+        cp_start_time = time.time()
         control_plane_info = {
             "status": "running",
             "git_sha": "unknown",
-            "start_time": time.time(),
-            "uptime": "N/A"
+            "start_time": cp_start_time,
+            "uptime": _format_uptime(time.time() - cp_start_time)
         }
         try:
             from services.shared.info_endpoint import _get_git_commit
