@@ -27,7 +27,9 @@ import type {
   LightPattern,
   TelemetryEnrollment,
   IntercomSessionData,
-  IntercomConfigData
+  IntercomConfigData,
+  ImagePullResult,
+  SystemHealthStatus
 } from '../types/api';
 
 declare module 'axios' {
@@ -1091,5 +1093,15 @@ export const api = {
       responseType: 'text',
     });
     return resp.request.responseURL || '';
+  },
+
+  async getSystemHealth(): Promise<SystemHealthStatus> {
+    const resp = await apiClient.get('/api/admin/services/health');
+    return resp.data;
+  },
+
+  async pullServiceImage(serviceName: string): Promise<ImagePullResult> {
+    const resp = await apiClient.post(`/api/admin/services/${serviceName}/pull`);
+    return resp.data;
   },
 };

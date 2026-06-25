@@ -262,9 +262,51 @@ export interface IntercomSessionData {
 
 export interface IntercomConfigData {
   default_tts_engine?: string;
-  default_voice?: string;
+  defaultVoice?: string;
   default_volume?: number;
   enable_espresense_routing?: boolean;
+}
+
+export interface ServiceStatus {
+  name: string;
+  status: string;
+  image: string;
+  image_id?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  exit_code?: number;
+  uptime_seconds?: number | null;
+  uptime?: string | null;
+  health?: string | null;
+  health_status?: string | null;
+  pid?: number | null;
+  restart_count?: number;
+  image_pull_time?: string | null;
+  memory_usage?: number | null;
+  updated?: boolean;
+}
+
+export interface ImagePullResult {
+  service: string;
+  image: string;
+  current_image_id: string;
+  latest_image_id: string;
+  updated: boolean;
+  message: string;
+}
+
+export interface SystemHealthStatus {
+  total_services: number;
+  running: number;
+  stopped: number;
+  unhealthy: number;
+  control_plane: {
+    status: string;
+    git_sha: string;
+    start_time: number;
+    uptime: string;
+  };
+  services: ServiceStatus[];
 }
 
 /**

@@ -3889,6 +3889,19 @@ async def list_services(request: Request):
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
+@app.post("/api/admin/services/{service_name}/pull")
+async def pull_service_image(service_name: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{CONTROL_PLANE_URL}/api/containers/{service_name}/pull",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
 @app.get("/api/admin/services/{service_name}/logs")
 async def get_service_logs(service_name: str, request: Request, tail: int = 100):
     creds = await _resolve_identity_from_request(request)
@@ -5941,11 +5954,12 @@ async def stream_music_assistant(uri: str, request: Request):
             except Exception as mute_err:
                 log.error(f"[stream/ma] Failed to mute player before play_media - audio may leak to physical device: {mute_err}", exc_info=True)
 
-            # Send play_media command with custom_data containing session_id
+            # Send play_media using the MA frontend signature so the requested URI
+            # replaces the active queue instead of reusing the previous item.
             log.info(f"[stream/ma] Sending play_media for uri='{ma_uri}' on player='{target_player_id}' (session_id={session_id})")
             play_media_response = await ma_client.send_command(
                 "player_queues/play_media",
-                {"queue_id": target_player_id, "media": ma_uri, "custom_data": {"session_id": session_id}},
+                {"queue_id": target_player_id, "media": ma_uri, "option": "replace", "radio_mode": False, "custom_data": {"session_id": session_id}},
             )
             log.info(f"[stream/ma] play_media response: {play_media_response}")
 

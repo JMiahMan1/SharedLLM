@@ -26,6 +26,10 @@ import {
   Radio,
   Megaphone,
   Phone,
+  Server,
+  Power,
+  PowerOff,
+  RefreshCw,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -44,7 +48,7 @@ import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 
-type AdminTab = 'users' | 'groups' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database';
+type AdminTab = 'users' | 'groups' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database' | 'services';
 
 const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string }[] = [
   { id: 'users', label: 'Users & Devices', icon: Shield, path: '/admin/users' },
@@ -54,6 +58,7 @@ const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string
   { id: 'raven', label: 'Raven Ops', icon: ShieldAlert, path: '/admin/ops' },
   { id: 'settings', label: 'LLM & Settings', icon: Code2, path: '/admin/integrations' },
   { id: 'database', label: 'Database & Audit', icon: BarChart3, path: '/admin/database' },
+  { id: 'services', label: 'System Services', icon: Server, path: '/admin/services' },
 ];
 
 const adminTabFromPathname = (pathname: string): AdminTab => {
@@ -65,6 +70,7 @@ const adminTabFromPathname = (pathname: string): AdminTab => {
   if (pathname.startsWith('/admin/database')) return 'database';
   if (pathname.startsWith('/admin/intercom')) return 'intercom';
   if (pathname.startsWith('/admin/users')) return 'users';
+  if (pathname.startsWith('/admin/services')) return 'services';
   return 'users';
 };
 
@@ -207,6 +213,24 @@ const Admin = () => {
     queryKey: ['collection-docs', inspectingCollection, inspectLimit],
     queryFn: () => inspectingCollection ? api.getCollectionDocs(inspectingCollection, inspectLimit) : null,
     enabled: !!inspectingCollection,
+  });
+
+  const { data: systemHealth, isFetching: isFetchingHealth } = useQuery({
+    queryKey: ['system-health'],
+    queryFn: () => api.getSystemHealth(),
+    refetchInterval: 10000,
+  });
+
+  const pullImageMutation = useMutation({
+    mutationFn: (serviceName: string) => api.pullServiceImage(serviceName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-health'] });
+      toast.success('Image pull completed');
+    },
+    onError: (error: unknown) => {
+      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(detail || 'Image pull failed');
+    },
   });
 
   const saveUserMutation = useMutation({
@@ -1532,6 +1556,154 @@ const Admin = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {activeTab === 'services' && (
+        <section className="space-y-6">
+          <div className="glass-panel p-6">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h3 className="flex items-center gap-3 text-xl font-bold text-white">
+                  <Server size={20} className="text-emerald-400" />
+                  System Services Health
+                </h3>
+                <p className="mt-1 text-sm text-slate-400">Docker container status, image updates, and uptime metrics.</p>
+              </div>
+              <button
+                onClick={() => queryClient.invalidateQueries({ queryKey: ['system-health'] })}
+                disabled={isFetchingHealth}
+                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
+              >
+                <RefreshCcw size={14} className={isFetchingHealth ? 'animate-spin' : ''} />
+                Refresh
+              </button>
+            </div>
+
+            {isFetchingHealth && !systemHealth ? (
+              <div className="flex h-48 items-center justify-center">
+                <RefreshCcw className="animate-spin text-emerald-400" size={32} />
+              </div>
+            ) : systemHealth ? (
+              <>
+                <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                  <div className="rounded-2xl border border-white/5 bg-white/5 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total Services</p>
+                    <p className="mt-1 text-2xl font-bold text-white">{systemHealth.total_services}</p>
+                  </div>
+                  <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Running</p>
+                    <p className="mt-1 text-2xl font-bold text-emerald-400">{systemHealth.running}</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-500/20 bg-slate-500/5 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Stopped</p>
+                    <p className="mt-1 text-2xl font-bold text-slate-400">{systemHealth.stopped}</p>
+                  </div>
+                  <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-red-600">Unhealthy</p>
+                    <p className="mt-1 text-2xl font-bold text-red-400">{systemHealth.unhealthy}</p>
+                  </div>
+                </div>
+
+                <div className="mb-6 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-widest text-indigo-400">Control Plane</p>
+                      <p className="mt-1 text-sm text-white font-mono">{systemHealth.control_plane.git_sha}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs font-black uppercase tracking-widest text-indigo-400">Uptime</p>
+                      <p className="mt-1 text-lg font-bold text-white">{systemHealth.control_plane.uptime}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {systemHealth.services.map((service) => (
+                    <div key={service.name} className="glass-card p-4">
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <div className={`rounded-full p-2 ${
+                            service.status === 'running' ? 'bg-emerald-500/10' :
+                            service.health_status === 'unhealthy' ? 'bg-red-500/10' :
+                            'bg-slate-500/10'
+                          }`}>
+                            {service.status === 'running' ? (
+                              <Power size={16} className="text-emerald-400" />
+                            ) : service.health_status === 'unhealthy' ? (
+                              <ShieldAlert size={16} className="text-red-400" />
+                            ) : (
+                              <PowerOff size={16} className="text-slate-400" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-white capitalize">{service.name.replace(/_/g, ' ')}</p>
+                            <p className="text-[10px] font-mono text-slate-500">{service.image}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${
+                            service.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' :
+                            service.health_status === 'unhealthy' ? 'bg-red-500/10 text-red-400' :
+                            'bg-slate-500/10 text-slate-400'
+                          }`}>
+                            {service.status}
+                          </span>
+                          {service.updated && (
+                            <span className="rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-400">
+                              Updated
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-4 border-t border-white/5 pt-3 text-xs text-slate-500">
+                        <div className="flex gap-4">
+                          <span>Uptime: {service.uptime || 'N/A'}</span>
+                          {service.restart_count > 0 && (
+                            <span>Restarts: {service.restart_count}</span>
+                          )}
+                          {service.started_at && (
+                            <span>Started: {new Date(service.started_at).toLocaleString()}</span>
+                          )}
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          {service.status !== 'running' && (
+                            <button
+                              onClick={() => toast.info('Start command sent')}
+                              className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest"
+                            >
+                              <Power size={12} /> Start
+                            </button>
+                          )}
+                          {service.status === 'running' && (
+                            <>
+                              <button
+                                onClick={() => toast.info('Restart command sent')}
+                                className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest"
+                              >
+                                <RefreshCw size={12} /> Restart
+                              </button>
+                              <button
+                                onClick={() => pullImageMutation.mutate(service.name)}
+                                disabled={pullImageMutation.isPending}
+                                className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest"
+                              >
+                                <Cloud size={12} /> Pull
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="flex h-48 items-center justify-center text-slate-500">
+                <p>Unable to fetch system health. Control plane may be unreachable.</p>
+              </div>
+            )}
+          </div>
+        </section>
       )}
 
       <Modal
