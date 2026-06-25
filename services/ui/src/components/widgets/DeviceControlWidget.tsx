@@ -60,6 +60,24 @@ function isActive(state: string): boolean {
   return ACTIVE_STATES.has(state.toLowerCase());
 }
 
+function getToggleAction(domain: string, state: string): { service: string; label: string } | null {
+  const active = isActive(state);
+
+  switch (domain) {
+    case 'light':
+    case 'switch':
+    case 'media_player':
+    case 'fan':
+      return { service: active ? 'turn_off' : 'turn_on', label: active ? 'Off' : 'On' };
+    case 'cover':
+      return { service: active ? 'close_cover' : 'open_cover', label: active ? 'Close' : 'Open' };
+    case 'lock':
+      return { service: active ? 'lock' : 'unlock', label: active ? 'Lock' : 'Unlock' };
+    default:
+      return null;
+  }
+}
+
 function getDeviceIcon(domain: string): string {
   return DEVICE_ICONS[domain] || '📱';
 }
@@ -156,36 +174,6 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     );
   }, [role, assignments, user]);
 
-  const toggleDevice = useCallback(
-    async (entityId: string, currentState: string) => {
-      if (!hasControlPermission(entityId)) {
-        toast.error('Access Denied: You are not assigned to control this device.');
-        return;
-      }
-
-      const newState = isActive(currentState) ? 'off' : 'on';
-      const targetState = newState === 'on' ? 'off' : 'on';
-
-      // Optimistic update
-      setDevices((prev) =>
-        prev.map((d) => (d.entity_id === entityId ? { ...d, state: targetState } : d))
-      );
-
-      try {
-        await api.toggleDevice(entityId, newState);
-        setDevices((prev) =>
-          prev.map((d) => (d.entity_id === entityId ? { ...d, state: newState } : d))
-        );
-      } catch {
-        toast.error('Failed to toggle device');
-        setDevices((prev) =>
-          prev.map((d) => (d.entity_id === entityId ? { ...d, state: currentState } : d))
-        );
-      }
-    },
-    [hasControlPermission]
-  );
-
   const callHAService = useCallback(async (domain: string, service: string, entityId: string, serviceData: unknown = null) => {
     if (!hasControlPermission(entityId)) {
       toast.error('Access Denied: You are not assigned to control this device.');
@@ -206,6 +194,25 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       toast.error('Failed to send command to device');
     }
   }, [hasControlPermission, loadDevices]);
+
+  const toggleDevice = useCallback(
+    async (entityId: string, currentState: string) => {
+      if (!hasControlPermission(entityId)) {
+        toast.error('Access Denied: You are not assigned to control this device.');
+        return;
+      }
+
+      const domain = entityId.split('.')[0];
+      const action = getToggleAction(domain, currentState);
+      if (!action) {
+        toast.error(`No generic power toggle is available for ${getDomainLabel(domain)} devices.`);
+        return;
+      }
+
+      await callHAService(domain, action.service, entityId);
+    },
+    [hasControlPermission, callHAService]
+  );
 
   // Persists device favorites in store + DB
   const toggleFavorite = useCallback(
@@ -253,6 +260,10 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       .map((a) => a.username);
     setAdminAssignments(deviceAssignedUsers);
   };
+
+  const selectedToggleAction = selectedDevice
+    ? getToggleAction(selectedDevice.domain, selectedDevice.state)
+    : null;
 
   // Handle Admin User Assignment changes
   const handleToggleUserAssignment = async (username: string) => {
@@ -354,18 +365,27 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
             <Star size={14} className={isFav ? 'fill-amber-400 text-amber-400' : ''} />
           </button>
           
-          <button
-            onClick={() => toggleDevice(device.entity_id, device.state)}
-            disabled={!hasControl}
-            className={`text-xs px-3 py-1 rounded-lg font-semibold transition-all duration-200 ${
-              isDeviceActive
-                ? 'bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20'
-                : 'bg-slate-950/40 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
-            } disabled:opacity-30 disabled:cursor-not-allowed`}
-          >
-            <Power size={12} className="inline mr-1" />
-            {isDeviceActive ? 'On' : 'Off'}
-          </button>
+          {getToggleAction(device.domain, device.state) ? (
+            <button
+              onClick={() => toggleDevice(device.entity_id, device.state)}
+              disabled={!hasControl}
+              className={`text-xs px-3 py-1 rounded-lg font-semibold transition-all duration-200 ${
+                isDeviceActive
+                  ? 'bg-green-500/10 border border-green-500/30 text-green-400 hover:bg-green-500/20'
+                  : 'bg-slate-950/40 border border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+              } disabled:opacity-30 disabled:cursor-not-allowed`}
+            >
+              <Power size={12} className="inline mr-1" />
+              {getToggleAction(device.domain, device.state)?.label}
+            </button>
+          ) : (
+            <button
+              disabled
+              className="text-xs px-3 py-1 rounded-lg font-semibold bg-slate-900/40 border border-slate-800 text-slate-500 cursor-not-allowed"
+            >
+              No Toggle
+            </button>
+          )}
         </div>
       </div>
     );
@@ -644,16 +664,25 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
                 >
                   <Star size={16} className={pinnedDevices.includes(selectedDevice.entity_id) ? 'fill-amber-400 text-amber-400' : ''} />
                 </button>
-                <button
-                  onClick={() => toggleDevice(selectedDevice.entity_id, selectedDevice.state)}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all ${
-                    isActive(selectedDevice.state)
-                      ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
-                      : 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20'
-                  }`}
-                >
-                  Toggle State
-                </button>
+                {selectedToggleAction ? (
+                  <button
+                    onClick={() => toggleDevice(selectedDevice.entity_id, selectedDevice.state)}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all ${
+                      isActive(selectedDevice.state)
+                        ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
+                        : 'bg-green-500/10 border-green-500/30 text-green-400 hover:bg-green-500/20'
+                    }`}
+                  >
+                    {selectedToggleAction.label} Device
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    className="text-xs font-bold px-3 py-1.5 rounded-lg border bg-slate-900/40 border-slate-800 text-slate-500 cursor-not-allowed"
+                  >
+                    No Toggle
+                  </button>
+                )}
               </div>
             </div>
 
