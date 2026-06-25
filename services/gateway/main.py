@@ -6075,11 +6075,39 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                 if range_header:
                     proxy_headers["Range"] = range_header
 
-                proxy_resp = await proxy_client.send(
-                    proxy_client.build_request("GET", stream_url, headers=proxy_headers),
-                    stream=True
-                )
-                log.info(f"[stream/ma] MA stream response status: {proxy_resp.status_code}")
+                proxy_resp: httpx.Response | None = None
+                last_status_code: int | None = None
+                for attempt in range(1, 11):
+                    proxy_resp = await proxy_client.send(
+                        proxy_client.build_request("GET", stream_url, headers=proxy_headers),
+                        stream=True,
+                    )
+                    last_status_code = proxy_resp.status_code
+                    log.info(f"[stream/ma] MA stream response status: {proxy_resp.status_code} (attempt {attempt}/10)")
+                    if proxy_resp.status_code != 404:
+                        break
+                    await proxy_resp.aclose()
+                    proxy_resp = None
+                    if attempt < 10:
+                        await asyncio.sleep(0.5)
+
+                if proxy_resp is None:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"MA stream endpoint returned HTTP {last_status_code} while waiting for audio readiness",
+                    )
+
+                if proxy_resp.status_code >= 400:
+                    body = ""
+                    try:
+                        body = (await proxy_resp.aread()).decode("utf-8", errors="ignore").strip()
+                    except Exception:
+                        pass
+                    await proxy_resp.aclose()
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"MA stream endpoint returned HTTP {proxy_resp.status_code}{f': {body[:200]}' if body else ''}",
+                    )
 
                 proxy_response_headers = {
                     "Accept-Ranges": "bytes",

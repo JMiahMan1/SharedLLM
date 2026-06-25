@@ -128,7 +128,7 @@ async function resolveStreamUrl(page: Page, uri: string, token: string, playerId
 
 async function connectBrowserPlayer(page: Page): Promise<string | null> {
   try {
-    await page.goto(`${UI_URL}/api/media/ma-stream-test.html`, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto(`${UI_URL}/ma-stream-test.html`, { waitUntil: 'networkidle', timeout: 30000 });
     const connectButton = page.locator('#btn-connect').first();
     await expect(connectButton).toBeVisible({ timeout: 10000 });
     await connectButton.click();
@@ -537,7 +537,7 @@ test.describe('MA Stream Endpoint', () => {
   test('test standalone MA stream test page loads', async () => {
     // Navigate to the standalone test page via gateway (avoids SPA catch-all)
     try {
-      await page!.goto(`${UI_URL}/api/media/ma-stream-test.html`, { waitUntil: 'networkidle', timeout: 15000 });
+      await page!.goto(`${UI_URL}/ma-stream-test.html`, { waitUntil: 'networkidle', timeout: 15000 });
       await page!.waitForTimeout(1000);
 
       // Verify the page loaded (may be SPA fallback if not served as static)
