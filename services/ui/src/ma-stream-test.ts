@@ -299,14 +299,10 @@ async function connect() {
             log(`[MAWebPlayer] JSON-RPC proxy error`, 'error')
         }
 
-        // JSON-RPC heartbeat
+        // MA's websocket API expects command messages only; do not inject ad-hoc pings.
         const startHeartbeat = () => {
             clearInterval(heartbeatInterval!)
-            heartbeatInterval = setInterval(() => {
-                if (jsonrpcWs!.readyState === WebSocket.OPEN) {
-                    jsonrpcWs!.send(JSON.stringify({ type: 'ping' }))
-                }
-            }, 20000)
+            heartbeatInterval = null
         }
         const stopHeartbeat = () => {
             clearInterval(heartbeatInterval!)
