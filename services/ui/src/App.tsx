@@ -90,6 +90,7 @@ function App() {
             <Route path="/admin/integrations" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
             <Route path="/admin/database" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
             <Route path="/admin/sounds" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
+            <Route path="/admin/services" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
             <Route path="/identity" element={<ProtectedRoute isMobile={isNative}><Identity /></ProtectedRoute>} />
             <Route path="/communication" element={<ProtectedRoute isMobile={isNative}><Communication /></ProtectedRoute>} />
             <Route path="/chat" element={<ProtectedRoute isMobile={isNative}><Communication /></ProtectedRoute>} />
