@@ -89,7 +89,7 @@ async def search_library(
     abs_url: str, abs_api_key: str, query: str, limit: int = 10
 ) -> dict:
     """Search the ABS library for audiobooks matching the query."""
-    return await abs_get(abs_url, abs_api_key, "/api/v1/search", params={"q": query, "limit": limit})
+    return await abs_get(abs_url, abs_api_key, "/api/search", params={"q": query, "limit": limit})
 
 
 async def get_library_items(
