@@ -40,6 +40,7 @@ const navItems = [
   // Admin-only: System Ops & Raven
   { icon: Settings, label: 'System Ops & Raven', path: '/admin/ops', adminOnly: true },
   { icon: FlaskConical, label: 'Jarvis Lab', path: '/lab', adminOnly: true },
+  { icon: Activity, label: 'System Services', path: '/admin/services', adminOnly: true },
 ];
 
 const Sidebar = () => {
