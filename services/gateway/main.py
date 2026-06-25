@@ -5451,21 +5451,27 @@ async def sendspin_proxy(websocket: WebSocket):
             try:
                 while True:
                     message = await websocket.receive()
-                    data = message.get("text") or message.get("bytes")
-                    if data is None:
+                    text_data = message.get("text")
+                    binary_data = message.get("bytes")
+                    if text_data is None and binary_data is None:
                         log.info("[sendspin] Proxy: browser connection closed by remote")
                         break
-                    if isinstance(data, str):
-                        data = data.encode("utf-8")
+                    if text_data is None and binary_data is not None:
+                        try:
+                            text_data = binary_data.decode("utf-8")
+                            log.warning("[sendspin] Proxy: browser sent unexpected binary frame; decoding as UTF-8 text")
+                        except Exception:
+                            log.warning("[sendspin] Proxy: browser sent unexpected non-text frame; ignoring")
+                            continue
                     try:
-                        parsed = json.loads(data)
+                        parsed = json.loads(text_data)
                         if parsed.get("type") == "client/goodbye":
                             log.info("[sendspin] Proxy: received client/goodbye from browser")
                             client_goodbye_sent.set()
                     except (json.JSONDecodeError, AttributeError):
                         pass
-                    log.info(f"[sendspin] Proxy: browser→MA ({len(data)} bytes)")
-                    await ma_ws.send(data)
+                    log.info(f"[sendspin] Proxy: browser→MA ({len(text_data)} chars)")
+                    await ma_ws.send(text_data)
             except WebSocketDisconnect:
                 log.info("[sendspin] Proxy: Browser disconnected from gateway")
             except Exception as e:
@@ -5719,12 +5725,20 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                 try:
                     while True:
                         msg = await websocket.receive()
-                        data = msg.get("text") or msg.get("bytes")
-                        if data is None:
+                        text_data = msg.get("text")
+                        binary_data = msg.get("bytes")
+                        if text_data is None and binary_data is None:
                             log.info("[ma-jsonrpc] Proxy: browser connection closed")
                             break
-                        log.info(f"[ma-jsonrpc] Proxy: browser→MA ({len(data)} bytes)")
-                        await ma_ws.send(data)
+                        if text_data is None and binary_data is not None:
+                            try:
+                                text_data = binary_data.decode("utf-8")
+                                log.warning("[ma-jsonrpc] Proxy: browser sent unexpected binary frame; decoding as UTF-8 text")
+                            except Exception:
+                                log.warning("[ma-jsonrpc] Proxy: browser sent unexpected non-text frame; ignoring")
+                                continue
+                        log.info(f"[ma-jsonrpc] Proxy: browser→MA ({len(text_data)} chars)")
+                        await ma_ws.send(text_data)
                 except WebSocketDisconnect:
                     log.info("[ma-jsonrpc] Proxy: Browser disconnected from gateway")
                 except Exception as e:
