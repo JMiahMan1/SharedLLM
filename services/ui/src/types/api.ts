@@ -283,7 +283,6 @@ export interface ServiceStatus {
   restart_count?: number;
   image_pull_time?: string | null;
   memory_usage?: number | null;
-  updated?: boolean;
 }
 
 export interface ImagePullResult {

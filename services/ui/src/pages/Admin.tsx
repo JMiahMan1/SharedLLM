@@ -233,6 +233,18 @@ const Admin = () => {
     },
   });
 
+  const restartServiceMutation = useMutation({
+    mutationFn: (serviceName: string) => api.restartService(serviceName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-health'] });
+      toast.success('Service restart initiated');
+    },
+    onError: (error: unknown) => {
+      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(detail || 'Restart failed');
+    },
+  });
+
   const saveUserMutation = useMutation({
     mutationFn: async (form: UserFormState) => {
       const payload = {
@@ -1648,11 +1660,6 @@ const Admin = () => {
                           }`}>
                             {service.status}
                           </span>
-                          {service.updated && (
-                            <span className="rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest bg-amber-500/10 text-amber-400">
-                              Updated
-                            </span>
-                          )}
                         </div>
                       </div>
                       <div className="mt-3 flex items-center justify-between gap-4 border-t border-white/5 pt-3 text-xs text-slate-500">
@@ -1666,18 +1673,11 @@ const Admin = () => {
                           )}
                         </div>
                         <div className="flex gap-1 shrink-0">
-                          {service.status !== 'running' && (
-                            <button
-                              onClick={() => toast.info('Start command sent')}
-                              className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest"
-                            >
-                              <Power size={12} /> Start
-                            </button>
-                          )}
                           {service.status === 'running' && (
                             <>
                               <button
-                                onClick={() => toast.info('Restart command sent')}
+                                onClick={() => restartServiceMutation.mutate(service.name)}
+                                disabled={restartServiceMutation.isPending}
                                 className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest"
                               >
                                 <RefreshCw size={12} /> Restart
