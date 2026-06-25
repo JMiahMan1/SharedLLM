@@ -5745,6 +5745,37 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
         ) as ma_ws:
             log.info("[ma-jsonrpc] STEP 4 PASS: WebSocket connected to MA JSON-RPC")
 
+            auth_msg = json.dumps({"message_id": "gateway-auth", "command": "auth", "args": {"token": mass_token}})
+            log.info("[ma-jsonrpc] STEP 4.5: Sending auth to MA")
+            await ma_ws.send(auth_msg)
+            log.info("[ma-jsonrpc] STEP 4.6: Waiting for MA auth response...")
+            try:
+                auth_response = await asyncio.wait_for(ma_ws.recv(), timeout=10.0)
+            except asyncio.TimeoutError:
+                log.error("[ma-jsonrpc] STEP 4.6 FAILED: MA auth response timed out after 10s")
+                await websocket.close(code=1008, reason="MA auth timeout")
+                return
+
+            if isinstance(auth_response, str):
+                log.info(f"[ma-jsonrpc] STEP 4.7: MA auth response received: {auth_response[:500]}")
+                try:
+                    auth_json = json.loads(auth_response)
+                    if auth_json.get("type") in ("error", "auth/reject", "auth/failure") or auth_json.get("error_code") is not None:
+                        log.error(f"[ma-jsonrpc] MA auth rejected: {auth_json}")
+                        await websocket.close(code=1008, reason="MA auth rejected")
+                        return
+                except json.JSONDecodeError:
+                    pass
+                try:
+                    await websocket.send_text(auth_response)
+                    log.info("[ma-jsonrpc] STEP 4.8: Forwarded MA auth response to browser")
+                except Exception as send_err:
+                    log.error(f"[ma-jsonrpc] STEP 4.8 FAILED: Could not forward MA auth response: {send_err}", exc_info=True)
+                    await websocket.close(code=1011, reason="Failed to forward MA auth response")
+                    return
+            else:
+                log.info(f"[ma-jsonrpc] STEP 4.7: MA auth response received as binary ({len(auth_response)} bytes)")
+
             async def forward_client_to_ma():
                 """Forward browser JSON-RPC commands to MA."""
                 log.info("[ma-jsonrpc] STEP 5: Proxy loop started — browser→MA direction active")
