@@ -382,7 +382,7 @@ function reconnect() {
 async function cmdPlay() {
     log(`[MAWebPlayer] cmdPlay called, player: ${playerId}`, 'info')
     try {
-        await sendJsonRpc('players/cmd_play', { player_id: playerId })
+        player?.sendCommand('play')
     } catch (err) {
         log(`[MAWebPlayer] cmd_play failed: ${(err as Error).message}`, 'error')
     }
@@ -391,7 +391,7 @@ async function cmdPlay() {
 async function cmdPause() {
     log(`[MAWebPlayer] cmdPause called, player: ${playerId}`, 'info')
     try {
-        await sendJsonRpc('players/cmd_pause', { player_id: playerId })
+        player?.sendCommand('pause')
     } catch (err) {
         log(`[MAWebPlayer] cmd_pause failed: ${(err as Error).message}`, 'error')
     }
@@ -422,8 +422,8 @@ async function playMedia(mediaUri: string) {
             custom_data: { source_change: false },
         }, true)
         log(`[MAWebPlayer] play_media response: ${JSON.stringify(playResult).substring(0, 200)}`, 'info')
-        // Now start playback with cmd_play on the same player
-        await sendJsonRpc('players/cmd_play', { player_id: playerId }, false)
+        // Start local browser playback via Sendspin
+        player?.sendCommand('play')
         log(`[MAWebPlayer] play_media + cmd_play sent`, 'success')
     } catch (err) {
         log(`[MAWebPlayer] play_media failed: ${(err as Error).message}`, 'error')
@@ -437,7 +437,7 @@ async function playMedia(mediaUri: string) {
                 enqueue: 'play',
             }, true)
             log(`[MAWebPlayer] Fallback play_media response: ${JSON.stringify(playResult).substring(0, 200)}`, 'info')
-            await sendJsonRpc('players/cmd_play', { player_id: playerId }, false)
+            player?.sendCommand('play')
         } catch (fallbackErr) {
             log(`[MAWebPlayer] Fallback also failed: ${(fallbackErr as Error).message}`, 'error')
         }
