@@ -60,7 +60,7 @@ def health_prefixed():
 def _format_uptime(uptime_seconds: float) -> str:
     """Format uptime seconds into a human-readable duration."""
     delta = int(uptime_seconds)
-    days, remainder = divmod(int(delta), 86400)
+    days, remainder = divmod(delta, 86400)
     hours, remainder = divmod(remainder, 3600)
     minutes = remainder
     parts = []
@@ -71,7 +71,7 @@ def _format_uptime(uptime_seconds: float) -> str:
     if minutes:
         parts.append(f"{minutes}m")
     if not parts:
-        return "just now"
+        return "<1m"
     return f"{parts[-1]} ago"
 
 
@@ -179,13 +179,18 @@ def system_health():
                 if info.get("health_status") == "unhealthy":
                     unhealthy += 1
 
-        # Get control plane info from /info
+        # Get control plane git info
         control_plane_info = {
             "status": "running",
             "git_sha": "unknown",
             "start_time": time.time(),
-            "uptime": "unknown"
+            "uptime": "N/A"
         }
+        try:
+            from services.shared.info_endpoint import _get_git_commit
+            control_plane_info["git_sha"] = _get_git_commit()
+        except Exception:
+            pass
 
         return {
             "total_services": len(services),
