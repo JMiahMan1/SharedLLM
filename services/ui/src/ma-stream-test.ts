@@ -514,6 +514,8 @@ async function playFromSearch(uri: string) {
     await playMedia(uri)
 }
 
+;(window as any).playFromSearch = playFromSearch
+
 // ═══════════════════════════════════════════════════════════
 // MA Event handlers
 // ═══════════════════════════════════════════════════════════

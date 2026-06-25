@@ -599,7 +599,7 @@ const MediaExplorerModal = ({
                       .map((pl) => (
                         <PlaylistItem key={pl.uri} name={pl.name} trackCount={pl.items}
                           onPlay={() => handlePlay(pl.uri, 'playlist', pl.name, pl.items > 0 ? `${pl.items} tracks` : 'Playlist')}
-                          isDisabled={!selectedTarget} isLoading={itemLoading === `pl-${pl.uri}`} />
+                          isDisabled={!localMode && !selectedTarget} isLoading={itemLoading === `pl-${pl.uri}`} />
                       ))}
                   </div>
                 )}
@@ -623,7 +623,7 @@ const MediaExplorerModal = ({
                     {maRecent.recent
                       .filter((i) => !search || i.name.toLowerCase().includes(search.toLowerCase()) || i.artist.toLowerCase().includes(search.toLowerCase()))
                       .map((item) => (
-                        <button key={item.uri} onClick={() => handlePlay(item.uri, 'music', item.name, item.artist)} disabled={!selectedTarget}
+                        <button key={item.uri} onClick={() => handlePlay(item.uri, 'music', item.name, item.artist)} disabled={!localMode && !selectedTarget}
                           className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
                           {itemLoading === `ma-${item.uri}` ?
                             <Loader2 size={18} className="text-purple-400 animate-spin shrink-0" /> :
@@ -693,7 +693,7 @@ const MediaExplorerModal = ({
                       {absLibraryItems.books
                         .filter((b) => !search || b.title.toLowerCase().includes(search.toLowerCase()) || b.author.toLowerCase().includes(search.toLowerCase()))
                         .map((book) => (
-<button key={book.id} onClick={() => handlePlay(book.id, 'audiobook', book.title, book.author)} disabled={!selectedTarget}
+<button key={book.id} onClick={() => handlePlay(book.id, 'audiobook', book.title, book.author)} disabled={!localMode && !selectedTarget}
                             className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
                             {itemLoading === `abs-${book.id}` ?
                               <Loader2 size={18} className="text-amber-400 animate-spin shrink-0" /> :
@@ -722,7 +722,7 @@ const MediaExplorerModal = ({
                   ) : !absSearchResults?.books?.length ? emptySection(`No results for "${search}"`) : (
                     <div className="space-y-1.5">
                       {absSearchResults.books.map((book) => (
-                        <button key={book.id} onClick={() => handlePlay(book.id, 'audiobook', book.title, book.author)} disabled={!selectedTarget}
+                        <button key={book.id} onClick={() => handlePlay(book.id, 'audiobook', book.title, book.author)} disabled={!localMode && !selectedTarget}
                           className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
                           {itemLoading === `abs-${book.id}` ?
                             <Loader2 size={18} className="text-amber-400 animate-spin shrink-0" /> :
@@ -760,7 +760,7 @@ const Media = () => {
   const [mediaStatus, setMediaStatus] = useState<MediaStatus | null>(null);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
-  const [localMode, setLocalMode] = useState(false);
+  const [localMode, setLocalMode] = useState(true);
 
   // MA Web Player (sendspin-js)
   const maPlayer = useMAWebPlayer();
@@ -1066,10 +1066,6 @@ const Media = () => {
             }
           } else {
             setMediaStatus(active);
-            setLocalMode(false);
-            if (active.entity_id) {
-              setSelectedTarget(String(active.entity_id));
-            }
             if (active.volume_level !== undefined && active.volume_level !== null) {
               setVolume(Math.round(Number(active.volume_level) * 100));
             }
