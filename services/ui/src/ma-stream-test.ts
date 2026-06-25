@@ -514,6 +514,10 @@ async function playFromSearch(uri: string) {
         return
     }
     log(`[MAWebPlayer] Play from search: ${uri.substring(0, 60)}...`, 'info')
+    if (!player || !sendspinWs || sendspinWs.readyState !== WebSocket.OPEN || !jsonrpcWs || jsonrpcWs.readyState !== WebSocket.OPEN) {
+        log(`[MAWebPlayer] Initializing player before search playback...`, 'info')
+        await connect()
+    }
     await playMedia(uri)
 }
 
