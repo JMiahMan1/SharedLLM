@@ -422,8 +422,6 @@ async function playMedia(mediaUri: string) {
             option: 'replace',
             radio_mode: false,
         }, false)
-        // Kick the browser player back into play so it binds to the new queue item.
-        player?.sendCommand('play')
         log(`[MAWebPlayer] play_media sent`, 'success')
     } catch (err) {
         log(`[MAWebPlayer] play_media failed: ${(err as Error).message}`, 'error')
