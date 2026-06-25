@@ -64,7 +64,7 @@ ws://ma-server:8095/ws
 
 1. **Connection:** Gateway connects to `ws://ma:8095/ws` with token as query parameter
 2. **Auth:** Token validated by MA WebSocket middleware on connect
-3. **Command:** Sends `player_queues/play_media` with `{queue_id, media: uri}` (e.g., `library://track/1759`)
+3. **Command:** Sends `player_queues/play_media` with `{queue_id, media: uri, option: "replace", radio_mode: false}` (e.g., `library://track/1759`)
 4. **State Sync:** MA broadcasts queue state updates via WebSocket containing:
    - Current track metadata
    - Queue state with `current_item` containing `queue_item_id` and `player_id`

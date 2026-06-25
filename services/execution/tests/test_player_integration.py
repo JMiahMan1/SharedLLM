@@ -710,8 +710,8 @@ class TestGatewayStreamEndpoint:
             assert "No Music Assistant players available" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_stream_ma_selects_idle_player(self, ctx):
-        """Stream endpoint should prefer idle/playing players over busy ones."""
+    async def test_stream_ma_prefers_browser_player(self, ctx):
+        """Stream endpoint should prefer the browser Sendspin player."""
         from services.gateway.main import stream_music_assistant
         from fastapi import Request
         from services.gateway.schemas import ResolvedCredentials
@@ -736,7 +736,9 @@ class TestGatewayStreamEndpoint:
             pass
 
         async def mock_send_command(self, command, args):
-            pass
+            sent_commands.append((command, args))
+
+        sent_commands: list[tuple[str, dict]] = []
 
         class FakeRequest:
             headers = {"Authorization": "Bearer test_internal_secret"}
@@ -751,23 +753,14 @@ class TestGatewayStreamEndpoint:
         ):
             # Mock player list and status
             async def mock_post(url, json=None, headers=None, timeout=15.0):
-                if "player/list" in url:
+                if (json or {}).get("command") == "players/all":
                     return MM(
                         status_code=200,
-                        json=MM(return_value={
-                            "players": [
-                                {"player_id": "busy_player_1"},
-                                {"player_id": "idle_player_1"},
-                                {"player_id": "busy_player_2"},
-                            ]
-                        }),
+                        json=MM(return_value=[
+                            {"player_id": "office_tv", "name": "Office TV"},
+                            {"player_id": "browser_player", "name": "Sendspin JS Client (test)"},
+                        ]),
                     )
-                elif "player/status" in url:
-                    player_id = (json or {}).get("args", {}).get("player_id", "")
-                    if "busy" in player_id:
-                        return MM(status_code=200, json=MM(return_value={"state": "playing", "queue_id": "queue123"}))
-                    else:
-                        return MM(status_code=200, json=MM(return_value={"state": "idle", "queue_id": None}))
                 return MM(status_code=500)
 
             with patch("services.gateway.main.httpx.AsyncClient") as mock_client_cls:
@@ -777,12 +770,14 @@ class TestGatewayStreamEndpoint:
                 mock_client.post = AsyncMock(side_effect=mock_post)
                 mock_client_cls.return_value = mock_client
 
-                # This will fail at WebSocket step but we can verify player selection
+                # This will fail once the stream URL loop times out, but we can
+                # verify that the browser player was selected first.
                 with pytest.raises(Exception):
                     await stream_music_assistant("music://track/12345", cast(Request, FakeRequest()))
 
-                # Verify idle_player_1 was selected (not busy_player_1 or busy_player_2)
-                # The player/status calls should have been made for busy players first
+                assert sent_commands, "Expected at least one MA command to be sent"
+                assert sent_commands[0][0] == "player_queues/play_media"
+                assert sent_commands[0][1].get("queue_id") == "browser_player"
 
 
 

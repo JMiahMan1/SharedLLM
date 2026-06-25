@@ -29,22 +29,22 @@ async def run_sendspin_proxy(proxy_ws: str) -> None:
             "type": "client/hello",
             "payload": {
                 "client_id": "test-browser-client",
-                "client_name": "TestBrowser",
-                "supported_formats": [
-                    {
-                        "codec": "opus",
-                        "channels": 2,
-                        "sample_rate": 48000,
-                        "bit_depth": 16,
-                    },
-                    {
-                        "codec": "flac",
-                        "channels": 2,
-                        "sample_rate": 48000,
-                        "bit_depth": 24,
-                    },
-                ],
-                "volume": 50,
+                "name": "TestBrowser",
+                "version": 1,
+                "supported_roles": ["player@v1", "controller@v1", "metadata@v1"],
+                "device_info": {
+                    "product_name": "Web Browser",
+                    "manufacturer": "Mozilla",
+                    "software_version": "Test",
+                },
+                "player@v1_support": {
+                    "supported_formats": [
+                        {"codec": "opus", "channels": 2, "sample_rate": 48000, "bit_depth": 16},
+                        {"codec": "flac", "channels": 2, "sample_rate": 48000, "bit_depth": 24},
+                    ],
+                    "buffer_capacity": 5242880,
+                    "supported_commands": ["volume", "mute"],
+                },
             },
         }
         print(f"Sending: {json.dumps(hello)[:200]}")
@@ -59,11 +59,9 @@ async def run_sendspin_proxy(proxy_ws: str) -> None:
             return
 
         player_cmd = {
-            "type": "command",
-            "message_id": str(asyncio.get_event_loop().time() * 1000),
-            "payload": {
-                "action": "get_players",
-            },
+            "type": "client/command",
+            "message_id": "test-player-cmd-1",
+            "payload": {},
         }
         await ws.send(json.dumps(player_cmd))
         try:
@@ -90,10 +88,21 @@ async def run_ma_direct(ma_ws: str, ma_token: str) -> None:
             "message_id": "direct-test-1",
             "payload": {
                 "client_id": "direct-test-client",
-                "client_name": "DirectTest",
-                "supported_formats": [
-                    {"codec": "opus", "channels": 2, "sample_rate": 48000, "bit_depth": 16},
-                ],
+                "name": "DirectTest",
+                "version": 1,
+                "supported_roles": ["player@v1", "controller@v1", "metadata@v1"],
+                "device_info": {
+                    "product_name": "Web Browser",
+                    "manufacturer": "Mozilla",
+                    "software_version": "Test",
+                },
+                "player@v1_support": {
+                    "supported_formats": [
+                        {"codec": "opus", "channels": 2, "sample_rate": 48000, "bit_depth": 16},
+                    ],
+                    "buffer_capacity": 5242880,
+                    "supported_commands": ["volume", "mute"],
+                },
             },
         }
         print(f"Sending client/hello: {json.dumps(hello)[:200]}")

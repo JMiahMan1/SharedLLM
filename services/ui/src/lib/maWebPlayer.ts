@@ -407,7 +407,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
   /* ── JSON-RPC Control Methods ──────────────────────────────────────── */
 
-  // Queue a URI in MA and then start local browser playback.
+  // Queue a URI in MA using the same signature as the MA frontend, then start playback.
   const playMedia = useCallback(async (mediaUri: string, player_id?: string) => {
     const pid = player_id || playerIdRef.current;
     if (!pid) {
@@ -419,7 +419,8 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       await sendJsonRpc('player_queues/play_media', {
         queue_id: pid,
         media: mediaUri,
-        custom_data: { source_change: false },
+        option: 'replace',
+        radio_mode: false,
       }, false);
       playerRef.current?.sendCommand('play');
     } catch (err) {
@@ -474,7 +475,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
   /* ── Convenience Methods ───────────────────────────────────────────── */
 
-  // Play: ensure connected, send play_media (if URI provided), then local play.
+  // Play: ensure connected, queue media if provided, then resume local playback.
   const play = useCallback(async (mediaUri?: string) => {
     console.log('[MAWebPlayer] play called, player exists:', !!playerRef.current);
     try {

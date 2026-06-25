@@ -414,15 +414,17 @@ async function setVolumeVolume(volume: number) {
 async function playMedia(mediaUri: string) {
     log(`[MAWebPlayer] play_media: ${mediaUri.substring(0, 80)}..., player: ${playerId}`, 'info')
     try {
-        // Use player_queues/play_media (the MA web player pattern) with queue_id
+        // Match the MA frontend playMedia() signature so the selected item replaces
+        // the active queue instead of resuming the previous track.
         await sendJsonRpc('player_queues/play_media', {
             queue_id: playerId,
             media: mediaUri,
-            custom_data: { source_change: false },
+            option: 'replace',
+            radio_mode: false,
         }, false)
-        // Start local browser playback via Sendspin
+        // Kick the browser player back into play so it binds to the new queue item.
         player?.sendCommand('play')
-        log(`[MAWebPlayer] play_media + cmd_play sent`, 'success')
+        log(`[MAWebPlayer] play_media sent`, 'success')
     } catch (err) {
         log(`[MAWebPlayer] play_media failed: ${(err as Error).message}`, 'error')
     }

@@ -5,6 +5,7 @@ credential fields from the dict returned by _resolve_identity_from_request.
 """
 import os
 import sys
+from contextlib import asynccontextmanager
 os.environ["INTERNAL_SECRET"] = "test-secret"
 
 import pytest
@@ -25,6 +26,12 @@ def client_fixture(monkeypatch):
 
     from services.gateway.main import app
     from services.gateway import main
+
+    @asynccontextmanager
+    async def noop_lifespan(_app):
+        yield
+
+    monkeypatch.setattr(app.router, "lifespan_context", noop_lifespan)
     main.background_tasks = None  # pyright: ignore[reportAttributeAccessIssue]
 
     return TestClient(app)
@@ -55,7 +62,7 @@ async def test_stream_abs_uses_dict_get_not_dot_notation(monkeypatch, client):
         mock_httpx_client = AsyncMock()
         mock_response = MagicMock()
         mock_response.status_code = 200
-        mock_response.headers = {"content-type": "audio/mpeg", "Content-Length": "100"}
+        mock_response.headers = {"content-type": "audio/mpeg", "Content-Length": "10"}
         mock_response.aiter_bytes = MagicMock(return_value=async_byte_iterator())
         mock_response.aclose = AsyncMock()
         mock_httpx_client.send = AsyncMock(return_value=mock_response)
@@ -94,8 +101,11 @@ async def test_stream_ma_uses_dict_get_not_dot_notation(monkeypatch, client):
             status_code=200,
             json=lambda: {"result": {"players": []}}
         ))
+        mock_httpx_cm = AsyncMock()
+        mock_httpx_cm.__aenter__.return_value = mock_httpx_client
+        mock_httpx_cm.__aexit__.return_value = None
 
-        with patch('services.gateway.main.httpx.AsyncClient', return_value=mock_httpx_client):
+        with patch('services.gateway.main.httpx.AsyncClient', return_value=mock_httpx_cm):
             resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
 
             # If dot notation was used, this would 500 with AttributeError
@@ -159,7 +169,10 @@ async def test_stream_ma_no_players_returns_404(monkeypatch, client):
                 status_code=200,
                 json=lambda: {"result": {"players": []}}
             ))
-            mock_httpx.AsyncClient.return_value = mock_httpx_instance
+            mock_httpx_cm = AsyncMock()
+            mock_httpx_cm.__aenter__.return_value = mock_httpx_instance
+            mock_httpx_cm.__aexit__.return_value = None
+            mock_httpx.return_value = mock_httpx_cm
 
             resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
 
@@ -227,7 +240,7 @@ async def test_stream_abs_credential_fields_accessed_correctly(monkeypatch, clie
             # First call: ABS login, second call: stream
             mock_stream_resp = MagicMock()
             mock_stream_resp.status_code = 200
-            mock_stream_resp.headers = {"content-type": "audio/mpeg", "Content-Length": "26"}
+            mock_stream_resp.headers = {"content-type": "audio/mpeg", "Content-Length": "15"}
             mock_stream_resp.aiter_bytes = MagicMock(return_value=async_stream_iterator())
             mock_stream_resp.aclose = AsyncMock()
 
@@ -249,16 +262,8 @@ async def test_stream_abs_credential_fields_accessed_correctly(monkeypatch, clie
 
 
 @pytest.mark.asyncio
-async def test_stream_ma_mutes_and_pauses_player_for_browser_only(monkeypatch, client):
-    """Verify stream_music_assistant mutes, plays, pauses, and unmutes the MA player.
-
-    The Web Player must play audio through the BROWSER, not the physical MA device.
-    This test verifies that:
-    1. The player is MUTED before play_media (no audio leaks to physical device)
-    2. play_media is called to populate the queue (needed for stream URL)
-    3. The player is PAUSED after stream URL is resolved
-    4. The player is UNMUTED after pause (restores original state)
-    """
+async def test_stream_ma_targets_browser_player_without_muting(monkeypatch, client):
+    """Verify stream_music_assistant targets the browser player and does not mute/pause it."""
     from services.gateway import main as gateway_main
 
     mock_creds = {
@@ -289,20 +294,18 @@ async def test_stream_ma_mutes_and_pauses_player_for_browser_only(monkeypatch, c
     mock_ma_client.get_ma_error = MagicMock(return_value=None)
     mock_ma_client.get_queue_state = MagicMock(return_value={
         "current_item": {"queue_item_id": "item-123"},
-        "queue_id": "player-1",
-        "player_id": "player-1",
+        "queue_id": "browser-player",
+        "player_id": "browser-player",
     })
     mock_ma_client.get_queue_state_description = MagicMock(return_value="playing")
 
     # Mock players/all response
     mock_players_resp = MagicMock()
     mock_players_resp.status_code = 200
-    mock_players_resp.json.return_value = [{"player_id": "player-1"}]
-
-    # Mock player_queues/all response
-    mock_queues_resp = MagicMock()
-    mock_queues_resp.status_code = 200
-    mock_queues_resp.json.return_value = [{"queue_id": "player-1", "state": "idle"}]
+    mock_players_resp.json.return_value = [
+        {"player_id": "office-tv", "name": "Office TV"},
+        {"player_id": "browser-player", "name": "Sendspin JS Client (test)"},
+    ]
 
     # Mock /flow/ stream response
     async def async_byte_iterator():
@@ -322,7 +325,7 @@ async def test_stream_ma_mutes_and_pauses_player_for_browser_only(monkeypatch, c
 
     # All httpx.AsyncClient instances use a unified mock
     unified_httpx = AsyncMock()
-    unified_httpx.post = AsyncMock(side_effect=[mock_players_resp, mock_queues_resp])
+    unified_httpx.post = AsyncMock(return_value=mock_players_resp)
     unified_httpx.send = AsyncMock(return_value=mock_flow_resp)
     unified_httpx.aclose = AsyncMock()
     unified_httpx.build_request = MagicMock(return_value=MagicMock())
@@ -353,38 +356,11 @@ async def test_stream_ma_mutes_and_pauses_player_for_browser_only(monkeypatch, c
                 # Extract command names from sent commands
                 command_names = [cmd[0] for cmd in sent_commands]
 
-                # Verify the mute→play→pause→unmute sequence
-                assert "players/mute" in command_names, (
-                    f"players/mute not sent! Commands: {command_names}"
-                )
+                # Verify the browser queue was targeted directly and no physical-device
+                # mute/pause calls were emitted.
                 assert "player_queues/play_media" in command_names, (
                     f"player_queues/play_media not sent! Commands: {command_names}"
                 )
-                assert "player_queues/pause" in command_names, (
-                    f"player_queues/pause not sent! Commands: {command_names}"
-                )
-
-                # Verify mute was sent BEFORE play_media
-                mute_idx = command_names.index("players/mute")
-                play_idx = command_names.index("player_queues/play_media")
-                pause_idx = command_names.index("player_queues/pause")
-                assert mute_idx < play_idx, (
-                    f"Mute must come before play_media! Order: {command_names}"
-                )
-                assert play_idx < pause_idx, (
-                    f"play_media must come before pause! Order: {command_names}"
-                )
-
-                # Verify there are at least 2 mute calls (mute before, unmute after)
-                mute_calls = [cmd for cmd in sent_commands if cmd[0] == "players/mute"]
-                assert len(mute_calls) >= 2, (
-                    f"Expected at least 2 mute calls (mute + unmute), got {len(mute_calls)}: {mute_calls}"
-                )
-
-                # First mute should be muted=True, last should be muted=False
-                assert mute_calls[0][1].get("muted") is True, (
-                    f"First mute call should set muted=True, got: {mute_calls[0][1]}"
-                )
-                assert mute_calls[-1][1].get("muted") is False, (
-                    f"Last mute call should set muted=False (unmute), got: {mute_calls[-1][1]}"
-                )
+                assert "players/mute" not in command_names, f"Unexpected mute command: {command_names}"
+                assert "player_queues/pause" not in command_names, f"Unexpected pause command: {command_names}"
+                assert sent_commands[0][1].get("queue_id") == "browser-player"

@@ -5811,22 +5811,21 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
 
 
 @app.get("/api/media/stream/music-assistant")
-async def stream_music_assistant(uri: str, request: Request):
-    """Proxy Music Assistant audio stream to browser.
+async def stream_music_assistant(uri: str, request: Request, player_id: str | None = None):
+    """Proxy Music Assistant audio stream to the browser.
 
-    Flow (MA web-player pattern):
+    This endpoint is browser-local only. The browser's Sendspin player owns the
+    queue, and the gateway proxies the resolved MA bytes back to that same browser.
+    We never mutate a random physical player to make the stream work.
+
+    Flow:
     1. Resolve credentials (mass_url, mass_token) from the Jarvis identity service.
-    2. Discover MA players via JSON-RPC player/list and select an idle player.
+    2. Select the browser Sendspin player, either by explicit `player_id` or by
+       matching the connected browser player name.
     3. Connect to MA WebSocket and authenticate.
-    4. Mute the physical player to prevent audio leaking to the hardware device.
-    5. Send player_queues/play_media with the URI to populate the queue.
-    6. Listen for the queue_updated event to construct the stream URL from queue state.
-    7. Send player_queues/pause to stop the physical player.
-    8. Unmute the player (restore original state) and disconnect MA WebSocket.
-    9. Proxy audio bytes from MA stream server (/flow/) through the Gateway.
-
-    The browser binds <audio src> directly to this gateway endpoint. The physical
-    MA player is muted and paused so audio only plays through the browser.
+    4. Send player_queues/play_media to populate the browser queue.
+    5. Resolve the queue's stream URL from MA state.
+    6. Disconnect MA and proxy the bytes through the Gateway.
     """
     log.info(f"[stream/ma] Received stream request for uri='{uri}'")
     try:
@@ -5858,7 +5857,7 @@ async def stream_music_assistant(uri: str, request: Request):
 
         # ── Step 1: Discover MA players via JSON-RPC ──────────────────────────
         log.info("[stream/ma] Discovering MA players...")
-        available_players: list[str] = []
+        available_players: dict[str, dict[str, Any]] = {}
         import uuid as _uuid
         async with httpx.AsyncClient(timeout=15.0) as client:
             try:
@@ -5876,8 +5875,17 @@ async def stream_music_assistant(uri: str, request: Request):
                             if isinstance(p, dict):
                                 pid = p.get("player_id") or p.get("id")
                                 if pid:
-                                    available_players.append(str(pid))
-                                    log.info(f"[stream/ma] Found player: {pid}")
+                                    player_info: dict[str, Any] = {
+                                        "player_id": str(pid),
+                                        "name": str(p.get("name") or p.get("friendly_name") or ""),
+                                        "state": str(p.get("state") or p.get("available_state") or "").lower(),
+                                    }
+                                    device_info = p.get("device_info")
+                                    if isinstance(device_info, dict):
+                                        player_info["device_info"] = device_info
+                                    available_players[str(pid)] = player_info
+                                    player_name = player_info["name"] or "unnamed"
+                                    log.info(f"[stream/ma] Found player: {pid} ({player_name})")
             except Exception as err:
                 log.warning(f"[stream/ma] players/all call failed: {err}", exc_info=True)
 
@@ -5885,47 +5893,55 @@ async def stream_music_assistant(uri: str, request: Request):
             log.error("[stream/ma] No MA players found")
             raise HTTPException(status_code=404, detail="No Music Assistant players available")
 
-        # ── Step 2: Select target player (prefer idle to avoid interrupting) ─
-        log.info("[stream/ma] Selecting target player...")
-        target_player_id: str | None = None
-        target_previous_state: str = "idle"
-        # Priority: idle > paused > playing (don't interrupt active playback)
-        best_priority: int = 99
-        priority_map = {"idle": 0, "paused": 1, "playing": 2}
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                resp = await client.post(
-                    ma_api,
-                    json={"message_id": _uuid.uuid4().hex, "command": "player_queues/all"},
-                    headers={"Content-Type": "application/json", **auth_headers},
-                )
-                log.info(f"[stream/ma] player_queues/all status: {resp.status_code}")
-                if resp.status_code == 200:
-                    data = resp.json()
-                    # MA v2 REST returns data directly
-                    if isinstance(data, list):
-                        for q in data:
-                            if isinstance(q, dict):
-                                queue_id = q.get("queue_id") or ""
-                                state = str(q.get("state", "")).lower()
-                                # queue_id matches player_id in MA
-                                if queue_id in available_players and state in priority_map:
-                                    prio = priority_map[state]
-                                    if prio < best_priority:
-                                        best_priority = prio
-                                        target_player_id = queue_id
-                                        target_previous_state = state
-                                        log.info(f"[stream/ma] Candidate player '{queue_id}' (state={state}, priority={prio})")
-                                        if state == "idle":
-                                            break  # Can't do better than idle
-            except Exception as err:
-                log.warning(f"[stream/ma] player_queues/all call failed: {err}", exc_info=True)
+        # ── Step 2: Select the browser Sendspin player ────────────────────────
+        log.info("[stream/ma] Selecting browser player...")
 
-        if not target_player_id:
-            target_player_id = available_players[0]
-            log.info(f"[stream/ma] No suitable player found, defaulting to '{target_player_id}'")
+        def _player_text(player: dict[str, Any]) -> str:
+            parts = [
+                str(player.get("name") or ""),
+                str(player.get("friendly_name") or ""),
+            ]
+            device_info = player.get("device_info")
+            if isinstance(device_info, dict):
+                parts.extend(
+                    str(device_info.get(key) or "")
+                    for key in ("product_name", "manufacturer", "model", "software_version")
+                )
+            return " ".join(parts).lower()
+
+        def _is_browser_player(player: dict[str, Any]) -> bool:
+            player_text = _player_text(player)
+            return any(term in player_text for term in ("sendspin", "browser", "web player", "webplayer"))
+
+        target_player: dict[str, Any] | None = None
+        if player_id:
+            target_player = available_players.get(player_id)
+            if not target_player:
+                log.error(f"[stream/ma] Requested browser player_id '{player_id}' is not available")
+                raise HTTPException(
+                    status_code=409,
+                    detail="Browser player is not connected. Open the browser Web Player first.",
+                )
+            log.info(
+                f"[stream/ma] Using explicit browser player '{player_id}' "
+                f"({target_player.get('name') or 'unnamed'})"
+            )
         else:
-            log.info(f"[stream/ma] Selected player '{target_player_id}' (previous_state={target_previous_state})")
+            browser_players = [p for p in available_players.values() if _is_browser_player(p)]
+            if browser_players:
+                target_player = browser_players[0]
+                log.info(
+                    f"[stream/ma] Using detected browser player '{target_player['player_id']}' "
+                    f"({target_player.get('name') or 'unnamed'})"
+                )
+            else:
+                log.error("[stream/ma] No browser Sendspin player is connected")
+                raise HTTPException(
+                    status_code=409,
+                    detail="Browser player is not connected. Open the browser Web Player first.",
+                )
+
+        target_player_id = str(target_player["player_id"])
 
         # ── Step 3: Connect to MA WebSocket and get stream URL ────────────────
         log.info(f"[stream/ma] Connecting to MA WebSocket...")
@@ -5954,18 +5970,6 @@ async def stream_music_assistant(uri: str, request: Request):
                 if _re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', uri, _re.IGNORECASE):
                     ma_uri = f"library://audiobookshelf/book/{uri}"
                     log.info(f"[stream/ma] Detected ABS book ID, converted to MA URI: {ma_uri}")
-
-            # ── Mute the player BEFORE play_media to prevent audio on physical device ──
-            # We need play_media to populate the queue (for queue_item_id), but we don't
-            # want audio coming out of the physical speaker. Mute → play → get URL → pause → unmute.
-            try:
-                await ma_client.send_command_no_wait(
-                    "players/mute",
-                    {"player_id": target_player_id, "muted": True},
-                )
-                log.info(f"[stream/ma] Muted player '{target_player_id}' before play_media")
-            except Exception as mute_err:
-                log.error(f"[stream/ma] Failed to mute player before play_media - audio may leak to physical device: {mute_err}", exc_info=True)
 
             # Send play_media using the MA frontend signature so the requested URI
             # replaces the active queue instead of reusing the previous item.
@@ -6030,35 +6034,11 @@ async def stream_music_assistant(uri: str, request: Request):
                     detail=f"MA did not resolve queue state within {stream_timeout}s. Queue state: {queue_desc}. Session ID: {session_id}"
                 )
 
-            # ── Step 4: Pause the MA player and restore mute state ──────────────
-            # The /flow/ stream URL serves audio bytes regardless of player state,
-            # so pausing the player stops physical device output while the browser
-            # continues to receive the proxied stream.
-            try:
-                await ma_client.send_command_no_wait(
-                    "player_queues/pause",
-                    {"queue_id": target_player_id},
-                )
-                log.info(f"[stream/ma] Sent pause to player '{target_player_id}' to prevent physical audio output")
-            except Exception as pause_err:
-                log.warning(f"[stream/ma] Failed to pause player after stream URL resolved: {pause_err}")
-
-            # Restore the player's original mute state (unmute unless it was muted before)
-            if target_previous_state != "paused":
-                try:
-                    await ma_client.send_command_no_wait(
-                        "players/mute",
-                        {"player_id": target_player_id, "muted": False},
-                    )
-                    log.info(f"[stream/ma] Unmuted player '{target_player_id}' (restoring original state)")
-                except Exception as unmute_err:
-                    log.warning(f"[stream/ma] Failed to unmute player after pause: {unmute_err}")
-
-            # ── Step 5: Disconnect MA WebSocket (no longer needed) ──────────────
+            # ── Step 4: Disconnect MA WebSocket (no longer needed) ──────────────
             await ma_client.disconnect()
             log.info("[stream/ma] WebSocket closed after stream URL resolved")
 
-            # ── Step 6: Proxy MA stream bytes through the Gateway ──────────────
+            # ── Step 5: Proxy MA stream bytes through the Gateway ──────────────
             log.info(f"[stream/ma] Initiating byte proxy from: {stream_url[:120]}...")
 
             async def stream_generator_ma(cli, r):

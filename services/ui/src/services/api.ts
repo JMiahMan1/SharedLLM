@@ -1087,9 +1087,9 @@ export const api = {
     return resp.request.responseURL || '';
   },
 
-  async getMusicAssistantStreamUrl(uri: string): Promise<string> {
+  async getMusicAssistantStreamUrl(uri: string, playerId?: string): Promise<string> {
     const resp = await apiClient.get('/api/media/stream/music-assistant', {
-      params: { uri },
+      params: playerId ? { uri, player_id: playerId } : { uri },
       responseType: 'text',
     });
     return resp.request.responseURL || '';
