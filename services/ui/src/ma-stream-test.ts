@@ -10,11 +10,11 @@ console.log('[MA-Test] SendspinPlayer loaded:', typeof SendspinPlayer)
 let sendspinWs: WebSocket | null = null
 let jsonrpcWs: WebSocket | null = null
 let player: SendspinPlayer | null = null
-let audio: HTMLAudioElement | null = null
+const audio: HTMLAudioElement | null = null
 let playerId = ''
 let msgIdCounter = 0
-let reconnectAttempts = 0
-let logsEnabled = { sendspin: true, jsonrpc: true }
+const reconnectAttempts = 0
+const logsEnabled = { sendspin: true, jsonrpc: true }
 let audioElement: HTMLAudioElement | null = null
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null
 
