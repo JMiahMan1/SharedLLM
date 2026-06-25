@@ -422,7 +422,6 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         option: 'replace',
         radio_mode: false,
       }, false);
-      playerRef.current?.sendCommand('play');
     } catch (err) {
       console.error('[MAWebPlayer] play_media failed:', err);
     }
