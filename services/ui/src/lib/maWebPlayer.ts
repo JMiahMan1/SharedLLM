@@ -513,17 +513,10 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     console.log('[MAWebPlayer] setVolume called:', volume);
     try {
       playerRef.current?.setVolume(Math.round(volume));
-      // Also sync via JSON-RPC if connected
-      if (playerIdRef.current && jsonrpcWsRef.current?.readyState === WebSocket.OPEN) {
-        sendJsonRpc('players/set_volume', {
-          player_id: playerIdRef.current,
-          volume_level: volume / 100,
-        }).catch((err) => console.error('[MAWebPlayer] setVolume JSON-RPC failed:', err));
-      }
     } catch (err) {
       console.error('[MAWebPlayer] setVolume failed:', err);
     }
-  }, [sendJsonRpc]);
+  }, []);
 
   const setMuted = useCallback((muted: boolean) => {
     console.log('[MAWebPlayer] setMuted called:', muted);
