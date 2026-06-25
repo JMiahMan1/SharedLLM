@@ -57,9 +57,9 @@ def health_prefixed():
 
 # ─── Container Management ──────────────────────────────────────────────────────
 
-def _format_uptime(start_time: float) -> str:
-    """Format seconds since start into a human-readable duration."""
-    delta = time.time() - start_time
+def _format_uptime(uptime_seconds: float) -> str:
+    """Format uptime seconds into a human-readable duration."""
+    delta = int(uptime_seconds)
     days, remainder = divmod(int(delta), 86400)
     hours, remainder = divmod(remainder, 3600)
     minutes = remainder
@@ -117,14 +117,6 @@ def _get_container_info(container):
     if health:
         health_status = health.get("Status")
 
-    # Container start time for uptime calculation
-    container_start_time = None
-    try:
-        # Use State.StartedAt if available, otherwise inspect.Created
-        container_start_time = inspect.get("State", {}).get("StartedAt")
-    except Exception:
-        pass
-
     # Get image tags
     image_tags = []
     if container.image and container.image.tags:
@@ -139,7 +131,7 @@ def _get_container_info(container):
         "finished_at": finished_at,
         "exit_code": exit_code,
         "uptime_seconds": round(uptime_seconds) if uptime_seconds is not None else None,
-        "uptime": _format_uptime(time.time() - (container_start_time or time.time())) if container_start_time else None,
+        "uptime": _format_uptime(uptime_seconds) if uptime_seconds is not None else None,
         "health": health_status,
         "health_status": health_status,
         "pid": state.get("Pid"),
@@ -161,6 +153,48 @@ def list_containers():
             if c.name and c.name.startswith("sharedllm_"):
                 results.append(_get_container_info(c))
         return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/health", dependencies=[Depends(verify_internal_secret)])
+def system_health():
+    """Aggregated health status of all sharedllm services."""
+    if not client:
+        raise HTTPException(status_code=500, detail="Docker client not initialized")
+    try:
+        containers = client.containers.list(all=True)
+        services = []
+        running = 0
+        stopped = 0
+        unhealthy = 0
+        for c in containers:
+            if c.name and c.name.startswith("sharedllm_"):
+                info = _get_container_info(c)
+                services.append(info)
+                if c.status == "running":
+                    running += 1
+                else:
+                    stopped += 1
+                if info.get("health_status") == "unhealthy":
+                    unhealthy += 1
+
+        # Get control plane info from /info
+        control_plane_info = {
+            "status": "running",
+            "git_sha": "unknown",
+            "start_time": time.time(),
+            "uptime": "unknown"
+        }
+
+        return {
+            "total_services": len(services),
+            "running": running,
+            "stopped": stopped,
+            "unhealthy": unhealthy,
+            "control_plane": control_plane_info,
+            "services": services,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
