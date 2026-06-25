@@ -5673,12 +5673,12 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
     import websockets
 
     # Extract API token from query params
+    await websocket.accept()
+    log.info("[ma-jsonrpc] Browser WebSocket connection accepted")
     api_token = websocket.query_params.get("token")
     if not api_token:
         await websocket.close(code=1008, reason="Missing token")
         return
-
-    log.info("[ma-jsonrpc] STEP 1: Browser WebSocket connection accepted")
 
     # Resolve MA credentials via identity service
     log.info("[ma-jsonrpc] STEP 2: Resolving MA credentials...")
@@ -6270,6 +6270,4 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
         except Exception as e:
             log.error(f"[media/favorite] Exception: {e}", exc_info=True)
             raise HTTPException(status_code=502, detail="Error communicating with Music Assistant")
-
-
 
