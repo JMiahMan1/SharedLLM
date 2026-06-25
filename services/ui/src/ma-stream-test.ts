@@ -403,10 +403,7 @@ async function setVolumeVolume(volume: number) {
         if (audioElement) {
             audioElement.volume = volume / 100
         }
-        await sendJsonRpc('players/set_volume', {
-            player_id: playerId,
-            volume_level: volume / 100,
-        })
+        player?.setVolume(volume)
     } catch (err) {
         log(`[MAWebPlayer] setVolume failed: ${(err as Error).message}`, 'error')
     }
