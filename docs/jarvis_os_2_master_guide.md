@@ -199,7 +199,7 @@ Each state transition persists:
 
 ## References
 
-* jarvis_os_2_master_guide_detailed.md: Complete technical implementation details (2,029 lines)
-* jarvis_os_2_ui_wireframes.md: UI wireframes and component specifications
-* docs/roadmap.md: Feature roadmap and progress tracking
-* RAVEN_AUDIT_BLUEPRINT.md: Raven 2.0 architectural overhaul and hardening blueprint
+- jarvis_os_2_master_guide_detailed.md: Complete technical implementation details (2,029 lines)
+- jarvis_os_2_ui_wireframes.md: UI wireframes and component specifications
+- docs/roadmap.md: Feature roadmap and progress tracking
+- RAVEN_AUDIT_BLUEPRINT.md: Raven 2.0 architectural overhaul and hardening blueprint
