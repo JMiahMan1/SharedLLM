@@ -293,6 +293,10 @@ class RavenWorker:
         # Determine job tier (2 = Librarian, 3 = Raven) for concurrency control
         is_autonomous = self._is_autonomous_job(payload, user_id)
         
+        # Retry configuration for infrastructure failures (alpaca restarts, connection drops)
+        INFRA_RETRIES = 3
+        INFRA_RETRY_DELAY = 10  # seconds
+        
         try:
             heartbeat_task = asyncio.create_task(self._job_heartbeat(job_id))
             
@@ -316,36 +320,49 @@ class RavenWorker:
                         await self.job_queue.push_chunk(job_id, chunk)
                     payload["_job_id"] = job_id  # traceability
                     
-                    # --- CANCELLABLE ORCHESTRATION ---
-                    orchestration_task = asyncio.create_task(process_full_orchestration(payload, chunk_callback=chunk_callback))
-                    
-                    # Monitor for kill signal
-                    kill_monitor = None
-                    if mission_id:
-                        async def _monitor_kill(mid, task_to_cancel):
-                            import redis.asyncio as redis
-                            r_kill = redis.from_url(REDIS_URL, decode_responses=True)
-                            pubsub = r_kill.pubsub()
-                            await pubsub.subscribe(f"raven:mission:kill:{mid}")
-                            try:
-                                async for message in pubsub.listen():
-                                    if message["type"] == "message" and message["data"] == "KILL":
-                                        log.warning(f"[Worker] KILL SIGNAL RECEIVED for mission {mid}. Cancelling task.")
-                                        task_to_cancel.cancel()
-                                        break
-                            finally:
-                                await pubsub.unsubscribe()
-                                await r_kill.close()
-                        kill_monitor = asyncio.create_task(_monitor_kill(mission_id, orchestration_task))
+                    # Retry orchestration on infrastructure failures
+                    ans = None
+                    for attempt in range(INFRA_RETRIES):
+                        try:
+                            # --- CANCELLABLE ORCHESTRATION ---
+                            orchestration_task = asyncio.create_task(process_full_orchestration(payload, chunk_callback=chunk_callback))
+                            
+                            # Monitor for kill signal
+                            kill_monitor = None
+                            if mission_id:
+                                async def _monitor_kill(mid, task_to_cancel):
+                                    import redis.asyncio as redis
+                                    r_kill = redis.from_url(REDIS_URL, decode_responses=True)
+                                    pubsub = r_kill.pubsub()
+                                    await pubsub.subscribe(f"raven:mission:kill:{mid}")
+                                    try:
+                                        async for message in pubsub.listen():
+                                            if message["type"] == "message" and message["data"] == "KILL":
+                                                log.warning(f"[Worker] KILL SIGNAL RECEIVED for mission {mid}. Cancelling task.")
+                                                task_to_cancel.cancel()
+                                                break
+                                    finally:
+                                        await pubsub.unsubscribe()
+                                        await r_kill.close()
+                                kill_monitor = asyncio.create_task(_monitor_kill(mission_id, orchestration_task))
 
-                    try:
-                        ans = await orchestration_task
-                    except asyncio.CancelledError:
-                        log.warning(f"[Worker] Orchestration for mission {mission_id} was CANCELLED.")
-                        ans = "Mission aborted by user."
-                    finally:
-                        if kill_monitor:
-                            kill_monitor.cancel()
+                            try:
+                                ans = await orchestration_task
+                            except asyncio.CancelledError:
+                                log.warning(f"[Worker] Orchestration for mission {mission_id} was CANCELLED.")
+                                ans = "Mission aborted by user."
+                            finally:
+                                if kill_monitor:
+                                    kill_monitor.cancel()
+                            break  # Success, exit retry loop
+                        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout, ConnectionResetError, BrokenPipeError) as e:
+                            log.warning(f"[Worker] Infrastructure error on attempt {attempt + 1}/{INFRA_RETRIES}: {e}")
+                            if attempt < INFRA_RETRIES - 1:
+                                log.info(f"[Worker] Retrying orchestration in {INFRA_RETRY_DELAY}s...")
+                                await asyncio.sleep(INFRA_RETRY_DELAY)
+                            else:
+                                log.error(f"[Worker] All {INFRA_RETRIES} infrastructure retries failed: {e}")
+                                raise
             else:
                 log.info(f"[Worker] Acquiring TIER2 (Librarian) semaphore for job {job_id}")
                 async with TIER2_SEMAPHORE:
@@ -364,7 +381,21 @@ class RavenWorker:
                     async def chunk_callback(chunk: str):
                         await self.job_queue.push_chunk(job_id, chunk)
                     payload["_job_id"] = job_id
-                    ans = await process_full_orchestration(payload, chunk_callback=chunk_callback)
+                    
+                    # Retry orchestration on infrastructure failures
+                    ans = None
+                    for attempt in range(INFRA_RETRIES):
+                        try:
+                            ans = await process_full_orchestration(payload, chunk_callback=chunk_callback)
+                            break  # Success, exit retry loop
+                        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout, ConnectionResetError, BrokenPipeError) as e:
+                            log.warning(f"[Worker] Infrastructure error on attempt {attempt + 1}/{INFRA_RETRIES}: {e}")
+                            if attempt < INFRA_RETRIES - 1:
+                                log.info(f"[Worker] Retrying orchestration in {INFRA_RETRY_DELAY}s...")
+                                await asyncio.sleep(INFRA_RETRY_DELAY)
+                            else:
+                                log.error(f"[Worker] All {INFRA_RETRIES} infrastructure retries failed: {e}")
+                                raise
             
             await self.job_queue.complete_job(job_id, ans)
             
