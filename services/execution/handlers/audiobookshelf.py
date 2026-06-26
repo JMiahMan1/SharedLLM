@@ -85,14 +85,13 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
     # Search ABS library
     library_result = await abs_client.search_library(abs_url, abs_key, req.query, limit=req.limit)
     if "error" not in library_result:
-        books = library_result.get("book", [])
+        books = library_result.get("results", [])
         if books:
             book_summaries = []
             for b in books[:req.limit]:
-                library_item = b.get("libraryItem", {})
-                meta = library_item.get("media", {}).get("metadata", {})
-                media_info = library_item.get("media", {})
-                book_id = library_item.get("id", "")
+                media = b.get("media", {})
+                meta = media.get("metadata", {})
+                book_id = b.get("id", "")
                 book_summaries.append({
                     "id": book_id,
                     "title": meta.get("title", "Unknown"),
@@ -101,11 +100,11 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
                     "series": meta.get("series", ""),
                     "publishedYear": meta.get("publishedYear", ""),
                     "genres": meta.get("genres", []),
-                    "duration": media_info.get("duration", 0),
-                    "duration_formatted": _format_time(media_info.get("duration", 0)) if media_info.get("duration") else "",
-                    "progress": library_item.get("progress", 0),
+                    "duration": media.get("duration", 0),
+                    "duration_formatted": _format_time(media.get("duration", 0)) if media.get("duration") else "",
+                    "progress": b.get("progress", {}),
                     "play_url": await abs_client.get_stream_url(abs_url, abs_key, book_id) if book_id else "",
-                    "cover": media_info.get("cover", {}).get("path", "") if isinstance(media_info.get("cover"), dict) else (media_info.get("cover", "") or ""),
+                    "cover": media.get("cover", {}).get("path", "") if isinstance(media.get("cover"), dict) else (media.get("cover", "") or ""),
                 })
 
             return ExecutionResult(
@@ -189,9 +188,9 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
         book_title = req.book_id
     elif req.query:
         search = await abs_client.search_library(abs_url, abs_key, req.query, limit=1)
-        if "error" in search or not search.get("book"):
+        if "error" in search or not search.get("results"):
             return ExecutionResult(status="FAILURE", message=f"No audiobook found for '{req.query}'.", service="audiobookshelf")
-        book = search["book"][0].get("libraryItem", {})
+        book = search["results"][0]
         book_id = book.get("id")
         book_title = book.get("media", {}).get("metadata", {}).get("title", req.query)
     else:
