@@ -408,17 +408,23 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   /* ── JSON-RPC Control Methods ──────────────────────────────────────── */
 
   // Queue a URI in MA using the same signature as the MA frontend, then start playback.
+  // Converts raw ABS book UUIDs to MA-compatible library:// URIs.
   const playMedia = useCallback(async (mediaUri: string, player_id?: string) => {
     const pid = player_id || playerIdRef.current;
     if (!pid) {
       console.error('[MAWebPlayer] No player_id available for play_media');
       return;
     }
+    // Convert raw ABS book ID (UUID) to MA library URI
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const resolvedUri = uuidRegex.test(mediaUri)
+      ? `library://audiobookshelf/book/${mediaUri}`
+      : mediaUri;
     try {
-      console.log('[MAWebPlayer] play_media:', mediaUri, 'player:', pid);
+      console.log('[MAWebPlayer] play_media:', resolvedUri, 'player:', pid);
       await sendJsonRpc('player_queues/play_media', {
         queue_id: pid,
-        media: mediaUri,
+        media: resolvedUri,
         option: 'replace',
         radio_mode: false,
       }, false);
