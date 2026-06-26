@@ -240,7 +240,7 @@ async def authorize_token(abs_url: str, abs_api_key: str) -> dict:
 
 async def get_items_in_progress(abs_url: str, abs_api_key: str) -> dict:
     """Get user's in-progress items (better than /me/progress for continue listening)."""
-    return await abs_get(abs_url, abs_api_key, "/me/items-in-progress")
+    return await abs_get(abs_url, abs_api_key, "/api/me/items-in-progress")
 
 
 async def get_listening_sessions(abs_url: str, abs_api_key: str, limit: int = 10) -> dict:
