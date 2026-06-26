@@ -355,7 +355,7 @@ const RBAC = {
 #### Phase 1: Backend Compatibility
 ```bash
 # Deploy updated backend APIs supporting workspace context
-curl -X POST /api/raven/missions 
+curl -X POST /api/raven/missions
   -H "Content-Type: application/json"
   -d '{"workspace_id": "my-workspace", "mission_type": "admin_fix"}'
 ```
