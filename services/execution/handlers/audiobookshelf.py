@@ -82,39 +82,74 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
     if not req.query:
         return ExecutionResult(status="FAILURE", message="Search query is required.", service="audiobookshelf")
 
-    result = await abs_client.search_library(abs_url, abs_key, req.query, limit=req.limit)
-    if "error" in result:
-        return ExecutionResult(status="FAILURE", message=result["error"], service="audiobookshelf")
+    result = await abs_client.search_all(abs_url, abs_key, req.query, limit=req.limit)
+    if not result.get("books") and not result.get("podcasts") and not result.get("authors"):
+        return ExecutionResult(
+            status="SUCCESS",
+            message=f"No results found for '{req.query}'.",
+            service="audiobookshelf",
+            detail={"books": [], "podcasts": [], "authors": []},
+        )
 
-    books = result.get("book", [])
-    if not books:
-        return ExecutionResult(status="SUCCESS", message=f"No audiobooks found for '{req.query}'.", service="audiobookshelf")
+    book_summaries = []
+    for b in result.get("books", [])[:req.limit]:
+        if isinstance(b, dict):
+            book_summaries.append({
+                "id": b.get("id", b.get("key", "")),
+                "title": b.get("title", "Unknown"),
+                "author": b.get("author", b.get("authorName", "")),
+                "narrator": b.get("narrator", b.get("narratorName", "")),
+                "publisher": b.get("publisher", ""),
+                "description": b.get("description", ""),
+                "cover": b.get("cover", b.get("coverUrl", "")),
+                "genres": b.get("genres", []),
+                "publishedYear": b.get("publishedYear", ""),
+                "asin": b.get("asin", ""),
+                "type": "book",
+                "source": "external",
+            })
 
-    summaries = []
-    for b in books[:req.limit]:
-        book = b.get("libraryItem", {})
-        meta = book.get("media", {}).get("metadata", {})
-        media_info = book.get("media", {})
-        chapters = media_info.get("chapters", [])
-        summaries.append({
-            "id": book.get("id"),
-            "title": meta.get("title", "Unknown"),
-            "author": meta.get("authorName", "Unknown"),
-            "narrator": meta.get("narratorName", "Unknown"),
-            "series": meta.get("series", ""),
-            "published": meta.get("publishedYear", meta.get("publishedDate", "")),
-            "genres": meta.get("genres", []),
-            "duration": media_info.get("duration", 0),
-            "chapters": len(chapters) if isinstance(chapters, list) else 0,
-            "status": book.get("status", "unknown"),
-            "progress": book.get("progress", 0),
-        })
+    podcast_summaries = []
+    for p in result.get("podcasts", [])[:req.limit]:
+        if isinstance(p, dict):
+            podcast_summaries.append({
+                "id": p.get("id", ""),
+                "title": p.get("title", p.get("collectionName", "Unknown")),
+                "author": p.get("artistName", p.get("publisher", "")),
+                "description": p.get("descriptionPlain", p.get("description", "")),
+                "cover": p.get("cover", p.get("artworkUrl", "")),
+                "trackCount": p.get("trackCount", 0),
+                "genres": p.get("genres", []),
+                "feedUrl": p.get("feedUrl", p.get("podcastUrl", "")),
+                "explicit": p.get("explicit", False),
+                "type": "podcast",
+                "source": "itunes",
+            })
 
+    author_summaries = []
+    for a in result.get("authors", [])[:req.limit]:
+        if isinstance(a, dict):
+            author_summaries.append({
+                "id": a.get("id", ""),
+                "name": a.get("name", "Unknown"),
+                "description": a.get("description", ""),
+                "image": a.get("image", a.get("imageUrl", "")),
+                "asin": a.get("asin", ""),
+                "type": "author",
+                "source": "audnexus",
+            })
+
+    total = len(book_summaries) + len(podcast_summaries) + len(author_summaries)
     return ExecutionResult(
         status="SUCCESS",
-        message=f"Found {len(summaries)} audiobook(s) for '{req.query}'.",
+        message=f"Found {total} result(s) for '{req.query}'.",
         service="audiobookshelf",
-        detail={"books": summaries},
+        detail={
+            "books": book_summaries,
+            "podcasts": podcast_summaries,
+            "authors": author_summaries,
+            "total": total,
+        },
     )
 
 

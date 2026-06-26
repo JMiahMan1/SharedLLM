@@ -35,7 +35,7 @@ def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[
 
 async def abs_login(abs_url: str, username: str, password: str) -> Optional[str]:
     """Login to ABS with username/password and return API token."""
-    url = f"{abs_url.rstrip('/')}/audiobookshelf/login"
+    url = f"{abs_url.rstrip('/')}/login"
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
             resp = await client.post(url, json={"username": username, "password": password})
@@ -51,7 +51,7 @@ async def abs_get(
     abs_url: str, abs_api_key: str, path: str, params: Optional[dict] = None
 ) -> dict:
     """GET request to ABS API."""
-    url = f"{abs_url.rstrip('/')}/audiobookshelf{path}"
+    url = f"{abs_url.rstrip('/')}{path}"
     headers = {"Authorization": f"Bearer {abs_api_key}"}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
@@ -70,7 +70,7 @@ async def abs_post(
     abs_url: str, abs_api_key: str, path: str, json: Optional[dict] = None
 ) -> dict:
     """POST request to ABS API."""
-    url = f"{abs_url.rstrip('/')}/audiobookshelf{path}"
+    url = f"{abs_url.rstrip('/')}{path}"
     headers = {"Authorization": f"Bearer {abs_api_key}", "Content-Type": "application/json"}
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
         try:
@@ -90,6 +90,71 @@ async def search_library(
 ) -> dict:
     """Search the ABS library for audiobooks matching the query."""
     return await abs_get(abs_url, abs_api_key, "/api/search", params={"q": query, "limit": limit})
+
+
+async def search_books(
+    abs_url: str, abs_api_key: str, title: str = "", author: str = "", provider: str = "google"
+) -> dict:
+    """Search external metadata providers for books (iTunes, Audible, Google, OpenLibrary)."""
+    params = {"provider": provider}
+    if title:
+        params["title"] = title
+    if author:
+        params["author"] = author
+    return await abs_get(abs_url, abs_api_key, "/api/search/books", params=params)
+
+
+async def search_podcasts(
+    abs_url: str, abs_api_key: str, term: str
+) -> dict:
+    """Search iTunes for podcasts."""
+    return await abs_get(abs_url, abs_api_key, "/api/search/podcast", params={"term": term})
+
+
+async def search_authors(
+    abs_url: str, abs_api_key: str, query: str
+) -> dict:
+    """Search Audnexus/Audible for authors."""
+    return await abs_get(abs_url, abs_api_key, "/api/search/authors", params={"q": query})
+
+
+async def search_all(
+    abs_url: str, abs_api_key: str, query: str, limit: int = 30
+) -> dict:
+    """Generic search: books + podcasts + authors from external metadata providers."""
+    import asyncio
+
+    results = {"books": [], "podcasts": [], "authors": []}
+
+    async def _gather():
+        tasks = [
+            search_books(abs_url, abs_api_key, title=query),
+            search_podcasts(abs_url, abs_api_key, term=query),
+            search_authors(abs_url, abs_api_key, query=query),
+        ]
+        return await asyncio.gather(*tasks, return_exceptions=True)
+
+    book_res, podcast_res, author_res = await _gather()
+
+    for r in [book_res, podcast_res, author_res]:
+        if isinstance(r, Exception):
+            log.warning(f"[abs_client] Generic search sub-error: {r}")
+
+    if isinstance(book_res, dict) and "error" not in book_res:
+        books = book_res if isinstance(book_res, list) else book_res.get("results", book_res.get("books", []))
+        results["books"] = books[:limit]
+
+    if isinstance(podcast_res, dict) and "error" not in podcast_res:
+        pods = podcast_res if isinstance(podcast_res, list) else podcast_res.get("results", podcast_res.get("podcasts", []))
+        results["podcasts"] = pods[:limit]
+
+    if isinstance(author_res, dict) and "error" not in author_res:
+        author_list = author_res if isinstance(author_res, list) else [author_res]
+        if "authors" in author_res:
+            author_list = author_res["authors"]
+        results["authors"] = [a for a in author_list if a] if isinstance(author_list, list) else []
+
+    return results
 
 
 async def get_library_items(

@@ -4927,12 +4927,12 @@ async def get_abs_library_items(library_id: str, request: Request, limit: int = 
 
 @app.get("/api/media/audiobookshelf/search")
 async def search_abs(q: str, request: Request, limit: int = 20):
-    """Search Audiobookshelf for audiobooks (per-user credentials)."""
+    """Search Audiobookshelf for books, podcasts, and authors (per-user credentials)."""
     try:
         creds = await _resolve_identity_from_request(request)
     except HTTPException as e:
         log.error(f"[abs/search] identity resolution failed: {e.detail}")
-        return {"status": "SUCCESS", "books": []}
+        return {"status": "SUCCESS", "books": [], "podcasts": [], "authors": [], "total": 0}
     try:
         async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
             resp = await client.get(
@@ -4943,13 +4943,22 @@ async def search_abs(q: str, request: Request, limit: int = 20):
             if resp.status_code == 200:
                 data = resp.json()
                 detail = data.get("detail") or {}
-                if detail.get("books"):
-                    return {"status": "SUCCESS", "books": detail["books"]}
+                books = detail.get("books", [])
+                podcasts = detail.get("podcasts", [])
+                authors = detail.get("authors", [])
+                total = detail.get("total", len(books) + len(podcasts) + len(authors))
+                return {
+                    "status": "SUCCESS",
+                    "books": books,
+                    "podcasts": podcasts,
+                    "authors": authors,
+                    "total": total,
+                }
     except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as e:
         log.warning(f"[abs/search] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/search] ABS error: {e}")
-    return {"status": "SUCCESS", "books": [], "notice": "ABS unavailable"}
+    return {"status": "SUCCESS", "books": [], "podcasts": [], "authors": [], "total": 0, "notice": "ABS unavailable"}
 
 
 # ─── ABS connectivity status ─────────────────────────────────────────────
