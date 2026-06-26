@@ -208,22 +208,22 @@ jobs:
           echo "SERVICE_NAME=${{ matrix.service }}" >> $GITHUB_OUTPUT
 
       - name: Build and push ${{ matrix.service }}
-         uses: docker/build-push-action@v6
-         with:
-           context: .
-           file: services/${{ matrix.service }}/Dockerfile
-           push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
-           tags: ${{ steps.meta.outputs.tags }}
-           labels: ${{ steps.meta.outputs.labels }}
-           build-args: |
-             BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base:${{ steps.base-tag.outputs.tag }}
-             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
-             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
-             SERVICE_NAME=${{ steps.build-args.outputs.SERVICE_NAME }}
-           platforms: linux/amd64
-           cache-from: type=gha
-           cache-to: type=gha,mode=max
-           no-cache: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: services/${{ matrix.service }}/Dockerfile
+          push: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BASE_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base:${{ steps.base-tag.outputs.tag }}
+            GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
+            BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
+            SERVICE_NAME=${{ steps.build-args.outputs.SERVICE_NAME }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          no-cache: ${{ github.event_name == 'workflow_dispatch' }}
 
   build-ui:
     name: Build & Push UI
