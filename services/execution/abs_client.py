@@ -88,8 +88,26 @@ async def abs_post(
 async def search_library(
     abs_url: str, abs_api_key: str, query: str, limit: int = 10
 ) -> dict:
-    """Search the ABS library for audiobooks matching the query."""
-    return await abs_get(abs_url, abs_api_key, "/api/search", params={"q": query, "limit": limit})
+    """Search the ABS book library for audiobooks matching the query.
+    
+    Gets the book library ID and searches within it using the correct ABS API endpoint.
+    """
+    # Get libraries to find the book library
+    libs = await abs_get(abs_url, abs_api_key, "/api/libraries")
+    if "error" in libs:
+        return libs
+    
+    book_lib_id = None
+    for lib in libs.get("libraries", []):
+        if lib.get("mediaType") == "book":
+            book_lib_id = lib.get("id")
+            break
+    
+    if not book_lib_id:
+        return {"error": "No book library found"}
+    
+    # Search within the book library
+    return await abs_get(abs_url, abs_api_key, f"/api/libraries/{book_lib_id}/items", params={"query": query, "limit": limit})
 
 
 async def search_books(
