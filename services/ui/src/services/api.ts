@@ -963,7 +963,7 @@ export const api = {
 
   async searchAudiobookshelf(query: string, limit = 20): Promise<{
     status: string;
-    books: Array<{ id: string; title: string; author: string; narrator?: string; cover?: string; genres?: string[]; publishedYear?: string; asin?: string; type?: string; source?: string }>;
+    books: Array<{ id: string; title: string; author: string; narrator?: string; cover?: string; genres?: string[]; publishedYear?: string; asin?: string; type?: string; source?: string; duration?: number; duration_formatted?: string; series?: string; play_url?: string; progress?: any }>;
     podcasts: Array<{ id: string; title: string; author: string; description?: string; cover?: string; trackCount?: number; genres?: string[]; explicit?: boolean; type?: string; source?: string }>;
     authors: Array<{ id: string; name: string; description?: string; image?: string; asin?: string; type?: string; source?: string }>;
     total?: number;
