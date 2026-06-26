@@ -230,7 +230,7 @@ async def get_stream_url(
 
 async def get_libraries(abs_url: str, abs_api_key: str) -> dict:
     """List all ABS libraries."""
-    return await abs_get(abs_url, abs_api_key, "/libraries")
+    return await abs_get(abs_url, abs_api_key, "/api/libraries")
 
 
 async def authorize_token(abs_url: str, abs_api_key: str) -> dict:
