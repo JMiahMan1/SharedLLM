@@ -2,6 +2,8 @@
 # deploy_remote.sh
 # Usage: ./deploy_remote.sh [user@machine_ip] [path_to_app]
 
+set -euo pipefail
+
 ARG_HOST=$1
 if [ -z "$ARG_HOST" ]; then
     echo "ERROR: No host argument provided."
@@ -11,10 +13,13 @@ fi
 HOST="$ARG_HOST"
 DIR="${2:-/home/jeremiah/SharedLLM}"
 
-# Sync local .env to remote to ensure config match
+# SSH options for robustness: auto-accept new host keys, fail on broken pipe
+SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10"
+
+# Sync local .env to remote to ensure config match (use ssh pipe instead of scp for reliability)
 if [ -f .env ]; then
     echo "Syncing local .env to remote..."
-    scp .env "$HOST:$DIR/.env"
+    ssh $SSH_OPTS "$HOST" "mkdir -p '$DIR' && cat > '$DIR/.env'" < .env
 fi
 
 echo "Deploying to $HOST:$DIR"
@@ -24,7 +29,7 @@ BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 echo "Branch: $BRANCH"
 
 # shellcheck disable=SC2087
-if ssh "$HOST" << EOF
+if ssh $SSH_OPTS "$HOST" << EOF
     cd "$DIR"
 
     # Detect Docker user/group IDs dynamically (not hardcoded)
