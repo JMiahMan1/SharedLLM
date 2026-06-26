@@ -308,3 +308,4 @@ The frontend tracks the active playback state using two mechanisms:
   * `library://track/735` - "Help!" by The Beatles
 * **Audio Format:** `mpeg` (119 kbps, 44100 Hz, 16-bit, stereo) from OpenSubsonic provider.
 * **MA JWT Token:** Stored in `.env` file. Admin token for user "summers" with long-lived expiry.
+
