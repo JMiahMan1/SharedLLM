@@ -137,7 +137,125 @@ In alignment with the **"Neon Glass"** design system, the Media Player uses semi
 
 ---
 
-### 3.2 Execution Service Commands
+### 3.2 ABS Library Search
+
+The gateway provides a unified search endpoint that searches the local ABS library first, then falls back to external metadata (iTunes, Audnexus) if no library matches are found.
+
+#### Gateway Search Endpoint
+
+* **Endpoint:** `GET /api/media/audiobookshelf/search?q=<query>&limit=<n>`
+* **Headers:** `Authorization: Bearer <jarvis_api_token>` (per-user credentials)
+* **Description:** Searches the ABS library using the `/api/libraries/{book_library_id}/items?query=<q>&limit=<n>` endpoint. If no library matches are found, falls back to external metadata search (iTunes books, podcasts, Audnexus authors).
+
+**Request:**
+```
+GET /api/media/audiobookshelf/search?q=mark&limit=5
+```
+
+**Response (Library Search Success):**
+```json
+{
+  "status": "SUCCESS",
+  "books": [
+    {
+      "id": "510e38dd-3196-4755-8a9b-7c81208c373b",
+      "title": "God's Smuggler (Unabridged)",
+      "author": "Brother Andrew",
+      "narrator": "Simon Vance",
+      "series": "",
+      "publishedYear": "2009-07-29",
+      "genres": ["Religious", "Missions"],
+      "duration": 31745,
+      "duration_formatted": "8h 49m",
+      "progress": {},
+      "play_url": "https://abs.sumemail.com/api/items/510e38dd-3196-4755-8a9b-7c81208c373b/stream?format=mp4&token=<jwt>",
+      "cover": ""
+    }
+  ],
+  "podcasts": [],
+  "authors": [],
+  "total": 1
+}
+```
+
+**Response (External Metadata Fallback):**
+```json
+{
+  "status": "SUCCESS",
+  "books": [
+    {
+      "id": "B07HHH7L77",
+      "title": "The Hunger Games",
+      "author": "Suzanne Collins",
+      "narrator": "",
+      "publisher": "Scholastic Audio",
+      "description": "...",
+      "cover": "https://covers.example.com/...",
+      "genres": [],
+      "publishedYear": "2010",
+      "asin": "B07HHH7L77",
+      "type": "book",
+      "source": "external"
+    }
+  ],
+  "podcasts": [
+    {
+      "id": "123456789",
+      "title": "The Daily",
+      "author": "The New York Times",
+      "description": "...",
+      "cover": "https://covers.example.com/...",
+      "trackCount": 100,
+      "genres": ["News"],
+      "feedUrl": "https://feeds.example.com/daily",
+      "explicit": false,
+      "type": "podcast",
+      "source": "itunes"
+    }
+  ],
+  "authors": [
+    {
+      "id": "author_123",
+      "name": "Brandon Sanderson",
+      "description": "...",
+      "image": "https://covers.example.com/...",
+      "asin": "",
+      "type": "author",
+      "source": "audnexus"
+    }
+  ],
+  "total": 3
+}
+```
+
+**Response (No Results/ABS Unavailable):**
+```json
+{
+  "status": "SUCCESS",
+  "books": [],
+  "podcasts": [],
+  "authors": [],
+  "total": 0
+}
+```
+
+#### Search Flow
+
+1. **Library Search:** Uses the ABS API key to fetch all libraries, identifies the book library by `media_type='book'`, then searches within that library using `/api/libraries/{library_id}/items?query=<q>&limit=<n>`.
+2. **External Fallback:** If library search returns no results, falls back to `abs_client.search_all()` which queries:
+   - iTunes Search API (`https://itunes.apple.com/search`) for books and podcasts
+   - Audnexus API (`https://audnexus.com/api/v3`) for authors
+3. **Response Format:** Library results include `play_url` (direct ABS stream URL with JWT token) and `progress` (resume progress). External results include `source` field (`external`, `itunes`, `audnexus`) and `type` field (`book`, `podcast`, `author`).
+
+#### ABS Stream URL Format
+
+* **Library Stream:** `https://<abs_host>/api/items/{item_id}/stream?format=mp4&token=<jwt_api_key>`
+* The JWT API key is stored in `.env` as `AUDIOBOOKSHELF_API_KEY` and is resolved per-user from identity settings.
+* Format `mp4` produces M4B-compatible audio streams suitable for browser `<audio>` playback.
+
+---
+
+### 3.3 Execution Service Commands
 
 All remote casting requests are sent through `POST /execute/media/play`:
 

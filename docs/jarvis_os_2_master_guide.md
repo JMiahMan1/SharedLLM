@@ -52,8 +52,10 @@ The frontend uses generic Capability Widgets (MediaWidget, ChoreWidget). The bac
 ### 3.2 Audiobookshelf (ABS)
 
 * **Backend Reality:** execution/handlers/audiobookshelf.py directly interfaces with the ABS API bypassing HA for metadata. It features complex logic to track duration, currentTime, and resume progress (_handle_resume, _handle_progress). It pipes the direct MP4 stream back to HA via play_media. Maps to the audiobookshelfrequest tool.
+* **Library Search (2026-06-25):** The gateway endpoint `GET /api/media/audiobookshelf/search?q=<query>&limit=<n>` first fetches `/api/libraries` to discover the book library ID, then searches via `/api/libraries/{book_library_id}/items?query=<q>&limit=<n>`. If no library matches, falls back to external metadata (iTunes books/podcasts, Audnexus authors). Library results include `play_url` (stream URL with JWT token) and `progress` (resume state). Response format: `{"books": [...], "podcasts": [...], "authors": [...], "total": <n>}`.
 * **Jarvis OS 2.0 Enhancements:**
   * **"Continue Reading" Widget:** Leverages the precise tracking in _handle_progress. Shows the exact progress percentage and a beautifully formatted _format_time string (e.g., "3h 15m remaining") underneath the book cover. Tapping the widget instantly triggers _handle_resume on the room's default speaker.
+  * **Frontend Media Picker:** `Media.tsx` renders library search results with `duration_formatted` display. External metadata results show source badges (`book`, `podcast`, `author`). Both paths trigger browser local playback via the `<audio>` element.
 
 ### 3.3 Raven Autonomous Engine, Ops & The Control Plane (OpenCode Architecture)
 
