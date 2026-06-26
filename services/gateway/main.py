@@ -3972,20 +3972,29 @@ async def switch_model(request: Request):
     if isinstance(provider, OllamaProvider):
         try:
             async with borrow_http_client() as client:
-                # Ollama auto-unloads old model when a new one is requested.
-                # We trigger the switch by making a minimal /api/chat call.
-                chat_resp = await client.post(f"{provider.base_url}/api/chat", json={
+                # First, unload the current model if any
+                ps_resp = await client.get(f"{provider.base_url}/api/ps")
+                if ps_resp.status_code == 200:
+                    ps_data = ps_resp.json()
+                    loaded = ps_data.get("models", [])
+                    if loaded:
+                        current_model = loaded[0].get("model")
+                        if current_model and current_model != model:
+                            await client.post(f"{provider.base_url}/models/unload", json={"model": current_model})
+                            await asyncio.sleep(0.5)
+                
+                # Load the new model
+                load_resp = await client.post(f"{provider.base_url}/api/load", json={
                     "model": model,
-                    "messages": [{"role": "user", "content": "ok"}],
                     "stream": False
                 })
                 
-                if chat_resp.status_code == 200:
+                if load_resp.status_code == 200:
                     return {"status": "loaded", "model": model}
                 else:
                     return JSONResponse(
-                        status_code=chat_resp.status_code, 
-                        content={"error": chat_resp.text}
+                        status_code=load_resp.status_code, 
+                        content={"error": load_resp.text}
                     )
         except Exception as e:
             log.error(f"Error switching model: {e}")
@@ -4005,7 +4014,7 @@ async def unload_model(request: Request):
     if isinstance(provider, OllamaProvider):
         try:
             async with borrow_http_client() as client:
-                # If model not specified, get whatever is loaded
+                # If model not specified, unload whatever is loaded
                 if not model:
                     ps_resp = await client.get(f"{provider.base_url}/api/ps")
                     if ps_resp.status_code == 200:
@@ -4017,23 +4026,15 @@ async def unload_model(request: Request):
                 if not model:
                     return {"status": "success", "message": "No model loaded to unload"}
                 
-                # Ollama doesn't have a dedicated unload endpoint.
-                # We trigger unload by sending a request with keep_alive=0.
-                unload_resp = await client.post(f"{provider.base_url}/api/generate", json={
-                    "model": model,
-                    "prompt": "",
-                    "keep_alive": 0
-                })
+                unload_resp = await client.post(f"{provider.base_url}/models/unload", json={"model": model})
                 
-                # Verify the model was actually unloaded
-                ps_resp = await client.get(f"{provider.base_url}/api/ps")
-                if ps_resp.status_code == 200:
-                    ps_data = ps_resp.json()
-                    remaining = [m["model"] for m in ps_data.get("models", [])]
-                    if model not in remaining:
-                        return {"status": "unloaded", "model": model}
-                
-                return {"status": "success", "message": f"Model {model} may still be cached"}
+                if unload_resp.status_code == 200:
+                    return {"status": "unloaded", "model": model}
+                else:
+                    return JSONResponse(
+                        status_code=unload_resp.status_code, 
+                        content={"error": unload_resp.text}
+                    )
         except Exception as e:
             log.error(f"Error unloading model: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
