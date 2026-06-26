@@ -3957,6 +3957,90 @@ async def list_models(request: Request):
 
 
 
+
+@app.post("/api/models/switch")
+async def switch_model(request: Request):
+    """Switch to a different model by loading it (unloads current if needed)."""
+    body = await request.json()
+    model = body.get("model") if body else None
+    if not model:
+        return JSONResponse(status_code=400, content={"error": "model is required"})
+    
+    settings = await get_llm_settings()
+    provider = await get_provider(settings)
+    
+    if isinstance(provider, OllamaProvider):
+        try:
+            async with borrow_http_client() as client:
+                # First, unload the current model if any
+                ps_resp = await client.get(f"{provider.base_url}/api/ps")
+                if ps_resp.status_code == 200:
+                    ps_data = ps_resp.json()
+                    loaded = ps_data.get("models", [])
+                    if loaded:
+                        current_model = loaded[0].get("model")
+                        if current_model and current_model != model:
+                            await client.post(f"{provider.base_url}/models/unload", json={"model": current_model})
+                            await asyncio.sleep(0.5)
+                
+                # Load the new model
+                load_resp = await client.post(f"{provider.base_url}/api/load", json={
+                    "model": model,
+                    "stream": False
+                })
+                
+                if load_resp.status_code == 200:
+                    return {"status": "loaded", "model": model}
+                else:
+                    return JSONResponse(
+                        status_code=load_resp.status_code, 
+                        content={"error": load_resp.text}
+                    )
+        except Exception as e:
+            log.error(f"Error switching model: {e}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+    
+    return JSONResponse(status_code=500, content={"error": "Model switching only supported for Ollama provider"})
+
+@app.post("/api/models/unload")
+async def unload_model(request: Request):
+    """Unload a model from Ollama."""
+    body = await request.json()
+    model = body.get("model") if body else None
+    
+    settings = await get_llm_settings()
+    provider = await get_provider(settings)
+    
+    if isinstance(provider, OllamaProvider):
+        try:
+            async with borrow_http_client() as client:
+                # If model not specified, unload whatever is loaded
+                if not model:
+                    ps_resp = await client.get(f"{provider.base_url}/api/ps")
+                    if ps_resp.status_code == 200:
+                        ps_data = ps_resp.json()
+                        loaded = ps_data.get("models", [])
+                        if loaded:
+                            model = loaded[0].get("model")
+                
+                if not model:
+                    return {"status": "success", "message": "No model loaded to unload"}
+                
+                unload_resp = await client.post(f"{provider.base_url}/models/unload", json={"model": model})
+                
+                if unload_resp.status_code == 200:
+                    return {"status": "unloaded", "model": model}
+                else:
+                    return JSONResponse(
+                        status_code=unload_resp.status_code, 
+                        content={"error": unload_resp.text}
+                    )
+        except Exception as e:
+            log.error(f"Error unloading model: {e}")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+    
+    return JSONResponse(status_code=500, content={"error": "Model unloading only supported for Ollama provider"})
+
 @app.get("/v1/models")
 async def list_openai_models(request: Request):
     """OpenAI-compatible endpoint to list models."""
