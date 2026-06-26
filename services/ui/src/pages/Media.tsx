@@ -4,7 +4,8 @@ import {
   Play, Pause, Volume2, Volume1, VolumeX, Cast,
   Music, BookOpen, List, Loader2, X, Library, Search,
   SkipBack as SkipBackIcon, SkipForward as SkipForwardIcon,
-  ChevronRight, Grid3X3, Clock, Headphones, Heart, Square
+  ChevronRight, Grid3X3, Clock, Heart, Square,
+  Mic2, Users
 } from 'lucide-react';
 import { api } from '../services/api';
 import { useHaptics } from '../hooks/useHaptics';
@@ -713,26 +714,54 @@ const MediaExplorerModal = ({
               {search.length >= 2 && (
                 <div className="mt-4">
                   <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                    <Search size={12} />Search Results
+                    <Search size={12} />Search Results ({absSearchResults?.total || 0})
                   </h3>
                   {absSearchLoading ? loadingSection() : absSearchError ? (
                     <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
                       <p className="text-sm text-red-400">Search failed. Check your server connection.</p>
                     </div>
-                  ) : !absSearchResults?.books?.length ? emptySection(`No results for "${search}"`) : (
+                  ) : !absSearchResults?.books?.length && !absSearchResults?.podcasts?.length && !absSearchResults?.authors?.length ? emptySection(`No results for "${search}"`) : (
                     <div className="space-y-1.5">
                       {absSearchResults.books.map((book) => (
-                        <button key={book.id} onClick={() => handlePlay(book.id, 'audiobook', book.title, book.author)} disabled={!localMode && !selectedTarget}
+                        <button key={`book-${book.id}`} onClick={() => handlePlay(book.id, 'audiobook', book.title, book.author)} disabled={!localMode && !selectedTarget}
                           className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
                           {itemLoading === `abs-${book.id}` ?
                             <Loader2 size={18} className="text-amber-400 animate-spin shrink-0" /> :
                             <BookOpen size={18} className="text-amber-400 shrink-0" />}
                           <div className="min-w-0 flex-1">
                             <p className="text-white text-sm font-medium truncate">{book.title}</p>
-                            <p className="text-xs text-slate-400">{book.author}</p>
+                            <p className="text-xs text-slate-400">{book.author || book.narrator || book.publisher || 'External'}</p>
                           </div>
-                          {book.narrator && <Headphones size={12} className="text-slate-500 shrink-0" />}
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 shrink-0">book</span>
                           <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                        </button>
+                      ))}
+                      {absSearchResults.podcasts.map((pod) => (
+                        <button key={`pod-${pod.id}`} onClick={() => handlePlay(pod.id, 'playlist', pod.title, pod.author)} disabled={!localMode && !selectedTarget}
+                          className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
+                          {itemLoading === `abs-pod-${pod.id}` ?
+                            <Loader2 size={18} className="text-blue-400 animate-spin shrink-0" /> :
+                            <Mic2 size={18} className="text-blue-400 shrink-0" />}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-white text-sm font-medium truncate">{pod.title}</p>
+                            <p className="text-xs text-slate-400">{pod.author || 'Unknown'}</p>
+                          </div>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 shrink-0">podcast</span>
+                          <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                        </button>
+                      ))}
+                      {absSearchResults.authors.map((author) => (
+                        <button key={`auth-${author.id}`} onClick={() => { setSearch(author.name); }} disabled={!localMode && !selectedTarget}
+                          className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
+                          {itemLoading === `abs-auth-${author.id}` ?
+                            <Loader2 size={18} className="text-emerald-400 animate-spin shrink-0" /> :
+                            <Users size={18} className="text-emerald-400 shrink-0" />}
+                          <div className="min-w-0 flex-1">
+                            <p className="text-white text-sm font-medium truncate">{author.name}</p>
+                            <p className="text-xs text-slate-400">Search author</p>
+                          </div>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 shrink-0">author</span>
+                          <Search size={14} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                         </button>
                       ))}
                     </div>
