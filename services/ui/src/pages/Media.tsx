@@ -730,7 +730,10 @@ const MediaExplorerModal = ({
                             <BookOpen size={18} className="text-amber-400 shrink-0" />}
                           <div className="min-w-0 flex-1">
                             <p className="text-white text-sm font-medium truncate">{book.title}</p>
-                            <p className="text-xs text-slate-400">{book.author || book.narrator || book.publisher || 'External'}</p>
+                            <p className="text-xs text-slate-400">{book.author || book.narrator || 'Unknown author'}</p>
+                            {book.duration_formatted && (
+                              <p className="text-[10px] text-slate-500">{book.duration_formatted}</p>
+                            )}
                           </div>
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 shrink-0">book</span>
                           <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
