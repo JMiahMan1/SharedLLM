@@ -148,11 +148,13 @@ The gateway provides a unified search endpoint that searches the local ABS libra
 * **Description:** Searches the ABS library using the `/api/libraries/{book_library_id}/items?query=<q>&limit=<n>` endpoint. If no library matches are found, falls back to external metadata search (iTunes books, podcasts, Audnexus authors).
 
 **Request:**
-```
+
+```text
 GET /api/media/audiobookshelf/search?q=mark&limit=5
 ```
 
 **Response (Library Search Success):**
+
 ```json
 {
   "status": "SUCCESS",
@@ -179,6 +181,7 @@ GET /api/media/audiobookshelf/search?q=mark&limit=5
 ```
 
 **Response (External Metadata Fallback):**
+
 ```json
 {
   "status": "SUCCESS",
@@ -229,6 +232,7 @@ GET /api/media/audiobookshelf/search?q=mark&limit=5
 ```
 
 **Response (No Results/ABS Unavailable):**
+
 ```json
 {
   "status": "SUCCESS",
@@ -249,9 +253,9 @@ GET /api/media/audiobookshelf/search?q=mark&limit=5
 
 #### ABS Stream URL Format
 
-* **Library Stream:** `https://<abs_host>/api/items/{item_id}/stream?format=mp4&token=<jwt_api_key>`
-* The JWT API key is stored in `.env` as `AUDIOBOOKSHELF_API_KEY` and is resolved per-user from identity settings.
-* Format `mp4` produces M4B-compatible audio streams suitable for browser `<audio>` playback.
+- **Library Stream:** `https://<abs_host>/api/items/{item_id}/stream?format=mp4&token=<jwt_api_key>`
+- The JWT API key is stored in `.env` as `AUDIOBOOKSHELF_API_KEY` and is resolved per-user from identity settings.
+- Format `mp4` produces M4B-compatible audio streams suitable for browser `<audio>` playback.
 
 ---
 
