@@ -961,7 +961,13 @@ export const api = {
     return resp.data;
   },
 
-  async searchAudiobookshelf(query: string, limit = 20): Promise<{ status: string; books: Array<{ id: string; title: string; author: string; narrator?: string; duration?: number }> }> {
+  async searchAudiobookshelf(query: string, limit = 20): Promise<{
+    status: string;
+    books: Array<{ id: string; title: string; author: string; narrator?: string; cover?: string; genres?: string[]; publishedYear?: string; asin?: string; type?: string; source?: string }>;
+    podcasts: Array<{ id: string; title: string; author: string; description?: string; cover?: string; trackCount?: number; genres?: string[]; explicit?: boolean; type?: string; source?: string }>;
+    authors: Array<{ id: string; name: string; description?: string; image?: string; asin?: string; type?: string; source?: string }>;
+    total?: number;
+  }> {
     const resp = await apiClient.get(`/api/media/audiobookshelf/search?q=${encodeURIComponent(query)}&limit=${limit}`);
     return resp.data;
   },
