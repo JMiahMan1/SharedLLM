@@ -203,3 +203,4 @@ Each state transition persists:
 - jarvis_os_2_ui_wireframes.md: UI wireframes and component specifications
 - docs/roadmap.md: Feature roadmap and progress tracking
 - RAVEN_AUDIT_BLUEPRINT.md: Raven 2.0 architectural overhaul and hardening blueprint
+
