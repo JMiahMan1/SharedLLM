@@ -45,7 +45,6 @@ CREDENTIAL_KEYS = {
 
 THINKING_PATTERNS = [
     re.compile(r'<think>.*?</think>', re.DOTALL),
-    re.compile(r'<think>.*?</think>', re.DOTALL),
     re.compile(r'<thinking>.*?</thinking>', re.DOTALL),
 ]
 
@@ -1217,7 +1216,8 @@ async def run_post_write_lint(file_path: str, execution_svc: str, internal_secre
             )
             if lint_resp.status_code == 200:
                 lint_data = lint_resp.json()
-                if lint_data.get("status") == "FAILURE":
+                lint_passed = lint_data.get("detail", {}).get("passed", True)
+                if lint_passed is False:
                     lint_msg = lint_data.get("message", "")
                     detail = lint_data.get("detail", {}) or {}
                     results = detail.get("results", []) if isinstance(detail, dict) else []
