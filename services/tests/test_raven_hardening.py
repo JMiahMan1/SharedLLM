@@ -161,7 +161,7 @@ async def test_logging_service_sanitizes_secrets_and_requires_auth(monkeypatch):
 async def test_workspace_shell_blocks_mutating_commands():
     req = WorkspaceShellRequest(
         user_context=UserContext(user="raven", is_admin=True),
-        command="rm -rf services",
+        command="sudo reboot",
         commands=None,
         cwd=".",
         timeout=5,

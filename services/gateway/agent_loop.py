@@ -14,7 +14,7 @@ from services.gateway.config import (
     RAVEN_MAX_TOTAL_SECONDS,
     RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
 )
-from services.gateway.prompts import RAVEN_PLAN_PROMPT, RAVEN_REFLECTION_PROMPT
+from services.gateway.prompts import load_prompt, PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION
 from services.gateway.schemas import ResolvedCredentials
 from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider
 
@@ -489,8 +489,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     # --- PLANNING PHASE ---
     try:
+        raven_plan = await load_prompt(get_http_client(), PROMPT_RAVEN_PLAN)
         plan_prompt = [
-            {"role": "system", "content": RAVEN_PLAN_PROMPT},
+            {"role": "system", "content": raven_plan},
             {"role": "user", "content": f"Mission: {query}\n\nCreate a concise execution plan:"}
         ]
         plan_data = await execute_inference(provider, selected_model, plan_prompt, {"temperature": 0.1, "num_predict": 512})
@@ -1154,8 +1155,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     reflection_summary = ""
     if action_log and successful_tool_calls > 0:
         try:
+            raven_reflection = await load_prompt(get_http_client(), PROMPT_RAVEN_REFLECTION)
             reflection_prompt = [
-                {"role": "system", "content": RAVEN_REFLECTION_PROMPT},
+                {"role": "system", "content": raven_reflection},
                 {"role": "user", "content": f"Mission: {query}\n\nPlan:\n{generated_plan}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nFinal result: {ans}\n\nProvide your reflection:"}
             ]
             reflection_data = await execute_inference(provider, selected_model, reflection_prompt, {"temperature": 0.1})

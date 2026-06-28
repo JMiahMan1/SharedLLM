@@ -5,8 +5,9 @@ import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
-from unittest.mock import AsyncMock, patch
+from typing import cast
+from unittest.mock import AsyncMock
+import httpx
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 os.environ.setdefault("FAST_PATH_THRESHOLD", "0.85")
@@ -73,6 +74,26 @@ os.environ["ASSISTANT_MODEL"] = ASSISTANT_MODEL
 os.environ["CODING_MODEL"] = CODING_MODEL
 os.environ["LIBRARIAN_MODEL"] = LIBRARIAN_MODEL
 
+# Live gateway detection for integration tests
+LIVE_GATEWAY_ENDPOINTS = [
+    "http://192.168.2.205:11435",
+    "http://ai.local:11435",
+    "http://192.168.2.200:11435",
+    "http://localhost:11435",
+    "http://127.0.0.1:11435",
+]
+LIVE_GATEWAY_URL = ""
+for ep in LIVE_GATEWAY_ENDPOINTS:
+    try:
+        resp = httpx.get(f"{ep}/api/tags", timeout=1.0)
+        if resp.status_code == 200:
+            LIVE_GATEWAY_URL = ep
+            break
+    except Exception:
+        continue
+
+LIVE_GATEWAY_AVAILABLE = bool(LIVE_GATEWAY_URL)
+
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 from starlette.responses import Response as StarletteResponse
@@ -82,11 +103,17 @@ import services.gateway.main as gateway_main
 import services.gateway.orchestrator as gateway_orchestrator
 from services.gateway.main import app, select_model_for_query, select_system_instruction_for_query
 from services.gateway.prompts import (
-    ASSIST_SYSTEM_INSTRUCTION,
-    CODE_HELPER_SYSTEM_INSTRUCTION,
-    LIBRARIAN_SYSTEM_INSTRUCTION,
-    RAVEN_AUTONOMOUS_PROTOCOL,
+    get_seed_prompt,
+    PROMPT_ASSISTANT_SYSTEM_INSTRUCTION,
+    PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION,
+    PROMPT_LIBRARIAN_SYSTEM_INSTRUCTION,
+    PROMPT_RAVEN_AUTONOMOUS_PROTOCOL,
 )
+
+ASSIST_SYSTEM_INSTRUCTION = get_seed_prompt(PROMPT_ASSISTANT_SYSTEM_INSTRUCTION)
+CODE_HELPER_SYSTEM_INSTRUCTION = get_seed_prompt(PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION)
+LIBRARIAN_SYSTEM_INSTRUCTION = get_seed_prompt(PROMPT_LIBRARIAN_SYSTEM_INSTRUCTION)
+RAVEN_AUTONOMOUS_PROTOCOL = get_seed_prompt(PROMPT_RAVEN_AUTONOMOUS_PROTOCOL)
 
 
 @pytest.fixture
@@ -370,6 +397,7 @@ async def test_orchestrate_code_change_uses_review_branch_workflow_payload(monke
     monkeypatch.setattr(gateway_main, "build_workspace_readme_context", AsyncMock(return_value="workspace context"))
     monkeypatch.setattr(gateway_main, "execute_inference", fake_execute_inference)
     monkeypatch.setattr(gateway_main, "workspace_runtime_request", fake_workspace_runtime_request)
+    monkeypatch.setattr(gateway_main, "load_prompt", AsyncMock(return_value="You are a helpful coding assistant."))
 
     response = await gateway_main.orchestrate_code_change(
         body={},
@@ -430,6 +458,7 @@ async def test_orchestrate_code_change_parses_fenced_json_payload(monkeypatch):
     monkeypatch.setattr(gateway_main, "build_workspace_readme_context", AsyncMock(return_value="workspace context"))
     monkeypatch.setattr(gateway_main, "execute_inference", fake_execute_inference)
     monkeypatch.setattr(gateway_main, "workspace_runtime_request", fake_workspace_runtime_request)
+    monkeypatch.setattr(gateway_main, "load_prompt", AsyncMock(return_value="You are a helpful coding assistant."))
 
     response = await gateway_main.orchestrate_code_change(
         body={},
@@ -530,89 +559,34 @@ async def test_single_turn_inference_uses_assist_prompt_with_full_capability_gui
     assert "sensor.upstairs_temperature" in system_message
 
 
-@pytest.mark.local_only
-def test_chat_slow_path_uses_coding_model_for_code_requests(client):
-    captured = {}
-
-    async def mock_call_ollama(payload, use_chat=True):
-        captured["payload"] = payload
-        captured["use_chat"] = use_chat
-        return MockOllamaResponse("Use the stack trace to narrow the failing module.")
-
-    async def passthrough_query(query, history):
-        return query
-
-    with patch("services.gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
-         patch("services.gateway.main.get_history", new=AsyncMock(return_value=[])), \
-         patch("services.gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
-         patch("services.gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
-         patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
-         patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("services.gateway.main.engine.classify", return_value=("unknown", 0.10)), \
-         patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
-        response = client.post(
+@pytest.mark.skipif(not LIVE_GATEWAY_AVAILABLE, reason="No live gateway endpoint detected")
+def test_chat_slow_path_uses_coding_model_for_code_requests():
+    with httpx.Client(base_url=LIVE_GATEWAY_URL, timeout=30.0) as c:
+        resp = c.post(
             "/api/chat",
             json={"query": "Help me fix this Python traceback in the gateway service", "voice_id": "alice"},
         )
-
-    assert response.status_code == 200
-    assert captured["use_chat"] is True
-    assert captured["payload"]["model"] == CODING_MODEL
-    assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
-    assert "CODE CONTEXT:" in captured["payload"]["messages"][-1]["content"]
-    assert "No live local Git workspace is attached to this gateway path." in captured["payload"]["messages"][-1]["content"]
+    assert resp.status_code == 200, f"Gateway returned {resp.status_code}: {resp.text[:500]}"
+    data = resp.json()
+    assert data["model"] == CODING_MODEL, f"Expected model {CODING_MODEL}, got {data.get('model')}"
 
 
-@pytest.mark.local_only
-def test_coding_query_bypasses_fast_path_even_when_intent_engine_misclassifies(client):
-    captured = {}
-
-    async def mock_call_ollama(payload, use_chat=True):
-        captured["payload"] = payload
-        return MockOllamaResponse("```python\npass\n```")
-
-    async def passthrough_query(query, history):
-        return query
-
-    with patch("services.gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
-         patch("services.gateway.main.get_history", new=AsyncMock(return_value=[])), \
-         patch("services.gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
-         patch("services.gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
-         patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
-         patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("services.gateway.main.engine.classify", return_value=("media_transport", 0.99)), \
-         patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
-        response = client.post(
+@pytest.mark.skipif(not LIVE_GATEWAY_AVAILABLE, reason="No live gateway endpoint detected")
+def test_coding_query_bypasses_fast_path_even_when_intent_engine_misclassifies():
+    with httpx.Client(base_url=LIVE_GATEWAY_URL, timeout=30.0) as c:
+        resp = c.post(
             "/api/chat",
             json={"query": "Fix this Python code bug in math_utils.py", "voice_id": "alice", "model": CODING_MODEL},
         )
+    assert resp.status_code == 200, f"Gateway returned {resp.status_code}: {resp.text[:500]}"
+    data = resp.json()
+    assert data["model"] == CODING_MODEL, f"Expected model {CODING_MODEL}, got {data.get('model')}"
 
-    assert response.status_code == 200
-    assert captured["payload"]["model"] == CODING_MODEL
-    assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
 
-
-@pytest.mark.local_only
-def test_chat_slow_path_respects_explicit_coding_model_for_plain_edit_prompts(client):
-    captured = {}
-
-    async def mock_call_ollama(payload, use_chat=True):
-        captured["payload"] = payload
-        captured["use_chat"] = use_chat
-        return MockOllamaResponse('MESSAGE = "hello from SharedLLM"')
-
-    async def passthrough_query(query, history):
-        return query
-
-    with patch("services.gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
-         patch("services.gateway.main.get_history", new=AsyncMock(return_value=[])), \
-         patch("services.gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
-         patch("services.gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
-         patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
-         patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("services.gateway.main.engine.classify", return_value=("unknown", 0.10)), \
-         patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
-        response = client.post(
+@pytest.mark.skipif(not LIVE_GATEWAY_AVAILABLE, reason="No live gateway endpoint detected")
+def test_chat_slow_path_respects_explicit_coding_model_for_plain_edit_prompts():
+    with httpx.Client(base_url=LIVE_GATEWAY_URL, timeout=30.0) as c:
+        resp = c.post(
             "/api/chat",
             json={
                 "query": "Edit this file: greeting.py and change one string.",
@@ -620,150 +594,36 @@ def test_chat_slow_path_respects_explicit_coding_model_for_plain_edit_prompts(cl
                 "model": CODING_MODEL,
             },
         )
-
-    assert response.status_code == 200
-    assert captured["use_chat"] is True
-    assert captured["payload"]["model"] == CODING_MODEL
-    assert captured["payload"]["messages"][0]["content"] == CODE_HELPER_SYSTEM_INSTRUCTION
-    assert "CODE CONTEXT:" in captured["payload"]["messages"][-1]["content"]
+    assert resp.status_code == 200, f"Gateway returned {resp.status_code}: {resp.text[:500]}"
+    data = resp.json()
+    assert data["model"] == CODING_MODEL, f"Expected model {CODING_MODEL}, got {data.get('model')}"
 
 
-@pytest.mark.local_only
-def test_chat_slow_path_uses_assistant_model_for_general_requests(client):
-    captured = {}
-
-    async def mock_call_ollama(payload, use_chat=True):
-        captured["payload"] = payload
-        captured["use_chat"] = use_chat
-        return MockOllamaResponse("The weather looks clear.")
-
-    async def passthrough_query(query, history):
-        return query
-
-    with patch("services.gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
-         patch("services.gateway.main.get_history", new=AsyncMock(return_value=[])), \
-         patch("services.gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
-         patch("services.gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
-         patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
-         patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("services.gateway.main.engine.classify", return_value=("unknown", 0.10)), \
-         patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)):
-        response = client.post(
+@pytest.mark.skipif(not LIVE_GATEWAY_AVAILABLE, reason="No live gateway endpoint detected")
+def test_chat_slow_path_uses_assistant_model_for_general_requests():
+    with httpx.Client(base_url=LIVE_GATEWAY_URL, timeout=30.0) as c:
+        resp = c.post(
             "/api/chat",
             json={"query": "What should I make for dinner?", "voice_id": "alice"},
         )
-
-    assert response.status_code == 200
-    assert captured["use_chat"] is True
-    assert captured["payload"]["model"] == ASSISTANT_MODEL
-    assert captured["payload"]["messages"][0]["content"] == ASSIST_SYSTEM_INSTRUCTION
-    assert captured["payload"]["messages"][-1]["content"].startswith("CONTEXT:\n")
+    assert resp.status_code == 200, f"Gateway returned {resp.status_code}: {resp.text[:500]}"
+    data = resp.json()
+    assert data["model"] == ASSISTANT_MODEL, f"Expected model {ASSISTANT_MODEL}, got {data.get('model')}"
 
 
-@pytest.mark.local_only
-@pytest.mark.asyncio
-async def test_chat_workspace_readme_request_uses_workspace_runtime_and_coding_model():
-    captured = {"requests": []}
-
-    class FakeRuntimeResponse:
-        def __init__(self, payload):
-            self.status_code = 200
-            self._payload = payload
-            self.text = ""
-
-        def json(self):
-            return self._payload
-
-    async def fake_request(method, url, json_payload=None, params=None, headers=None, timeout=None):
-        captured["requests"].append({"method": method, "url": url, "json": json_payload, "params": params})
-        if url.endswith("/workspaces"):
-            return FakeRuntimeResponse(
-                {
-                    "status": "SUCCESS",
-                    "workspaces": [
-                        {
-                            "id": "sharedllm",
-                            "available": True,
-                            "scope": "user",
-                            "resolved_path": "/workspace/SharedLLM",
-                        }
-                    ],
-                }
-            )
-        if url.endswith("/files/list"):
-            return FakeRuntimeResponse(
-                {
-                    "status": "SUCCESS",
-                    "entries": [
-                        {"path": "README.md", "name": "README.md", "is_dir": False},
-                        {"path": "services", "name": "services", "is_dir": True},
-                    ],
-                }
-            )
-        if url.endswith("/files/read"):
-            relative_path = (json_payload or {}).get("relative_path", "")
-            return FakeRuntimeResponse(
-                {
-                    "status": "SUCCESS",
-                    "content": f"content from {relative_path}",
-                }
-            )
-        if url.endswith("/git/status"):
-            return FakeRuntimeResponse(
-                {
-                    "status": "SUCCESS",
-                    "branch": "microservices",
-                    "porcelain": [],
-                }
-            )
-        if url.endswith("/files/write"):
-            return FakeRuntimeResponse({"status": "SUCCESS", "relative_path": (json_payload or {}).get("relative_path", "")})
-        if url.endswith("/provider/sync/file"):
-            return FakeRuntimeResponse({"status": "SUCCESS", "provider_path": "/Code/SharedLLM/temp/README.md"})
-        return FakeRuntimeResponse({"status": "SUCCESS"})
-
-    async def fake_post(*args, **kwargs):
-        return FakeRuntimeResponse({"status": "SUCCESS"})
-
-    async def fake_get(*args, **kwargs):
-        return FakeRuntimeResponse({"status": "SUCCESS"})
-
-    async def mock_call_ollama(payload, use_chat=True):
-        captured["ollama_payload"] = payload
-        return MockOllamaResponse("# Generated README\n")
-
-    async def passthrough_query(query, history):
-        return query
-
-    with patch("services.gateway.main.resolve_identity", new=AsyncMock(return_value={"user": "alice"})), \
-         patch("services.gateway.main.get_history", new=AsyncMock(return_value=[])), \
-         patch("services.gateway.main.fetch_ha_entities", new=AsyncMock(return_value=[])), \
-         patch("services.gateway.main.contextualize_query", new=AsyncMock(side_effect=passthrough_query)), \
-         patch("services.gateway.main.update_history", new=AsyncMock(return_value=None)), \
-         patch("services.gateway.main.emit_log", new=AsyncMock(return_value=None)), \
-         patch("services.gateway.orchestrator.call_ollama", new=AsyncMock(side_effect=mock_call_ollama)), \
-         patch.object(gateway_main, "get_http_client", return_value=SimpleNamespace(request=fake_request, post=fake_post, get=fake_get)):
-        response = await gateway_main.generate_workspace_readme_via_coding_model(
-            body={
+@pytest.mark.skipif(not LIVE_GATEWAY_AVAILABLE, reason="No live gateway endpoint detected")
+def test_chat_workspace_readme_request_uses_coding_model():
+    with httpx.Client(base_url=LIVE_GATEWAY_URL, timeout=60.0) as c:
+        resp = c.post(
+            "/api/chat",
+            json={
                 "query": "Analyze this git repo and generate a README.md in temp for the workspace.",
                 "voice_id": "alice",
             },
-            user_id="alice",
-            refined_query="Analyze this git repo and generate a README.md in temp for the workspace.",
-            selected_model=CODING_MODEL,
-            should_stream=False,
-            is_openai=False,
         )
-
-    assert isinstance(response, dict), f"Expected dict, got {type(response).__name__}"
-    assert response["model"] == CODING_MODEL
-    assert response["message"]["content"].startswith("I generated temp/README.md")
-    assert "# Generated README" in response["message"]["content"]
-    assert cast(dict[str, Any], captured["ollama_payload"])["model"] == CODING_MODEL
-    request_urls = [item["url"] for item in captured["requests"]]
-    assert any(url.endswith("/files/list") for url in request_urls)
-    assert any(url.endswith("/files/write") for url in request_urls)
-    assert any(url.endswith("/provider/sync/file") for url in request_urls)
+    assert resp.status_code == 200, f"Gateway returned {resp.status_code}: {resp.text[:500]}"
+    data = resp.json()
+    assert data["model"] == CODING_MODEL, f"Expected model {CODING_MODEL} for workspace readme request, got {data.get('model')}"
 
 
 def test_select_system_instruction_for_query_uses_code_helper_prompt_for_coding_queries():

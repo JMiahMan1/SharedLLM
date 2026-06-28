@@ -27,13 +27,18 @@ from services.gateway.agent_loop import (
 )
 from services.gateway.config import INTERNAL_SECRET, CONFIG
 from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
-from services.gateway.orchestrator import get_all_settings, _get, SINGLE_TURN_TOOL_GUIDE
+from services.gateway.orchestrator import get_all_settings, _get
 from services.gateway.config_validator import validate_config
 from services.gateway.intent_engine import engine
 from services.gateway.history import update_history, ping_redis, get_history, get_long_term_memory
 from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
 from services.gateway.ma_ws_client import MAWebSocketClient
-from services.gateway.prompts import ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION, MEDIA_TROUBLESHOOTING_PROMPT
+from services.gateway.prompts import (
+    load_prompt_sync, load_prompt,
+    PROMPT_ASSISTANT_SYSTEM_INSTRUCTION, PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION, PROMPT_MEDIA_TROUBLESHOOTING, PROMPT_SINGLE_TURN_TOOL_GUIDE,
+    # Backward-compat aliases for tests and external references
+    ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION,
+)
 from services.gateway.messaging import InferenceJobQueue, JobStatus
 from services.gateway.background_worker import worker as raven_worker
 
@@ -832,15 +837,14 @@ async def select_model_for_query(query: str) -> str:
 
 
 def select_system_instruction_for_query(query: str, selected_model: str) -> str:
-    from services.gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL, RAVEN_NARRATOR_PROTOCOL
     q = (query or "").lower()
     if any(token in q for token in TTS_SIGNALS):
-      return RAVEN_NARRATOR_PROTOCOL
+      return load_prompt_sync("raven_narrator_protocol")
     if any(token in q for token in AUTONOMOUS_SIGNALS):
-      return RAVEN_AUTONOMOUS_PROTOCOL
+      return load_prompt_sync("raven_autonomous_protocol")
     if any(token in q for token in CODING_SIGNALS):
-      return CODE_HELPER_SYSTEM_INSTRUCTION
-    return ASSIST_SYSTEM_INSTRUCTION
+      return load_prompt_sync("code_helper_system_instruction")
+    return load_prompt_sync("assistant_system_instruction")
 
 
 def is_coding_query(query: str) -> bool:
@@ -1229,10 +1233,11 @@ async def generate_workspace_readme_via_coding_model(
       f"Workspace context:\n{workspace_context}\n\n"
       f"User request:\n{refined_query}\n"
     )
+    code_helper_prompt = await load_prompt(get_http_client(), PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION)
     payload = {
       "model": selected_model,
       "messages": [
-        {"role": "system", "content": CODE_HELPER_SYSTEM_INSTRUCTION},
+        {"role": "system", "content": code_helper_prompt},
         {"role": "user", "content": prompt},
       ],
       "stream": False,
@@ -1321,10 +1326,11 @@ async def orchestrate_code_change(
         f"### User Request: {refined_query}\n"
     )
     
+    code_helper_prompt = await load_prompt(get_http_client(), PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION)
     payload = {
         "model": selected_model,
         "messages": [
-            {"role": "system", "content": CODE_HELPER_SYSTEM_INSTRUCTION},
+            {"role": "system", "content": code_helper_prompt},
             {"role": "user", "content": prompt},
         ],
         "stream": False,
@@ -1624,8 +1630,9 @@ def resolve_video_target(query: str, entities: list[dict], cached_device: str | 
 
 
 async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
+    media_prompt = await load_prompt(get_http_client(), PROMPT_MEDIA_TROUBLESHOOTING)
     prompt = (
-      f"{MEDIA_TROUBLESHOOTING_PROMPT}\n"
+      f"{media_prompt}\n"
       f"User request: {query}\n"
       f"Failure: {failure}"
     )
@@ -2771,14 +2778,7 @@ async def chat_handler(request: Request, background_tasks=None):
     if any(k in query.lower() for k in autonomy_signals) or ":" in query[:15]:
         log.info("[ShadowExecution] AUTONOMOUS MISSION DETECTED via keyword/protocol signal")
         is_autonomous = True
-        try:
-            from .prompts import RAVEN_AUTONOMOUS_PROTOCOL
-        except (ImportError, ValueError):
-            try:
-                from prompts import RAVEN_AUTONOMOUS_PROTOCOL
-            except ImportError:
-                from gateway.prompts import RAVEN_AUTONOMOUS_PROTOCOL
-        system_instruction = RAVEN_AUTONOMOUS_PROTOCOL
+        system_instruction = await load_prompt(get_http_client(), "raven_autonomous_protocol")
 
     admin_tag = " (ADMIN)" if creds.is_admin else ""
     user_info = f"Current User: {user_id}{admin_tag}"
@@ -4213,7 +4213,8 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         # Enqueue the job for execution
         target_model = (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or coding_model
         system_prompt = "You are Raven, an autonomous agent executing a user-assigned background mission.\n\n"
-        system_prompt += SINGLE_TURN_TOOL_GUIDE
+        single_turn_guide = await load_prompt(client, PROMPT_SINGLE_TURN_TOOL_GUIDE)
+        system_prompt += single_turn_guide
         system_prompt += f"\n\nExecute the following task to the best of your ability:\n{mission_data['proposed_mission']}"
         
         await job_queue.enqueue_job(creds.get("user_id") or "raven_user", {
