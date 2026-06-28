@@ -35,9 +35,7 @@ from services.gateway.media_device_cache import get_last_used_device, set_last_u
 from services.gateway.ma_ws_client import MAWebSocketClient
 from services.gateway.prompts import (
     load_prompt_sync, load_prompt,
-    PROMPT_ASSISTANT_SYSTEM_INSTRUCTION, PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION, PROMPT_MEDIA_TROUBLESHOOTING, PROMPT_SINGLE_TURN_TOOL_GUIDE,
-    # Backward-compat aliases for tests and external references
-    ASSIST_SYSTEM_INSTRUCTION, CODE_HELPER_SYSTEM_INSTRUCTION,
+    PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION, PROMPT_MEDIA_TROUBLESHOOTING, PROMPT_SINGLE_TURN_TOOL_GUIDE,
 )
 from services.gateway.messaging import InferenceJobQueue, JobStatus
 from services.gateway.background_worker import worker as raven_worker
