@@ -13,6 +13,7 @@ from services.gateway.config import (
 )
 from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider, OllamaProvider
 from services.gateway.schemas import ResolvedCredentials
+from services.gateway.prompts import load_prompt_sync, PROMPT_SINGLE_TURN_TOOL_GUIDE
 
 log = logging.getLogger("gateway.orchestrator")
 
@@ -220,35 +221,6 @@ _TOOL_SERVICE_MAP = {
     "workspacebootstraprequest": "workspace_runtime_svc_url",
     "contextsearchrequest": "rag_svc_url",
 }
-
-SINGLE_TURN_TOOL_GUIDE = """
-# CORE PROTOCOLS
-1. **JSON ONLY**: You MUST output ONLY the JSON block. No preamble, no natural language.
-2. **STRICT SCHEMA**: Your JSON must use lowercase "action" and "payload".
-3. **ONE ACTION**: Only one action per turn.
-4. **NO TOOL CALLS FOR SIMPLE CHAT**: If the user asks a simple question (greeting, math, facts, time, weather), just answer directly. Do NOT call any tools.
-
-# VALID TOOLS (MANDATORY NAMES)
-- Git: GitOperationRequest (actions: status, add, commit, push, pull, diff)
-- Docker: DockerLogsRequest, DockerComposeRequest
-- File: WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest
-- Storage: StorageFileReadRequest, StorageFileWriteRequest, StorageListRequest, StorageIndexRequest
-- Home Assistant: LightControlRequest, MediaPlayRequest, MediaStatusRequest (for "what's playing"), LogbookRequest (for device logs)
-- Announcements: AnnouncementRequest (payload: entity_id, message) - use for TTS announcements on media players
-- Talk: TalkRequest (actions: list, send, messages; payload: message, target_user)
-- LLM Info: LLMInfoRequest (actions: list, ps, version, show)
-- Verification: ExecutionLogRequest (use to verify a task was actually performed - filters by service/keyword)
-
-# OUTPUT FORMAT (MANDATORY)
-```json
-{
-  "action": "TOOL_NAME",
-  "payload": {
-    "key": "value"
-  }
-}
-```
-"""
 
 
 async def get_llm_settings() -> Dict[str, str]:
@@ -643,7 +615,8 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
 
 async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None, show_thinking: bool = False) -> str:
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
-    system = f"{system_prompt.strip()}\n\nCurrent Date/Time: {now}\n\nSystem Capability Context:\n{SINGLE_TURN_TOOL_GUIDE}\n\nRetrieved Context:\n{rag_context}"
+    single_turn_guide = load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE)
+    system = f"{system_prompt.strip()}\n\nCurrent Date/Time: {now}\n\nSystem Capability Context:\n{single_turn_guide}\n\nRetrieved Context:\n{rag_context}"
     log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
     if rag_context:
         log.info(f"[_single_turn_inference] RAG context preview: {rag_context[:300]}")
