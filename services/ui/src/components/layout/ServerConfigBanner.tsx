@@ -13,6 +13,7 @@ const ServerConfigBanner = () => {
   const mountedRef = useRef(false);
 
   const check = useCallback(async () => {
+    if (!mountedRef.current) return;
     const serverUrl = await storageGet('jarvis_server_url');
 
     if (!serverUrl) {

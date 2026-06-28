@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Capacitor } from '@capacitor/core';
 import BottomNav from './BottomNav';
 import Header from './Header';
@@ -9,7 +10,15 @@ interface MobileShellProps {
 
 const MobileShell = ({ children }: MobileShellProps) => {
   const isNative = Capacitor.isNativePlatform();
-  const isMobileWidth = typeof window !== 'undefined' && window.innerWidth < 768;
+  const [isMobileWidth, setIsMobileWidth] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobileWidth(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   const showBottomNav = isNative || isMobileWidth;
 
   return (
