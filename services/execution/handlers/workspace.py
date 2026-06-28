@@ -18,15 +18,45 @@ from services.execution.schemas import (
 
 log = logging.getLogger("execution.workspace")
 READ_ONLY_SHELL_COMMANDS = {
-    "cat", "find", "git", "head", "ls", "pwd", "rg", "sed", "tail", "wc", "grep", "du", "stat"
+    # File reading / listing
+    "cat", "find", "head", "ls", "pwd", "rg", "sed", "tail", "wc", "grep", "du", "stat", "file",
+    # System info
+    "uptime", "whoami", "id", "hostname", "date", "echo", "printenv",
+    # Text processing
+    "sort", "uniq", "tr", "cut", "awk", "xxd",
+    # Shell builtins
+    "env", "true", "false", "yes", "seq", "printf",
+    # Location/lookup
+    "which", "whereis", "type", "command",
+    # Math / checksum
+    "bc", "expr", "md5sum", "sha256sum",
+    # Disk / process info
+    "df", "free", "uname", "ps", "top", "dmesg",
+}
+CODE_EDITING_SHELL_COMMANDS = {
+    # File creation / manipulation (agents need these for code editing)
+    "touch", "mkdir", "rm", "mv", "cp", "tee", "cat",
+    # Permission / ownership
+    "chmod", "chown",
+    # Script execution
+    "bash", "sh", "zsh",
+    # External content
+    "curl", "wget", "pip", "npm", "apt", "apt-get", "yum", "dnf", "pacman",
+    # Additional file utilities
+    "ln", "xargs",
 }
 VERIFICATION_SHELL_COMMANDS = {
     "black", "eslint", "flake8", "pytest", "python", "python3"
 }
-SHELL_BLOCKLIST_TOKENS = {">", ">>", "<"}
-SHELL_BLOCKLIST_COMMANDS = {
-    "bash", "chmod", "cp", "git-commit", "git-push", "mv", "rm", "sh", "sudo", "su", "curl", "wget", "xargs"
+# Truly dangerous system-level commands — never allowed regardless of context
+SYSTEM_BLOCKLIST_COMMANDS = {
+    "sudo", "su", "dd", "mkfs", "mount", "umount",
+    "reboot", "shutdown", "poweroff", "halt",
+    "insmod", "modprobe", "rmmod", "modinfo",
+    "iptables", "ip6tables", "ufw", "firewall-cmd",
+    "fdisk", "parted", "losetup",
 }
+SHELL_BLOCKLIST_TOKENS = {">", ">>", "<"}
 
 def _ok(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service="workspace", detail=detail)
@@ -348,15 +378,19 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         base_command = parsed[0]
         normalized_command = f"{base_command}-{parsed[1]}" if base_command == "git" and len(parsed) > 1 else base_command
 
-        if normalized_command in SHELL_BLOCKLIST_COMMANDS:
+        if normalized_command in SYSTEM_BLOCKLIST_COMMANDS:
             return _fail(
-                "Mutating shell commands are blocked. Use workspace write/patch tools and workspace runtime verification workflows instead."
+                f"Shell command '{normalized_command}' is blocked: dangerous system-level operation not permitted."
             )
 
-        allowed = normalized_command in READ_ONLY_SHELL_COMMANDS or base_command in VERIFICATION_SHELL_COMMANDS
+        allowed = (
+            normalized_command in READ_ONLY_SHELL_COMMANDS
+            or normalized_command in CODE_EDITING_SHELL_COMMANDS
+            or base_command in VERIFICATION_SHELL_COMMANDS
+        )
         if not allowed:
             return _fail(
-                f"Shell command '{normalized_command}' is not allowed. Use read/search tools or the workspace runtime workflow."
+                f"Shell command '{normalized_command}' is not allowed. Use read/search/write/patch tools or the workspace runtime workflow."
             )
 
         if base_command in {"python", "python3"} and parsed[1:3] != ["-m", "pytest"]:
@@ -368,6 +402,8 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # Enforce capability constraints on the workspace
         if ws_details:
             required_cap = "read"
+            if base_command in CODE_EDITING_SHELL_COMMANDS and base_command not in READ_ONLY_SHELL_COMMANDS:
+                required_cap = "write"
             if base_command in {"python", "python3"} and parsed[1:3] == ["-m", "pytest"]:
                 required_cap = "pytest"
             elif base_command == "git":
