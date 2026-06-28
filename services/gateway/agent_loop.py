@@ -217,8 +217,83 @@ ALLOWED_TOOLS = {
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
-    "status", "diff", "add", "commit", "push", "pull", "log"
+    "status", "diff", "add", "commit", "push", "pull", "log",
+    # Common LLM hallucination patterns (tool_name, function_name, command)
+    "tool_name", "function_name", "command", "operation", "target",
+    # Parameter hallucination patterns
+    "parameters", "request", "input",
+    # Search/query variations
+    "search_query", "query_text", "response_format",
+    # Additional Git operations
+    "git_branch", "git_checkout", "git_reset", "git_stash", "git_blame",
+    "git_show", "git_revert", "git_tag", "git_remote",
+    # Workspace variations
+    "workspace_list", "workspace_delete", "workspace_create",
+    # Storage variations
+    "storage_delete", "storage_move", "storage_rename", "storage_copy",
+    # Browser variations
+    "browser_screenshot", "browser_click", "browser_type", "browser_navigate",
+    # Media variations
+    "media_search", "media_library", "media_queue", "media_playlist",
+    # Docker variations
+    "docker_ps", "docker_exec", "docker_stop", "docker_start", "docker_restart", "docker_build",
+    # Home Assistant variations
+    "ha_call_service", "ha_get_state", "ha_set_state", "ha_get_entities",
+    # Note variations
+    "note_create", "note_delete", "note_list", "note_update",
+    # Calendar variations
+    "calendar_create", "calendar_delete", "calendar_list", "calendar_update",
+    # Security variations
+    "security_lock", "security_unlock", "security_arm", "security_disarm",
+    # Climate variations
+    "climate_set_temperature", "climate_set_mode", "climate_toggle",
+    # Light variations
+    "light_on", "light_off", "light_brightness", "light_color",
+    # Timer variations
+    "timer_start", "timer_stop", "timer_pause", "timer_resume",
+    # Talk variations
+    "talk_speak", "talk_stop", "talk_silence",
+    # Learning variations
+    "learn_add", "learn_remove", "learn_forget",
+    # Intercom variations
+    "intercom_start", "intercom_end", "intercom_list",
+    # Telemetry variations
+    "telemetry_enroll", "telemetry_unenroll", "telemetry_list", "telemetry_query",
+    # Identity variations
+    "identity_list", "identity_update", "identity_delete",
+    # Deployment variations
+    "deploy_restart", "deploy_status", "deploy_logs",
+    # Diagnostics variations
+    "diagnostics_check", "diagnostics_report", "diagnostics_screenshot"
 }
+
+def _extract_json_with_brace_depth(text: str, start: int = 0) -> dict | list | None:
+    """Extract JSON from text using brace-depth tracking for accurate nesting."""
+    if not text:
+        return None
+    depth = 0
+    start_brace = -1
+    for i in range(start, len(text)):
+        ch = text[i]
+        if ch == '{' or ch == '[':
+            if depth == 0:
+                start_brace = i
+            depth += 1
+        elif ch == '}' or ch == ']':
+            depth -= 1
+            if depth == 0 and start_brace != -1:
+                candidate = text[start_brace:i+1]
+                try:
+                    return json.loads(candidate)
+                except Exception:
+                    try:
+                        cleaned = re.sub(r",\s*([\]}])", r"\1", candidate)
+                        return json.loads(cleaned)
+                    except Exception:
+                        pass
+                break
+    return None
+
 
 def extract_action_json(text: str) -> dict | None:
     """Extracts the first JSON object found in the text, with MoE-safe fallback and log-stripping."""
@@ -233,9 +308,58 @@ def extract_action_json(text: str) -> dict | None:
         try:
             return json.loads(match.group(1))
         except Exception:
+            try:
+                cleaned = re.sub(r",\s*([\]}])", r"\1", match.group(1))
+                return json.loads(cleaned)
+            except Exception:
+                pass
+
+    # Priority 1b: Unquoted fenced block (``` without json tag)
+    match = re.search(r"```\s*\n\s*(\{.*?\})", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except Exception:
+            try:
+                cleaned = re.sub(r",\s*([\]}])", r"\1", match.group(1))
+                return json.loads(cleaned)
+            except Exception:
+                pass
+
+    # Priority 1c: Thinking/reasoning block JSON (common with Qwen thinking models)
+    match = re.search(r"</thinking>.*?```(?:json)?\s*(\{.*?\})", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except Exception:
+            try:
+                cleaned = re.sub(r",\s*([\]}])", r"\1", match.group(1))
+                return json.loads(cleaned)
+            except Exception:
+                pass
+
+    # Priority 1d: Direct thinking block JSON
+    match = re.search(r"</thinking>(\{.*?\})\s*$", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except Exception:
             pass
 
-    # Priority 2: Outer-most braces (robust fallback)
+    # Priority 2: Brace-depth tracking (robust nested JSON extraction)
+    result = _extract_json_with_brace_depth(text)
+    if isinstance(result, dict):
+        return result
+    elif isinstance(result, list):
+        # If we got an array, return the first dict element if it has an action key
+        for item in result:
+            if isinstance(item, dict) and item.get("action"):
+                return item
+        # Return the first element as a wrapper
+        if result and isinstance(result[0], dict):
+            return {"action": "tool_call", "payload": result[0]}
+
+    # Priority 3: Outer-most braces (legacy fallback)
     first_brace = text.find("{")
     last_brace = text.rfind("}")
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:

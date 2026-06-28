@@ -18,22 +18,51 @@ class BaseRequest(BaseModel):
         if isinstance(data, dict):
             field_names = set(cls.model_fields.keys()) if hasattr(cls, 'model_fields') else set()
 
-            # Map 'command' or 'operation' to 'action' (Common Git hallucination)
-            # Only if the schema actually has an 'action' field
+            # Map 'tool_name' or 'function_name' to 'action' (common LLM hallucination)
             if "action" not in data and "action" in field_names:
-                if "command" in data:
+                if "tool_name" in data:
+                    data["action"] = data["tool_name"]
+                elif "function_name" in data:
+                    data["action"] = data["function_name"]
+                elif "command" in data:
                     data["action"] = data["command"]
                 elif "operation" in data:
                     data["action"] = data["operation"]
                 elif "message" in data:
-                    # TalkRequest: if message is present but no action, default to "send"
                     data["action"] = "send"
                 elif "text_to_voice" in data:
-                    # TalkRequest: if text_to_voice is present but no action, default to "send"
                     data["action"] = "send"
                 elif "token" in data:
-                    # TalkRequest: if token is present but no action, default to "messages"
                     data["action"] = "messages"
+
+            # Map 'target' to 'action' if action is missing and schema has action
+            if "action" not in data and "action" in field_names and "target" in data:
+                data["action"] = data["target"]
+
+            # Map 'request' or 'parameters' to 'payload' (common LLM hallucination)
+            if "payload" not in data and "payload" in field_names:
+                if "request" in data:
+                    data["payload"] = data["request"]
+                elif "parameters" in data:
+                    data["payload"] = data["parameters"]
+                elif "input" in data:
+                    data["payload"] = data["input"]
+
+            # Map 'action' to 'payload' for schema-only actions (e.g. TalkRequest)
+            if "payload" not in data and "payload" in field_names and "action" in data:
+                action = data.get("action")
+                if action == "send" or action == "messages":
+                    # If we have message/text_to_voice/token, put it in payload
+                    if "message" in data:
+                        data["payload"] = data["message"]
+                    elif "text_to_voice" in data:
+                        data["payload"] = data["text_to_voice"]
+                    elif "token" in data:
+                        data["payload"] = data["token"]
+                    elif "text" in data:
+                        data["payload"] = data["text"]
+                    elif "content" in data:
+                        data["payload"] = data["content"]
 
             # Map 'git_status' to 'status', etc.
             if "action" in data and isinstance(data["action"], str) and data["action"].startswith("git_"):
@@ -49,7 +78,6 @@ class BaseRequest(BaseModel):
                     data["path"] = data["file"]
 
             # Map 'message' to 'commit_message' or vice-versa
-            # Only if the schema has commit_message (Git-related schemas)
             if "commit_message" in field_names:
                 if "message" in data and "commit_message" not in data:
                     data["commit_message"] = data["message"]
@@ -61,6 +89,21 @@ class BaseRequest(BaseModel):
                 data["limit_lines"] = data["limit"]
             if "offset" in data and "offset_lines" not in data:
                 data["offset_lines"] = data["offset"]
+
+            # Map 'query' to 'search_query' or 'query_text' where applicable
+            if "search_query" in field_names and "search_query" not in data and "query" in data:
+                data["search_query"] = data["query"]
+            if "query_text" in field_names and "query_text" not in data and "query" in data:
+                data["query_text"] = data["query"]
+
+            # Map 'response_format' to 'format' where applicable
+            if "format" in field_names and "format" not in data and "response_format" in data:
+                data["format"] = data["response_format"]
+
+            # Normalize empty strings to None for optional fields
+            for field_name in field_names:
+                if field_name in data and data[field_name] == "":
+                    data[field_name] = None
 
         return data
 
