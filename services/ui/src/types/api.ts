@@ -294,6 +294,21 @@ export interface ImagePullResult {
   message: string;
 }
 
+export interface ImageUpdateCheck {
+  service: string;
+  image: string;
+  current_image_id: string;
+  latest_image_id: string;
+  has_update: boolean;
+  status: string;
+}
+
+export interface CheckUpdatesResponse {
+  checked: number;
+  updates_available: number;
+  services: ImageUpdateCheck[];
+}
+
 export interface SystemHealthStatus {
   total_services: number;
   running: number;
