@@ -261,6 +261,62 @@ def delete_container(service_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/admin/services/updates", dependencies=[Depends(verify_internal_secret)])
+def check_all_updates():
+    """Check all sharedllm services for available image updates without pulling."""
+    if not client:
+        raise HTTPException(status_code=500, detail="Docker client not initialized")
+
+    try:
+        containers = client.containers.list(all=True)
+        updates = []
+
+        for container in containers:
+            if not container.name or not container.name.startswith("sharedllm_"):
+                continue
+
+            try:
+                image_tag = container.image.tags[0] if container.image.tags else None
+                if not image_tag:
+                    continue
+
+                current_image_id = container.image.id
+                # Check registry without pulling
+                try:
+                    client.images.get_registry_data(image_tag)
+                    latest_image = client.images.pull(image_tag, dry_run=True)
+                    latest_image_id = latest_image.id
+                except Exception:
+                    # If dry_run fails, try regular pull check
+                    try:
+                        client.images.pull(image_tag)
+                        latest_image_id = client.images.get(image_tag).id
+                    except Exception:
+                        latest_image_id = current_image_id
+
+                has_update = latest_image_id != current_image_id
+
+                updates.append({
+                    "service": container.name,
+                    "image": image_tag,
+                    "current_image_id": current_image_id,
+                    "latest_image_id": latest_image_id,
+                    "has_update": has_update,
+                    "status": container.status
+                })
+            except Exception as e:
+                log.warning(f"Failed to check updates for {container.name}: {e}")
+                continue
+
+        return {
+            "checked": len(updates),
+            "updates_available": sum(1 for u in updates if u["has_update"]),
+            "services": updates
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/containers/{service_name}/pull", dependencies=[Depends(verify_internal_secret)])
 def pull_image_update(service_name: str):
     """Pull latest image for a service to check for updates."""
@@ -294,7 +350,7 @@ def pull_image_update(service_name: str):
             "current_image_id": current_image_id,
             "latest_image_id": new_image_id,
             "updated": updated,
-            "message": "Image is up to date" if not updated else "New image version available"
+            "message": "Image is up to date" if not updated else "New version pulled successfully"
         }
     except ImageNotFound:
         raise HTTPException(status_code=404, detail=f"Image not found for {service_name}")

@@ -28,6 +28,7 @@ import {
   Phone,
   Server,
   Power,
+  ArrowUpCircle,
   PowerOff,
   RefreshCw,
 } from 'lucide-react';
@@ -221,11 +222,19 @@ const Admin = () => {
     refetchInterval: 10000,
   });
 
+  const { data: updatesData } = useQuery({
+    queryKey: ['service-updates'],
+    queryFn: () => api.checkAllUpdates(),
+    refetchInterval: 60000,
+    refetchOnWindowFocus: true,
+  });
+
   const pullImageMutation = useMutation({
     mutationFn: (serviceName: string) => api.pullServiceImage(serviceName),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['system-health'] });
-      toast.success('Image pull completed');
+      queryClient.invalidateQueries({ queryKey: ['service-updates'] });
+      toast.success(data.message || 'Image pull completed');
     },
     onError: (error: unknown) => {
       const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -1615,11 +1624,7 @@ const Admin = () => {
               </div>
             ) : systemHealth ? (
               <>
-                <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-                  <div className="rounded-2xl border border-white/5 bg-white/5 p-4">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total Services</p>
-                    <p className="mt-1 text-2xl font-bold text-white">{systemHealth.total_services}</p>
-                  </div>
+                <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-3">
                   <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
                     <p className="text-[10px] font-black uppercase tracking-widest text-emerald-600">Running</p>
                     <p className="mt-1 text-2xl font-bold text-emerald-400">{systemHealth.running}</p>
@@ -1628,9 +1633,9 @@ const Admin = () => {
                     <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Stopped</p>
                     <p className="mt-1 text-2xl font-bold text-slate-400">{systemHealth.stopped}</p>
                   </div>
-                  <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-4">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-red-600">Unhealthy</p>
-                    <p className="mt-1 text-2xl font-bold text-red-400">{systemHealth.unhealthy}</p>
+                  <div className="rounded-2xl border border-orange-500/20 bg-orange-500/5 p-4">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-orange-600">Updates</p>
+                    <p className="mt-1 text-2xl font-bold text-orange-400">{updatesData?.updates_available || 0}</p>
                   </div>
                 </div>
 
@@ -1648,8 +1653,12 @@ const Admin = () => {
                 </div>
 
                 <div className="space-y-3">
-                  {systemHealth.services.map((service) => (
-                    <div key={service.name} className="glass-card p-4">
+                  {systemHealth.services.map((service) => {
+                  const updateInfo = updatesData?.services.find(s => s.service === service.name);
+                  const hasUpdate = updateInfo?.has_update;
+
+                  return (
+                    <div key={service.name} className={`glass-card p-4 ${hasUpdate ? 'border-orange-500/30' : ''}`}>
                       <div className="flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3">
                           <div className={`rounded-full p-2 ${
@@ -1666,7 +1675,14 @@ const Admin = () => {
                             )}
                           </div>
                           <div>
-                            <p className="font-semibold text-white capitalize">{service.name.replace(/_/g, ' ')}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-white capitalize">{service.name.replace(/_/g, ' ')}</p>
+                              {hasUpdate && (
+                                <span className="flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-orange-400">
+                                  <ArrowUpCircle size={10} /> Update Available
+                                </span>
+                              )}
+                            </div>
                             <p className="text-[10px] font-mono text-slate-500">{service.image}</p>
                           </div>
                         </div>
@@ -1702,17 +1718,18 @@ const Admin = () => {
                               </button>
                               <button
                                 onClick={() => pullImageMutation.mutate(service.name)}
-                                disabled={pullImageMutation.isPending}
-                                className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest"
+                                disabled={pullImageMutation.isPending || pullImageMutation.isPaused}
+                                className={`glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest ${hasUpdate ? 'border-orange-500/50 text-orange-400' : ''}`}
                               >
-                                <Cloud size={12} /> Pull
+                                <Cloud size={12} /> {hasUpdate ? 'Update' : 'Pull'}
                               </button>
                             </>
                           )}
                         </div>
                       </div>
                     </div>
-                  ))}
+                  );
+                })}
                 </div>
               </>
             ) : (
