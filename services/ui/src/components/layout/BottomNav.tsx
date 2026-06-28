@@ -36,7 +36,7 @@ const BottomNav = () => {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 glass-panel border-t border-white/10" style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-      <div className="flex items-center justify-around h-16 overflow-x-auto">
+      <div className="flex items-center justify-around h-16">
         {navItems.map((item) => (
           <NavLink
             key={item.path}
@@ -44,7 +44,7 @@ const BottomNav = () => {
             onClick={handleTap}
             className={({ isActive }) =>
               cn(
-                'flex flex-col items-center justify-center gap-1 px-2 py-3 min-w-0 flex-1 transition-colors',
+                'flex flex-col items-center justify-center gap-1 px-2 py-3 min-w-[4rem] flex-1 max-w-[8rem] transition-colors',
                 isActive
                   ? 'text-purple-400 neon-glow font-bold'
                   : 'text-slate-500 hover:text-slate-300'

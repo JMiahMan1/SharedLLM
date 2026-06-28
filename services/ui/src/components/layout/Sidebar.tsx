@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
   LayoutDashboard, 
@@ -20,7 +20,7 @@ import {
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useAuth } from '../../context/AuthContext';
-import { api } from '../../services/api';
+import { useRavenMissions } from '../../hooks/useRavenMissions';
 import type { RavenMission } from '../../services/api';
 
 function cn(...inputs: ClassValue[]) {
@@ -92,38 +92,11 @@ const Sidebar = () => {
 };
 
 const RavenStatusSection = () => {
-  const [activeMissions, setActiveMissions] = useState<RavenMission[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchMissions = useCallback(async () => {
-    try {
-      const resp = await api.getUserMissions();
-      const missions = Array.isArray(resp) ? resp : [];
-      const active = missions.filter((m: RavenMission) =>
-        ['queued', 'running', 'paused'].includes(m.status)
-      );
-      setActiveMissions(active);
-    } catch {
-      setActiveMissions([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Defer initial fetch to avoid synchronous setState in effect
-    const timeoutId = setTimeout(() => fetchMissions(), 0);
-    const intervalId = setInterval(fetchMissions, 30000);
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(intervalId);
-    };
-  }, [fetchMissions]);
+  const { data: activeMissions = [], isLoading } = useRavenMissions();
 
   const handleLaunch = async () => {
     try {
       await api.createUserMission('System diagnostic and maintenance scan', 2);
-      await fetchMissions();
     } catch {
       // Silently fail - user sees this in Lab
     }
@@ -137,7 +110,7 @@ const RavenStatusSection = () => {
           className="flex items-center gap-2 text-slate-300 hover:text-purple-400 transition-colors w-full"
           title="Launch Raven mission"
         >
-          {loading ? (
+          {isLoading ? (
             <Loader2 size={14} className="animate-spin text-purple-400" />
           ) : activeMissions.length > 0 ? (
             <Brain size={14} className="text-purple-400" />
@@ -145,10 +118,10 @@ const RavenStatusSection = () => {
             <ShieldCheck size={14} className="text-green-400" />
           )}
           <span className="font-medium hidden md:inline">
-            {loading ? 'Loading...' : activeMissions.length > 0 ? `${activeMissions.length} Mission${activeMissions.length > 1 ? 's' : ''} Active` : 'Raven Idle'}
+            {isLoading ? 'Loading...' : activeMissions.length > 0 ? `${activeMissions.length} Mission${activeMissions.length > 1 ? 's' : ''} Active` : 'Raven Idle'}
           </span>
         </button>
-        {!loading && activeMissions.length > 0 && (
+        {!isLoading && activeMissions.length > 0 && (
           <div className="mt-2 space-y-1 hidden md:block">
             {activeMissions.slice(0, 2).map((mission: RavenMission) => (
               <div key={mission.id} className="flex items-center gap-1 text-slate-400">
@@ -162,7 +135,7 @@ const RavenStatusSection = () => {
             ))}
           </div>
         )}
-        {!loading && activeMissions.length === 0 && (
+        {!isLoading && activeMissions.length === 0 && (
           <p className="text-slate-500 hidden md:block mt-2">
             Raven ready to scan workspaces
           </p>

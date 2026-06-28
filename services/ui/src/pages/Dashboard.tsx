@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
@@ -17,8 +17,9 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
-import type { GlobalSetting, HealthStatus, LogEntry, RavenMission, Workspace } from '../services/api';
+import type { GlobalSetting, HealthStatus, LogEntry, Workspace } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useRavenMissions } from '../hooks/useRavenMissions';
 import { useHaptics } from '../hooks/useHaptics';
 import HaloBanner from '../components/presence/HaloBanner';
 import VoiceAssistantOverlay from '../components/voice/VoiceAssistantOverlay';
@@ -53,8 +54,10 @@ const Dashboard = () => {
   const queryClient = useQueryClient();
   const [selectedService, setSelectedService] = useState<ServiceSummary | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<SearchResult | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const { user } = useAuth();
   const { trigger } = useHaptics();
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -87,33 +90,56 @@ const Dashboard = () => {
     queryFn: () => api.getSettings(),
   });
 
-  const [ravenMissions, setRavenMissions] = useState<RavenMission[]>([]);
-  const [ravenLoading, setRavenLoading] = useState(true);
+  const { data: activeMissions = [], isLoading: ravenLoading } = useRavenMissions();
 
-  const fetchRavenMissions = useCallback(async () => {
-    try {
-      const resp = await api.getUserMissions();
-      const missions = Array.isArray(resp) ? resp : [];
-      const active = missions.filter((m: RavenMission) =>
-        ['queued', 'running', 'paused'].includes(m.status)
-      );
-      setRavenMissions(active);
-    } catch {
-      setRavenMissions([]);
-    } finally {
-      setRavenLoading(false);
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (searchQuery.trim()) {
+        setDebouncedSearch(searchQuery);
+      } else {
+        setDebouncedSearch('');
+      }
+    }, 300);
+    return () => clearTimeout(timeoutId);
+  }, [searchQuery]);
+
+  const performSearch = useCallback((query: string) => {
+    if (!query) {
+      return;
     }
+    setIsSearching(true);
+    setSearchError(null);
+    api.globalSearch(query)
+      .then((results) => {
+        const data = results as SearchResult;
+        setSearchResults(data);
+        if (!data.answer && (!data.files || data.files.length === 0)) {
+          setSearchError('No results found');
+        }
+      })
+      .catch(() => {
+        toast.error('Search failed');
+        setSearchError('Search failed. Please try again.');
+      })
+      .finally(() => {
+        setIsSearching(false);
+      });
   }, []);
 
   useEffect(() => {
-    // Defer initial fetch to avoid synchronous setState in effect
-    const timeoutId = setTimeout(() => fetchRavenMissions(), 0);
-    const intervalId = setInterval(fetchRavenMissions, 30000);
-    return () => {
-      clearTimeout(timeoutId);
-      clearInterval(intervalId);
-    };
-  }, [fetchRavenMissions]);
+    if (!debouncedSearch) {
+      return;
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    performSearch(debouncedSearch);
+  }, [debouncedSearch, performSearch]);
+
+  const clearSearch = useCallback(() => {
+    setSearchResults(null);
+    setSearchError(null);
+    setSearchQuery('');
+    setDebouncedSearch('');
+  }, []);
 
   const serviceSummaries = useMemo<ServiceSummary[]>(() => {
     const services = health?.services || {};
@@ -148,15 +174,7 @@ const Dashboard = () => {
     if (!searchQuery.trim()) {
       return;
     }
-    setIsSearching(true);
-    try {
-      const results = await api.globalSearch(searchQuery) as SearchResult;
-      setSearchResults(results);
-    } catch {
-      toast.error('Search failed');
-    } finally {
-      setIsSearching(false);
-    }
+    setDebouncedSearch(searchQuery);
   };
 
   return (
@@ -182,7 +200,12 @@ const Dashboard = () => {
           <input
             type="text"
             value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
+            onChange={(event) => {
+              setSearchQuery(event.target.value);
+              if (!event.target.value.trim()) {
+                setDebouncedSearch('');
+              }
+            }}
             placeholder="Search live RAG context and indexed files"
             className="glass-input w-full py-3 pl-12 pr-12"
           />
@@ -209,26 +232,34 @@ const Dashboard = () => {
         <section className="glass-panel space-y-4 border-indigo-500/20 bg-indigo-500/5 p-6">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-indigo-300">Live Search Result</h3>
-            <button onClick={() => setSearchResults(null)} aria-label="Close search" className="text-slate-500 hover:text-white">
+            <button onClick={clearSearch} aria-label="Close search" className="text-slate-500 hover:text-white">
               <X size={16} />
             </button>
           </div>
-          {searchResults.answer && (
-            <div className="rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-relaxed text-slate-300">
-              {searchResults.answer}
+          {searchError && !searchResults.answer && (!searchResults.files || searchResults.files.length === 0) ? (
+            <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/10 p-4 text-sm text-indigo-300">
+              {searchError}
             </div>
-          )}
-          <div className="grid gap-3 md:grid-cols-2">
-            {(searchResults.files || []).map((file) => (
-              <div key={file.path} className="glass-card flex items-center gap-3 p-4">
-                <FileText size={16} className="text-blue-300" />
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-white">{file.name}</p>
-                  <p className="truncate text-xs text-slate-500">{file.path}</p>
+          ) : (
+            <>
+              {searchResults.answer && (
+                <div className="rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-relaxed text-slate-300">
+                  {searchResults.answer}
                 </div>
+              )}
+              <div className="grid gap-3 md:grid-cols-2">
+                {(searchResults.files || []).map((file) => (
+                  <div key={file.path} className="glass-card flex items-center gap-3 p-4">
+                    <FileText size={16} className="text-blue-300" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">{file.name}</p>
+                      <p className="truncate text-xs text-slate-500">{file.path}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          )}
         </section>
       )}
 
@@ -372,8 +403,8 @@ const Dashboard = () => {
                     <p className="text-sm text-slate-400">Autonomous mission monitoring</p>
                   </div>
                 </div>
-                <span className={`text-[10px] font-black uppercase tracking-widest ${ravenLoading ? 'text-yellow-400' : ravenMissions.length > 0 ? 'text-orange-400' : 'text-emerald-400'}`}>
-                  {ravenLoading ? 'Loading...' : ravenMissions.length > 0 ? 'Active' : 'Idle'}
+                <span className={`text-[10px] font-black uppercase tracking-widest ${ravenLoading ? 'text-yellow-400' : activeMissions.length > 0 ? 'text-orange-400' : 'text-emerald-400'}`}>
+                  {ravenLoading ? 'Loading...' : activeMissions.length > 0 ? 'Active' : 'Idle'}
                 </span>
               </div>
               <div className="space-y-3">
@@ -381,8 +412,8 @@ const Dashboard = () => {
                   <div className="flex items-center justify-center py-8">
                     <Loader2 size={24} className="animate-spin text-purple-400" />
                   </div>
-                ) : ravenMissions.length > 0 ? (
-                  ravenMissions.slice(0, 3).map((mission) => (
+                ) : activeMissions.length > 0 ? (
+                  activeMissions.slice(0, 3).map((mission) => (
                     <div key={mission.id} className="glass-card p-4 space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-black uppercase tracking-widest text-purple-400">Mission #{mission.id}</span>
