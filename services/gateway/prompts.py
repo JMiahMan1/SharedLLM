@@ -8,6 +8,8 @@ from the DB at each call site so runtime changes take effect immediately.
 Seed defaults live in .env (PROMPT_assistant_system_instruction, etc.)
 and are used by the Identity seed endpoint on first run.
 
+At runtime, prompts are ONLY read from the Identity DB.
+
 PROMPT KEYS (must match Identity DEFAULT_GLOBAL_SETTINGS):
     assistant_system_instruction   -- main assistant / Jarvis persona
     librarian_system_instruction   -- librarian/RAG persona (alias for assistant)
@@ -26,12 +28,7 @@ UNUSED PROMPTS REMOVED:
                                          RAVEN_AUTONOMOUS_PROTOCOL
 """
 
-import os
 import httpx
-from dotenv import load_dotenv
-
-# Load .env so prompt seeds are available
-load_dotenv()
 
 from services.gateway.config import INTERNAL_SECRET, IDENTITY_SVC
 
@@ -51,35 +48,7 @@ PROMPT_SINGLE_TURN_TOOL_GUIDE = "single_turn_tool_guide"
 
 
 # =============================================================================
-# Seed defaults from .env (for Identity seed script and test compatibility)
-# =============================================================================
-_SEED_ENV_PREFIX = "PROMPT_"
-
-
-def _load_seed_from_env(key: str) -> str:
-    """Load a prompt seed from .env via the PROMPT_ prefix convention."""
-    env_var = f"{_SEED_ENV_PREFIX}{key}"
-    value = os.environ.get(env_var, os.getenv(env_var, ""))
-    if not value:
-        raise ValueError(f"Prompt seed not found in .env: {env_var}")
-    return value
-
-
-def get_seed_prompt(key: str) -> str:
-    """Public helper for tests and seed scripts to load a prompt from .env."""
-    return _load_seed_from_env(key)
-
-
-# =============================================================================
-# Backward-compat aliases (tests and external references import these from main.py)
-# These load from .env seeds at import time.
-# =============================================================================
-ASSIST_SYSTEM_INSTRUCTION = get_seed_prompt(PROMPT_ASSISTANT_SYSTEM_INSTRUCTION)
-CODE_HELPER_SYSTEM_INSTRUCTION = get_seed_prompt(PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION)
-
-
-# =============================================================================
-# Runtime loaders -- fetch fresh from Identity DB
+# Runtime loaders -- fetch fresh from Identity DB only
 # =============================================================================
 
 # Cached settings dict and client for sync access
@@ -100,9 +69,8 @@ def load_prompt_sync(prompt_key: str) -> str:
     """Fetch a prompt from the Identity service GlobalSettings table (sync).
     
     Uses a cached httpx client and settings cache to minimize overhead.
-    Falls back to seed values from .env if Identity service is unavailable.
     
-    Raises ValueError if the prompt key is not found in the DB or .env.
+    Raises ValueError if the prompt key is not found in the DB.
     """
     import time
     
@@ -120,17 +88,12 @@ def load_prompt_sync(prompt_key: str) -> str:
                 _settings_cache = {item["key"]: item["value"] for item in resp.json()}
                 _settings_cache_time = now
         except Exception:
-            # If Identity is unavailable, fall back to seeds
-            pass
+            raise ValueError(f"Identity service unavailable and no cached prompts available")
     
     if prompt_key in _settings_cache and _settings_cache[prompt_key]:
         return _settings_cache[prompt_key]
     
-    # Fallback to .env seed
-    try:
-        return _load_seed_from_env(prompt_key)
-    except ValueError:
-        raise ValueError(f"Prompt not found in settings DB or .env seed: {prompt_key}")
+    raise ValueError(f"Prompt not found in settings DB: {prompt_key}")
 
 
 async def load_prompt(client: httpx.AsyncClient, prompt_key: str) -> str:

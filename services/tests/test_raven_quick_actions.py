@@ -13,6 +13,8 @@ import os
 import pytest
 from typing import cast
 from unittest.mock import patch, AsyncMock
+from dotenv import dotenv_values
+from pathlib import Path
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
@@ -26,8 +28,12 @@ os.environ.setdefault("CONTROL_PLANE_URL", "http://control_plane:8008")
 os.environ.setdefault("SEARXNG_URL", "http://searxng:8080")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
-from services.gateway.prompts import get_seed_prompt, PROMPT_RAVEN_AUTONOMOUS_PROTOCOL
-RAVEN_AUTONOMOUS_PROTOCOL = get_seed_prompt(PROMPT_RAVEN_AUTONOMOUS_PROTOCOL)
+from services.gateway.prompts import PROMPT_RAVEN_AUTONOMOUS_PROTOCOL
+
+# Read .env directly for test values (runtime never reads .env)
+_env = dotenv_values(Path(__file__).resolve().parent.parent.parent / ".env")
+RAVEN_AUTONOMOUS_PROTOCOL = _env.get(f"PROMPT_{PROMPT_RAVEN_AUTONOMOUS_PROTOCOL}", "")
+
 from services.gateway.main import select_model_for_query, select_system_instruction_for_query, AUTONOMOUS_SIGNALS
 from services.gateway.agent_loop import extract_action_json
 

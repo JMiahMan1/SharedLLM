@@ -299,6 +299,32 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             session.add(existing)
             log.info("[seed] Re-seeded SKYLIGHT_PASS (encrypted)")
 
+    # ── Smart-seed prompt values from .env (PROMPT_*) ─────────────────────────
+    # Reads PROMPT_* keys from .env file directly (not os.environ) and inserts
+    # them into GlobalSettings if they don't already exist. Never overwrites
+    # existing values unless force=True.
+    try:
+        from dotenv import dotenv_values as _dotenv_values
+        _prompt_env = _dotenv_values(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env"))
+        if not _prompt_env:
+            _prompt_env = _dotenv_values(".env")
+        for env_key, env_val in _prompt_env.items():
+            if not env_key or not env_key.startswith("PROMPT_"):
+                continue
+            if not env_val or not env_val.strip():
+                continue
+            global_key = env_key.replace("PROMPT_", "").lower()
+            existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
+            if not existing:
+                session.add(GlobalSetting(key=global_key, value=env_val.strip(), description=f"Prompt seed from .env {env_key}."))
+                log.info(f"[seed] Smart-seeded prompt: {global_key} from {env_key}")
+            elif force:
+                existing.value = env_val.strip()
+                session.add(existing)
+                log.info(f"[seed] Force-updated prompt: {global_key}")
+    except Exception as e:
+        log.warning(f"[seed] Failed to smart-seed prompts from .env: {e}")
+
     session.commit()
     log.info(f"[seed] Seeded {count} user(s) and default settings.")
     return count

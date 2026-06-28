@@ -1,11 +1,15 @@
 import pytest
 from unittest.mock import patch, AsyncMock
+from dotenv import dotenv_values
+from pathlib import Path
 
 from services.gateway.main import select_model_for_query, select_system_instruction_for_query
-from services.gateway.prompts import get_seed_prompt, PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION, PROMPT_RAVEN_AUTONOMOUS_PROTOCOL
+from services.gateway.prompts import PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION, PROMPT_RAVEN_AUTONOMOUS_PROTOCOL
 
-CODE_HELPER_SYSTEM_INSTRUCTION = get_seed_prompt(PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION)
-RAVEN_AUTONOMOUS_PROTOCOL = get_seed_prompt(PROMPT_RAVEN_AUTONOMOUS_PROTOCOL)
+# Read .env directly for test values (runtime never reads .env)
+_env = dotenv_values(Path(__file__).resolve().parent.parent.parent / ".env")
+CODE_HELPER_SYSTEM_INSTRUCTION = _env.get(f"PROMPT_{PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION}", "")
+RAVEN_AUTONOMOUS_PROTOCOL = _env.get(f"PROMPT_{PROMPT_RAVEN_AUTONOMOUS_PROTOCOL}", "")
 
 
 @pytest.mark.asyncio
