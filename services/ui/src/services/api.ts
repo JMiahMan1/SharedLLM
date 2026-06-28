@@ -29,7 +29,7 @@ import type {
   IntercomSessionData,
   IntercomConfigData,
   ImagePullResult,
-  SystemHealthStatus
+  CheckUpdatesResponse,
 } from '../types/api';
 
 declare module 'axios' {
@@ -1108,6 +1108,11 @@ export const api = {
 
   async pullServiceImage(serviceName: string): Promise<ImagePullResult> {
     const resp = await apiClient.post(`/api/admin/services/${serviceName}/pull`);
+    return resp.data;
+  },
+
+  async checkAllUpdates(): Promise<CheckUpdatesResponse> {
+    const resp = await apiClient.get('/api/admin/services/updates');
     return resp.data;
   },
 
