@@ -10,7 +10,7 @@ import hashlib
 import os
 import logging
 from sqlmodel import Session, select, text
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 from services.identity.models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
 from services.identity.crypto import encrypt
@@ -168,10 +168,14 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             password_hash = None
             is_admin = udata.get("is_admin", False)
             if udata["username"] == "default":
-                raw_pwd = os.getenv("DEFAULT_ADMIN_PASSWORD")
-                if raw_pwd is None:
+                raw_pwd = None
+                env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
+                if os.path.exists(env_path):
+                    env_vals = dotenv_values(env_path)
+                    raw_pwd = env_vals.get("DEFAULT_ADMIN_PASSWORD", "")
+                if not raw_pwd:
                     raise EnvironmentError(
-                        "Environment variable DEFAULT_ADMIN_PASSWORD is not set.\n"
+                        "DEFAULT_ADMIN_PASSWORD is not set in .env.\n"
                         "The default admin user cannot be created without a password.\n"
                         "Set DEFAULT_ADMIN_PASSWORD in the .env file before starting the identity service."
                     )
@@ -230,12 +234,12 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             session.add(existing)
 
     # ── Seed OLLAMA_URL from .env (seed-only, not in DEFAULT_GLOBAL_SETTINGS) ─
-    # Read directly from .env file to avoid import-time caching issues
     env_ollama_url = os.getenv("OLLAMA_URL", "")
-    if not env_ollama_url and os.path.exists(".env"):
-        from dotenv import dotenv_values
-        env_vals = dotenv_values(".env")
-        env_ollama_url = env_vals.get("OLLAMA_URL", "")
+    if not env_ollama_url:
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
+        if os.path.exists(env_path):
+            env_vals = dotenv_values(env_path)
+            env_ollama_url = env_vals.get("OLLAMA_URL", "")
     if env_ollama_url:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == "llm_local_url")).first()
         if not existing:
@@ -299,31 +303,35 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             session.add(existing)
             log.info("[seed] Re-seeded SKYLIGHT_PASS (encrypted)")
 
-    # ── Smart-seed prompt values from .env (PROMPT_*) ─────────────────────────
-    # Reads PROMPT_* keys from .env file directly (not os.environ) and inserts
-    # them into GlobalSettings if they don't already exist. Never overwrites
-    # existing values unless force=True.
+    # ── Seed prompts from prompts/*.md files ────────────────────────────────────
+    # Reads markdown files from the prompts/ directory and seeds them into
+    # GlobalSettings. The filename (minus .md) becomes the setting key.
+    # Never overwrites existing values unless force=True.
     try:
-        from dotenv import dotenv_values as _dotenv_values
-        _prompt_env = _dotenv_values(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env"))
-        if not _prompt_env:
-            _prompt_env = _dotenv_values(".env")
-        for env_key, env_val in _prompt_env.items():
-            if not env_key or not env_key.startswith("PROMPT_"):
-                continue
-            if not env_val or not env_val.strip():
-                continue
-            global_key = env_key.replace("PROMPT_", "").lower()
-            existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
-            if not existing:
-                session.add(GlobalSetting(key=global_key, value=env_val.strip(), description=f"Prompt seed from .env {env_key}."))
-                log.info(f"[seed] Smart-seeded prompt: {global_key} from {env_key}")
-            elif force:
-                existing.value = env_val.strip()
-                session.add(existing)
-                log.info(f"[seed] Force-updated prompt: {global_key}")
+        repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        prompts_dir = os.path.join(repo_root, "prompts")
+        if os.path.isdir(prompts_dir):
+            for filename in os.listdir(prompts_dir):
+                if not filename.endswith(".md"):
+                    continue
+                if filename == "README.md":
+                    continue
+                global_key = filename[:-3]  # strip .md
+                filepath = os.path.join(prompts_dir, filename)
+                with open(filepath, "r") as f:
+                    content = f.read().strip()
+                if not content:
+                    continue
+                existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
+                if not existing:
+                    session.add(GlobalSetting(key=global_key, value=content, description=f"Prompt seeded from {filename}."))
+                    log.info(f"[seed] Prompt seeded: {global_key} from {filename}")
+                elif force:
+                    existing.value = content
+                    session.add(existing)
+                    log.info(f"[seed] Force-updated prompt: {global_key}")
     except Exception as e:
-        log.warning(f"[seed] Failed to smart-seed prompts from .env: {e}")
+        log.warning(f"[seed] Failed to seed prompts from .md files: {e}")
 
     session.commit()
     log.info(f"[seed] Seeded {count} user(s) and default settings.")
