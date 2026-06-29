@@ -390,7 +390,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         )
         if not allowed:
             return _fail(
-                f"Shell command '{normalized_command}' is not allowed. Use read/search/write/patch tools or the workspace runtime workflow."
+                f"Shell command '{normalized_command}' is not allowed. Allowed commands: read-only tools (cat, ls, grep, etc.), code editing tools (touch, mkdir, etc.), and verification tools (pytest). Use read/search/write/patch tools for complex operations."
             )
 
         if base_command in {"python", "python3"} and parsed[1:3] != ["-m", "pytest"]:
@@ -401,13 +401,17 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
 
         # Enforce capability constraints on the workspace
         if ws_details:
-            required_cap = "read"
-            if base_command in CODE_EDITING_SHELL_COMMANDS and base_command not in READ_ONLY_SHELL_COMMANDS:
-                required_cap = "write"
+            # Determine required capability based on command type
             if base_command in {"python", "python3"} and parsed[1:3] == ["-m", "pytest"]:
                 required_cap = "pytest"
             elif base_command == "git":
                 required_cap = "git_status"
+            elif normalized_command in CODE_EDITING_SHELL_COMMANDS and normalized_command not in READ_ONLY_SHELL_COMMANDS:
+                # Only require write for commands that are exclusively in CODE_EDITING list
+                required_cap = "write"
+            else:
+                # All other allowed commands (including read-only and overlapping commands like cat)
+                required_cap = "read"
             _require_capability(ws_details, required_cap)
 
         log.info(f"Executing shell command: {final_cmd} in {abs_cwd}")
