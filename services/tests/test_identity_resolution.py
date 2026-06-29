@@ -11,6 +11,8 @@ if "FERNET_KEY" not in os.environ:
     os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 if "INIT_DB" not in os.environ:
     os.environ["INIT_DB"] = "false"
+if "DEFAULT_ADMIN_PASSWORD" not in os.environ:
+    os.environ["DEFAULT_ADMIN_PASSWORD"] = "test-admin-password"
 
 import services.identity.main as identity_main
 from services.identity.main import app, get_session, _store_user_api_key
