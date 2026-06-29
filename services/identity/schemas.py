@@ -216,7 +216,7 @@ class RavenMissionCreate(BaseModel):
     target_container: Optional[str] = None
     error_summary: Optional[str] = None
     proposed_mission: str
-    coding_model: Optional[str] = None
+    coding_model: str = "Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M"
     user_id: Optional[int] = None
 
 class RavenMissionUpdate(BaseModel):
