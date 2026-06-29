@@ -169,10 +169,13 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             is_admin = udata.get("is_admin", False)
             if udata["username"] == "default":
                 raw_pwd = None
-                env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
-                if os.path.exists(env_path):
-                    env_vals = dotenv_values(env_path)
-                    raw_pwd = env_vals.get("DEFAULT_ADMIN_PASSWORD", "")
+                # Check os.environ first (for CI/tests), then fall back to .env file
+                raw_pwd = os.environ.get("DEFAULT_ADMIN_PASSWORD", "")
+                if not raw_pwd:
+                    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
+                    if os.path.exists(env_path):
+                        env_vals = dotenv_values(env_path)
+                        raw_pwd = env_vals.get("DEFAULT_ADMIN_PASSWORD", "")
                 if not raw_pwd:
                     raise EnvironmentError(
                         "DEFAULT_ADMIN_PASSWORD is not set in .env.\n"
