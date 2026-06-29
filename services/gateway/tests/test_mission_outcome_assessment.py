@@ -44,3 +44,30 @@ class TestMissionOutcomeAssessment:
 
     def test_failed_prefix(self):
         assert should_persist_learning("Failed: Mission could not be completed") is False
+
+    def test_empty_short_result(self):
+        assert should_persist_learning("   ") is False
+
+    def test_single_char_result(self):
+        assert should_persist_learning("x") is False
+
+    def test_standalone_status_code_422(self):
+        assert should_persist_learning("422") is False
+
+    def test_standalone_status_code_500(self):
+        assert should_persist_learning("500") is False
+
+    def test_schema_error_rejected(self):
+        assert should_persist_learning("SCHEMA ERROR (422): Validation failed") is False
+
+    def test_llm_hallucinated_failure_accepted(self):
+        # The summarization prompt now prevents "failed to complete" hallucinations.
+        # If the LLM does produce this, it's still a meaningful summary (not pure error).
+        assert should_persist_learning("The mission failed to complete. The LLM returned empty output.") is True
+
+    def test_git_status_meaningful(self):
+        assert should_persist_learning("Git status is clean. On branch main with no changes.") is True
+
+    def test_mixed_error_in_natural_language_accepted(self):
+        # "error:" embedded in natural language should NOT be rejected
+        assert should_persist_learning("The file had an error: permission denied on line 42") is True

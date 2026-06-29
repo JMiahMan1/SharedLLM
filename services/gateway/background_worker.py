@@ -426,7 +426,11 @@ class RavenWorker:
                             await self._retry_with_bigger_model(mission_id, payload, result_str)
                             return  # Don't update status yet — retry will handle it
                         status = "failed"
-                        result_str = f"Mission did not accomplish meaningful work. Result: {result_str[:500]}"
+                        # Preserve the actual result so the user can see what went wrong
+                        if result_str and result_str.strip() not in ("None", "", "null"):
+                            result_str = f"The mission did not produce a meaningful result. Output: {result_str[:1000]}"
+                        else:
+                            result_str = "The mission did not produce a meaningful result. The LLM returned an empty or invalid response."
                         log.warning(f"[Worker] Mission {mission_id} marked failed — no meaningful work accomplished")
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         await client.patch(
