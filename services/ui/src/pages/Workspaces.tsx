@@ -38,8 +38,6 @@ const Workspaces = () => {
     id: '',
     display_name: '',
     local_path: '',
-    host_mount_path: '',
-    container_mount_path: '',
     git_remote: 'origin',
     default_branch: 'main',
     sync_mode: 'local_git_authoritative',
@@ -108,8 +106,6 @@ const Workspaces = () => {
       id: '',
       display_name: '',
       local_path: '',
-      host_mount_path: '',
-      container_mount_path: '',
       git_remote: 'origin',
       default_branch: 'main',
       sync_mode: 'local_git_authoritative',
@@ -293,21 +289,12 @@ const Workspaces = () => {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Container Path</p>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Path</p>
                       <div className="flex items-center gap-2 text-sm text-slate-300">
                         <Folder size={14} className="text-slate-600" />
-                        <span className="font-mono truncate">{ws.container_mount_path || ws.local_path}</span>
+                        <span className="font-mono truncate">{ws.local_path}</span>
                       </div>
                     </div>
-                    {ws.host_mount_path && (
-                      <div className="space-y-1">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Host Path</p>
-                        <div className="flex items-center gap-2 text-sm text-slate-300">
-                          <Folder size={14} className="text-slate-600" />
-                          <span className="font-mono truncate">{ws.host_mount_path}</span>
-                        </div>
-                      </div>
-                    )}
                     <div className="space-y-1">
                       <div className="flex items-center justify-between">
                         <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Git Status</p>
@@ -485,33 +472,18 @@ const Workspaces = () => {
           </label>
 
           <label className="space-y-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Container Mount Path</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Path</span>
             <div className="relative">
               <Folder size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
               <input 
                 type="text" 
-                value={form.container_mount_path || form.local_path || ''}
-                onChange={(e) => setForm({ ...form, container_mount_path: e.target.value })}
-                placeholder="your/repository/folder"
+                value={form.local_path || ''}
+                onChange={(e) => setForm({ ...form, local_path: e.target.value })}
+                placeholder="your/repository/folder (relative) or /absolute/path (system)"
                 className="glass-input w-full pl-10"
               />
             </div>
-            <p className="text-[10px] text-slate-600 italic">Path relative to the backend's workspace root. Used for all internal operations (git, file read/write).</p>
-          </label>
-
-          <label className="space-y-2">
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Host Mount Path <span className="text-slate-600 normal-case">(optional)</span></span>
-            <div className="relative">
-              <Folder size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
-              <input 
-                type="text" 
-                value={form.host_mount_path || ''}
-                onChange={(e) => setForm({ ...form, host_mount_path: e.target.value })}
-                placeholder="/home/user/projects/my-repo"
-                className="glass-input w-full pl-10"
-              />
-            </div>
-            <p className="text-[10px] text-slate-600 italic">Absolute path on the host machine. Used by Nextcloud sync and for your reference.</p>
+            <p className="text-[10px] text-slate-600 italic">Relative path for user workspaces, absolute path for system workspaces (e.g. /host-repo). Used for all internal operations.</p>
           </label>
 
           <div className="grid gap-4 md:grid-cols-2">
