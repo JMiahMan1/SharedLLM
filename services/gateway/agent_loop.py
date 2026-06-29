@@ -495,25 +495,40 @@ def should_persist_learning(result: str) -> bool:
     """
     if not result or result.strip() in ("None", "", "null"):
         return False
-    result_lower = result.lower()
+    result_lower = result.lower().strip()
+    
+    # Reject if the result is empty or just whitespace after stripping
+    if len(result_lower) < 3:
+        return False
     
     # Lint results with "issues found" are meaningful — the LLM found real problems.
     # Only reject if it's a tool execution error, not a diagnostic finding.
     if "lint issues found" in result_lower or "lint passed" in result_lower:
         return True
     
+    # Reject pure error/exception strings that indicate infrastructure failures
+    # rather than actual mission output from the LLM
     failure_indicators = [
         "tool execution failed",
-        "422",
-        "400",
-        "500",
-        "error:",
-        "failed:",
-        "traceback",
+        "traceback (most recent call last)",
     ]
     for indicator in failure_indicators:
         if indicator in result_lower:
             return False
+    
+    # Reject messages that start with "Error:" or "Failed:" — these are
+    # infrastructure/tool error messages, not meaningful LLM summaries
+    if re.match(r'^\s*(error|exception|failed)\s*:', result_lower):
+        return False
+    
+    # Reject HTTP status codes standing alone (not embedded in natural language)
+    if result_lower in ("400", "422", "500", "502", "503", "504"):
+        return False
+    
+    # Reject pure schema/validation error wrappers
+    if "schema error (422)" in result_lower:
+        return False
+    
     read_only_patterns = ["read ", "lines from"]
     if all(p in result_lower for p in read_only_patterns):
         return False
@@ -1197,7 +1212,28 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
                     short_msg = exec_data.get("message", "Success")
                     await stream_event("result_success", short_msg)
-                    action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
+                    # Build action log entry with detail for data-producing tools
+                    detail = exec_data.get("detail", {}) if isinstance(exec_data, dict) else {}
+                    if detail and not isinstance(detail, str):
+                        # For read-only tools with useful detail data, include a truncated summary
+                        detail_parts = []
+                        if "branch_line" in detail:
+                            detail_parts.append(detail["branch_line"].strip())
+                        if "raw_stdout" in detail:
+                            raw = detail["raw_stdout"].strip()
+                            if raw:
+                                detail_parts.append(raw[:500])
+                        if "porcelain" in detail and detail["porcelain"]:
+                            for p in detail["porcelain"][:10]:
+                                detail_parts.append(p.strip())
+                        if detail_parts:
+                            action_log.append(f"Step {iter_num}: {action} -> {short_msg} | Details: " + "\n".join(detail_parts))
+                        else:
+                            action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
+                    elif isinstance(detail, str) and detail.strip():
+                        action_log.append(f"Step {iter_num}: {action} -> {short_msg} | {detail.strip()[:300]}")
+                    else:
+                        action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
                     # Track successful tool executions (non-ERROR responses)
                     if isinstance(exec_data, dict) and exec_data.get("status") != "ERROR":
                         successful_tool_calls += 1
@@ -1259,14 +1295,23 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # --- SUMMARIZATION PHASE ---
     # Trigger if we have successful tool calls OR if the model output is purely JSON/messy
     is_messy = "was was was" in ans or "```json" in ans or (ans.strip().startswith("{") and ans.strip().endswith("}"))
+    ans_is_empty = not ans or ans.strip() in ("", "None", "null", "{}", "[]", "}")
     if successful_tool_calls > 0 or is_messy:
         # If the last response still looks like a tool call or is very short/messy, force a clean summary
         if extract_action_json(ans) or len(ans.strip()) < 30 or is_messy:
             log.info("[AgentLoop] Finalizing with clean summarization phase...")
-            summary_prompt = [
-                {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise."},
-                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nRaw output: {ans}\n\nPlease provide the final clean summary now:"}
-            ]
+            if ans_is_empty:
+                # LLM response was empty — build summary from action log only
+                action_summary = "\n".join(action_log)
+                summary_prompt = [
+                    {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. State what was accomplished based on the actions taken."},
+                    {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{action_summary}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished."}
+                ]
+            else:
+                summary_prompt = [
+                    {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. Do NOT say the mission failed unless the tool execution itself reported an error."},
+                    {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nRaw output: {ans}\n\nPlease provide the final clean summary now:"}
+                ]
             try:
                 data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.0})
                 ans = data.get("message", {}).get("content", ans)
