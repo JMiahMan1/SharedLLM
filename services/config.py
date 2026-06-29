@@ -168,6 +168,7 @@ async def resolve_runtime_config():
         "librarian_model": "LIBRARIAN_MODEL",
         "default_tts_voice": "DEFAULT_TTS_VOICE",
         "workspace_root": "WORKSPACE_ROOT",
+        "workspace_runtime_root": "WORKSPACE_RUNTIME_ROOT",
         "mass_config_entry_id": "MASS_CONFIG_ENTRY_ID",
         "abs_url": "ABS_URL",
         "abs_api_key": "ABS_API_KEY",

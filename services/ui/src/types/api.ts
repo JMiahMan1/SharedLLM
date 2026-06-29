@@ -35,8 +35,6 @@ export interface Workspace {
   id: string;
   display_name: string;
   local_path: string;
-  host_mount_path?: string | null;
-  container_mount_path?: string | null;
   resolved_path?: string | null;
   available?: boolean;
   nextcloud_path?: string | null;
