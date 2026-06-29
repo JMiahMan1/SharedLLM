@@ -385,7 +385,7 @@ services:
       - HOME=/home/sharedllm
     volumes:
       - ${WORKSPACE_HOST_PATH:-/home/jeremiah/workspaces}:/workspaces
-      - /home/jeremiah/SharedLLM:/host-repo:ro
+      - /home/jeremiah/SharedLLM:/host-repo
       - workspace_runtime_data:/data
       - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
