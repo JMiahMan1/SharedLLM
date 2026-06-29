@@ -46,7 +46,7 @@ CODE_EDITING_SHELL_COMMANDS = {
     "ln", "xargs",
 }
 VERIFICATION_SHELL_COMMANDS = {
-    "black", "eslint", "flake8", "pytest", "python", "python3"
+    "black", "eslint", "flake8", "pytest", "python", "python3", "git"
 }
 # Truly dangerous system-level commands — never allowed regardless of context
 SYSTEM_BLOCKLIST_COMMANDS = {
@@ -383,6 +383,9 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                 f"Shell command '{normalized_command}' is blocked: dangerous system-level operation not permitted."
             )
 
+        if base_command == "git" and len(parsed) > 1 and parsed[1] not in {"status", "diff", "log", "show"}:
+            return _fail("Only read-only git shell commands are allowed")
+
         allowed = (
             normalized_command in READ_ONLY_SHELL_COMMANDS
             or normalized_command in CODE_EDITING_SHELL_COMMANDS
@@ -395,9 +398,6 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
 
         if base_command in {"python", "python3"} and parsed[1:3] != ["-m", "pytest"]:
             return _fail("Only pytest execution is allowed through python shell commands")
-
-        if base_command == "git" and len(parsed) > 1 and parsed[1] not in {"status", "diff", "log", "show"}:
-            return _fail("Only read-only git shell commands are allowed")
 
         # Enforce capability constraints on the workspace
         if ws_details:
