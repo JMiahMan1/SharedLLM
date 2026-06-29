@@ -100,10 +100,12 @@ class BaseRequest(BaseModel):
             if "format" in field_names and "format" not in data and "response_format" in data:
                 data["format"] = data["response_format"]
 
-            # Normalize empty strings to None for optional fields
+            # Normalize empty strings to None for optional fields only
             for field_name in field_names:
-                if field_name in data and data[field_name] == "":
-                    data[field_name] = None
+                field_info = cls.model_fields.get(field_name)
+                if field_info is not None and not field_info.is_required():
+                    if field_name in data and data[field_name] == "":
+                        data[field_name] = None
 
         return data
 
