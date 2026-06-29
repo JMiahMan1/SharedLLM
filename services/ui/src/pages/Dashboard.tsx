@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Activity,
@@ -17,19 +17,15 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
-import type { GlobalSetting, HealthStatus, LogEntry, Workspace } from '../services/api';
+import type { GlobalSetting, HealthStatus, LogEntry, Workspace, SearchResult } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useRavenMissions } from '../hooks/useRavenMissions';
 import { useHaptics } from '../hooks/useHaptics';
+import { useDebounce } from '../hooks/useDebounce';
 import HaloBanner from '../components/presence/HaloBanner';
 import VoiceAssistantOverlay from '../components/voice/VoiceAssistantOverlay';
 import Modal from '../components/ui/Modal';
 import BentoBoxDashboard from '../components/dashboard/BentoBoxDashboard';
-
-type SearchResult = {
-  answer?: string;
-  files?: { name: string; path: string }[];
-};
 
 type ServiceSummary = {
   key: string;
@@ -50,17 +46,137 @@ const SERVICE_ICON_MAP = {
   redis: Activity,
 } as const;
 
+const ServiceCard = ({ service, onClick }: { service: ServiceSummary; onClick: () => void }) => {
+  const Icon = service.icon;
+  
+  return (
+    <button
+      onClick={onClick}
+      className="glass-card flex flex-col gap-4 p-6 text-left transition hover:border-purple-500/30"
+    >
+      <div className="flex items-center justify-between">
+        <div className="rounded-xl bg-white/5 p-3">
+          <Icon size={20} className="text-purple-300" />
+        </div>
+        <span className={`text-[10px] font-black uppercase tracking-widest ${
+          service.status === 'OK' ? 'text-emerald-300' : 'text-red-300'
+        }`}>
+          {service.status}
+        </span>
+      </div>
+      <div>
+        <p className="font-semibold capitalize text-white">{service.label}</p>
+        <p className="mt-1 text-xs text-slate-400">Derived from `/health/ready` and recent logs.</p>
+      </div>
+    </button>
+  );
+};
+
+const LogEntryCard = ({ log }: { log: LogEntry }) => (
+  <div className="glass-card p-4">
+    <div className="flex items-center justify-between gap-4 overflow-hidden">
+      <p className="font-semibold text-white truncate">{log.service}</p>
+      <span className="text-[10px] uppercase tracking-widest text-slate-500 shrink-0">{log.level}</span>
+    </div>
+    <p className="mt-2 text-sm text-slate-300 break-words">{log.message}</p>
+    <p className="mt-2 text-xs text-slate-500">{new Date(log.timestamp).toLocaleString()}</p>
+  </div>
+);
+
+const WorkspaceCard = ({ workspace }: { workspace: Workspace }) => (
+  <div className="glass-card p-4 transition-all hover:border-emerald-500/20">
+    <div className="flex items-center justify-between gap-4 overflow-hidden">
+      <p className="font-semibold text-white truncate">{workspace.display_name || workspace.id}</p>
+      <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 px-2 py-1 rounded-md ${
+        workspace.available ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'
+      }`}>
+        {workspace.available ? 'Online' : 'Unavailable'}
+      </span>
+    </div>
+    <p className="mt-2 font-mono text-[10px] text-slate-500 break-all bg-black/20 p-2 rounded">
+      {workspace.resolved_path || 'Path resolution failed'}
+    </p>
+    {!workspace.available && (
+      <p className="mt-2 text-[10px] text-red-400/70 italic">
+        Check workspace mount or local_path configuration.
+      </p>
+    )}
+  </div>
+);
+
+function useSearch(query: string) {
+  const [results, setResults] = useState<SearchResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const previousQueryRef = useRef<string>('');
+
+  useEffect(() => {
+    if (!query) {
+      // Only clear if we were previously searching to avoid unnecessary re-renders
+      if (previousQueryRef.current && (results || error)) {
+        setResults(null);
+        setError(null);
+      }
+      previousQueryRef.current = '';
+      return;
+    }
+
+    // Skip if query hasn't changed
+    if (query === previousQueryRef.current) {
+      return;
+    }
+    previousQueryRef.current = query;
+
+    let cancelled = false;
+    
+    setIsSearching(true);
+    setError(null);
+    
+    api.globalSearch(query)
+      .then((data) => {
+        if (!cancelled) {
+          setResults(data);
+          if (!data.answer && (!data.files || data.files.length === 0)) {
+            setError('No results found');
+          }
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          toast.error('Search failed');
+          setError('Search failed. Please try again.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsSearching(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [query, results, error]);
+
+  const clear = useCallback(() => {
+    setResults(null);
+    setError(null);
+    previousQueryRef.current = '';
+  }, []);
+
+  return { results, error, isSearching, clear };
+}
+
 const Dashboard = () => {
   const queryClient = useQueryClient();
   const [selectedService, setSelectedService] = useState<ServiceSummary | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState<SearchResult | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
   const { user } = useAuth();
   const { trigger } = useHaptics();
   const [voiceOpen, setVoiceOpen] = useState(false);
+
+  const debouncedSearch = useDebounce(searchQuery, 300);
+  const { results: searchResults, error: searchError, isSearching, clear: clearSearch } = useSearch(debouncedSearch);
 
   const { data: health } = useQuery<HealthStatus>({
     queryKey: ['health'],
@@ -91,55 +207,6 @@ const Dashboard = () => {
   });
 
   const { data: activeMissions = [], isLoading: ravenLoading } = useRavenMissions();
-
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      if (searchQuery.trim()) {
-        setDebouncedSearch(searchQuery);
-      } else {
-        setDebouncedSearch('');
-      }
-    }, 300);
-    return () => clearTimeout(timeoutId);
-  }, [searchQuery]);
-
-  const performSearch = useCallback((query: string) => {
-    if (!query) {
-      return;
-    }
-    setIsSearching(true);
-    setSearchError(null);
-    api.globalSearch(query)
-      .then((results) => {
-        const data = results as SearchResult;
-        setSearchResults(data);
-        if (!data.answer && (!data.files || data.files.length === 0)) {
-          setSearchError('No results found');
-        }
-      })
-      .catch(() => {
-        toast.error('Search failed');
-        setSearchError('Search failed. Please try again.');
-      })
-      .finally(() => {
-        setIsSearching(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    if (!debouncedSearch) {
-      return;
-    }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    performSearch(debouncedSearch);
-  }, [debouncedSearch, performSearch]);
-
-  const clearSearch = useCallback(() => {
-    setSearchResults(null);
-    setSearchError(null);
-    setSearchQuery('');
-    setDebouncedSearch('');
-  }, []);
 
   const serviceSummaries = useMemo<ServiceSummary[]>(() => {
     const services = health?.services || {};
@@ -174,8 +241,12 @@ const Dashboard = () => {
     if (!searchQuery.trim()) {
       return;
     }
-    setDebouncedSearch(searchQuery);
   };
+
+  const handleClearSearch = useCallback(() => {
+    setSearchQuery('');
+    clearSearch();
+  }, [clearSearch]);
 
   return (
     <div className="space-y-6 md:space-y-8 pb-12">
@@ -196,32 +267,29 @@ const Dashboard = () => {
 
         <div className="flex items-center gap-3 w-full">
           <form onSubmit={handleSearch} className="relative flex-1">
-          <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(event) => {
-              setSearchQuery(event.target.value);
-              if (!event.target.value.trim()) {
-                setDebouncedSearch('');
-              }
-            }}
-            placeholder="Search live RAG context and indexed files"
-            className="glass-input w-full py-3 pl-12 pr-12"
-          />
-          <button type="submit" aria-label="Submit search" disabled={isSearching} className="absolute right-2 top-1.5 glass-button px-4 py-1.5 text-xs font-bold">
-            {isSearching ? '...' : <ArrowUpRight size={16} />}
-          </button>
-        </form>
+            <Search className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+              }}
+              placeholder="Search live RAG context and indexed files"
+              className="glass-input w-full py-3 pl-12 pr-12"
+            />
+            <button type="submit" aria-label="Submit search" disabled={isSearching} className="absolute right-2 top-1.5 glass-button px-4 py-1.5 text-xs font-bold">
+              {isSearching ? '...' : <ArrowUpRight size={16} />}
+            </button>
+          </form>
 
-        <button
-          onClick={() => { trigger('medium'); setVoiceOpen(true); }}
-          className="p-3 rounded-xl bg-purple-500/20 border border-purple-500/30 text-purple-400 hover:bg-purple-500/30 transition-colors shrink-0"
-          aria-label="Voice command"
-        >
-          <Mic size={20} />
-        </button>
-      </div>
+          <button
+            onClick={() => { trigger('medium'); setVoiceOpen(true); }}
+            className="p-3 rounded-xl bg-purple-500/20 border border-purple-500/30 text-purple-400 hover:bg-purple-500/30 transition-colors shrink-0"
+            aria-label="Voice command"
+          >
+            <Mic size={20} />
+          </button>
+        </div>
       </header>
 
       <section>
@@ -232,7 +300,7 @@ const Dashboard = () => {
         <section className="glass-panel space-y-4 border-indigo-500/20 bg-indigo-500/5 p-6">
           <div className="flex items-center justify-between">
             <h3 className="font-bold text-indigo-300">Live Search Result</h3>
-            <button onClick={clearSearch} aria-label="Close search" className="text-slate-500 hover:text-white">
+            <button onClick={handleClearSearch} aria-label="Close search" className="text-slate-500 hover:text-white">
               <X size={16} />
             </button>
           </div>
@@ -276,24 +344,11 @@ const Dashboard = () => {
 
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
           {serviceSummaries.map((service) => (
-            <button
+            <ServiceCard
               key={service.key}
+              service={service}
               onClick={() => { trigger('light'); setSelectedService(service); }}
-              className="glass-card flex flex-col gap-4 p-6 text-left transition hover:border-purple-500/30"
-            >
-              <div className="flex items-center justify-between">
-                <div className="rounded-xl bg-white/5 p-3">
-                  <service.icon size={20} className="text-purple-300" />
-                </div>
-                <span className={`text-[10px] font-black uppercase tracking-widest ${service.status === 'OK' ? 'text-emerald-300' : 'text-red-300'}`}>
-                  {service.status}
-                </span>
-              </div>
-              <div>
-                <p className="font-semibold capitalize text-white">{service.label}</p>
-                <p className="mt-1 text-xs text-slate-400">Derived from `/health/ready` and recent logs.</p>
-              </div>
-            </button>
+            />
           ))}
         </div>
       </section>
@@ -320,16 +375,15 @@ const Dashboard = () => {
             </button>
           </div>
           <div className="space-y-3">
-            {logs.map((log, index) => (
-              <div key={`${log.timestamp}-${index}`} className="glass-card p-4">
-                <div className="flex items-center justify-between gap-4 overflow-hidden">
-                  <p className="font-semibold text-white truncate">{log.service}</p>
-                  <span className="text-[10px] uppercase tracking-widest text-slate-500 shrink-0">{log.level}</span>
-                </div>
-                <p className="mt-2 text-sm text-slate-300 break-words">{log.message}</p>
-                <p className="mt-2 text-xs text-slate-500">{new Date(log.timestamp).toLocaleString()}</p>
+            {logs.length > 0 ? (
+              logs.map((log, index) => (
+                <LogEntryCard key={`${log.timestamp}-${index}`} log={log} />
+              ))
+            ) : (
+              <div className="text-center py-8 glass-card border-dashed border-white/5">
+                <p className="text-sm text-slate-500">No recent activity</p>
               </div>
-            ))}
+            )}
           </div>
         </section>
 
@@ -345,22 +399,7 @@ const Dashboard = () => {
             <div className="space-y-3">
               {Array.isArray(workspaces) && workspaces.length > 0 ? (
                 workspaces.map((workspace) => (
-                  <div key={workspace.id} className="glass-card p-4 transition-all hover:border-emerald-500/20">
-                    <div className="flex items-center justify-between gap-4 overflow-hidden">
-                      <p className="font-semibold text-white truncate">{workspace.display_name || workspace.id}</p>
-                      <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 px-2 py-1 rounded-md ${workspace.available ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-red-500/10 text-red-300 border border-red-500/20'}`}>
-                        {workspace.available ? 'Online' : 'Unavailable'}
-                      </span>
-                    </div>
-                    <p className="mt-2 font-mono text-[10px] text-slate-500 break-all bg-black/20 p-2 rounded">
-                      {workspace.resolved_path || 'Path resolution failed'}
-                    </p>
-                    {!workspace.available && (
-                      <p className="mt-2 text-[10px] text-red-400/70 italic">
-                        Check workspace mount or local_path configuration.
-                      </p>
-                    )}
-                  </div>
+                  <WorkspaceCard key={workspace.id} workspace={workspace} />
                 ))
               ) : (
                 <div className="text-center py-8 glass-card border-dashed border-white/5">
@@ -403,7 +442,9 @@ const Dashboard = () => {
                     <p className="text-sm text-slate-400">Autonomous mission monitoring</p>
                   </div>
                 </div>
-                <span className={`text-[10px] font-black uppercase tracking-widest ${ravenLoading ? 'text-yellow-400' : activeMissions.length > 0 ? 'text-orange-400' : 'text-emerald-400'}`}>
+                <span className={`text-[10px] font-black uppercase tracking-widest ${
+                  ravenLoading ? 'text-yellow-400' : activeMissions.length > 0 ? 'text-orange-400' : 'text-emerald-400'
+                }`}>
                   {ravenLoading ? 'Loading...' : activeMissions.length > 0 ? 'Active' : 'Idle'}
                 </span>
               </div>

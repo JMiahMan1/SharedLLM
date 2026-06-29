@@ -30,6 +30,7 @@ import type {
   IntercomConfigData,
   ImagePullResult,
   CheckUpdatesResponse,
+  SearchResult,
 } from '../types/api';
 
 declare module 'axios' {
@@ -301,9 +302,9 @@ export const api = {
     return resp.data.models;
   },
 
-  async globalSearch(query: string): Promise<unknown> {
+  async globalSearch(query: string): Promise<SearchResult> {
     const resp = await apiClient.get(`/api/search?q=${encodeURIComponent(query)}`);
-    return resp.data;
+    return resp.data as SearchResult;
   },
 
   async getLogs(limit = 50): Promise<LogEntry[]> {

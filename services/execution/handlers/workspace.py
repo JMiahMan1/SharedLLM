@@ -4,6 +4,7 @@ import difflib
 import logging
 import os
 import shlex
+import traceback
 from typing import Optional
 from fastapi import HTTPException
 from services.config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
@@ -383,9 +384,6 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                 f"Shell command '{normalized_command}' is blocked: dangerous system-level operation not permitted."
             )
 
-        if base_command == "git" and len(parsed) > 1 and parsed[1] not in {"status", "diff", "log", "show"}:
-            return _fail("Only read-only git shell commands are allowed")
-
         allowed = (
             normalized_command in READ_ONLY_SHELL_COMMANDS
             or normalized_command in CODE_EDITING_SHELL_COMMANDS
@@ -405,7 +403,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
             if base_command in {"python", "python3"} and parsed[1:3] == ["-m", "pytest"]:
                 required_cap = "pytest"
             elif base_command == "git":
-                required_cap = "git_status"
+                required_cap = "git_write" if len(parsed) > 1 and parsed[1] not in {"status", "diff", "log", "show"} else "git_status"
             elif normalized_command in CODE_EDITING_SHELL_COMMANDS and normalized_command not in READ_ONLY_SHELL_COMMANDS:
                 # Only require write for commands that are exclusively in CODE_EDITING list
                 required_cap = "write"
@@ -421,9 +419,22 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         try:
             rc, stdout, stderr = await _run_command_async(final_cmd, cwd=abs_cwd, timeout=safe_timeout, shell=True)
         except TimeoutError:
-            return _fail(f"Command timed out after {req.timeout}s")
+            tb_str = traceback.format_exc()
+            log.error(f"[WORKSPACE SHELL TIMEOUT] Command: {final_cmd}\n{tb_str}")
+            detail = {
+                "command": final_cmd,
+                "cwd": abs_cwd,
+                "timeout": safe_timeout,
+                "error_type": "TimeoutError",
+                "traceback": tb_str,
+                "stdout": "",
+                "stderr": f"Command timed out after {safe_timeout}s",
+            }
+            return _fail(f"Command timed out after {safe_timeout}s", detail)
         
         detail = {
+            "command": final_cmd,
+            "cwd": abs_cwd,
             "stdout": stdout,
             "stderr": stderr,
             "returncode": rc
@@ -433,13 +444,22 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
             cmd_prefix = req.command[:50] if req.command else "<unknown>"
             return _ok(f"Command executed successfully: {cmd_prefix}...", detail)
         else:
+            log.error(f"[WORKSPACE SHELL FAIL] command='{final_cmd}' rc={rc} cwd={abs_cwd}\nstdout: {stdout}\nstderr: {stderr}")
             return _fail(f"Command failed with exit code {rc}", detail)
             
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Workspace shell execution failed: {e}")
-        return _fail(str(e))
+        tb_str = traceback.format_exc()
+        log.error(f"[WORKSPACE SHELL ERROR] command='{final_cmd if 'final_cmd' in dir() else '<unknown>'}'\n{tb_str}")
+        detail = {
+            "command": final_cmd if 'final_cmd' in dir() else "<unknown>",
+            "cwd": abs_cwd if 'abs_cwd' in dir() else "<unknown>",
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "traceback": tb_str,
+        }
+        return _fail(f"Workspace shell execution failed: {e}", detail)
 
 async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionResult:
     try:
@@ -510,8 +530,15 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Workspace patch failed: {e}")
-        return _fail(str(e))
+        tb_str = traceback.format_exc()
+        log.error(f"[WORKSPACE PATCH ERROR] path='{getattr(req, 'path', '<unknown>')}'\n{tb_str}")
+        detail = {
+            "path": getattr(req, "path", "<unknown>"),
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "traceback": tb_str,
+        }
+        return _fail(f"Workspace patch failed: {e}", detail)
 
 
 async def handle_workspace_lint(req) -> ExecutionResult:

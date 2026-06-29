@@ -129,6 +129,11 @@ export interface GlobalSetting {
   description?: string;
 }
 
+export interface SearchResult {
+  answer?: string;
+  files?: Array<{ name: string; path: string }>;
+}
+
 export interface GatewayConfig {
   assistant_model: string;
   coding_model: string;
