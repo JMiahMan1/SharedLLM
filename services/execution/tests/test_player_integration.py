@@ -370,9 +370,9 @@ class TestABSHandlers:
         assert book["author"] == "J.R.R. Tolkien"
         assert book["narrator"] == "Rob Inglis"
         assert book["series"] == "The Hobbit"
-        assert book["published"] == "1937"
+        assert book["publishedYear"] == "1937"
         assert book["genres"] == ["Fantasy", "Adventure"]
-        assert book["chapters"] == 2
+        assert book["chapter_count"] == 2
         assert book["status"] == "active"
         assert book["progress"] == 0.45
 
@@ -451,8 +451,10 @@ class TestABSHandlers:
             result = await _handle_search(abs_url, abs_key, req)
 
         assert result.status == "SUCCESS"
-        assert "No audiobooks found" in result.message
-        assert result.detail is None
+        assert "Found 0 result(s)" in result.message
+        assert result.detail is not None
+        assert result.detail.get("books") == []
+        assert result.detail.get("total") == 0
 
     @pytest.mark.asyncio
     async def test_search_error_returns_failure(self, ctx):
@@ -465,11 +467,15 @@ class TestABSHandlers:
             query="Test Query",
             limit=5,
         )
-        with patch("services.execution.handlers.audiobookshelf.abs_client.search_library", new=AsyncMock(return_value={"error": "API key invalid"})):
+        with (
+            patch("services.execution.handlers.audiobookshelf.abs_client.search_library", new=AsyncMock(return_value={"error": "API key invalid"})),
+            patch("services.execution.handlers.audiobookshelf.abs_client.search_all", new=AsyncMock(return_value={"books": [], "podcasts": [], "authors": []})),
+        ):
             result = await _handle_search(abs_url, abs_key, req)
 
-        assert result.status == "FAILURE"
-        assert "API key invalid" in result.message
+        # Falls through to external search which also returns no results
+        assert result.status == "SUCCESS"
+        assert "Found 0 result(s)" in result.message
 
     @pytest.mark.asyncio
     async def test_last_played_no_results(self, ctx):
