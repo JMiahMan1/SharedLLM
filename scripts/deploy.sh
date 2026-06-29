@@ -31,9 +31,8 @@ fi
 # Pre-flight check: ensure critical environment variables are injected
 if [ -z "${INTERNAL_SECRET:-}" ]; then
     if [ -f "$REPO_DIR/.env" ]; then
-        set -a
-        source "$REPO_DIR/.env"
-        set +a
+        # Extract INTERNAL_SECRET without sourcing (backticks in .env cause bash to interpret as commands)
+        INTERNAL_SECRET=$(grep '^INTERNAL_SECRET=' "$REPO_DIR/.env" | head -1 | sed 's/^INTERNAL_SECRET=//;s/^"//;s/"$//')
     fi
 fi
 
@@ -158,7 +157,13 @@ if [ "$HEALTHY" = false ]; then
     exit 1
 fi
 
-# --- Step 4: Re-ingest HA devices ---
+# --- Step 4: Force-reseed Identity (prompts + models from .md/.env) ---
+log "Force-reseeding Identity service (prompts + models)..."
+$COMPOSE exec -T identity curl -s -X POST "http://localhost:8001/api/admin/seed?force=true" \
+     -H "X-Internal-Secret: $INTERNAL_SECRET" \
+     | tee -a "$LOG_FILE"
+
+# --- Step 5: Re-ingest HA devices ---
 log "Re-ingesting Home Assistant devices via Gateway..."
 # Execute the POST request INSIDE the gateway container
 $COMPOSE exec -T gateway curl -s -X POST "http://localhost:11435/api/discovery/sync" \

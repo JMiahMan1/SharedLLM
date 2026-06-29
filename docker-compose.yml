@@ -72,6 +72,7 @@ services:
       - identity_db:/data
       - /etc/localtime:/etc/localtime:ro
       - ./.env:/app/.env:ro
+      - ./prompts:/app/prompts:ro
     networks:
       - sharedllm
     healthcheck:
