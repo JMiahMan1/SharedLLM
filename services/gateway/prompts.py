@@ -5,8 +5,8 @@ Prompt management module.
 All prompts are stored in the Identity service GlobalSettings table and loaded
 from the DB at each call site so runtime changes take effect immediately.
 
-Seed defaults live in .env (PROMPT_assistant_system_instruction, etc.)
-and are used by the Identity seed endpoint on first run.
+Seed defaults live in prompts/*.md files and are loaded by the Identity seed
+endpoint (seed_from_env) on first run or when --force is passed.
 
 At runtime, prompts are ONLY read from the Identity DB.
 

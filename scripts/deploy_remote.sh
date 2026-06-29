@@ -16,11 +16,18 @@ DIR="${2:-/home/jeremiah/SharedLLM}"
 # SSH options for robustness: auto-accept new host keys, fail on broken pipe
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10"
 
-# Sync local .env to remote to ensure config match (use ssh pipe instead of scp for reliability)
-if [ -f .env ]; then
-    echo "Syncing local .env to remote..."
-    ssh $SSH_OPTS "$HOST" "mkdir -p '$DIR' && cat > '$DIR/.env'" < .env
-fi
+# Sync non-git files to remote to ensure config match
+for NON_GIT_FILE in ".env" "prompts/"; do
+    if [ -e "$NON_GIT_FILE" ]; then
+        echo "Syncing $NON_GIT_FILE to remote..."
+        if [ -d "$NON_GIT_FILE" ]; then
+            ssh $SSH_OPTS "$HOST" "mkdir -p '$DIR/$NON_GIT_FILE'"
+            rsync -a --delete -e "ssh $SSH_OPTS" "$NON_GIT_FILE/" "$HOST:$DIR/$NON_GIT_FILE/"
+        else
+            ssh $SSH_OPTS "$HOST" "mkdir -p '$DIR' && cat > '$DIR/$NON_GIT_FILE'" < "$NON_GIT_FILE"
+        fi
+    fi
+done
 
 echo "Deploying to $HOST:$DIR"
 
