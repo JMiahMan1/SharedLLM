@@ -22,6 +22,7 @@ import logging
 import os
 import re
 import shlex
+import traceback
 from fastapi import HTTPException
 from services.config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
 from typing import Optional
@@ -111,6 +112,27 @@ async def _resolve_workspace_path(
                         log.info(f"Using default workspace: {ws.get('id')} -> {ws['resolved_path']}")
                         return ws["resolved_path"]
                 
+                # Handle workspaces that require user context (resolved_path is null in list response)
+                system_user_ctx = {"user": "system", "is_admin": True}
+                for ws in workspaces:
+                    ws_id = ws.get("id")
+                    if ws_id and not ws.get("resolved_path") and ws.get("requires_user_context"):
+                        try:
+                            resolve_resp = await client.post(
+                                f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
+                                json={"workspace_id": ws_id, "user_context": system_user_ctx},
+                                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                            )
+                            if resolve_resp.status_code == 200:
+                                resolve_data = resolve_resp.json()
+                                if resolve_data.get("status") == "SUCCESS":
+                                    resolved_path = resolve_data["workspace"].get("resolved_path")
+                                    if resolved_path:
+                                        log.info(f"Resolved workspace '{ws_id}' -> {resolved_path}")
+                                        return resolved_path
+                        except Exception as resolve_err:
+                            log.warning(f"Failed to resolve workspace {ws_id}: {resolve_err}")
+                
                 # Then try first workspace with git capabilities
                 for ws in workspaces:
                     if ws.get("resolved_path") and "git_status" in ws.get("capabilities", []):
@@ -123,7 +145,8 @@ async def _resolve_workspace_path(
                         log.info(f"Using first available workspace: {ws.get('id')} -> {ws['resolved_path']}")
                         return ws["resolved_path"]
     except Exception as e:
-        log.warning(f"Failed to list workspaces: {e}")
+        tb_str = traceback.format_exc()
+        log.error(f"[GIT RESOLVE WORKSPACE FAILED] workspace_id={workspace_id}\n{tb_str}")
     
     log.warning(f"No workspace found, falling back to WORKSPACE_ROOT: {WORKSPACE_ROOT}")
     return WORKSPACE_ROOT
@@ -168,10 +191,13 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
             "stderr": stderr.decode("utf-8", errors="replace").strip(),
         }
     except asyncio.TimeoutError:
+        tb_str = traceback.format_exc()
+        log.error(f"[GIT TIMEOUT] cmd={' '.join(cmd)} cwd={cwd}\n{tb_str}")
         return {"returncode": -1, "stdout": "", "stderr": "Git command timed out after 60s."}
     except Exception as e:
-        log.error(f"Git execution failed: {e}")
-        return {"returncode": -1, "stdout": "", "stderr": str(e)}
+        tb_str = traceback.format_exc()
+        log.error(f"[GIT ERROR] cmd={' '.join(cmd)} cwd={cwd}\n{tb_str}")
+        return {"returncode": -1, "stdout": "", "stderr": f"{type(e).__name__}: {e}"}
 
 
 async def _get_remote_url(remote_name: str = "origin", cwd: str = WORKSPACE_ROOT) -> str:
