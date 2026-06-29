@@ -142,8 +142,6 @@ async def global_exception_handler(request: Request, exc: Exception):
 class WorkspaceRef(BaseModel):
     workspace_id: Optional[str] = None
     local_path: Optional[str] = None
-    host_mount_path: Optional[str] = None
-    container_mount_path: Optional[str] = None
     rag_user: Optional[str] = None
     voice_id: Optional[str] = None
     device_id: Optional[str] = None
@@ -482,24 +480,38 @@ def _resolve_identity_context(ref: WorkspaceRef) -> Optional[dict[str, Any]]:
 
 def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Path:
     """
-    Resolves a relative path against a base directory, ensuring it does not escape.
-    Raises 403 Forbidden if the path is unsafe.
+    Resolves a path against a base directory for user workspaces, or uses it directly
+    for absolute paths (system workspaces). Ensures user workspaces don't escape the
+    workspace root, but allows absolute paths for system workspaces.
     """
     try:
-        # 1. Joins and resolves absolute path
+        # If path is already absolute, use it directly (system workspaces)
+        if os.path.isabs(relative):
+            target = Path(relative).resolve()
+            if must_exist and not target.exists():
+                raise HTTPException(status_code=404, detail=f"Path not found: {relative}")
+            return target
+        
+        # User workspace: join with base and check for path escapes
         target = (base / relative).resolve()
         
-        # 2. Check if target is within base
-        target.relative_to(base)
+        # Ensure the resolved path is within the base directory
+        try:
+            target.relative_to(base)
+        except (ValueError, RuntimeError):
+            log.warning(f"SECURITY ALERT: Path traversal attempt blocked! Base='{base}', Relative='{relative}'")
+            raise HTTPException(status_code=403, detail="Forbidden: Path traversal detected")
         
-        # 3. Existence check if required
+        # Existence check if required
         if must_exist and not target.exists():
             raise HTTPException(status_code=404, detail=f"Path not found: {relative}")
             
         return target
-    except (ValueError, RuntimeError):
-        log.warning(f"SECURITY ALERT: Path traversal attempt blocked! Base='{base}', Relative='{relative}'")
-        raise HTTPException(status_code=403, detail="Forbidden: Path traversal detected")
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"Unexpected error resolving path: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to resolve path: {relative}")
 
 
 def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
@@ -509,20 +521,18 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     is_admin = bool(identity and identity.get("is_admin"))
     match = None
 
-    # Resolution priority: workspace_id > container_mount_path > local_path
+    # Resolution priority: workspace_id > local_path (only field users need to set)
     if ref.workspace_id:
         match = next((item for item in registry if item.get("id") == ref.workspace_id), None)
-    elif ref.container_mount_path or ref.local_path:
-        lookup_path = ref.container_mount_path or ref.local_path
+    elif ref.local_path:
         match = next(
-            (item for item in registry
-             if (item.get("container_mount_path") or item.get("local_path")) == lookup_path),
+            (item for item in registry if item.get("local_path") == ref.local_path),
             None
         )
         if match is None:
-            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace", "container_mount_path": lookup_path}
+            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace"}
     else:
-        raise HTTPException(status_code=400, detail="workspace_id or container_mount_path is required")
+        raise HTTPException(status_code=400, detail="workspace_id or local_path is required")
 
     if match is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
@@ -539,8 +549,8 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     if owner_user and not is_admin and owner_user != resolved_user and not is_default_shared:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    # Use container_mount_path if available, fallback to local_path
-    effective_path = str(match.get("container_mount_path") or match.get("local_path", ""))
+    # local_path is the only user-facing path field (relative for users, absolute for system)
+    effective_path = str(match.get("local_path", ""))
     resolved_path = resolve_safe_path(get_workspace_root(), effective_path)
     if not resolved_path.is_dir():
          raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {effective_path}")
@@ -571,13 +581,12 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
 
     if ref.workspace_id:
         match = next((item for item in registry if item.get("id") == ref.workspace_id), None)
-    elif ref.container_mount_path or ref.local_path:
-        lookup_path = ref.container_mount_path or ref.local_path
-        match = next((item for item in registry if (item.get("container_mount_path") or item.get("local_path")) == lookup_path), None)
+    elif ref.local_path:
+        match = next((item for item in registry if item.get("local_path") == ref.local_path), None)
         if match is None:
-            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace", "container_mount_path": lookup_path}
+            match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace"}
     else:
-        raise HTTPException(status_code=400, detail="workspace_id or container_mount_path is required")
+        raise HTTPException(status_code=400, detail="workspace_id or local_path is required")
 
     if match is None:
         if not ref.create_if_missing:
@@ -599,12 +608,12 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
             raise HTTPException(status_code=400, detail=f"Workspace ID '{workspace_id}' is reserved. Cannot use: {', '.join(sorted(RESERVED_WORKSPACE_NAMES))}")
         
         owner_user = resolved_user if scope == "user" else "system"
-        container_mount_path = str(ref.container_mount_path or ref.local_path or _derive_workspace_container_path(workspace_id, scope, owner_user)).strip()
+        local_path = str(ref.local_path or _derive_workspace_container_path(workspace_id, scope, owner_user)).strip()
         match = {
             "id": workspace_id,
             "display_name": str(ref.display_name or workspace_id).strip(),
             "access_policy": "authenticated",
-            "container_mount_path": container_mount_path,
+            "local_path": local_path,
             "repo_url": repo_url,
             "git_remote": str(ref.remote or "origin").strip(),
             "default_branch": str(ref.branch or "main").strip(),
@@ -620,7 +629,7 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
                 id=workspace_id,
                 display_name=str(match.get("display_name", workspace_id)),
                 access_policy=str(match.get("access_policy", "authenticated")),
-                container_mount_path=match.get("container_mount_path"),
+                local_path=match.get("local_path"),
                 scope=match.get("scope", "user"),
                 owner_user=match.get("owner_user"),
             ))
@@ -635,7 +644,8 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
     if owner_user and not is_admin and owner_user != resolved_user:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    effective_path = str(match.get("container_mount_path") or match.get("local_path", ""))
+    # local_path is the only user-facing path field
+    effective_path = str(match.get("local_path", ""))
     resolved_path = resolve_safe_path(get_workspace_root(), effective_path, must_exist=False)
     workspace = dict(match)
     workspace["resolved_path"] = str(resolved_path)
@@ -1208,7 +1218,8 @@ def list_workspaces(
             items.append(item)
             continue
         try:
-            effective_path = str(entry.get("container_mount_path") or entry["local_path"])
+            # local_path is the only user-facing path field (relative for users, absolute for system)
+            effective_path = str(entry.get("local_path", "."))
             item["resolved_path"] = str(resolve_safe_path(get_workspace_root(), effective_path))
             item["available"] = True
         except HTTPException:
@@ -1242,21 +1253,21 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: Optio
     workspace = _resolve_workspace_for_bootstrap(req)
     _require_workspace_capability(workspace, "git_write")
 
-    # Fix legacy workspaces with outdated paths (container_mount_path=None, local_path='.')
-    if workspace.get("container_mount_path") is None and workspace.get("local_path") == ".":
+    # Derive target path from local_path (relative for user workspaces, absolute for system)
+    effective_path = str(workspace.get("local_path", "."))
+    if effective_path == ".":
         repo_url = str(req.repo_url or workspace.get("repo_url") or "").strip()
         if repo_url:
             scope = workspace.get("scope", "user")
             owner_user = workspace.get("owner_user")
-            new_path = _derive_workspace_container_path(workspace["id"], scope, owner_user)
-            workspace["container_mount_path"] = new_path
-            effective_path = new_path
+            effective_path = _derive_workspace_container_path(workspace["id"], scope, owner_user)
+            workspace["local_path"] = effective_path
             resolved_path = resolve_safe_path(get_workspace_root(), effective_path, must_exist=False)
             workspace["resolved_path"] = str(resolved_path)
             with Session(engine) as session:
                 ws = session.exec(select(Workspace).where(Workspace.id == workspace["id"])).first()
                 if ws:
-                    ws.container_mount_path = new_path
+                    ws.local_path = effective_path
                     session.add(ws)
                     session.commit()
             target_path = Path(workspace["resolved_path"])
@@ -1346,9 +1357,9 @@ def create_workspace(ws: Workspace, x_internal_secret: Optional[str] = Header(de
     if slug in RESERVED_WORKSPACE_NAMES:
         raise HTTPException(status_code=400, detail=f"Workspace ID '{ws.id}' is reserved. Cannot use: {', '.join(sorted(RESERVED_WORKSPACE_NAMES))}")
     
-    # Auto-derive container_mount_path if not provided
-    if not ws.container_mount_path and ws.repo_url:
-        ws.container_mount_path = _derive_workspace_container_path(ws.id, ws.scope, ws.owner_user)
+    # Derive local_path if not provided
+    if not ws.local_path and ws.repo_url:
+        ws.local_path = _derive_workspace_container_path(ws.id, ws.scope, ws.owner_user)
     
     with Session(engine) as session:
         existing = session.get(Workspace, ws.id)
