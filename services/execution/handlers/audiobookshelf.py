@@ -84,35 +84,42 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
 
     # Search ABS library
     library_result = await abs_client.search_library(abs_url, abs_key, req.query, limit=req.limit)
-    if "error" not in library_result:
-        books = library_result.get("results", [])
-        if books:
-            book_summaries = []
-            for b in books[:req.limit]:
-                media = b.get("media", {})
-                meta = media.get("metadata", {})
-                book_id = b.get("id", "")
-                book_summaries.append({
-                    "id": book_id,
-                    "title": meta.get("title", "Unknown"),
-                    "author": meta.get("authorName", "Unknown"),
-                    "narrator": meta.get("narratorName", ""),
-                    "series": meta.get("series", ""),
-                    "publishedYear": meta.get("publishedYear", ""),
-                    "genres": meta.get("genres", []),
-                    "duration": media.get("duration", 0),
-                    "duration_formatted": _format_time(media.get("duration", 0)) if media.get("duration") else "",
-                    "progress": b.get("progress", {}),
-                    "play_url": await abs_client.get_stream_url(abs_url, abs_key, book_id) if book_id else "",
-                    "cover": media.get("cover", {}).get("path", "") if isinstance(media.get("cover"), dict) else (media.get("cover", "") or ""),
-                })
+    if "error" in library_result:
+        log.warning(f"[abs] Library search failed, falling back to external: {library_result.get('error')}")
+        # Fall through to external metadata search
 
-            return ExecutionResult(
-                status="SUCCESS",
-                message=f"Found {len(book_summaries)} audiobook(s) in library for '{req.query}'.",
-                service="audiobookshelf",
-                detail={"books": book_summaries},
-            )
+    books = library_result.get("book", [])
+    if books:
+        book_summaries = []
+        for b in books[:req.limit]:
+            library_item = b.get("libraryItem", {})
+            media = library_item.get("media", {})
+            meta = media.get("metadata", {})
+            book_id = library_item.get("id", "")
+            chapters = media.get("chapters", [])
+            book_summaries.append({
+                "id": book_id,
+                "title": meta.get("title", "Unknown"),
+                "author": meta.get("authorName", "Unknown"),
+                "narrator": meta.get("narratorName", ""),
+                "series": meta.get("series", ""),
+                "publishedYear": meta.get("publishedYear", ""),
+                "genres": meta.get("genres", []),
+                "duration": media.get("duration", 0),
+                "duration_formatted": _format_time(media.get("duration", 0)) if media.get("duration") else "",
+                "progress": library_item.get("progress", {}),
+                "status": library_item.get("status", ""),
+                "chapter_count": len(chapters) if isinstance(chapters, list) else 0,
+                "play_url": await abs_client.get_stream_url(abs_url, abs_key, book_id) if book_id else "",
+                "cover": media.get("cover", {}).get("path", "") if isinstance(media.get("cover"), dict) else (media.get("cover", "") or ""),
+            })
+
+        return ExecutionResult(
+            status="SUCCESS",
+            message=f"Found {len(book_summaries)} audiobook(s) in library for '{req.query}'.",
+            service="audiobookshelf",
+            detail={"books": book_summaries},
+        )
 
     # Fallback: external metadata search
     result = await abs_client.search_all(abs_url, abs_key, req.query, limit=req.limit)
