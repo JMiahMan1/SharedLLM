@@ -11,7 +11,7 @@ import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import Identity from './pages/Identity';
 import Communication from './pages/Communication';
-import JarvisLab from './pages/JarvisLab';
+import JarvisLab, { JarvisLabAdmin } from './pages/JarvisLab';
 import KnowledgeHub from './pages/KnowledgeHub';
 import Workspaces from './pages/Workspaces';
 import Docs from './pages/Docs';
@@ -81,6 +81,8 @@ function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/" element={<ProtectedRoute isMobile={isNative}><Dashboard /></ProtectedRoute>} />
+            
+            {/* Admin-only routes */}
             <Route path="/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
             <Route path="/admin/ops" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
             <Route path="/admin/users" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
@@ -91,6 +93,8 @@ function App() {
             <Route path="/admin/database" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
             <Route path="/admin/sounds" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
             <Route path="/admin/services" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
+
+            {/* Service routes */}
             <Route path="/identity" element={<ProtectedRoute isMobile={isNative}><Identity /></ProtectedRoute>} />
             <Route path="/communication" element={<ProtectedRoute isMobile={isNative}><Communication /></ProtectedRoute>} />
             <Route path="/chat" element={<ProtectedRoute isMobile={isNative}><Communication /></ProtectedRoute>} />
@@ -99,10 +103,13 @@ function App() {
             <Route path="/remote" element={<ProtectedRoute isMobile={isNative}><Remote /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute isMobile={isNative}><Settings /></ProtectedRoute>} />
             <Route path="/settings/integrations" element={<ProtectedRoute isMobile={isNative}><Settings /></ProtectedRoute>} />
-            <Route path="/lab" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><JarvisLab /></AdminElevation></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute isMobile={isNative}><KnowledgeHub /></ProtectedRoute>} />
             <Route path="/workspaces" element={<ProtectedRoute isMobile={isNative}><Workspaces /></ProtectedRoute>} />
             <Route path="/docs" element={<ProtectedRoute isMobile={isNative}><Docs /></ProtectedRoute>} />
+
+            {/* Jarvis Lab — user view (admin-only access) and admin view */}
+            <Route path="/lab" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><JarvisLab /></AdminElevation></ProtectedRoute>} />
+            <Route path="/lab/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><JarvisLabAdmin /></AdminElevation></ProtectedRoute>} />
           </Routes>
         </Router>
       </LocationProvider>

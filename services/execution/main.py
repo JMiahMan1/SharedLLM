@@ -1854,7 +1854,7 @@ async def get_ma_library(user_id: str = "", media_type: str = "TRACKS", offset: 
 
 
 @app.get("/execute/media/music-assistant/search")
-async def search_ma(user_id: str = "", query: str = "", media_type: str = "", limit: int = 20, artist: str = "", album: str = ""):
+async def search_ma(user_id: str = "", query: str = "", media_type: str = "", limit: int = 20, artist: str = "", album: str = "", library_only: bool = True):
     """Search MA for media items via HA proxy."""
     try:
         creds = await _resolve_mass_ha_creds(user_id)
@@ -1866,11 +1866,11 @@ async def search_ma(user_id: str = "", query: str = "", media_type: str = "", li
             return {"status": "SUCCESS", "results": [], "notice": "MA/HA not configured"}
         
         from services.execution.handlers.mass_ha_client import search as _ma_search
-        results = await _ma_search(ha_url, ha_token, query, mass_entry_id=mass_entry_id, media_types=[media_type] if media_type else None, limit=limit, artist=artist, album=album)
+        results = await _ma_search(ha_url, ha_token, query, mass_entry_id=mass_entry_id, media_types=[media_type] if media_type else None, limit=limit, artist=artist, album=album, library_only=library_only)
         return {"status": "SUCCESS", "results": results, "query": query}
     except Exception as e:
         log.error(f"[ma/search] Error: {e}")
-        return {"status": "SUCCESS", "results": []}
+        return {"status": "FAILURE", "message": str(e), "results": []}
 
 
 @app.get("/execute/audiobookshelf")
