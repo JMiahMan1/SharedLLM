@@ -630,6 +630,27 @@ export const api = {
     return resp.data;
   },
 
+  async triggerIndexingForce(path: string, recursive = true): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/api/storage/index', { path, recursive, force: true });
+    return resp.data;
+  },
+
+  async triggerFullIndex(provider: { kind: string; settings: Record<string, unknown> }, options?: {
+    path?: string;
+    recursive?: boolean;
+    user_id?: string;
+    force?: boolean;
+  }): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/api/storage/index/full', {
+      provider,
+      path: options?.path ?? '/',
+      recursive: options?.recursive ?? true,
+      user_id: options?.user_id,
+      force: options?.force ?? false,
+    });
+    return resp.data;
+  },
+
   async getRagStats(): Promise<RagStats> {
     const resp = await apiClient.get('/api/storage/stats');
     return resp.data;

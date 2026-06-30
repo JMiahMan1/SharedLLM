@@ -85,6 +85,7 @@ class StorageListRequest(BaseModel):
 class StorageIndexRequest(BaseModel):
     path: str = "/"
     recursive: bool = True
+    force: bool = False
 
 class StorageStatusRequest(BaseModel):
     """

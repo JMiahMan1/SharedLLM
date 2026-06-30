@@ -47,9 +47,9 @@ Identified 14 critical contradictions between documentation and code implementat
 
 ## Undocumented Services (Now Fixed)
 - [x] dns-sync service → docs/DNS_SYNC_SERVICE.md
+- [x] DNS Resolver → docs/DNS_RESOLVER.md
 - [x] Control Plane → docs/CONTROL_PLANE_SERVICE.md
 - [x] Automation → docs/AUTOMATION_SERVICE.md
-- [x] DNS Resolver → docs/DNS_RESOLVER.md
 
 ## Verification
 All fixes verified against source code. No assumptions made.
