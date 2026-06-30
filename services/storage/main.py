@@ -5,7 +5,6 @@ import re
 
 from services.config import RAG_SVC_URL, INTERNAL_SECRET
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Body, Query
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from typing import Optional
 
@@ -269,7 +268,7 @@ async def mirror_provider_directory(req: ProviderMirrorRequest):
         if upload_fn is None:
             raise HTTPException(status_code=400, detail="Provider does not support directory mirroring")
 
-        result = await run_in_threadpool(upload_fn, req.remote_path, req.local_path, excludes=req.excludes)
+        result = await upload_fn(req.remote_path, req.local_path, excludes=req.excludes)
         return {"status": "SUCCESS", "result": result}
     except Exception as e:
         log.error(f"Provider mirror failed: {e}")
