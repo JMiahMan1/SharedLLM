@@ -17,18 +17,23 @@ const BottomNav = () => {
 
   const navItems = [
     { icon: Home, label: 'Home', path: '/', roles: ['admin', 'user', 'child'] },
-    { icon: FolderKanban, label: 'Workspaces', path: '/workspaces', roles: ['admin', 'user', 'child'] },
-    { icon: Radio, label: 'Remote', path: '/remote', roles: ['admin', 'user', 'child'] },
-    { icon: Database, label: 'Knowledge', path: '/knowledge', roles: ['admin', 'user', 'child'] },
-    { icon: MessageSquare, label: 'Chat', path: '/communication', roles: ['admin', 'user', 'child'] },
     { icon: Music, label: 'Media', path: '/media', roles: ['admin', 'user', 'child'] },
-    ...(isAdmin
-      ? [{ icon: Brain, label: 'Lab', path: '/lab', roles: ['admin'] as const }]
-      : []),
-    ...(isAdmin
-      ? [{ icon: Shield, label: 'Raven Ops', path: '/admin/ops', roles: ['admin'] as const }]
-      : [{ icon: Settings, label: 'Settings', path: '/settings', roles: ['user', 'child'] as const }]),
+    { icon: MessageSquare, label: 'Chat', path: '/communication', roles: ['admin', 'user', 'child'] },
+    { icon: Radio, label: 'Remote', path: '/remote', roles: ['admin', 'user', 'child'] },
+    { icon: FolderKanban, label: 'Workspaces', path: '/workspaces', roles: ['admin', 'user', 'child'] },
   ];
+
+  if (isAdmin) {
+    navItems.push(
+      { icon: Brain, label: 'Lab', path: '/lab', roles: ['admin'] as const },
+      { icon: Shield, label: 'Ops', path: '/admin/ops', roles: ['admin'] as const },
+    );
+  } else {
+    navItems.push(
+      { icon: Database, label: 'Knowledge', path: '/knowledge', roles: ['admin', 'user', 'child'] as const },
+      { icon: Settings, label: 'Settings', path: '/settings', roles: ['admin', 'user', 'child'] as const },
+    );
+  }
 
   const handleTap = () => {
     trigger('light');

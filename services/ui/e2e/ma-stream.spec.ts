@@ -169,7 +169,7 @@ async function getRecentMATracks(page: Page, token: string): Promise<unknown[] |
 }
 
 function isUnsupportedPlaybackUri(uri: string): boolean {
-  return /youtube\.com|youtu\.be|spotify:|open\.spotify\.com/i.test(uri);
+  return /youtube\.com|youtu\.be/i.test(uri);
 }
 
 async function getLiveMATestUri(page: Page, token: string): Promise<string | null> {

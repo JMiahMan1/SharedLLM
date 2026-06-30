@@ -5027,7 +5027,7 @@ async def get_ma_browse(request: Request, media_type: str = "TRACKS", offset: in
 
 
 @app.get("/api/media/music-assistant/search")
-async def search_ma(request: Request, query: str = "", media_type: str = "", limit: int = 20, artist: str = "", album: str = ""):
+async def search_ma(request: Request, query: str = "", media_type: str = "", limit: int = 20, artist: str = "", album: str = "", library_only: bool = True):
     """Search MA for media items via HA."""
     try:
         creds = await _resolve_identity_from_request(request)
@@ -5037,7 +5037,7 @@ async def search_ma(request: Request, query: str = "", media_type: str = "", lim
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/search",
-            params={"user_id": creds.get("user") or "", "query": query, "media_type": media_type, "limit": limit, "artist": artist, "album": album},
+            params={"user_id": creds.get("user") or "", "query": query, "media_type": media_type, "limit": limit, "artist": artist, "album": album, "library_only": library_only},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         if resp.status_code == 200:
@@ -5905,7 +5905,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
     4. Forwards all JSON-RPC messages bidirectionally
 
     Browser sends JSON-RPC commands like:
-    - {"message_id": "counter1", "command": "players/play_media", "args": {"player_id": "...", "media": "spotify://track/..."}}
+    - {"message_id": "counter1", "command": "players/play_media", "args": {"player_id": "...", "media": "mass://search?q=artist&limit=10"}}
     - {"message_id": "counter2", "command": "players/cmd_play", "args": {"player_id": "..."}}
     - {"message_id": "counter3", "command": "players/cmd_pause", "args": {"player_id": "..."}}
     - {"message_id": "counter4", "command": "players/cmd_seek", "args": {"player_id": "...", "position": 30}}

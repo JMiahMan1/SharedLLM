@@ -994,6 +994,16 @@ export const api = {
     return resp.data;
   },
 
+  async searchMusicAssistant(query: string, mediaType?: string, limit = 30, libraryOnly = true): Promise<{
+    status: string;
+    results: Array<{ name: string; uri: string; type: string; duration?: number; artist?: string; album?: string; cover?: string; trackCount?: number }>;
+  }> {
+    const params = new URLSearchParams({ query, limit: String(limit), library_only: String(libraryOnly) });
+    if (mediaType) params.set('media_type', mediaType);
+    const resp = await apiClient.get(`/api/media/music-assistant/search?${params.toString()}`);
+    return resp.data;
+  },
+
   async getWidgetSettings(): Promise<{
     widgets: Array<{
       widget_key: string;

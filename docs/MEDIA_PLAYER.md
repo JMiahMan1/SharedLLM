@@ -259,7 +259,62 @@ GET /api/media/audiobookshelf/search?q=mark&limit=5
 
 ---
 
-### 3.3 Execution Service Commands
+### 3.3 Music Assistant Search
+
+The gateway provides a Music Assistant search endpoint forwarding to Home Assistant's `music_assistant.search` action.
+
+#### Gateway Search Endpoint
+
+* **Endpoint:** `GET /api/media/music-assistant/search?query=<query>&limit=<n>&library_only=<true|false>`
+* **Headers:** `X-Internal-Secret: <secret>` (or user context resolved internally)
+* **Parameters:**
+  * `query`: Search query (e.g. track name, artist, or album)
+  * `limit`: Max results to return (defaults to `20` / `30`)
+  * `library_only`: Filter constraint (boolean, defaults to `true`). 
+    * When `true`, restricts matches only to items cataloged in the local Music Assistant database.
+    * When `false`, searches external streaming providers (e.g., Spotify, SoundCloud) in addition to local library database items.
+
+**Request:**
+
+```text
+GET /api/media/music-assistant/search?query=Miles+Davis&library_only=true
+```
+
+**Response (Success):**
+
+```json
+{
+  "status": "SUCCESS",
+  "query": "Miles Davis",
+  "results": [
+    {
+      "name": "So What",
+      "uri": "library://track/123",
+      "type": "track",
+      "artist": "Miles Davis",
+      "duration": 562
+    }
+  ]
+}
+```
+
+#### Error Handling & Downstream Failure Capture
+
+If the connection to the downstream Home Assistant or Music Assistant service fails or times out, the search endpoint returns a `FAILURE` status instead of silently falling back to a `SUCCESS` envelope with 0 results.
+
+**Response (Failure):**
+
+```json
+{
+  "status": "FAILURE",
+  "message": "Home Assistant Music Assistant service call failed (Connection Timeout)",
+  "results": []
+}
+```
+
+---
+
+### 3.4 Execution Service Commands
 
 All remote casting requests are sent through `POST /execute/media/play`:
 
@@ -280,7 +335,7 @@ All remote casting requests are sent through `POST /execute/media/play`:
 
 ---
 
-### 3.3 State Syncing & Polling
+### 3.5 State Syncing & Polling
 
 The frontend tracks the active playback state using two mechanisms:
 
