@@ -145,10 +145,7 @@ async def _run_full_index_task(req: IndexScanRequest):
                 # 4. Cleanup old entries
                 purge_resp = await client.post(
                     f"{RAG_SVC}/rag/purge/{req.provider.kind}_files",
-                    json={
-                        "user_id": user_id,
-                        "filter": {"session_id": {"$ne": session_id}}
-                    },
+                    params={"user_id": user_id},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
                 if purge_resp.status_code != 200:
