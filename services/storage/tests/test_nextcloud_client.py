@@ -9,7 +9,8 @@ def client():
     return NextCloudClient("http://nextcloud.local", "user", "pass")
 
 @respx.mock
-def test_list_files_parsing(client):
+@pytest.mark.asyncio
+async def test_list_files_parsing(client):
     xml_content = b"""<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:">
  <d:response>
@@ -40,7 +41,7 @@ def test_list_files_parsing(client):
         return_value=httpx.Response(207, content=xml_content)
     )
 
-    items = client.list_files("/")
+    items = await client.list_files("/")
     assert len(items) == 2
     assert items[0]["href"] == "/remote.php/dav/files/user/folder/"
     assert items[0]["props"]["is_dir"] is True
@@ -49,7 +50,8 @@ def test_list_files_parsing(client):
     assert items[1]["props"]["size"] == "123"
 
 @respx.mock
-def test_list_entries(client):
+@pytest.mark.asyncio
+async def test_list_entries(client):
     xml_content = b"""<?xml version="1.0" encoding="utf-8"?>
 <d:multistatus xmlns:d="DAV:">
  <d:response>
@@ -72,7 +74,7 @@ def test_list_entries(client):
         return_value=httpx.Response(207, content=xml_content)
     )
 
-    entries = client.list_entries("/")
+    entries = await client.list_entries("/")
     assert len(entries) == 1
     assert isinstance(entries[0], StorageEntry)
     assert entries[0].name == "test.txt"
@@ -80,15 +82,17 @@ def test_list_entries(client):
     assert entries[0].size == 500
 
 @respx.mock
-def test_get_file_content(client):
+@pytest.mark.asyncio
+async def test_get_file_content(client):
     respx.get("http://nextcloud.local/remote.php/dav/files/user/test.txt").mock(
         return_value=httpx.Response(200, text="hello world")
     )
-    content = client.get_file_content("/test.txt")
+    content = await client.get_file_content("/test.txt")
     assert content == "hello world"
 
 @respx.mock
-def test_write_file_content(client):
+@pytest.mark.asyncio
+async def test_write_file_content(client):
     # Mock MKCOL for parent dir
     respx.request("MKCOL", "http://nextcloud.local/remote.php/dav/files/user/folder").mock(
         return_value=httpx.Response(201)
@@ -98,6 +102,6 @@ def test_write_file_content(client):
         return_value=httpx.Response(201)
     )
     
-    res = client.write_file_content("/folder/test.txt", "content")
+    res = await client.write_file_content("/folder/test.txt", "content")
     assert res["bytes_written"] == 7
     assert res["path"] == "/folder/test.txt"

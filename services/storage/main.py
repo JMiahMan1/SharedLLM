@@ -130,6 +130,18 @@ async def _run_full_index_task(req: IndexScanRequest):
         
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
             try:
+                # 3.5. Cleanup old entries BEFORE syncing new ones
+                purge_resp = await client.post(
+                    f"{RAG_SVC}/rag/purge/{req.provider.kind}_files",
+                    params={"user_id": user_id},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if purge_resp.status_code != 200:
+                    log.warning(f"Purge failed (non-fatal): {purge_resp.status_code} {purge_resp.text}")
+                else:
+                    log.info(f"Cleaned old {collection_name} entries for user {user_id}")
+                
+                # 3.6. Sync to RAG in batches to avoid timeout on large payloads
                 for i in range(0, len(chunks), BATCH_SIZE):
                     batch = chunks[i:i+BATCH_SIZE]
                     batch_num = (i // BATCH_SIZE) + 1
@@ -154,15 +166,6 @@ async def _run_full_index_task(req: IndexScanRequest):
                         )
                     total_synced += len(batch)
                     log.info(f"RAG batch {batch_num}/{total_batches} synced: {len(batch)} chunks")
-                
-                # 4. Cleanup old entries
-                purge_resp = await client.post(
-                    f"{RAG_SVC}/rag/purge/{req.provider.kind}_files",
-                    params={"user_id": user_id},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
-                if purge_resp.status_code != 200:
-                    log.warning(f"Purge failed (non-fatal): {purge_resp.status_code} {purge_resp.text}")
                 
                 log.info(f"Background index complete for {user_id}. Synced {total_synced}/{len(chunks)} chunks.")
             except httpx.HTTPStatusError as e:

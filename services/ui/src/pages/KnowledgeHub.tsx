@@ -25,6 +25,8 @@ const KnowledgeHub = () => {
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const [purgeModalCollection, setPurgeModalCollection] = useState<string | null>(null);
+  const [fullReindexForce, setFullReindexForce] = useState(false);
+  const [indexForce, setIndexForce] = useState(false);
 
   const { data: stats, isLoading: statsLoading } = useQuery<RagStats>({
     queryKey: ['rag-stats'],
@@ -38,14 +40,29 @@ const KnowledgeHub = () => {
   });
 
   const indexMutation = useMutation({
-    mutationFn: ({ path, recursive = true }: { path: string; recursive?: boolean }) => 
-      api.triggerIndexing(path, recursive),
+    mutationFn: ({ path, recursive = true, force = false }: { path: string; recursive?: boolean; force?: boolean }) => 
+      force ? api.triggerIndexingForce(path, recursive) : api.triggerIndexing(path, recursive),
     onSuccess: () => {
       toast.success('Indexing started in background');
       queryClient.invalidateQueries({ queryKey: ['rag-stats'] });
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Failed to start indexing');
+    },
+  });
+
+  const fullReindexMutation = useMutation({
+    mutationFn: ({ force = false }: { force?: boolean }) => 
+      api.triggerFullIndex(
+        { kind: 'nextcloud', settings: {} },
+        { force, user_id: user?.username }
+      ),
+    onSuccess: () => {
+      toast.success('Full NextCloud reindex started in background');
+      queryClient.invalidateQueries({ queryKey: ['rag-stats'] });
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to start full reindex');
     },
   });
 
@@ -78,18 +95,15 @@ const KnowledgeHub = () => {
     setCurrentPath('/' + parts.join('/'));
   };
 
-  const handleIndexFolder = (path: string) => {
-    indexMutation.mutate({ path, recursive: true });
-  };
-
   const handleManualIndex = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const path = (formData.get('path') as string).trim();
     const recursive = formData.get('recursive') === 'on';
+    const force = formData.get('force') === 'on';
     
     if (path) {
-      indexMutation.mutate({ path, recursive });
+      indexMutation.mutate({ path, recursive, force });
       e.currentTarget.reset();
     } else {
       toast.error('Please enter a valid path');
@@ -213,17 +227,31 @@ const KnowledgeHub = () => {
               </div>
             </div>
             
-            <div className="flex items-center gap-3 py-2.5 px-4 bg-white/5 rounded-lg border border-white/5">
-              <input 
-                id="recursive"
-                name="recursive"
-                type="checkbox" 
-                defaultChecked
-                className="w-4 h-4 rounded border-white/10 bg-black/20 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-black"
-              />
-              <label htmlFor="recursive" className="text-sm text-slate-300 cursor-pointer">
-                Recursive Ingestion
-              </label>
+            <div className="flex items-center gap-6 py-2.5">
+              <div className="flex items-center gap-3 px-4 bg-white/5 rounded-lg border border-white/5">
+                <input 
+                  id="recursive"
+                  name="recursive"
+                  type="checkbox" 
+                  defaultChecked
+                  className="w-4 h-4 rounded border-white/10 bg-black/20 text-indigo-600 focus:ring-indigo-500 focus:ring-offset-black"
+                />
+                <label htmlFor="recursive" className="text-sm text-slate-300 cursor-pointer">
+                  Recursive Ingestion
+                </label>
+              </div>
+
+              <div className="flex items-center gap-3 px-4 bg-white/5 rounded-lg border border-white/5">
+                <input 
+                  id="force"
+                  name="force"
+                  type="checkbox" 
+                  className="w-4 h-4 rounded border-white/10 bg-black/20 text-amber-600 focus:ring-amber-500 focus:ring-offset-black"
+                />
+                <label htmlFor="force" className="text-sm text-slate-300 cursor-pointer">
+                  Force Reindex
+                </label>
+              </div>
             </div>
 
             <button 
@@ -269,15 +297,29 @@ const KnowledgeHub = () => {
           </div>
           <div className="flex items-center gap-3">
              {filesFetching && <RefreshCw size={16} className="animate-spin text-indigo-400" />}
-             <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                <input 
-                  type="text" 
-                  placeholder="Filter files..." 
-                  className="bg-black/20 border border-white/5 rounded-lg py-1.5 pl-9 pr-4 text-sm focus:outline-none focus:border-indigo-500/50 transition-colors"
-                />
+             <div className="flex items-center gap-4">
+                <div className="relative">
+                   <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                   <input 
+                     type="text" 
+                     placeholder="Filter files..." 
+                     className="bg-black/20 border border-white/5 rounded-lg py-1.5 pl-9 pr-4 text-sm focus:outline-none focus:border-indigo-500/50 transition-colors"
+                   />
+                </div>
+                <div className="flex items-center gap-2 px-3 py-1.5 bg-white/5 rounded-lg border border-white/5">
+                   <input 
+                     id="indexForce"
+                     type="checkbox" 
+                     checked={indexForce}
+                     onChange={(e) => setIndexForce(e.target.checked)}
+                     className="w-3.5 h-3.5 rounded border-white/10 bg-black/20 text-amber-600 focus:ring-amber-500 focus:ring-offset-black"
+                   />
+                   <label htmlFor="indexForce" className="text-[10px] text-slate-400 cursor-pointer font-bold uppercase tracking-tighter">
+                     Force
+                   </label>
+                </div>
              </div>
-          </div>
+           </div>
         </div>
 
         <div className="overflow-x-auto pb-4">
@@ -344,7 +386,7 @@ const KnowledgeHub = () => {
                     <td className="px-6 py-4 text-right">
                       {file.is_dir ? (
                         <button
-                          onClick={() => handleIndexFolder(file.path)}
+                          onClick={() => indexMutation.mutate({ path: file.path, recursive: true, force: indexForce })}
                           disabled={indexMutation.isPending}
                           className="glass-button text-[10px] font-black uppercase tracking-widest py-1.5 px-3 flex items-center gap-2 ml-auto hover:border-indigo-500/50 hover:text-indigo-300 transition-all"
                         >
@@ -357,7 +399,7 @@ const KnowledgeHub = () => {
                         </button>
                       ) : (
                         <button
-                          onClick={() => indexMutation.mutate({ path: file.path, recursive: false })}
+                          onClick={() => indexMutation.mutate({ path: file.path, recursive: false, force: indexForce })}
                           disabled={indexMutation.isPending}
                           className="glass-button text-[10px] font-black uppercase tracking-widest py-1.5 px-3 flex items-center gap-2 ml-auto hover:border-emerald-500/50 hover:text-emerald-300 transition-all"
                         >
@@ -389,42 +431,76 @@ const KnowledgeHub = () => {
             </div>
          </div>
 
-         <div className="grid gap-6 grid-cols-1 md:grid-cols-2">
-            <div className="glass-panel p-6 border-red-500/10 hover:border-red-500/30 transition-colors group">
-               <div className="flex items-start justify-between mb-6">
-                  <div className="space-y-1">
-                     <h4 className="font-bold text-white">Clear Nextcloud Collection</h4>
-                     <p className="text-xs text-slate-500">Permanently delete all indexed file chunks from Nextcloud storage.</p>
-                  </div>
-                  <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
-               </div>
-               <button 
-                 onClick={() => setPurgeModalCollection('nextcloud_files')}
-                 className="w-full glass-button py-3 text-red-400 border-red-500/20 hover:bg-red-500/10 font-black text-[10px] uppercase tracking-widest"
-               >
-                  Purge Nextcloud Data
-               </button>
-            </div>
+          <div className="glass-panel p-6 border-amber-500/10 hover:border-amber-500/30 transition-colors group mb-6">
+             <div className="flex items-start justify-between mb-4">
+                <div className="space-y-1">
+                   <h4 className="font-bold text-white">Full NextCloud Reindex</h4>
+                   <p className="text-xs text-slate-500">Bypass checkpoint and re-process all files from NextCloud. Clears existing data before re-indexing.</p>
+                </div>
+                <RefreshCw className="text-amber-500/40 group-hover:text-amber-400 transition-colors" size={24} />
+             </div>
+             <div className="flex items-center gap-3 mb-4">
+                <input 
+                  id="fullForce"
+                  type="checkbox" 
+                  checked={fullReindexForce}
+                  onChange={(e) => setFullReindexForce(e.target.checked)}
+                  className="w-4 h-4 rounded border-white/10 bg-black/20 text-amber-600 focus:ring-amber-500 focus:ring-offset-black"
+                />
+                <label htmlFor="fullForce" className="text-sm text-slate-300 cursor-pointer">
+                  Force bypass checkpoint
+                </label>
+             </div>
+             <button 
+               onClick={() => fullReindexMutation.mutate({ force: fullReindexForce })}
+               disabled={fullReindexMutation.isPending}
+               className="w-full glass-button py-3 text-amber-400 border-amber-500/20 hover:bg-amber-500/10 font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2"
+             >
+               {fullReindexMutation.isPending ? (
+                 <RefreshCw size={16} className="animate-spin" />
+               ) : (
+                 <RefreshCw size={16} />
+               )}
+               {fullReindexMutation.isPending ? 'Reindexing...' : 'Start Full Reindex'}
+             </button>
+          </div>
 
-            <div className="glass-panel p-6 border-red-500/10 hover:border-red-500/30 transition-colors group">
-               <div className="flex items-start justify-between mb-6">
-                  <div className="space-y-1">
-                     <h4 className="font-bold text-white">Clear Home Assistant Collection</h4>
-                     <p className="text-xs text-slate-500">Remove all device states and automation history from semantic memory.</p>
-                  </div>
-                  <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
-               </div>
-               <button 
-                 onClick={() => setPurgeModalCollection('ha_entities')}
-                 className="w-full glass-button py-3 text-red-400 border-red-500/20 hover:bg-red-500/10 font-black text-[10px] uppercase tracking-widest"
-               >
-                  Purge HA Entities
-               </button>
-            </div>
-         </div>
-      </section>
+          <div className="grid gap-6 grid-cols-1 md:grid-cols-2">
+             <div className="glass-panel p-6 border-red-500/10 hover:border-red-500/30 transition-colors group">
+                <div className="flex items-start justify-between mb-6">
+                   <div className="space-y-1">
+                      <h4 className="font-bold text-white">Clear Nextcloud Collection</h4>
+                      <p className="text-xs text-slate-500">Permanently delete all indexed file chunks from Nextcloud storage.</p>
+                   </div>
+                   <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
+                </div>
+                <button 
+                  onClick={() => setPurgeModalCollection('nextcloud_files')}
+                  className="w-full glass-button py-3 text-red-400 border-red-500/20 hover:bg-red-500/10 font-black text-[10px] uppercase tracking-widest"
+                >
+                   Purge Nextcloud Data
+                </button>
+             </div>
 
-      <Modal
+             <div className="glass-panel p-6 border-red-500/10 hover:border-red-500/30 transition-colors group">
+                <div className="flex items-start justify-between mb-6">
+                   <div className="space-y-1">
+                      <h4 className="font-bold text-white">Clear Home Assistant Collection</h4>
+                      <p className="text-xs text-slate-500">Remove all device states and automation history from semantic memory.</p>
+                   </div>
+                   <AlertTriangle className="text-red-500/40 group-hover:text-red-500 transition-colors" size={24} />
+                </div>
+                <button 
+                  onClick={() => setPurgeModalCollection('ha_entities')}
+                  className="w-full glass-button py-3 text-red-400 border-red-500/20 hover:bg-red-500/10 font-black text-[10px] uppercase tracking-widest"
+                >
+                   Purge HA Entities
+                </button>
+             </div>
+          </div>
+       </section>
+
+       <Modal
         isOpen={Boolean(purgeModalCollection)}
         onClose={() => setPurgeModalCollection(null)}
         title="Critical Security Warning"
