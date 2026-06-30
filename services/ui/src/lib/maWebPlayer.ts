@@ -125,6 +125,15 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
   });
 
+  const onStateChangeRef = useRef(onStateChange);
+  useEffect(() => {
+    onStateChangeRef.current = onStateChange;
+  }, [onStateChange]);
+
+  useEffect(() => {
+    onStateChangeRef.current?.(state);
+  }, [state]);
+
   const getPlayerIdRef = useCallback(() => {
     let id = getPlayerId();
     if (!id) {
@@ -153,10 +162,9 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         reconnectAttempts,
         error: isFailed ? `Connection failed after ${MAX_RECONNECT_ATTEMPTS} attempts. Please refresh.` : null,
       };
-      onStateChange?.({ ...next });
       return next;
     });
-  }, [onStateChange]);
+  }, []);
 
   // Handle MA JSON-RPC events (queue_updated, player_updated)
   const handleMaEvent = useCallback((eventType: string, data: Record<string, unknown>) => {
@@ -363,7 +371,6 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
               muted: newState.muted,
               error: newState.playerState === 'error' ? 'Playback error - attempting recovery' : null,
             };
-            onStateChange?.({ ...updated });
             return updated;
           });
         },
@@ -390,7 +397,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       console.error('[MAWebPlayer] Init failed:', msg, err);
       setStateLocal(s => ({ ...s, error: msg }));
     }
-  }, [getPlayerIdRef, handleMaEvent, onStateChange, updateConnectionState]);
+  }, [getPlayerIdRef, handleMaEvent, updateConnectionState]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -415,11 +422,22 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       console.error('[MAWebPlayer] No player_id available for play_media');
       return;
     }
-    // Convert raw ABS book ID (UUID) to MA library URI
+
+    let resolvedUri = mediaUri;
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    const resolvedUri = uuidRegex.test(mediaUri)
-      ? `library://audiobookshelf/book/${mediaUri}`
-      : mediaUri;
+
+    if (mediaUri.startsWith('audiobookshelf://')) {
+      const idClean = mediaUri.replace('audiobookshelf://', '').replace('abs-', '').replace('ma-', '');
+      resolvedUri = `library://audiobookshelf/book/${idClean}`;
+    } else if (uuidRegex.test(mediaUri)) {
+      resolvedUri = `library://audiobookshelf/book/${mediaUri}`;
+    } else if (mediaUri.startsWith('abs-') || mediaUri.startsWith('ma-')) {
+      const idClean = mediaUri.replace('abs-', '').replace('ma-', '');
+      if (uuidRegex.test(idClean)) {
+        resolvedUri = `library://audiobookshelf/book/${idClean}`;
+      }
+    }
+
     try {
       console.log('[MAWebPlayer] play_media:', resolvedUri, 'player:', pid);
       await sendJsonRpc('player_queues/play_media', {

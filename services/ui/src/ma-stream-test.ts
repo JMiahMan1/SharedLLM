@@ -48,6 +48,12 @@ const btnSearch = document.getElementById('btn-search') as HTMLButtonElement
     const debugOutput = document.getElementById('debug-output') as HTMLElement
     const audioPlayer = document.getElementById('audio-player') as HTMLAudioElement
 
+function getApiToken(): string | null {
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlToken = urlParams.get('token')?.trim()
+    return urlToken || localStorage.getItem('jarvis_api_key') || apiTokenInput?.value?.trim() || null
+}
+
 // ═══════════════════════════════════════════════════════════
 // Logging
 // ═══════════════════════════════════════════════════════════
@@ -182,19 +188,7 @@ function sendJsonRpc(command: string, args: any, expectResult: boolean = true): 
 // Connect
 // ═══════════════════════════════════════════════════════════
 async function connect() {
-    const urlParams = new URLSearchParams(window.location.search)
-    const urlToken = urlParams.get('token')?.trim()
-    if (urlToken) {
-        apiTokenInput.value = urlToken
-    }
-
-    let token = localStorage.getItem('jarvis_api_key')
-    if (!token && urlToken) {
-        token = urlToken
-    }
-    if (!token && apiTokenInput?.value) {
-        token = apiTokenInput.value.trim()
-    }
+    const token = getApiToken()
     if (!token) {
         setStatus('No token — login to UI first, pass ?token=xxx in URL, or enter API key above', 'error')
         return
@@ -412,13 +406,26 @@ async function setVolumeVolume(volume: number) {
 // playMedia
 // ═══════════════════════════════════════════════════════════
 async function playMedia(mediaUri: string) {
-    log(`[MAWebPlayer] play_media: ${mediaUri.substring(0, 80)}..., player: ${playerId}`, 'info')
+    let resolvedUri = mediaUri;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (mediaUri.startsWith('audiobookshelf://')) {
+        const idClean = mediaUri.replace('audiobookshelf://', '').replace('abs-', '').replace('ma-', '');
+        resolvedUri = `library://audiobookshelf/book/${idClean}`;
+    } else if (uuidRegex.test(mediaUri)) {
+        resolvedUri = `library://audiobookshelf/book/${mediaUri}`;
+    } else if (mediaUri.startsWith('abs-') || mediaUri.startsWith('ma-')) {
+        const idClean = mediaUri.replace('abs-', '').replace('ma-', '');
+        if (uuidRegex.test(idClean)) {
+            resolvedUri = `library://audiobookshelf/book/${idClean}`;
+        }
+    }
+
+    log(`[MAWebPlayer] play_media: ${resolvedUri.substring(0, 80)}..., player: ${playerId}`, 'info')
     try {
-        // Match the MA frontend playMedia() signature so the selected item replaces
-        // the active queue instead of resuming the previous track.
         await sendJsonRpc('player_queues/play_media', {
             queue_id: playerId,
-            media: mediaUri,
+            media: resolvedUri,
             option: 'replace',
             radio_mode: false,
         }, false)
@@ -432,8 +439,11 @@ async function playMedia(mediaUri: string) {
 // Search
 // ═══════════════════════════════════════════════════════════
 async function searchMedia(query: string) {
-    const token = localStorage.getItem('jarvis_api_key')
-    if (!token) return
+    const token = getApiToken()
+    if (!token) {
+        log('No API token resolved — enter API key above or login to UI', 'error')
+        return
+    }
 
     const domain = searchDomain.value
     let url: string
@@ -471,7 +481,11 @@ function renderSearchResults(results: any[], domain: string) {
     results.forEach(r => {
         const div = document.createElement('div')
         div.className = 'search-item'
-        const uri = r.uri || r.id || ''
+        let uri = r.uri || r.id || ''
+        if (domain === 'audiobookshelf' && !uri.startsWith('audiobookshelf://')) {
+            const idClean = uri.replace('abs-', '').replace('ma-', '')
+            uri = `audiobookshelf://${idClean}`
+        }
         const name = domain === 'music_assistant' ? (r.name || uri) : (r.title || uri)
         const meta = domain === 'music_assistant' ? (r.artist || r.type || '') : (r.author || r.narrator || '')
         div.innerHTML = `
@@ -586,7 +600,7 @@ function setState(updates: any) {
 // Debug helpers
 // ═══════════════════════════════════════════════════════════
 async function listPlayers() {
-    const token = localStorage.getItem('jarvis_api_key')
+    const token = getApiToken()
     if (!token) { log('No token', 'error'); return }
     try {
         const resp = await fetch('/api/ma-jsonrpc/debug/players', {
@@ -602,7 +616,7 @@ async function listPlayers() {
 }
 
 async function listQueues() {
-    const token = localStorage.getItem('jarvis_api_key')
+    const token = getApiToken()
     if (!token) { log('No token', 'error'); return }
     try {
         const resp = await fetch('/api/ma-jsonrpc/debug/queues', {
@@ -618,7 +632,7 @@ async function listQueues() {
 }
 
 async function testPlayerQuery() {
-    const token = localStorage.getItem('jarvis_api_key')
+    const token = getApiToken()
     if (!token) { log('No token', 'error'); return }
     try {
         const resp = await fetch(`/api/ma-jsonrpc/debug/player/${encodeURIComponent(playerId)}`, {
