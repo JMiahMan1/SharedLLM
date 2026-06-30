@@ -10,15 +10,15 @@ except ImportError:
 
 class StorageProvider(ABC):
     @abstractmethod
-    def list_entries(self, path: str = "/", recursive: bool = False) -> list[StorageEntry]:
+    async def list_entries(self, path: str = "/", recursive: bool = False) -> list[StorageEntry]:
         raise NotImplementedError
 
     @abstractmethod
-    def get_content(self, path: str) -> str | None:
+    async def get_content(self, path: str) -> str | None:
         raise NotImplementedError
 
     @abstractmethod
-    def write_content(
+    async def write_content(
         self, path: str, content: str | bytes, create_parents: bool = True, verify: bool = True, is_binary: bool = False
     ) -> dict[str, Any]:
         raise NotImplementedError
