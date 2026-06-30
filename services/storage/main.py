@@ -103,8 +103,7 @@ async def _run_full_index_task(req: IndexScanRequest):
 
         # 1. Scan structure
         log.info(f"Starting background scan for path: {req.path}")
-        from starlette.concurrency import run_in_threadpool
-        entries = await run_in_threadpool(provider.list_entries, path=req.path, recursive=req.recursive)
+        entries = await provider.list_entries(path=req.path, recursive=req.recursive)
         log.info(f"Scan complete. Found {len(entries)} raw entries.")
         items = build_content_index(entries)
         
@@ -135,10 +134,16 @@ async def _run_full_index_task(req: IndexScanRequest):
                     json=sync_payload,
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                resp.raise_for_status()
+                if resp.status_code != 200:
+                    raise httpx.HTTPStatusError(
+                        f"RAG sync failed: {resp.status_code} {resp.text}",
+                        request=resp.request,
+                        response=resp
+                    )
+                log.info(f"RAG sync successful: {resp.json()}")
                 
                 # 4. Cleanup old entries
-                await client.post(
+                purge_resp = await client.post(
                     f"{RAG_SVC}/rag/purge/{req.provider.kind}_files",
                     json={
                         "user_id": user_id,
@@ -146,9 +151,14 @@ async def _run_full_index_task(req: IndexScanRequest):
                     },
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
+                if purge_resp.status_code != 200:
+                    log.warning(f"Purge failed (non-fatal): {purge_resp.status_code} {purge_resp.text}")
+                
                 log.info(f"Background index complete for {user_id}. Extracted {len(chunks)} chunks.")
+            except httpx.HTTPStatusError as e:
+                log.error(f"Failed to sync background index to RAG: HTTP {e.response.status_code} - {e.response.text}")
             except Exception as e:
-                log.error(f"Failed to sync background index to RAG: {e}")
+                log.error(f"Failed to sync background index to RAG: {type(e).__name__}: {e}")
     except Exception as e:
         log.error(f"Background index task failed: {e}")
         import traceback
@@ -165,53 +175,11 @@ def resume_indexing():
     return {"status": "RESUMED"}
 
 
-async def full_content_index(req: IndexScanRequest, bg_tasks: BackgroundTasks):
-    """Full content index: scan, chunk, and sync to RAG in the background."""
-    provider = build_provider(req.provider)
-    bg_tasks.add_task(_run_full_index, req, provider)
-    return {"status": "SUCCESS", "message": "Indexing started in background."}
-
-
-async def _run_full_index(req: IndexScanRequest, provider):
-    from starlette.concurrency import run_in_threadpool
-    entries = await run_in_threadpool(provider.list_entries, path=req.path, recursive=req.recursive)
-    items = build_content_index(entries)
-    checkpoint = CheckpointManager()
-    chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
-    user_id = req.provider.settings.get("username", "admin").lower()
-    import time
-    session_id = str(int(time.time()))
-    indexed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    for c in chunks:
-        c["metadata"]["session_id"] = session_id
-        c["metadata"]["indexed_at"] = indexed_at
-    sync_payload = {
-        "chunks": chunks,
-        "user_id": user_id,
-        "collection_name": f"{req.provider.kind}_files"
-    }
-    async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=5.0)) as client:
-        try:
-            await client.post(
-                f"{RAG_SVC}/rag/sync/files",
-                json=sync_payload,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            await client.post(
-                f"{RAG_SVC}/rag/purge/{req.provider.kind}_files",
-                json={"user_id": user_id, "filter": {"session_id": {"$ne": session_id}}},
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-        except Exception as e:
-            log.error(f"Failed to sync full content index to RAG: {e}")
-
-
 @app.post("/providers/list")
 async def list_provider_entries(req: IndexScanRequest):
     try:
         provider = build_provider(req.provider)
-        from starlette.concurrency import run_in_threadpool
-        entries = await run_in_threadpool(provider.list_entries, path=req.path, recursive=req.recursive)
+        entries = await provider.list_entries(path=req.path, recursive=req.recursive)
         
         # Cross-reference with RAG to set indexed status
         user_id = req.provider.settings.get("username", "admin")
@@ -244,10 +212,9 @@ async def list_provider_entries(req: IndexScanRequest):
 @app.post("/providers/search")
 async def search_provider(query: str = Query(...), req: IndexScanRequest = Body(...)):
     try:
-        from starlette.concurrency import run_in_threadpool
         provider = build_provider(req.provider)
         # Scan root for shallow search (could be optimized)
-        entries = await run_in_threadpool(provider.list_entries, path=req.path, recursive=req.recursive)
+        entries = await provider.list_entries(path=req.path, recursive=req.recursive)
         
         q_lower = query.lower()
         q_words = set(re.findall(r'\b\w+\b', q_lower))

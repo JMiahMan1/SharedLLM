@@ -33,13 +33,13 @@ class NextCloudClient:
             
         self.base_url = f"{self.protocol}://{self.host}"
         
-        self.client = httpx.Client(
+        self.client = httpx.AsyncClient(
             auth=(self.username, self.password),
             timeout=httpx.Timeout(15.0, read=60.0), # 15s general, 60s for reads/writes
             headers={"User-Agent": "JarvisOS-Storage/1.0"}
         )
 
-    def _full_url(self, remote_path: str) -> str:
+    async def _full_url(self, remote_path: str) -> str:
         clean_path = "/" + str(remote_path).lstrip("/")
         # If the path already includes the base_path, don't double it
         if clean_path.startswith(self.base_path):
@@ -96,27 +96,27 @@ class NextCloudClient:
             
         return items
 
-    def list_files(self, remote_path: str = "/") -> List[Dict[str, Any]]:
+    async def list_files(self, remote_path: str = "/") -> List[Dict[str, Any]]:
         """List files using PROPFIND."""
-        url = self._full_url(remote_path)
+        url = await self._full_url(remote_path)
         log.info(f"DAV PROPFIND: {url}")
         
         headers = {"Depth": "1"}
         try:
-            resp = self.client.request("PROPFIND", url, headers=headers)
+            resp = await self.client.request("PROPFIND", url, headers=headers)
             resp.raise_for_status()
             return self._parse_dav_response(resp.content)
         except Exception as e:
             log.error(f"Failed to list files in {remote_path}: {e}")
             return []
 
-    def list_entries(self, path: str = "/", recursive: bool = False) -> List[StorageEntry]:
+    async def list_entries(self, path: str = "/", recursive: bool = False) -> List[StorageEntry]:
         entries: List[StorageEntry] = []
         seen_paths = set()
 
-        def _walk(current_path: str):
+        async def _walk(current_path: str):
             target = "/" + current_path.strip("/")
-            items = self.list_files(target)
+            items = await self.list_files(target)
             
             # The first item in PROPFIND Depth 1 is usually the directory itself
             # We need to find the base href to calculate relative paths correctly
@@ -167,25 +167,25 @@ class NextCloudClient:
                 seen_paths.add(norm_path)
                 
                 if recursive and is_dir:
-                    _walk(norm_path)
+                    await _walk(norm_path)
 
-        _walk(path)
+        await _walk(path)
         return entries
 
-    def get_file_content(self, remote_path: str) -> Optional[str]:
+    async def get_file_content(self, remote_path: str) -> Optional[str]:
         """Fetch content of a text file."""
-        url = self._full_url(remote_path)
+        url = await self._full_url(remote_path)
         log.info(f"NextCloud GET: {url}")
         
         try:
-            resp = self.client.get(url)
+            resp = await self.client.get(url)
             resp.raise_for_status()
             return resp.text
         except Exception as e:
             log.error(f"Failed to fetch content for {remote_path}: {e}")
             return None
 
-    def ensure_directory(self, remote_path: str) -> None:
+    async def ensure_directory(self, remote_path: str) -> None:
         """Ensure a directory exists using MKCOL."""
         normalized = "/" + str(remote_path).strip("/")
         if normalized == "/":
@@ -194,10 +194,10 @@ class NextCloudClient:
         current = PurePosixPath("/")
         for part in PurePosixPath(normalized).parts[1:]:
             current = current / part
-            url = self._full_url(str(current))
+            url = await self._full_url(str(current))
             try:
                 # WebDAV requires MKCOL to create a directory
-                resp = self.client.request("MKCOL", url)
+                resp = await self.client.request("MKCOL", url)
                 # 405 Method Not Allowed often means the directory already exists
                 if resp.status_code not in {200, 201, 204, 301, 302, 405}:
                     log.warning(f"MKCOL {current} returned status {resp.status_code}")
@@ -205,7 +205,7 @@ class NextCloudClient:
                 log.error(f"Failed to ensure directory {current}: {e}")
                 raise
 
-    def write_file_content(
+    async def write_file_content(
         self,
         remote_path: str,
         content: str | bytes,
@@ -216,17 +216,17 @@ class NextCloudClient:
         normalized = "/" + str(remote_path).strip("/")
         if create_parents:
             parent = str(PurePosixPath(normalized).parent)
-            self.ensure_directory(parent)
+            await self.ensure_directory(parent)
 
         if not isinstance(content, bytes):
             content_bytes = content.encode("utf-8")
         else:
             content_bytes = content
 
-        url = self._full_url(normalized)
+        url = await self._full_url(normalized)
         try:
             headers = {"Content-Type": "application/octet-stream" if is_binary else "text/plain; charset=utf-8"}
-            resp = self.client.put(url, content=content_bytes, headers=headers)
+            resp = await self.client.put(url, content=content_bytes, headers=headers)
             resp.raise_for_status()
         except Exception as e:
             log.error(f"Failed to upload content for {normalized}: {e}")
@@ -238,21 +238,21 @@ class NextCloudClient:
             "verified": True if verify else None, # Simplified
         }
 
-    def download_file(self, remote_path: str, local_path: str) -> bool:
+    async def download_file(self, remote_path: str, local_path: str) -> bool:
         """Download a file to a local path."""
-        url = self._full_url(remote_path)
+        url = await self._full_url(remote_path)
         try:
             with open(local_path, "wb") as f:
-                with self.client.stream("GET", url) as resp:
+                async with self.client.stream("GET", url) as resp:
                     resp.raise_for_status()
-                    for chunk in resp.iter_bytes():
+                    async for chunk in resp.aiter_bytes():
                         f.write(chunk)
             return True
         except Exception as e:
             log.error(f"Failed to download {remote_path}: {e}")
             return False
 
-    def upload_directory(self, remote_path: str, local_path: str, excludes: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def upload_directory(self, remote_path: str, local_path: str, excludes: Optional[List[str]] = None) -> Dict[str, Any]:
         """Recursively upload a local directory to a remote Nextcloud path."""
         import os
         from pathlib import Path
@@ -284,7 +284,7 @@ class NextCloudClient:
             remote_dir = str(PurePosixPath(remote_root) / rel_path)
             
             # Ensure the directory exists on Nextcloud
-            self.ensure_directory(remote_dir)
+            await self.ensure_directory(remote_dir)
             
             for file in files:
                 local_file = Path(root) / file
@@ -293,7 +293,7 @@ class NextCloudClient:
                 try:
                     with open(local_file, "rb") as f:
                         content = f.read()
-                        self.write_file_content(remote_file, content, create_parents=False, is_binary=True)
+                        await self.write_file_content(remote_file, content, create_parents=False, is_binary=True)
                         uploaded_files += 1
                         total_bytes += len(content)
                 except Exception as e:
@@ -306,11 +306,11 @@ class NextCloudClient:
             "total_bytes": total_bytes
         }
 
-    def close(self):
-        self.client.close()
+    async def close(self):
+        await self.client.aclose()
 
-    def __enter__(self):
+    async def __aenter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()

@@ -166,7 +166,7 @@ async def extract_and_chunk_contents(
         # Optionally index full text
         if not item.is_dir and "full_text" in item.extractable_capabilities:
             log.info(f"Extracting full text for: {item.path}")
-            content = provider.get_content(item.path)
+            content = await provider.get_content(item.path)
             if content:
                 file_chunks = chunk_text(content)
                 for i, text in enumerate(file_chunks):

@@ -258,8 +258,117 @@ def _verify_sharedllm_container(container) -> bool:
     )
 
 
+def _recreate_container(container, new_image_id: str):
+    """
+    Recreates a container with the new image, preserving all config (port bindings,
+    volume binds, environment, network mode, and custom networks/aliases).
+    """
+    import time
+    if not client:
+        raise ValueError("Docker client not initialized")
+
+    old_name = container.name
+    backup_name = f"{old_name}_backup_{int(time.time())}"
+    
+    # 1. Stop the old container
+    log.info(f"[recreate] Stopping old container {old_name}...")
+    container.stop(timeout=10)
+    
+    # 2. Rename old container to backup name
+    log.info(f"[recreate] Renaming {old_name} to {backup_name}...")
+    container.rename(backup_name)
+    
+    new_container = None
+    try:
+        # 3. Extract old container configurations
+        old_config = container.attrs
+        config = old_config.get("Config", {})
+        host_config = old_config.get("HostConfig", {})
+        networks_dict = old_config.get("NetworkSettings", {}).get("Networks", {})
+        
+        exposed_ports = config.get("ExposedPorts")
+        
+        # 4. Create new container using the low-level API to preserve HostConfig exactly
+        log.info(f"[recreate] Creating new container {old_name} with image {new_image_id}...")
+        container_resp = client.api.create_container(
+            image=new_image_id,
+            name=old_name,
+            command=config.get("Cmd"),
+            entrypoint=config.get("Entrypoint"),
+            environment=config.get("Env"),
+            user=config.get("User"),
+            working_dir=config.get("WorkingDir"),
+            labels=config.get("Labels"),
+            host_config=host_config,
+            ports=exposed_ports if exposed_ports else None
+        )
+        
+        new_container_id = container_resp["Id"]
+        new_container = client.containers.get(new_container_id)
+        
+        # 5. Connect new container to custom networks with original aliases & IPs
+        for net_name, net_config in networks_dict.items():
+            if net_name == "bridge" and host_config.get("NetworkMode") == "default":
+                continue
+            if net_name == "host" and host_config.get("NetworkMode") == "host":
+                continue
+                
+            try:
+                network = client.networks.get(net_name)
+                # Disconnect first to avoid auto-connect conflicts and set aliases/IPs
+                try:
+                    network.disconnect(new_container)
+                except Exception:
+                    pass
+                
+                # Filter auto-generated aliases (like container IDs) to avoid conflicts
+                aliases = [
+                    a for a in net_config.get("Aliases", [])
+                    if a != container.id[:12] and a != backup_name and a != new_container.id[:12]
+                ]
+                ipv4 = net_config.get("IPAMConfig", {}).get("IPv4Address", "") or net_config.get("IPAddress", "")
+                
+                network.connect(
+                    new_container,
+                    aliases=aliases,
+                    ipv4_address=ipv4 or None
+                )
+            except Exception as ne:
+                log.warning(f"[recreate] Network connect warning for {net_name}: {ne}")
+                
+        # 6. Start the new container
+        log.info(f"[recreate] Starting new container {new_container.name}...")
+        new_container.start()
+        
+        # 7. Success: remove backup container
+        log.info(f"[recreate] Recreate successful. Removing backup container {backup_name}...")
+        try:
+            container.remove(force=True)
+        except Exception as re:
+            log.warning(f"[recreate] Failed to remove backup container {backup_name}: {re}")
+            
+        return {"recreated": True, "container": new_container}
+        
+    except Exception as e:
+        log.error(f"[recreate] Failed to recreate container {old_name}: {e}. Falling back to old container...")
+        # Clean up new container if it was created
+        if new_container:
+            try:
+                new_container.remove(force=True)
+            except Exception:
+                pass
+        # Restore backup container
+        try:
+            container.rename(old_name)
+            container.start()
+            log.info(f"[recreate] Fallback successful. Old container {old_name} restored and started.")
+        except Exception as fe:
+            log.critical(f"[recreate] Critical failure: Could not restore backup container {backup_name}: {fe}")
+        raise e
+
+
 @app.post("/api/restart/{service_name}", dependencies=[Depends(verify_internal_secret)])
-def restart_service(service_name: str):
+def restart_service(service_name: str, recreate: bool = False):
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
 
@@ -271,8 +380,35 @@ def restart_service(service_name: str):
         raise HTTPException(status_code=400, detail=f"Container '{container.name}' is not part of the sharedllm stack")
 
     try:
-        container.restart()
-        return {"status": "SUCCESS", "message": f"Container {container.name} restarted successfully"}
+        # Determine if recreation is needed
+        image_tags = container.image.tags if container.image else []
+        image_tag = image_tags[0] if image_tags else None
+        
+        should_recreate = recreate
+        local_latest_image_id = None
+        if image_tag:
+            try:
+                local_latest_image = client.images.get(image_tag)
+                local_latest_image_id = local_latest_image.id
+                if local_latest_image_id != container.image.id:
+                    should_recreate = True
+                    log.info(
+                        f"[restart] Container {container.name} is running image {container.image.id}, "
+                        f"but latest local tag {image_tag} is {local_latest_image_id}. Recreating..."
+                    )
+            except Exception as ie:
+                log.warning(f"[restart] Failed to compare image IDs for {container.name}: {ie}")
+
+        if should_recreate and (local_latest_image_id or container.image):
+            target_image_id = local_latest_image_id or container.image.id
+            _recreate_container(container, target_image_id)
+            return {
+                "status": "SUCCESS",
+                "message": f"Container {container.name} recreated and updated to image {target_image_id[:12]} successfully"
+            }
+        else:
+            container.restart()
+            return {"status": "SUCCESS", "message": f"Container {container.name} restarted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
