@@ -292,6 +292,7 @@ async def test_stream_ma_targets_browser_player_without_muting(monkeypatch, clie
     mock_ma_client.send_command = AsyncMock(side_effect=mock_send_command)
     mock_ma_client.send_command_no_wait = AsyncMock(side_effect=mock_send_command_no_wait)
     mock_ma_client.get_ma_error = MagicMock(return_value=None)
+    mock_ma_client.get_stream_url = MagicMock(return_value=None)
     mock_ma_client.get_queue_state = MagicMock(return_value={
         "current_item": {"queue_item_id": "item-123"},
         "queue_id": "browser-player",
@@ -342,6 +343,12 @@ async def test_stream_ma_targets_browser_player_without_muting(monkeypatch, clie
 
         async def aclose(self):
             await unified_httpx.aclose()
+
+        async def send(self, *args, **kwargs):
+            return await unified_httpx.send(*args, **kwargs)
+
+        def build_request(self, *args, **kwargs):
+            return unified_httpx.build_request(*args, **kwargs)
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
         with patch('services.gateway.main.httpx.AsyncClient', MockAsyncClient):

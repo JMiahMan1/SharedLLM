@@ -90,6 +90,8 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     monkeypatch.setattr(main, "get_llm_settings", AsyncMock(return_value={"active_llm_provider": "ollama", "assistant_model": "qwen3:8b"}))
     monkeypatch.setattr(main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
     monkeypatch.setattr(main, "fetch_global_setting", AsyncMock(return_value="0.85"))
+    # Mock system instruction loading to avoid real Identity service calls
+    monkeypatch.setattr(main, "select_system_instruction_for_query", lambda q, m: "# System instruction mock")
     
     # Mock the job queue to avoid Redis calls
     mock_job_queue = MagicMock()
@@ -143,6 +145,8 @@ async def test_openai_chat_completions(client: TestClient, monkeypatch):
     monkeypatch.setattr(main, "get_llm_settings", AsyncMock(return_value={"active_llm_provider": "ollama", "assistant_model": "qwen3:8b"}))
     monkeypatch.setattr(main, "get_assistant_model", AsyncMock(return_value="qwen3:8b"))
     monkeypatch.setattr(main, "fetch_global_setting", AsyncMock(return_value="0.85"))
+    # Mock system instruction loading to avoid real Identity service calls
+    monkeypatch.setattr(main, "select_system_instruction_for_query", lambda q, m: "# System instruction mock")
     
     # Mock the job queue to return a simulated response
     mock_job_queue = MagicMock()

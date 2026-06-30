@@ -2,7 +2,7 @@ import pytest
 import respx
 import httpx
 import sys
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 _mock_redis_async = MagicMock()
 _mock_redis = MagicMock()
 _mock_redis.asyncio = _mock_redis_async
@@ -16,6 +16,12 @@ import json
 import os
 from sqlmodel import Session, create_engine, select
 from services.identity.models import GlobalSetting
+
+# Provide default model values so get_test_settings() doesn't raise
+os.environ.setdefault("ASSISTANT_MODEL", "qwen3:8b")
+os.environ.setdefault("CODING_MODEL", "qwen2.5-coder:7b")
+os.environ.setdefault("LIBRARIAN_MODEL", "qwen3:8b")
+os.environ.setdefault("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
 
 def get_test_settings():
     db_path = "/data/identity.db"
@@ -104,6 +110,11 @@ def test_chat_storage_routing(auth_headers):
     identity_svc = settings.get("identity_svc_url") or IDENTITY_SVC
     rag_svc = settings.get("rag_svc_url") or RAG_SVC
     storage_svc = settings.get("storage_svc_url") or STORAGE_SVC
+
+    # Mock system instruction loading to avoid real Identity service calls
+    import services.gateway.main as gateway_main
+    gateway_main.select_system_instruction_for_query = lambda q, m: "# System instruction mock"
+    gateway_main.load_prompt = AsyncMock(return_value="# Raven protocol mock")
 
     # Mock identity settings (needed by get_assistant_model in chat path)
     respx.get(f"{identity_svc}/api/settings").mock(
