@@ -338,6 +338,9 @@ services:
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - NEXTCLOUD_URL=${NEXTCLOUD_URL:-}
+      - NEXTCLOUD_USER=${NEXTCLOUD_USER:-}
+      - NEXTCLOUD_PASS=${NEXTCLOUD_PASS:-}
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
