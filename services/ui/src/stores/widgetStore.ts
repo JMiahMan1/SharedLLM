@@ -62,6 +62,7 @@ interface WidgetState {
   mounting: boolean;
   error: string | null;
   mountCapabilities: CapabilityPayload;
+  visibleWidgets: WidgetInstance[];
 
   evaluateMountConditions: (capabilities: CapabilityPayload) => void;
   togglePin: (widgetKey: WidgetKey) => Promise<void>;
@@ -97,14 +98,47 @@ let activeSyncPromise: Promise<void> | null = null;
 let lastSyncTime = 0;
 const SYNC_COOLDOWN_MS = 5000;
 
-export const useWidgetStore = create<WidgetState>((set, get) => ({
-  widgetRegistry: defaultWidgetDefs,
-  userWidgets: {},
-  activeWidgets: [],
-  quickAssistantEnabled: false,
-  mounting: false,
-  error: null,
-  mountCapabilities: defaultCapabilities,
+export const useWidgetStore = create<WidgetState>((rawSet, get) => {
+  const set = (
+    partial: WidgetState | Partial<WidgetState> | ((state: WidgetState) => WidgetState | Partial<WidgetState>),
+    replace?: boolean
+  ) => {
+    rawSet((state) => {
+      const next = typeof partial === 'function' ? partial(state) : partial;
+      const merged = { ...state, ...next };
+      const visibleWidgets = merged.widgetRegistry
+        .filter((def) => {
+          if (def.mountConditions && !def.mountConditions(merged.mountCapabilities)) return false;
+          const settings = merged.userWidgets[def.key];
+          if (settings) {
+            if (settings.visibility === 'removed' || settings.visibility === 'hidden') return false;
+          } else {
+            const defaultSettings = createDefaultSettings(def.key, 0);
+            if (defaultSettings.visibility === 'hidden' || defaultSettings.visibility === 'removed') return false;
+          }
+          if (def.requiresQuickAssistantEnabled && !merged.quickAssistantEnabled) return false;
+          return true;
+        })
+        .map((def, index) => ({
+          def,
+          userSettings: merged.userWidgets[def.key] ?? createDefaultSettings(def.key, index),
+          isActive: true,
+        }))
+        .sort((a, b) => a.userSettings.order_index - b.userSettings.order_index);
+
+      return { ...next, visibleWidgets };
+    }, replace);
+  };
+
+  return {
+    widgetRegistry: defaultWidgetDefs,
+    userWidgets: {},
+    activeWidgets: [],
+    quickAssistantEnabled: false,
+    mounting: false,
+    error: null,
+    mountCapabilities: defaultCapabilities,
+    visibleWidgets: [],
 
   syncWithServer: async () => {
     if (activeSyncPromise) {
@@ -384,7 +418,8 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
       set({ userWidgets: { ...get().userWidgets, [widgetKey]: current } });
     }
   },
-}));
+  };
+});
 
 export function useWidget(key: WidgetKey): UserWidgetSettings | undefined {
   return useWidgetStore((state) => state.userWidgets[key]);
