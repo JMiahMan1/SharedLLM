@@ -3913,6 +3913,23 @@ async def get_system_health(request: Request):
         )
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
+@app.get("/api/admin/services/updates")
+async def check_service_updates(request: Request):
+    """Check all sharedllm services for available image updates without pulling."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{CONTROL_PLANE_URL}/api/admin/services/updates",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=60.0,  # registry checks can be slow
+        )
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
 @app.get("/api/admin/services/{service_name}/logs")
 async def get_service_logs(service_name: str, request: Request, tail: int = 100):
     creds = await _resolve_identity_from_request(request)

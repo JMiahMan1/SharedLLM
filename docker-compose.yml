@@ -452,6 +452,7 @@ services:
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
       - DOCKER_HOST=unix:///var/run/docker.sock
       - TZ=America/Phoenix
+      - GHCR_TOKEN=${GHCR_TOKEN:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro

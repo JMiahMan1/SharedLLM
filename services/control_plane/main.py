@@ -263,9 +263,101 @@ def delete_container(service_name: str):
 
 @app.get("/api/admin/services/updates", dependencies=[Depends(verify_internal_secret)])
 def check_all_updates():
-    """Check all sharedllm services for available image updates without pulling."""
+    """
+    Check all sharedllm services for available image updates.
+
+    Strategy: compare the locally running image's RepoDigest (sha256) against the
+    remote registry manifest digest fetched via the OCI Distribution HTTP API.
+    This never pulls an image — it only does a HEAD/GET request to the registry.
+
+    For GHCR images, authentication uses the GHCR_TOKEN environment variable
+    (a GitHub PAT with packages:read scope — the same token used by CI to push).
+    """
+    import urllib.request
+    import json as _json
+
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
+
+    # GHCR auth token (GitHub PAT with read:packages scope)
+    ghcr_token = os.getenv("GHCR_TOKEN", "")
+
+    def _get_remote_digest(image_ref: str) -> str | None:
+        """
+        Fetch the manifest digest for an image reference from its registry
+        without pulling. Returns the digest string (e.g. sha256:abc...) or None.
+        """
+        # Parse registry / repository / tag from image ref
+        # Expected format: ghcr.io/owner/repo:tag  OR  owner/repo:tag  OR  image:tag
+        tag = "latest"
+        if ":" in image_ref:
+            image_ref, tag = image_ref.rsplit(":", 1)
+
+        if image_ref.startswith("ghcr.io/"):
+            registry = "ghcr.io"
+            repo = image_ref[len("ghcr.io/"):]
+        elif "/" in image_ref and image_ref.split("/")[0].count(".") > 0:
+            # other registry host e.g. registry.example.com/repo
+            parts = image_ref.split("/", 1)
+            registry = parts[0]
+            repo = parts[1]
+        else:
+            # Docker Hub or plain image name
+            registry = "registry-1.docker.io"
+            if "/" not in image_ref:
+                repo = f"library/{image_ref}"
+            else:
+                repo = image_ref
+
+        # OCI-compliant manifest accept types (prefer multi-arch index)
+        accept_types = (
+            "application/vnd.oci.image.index.v1+json,"
+            "application/vnd.docker.distribution.manifest.list.v2+json,"
+            "application/vnd.oci.image.manifest.v1+json,"
+            "application/vnd.docker.distribution.manifest.v2+json"
+        )
+
+        url = f"https://{registry}/v2/{repo}/manifests/{tag}"
+
+        # Build auth header
+        auth_header = None
+        if registry == "ghcr.io" and ghcr_token:
+            import base64
+            token_b64 = base64.b64encode(f":{ghcr_token}".encode()).decode()
+            auth_header = f"Basic {token_b64}"
+
+        req = urllib.request.Request(url, method="HEAD")
+        req.add_header("Accept", accept_types)
+        if auth_header:
+            req.add_header("Authorization", auth_header)
+
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                # The Docker-Content-Digest header is the canonical digest
+                digest = resp.headers.get("Docker-Content-Digest")
+                return digest
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                log.warning(f"[updates] Auth error for {url}: {e.code}. Set GHCR_TOKEN env var.")
+            else:
+                log.warning(f"[updates] HTTP {e.code} fetching manifest for {image_ref}:{tag}")
+            return None
+        except Exception as e:
+            log.warning(f"[updates] Failed to fetch manifest for {image_ref}:{tag}: {e}")
+            return None
+
+    def _get_local_digest(image) -> str | None:
+        """Extract the repo digest from a locally cached image object."""
+        try:
+            attrs = image.attrs or {}
+            repo_digests = attrs.get("RepoDigests", [])
+            if repo_digests:
+                # Format: ghcr.io/owner/repo@sha256:abc...
+                digest_part = repo_digests[0].split("@")[-1]
+                return digest_part
+        except Exception:
+            pass
+        return None
 
     try:
         containers = client.containers.list(all=True)
@@ -276,45 +368,71 @@ def check_all_updates():
                 continue
 
             try:
-                image_tag = container.image.tags[0] if container.image.tags else None
+                image_tags = container.image.tags if container.image else []
+                image_tag = image_tags[0] if image_tags else None
                 if not image_tag:
+                    log.warning(f"[updates] {container.name} has no image tag, skipping")
+                    updates.append({
+                        "service": container.name,
+                        "image": "unknown",
+                        "current_digest": None,
+                        "remote_digest": None,
+                        "has_update": False,
+                        "check_error": "no_image_tag",
+                        "status": container.status,
+                    })
                     continue
 
-                current_image_id = container.image.id
-                # Check registry without pulling
-                try:
-                    client.images.get_registry_data(image_tag)
-                    latest_image = client.images.pull(image_tag, dry_run=True)
-                    latest_image_id = latest_image.id
-                except Exception:
-                    # If dry_run fails, try regular pull check
-                    try:
-                        client.images.pull(image_tag)
-                        latest_image_id = client.images.get(image_tag).id
-                    except Exception:
-                        latest_image_id = current_image_id
+                # Local digest (from what was pulled when the container was last started)
+                current_digest = _get_local_digest(container.image)
 
-                has_update = latest_image_id != current_image_id
+                # Remote digest (via OCI registry API — no pull)
+                remote_digest = _get_remote_digest(image_tag)
+
+                if current_digest is None or remote_digest is None:
+                    has_update = False
+                    check_error = "digest_unavailable"
+                else:
+                    # Compare only the sha256 hex, strip any prefix differences
+                    def _norm(d: str) -> str:
+                        return d.split(":")[-1].lower() if d else ""
+                    has_update = _norm(current_digest) != _norm(remote_digest)
+                    check_error = None
 
                 updates.append({
                     "service": container.name,
                     "image": image_tag,
-                    "current_image_id": current_image_id,
-                    "latest_image_id": latest_image_id,
+                    "current_digest": current_digest,
+                    "remote_digest": remote_digest,
                     "has_update": has_update,
-                    "status": container.status
+                    "check_error": check_error,
+                    "status": container.status,
                 })
+
+                log.info(
+                    f"[updates] {container.name}: local={current_digest} remote={remote_digest} "
+                    f"has_update={has_update}"
+                )
             except Exception as e:
-                log.warning(f"Failed to check updates for {container.name}: {e}")
+                log.warning(f"[updates] Failed to check {container.name}: {e}")
+                updates.append({
+                    "service": container.name,
+                    "image": getattr(container, "image_tag", "unknown"),
+                    "has_update": False,
+                    "check_error": str(e),
+                    "status": container.status,
+                })
                 continue
 
         return {
             "checked": len(updates),
             "updates_available": sum(1 for u in updates if u["has_update"]),
-            "services": updates
+            "services": updates,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 @app.post("/api/containers/{service_name}/pull", dependencies=[Depends(verify_internal_secret)])
