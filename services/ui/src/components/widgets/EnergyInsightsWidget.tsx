@@ -1,8 +1,9 @@
 import React, { useMemo } from 'react';
-import { Activity, Zap, TrendingUp } from 'lucide-react';
+import { Zap, TrendingUp } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import type { IWidgetProps } from '../../types/widget';
 import { api } from '../../services/api';
+import { WidgetCard } from './WidgetCard';
 
 interface EnergyDataPoint {
   time: string;
@@ -25,7 +26,7 @@ interface TelemetrySummary {
   }>;
 }
 
-const EnergyInsightsWidget = ({ userSettings, onTogglePin, settingsButton }: IWidgetProps) => {
+const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
   const [summaries, setSummaries] = React.useState<Record<string, TelemetrySummary>>({});
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -37,17 +38,20 @@ const EnergyInsightsWidget = ({ userSettings, onTogglePin, settingsButton }: IWi
         const enrolled = await api.getTelemetryEnrollments();
         const powerEnrollments = enrolled.filter((e) => e.power_tracking);
 
+        // Fetch all entity summaries in parallel — failed ones are skipped gracefully
+        const results = await Promise.allSettled(
+          powerEnrollments.map((enrollment) =>
+            api.getTelemetrySummary(enrollment.entity_id)
+          )
+        );
+
         const summaryMap: Record<string, TelemetrySummary> = {};
-        for (const enrollment of powerEnrollments) {
-          try {
-            const summary = await api.getTelemetrySummary(enrollment.entity_id);
-            if (summary.summary) {
-              summaryMap[enrollment.entity_id] = summary.summary;
-            }
-          } catch {
-            // Skip entities with no data
+        results.forEach((result, idx) => {
+          if (result.status === 'fulfilled' && result.value.summary) {
+            summaryMap[powerEnrollments[idx].entity_id] = result.value.summary;
           }
-        }
+        });
+
         setSummaries(summaryMap);
       } catch {
         setError('Telemetry Service Unconfigured');
@@ -114,74 +118,45 @@ const EnergyInsightsWidget = ({ userSettings, onTogglePin, settingsButton }: IWi
     };
   }, [summaries]);
 
-  if (loading) {
-    return (
-      <div className="glass-card h-full p-5 relative flex items-center justify-center">
-        <p className="text-slate-500 text-sm">Loading energy data...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="glass-card h-full p-5 relative flex items-center justify-center">
-        <div className="text-center">
-          <Zap size={32} className="text-slate-700 mb-2 mx-auto" />
-          <p className="text-sm text-red-400 mb-2">{error}</p>
-          <p className="text-xs text-slate-500">Check telemetry system status</p>
-        </div>
-      </div>
-    );
-  }
-
   const hasData = data.length > 0;
 
   return (
-    <div className="glass-card h-full p-5 relative">
-      <div className="absolute top-3 right-3 flex items-center gap-2 z-10">
-        <button
-          onClick={onTogglePin}
-          className="text-slate-500 hover:text-purple-400 transition-colors"
-          title={userSettings.is_pinned ? 'Unpin widget' : 'Pin widget'}
-        >
-          <Activity size={16} className={userSettings.is_pinned ? 'text-purple-400' : ''} />
-        </button>
-        {settingsButton}
-      </div>
-
-      <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-        <Zap size={18} className="text-amber-400" />
-        Energy Insights
-      </h3>
-
+    <WidgetCard
+      title="Energy Insights"
+      icon={<Zap size={16} className="text-amber-400" />}
+      isLoading={loading}
+      error={error}
+      settingsButton={settingsButton}
+      accentColor="#f59e0b"
+    >
       {hasData ? (
-        <>
-          <div className="grid grid-cols-3 gap-3 mb-4">
-            <div className="glass-card p-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Current</p>
-              <p className="text-xl font-bold text-amber-400">{metrics.current}<span className="text-xs ml-1 text-slate-500">W</span></p>
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="glass-card p-2.5 text-center">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Current</p>
+              <p className="text-base font-bold text-amber-400">{metrics.current}<span className="text-[10px] ml-0.5 text-slate-500">W</span></p>
             </div>
-            <div className="glass-card p-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Average</p>
-              <p className="text-xl font-bold text-blue-400">{metrics.avg}<span className="text-xs ml-1 text-slate-500">W</span></p>
+            <div className="glass-card p-2.5 text-center">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Average</p>
+              <p className="text-base font-bold text-blue-400">{metrics.avg}<span className="text-[10px] ml-0.5 text-slate-500">W</span></p>
             </div>
-            <div className="glass-card p-3">
-              <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Peak</p>
-              <p className="text-xl font-bold text-red-400">{metrics.peak}<span className="text-xs ml-1 text-slate-500">W</span></p>
+            <div className="glass-card p-2.5 text-center">
+              <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Peak</p>
+              <p className="text-base font-bold text-red-400">{metrics.peak}<span className="text-[10px] ml-0.5 text-slate-500">W</span></p>
             </div>
           </div>
 
-          {summaries && Object.keys(summaries).some(id => summaries[id]) && (
-            <div className="glass-card p-3 mb-4">
-              <div className="flex items-center justify-between mb-1">
-                <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Devices Tracked</p>
-                <TrendingUp size={14} className="text-emerald-400" />
+          {Object.keys(summaries).length > 0 && (
+            <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-black/20 border border-white/5">
+              <p className="text-xs text-slate-500">Devices tracked</p>
+              <div className="flex items-center gap-1.5">
+                <TrendingUp size={12} className="text-emerald-400" />
+                <span className="text-xs font-bold text-emerald-400">{Object.keys(summaries).length}</span>
               </div>
-              <p className="text-sm font-bold text-emerald-400">{Object.keys(summaries).length} device{Object.keys(summaries).length !== 1 ? 's' : ''}</p>
             </div>
           )}
 
-          <div className="h-32">
+          <div className="h-24">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={data}>
                 <defs>
@@ -191,30 +166,33 @@ const EnergyInsightsWidget = ({ userSettings, onTogglePin, settingsButton }: IWi
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <XAxis dataKey="time" tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} width={28} />
                 <Tooltip
                   contentStyle={{
-                    background: 'rgba(15, 23, 42, 0.9)',
+                    background: 'rgba(3, 7, 17, 0.95)',
                     border: '1px solid rgba(255,255,255,0.1)',
                     borderRadius: '8px',
-                    fontSize: '12px',
+                    fontSize: '11px',
                   }}
                 />
                 <Area type="monotone" dataKey="power" stroke="#f59e0b" strokeWidth={2} fill="url(#powerGradient)" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </>
+        </div>
       ) : (
-        <div className="flex flex-col items-center justify-center h-48 text-center">
-          <Zap size={32} className="text-slate-700 mb-2" />
-          <p className="text-sm text-slate-500">No energy data available</p>
-          <p className="text-xs text-slate-600 mt-1">Enroll power-tracking devices in Admin → Telemetry</p>
+        <div className="flex flex-col items-center justify-center h-full text-center py-4">
+          <Zap size={28} className="text-slate-700 mb-2" />
+          <p className="text-sm text-slate-500">No energy data</p>
+          <p className="text-xs text-slate-600 mt-1">Enroll devices in Admin → Telemetry</p>
         </div>
       )}
-    </div>
+    </WidgetCard>
   );
 };
+
+export default EnergyInsightsWidget;
+
 
 export default EnergyInsightsWidget;

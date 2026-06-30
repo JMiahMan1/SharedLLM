@@ -133,25 +133,34 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     setLoading(true);
     setError(null);
     try {
-      // Load device states from server
+      // Load device states — isolated: failure here is shown as error
       const state = await api.getDeviceStates(['light', 'switch', 'media_player', 'cover', 'climate', 'lock', 'fan']);
       setDevices(state);
+    } catch (err) {
+      console.error('Failed to load device states:', err);
+      setError('Failed to load devices. Check that Home Assistant is reachable.');
+    }
 
-      // Load user device assignments
+    // Load user device assignments — isolated: failure here only logs
+    try {
       const userDevices = await api.getDevices();
       setAssignments(userDevices);
+    } catch (err) {
+      console.error('Failed to load device assignments:', err);
+      // Non-fatal — keep whatever assignments we already had
+    }
 
-      // Load system users for admin assignments panel
-      if (role === 'admin') {
+    // Load system users for admin assignments panel — isolated
+    if (role === 'admin') {
+      try {
         const users = await api.getUsers();
         setAllUsers(users);
+      } catch (err) {
+        console.error('Failed to load users:', err);
       }
-    } catch (err) {
-      console.error(err);
-      setError('Failed to load device information');
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   }, [role]);
 
   useEffect(() => {
@@ -185,13 +194,14 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
         domain,
         service,
         entity_id: entityId,
-        service_data: serviceData,
+        service_data: serviceData ?? null,
       });
-      toast.success('Command sent successfully');
+      toast.success('Command sent');
+      // Refresh device states in background after HA executes
       loadDevices();
     } catch (err) {
       console.error('HA Service Error:', err);
-      toast.error('Failed to send command to device');
+      toast.error('Failed to send command. Check Home Assistant connection.');
     }
   }, [hasControlPermission, loadDevices]);
 

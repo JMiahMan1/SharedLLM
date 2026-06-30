@@ -1,87 +1,290 @@
 @import "tailwindcss";
 
-body { font-family: 'Outfit', 'Inter', sans-serif; }
+/* ──────────────────────────────────────────────────────────────
+   Fonts
+────────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-@keyframes loading {
-  0% { transform: translateX(-100%); }
-  50% { transform: translateX(100%); }
-  100% { transform: translateX(100%); }
+body {
+  font-family: 'Outfit', 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* ──────────────────────────────────────────────────────────────
+   CSS Variables
+────────────────────────────────────────────────────────────── */
+:root {
+  --color-bg-base: #030711;
+  --color-surface-0: rgba(255, 255, 255, 0.03);
+  --color-surface-1: rgba(255, 255, 255, 0.06);
+  --color-surface-2: rgba(255, 255, 255, 0.10);
+  --color-border-soft: rgba(255, 255, 255, 0.08);
+  --color-border-mid: rgba(255, 255, 255, 0.14);
+  --color-border-strong: rgba(255, 255, 255, 0.22);
+  --color-purple-glow: rgba(139, 92, 246, 0.35);
+  --color-purple-dim: rgba(139, 92, 246, 0.12);
+  --radius-card: 1.125rem;
+  --radius-panel: 1.5rem;
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.45), 0 1px 0 var(--color-border-soft) inset;
+  --shadow-panel: 0 8px 48px rgba(0, 0, 0, 0.6), 0 1px 0 var(--color-border-soft) inset;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Base
+────────────────────────────────────────────────────────────── */
 @layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
-    @apply bg-slate-950 text-slate-50 min-h-screen overflow-x-hidden;
-    background: radial-gradient(circle at top left, #1e1b4b, #0f172a);
+    @apply min-h-screen overflow-x-hidden;
+    background-color: var(--color-bg-base);
+    background-image:
+      radial-gradient(ellipse 80% 50% at 20% 0%, rgba(88, 28, 220, 0.18) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 100%, rgba(15, 118, 200, 0.10) 0%, transparent 60%);
     background-attachment: fixed;
+    color: #f1f5f9;
+  }
+
+  /* Smooth scrolling for all scroll containers */
+  * {
+    scroll-behavior: smooth;
   }
 }
 
+/* ──────────────────────────────────────────────────────────────
+   Component Classes
+────────────────────────────────────────────────────────────── */
 @layer components {
+
+  /* Panels — primary containers */
   .glass-panel {
-    @apply bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl shadow-xl;
+    background: linear-gradient(135deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.03) 100%);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid var(--color-border-mid);
+    border-radius: var(--radius-panel);
+    box-shadow: var(--shadow-panel);
   }
 
+  /* Cards — widget inner cards */
   .glass-card {
-    @apply bg-white/5 backdrop-blur-lg border border-white/10 rounded-xl hover:bg-white/10 transition-all duration-300;
+    background: var(--color-surface-0);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-border-soft);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
   }
 
+  .glass-card:hover {
+    background: var(--color-surface-1);
+    border-color: var(--color-border-mid);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 1px 0 var(--color-border-soft) inset;
+  }
+
+  /* Inputs */
   .glass-input {
-    @apply bg-white/5 border border-white/10 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500/50 backdrop-blur-sm transition-all;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid var(--color-border-soft);
+    border-radius: 0.625rem;
+    color: #f1f5f9;
+    padding: 0.5rem 1rem;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    outline: none;
   }
 
+  .glass-input:focus {
+    border-color: rgba(139, 92, 246, 0.5);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+  }
+
+  .glass-input::placeholder {
+    color: #475569;
+  }
+
+  /* Buttons */
   .glass-button {
-    @apply bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/30 rounded-lg px-4 py-2 transition-all duration-300 flex items-center justify-center gap-2;
+    background: rgba(139, 92, 246, 0.15);
+    border: 1px solid rgba(139, 92, 246, 0.30);
+    border-radius: 0.625rem;
+    color: #c4b5fd;
+    padding: 0.5rem 1rem;
+    font-weight: 600;
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    /* Minimum touch target */
+    min-height: 2.5rem;
+    min-width: 2.5rem;
   }
 
+  .glass-button:hover {
+    background: rgba(139, 92, 246, 0.25);
+    border-color: rgba(139, 92, 246, 0.50);
+    box-shadow: 0 0 16px rgba(139, 92, 246, 0.20);
+  }
+
+  .glass-button:active {
+    transform: scale(0.97);
+  }
+
+  .glass-button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
+  /* Sidebar */
+  .glass-sidebar {
+    background: rgba(3, 7, 17, 0.60);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-right: 1px solid var(--color-border-soft);
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+  }
+
+  /* Neon effects */
   .neon-border {
-    @apply border border-white/10 transition-all duration-300;
-    box-shadow: 0 0 15px rgba(139, 92, 246, 0.1), inset 0 0 10px rgba(139, 92, 246, 0.05);
+    border: 1px solid var(--color-border-mid);
+    transition: border-color 0.25s ease, box-shadow 0.25s ease;
+    box-shadow: 0 0 12px var(--color-purple-dim), inset 0 0 8px rgba(139, 92, 246, 0.04);
   }
 
   .neon-border:hover {
-    @apply border-purple-500/40;
-    box-shadow: 0 0 25px rgba(168, 85, 247, 0.25), inset 0 0 15px rgba(168, 85, 247, 0.1);
+    border-color: rgba(168, 85, 247, 0.45);
+    box-shadow: 0 0 24px var(--color-purple-glow), inset 0 0 12px rgba(168, 85, 247, 0.08);
   }
 
   .neon-glow {
-    text-shadow: 0 0 8px rgba(168, 85, 247, 0.6);
+    text-shadow: 0 0 10px rgba(168, 85, 247, 0.7), 0 0 20px rgba(168, 85, 247, 0.35);
   }
 
-  .glass-sidebar {
-    background: rgba(15, 23, 42, 0.4);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border-right: 1px solid rgba(255, 255, 255, 0.05);
-    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.3);
-  }
-
+  /* Safe area padding for mobile notches */
   .safe-area-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0.5rem);
   }
 
   .safe-area-top {
     padding-top: env(safe-area-inset-top, 0px);
   }
+
+  /* Status badges */
+  .status-ok {
+    @apply text-emerald-300 bg-emerald-500/10 border border-emerald-500/20;
+  }
+
+  .status-error {
+    @apply text-red-300 bg-red-500/10 border border-red-500/20;
+  }
+
+  .status-warn {
+    @apply text-amber-300 bg-amber-500/10 border border-amber-500/20;
+  }
+
+  /* Widget grid rows */
+  .row-span-1 { grid-row: span 1; }
+  .row-span-2 { grid-row: span 2; }
+  .row-span-3 { grid-row: span 3; }
 }
 
-/* Custom scrollbar */
+/* ──────────────────────────────────────────────────────────────
+   Animations
+────────────────────────────────────────────────────────────── */
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+
+@keyframes pulse-ring {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.08); }
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.4s ease forwards;
+}
+
+.animate-slide-in {
+  animation: slide-in-right 0.3s ease forwards;
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 0.5rem;
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.07) 50%, transparent 100%);
+  animation: shimmer 1.6s infinite;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Scrollbar
+────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar {
-  width: 8px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-transparent;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-white/10 rounded-full hover:bg-white/20;
+  background: rgba(255, 255, 255, 0.10);
+  border-radius: 9999px;
 }
 
-/* Day/Night gradients (can be controlled via class on body) */
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.20);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Range inputs
+────────────────────────────────────────────────────────────── */
+input[type="range"] {
+  accent-color: #8b5cf6;
+  cursor: pointer;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Theme modes (optional body class)
+────────────────────────────────────────────────────────────── */
 .day-mode {
-  background: radial-gradient(circle at top left, #4f46e5, #0ea5e9);
+  background-image: radial-gradient(ellipse 80% 50% at 20% 0%, rgba(79, 70, 229, 0.25) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(14, 165, 233, 0.15) 0%, transparent 60%);
 }
 
 .night-mode {
-  background: radial-gradient(circle at top left, #1e1b4b, #020617);
+  background-image: radial-gradient(ellipse 80% 50% at 20% 0%, rgba(30, 27, 75, 0.70) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(2, 6, 23, 0.90) 0%, transparent 60%);
 }
