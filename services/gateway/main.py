@@ -3928,7 +3928,19 @@ async def check_service_updates(request: Request):
         )
         if resp.status_code != 200:
             raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        
+        data = resp.json()
+        updates_available = data.get("updates_available", 0)
+        if updates_available > 0:
+            services = [s.get("service", "unknown").replace("sharedllm_", "") for s in data.get("services", []) if s.get("has_update")]
+            services_str = ", ".join(services)
+            await emit_log(
+                level="WARNING",
+                message=f"Docker image updates available: {services_str}",
+                context={"updates": services}
+            )
+
+        return JSONResponse(status_code=resp.status_code, content=data)
 
 @app.get("/api/admin/services/{service_name}/logs")
 async def get_service_logs(service_name: str, request: Request, tail: int = 100):
