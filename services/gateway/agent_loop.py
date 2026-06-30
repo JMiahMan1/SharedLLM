@@ -108,7 +108,7 @@ class OllamaProvider(BaseLLMProvider):
         }
 
         full_content = ""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with httpx.AsyncClient(headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as client:
             log.info(f"[OllamaProvider-Hardened] Calling {self.base_url}/api/chat for model {model}")
             if not chunk_callback:
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)
