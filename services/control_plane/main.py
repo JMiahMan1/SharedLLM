@@ -217,20 +217,62 @@ def get_service_status(service_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _resolve_container(service_name: str):
+    """
+    Finds a container matching service_name.
+    Supports:
+      1. Base service name (e.g. "gateway")
+      2. Full container name (e.g. "sharedllm_gateway_1" or "sharedllm_gateway")
+    """
+    if not client:
+        return None
+
+    # Try exact match first
+    try:
+        return client.containers.get(service_name)
+    except Exception:
+        pass
+
+    # Try finding by com.docker.compose.service label
+    for c in client.containers.list(all=True):
+        if c.labels.get("com.docker.compose.service") == service_name:
+            return c
+
+    # Try constructing name variations
+    for name_var in [f"sharedllm_{service_name}_1", f"sharedllm_{service_name}", service_name]:
+        try:
+            return client.containers.get(name_var)
+        except Exception:
+            pass
+
+    return None
+
+
+def _verify_sharedllm_container(container) -> bool:
+    """Ensure the target container belongs to the sharedllm project."""
+    if not container:
+        return False
+    return (
+        container.name.startswith("sharedllm_") or
+        container.labels.get("com.docker.compose.project") == "sharedllm"
+    )
+
+
 @app.post("/api/restart/{service_name}", dependencies=[Depends(verify_internal_secret)])
 def restart_service(service_name: str):
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
 
-    if not service_name.startswith("sharedllm_"):
-        raise HTTPException(status_code=400, detail="Can only restart sharedllm_ prefixed containers")
+    container = _resolve_container(service_name)
+    if not container:
+        raise HTTPException(status_code=404, detail=f"Container for service '{service_name}' not found")
+
+    if not _verify_sharedllm_container(container):
+        raise HTTPException(status_code=400, detail=f"Container '{container.name}' is not part of the sharedllm stack")
 
     try:
-        container = client.containers.get(service_name)
         container.restart()
-        return {"status": "SUCCESS", "message": f"Container {service_name} restarted successfully"}
-    except NotFound:
-        raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
+        return {"status": "SUCCESS", "message": f"Container {container.name} restarted successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -241,20 +283,21 @@ def delete_container(service_name: str):
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
 
-    if not service_name.startswith("sharedllm_"):
-        raise HTTPException(status_code=400, detail="Can only delete sharedllm_ prefixed containers")
+    container = _resolve_container(service_name)
+    if not container:
+        raise HTTPException(status_code=404, detail=f"Container for service '{service_name}' not found")
+
+    if not _verify_sharedllm_container(container):
+        raise HTTPException(status_code=400, detail=f"Container '{container.name}' is not part of the sharedllm stack")
 
     try:
-        container = client.containers.get(service_name)
         if container.status == "running":
             raise HTTPException(
                 status_code=409,
-                detail=f"Cannot delete running container {service_name}. Stop it first."
+                detail=f"Cannot delete running container {container.name}. Stop it first."
             )
         container.remove()
-        return {"status": "SUCCESS", "message": f"Container {service_name} removed successfully"}
-    except NotFound:
-        raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
+        return {"status": "SUCCESS", "message": f"Container {container.name} removed successfully"}
     except HTTPException:
         raise
     except Exception as e:
@@ -391,13 +434,24 @@ def check_all_updates():
             if not container.name or not container.name.startswith("sharedllm_"):
                 continue
 
+            # Determine base service name
+            compose_service = container.labels.get("com.docker.compose.service")
+            if compose_service:
+                svc_name = compose_service
+            else:
+                svc_name = container.name
+                if svc_name.startswith("sharedllm_"):
+                    svc_name = svc_name[len("sharedllm_"):]
+                if svc_name.endswith("_1"):
+                    svc_name = svc_name[:-2]
+
             try:
                 image_tags = container.image.tags if container.image else []
                 image_tag = image_tags[0] if image_tags else None
                 if not image_tag:
                     log.warning(f"[updates] {container.name} has no image tag, skipping")
                     updates.append({
-                        "service": container.name,
+                        "service": svc_name,
                         "image": "unknown",
                         "current_digest": None,
                         "remote_digest": None,
@@ -424,7 +478,7 @@ def check_all_updates():
                     check_error = None
 
                 updates.append({
-                    "service": container.name,
+                    "service": svc_name,
                     "image": image_tag,
                     "current_digest": current_digest,
                     "remote_digest": remote_digest,
@@ -434,13 +488,13 @@ def check_all_updates():
                 })
 
                 log.info(
-                    f"[updates] {container.name}: local={current_digest} remote={remote_digest} "
+                    f"[updates] {svc_name} ({container.name}): local={current_digest} remote={remote_digest} "
                     f"has_update={has_update}"
                 )
             except Exception as e:
                 log.warning(f"[updates] Failed to check {container.name}: {e}")
                 updates.append({
-                    "service": container.name,
+                    "service": svc_name,
                     "image": getattr(container, "image_tag", "unknown"),
                     "has_update": False,
                     "check_error": str(e),
@@ -465,21 +519,25 @@ def pull_image_update(service_name: str):
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
 
-    if not service_name.startswith("sharedllm_"):
-        raise HTTPException(status_code=400, detail="Can only pull for sharedllm_ prefixed containers")
+    container = _resolve_container(service_name)
+    if not container:
+        raise HTTPException(status_code=404, detail=f"Container for service '{service_name}' not found")
+
+    if not _verify_sharedllm_container(container):
+        raise HTTPException(status_code=400, detail=f"Container '{container.name}' is not part of the sharedllm stack")
 
     try:
-        container = client.containers.get(service_name)
         current_image_id = container.image.id
         if not current_image_id:
             raise HTTPException(status_code=500, detail="Cannot determine current image ID")
 
-        image_tag = container.image.tags[0] if container.image.tags else None
+        image_tags = container.image.tags if container.image else []
+        image_tag = image_tags[0] if image_tags else None
         if not image_tag:
             raise HTTPException(status_code=400, detail="Container has no image tag to pull")
 
         # Pull the latest version of the image
-        log.info(f"Pulling latest image for {service_name}: {image_tag}")
+        log.info(f"Pulling latest image for {container.name}: {image_tag}")
         client.images.pull(image_tag)
 
         # Check if image ID changed
@@ -494,12 +552,6 @@ def pull_image_update(service_name: str):
             "updated": updated,
             "message": "Image is up to date" if not updated else "New version pulled successfully"
         }
-    except ImageNotFound:
-        raise HTTPException(status_code=404, detail=f"Image not found for {service_name}")
-    except NotFound:
-        raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
-    except HTTPException:
-        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -508,20 +560,25 @@ def pull_image_update(service_name: str):
 def get_container_logs(service_name: str, tail: int = 100):
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
+
+    container = _resolve_container(service_name)
+    if not container:
+        raise HTTPException(status_code=404, detail=f"Container for service '{service_name}' not found")
+
+    if not _verify_sharedllm_container(container):
+        raise HTTPException(status_code=400, detail=f"Container '{container.name}' is not part of the sharedllm stack")
+
     try:
-        container = client.containers.get(service_name)
         logs = container.logs(tail=tail, stdout=True, stderr=True).decode("utf-8")
         tb_matches = TRACEBACK_RE.findall(logs)
         has_tracebacks = len(tb_matches) > 0
-        log.info(f"[logs] {service_name} tail={tail} tracebacks_found={len(tb_matches)}")
+        log.info(f"[logs] {container.name} tail={tail} tracebacks_found={len(tb_matches)}")
         return {
             "name": service_name,
             "logs": logs,
             "has_tracebacks": has_tracebacks,
             "traceback_count": len(tb_matches),
         }
-    except NotFound:
-        raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -535,19 +592,22 @@ def exec_in_container(service_name: str, body: dict):
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
 
-    if not service_name.startswith("sharedllm_"):
-        raise HTTPException(status_code=400, detail="Can only exec into sharedllm_ prefixed containers")
+    container = _resolve_container(service_name)
+    if not container:
+        raise HTTPException(status_code=404, detail=f"Container for service '{service_name}' not found")
+
+    if not _verify_sharedllm_container(container):
+        raise HTTPException(status_code=400, detail=f"Container '{container.name}' is not part of the sharedllm stack")
 
     command = body.get("command")
     if not command:
         raise HTTPException(status_code=400, detail="'command' is required in request body")
 
     try:
-        container = client.containers.get(service_name)
         if container.status != "running":
             raise HTTPException(
                 status_code=409,
-                detail=f"Container {service_name} is not running (status: {container.status})"
+                detail=f"Container {container.name} is not running (status: {container.status})"
             )
 
         exit_code, output = container.exec_run(
@@ -562,15 +622,13 @@ def exec_in_container(service_name: str, body: dict):
             output_str = (output[0] or b"").decode("utf-8") + (output[1] or b"").decode("utf-8")
         else:
             output_str = ""
-        log.info(f"[exec] {service_name} `{command}` → exit_code={exit_code}")
+        log.info(f"[exec] {container.name} `{command}` → exit_code={exit_code}")
         return {
             "service": service_name,
             "command": command,
             "exit_code": exit_code,
             "output": output_str
         }
-    except NotFound:
-        raise HTTPException(status_code=404, detail=f"Container {service_name} not found")
     except HTTPException:
         raise
     except Exception as e:
