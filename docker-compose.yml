@@ -140,7 +140,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution.local:8003
+      - EXECUTION_SVC_URL=http://host.docker.internal:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -217,7 +217,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution.local:8003
+      - EXECUTION_SVC_URL=http://host.docker.internal:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -257,7 +257,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution.local:8003
+      - EXECUTION_SVC_URL=http://host.docker.internal:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -297,7 +297,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution.local:8003
+      - EXECUTION_SVC_URL=http://host.docker.internal:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -333,7 +333,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution.local:8003
+      - EXECUTION_SVC_URL=http://host.docker.internal:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -375,7 +375,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution.local:8003
+      - EXECUTION_SVC_URL=http://host.docker.internal:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
@@ -448,7 +448,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server.local:11434
       - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://execution.local:8003
+      - EXECUTION_SVC_URL=http://host.docker.internal:8003
       - RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
