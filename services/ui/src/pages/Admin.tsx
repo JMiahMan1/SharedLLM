@@ -1656,6 +1656,7 @@ const Admin = () => {
                   {systemHealth.services.map((service) => {
                   const updateInfo = updatesData?.services.find(s => s.service === service.name);
                   const hasUpdate = updateInfo?.has_update;
+                  const checkError = updateInfo?.check_error;
 
                   return (
                     <div key={service.name} className={`glass-card p-4 ${hasUpdate ? 'border-orange-500/30' : ''}`}>
@@ -1680,6 +1681,14 @@ const Admin = () => {
                               {hasUpdate && (
                                 <span className="flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-orange-400">
                                   <ArrowUpCircle size={10} /> Update Available
+                                </span>
+                              )}
+                              {!hasUpdate && checkError && checkError !== 'no_image_tag' && (
+                                <span
+                                  className="flex items-center gap-1 rounded-full bg-slate-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-500"
+                                  title={`Update check failed: ${checkError}. Set GHCR_TOKEN in .env to enable registry checks.`}
+                                >
+                                  Check Failed
                                 </span>
                               )}
                             </div>
