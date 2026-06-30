@@ -193,6 +193,3 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
 };
 
 export default EnergyInsightsWidget;
-
-
-export default EnergyInsightsWidget;

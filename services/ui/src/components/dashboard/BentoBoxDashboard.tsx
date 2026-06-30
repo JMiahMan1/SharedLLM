@@ -1,6 +1,7 @@
 import { useEffect, useCallback, lazy, Suspense, Component, type ReactNode } from 'react';
 import { Settings2 } from 'lucide-react';
 import { useWidgetStore } from '../../stores/widgetStore';
+import { useShallow } from 'zustand/react/shallow';
 import WidgetContextMenu from '../widgets/WidgetContextMenu';
 import type { WidgetSize, WidgetKey, IActiveMediaWidgetProps } from '../../types/widget';
 import { WidgetSkeletonSelector } from '../widgets/skeletons/WidgetSkeletons';
@@ -80,8 +81,10 @@ class WidgetErrorBoundary extends Component<WidgetErrorBoundaryProps, WidgetErro
 
 // ── BentoBoxDashboard ────────────────────────────────────────────────────────
 
+const NOOP = () => {};
+
 const BentoBoxDashboard = () => {
-  const widgets = useWidgetStore((state) => state.getVisibleWidgets());
+  const widgets = useWidgetStore(useShallow((state) => state.getVisibleWidgets()));
   const mounting = useWidgetStore((state) => state.mounting);
 
   useEffect(() => {
@@ -184,7 +187,7 @@ const BentoBoxDashboard = () => {
                     settingsButton={settingsButton}
                     userSettings={widget.userSettings}
                     onTogglePin={() => handleTogglePin(widget.def.key)}
-                    onMediaStop={() => {/* handled inside widget */}}
+                    onMediaStop={NOOP}
                   />
                 ) : null}
               </Suspense>
