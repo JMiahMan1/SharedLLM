@@ -2,27 +2,16 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
   LayoutDashboard, 
-  UserCircle, 
   MessageSquare, 
-  FlaskConical, 
   Activity,
-  HelpCircle,
   Database,
-  Boxes,
+  FolderKanban,
   Music,
-  Radio,
   SlidersHorizontal,
   Brain,
   Loader2,
   ShieldCheck,
-  Server,
-  Users,
-  Monitor,
   Shield,
-  HardDrive,
-  Bell,
-  Puzzle,
-  Ear,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -35,57 +24,18 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const navSections = [
-  {
-    name: 'Home',
-    items: [
-      { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-    ],
-  },
-  {
-    name: 'Workspaces & Raven',
-    items: [
-      { icon: Boxes, label: 'My Workspaces', path: '/workspaces' },
-      { icon: Brain, label: 'Jarvis Lab', path: '/lab' },
-      { icon: MessageSquare, label: 'Communication', path: '/communication' },
-    ],
-    adminItems: [
-      { icon: FlaskConical, label: 'Advanced Lab', path: '/lab/admin' },
-    ],
-  },
-  {
-    name: 'Media',
-    items: [
-      { icon: Music, label: 'Media', path: '/media' },
-      { icon: Radio, label: 'Remote', path: '/remote' },
-    ],
-  },
-  {
-    name: 'Knowledge & Identity',
-    items: [
-      { icon: Database, label: 'Knowledge Hub', path: '/knowledge' },
-      { icon: UserCircle, label: 'Identity', path: '/identity' },
-    ],
-  },
-  {
-    name: 'Settings',
-    items: [
-      { icon: SlidersHorizontal, label: 'Settings', path: '/settings' },
-      { icon: HelpCircle, label: 'Help Hub', path: '/docs' },
-    ],
-  },
+const navItems = [
+  { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+  { icon: MessageSquare, label: 'Chat', path: '/communication' },
+  { icon: Music, label: 'Media', path: '/media' },
+  { icon: FolderKanban, label: 'Workspaces', path: '/workspaces' },
+  { icon: Brain, label: 'Lab', path: '/lab' },
+  { icon: Database, label: 'Knowledge', path: '/knowledge' },
+  { icon: SlidersHorizontal, label: 'Settings', path: '/settings' },
 ];
 
 const adminRoutes = [
-  { icon: Server, label: 'System Ops', path: '/admin/ops' },
-  { icon: Monitor, label: 'System Services', path: '/admin/services' },
-  { icon: Shield, label: 'System Monitor', path: '/admin/monitor' },
-  { icon: Users, label: 'User Management', path: '/admin/users' },
-  { icon: Puzzle, label: 'Integrations', path: '/admin/integrations' },
-  { icon: HardDrive, label: 'Database', path: '/admin/database' },
-  { icon: Ear, label: 'Sounds', path: '/admin/sounds' },
-  { icon: Bell, label: 'Intercom', path: '/admin/intercom' },
-  { icon: Users, label: 'Groups', path: '/admin/groups' },
+  { icon: Shield, label: 'Admin', path: '/admin' },
 ];
 
 const Sidebar = () => {
@@ -101,80 +51,44 @@ const Sidebar = () => {
         </h1>
       </div>
       
-      <nav className="flex-1 px-2 md:px-4 space-y-4 overflow-y-auto">
-        {navSections.map((section) => (
-          <div key={section.name}>
-            <div className="hidden md:block px-3 mb-2">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">
-                {section.name}
-              </span>
-            </div>
-            <div className="space-y-1">
-              {section.items.map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={({ isActive }) => cn(
-                    "flex items-center justify-center md:justify-start gap-3 px-3 md:px-4 py-3 rounded-xl transition-all duration-200",
-                    isActive 
-                      ? "bg-purple-600/30 text-white border border-purple-500/40 neon-border shadow-lg shadow-purple-500/10" 
-                      : "text-slate-400 hover:text-white hover:bg-white/5"
-                  )}
-                  title={item.label}
-                >
-                  <item.icon size={20} className="shrink-0" />
-                  <span className="font-medium hidden md:inline">{item.label}</span>
-                </NavLink>
-              ))}
-              {isAdmin && section.adminItems?.map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={({ isActive }) => cn(
-                    "flex items-center justify-center md:justify-start gap-3 px-3 md:px-4 py-3 rounded-xl transition-all duration-200",
-                    isActive 
-                      ? "bg-purple-600/30 text-white border border-purple-500/40 neon-border shadow-lg shadow-purple-500/10" 
-                      : "text-slate-500 hover:text-white hover:bg-white/5"
-                  )}
-                  title={item.label}
-                >
-                  <item.icon size={20} className="shrink-0" />
-                  <span className="font-medium hidden md:inline">{item.label}</span>
-                  <span className="hidden md:inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 ml-auto">
-                    Admin
-                  </span>
-                </NavLink>
-              ))}
-            </div>
-          </div>
+      <nav className="flex-1 px-2 md:px-4 space-y-1 overflow-y-auto">
+        {navItems.map((item) => (
+          <NavLink
+            key={item.path}
+            to={item.path}
+            className={({ isActive }) => cn(
+              "flex items-center justify-center md:justify-start gap-3 px-3 md:px-4 py-3 rounded-xl transition-all duration-200",
+              isActive 
+                ? "bg-purple-600/30 text-white border border-purple-500/40 neon-border shadow-lg shadow-purple-500/10" 
+                : "text-slate-400 hover:text-white hover:bg-white/5"
+            )}
+            title={item.label}
+          >
+            <item.icon size={20} className="shrink-0" />
+            <span className="font-medium hidden md:inline">{item.label}</span>
+          </NavLink>
         ))}
 
         {isAdmin && (
-          <div className="pt-4 border-t border-white/10">
-            <div className="hidden md:block px-3 mb-2">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">
-                System Operations
-              </span>
-            </div>
-            <div className="space-y-1">
-              {adminRoutes.map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={({ isActive }) => cn(
-                    "flex items-center justify-center md:justify-start gap-3 px-3 md:px-4 py-3 rounded-xl transition-all duration-200",
-                    isActive 
-                      ? "bg-purple-600/30 text-white border border-purple-500/40 neon-border shadow-lg shadow-purple-500/10" 
-                      : "text-slate-500 hover:text-white hover:bg-white/5"
-                  )}
-                  title={item.label}
-                >
-                  <item.icon size={20} className="shrink-0" />
-                  <span className="font-medium hidden md:inline">{item.label}</span>
-                </NavLink>
-              ))}
-            </div>
-          </div>
+          <>
+            <div className="border-t border-white/10 my-2" />
+            {adminRoutes.map((item) => (
+              <NavLink
+                key={item.path}
+                to={item.path}
+                className={({ isActive }) => cn(
+                  "flex items-center justify-center md:justify-start gap-3 px-3 md:px-4 py-3 rounded-xl transition-all duration-200",
+                  isActive 
+                    ? "bg-purple-600/30 text-white border border-purple-500/40 neon-border shadow-lg shadow-purple-500/10" 
+                    : "text-slate-500 hover:text-white hover:bg-white/5"
+                )}
+                title={item.label}
+              >
+                <item.icon size={20} className="shrink-0" />
+                <span className="font-medium hidden md:inline">{item.label}</span>
+              </NavLink>
+            ))}
+          </>
         )}
       </nav>
 

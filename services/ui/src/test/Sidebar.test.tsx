@@ -14,8 +14,8 @@ describe('Sidebar Component', () => {
     renderWithProviders(<Sidebar />);
     
     expect(screen.getByText('Dashboard')).toBeInTheDocument();
-    expect(screen.getByText('Identity')).toBeInTheDocument();
-    expect(screen.getByText('Communication')).toBeInTheDocument();
-    expect(screen.getByText('Help Hub')).toBeInTheDocument();
+    expect(screen.getByText('Workspaces')).toBeInTheDocument();
+    expect(screen.getByText('Media')).toBeInTheDocument();
+    expect(screen.getByText('Lab')).toBeInTheDocument();
   });
 });

@@ -12,7 +12,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { getPlayerId, savePlayerId, setState } from './webPlayer';
 import type { SendspinPlayer, PlayerState } from '@sendspin/sendspin-js';
-import { WebSocketManager, ConnectionState } from './wsManager';
+import type { ConnectionState } from './wsManager';
 
 const STORAGE_KEY = 'sendspin_webplayer_id';
 
@@ -53,39 +53,14 @@ function getSendspinUrl(baseUrl: string, apiToken: string): string {
   return `${wsProtocol}://${window.location.host}/api/sendspin?token=${encodeURIComponent(apiToken)}`;
 }
 
-/* ── JSON-RPC WebSocket proxy ──────────────────────────────────────────────
+/* ── JSON-RPC URL builder ─────────────────────────────────────────────────
  *
- * Connects to gateway's /api/ma-jsonrpc, which authenticates with MA and
- * proxies JSON-RPC messages bidirectionally.
- * Uses WebSocketManager for auto-reconnection.
- *
- * Browser sends: {"message_id": "counter1", "command": "player_queues/play_media", "args": {...}}
- * MA responds:   {"type": "RESULT", "message_id": "counter1", "result": {...}}
- * MA events:     {"event": "queue_updated", "data": {...}}
+ * Returns a native WebSocket URL for the JSON-RPC proxy.
+ * Matches ma-stream-test.ts: plain WebSocket, not WebSocketManager.
  */
-function createJsonRpcProxy(
-  baseUrl: string,
-  apiToken: string,
-  onEvent: (event: string, data: Record<string, unknown>) => void,
-): WebSocketManager {
-  const wsUrl = new URL('/api/ma-jsonrpc', baseUrl);
-  wsUrl.searchParams.set('token', apiToken);
-  return new WebSocketManager(wsUrl.toString(), {
-    onMessage: (event: MessageEvent) => {
-      try {
-        const data = JSON.parse(event.data as string);
-        if (data && typeof data === 'object' && 'event' in data) {
-          onEvent(data.event, data.data);
-        }
-      } catch {
-        // Non-JSON or unparseable — ignore
-      }
-    },
-    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
-    // MA's websocket API does not accept ad-hoc ping messages on the command channel.
-    heartbeatIntervalMs: 0,
-    heartbeatTimeoutMs: 0,
-  });
+function getJsonRpcUrl(apiToken: string): string {
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${wsProtocol}://${window.location.host}/api/ma-jsonrpc?token=${encodeURIComponent(apiToken)}`;
 }
 
 /* ── Hook ────────────────────────────────────────────────────────────────── */
@@ -93,8 +68,8 @@ function createJsonRpcProxy(
 export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void) {
   const playerRef = useRef<SendspinPlayer | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const jsonrpcWsRef = useRef<WebSocketManager | null>(null);
-  const sendspinWsRef = useRef<WebSocketManager | null>(null);
+  const jsonrpcWsRef = useRef<WebSocket | null>(null);
+  const sendspinWsRef = useRef<WebSocket | null>(null);
   const playerIdRef = useRef<string>('');
   const reconnectAttemptsRef = useRef(0);
   const [msgId, setMsgId] = useState(0);
@@ -263,11 +238,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       return;
     }
 
-    // Track connection state for UI feedback
-    let sendspinConnected = false;
-
     const markSendspinConnected = () => {
-      sendspinConnected = true;
       updateConnectionState('CONNECTED', 0);
       reconnectAttemptsRef.current = 0;
     };
@@ -275,27 +246,12 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     try {
       const baseUrl = window.location.origin;
 
-      // 1. Create native WebSocket for Sendspin (SendspinPlayer requires real WebSocket)
+      // 1. Create native WebSocket for Sendspin — matches ma-stream-test.ts exactly
       console.log('[MAWebPlayer] Creating Sendspin WebSocket...');
       const sendspinWsUrl = getSendspinUrl(baseUrl, apiToken);
-      const sendspinWs = new WebSocket(sendspinWsUrl);
-      sendspinWs.binaryType = 'arraybuffer';
+      let sendspinWs = new WebSocket(sendspinWsUrl);
 
-      sendspinWs.onopen = () => {
-        console.log('[MAWebPlayer] Sendspin WebSocket opened');
-        markSendspinConnected();
-      };
-
-      sendspinWs.onclose = (event) => {
-        console.log('[MAWebPlayer] Sendspin WebSocket closed:', event.code, event.reason);
-        // SendspinPlayer manages its own reconnection after connect()
-      };
-
-      sendspinWs.onerror = () => {
-        console.error('[MAWebPlayer] Sendspin WebSocket error');
-      };
-
-      // 2. Create audio element first (SendspinPlayer needs it before connect)
+      // 2. Create audio element (reuse existing player element from DOM if possible)
       console.log('[MAWebPlayer] Creating audio element...');
       const audio = new Audio();
       audio.crossOrigin = 'anonymous';
@@ -308,72 +264,75 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         audioElement: audio,
         playerId,
         webSocket: sendspinWs,
-        codecs: ['opus', 'flac'],
         onStateChange: (newState) => {
           console.log('[MAWebPlayer] onStateChange:', newState);
-          setStateLocal(s => {
-            const updated = {
-              ...s,
-              isPlaying: newState.isPlaying,
-              playerState: newState.playerState,
-              volume: newState.volume,
-              muted: newState.muted,
-              error: newState.playerState === 'error' ? 'Playback error - attempting recovery' : null,
-            };
-            return updated;
-          });
+          setStateLocal(s => ({
+            ...s,
+            isPlaying: newState.isPlaying,
+            volume: Math.round(newState.volume),
+            muted: newState.muted,
+            playerState: newState.isPlaying ? 'playing' : (newState.isConnected ? 'idle' : null),
+            // Read track metadata from serverState — matches ma-stream-test.ts
+            mediaTitle: (newState as unknown as { serverState?: { metadata?: { title?: string } } }).serverState?.metadata?.title ?? s.mediaTitle,
+            mediaArtist: (newState as unknown as { serverState?: { metadata?: { artist?: string } } }).serverState?.metadata?.artist ?? s.mediaArtist,
+            duration: (newState as unknown as { serverState?: { metadata?: { duration?: number } } }).serverState?.metadata?.duration ?? s.duration,
+            position: (newState as unknown as { serverState?: { position?: number } }).serverState?.position ?? s.position,
+            error: newState.playerState === 'error' ? 'Playback error - attempting recovery' : null,
+          }));
         },
       });
 
       playerRef.current = player;
 
-      // 4. Connect SendspinPlayer (this uses the pre-existing WebSocket)
+      // 4. Connect SendspinPlayer — matches ma-stream-test.ts exactly
       console.log('[MAWebPlayer] Calling player.connect()...');
       await player.connect();
+      // After connect, update reference to the player's internal WS (matches test page line 253)
+      sendspinWs = (player as unknown as { core: { wsManager: { ws: WebSocket } } }).core.wsManager.ws;
+      sendspinWsRef.current = sendspinWs;
+      markSendspinConnected();
       console.log('[MAWebPlayer] player.connect() completed, volume:', player.volume, 'muted:', player.muted);
 
-      // After connect, captures the internal WebSocket from SendspinPlayer's core
-      const internalWs = (player as unknown as { core?: { wsManager?: { ws?: unknown } } })?.core?.wsManager?.ws;
-      if (internalWs && internalWs instanceof WebSocket) {
-        sendspinWs.close();
-      }
-
-      // 5. Create JSON-RPC proxy WebSocket (control API)
-      console.log('[MAWebPlayer] Creating JSON-RPC proxy...');
-      const jsonrpcWs = createJsonRpcProxy(baseUrl, apiToken, handleMaEvent);
+      // 5. Create plain JSON-RPC WebSocket — matches ma-stream-test.ts (plain WS, not WebSocketManager)
+      console.log('[MAWebPlayer] Creating JSON-RPC WebSocket...');
+      const jsonrpcUrl = getJsonRpcUrl(apiToken);
+      const jsonrpcWs = new WebSocket(jsonrpcUrl);
       jsonrpcWsRef.current = jsonrpcWs;
 
-      // 6. Wait for both connections to establish
-      const connectionTimeout = 15000;
-      let resolved = false;
+      jsonrpcWs.onopen = () => {
+        console.log('[MAWebPlayer] JSON-RPC WebSocket connected');
+        updateConnectionState('CONNECTED', 0);
+      };
 
-      const waitForConnection = new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          if (!resolved) reject(new Error('Connection timeout after 15s'));
-        }, connectionTimeout);
-
-        const checkConnection = () => {
-          if (sendspinConnected && jsonrpcWs.readyState === WebSocket.OPEN) {
-            resolved = true;
-            clearTimeout(timeout);
-            console.log('[MAWebPlayer] Both WebSocket connections established');
-            resolve();
+      jsonrpcWs.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data as string);
+          if (data && typeof data === 'object' && 'event' in data) {
+            handleMaEvent(data.event as string, data.data as Record<string, unknown>);
           }
-        };
+        } catch { /* non-JSON, ignore */ }
+      };
 
-        // Listen for JSON-RPC connection state
-        jsonrpcWs.addEventListener('open', () => {
-          checkConnection();
-        });
+      jsonrpcWs.onclose = (event) => {
+        console.log('[MAWebPlayer] JSON-RPC WebSocket closed:', event.code, event.reason);
+      };
 
-        checkConnection();
-        const pollInterval = setInterval(() => {
-          checkConnection();
-          if (resolved) clearInterval(pollInterval);
-        }, 500);
-      });
+      jsonrpcWs.onerror = () => {
+        console.error('[MAWebPlayer] JSON-RPC WebSocket error');
+      };
 
-      await waitForConnection;
+      // 6. Wait for both connections — simple poll loop matching ma-stream-test.ts
+      const connTimeout = 15000;
+      const start = Date.now();
+      while (Date.now() - start < connTimeout) {
+        const sReady = sendspinWs && sendspinWs.readyState === WebSocket.OPEN;
+        const jReady = jsonrpcWs && jsonrpcWs.readyState === WebSocket.OPEN;
+        if (sReady && jReady) {
+          console.log('[MAWebPlayer] Both WebSocket connections established');
+          break;
+        }
+        await new Promise(r => setTimeout(r, 500));
+      }
 
       setStateLocal(s => ({
         ...s,
@@ -397,9 +356,9 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     return () => {
       playerRef.current?.disconnect('shutdown');
       playerRef.current = null;
-      sendspinWsRef.current?.close();
+      sendspinWsRef.current?.close(1000, 'shutdown');
       sendspinWsRef.current = null;
-      jsonrpcWsRef.current?.close();
+      jsonrpcWsRef.current?.close(1000, 'shutdown');
       jsonrpcWsRef.current = null;
       audioRef.current = null;
     };
