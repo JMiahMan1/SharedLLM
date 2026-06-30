@@ -30,6 +30,15 @@ const Header = () => {
     refetchInterval: 15000,
   });
 
+  // Periodic background check for service updates (admin accounts only)
+  useQuery({
+    queryKey: ['service-updates-background'],
+    queryFn: () => api.checkAllUpdates(),
+    enabled: !!user?.is_admin,
+    refetchInterval: 300000, // 5 minutes
+    refetchOnWindowFocus: false,
+  });
+
   const queryClient = useQueryClient();
   const clearMutation = useMutation({
     mutationFn: () => api.clearLogs(),
@@ -52,7 +61,17 @@ const Header = () => {
   const statusColor = error ? 'bg-red-500' : (isLoading ? 'bg-yellow-500' : (isReady ? 'bg-green-500' : 'bg-red-400'));
   const statusText = error ? 'Offline' : (isLoading ? 'Polling...' : (health?.status || 'Unknown'));
 
-  const hasErrors = notifications.some(n => n.level === 'ERROR' || n.level === 'WARNING' || n.level === 'WARN');
+  // Filter out image/service update notifications for non-admin accounts
+  const filteredNotifications = notifications.filter(n => {
+    const msg = n.message.toLowerCase();
+    const isUpdate = msg.includes('update available') || msg.includes('updates available') || msg.includes('image update');
+    if (isUpdate && !user?.is_admin) {
+      return false;
+    }
+    return true;
+  });
+
+  const hasErrors = filteredNotifications.some(n => n.level === 'ERROR' || n.level === 'WARNING' || n.level === 'WARN');
 
   return (
     <header className="h-14 md:h-20 flex items-center justify-between px-4 md:px-8 bg-transparent">
@@ -97,7 +116,7 @@ const Header = () => {
                 <h4 className="text-sm font-bold text-white uppercase tracking-widest">Activity Feed</h4>
                 <button 
                   onClick={handleClearLogs}
-                  disabled={notifications.length === 0 || clearMutation.isPending}
+                  disabled={filteredNotifications.length === 0 || clearMutation.isPending}
                   className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-widest text-red-400 hover:text-red-300 transition-colors disabled:opacity-30 p-2 -m-2"
                 >
                   <Trash2 size={12} />
@@ -105,9 +124,9 @@ const Header = () => {
                 </button>
               </div>
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {notifications.length === 0 ? (
+                {filteredNotifications.length === 0 ? (
                   <p className="text-xs text-slate-500 text-center py-4">No recent activity</p>
-                ) : notifications.map((log, i) => (
+                ) : filteredNotifications.map((log, i) => (
                   <div key={`${log.timestamp}-${i}`} className="p-3 rounded-xl bg-white/5 border border-white/5">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs text-white font-medium truncate">{log.service}</p>

@@ -280,7 +280,31 @@ def check_all_updates():
         raise HTTPException(status_code=500, detail="Docker client not initialized")
 
     # GHCR auth token (GitHub PAT with read:packages scope)
-    ghcr_token = os.getenv("GHCR_TOKEN", "")
+    # First, try to fetch user ID 1's github_token from identity service
+    ghcr_token = ""
+    try:
+        identity_svc_url = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
+        req_data = _json.dumps({"user_id": 1}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{identity_svc_url}/api/resolve",
+            data=req_data,
+            headers={
+                "Content-Type": "application/json",
+                "X-Internal-Secret": INTERNAL_SECRET
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            resp_data = _json.loads(resp.read().decode("utf-8"))
+            ghcr_token = resp_data.get("github_token") or ""
+            if ghcr_token:
+                log.info("[updates] Successfully resolved GitHub token for user ID 1 from identity")
+    except Exception as e:
+        log.warning(f"[updates] Failed to resolve GitHub token for user ID 1: {e}")
+
+    # Fallback to GHCR_TOKEN environment variable
+    if not ghcr_token:
+        ghcr_token = os.getenv("GHCR_TOKEN", "")
 
     def _get_remote_digest(image_ref: str) -> str | None:
         """
