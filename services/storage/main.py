@@ -112,8 +112,9 @@ async def _run_full_index_task(req: IndexScanRequest):
         # 2. Extract and chunk with checkpointing
         checkpoint = None if req.force else CheckpointManager()
         chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
+        log.info(f"Extracted {len(chunks)} total chunks from {len(items)} files.")
         
-        # 3. Sync to RAG
+        # 3. Sync to RAG in batches to avoid timeout on large payloads
         user_id = (req.user_id or req.provider.settings.get("username") or "admin").lower()
         import time
         session_id = str(int(time.time()))
@@ -123,26 +124,36 @@ async def _run_full_index_task(req: IndexScanRequest):
             c["metadata"]["session_id"] = session_id
             c["metadata"]["indexed_at"] = indexed_at
 
-        sync_payload = {
-            "chunks": chunks,
-            "user_id": user_id,
-            "collection_name": f"{req.provider.kind}_files"
-        }
+        collection_name = f"{req.provider.kind}_files"
+        BATCH_SIZE = 25
+        total_synced = 0
         
-        async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=5.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
             try:
-                resp = await client.post(
-                    f"{RAG_SVC}/rag/sync/files",
-                    json=sync_payload,
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
-                if resp.status_code != 200:
-                    raise httpx.HTTPStatusError(
-                        f"RAG sync failed: {resp.status_code} {resp.text}",
-                        request=resp.request,
-                        response=resp
+                for i in range(0, len(chunks), BATCH_SIZE):
+                    batch = chunks[i:i+BATCH_SIZE]
+                    batch_num = (i // BATCH_SIZE) + 1
+                    total_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
+                    
+                    sync_payload = {
+                        "chunks": batch,
+                        "user_id": user_id,
+                        "collection_name": collection_name
+                    }
+                    
+                    resp = await client.post(
+                        f"{RAG_SVC}/rag/sync/files",
+                        json=sync_payload,
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
-                log.info(f"RAG sync successful: {resp.json()}")
+                    if resp.status_code != 200:
+                        raise httpx.HTTPStatusError(
+                            f"RAG sync failed (batch {batch_num}/{total_batches}): {resp.status_code} {resp.text}",
+                            request=resp.request,
+                            response=resp
+                        )
+                    total_synced += len(batch)
+                    log.info(f"RAG batch {batch_num}/{total_batches} synced: {len(batch)} chunks")
                 
                 # 4. Cleanup old entries
                 purge_resp = await client.post(
@@ -153,7 +164,7 @@ async def _run_full_index_task(req: IndexScanRequest):
                 if purge_resp.status_code != 200:
                     log.warning(f"Purge failed (non-fatal): {purge_resp.status_code} {purge_resp.text}")
                 
-                log.info(f"Background index complete for {user_id}. Extracted {len(chunks)} chunks.")
+                log.info(f"Background index complete for {user_id}. Synced {total_synced}/{len(chunks)} chunks.")
             except httpx.HTTPStatusError as e:
                 log.error(f"Failed to sync background index to RAG: HTTP {e.response.status_code} - {e.response.text}")
             except Exception as e:
