@@ -51,6 +51,7 @@ class IndexScanRequest(BaseModel):
     provider: ProviderConfig
     path: str = "/"
     recursive: bool = True
+    user_id: Optional[str] = None
 
 
 class ProviderWriteRequest(BaseModel):

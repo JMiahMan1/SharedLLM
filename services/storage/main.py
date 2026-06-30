@@ -7,6 +7,7 @@ from services.config import RAG_SVC_URL, INTERNAL_SECRET
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Body, Query
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
+from typing import Optional
 
 from services.storage.indexer import (
     build_content_index, extract_and_chunk_contents,
@@ -30,6 +31,7 @@ class IndexScanRequest(BaseModel):
     provider: ProviderConfig
     path: str = "/"
     recursive: bool = True
+    user_id: Optional[str] = None
 
 import time
 import os
@@ -112,7 +114,7 @@ async def _run_full_index_task(req: IndexScanRequest):
         chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
         
         # 3. Sync to RAG
-        user_id = req.provider.settings.get("username", "admin").lower()
+        user_id = (req.user_id or req.provider.settings.get("username") or "admin").lower()
         import time
         session_id = str(int(time.time()))
         indexed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
