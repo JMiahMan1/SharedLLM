@@ -300,9 +300,13 @@ export interface ImagePullResult {
 export interface ImageUpdateCheck {
   service: string;
   image: string;
-  current_image_id: string;
-  latest_image_id: string;
+  /** Local image RepoDigest (sha256:...) — may be null if image was built locally */
+  current_digest: string | null;
+  /** Remote manifest digest fetched from registry — null if auth failed or unreachable */
+  remote_digest: string | null;
   has_update: boolean;
+  /** Set when the comparison could not be completed (e.g. no_image_tag, digest_unavailable) */
+  check_error?: string | null;
   status: string;
 }
 
