@@ -282,10 +282,37 @@ const Dashboard = () => {
 
   const { data: logs = [] } = useQuery<LogEntry[]>({
     queryKey: ['recent-logs'],
-    queryFn: () => api.getLogs(8),
+    queryFn: () => api.getLogs(50),
     refetchInterval: 10000,
     retry: 1,
   });
+
+  const filteredLogs = useMemo(() => {
+    return logs.filter(n => {
+      const msg = n.message.toLowerCase();
+      const service = n.service.toLowerCase();
+
+      const isUpdate = msg.includes('update available') || msg.includes('updates available') || msg.includes('image update');
+      if (isUpdate) {
+        return !!user?.is_admin;
+      }
+
+      // Check if it is a communication (e.g. Nextcloud Talk, messages, mentions, chats)
+      const isComm = ['talk', 'nextcloud', 'message', 'chat', 'mention', 'communication', 'notification'].some(
+        kw => msg.includes(kw) || service.includes(kw)
+      );
+
+      const relatesToUser = user?.username && msg.includes(user.username.toLowerCase());
+
+      if (isComm) {
+        if (relatesToUser || service.includes('talk') || service.includes('nextcloud') || msg.includes('talk') || msg.includes('nextcloud')) {
+          return true;
+        }
+      }
+
+      return false;
+    });
+  }, [logs, user]);
 
   const { data: workspaces = [] } = useQuery<Workspace[]>({
     queryKey: ['workspaces'],
@@ -530,8 +557,8 @@ const Dashboard = () => {
             </div>
 
             <div className="space-y-2">
-              {logs.length > 0 ? (
-                logs.map((log, index) => (
+              {filteredLogs.length > 0 ? (
+                filteredLogs.slice(0, 8).map((log, index) => (
                   <LogEntryCard key={`${log.timestamp}-${index}`} log={log} />
                 ))
               ) : (
