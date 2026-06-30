@@ -453,6 +453,7 @@ def get_http_client() -> httpx.AsyncClient:
 
     if _global_http_client is None or _global_http_client_loop != current_loop:
         _global_http_client = _original_async_client(
+            headers={"X-Request-Source": "shared-llm/app"},
             timeout=httpx.Timeout(300.0, connect=30.0),
             limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
         )
