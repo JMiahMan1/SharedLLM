@@ -55,6 +55,8 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     monkeypatch.setattr(main, "get_history", AsyncMock(return_value=[]))
     monkeypatch.setattr(main, "contextualize_query", AsyncMock(return_value="hello"))
     monkeypatch.setattr(main, "decompose_command_query", AsyncMock(return_value=[]))
+    # Mock system instruction loading to avoid real Identity service calls
+    monkeypatch.setattr(main, "select_system_instruction_for_query", lambda q, m: "# System instruction mock")
     
     class MockResponse:
         def __init__(self, json_data, status_code=200):

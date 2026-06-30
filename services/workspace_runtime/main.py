@@ -2499,11 +2499,26 @@ async def git_pull_webhook(
                 if dir_contents:
                     log.info(f"Workspace {workspace_id} directory has existing content ({len(dir_contents)} items), clearing before clone...")
                     import shutil
+                    # Remove entire directory tree and recreate it to avoid permission issues
                     for item in dir_contents:
-                        if item.is_dir():
-                            shutil.rmtree(item)
-                        else:
-                            item.unlink()
+                        try:
+                            if item.is_dir():
+                                shutil.rmtree(item)
+                            else:
+                                item.unlink()
+                        except PermissionError:
+                            # If we can't delete individual items, remove the whole tree
+                            log.warning(f"Permission denied clearing {workspace_id}, using fallback removal")
+                            try:
+                                shutil.rmtree(workspace_path)
+                                workspace_path.mkdir(parents=True, exist_ok=True)
+                            except Exception as fallback_err:
+                                log.error(f"Fallback removal also failed for {workspace_id}: {fallback_err}")
+                                raise HTTPException(
+                                    status_code=500,
+                                    detail=f"Failed to clear workspace directory: {str(fallback_err)}"
+                                )
+                            break
                 
                 # Use the HTTPS redirector for the clone too if needed
                 clone_url = _git_webhook_pull_remote(repo_url, remote_name)
