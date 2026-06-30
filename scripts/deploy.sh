@@ -129,7 +129,7 @@ sleep 15
 
 # --- Step 3: Verify the API is healthy inside the Docker boundary ---
 # Using docker exec ensures we hit the container internally, avoiding port blockages.
-HEALTH_URL="http://localhost:11435/health/ready"
+HEALTH_URL="http://127.0.0.1:11435/health/ready"
 log "Checking SOA Readiness at $HEALTH_URL via Docker internal network..."
 
 MAX_ATTEMPTS=12
@@ -159,14 +159,14 @@ fi
 
 # --- Step 4: Force-reseed Identity (prompts + models from .md/.env) ---
 log "Force-reseeding Identity service (prompts + models)..."
-$COMPOSE exec -T identity curl -s -X POST "http://localhost:8001/api/admin/seed?force=true" \
+$COMPOSE exec -T identity curl -s -X POST "http://127.0.0.1:8001/api/admin/seed?force=true" \
      -H "X-Internal-Secret: $INTERNAL_SECRET" \
      | tee -a "$LOG_FILE"
 
 # --- Step 5: Re-ingest HA devices ---
 log "Re-ingesting Home Assistant devices via Gateway..."
 # Execute the POST request INSIDE the gateway container
-$COMPOSE exec -T gateway curl -s -X POST "http://localhost:11435/api/discovery/sync" \
+$COMPOSE exec -T gateway curl -s -X POST "http://127.0.0.1:11435/api/discovery/sync" \
      -H "Content-Type: application/json" \
      -d '{"rag_user": "default"}' \
      | tee -a "$LOG_FILE"
