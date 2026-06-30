@@ -83,26 +83,14 @@ function App() {
             <Route path="/" element={<ProtectedRoute isMobile={isNative}><Dashboard /></ProtectedRoute>} />
             
             {/* Admin-only routes */}
-            <Route path="/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
-            <Route path="/admin/ops" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
-            <Route path="/admin/users" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
-            <Route path="/admin/groups" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
-            <Route path="/admin/monitor" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
-            <Route path="/admin/intercom" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
-            <Route path="/admin/integrations" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
-            <Route path="/admin/database" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
-            <Route path="/admin/sounds" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
-            <Route path="/admin/services" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
+            <Route path="/admin/*" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
 
             {/* Service routes */}
             <Route path="/identity" element={<ProtectedRoute isMobile={isNative}><Identity /></ProtectedRoute>} />
             <Route path="/communication" element={<ProtectedRoute isMobile={isNative}><Communication /></ProtectedRoute>} />
-            <Route path="/chat" element={<ProtectedRoute isMobile={isNative}><Communication /></ProtectedRoute>} />
-            <Route path="/intercom" element={<ProtectedRoute isMobile={isNative}><Communication /></ProtectedRoute>} />
             <Route path="/media" element={<ProtectedRoute isMobile={isNative}><Media /></ProtectedRoute>} />
             <Route path="/remote" element={<ProtectedRoute isMobile={isNative}><Remote /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute isMobile={isNative}><Settings /></ProtectedRoute>} />
-            <Route path="/settings/integrations" element={<ProtectedRoute isMobile={isNative}><Settings /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute isMobile={isNative}><KnowledgeHub /></ProtectedRoute>} />
             <Route path="/workspaces" element={<ProtectedRoute isMobile={isNative}><Workspaces /></ProtectedRoute>} />
             <Route path="/docs" element={<ProtectedRoute isMobile={isNative}><Docs /></ProtectedRoute>} />
