@@ -166,7 +166,7 @@ async def search(req: SearchRequest):
         
         response_items = []
         for (doc, meta_tuple), _score in top_k:
-            response_items.append(SearchResultItem(content=doc, metadata=dict(meta_tuple)))
+            response_items.append(SearchResultItem(content=doc, metadata=dict(meta_tuple), score=_score))
                 
         return SearchResponse(results=response_items)
     except Exception as e:

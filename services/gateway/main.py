@@ -3747,7 +3747,8 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
             }
         },
         "path": body.path,
-        "recursive": body.recursive
+        "recursive": body.recursive,
+        "force": body.force
     }
     
     resp = await get_http_client().post(
