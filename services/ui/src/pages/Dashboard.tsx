@@ -292,12 +292,21 @@ const Dashboard = () => {
       const msg = n.message.toLowerCase();
       const service = n.service.toLowerCase();
 
+      // 1. Check if it's an update notification (admin only)
       const isUpdate = msg.includes('update available') || msg.includes('updates available') || msg.includes('image update');
       if (isUpdate) {
         return !!user?.is_admin;
       }
 
-      // Check if it is a communication (e.g. Nextcloud Talk, messages, mentions, chats)
+      // 2. Check if it's an ingestion / upload / import event (all users can see)
+      const isIngest = ['ingest', 'upload', 'import', 'document', 'file', 'rag'].some(
+        kw => msg.includes(kw) || service.includes(kw)
+      );
+      if (isIngest) {
+        return true;
+      }
+
+      // 3. Check if it's a communication (Nextcloud Talk, messages, mentions, chats)
       const isComm = ['talk', 'nextcloud', 'message', 'chat', 'mention', 'communication', 'notification'].some(
         kw => msg.includes(kw) || service.includes(kw)
       );
