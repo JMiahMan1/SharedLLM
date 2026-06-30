@@ -26,7 +26,7 @@ const Header = () => {
 
   const { data: notifications = [] } = useQuery<LogEntry[]>({
     queryKey: ['header-notifications'],
-    queryFn: () => api.getLogs(5),
+    queryFn: () => api.getLogs(50),
     refetchInterval: 15000,
   });
 
@@ -61,14 +61,32 @@ const Header = () => {
   const statusColor = error ? 'bg-red-500' : (isLoading ? 'bg-yellow-500' : (isReady ? 'bg-green-500' : 'bg-red-400'));
   const statusText = error ? 'Offline' : (isLoading ? 'Polling...' : (health?.status || 'Unknown'));
 
-  // Filter out image/service update notifications for non-admin accounts
+  // Filter notifications: show communications for the logged-in user or updates for admins
   const filteredNotifications = notifications.filter(n => {
     const msg = n.message.toLowerCase();
+    const service = n.service.toLowerCase();
+    
+    // Check if it's an update notification
     const isUpdate = msg.includes('update available') || msg.includes('updates available') || msg.includes('image update');
-    if (isUpdate && !user?.is_admin) {
-      return false;
+    if (isUpdate) {
+      return !!user?.is_admin;
     }
-    return true;
+    
+    // Check if it's a communication (Nextcloud Talk, messages, mentions, chats)
+    const isComm = ['talk', 'nextcloud', 'message', 'chat', 'mention', 'communication', 'notification'].some(
+      kw => msg.includes(kw) || service.includes(kw)
+    );
+    
+    const relatesToUser = user?.username && msg.includes(user.username.toLowerCase());
+    
+    if (isComm) {
+      // Include if it explicitly mentions/targets the current user or is from talk/nextcloud services
+      if (relatesToUser || service.includes('talk') || service.includes('nextcloud') || msg.includes('talk') || msg.includes('nextcloud')) {
+        return true;
+      }
+    }
+    
+    return false;
   });
 
   const hasErrors = filteredNotifications.some(n => n.level === 'ERROR' || n.level === 'WARNING' || n.level === 'WARN');
@@ -126,7 +144,7 @@ const Header = () => {
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                 {filteredNotifications.length === 0 ? (
                   <p className="text-xs text-slate-500 text-center py-4">No recent activity</p>
-                ) : filteredNotifications.map((log, i) => (
+                ) : filteredNotifications.slice(0, 5).map((log, i) => (
                   <div key={`${log.timestamp}-${i}`} className="p-3 rounded-xl bg-white/5 border border-white/5">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs text-white font-medium truncate">{log.service}</p>
