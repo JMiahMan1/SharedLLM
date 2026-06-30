@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import dateparser
-import redis
+import redis.asyncio as redis
 from services.config import REDIS_URL
 from services.execution.schemas import TimerRequest, ExecutionResult
 
