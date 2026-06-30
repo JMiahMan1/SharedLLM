@@ -108,60 +108,63 @@ function useSearch(query: string) {
   const [results, setResults] = useState<SearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const previousQueryRef = useRef<string>('');
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const hasSearchedRef = useRef(false);
 
   useEffect(() => {
     if (!query) {
-      // Only clear if we were previously searching to avoid unnecessary re-renders
-      if (previousQueryRef.current && (results || error)) {
+      if (hasSearchedRef.current) {
+        hasSearchedRef.current = false;
         setResults(null);
         setError(null);
       }
-      previousQueryRef.current = '';
       return;
     }
 
-    // Skip if query hasn't changed
-    if (query === previousQueryRef.current) {
-      return;
-    }
-    previousQueryRef.current = query;
+    hasSearchedRef.current = true;
 
-    let cancelled = false;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
     
-    setIsSearching(true);
-    setError(null);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
     
-    api.globalSearch(query)
-      .then((data) => {
-        if (!cancelled) {
+    const performSearch = async () => {
+      setIsSearching(true);
+      setError(null);
+      
+      try {
+        const data = await api.globalSearch(query);
+        if (!controller.signal.aborted) {
           setResults(data);
           if (!data.answer && (!data.files || data.files.length === 0)) {
             setError('No results found');
           }
         }
-      })
-      .catch(() => {
-        if (!cancelled) {
+      } catch {
+        if (!controller.signal.aborted) {
           toast.error('Search failed');
           setError('Search failed. Please try again.');
         }
-      })
-      .finally(() => {
-        if (!cancelled) {
+      } finally {
+        if (!controller.signal.aborted) {
           setIsSearching(false);
         }
-      });
+      }
+    };
+
+    performSearch();
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [query, results, error]);
+  }, [query]);
 
   const clear = useCallback(() => {
     setResults(null);
     setError(null);
-    previousQueryRef.current = '';
+    hasSearchedRef.current = false;
   }, []);
 
   return { results, error, isSearching, clear };
