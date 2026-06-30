@@ -61,7 +61,7 @@ const Header = () => {
   const statusColor = error ? 'bg-red-500' : (isLoading ? 'bg-yellow-500' : (isReady ? 'bg-green-500' : 'bg-red-400'));
   const statusText = error ? 'Offline' : (isLoading ? 'Polling...' : (health?.status || 'Unknown'));
 
-  // Filter notifications: show communications for the logged-in user, updates for admins, or ingestion events
+  // Filter notifications: show communications for the logged-in user or updates for admins
   const filteredNotifications = notifications.filter(n => {
     const msg = n.message.toLowerCase();
     const service = n.service.toLowerCase();
@@ -72,15 +72,7 @@ const Header = () => {
       return !!user?.is_admin;
     }
     
-    // 2. Check if it's an ingestion / upload / import event (all users can see)
-    const isIngest = ['ingest', 'upload', 'import', 'document', 'file', 'rag'].some(
-      kw => msg.includes(kw) || service.includes(kw)
-    );
-    if (isIngest) {
-      return true;
-    }
-    
-    // 3. Check if it's a communication (Nextcloud Talk, messages, mentions, chats)
+    // 2. Check if it's a communication (Nextcloud Talk, messages, mentions, chats)
     const isComm = ['talk', 'nextcloud', 'message', 'chat', 'mention', 'communication', 'notification'].some(
       kw => msg.includes(kw) || service.includes(kw)
     );
@@ -132,14 +124,16 @@ const Header = () => {
             className="glass-card p-3 relative hover:bg-white/5 transition-colors"
           >
             <Bell size={20} className="text-slate-300" />
-            {/* Dot color: red if errors/warnings, green if all OK */}
-            <span className={`absolute top-2 right-2 w-2 h-2 rounded-full ${hasErrors ? 'bg-red-500' : 'bg-emerald-500'}`} />
+            {/* Show dot only if there are active notifications */}
+            {filteredNotifications.length > 0 && (
+              <span className={`absolute top-2 right-2 w-2 h-2 rounded-full ${hasErrors ? 'bg-red-500' : 'bg-emerald-500'}`} />
+            )}
           </button>
           
           {showNotifications && (
             <div className="absolute right-0 mt-4 w-80 max-w-[calc(100vw-2rem)] glass-panel p-4 z-50 animate-in slide-in-from-top-2 duration-200">
               <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
-                <h4 className="text-sm font-bold text-white uppercase tracking-widest">Activity Feed</h4>
+                <h4 className="text-sm font-bold text-white uppercase tracking-widest">Notifications</h4>
                 <button 
                   onClick={handleClearLogs}
                   disabled={filteredNotifications.length === 0 || clearMutation.isPending}
@@ -151,7 +145,7 @@ const Header = () => {
               </div>
               <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
                 {filteredNotifications.length === 0 ? (
-                  <p className="text-xs text-slate-500 text-center py-4">No recent activity</p>
+                  <p className="text-xs text-slate-500 text-center py-4">No notifications</p>
                 ) : filteredNotifications.slice(0, 5).map((log, i) => (
                   <div key={`${log.timestamp}-${i}`} className="p-3 rounded-xl bg-white/5 border border-white/5">
                     <div className="flex items-center justify-between gap-2">
