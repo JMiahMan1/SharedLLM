@@ -52,6 +52,7 @@ class IndexScanRequest(BaseModel):
     path: str = "/"
     recursive: bool = True
     user_id: Optional[str] = None
+    force: bool = False
 
 
 class ProviderWriteRequest(BaseModel):
