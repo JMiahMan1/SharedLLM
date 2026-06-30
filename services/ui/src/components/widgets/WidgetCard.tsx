@@ -1,10 +1,12 @@
 import React, { Component, useState, useEffect, type ReactNode } from 'react';
-import { Maximize2, Minimize2 } from 'lucide-react';
+import { Maximize2, Minimize2, AlertTriangle, RefreshCw } from 'lucide-react';
 
-// Error Boundary implementation
+// ── Error Boundary ──────────────────────────────────────────────────────────
+
 interface ErrorBoundaryProps {
   children: ReactNode;
-  fallback: ReactNode;
+  widgetTitle?: string;
+  onReset?: () => void;
 }
 
 interface ErrorBoundaryState {
@@ -23,16 +25,39 @@ class WidgetErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySta
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
-    console.error("WidgetErrorBoundary caught an error:", error, errorInfo);
+    console.error(`[WidgetCard] "${this.props.widgetTitle}" caught an error:`, error, errorInfo);
   }
+
+  handleReset = () => {
+    this.setState({ hasError: false, error: null });
+    this.props.onReset?.();
+  };
 
   render() {
     if (this.state.hasError) {
-      return this.props.fallback;
+      return (
+        <div className="flex flex-col items-center justify-center p-6 text-center h-full rounded-xl bg-red-950/20 border border-red-500/20">
+          <AlertTriangle size={24} className="text-red-400 mb-3" />
+          <p className="text-sm font-semibold text-red-300 mb-1">Widget Error</p>
+          <p className="text-xs text-red-400/70 mb-4 max-w-[200px] break-words">
+            {this.state.error?.message || 'An unexpected error occurred.'}
+          </p>
+          <button
+            onClick={this.handleReset}
+            className="glass-button px-3 py-1.5 text-xs text-red-300 border-red-500/30 hover:bg-red-500/10"
+          >
+            <RefreshCw size={12} />
+            Reset Widget
+          </button>
+        </div>
+      );
     }
+
     return this.props.children;
   }
 }
+
+// ── WidgetCard ──────────────────────────────────────────────────────────────
 
 interface WidgetCardProps {
   title: string;
@@ -45,6 +70,7 @@ interface WidgetCardProps {
   isExpandable?: boolean;
   children: ReactNode;
   expandedChildren?: ReactNode;
+  accentColor?: string;
 }
 
 export const WidgetCard: React.FC<WidgetCardProps> = ({
@@ -58,8 +84,10 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
   isExpandable = false,
   children,
   expandedChildren,
+  accentColor,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [resetKey, setResetKey] = useState(0);
 
   // Prevent background scrolling when widget is expanded
   useEffect(() => {
@@ -73,91 +101,155 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
     };
   }, [isExpanded]);
 
-  const fallbackUI = (
-    <div className="flex flex-col items-center justify-center p-6 text-center h-full bg-red-950/20 border border-red-500/20 rounded-2xl">
-      <p className="text-sm font-semibold text-red-400 mb-2">Widget Crashed</p>
-      <p className="text-xs text-red-300/80 mb-4 max-w-xs break-words">
-        An unexpected error occurred in this widget.
-      </p>
-      <button
-        onClick={() => window.location.reload()}
-        className="glass-button px-3 py-1.5 text-xs text-red-400 hover:text-red-300"
-      >
-        Reload Page
-      </button>
+  const handleBoundaryReset = () => {
+    setResetKey((k) => k + 1);
+  };
+
+  const header = (
+    <div className="flex items-center justify-between mb-4 shrink-0">
+      {/* Left: icon + title */}
+      <div className="flex items-center gap-2.5 min-w-0">
+        {icon && (
+          <span
+            className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg text-base"
+            style={accentColor ? { background: `${accentColor}18`, color: accentColor } : undefined}
+          >
+            {icon}
+          </span>
+        )}
+        <h4 className="text-sm font-bold text-white tracking-wide truncate">{title}</h4>
+      </div>
+
+      {/* Right: actions + expand + settings */}
+      <div className="flex items-center gap-1.5 shrink-0 relative z-20">
+        {actions && <div className="flex items-center gap-1">{actions}</div>}
+
+        {isExpandable && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+            className="p-1.5 rounded-lg text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
+            title={isExpanded ? 'Collapse' : 'Expand to full screen'}
+            aria-label={isExpanded ? 'Collapse widget' : 'Expand widget'}
+          >
+            {isExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
+        )}
+
+        {settingsButton}
+      </div>
     </div>
   );
 
-  const cardContent = (
-    <>
-      <div className="flex items-center justify-between mb-4 shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          {icon && <span className="text-slate-400 shrink-0 flex items-center justify-center">{icon}</span>}
-          <h4 className="text-sm font-bold text-white tracking-wide truncate">{title}</h4>
-        </div>
-        <div className="flex items-center gap-1.5 shrink-0 relative z-20">
-          {actions}
-          {isExpandable && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsExpanded(!isExpanded);
-              }}
-              className="text-slate-400 hover:text-white transition-colors p-1 rounded hover:bg-white/5"
-              title={isExpanded ? 'Collapse' : 'Expand'}
-            >
-              {isExpanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-            </button>
-          )}
-          {settingsButton}
-        </div>
-      </div>
-
-      <div className="flex-1 min-h-0 relative flex flex-col">
-        <WidgetErrorBoundary fallback={fallbackUI}>
-          {isLoading ? (
-            <div className="flex flex-col gap-3 h-full justify-center">
-              <div className="h-4 bg-white/5 rounded w-3/4 animate-pulse" />
-              <div className="h-4 bg-white/5 rounded w-1/2 animate-pulse" />
-              <div className="h-4 bg-white/5 rounded w-5/6 animate-pulse" />
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center text-center h-full gap-3 p-4">
-              <p className="text-xs text-slate-400 break-words max-w-xs">
-                {typeof error === 'string' ? error : error.message || 'Failed to load widget data'}
-              </p>
-              {onRetry && (
-                <button
-                  onClick={onRetry}
-                  className="glass-button px-3 py-1.5 text-xs font-semibold"
-                >
-                  Retry
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              {isExpanded && expandedChildren ? expandedChildren : children}
-            </div>
-          )}
-        </WidgetErrorBoundary>
-      </div>
-    </>
+  const body = (
+    <div className="flex-1 min-h-0 relative flex flex-col">
+      <WidgetErrorBoundary key={resetKey} widgetTitle={title} onReset={handleBoundaryReset}>
+        {isLoading ? (
+          // Skeleton shimmer
+          <div className="flex flex-col gap-3 py-2">
+            <div className="skeleton h-4 w-3/4" />
+            <div className="skeleton h-4 w-1/2" />
+            <div className="skeleton h-4 w-5/6" />
+            <div className="skeleton h-4 w-2/3" />
+          </div>
+        ) : error ? (
+          <div className="flex flex-col items-center justify-center text-center flex-1 gap-3 p-4 min-h-[80px]">
+            <AlertTriangle size={20} className="text-amber-400/70" />
+            <p className="text-xs text-slate-400 break-words max-w-[220px]">
+              {typeof error === 'string' ? error : error.message || 'Failed to load widget data'}
+            </p>
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                className="glass-button px-3 py-1.5 text-xs font-semibold"
+              >
+                <RefreshCw size={12} />
+                Retry
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {isExpanded && expandedChildren ? expandedChildren : children}
+          </div>
+        )}
+      </WidgetErrorBoundary>
+    </div>
   );
+
+  // ── Expanded (full-screen overlay) ──────────────────────────────────────
 
   if (isExpanded) {
     return (
-      <div className="fixed inset-0 z-50 bg-slate-950/98 p-6 md:p-8 flex flex-col backdrop-blur-md animate-in fade-in zoom-in duration-200">
-        <div className="max-w-7xl mx-auto w-full h-full flex flex-col">
-          {cardContent}
+      <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/98 backdrop-blur-xl p-4 md:p-8 animate-fade-up">
+        {/* Close strip */}
+        <div className="flex items-center justify-between mb-6 max-w-7xl mx-auto w-full shrink-0">
+          <div className="flex items-center gap-3">
+            {icon && (
+              <span
+                className="shrink-0 flex items-center justify-center w-10 h-10 rounded-xl text-lg"
+                style={accentColor ? { background: `${accentColor}20`, color: accentColor } : { background: 'rgba(139,92,246,0.12)', color: '#c4b5fd' }}
+              >
+                {icon}
+              </span>
+            )}
+            <h2 className="text-xl font-bold text-white">{title}</h2>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {actions}
+            <button
+              onClick={() => setIsExpanded(false)}
+              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 border border-white/10 transition-colors"
+              aria-label="Collapse widget"
+            >
+              <Minimize2 size={16} />
+            </button>
+            {settingsButton}
+          </div>
+        </div>
+
+        <div className="flex-1 max-w-7xl mx-auto w-full min-h-0 overflow-y-auto">
+          <WidgetErrorBoundary key={resetKey} widgetTitle={title} onReset={handleBoundaryReset}>
+            {isLoading ? (
+              <div className="flex flex-col gap-4 py-4">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="skeleton h-16 w-full rounded-xl" />
+                ))}
+              </div>
+            ) : error ? (
+              <div className="flex flex-col items-center justify-center text-center gap-4 py-12">
+                <AlertTriangle size={32} className="text-amber-400/70" />
+                <p className="text-slate-400 max-w-sm">
+                  {typeof error === 'string' ? error : error.message || 'Failed to load data'}
+                </p>
+                {onRetry && (
+                  <button onClick={onRetry} className="glass-button px-5 py-2.5 font-semibold">
+                    <RefreshCw size={14} />
+                    Retry
+                  </button>
+                )}
+              </div>
+            ) : (
+              expandedChildren ?? children
+            )}
+          </WidgetErrorBoundary>
         </div>
       </div>
     );
   }
 
+  // ── Compact card ─────────────────────────────────────────────────────────
+
   return (
-    <div className="glass-panel overflow-hidden p-5 flex flex-col h-full w-full select-none relative transition-all duration-300 hover:border-white/10">
-      {cardContent}
+    <div
+      className="glass-panel overflow-hidden p-5 flex flex-col h-full w-full relative transition-all duration-300"
+      style={accentColor ? { '--tw-ring-color': accentColor } as React.CSSProperties : undefined}
+    >
+      {header}
+      {body}
     </div>
   );
 };

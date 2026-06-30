@@ -144,7 +144,26 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
         lastSyncTime = Date.now();
       } catch (e) {
         const error = e instanceof Error ? e.message : 'Failed to sync widget settings';
-        set({ error, userWidgets: {}, activeWidgets: [] });
+        // On failure: surface error but keep default widgets visible so the
+        // dashboard never shows a blank screen.
+        const fallbackWidgets: Record<string, UserWidgetSettings> = {};
+        const fallbackActive: WidgetStateItem[] = defaultWidgetDefs.map((def, index) => {
+          const settings = createDefaultSettings(def.key, index);
+          fallbackWidgets[def.key] = settings;
+          return {
+            id: def.key,
+            type: def.key,
+            isVisible: settings.visibility === 'visible',
+            size: settings.size,
+            config: {},
+          };
+        });
+        // Only populate if we don't already have synced state
+        if (Object.keys(get().userWidgets).length === 0) {
+          set({ error, userWidgets: fallbackWidgets, activeWidgets: fallbackActive });
+        } else {
+          set({ error });
+        }
       } finally {
         set({ mounting: false });
         activeSyncPromise = null;
@@ -319,19 +338,9 @@ export const useWidgetStore = create<WidgetState>((set, get) => ({
   },
 
   getVisibleWidgets: () => {
-    return get().getActiveWidgets({
-      has_energy_data: false,
-      has_active_media: false,
-      has_chore_system: false,
-      has_skylight: false,
-      has_lights: false,
-      has_tvs: false,
-      has_timer: false,
-      has_notes: false,
-      has_events: false,
-      has_quick_assistant: false,
-      has_assignable_devices: false,
-    });
+    // Use the capabilities that were last evaluated (e.g. from server sync)
+    // rather than hard-coding all-false which would hide capability-gated widgets.
+    return get().getActiveWidgets(get().mountCapabilities);
   },
 
   updateWidgetConfig: async (id: string, config: Record<string, unknown>) => {
