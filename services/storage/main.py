@@ -31,6 +31,7 @@ class IndexScanRequest(BaseModel):
     path: str = "/"
     recursive: bool = True
     user_id: Optional[str] = None
+    force: bool = False
 
 import time
 import os
@@ -109,7 +110,7 @@ async def _run_full_index_task(req: IndexScanRequest):
         items = build_content_index(entries)
         
         # 2. Extract and chunk with checkpointing
-        checkpoint = CheckpointManager()
+        checkpoint = None if req.force else CheckpointManager()
         chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
         
         # 3. Sync to RAG
