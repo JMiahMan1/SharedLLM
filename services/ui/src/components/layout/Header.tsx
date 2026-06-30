@@ -61,18 +61,26 @@ const Header = () => {
   const statusColor = error ? 'bg-red-500' : (isLoading ? 'bg-yellow-500' : (isReady ? 'bg-green-500' : 'bg-red-400'));
   const statusText = error ? 'Offline' : (isLoading ? 'Polling...' : (health?.status || 'Unknown'));
 
-  // Filter notifications: show communications for the logged-in user or updates for admins
+  // Filter notifications: show communications for the logged-in user, updates for admins, or ingestion events
   const filteredNotifications = notifications.filter(n => {
     const msg = n.message.toLowerCase();
     const service = n.service.toLowerCase();
     
-    // Check if it's an update notification
+    // 1. Check if it's an update notification (admin only)
     const isUpdate = msg.includes('update available') || msg.includes('updates available') || msg.includes('image update');
     if (isUpdate) {
       return !!user?.is_admin;
     }
     
-    // Check if it's a communication (Nextcloud Talk, messages, mentions, chats)
+    // 2. Check if it's an ingestion / upload / import event (all users can see)
+    const isIngest = ['ingest', 'upload', 'import', 'document', 'file', 'rag'].some(
+      kw => msg.includes(kw) || service.includes(kw)
+    );
+    if (isIngest) {
+      return true;
+    }
+    
+    // 3. Check if it's a communication (Nextcloud Talk, messages, mentions, chats)
     const isComm = ['talk', 'nextcloud', 'message', 'chat', 'mention', 'communication', 'notification'].some(
       kw => msg.includes(kw) || service.includes(kw)
     );
