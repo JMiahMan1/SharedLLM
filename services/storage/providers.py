@@ -23,17 +23,30 @@ class StorageProvider(ABC):
     ) -> dict[str, Any]:
         raise NotImplementedError
 
+def _resolve_nextcloud_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """Merge request settings with defaults from config.py."""
+    merged = dict(settings)
+    from services.config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
+    if "url" not in merged:
+        merged["url"] = NEXTCLOUD_URL
+    if "username" not in merged:
+        merged["username"] = NEXTCLOUD_USER
+    if "password" not in merged:
+        merged["password"] = NEXTCLOUD_PASS
+    return merged
+
 def build_provider(config: ProviderConfig) -> StorageProvider:
     """
     Factory function to build storage providers.
     Moving specifics to plugins ensures backend agnosticism.
     """
     if config.kind == "nextcloud":
+        settings = _resolve_nextcloud_settings(config.settings)
         try:
             from .providers_impl.nextcloud import NextcloudStorageProvider
         except ImportError:
             from providers_impl.nextcloud import NextcloudStorageProvider
-        return NextcloudStorageProvider(config.settings)
+        return NextcloudStorageProvider(settings)
     
     # Example for future local provider:
     # if config.kind == "local":
