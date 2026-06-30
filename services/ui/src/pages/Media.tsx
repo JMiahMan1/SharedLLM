@@ -794,9 +794,6 @@ const Media = () => {
   const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
   const [localMode, setLocalMode] = useState(true);
 
-  // MA Web Player (sendspin-js)
-  const maPlayer = useMAWebPlayer();
-
   // Local player states
   const [localIsPlaying, setLocalIsPlaying] = useState(false);
   const [localVolume, setLocalVolume] = useState(70);
@@ -804,6 +801,44 @@ const Media = () => {
   const [localCurrentTime, setLocalCurrentTime] = useState(0);
   const [localDuration, setLocalDuration] = useState(0);
   const localProgressTimerRef = useRef<number | null>(null);
+
+  // MA Web Player (sendspin-js)
+  const maPlayer = useMAWebPlayer(useCallback((playerState) => {
+    if (playerState.isPlaying !== undefined) {
+      setLocalIsPlaying(playerState.isPlaying);
+    }
+    if (playerState.volume !== undefined) {
+      setLocalVolume(playerState.volume);
+    }
+    if (playerState.muted !== undefined) {
+      setLocalMuted(playerState.muted);
+    }
+    if (playerState.position !== undefined) {
+      setLocalCurrentTime(playerState.position);
+    }
+    if (playerState.duration !== undefined) {
+      setLocalDuration(playerState.duration);
+    }
+    if (playerState.mediaTitle || playerState.mediaArtist) {
+      setLocalTrack(prev => {
+        if (!prev) return null;
+        if (prev.title === playerState.mediaTitle && prev.subtitle === playerState.mediaArtist) return prev;
+        return {
+          ...prev,
+          title: playerState.mediaTitle || prev.title,
+          subtitle: playerState.mediaArtist || prev.subtitle,
+        };
+      });
+    }
+  }, []));
+
+  // Auto-connect Web Player when local mode is active
+  useEffect(() => {
+    if (localMode && !maPlayer.isConnected) {
+      console.log('[Media] Auto-connecting Web Player since localMode is active...');
+      maPlayer.connect().catch(err => console.error('[Media] Auto-connect failed:', err));
+    }
+  }, [localMode, maPlayer]);
 
   // Music Assistant metadata & favorites state
   const [detailedMetadata, setDetailedMetadata] = useState<TrackDetail | null>(null);
@@ -1349,7 +1384,7 @@ const Media = () => {
     } catch (err) {
       console.error('[Media] Failed to sync local play:', err);
     }
-  }, [trigger, localVolume, localMuted, maPlayer]);
+  }, [trigger, localVolume, localMuted, maPlayer, setLocalTrack, setLocalVolume, setLocalIsPlaying]);
 
   const toggleLocalPlay = useCallback(() => {
     if (!localTrack) return;
@@ -1387,7 +1422,7 @@ const Media = () => {
       volume_level: localVolume / 100,
       is_volume_muted: localMuted
     }).catch(err => console.error('[Media] Failed to sync toggleLocalPlay:', err));
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, localCurrentTime, maPlayer]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, localCurrentTime, maPlayer, setLocalIsPlaying]);
 
   const handleLocalVolume = useCallback((v: number) => {
     setLocalVolume(v);
@@ -1408,7 +1443,7 @@ const Media = () => {
         is_volume_muted: false
       }).catch(err => console.error('[Media] Failed to sync volume:', err));
     }
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, maPlayer]);
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, maPlayer, setLocalVolume, setLocalMuted]);
 
   const toggleLocalMute = useCallback(() => {
     const nextMuted = !localMuted;
@@ -1429,7 +1464,7 @@ const Media = () => {
         is_volume_muted: nextMuted
       }).catch(err => console.error('[Media] Failed to sync mute:', err));
     }
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted, maPlayer]);
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted, maPlayer, setLocalMuted]);
 
   const handleLocalSeek = useCallback((time: number) => {
     console.log('[Media] Seek to:', time);
@@ -1449,7 +1484,7 @@ const Media = () => {
         is_volume_muted: localMuted
       }).catch(err => console.error('[Media] Failed to sync seek:', err));
     }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer, setLocalCurrentTime]);
 
   const skipLocalBack = useCallback(() => {
     const currentTime = maPlayer.position || 0;
@@ -1472,7 +1507,7 @@ const Media = () => {
         }).catch(err => console.error('[Media] Failed to sync skip back:', err));
       }
     }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer, setLocalCurrentTime]);
 
   const skipLocalForward = useCallback(() => {
     const currentTime = maPlayer.position || 0;
@@ -1497,7 +1532,7 @@ const Media = () => {
         }).catch(err => console.error('[Media] Failed to sync skip forward:', err));
       }
     }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer, setLocalCurrentTime]);
 
   const handleStopPlayback = useCallback(() => {
     console.log('[Media] Stop playback');
@@ -1521,7 +1556,7 @@ const Media = () => {
     setLocalCurrentTime(0);
     setLocalDuration(0);
     maPlayer.disconnect();
-  }, [localTrack, localDuration, localVolume, localMuted, maPlayer]);
+  }, [localTrack, localDuration, localVolume, localMuted, maPlayer, releaseControl, setLocalTrack, setLocalIsPlaying, setLocalCurrentTime, setLocalDuration]);
 
   const handleVolume = useCallback(async (v: number) => {
     if (!selectedTarget) return;
