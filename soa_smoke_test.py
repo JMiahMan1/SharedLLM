@@ -28,7 +28,7 @@ def test_service_ping(name, url):
 def test_identity_resolve():
     try:
         # Test resolve which represents internal service handshake
-        payload = {"user_id": "default"}
+        payload = {"rag_user": "default"}
         resp = requests.post(f"{IDENTITY_URL}/api/resolve", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=5)
         if resp.status_code == 200:
             log("PASS: Identity Resolve Handshake")
