@@ -3114,6 +3114,102 @@ async def proxy_users(request: Request):
         return JSONResponse(status_code=resp.status_code, content=resp.json())
 
 
+# --- Telemetry Monitoring ---
+@app.get("/api/telemetry/enroll")
+async def proxy_list_telemetry_enrollments(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/telemetry/enroll",
+            headers=headers
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.post("/api/telemetry/enroll")
+async def proxy_enroll_telemetry(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    body = await request.json()
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/telemetry/enroll",
+            json=body,
+            headers=headers
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.delete("/api/telemetry/enroll/{entity_id:path}")
+async def proxy_unenroll_telemetry(entity_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.delete(
+            f"{IDENTITY_SVC}/api/telemetry/enroll/{entity_id}",
+            headers=headers
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.post("/api/telemetry/analyze")
+async def proxy_trigger_telemetry_analysis(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    body = await request.json()
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/telemetry/analyze",
+            json=body,
+            headers=headers
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.get("/api/telemetry/summary/{entity_id:path}")
+async def proxy_get_telemetry_summary(entity_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/telemetry/summary/{entity_id}",
+            headers=headers
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.get("/api/telemetry/data/{entity_id:path}")
+async def proxy_get_telemetry_data(entity_id: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/telemetry/data/{entity_id}",
+            headers=headers
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.post("/api/telemetry/snapshot")
+async def proxy_ingest_telemetry_snapshot(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    body = await request.json()
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/telemetry/snapshot",
+            json=body,
+            headers=headers
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+@app.get("/api/telemetry/insights")
+async def proxy_get_telemetry_insights(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/telemetry/insights",
+            headers=headers
+        )
+        return JSONResponse(status_code=resp.status_code, content=resp.json())
+
+
 @app.delete("/api/devices/{device_id:path}")
 async def proxy_delete_device(device_id: str, request: Request):
     auth_header = request.headers.get("Authorization")
