@@ -118,26 +118,31 @@ const DeviceSelector = ({
         <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
           <Cast size={12} />Select Device
         </h2>
-        <span className="text-[10px] text-slate-600">{localMode ? '1 mode' : `${targets.filter((t) => t.online).length} online`}</span>
+        <span className="text-[10px] text-slate-600">{localMode ? '🎧 Browser Audio' : `${targets.filter((t) => t.online).length} online`}</span>
       </div>
       <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-1">
         {/* Web Player */}
         <button
           onClick={handleLocalSelect}
-          className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] ${
+          className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] relative overflow-hidden ${
             localMode
               ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
               : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
           }`}
         >
-          <div className="w-2.5 h-2.5 rounded-full shrink-0 bg-green-400" />
-          <div className="min-w-0 flex-1">
-            <p className="text-white text-sm font-medium truncate">Web Player</p>
-            <p className="text-[10px] text-slate-500 truncate">Browser / Android App</p>
-          </div>
           {localMode && (
-            <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />
+            <div className="absolute inset-0 bg-cyan-500/5 animate-pulse pointer-events-none" />
           )}
+          <div className="relative flex items-center gap-2.5">
+            <div className="w-2.5 h-2.5 rounded-full shrink-0 bg-green-400" />
+            <div className="min-w-0 flex-1">
+              <p className="text-white text-sm font-medium truncate">Web Player</p>
+              <p className="text-[10px] text-slate-500 truncate">Browser / Android App</p>
+            </div>
+            {localMode && (
+              <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />
+            )}
+          </div>
         </button>
         {/* HA Devices */}
         {hasHaDevices && (
@@ -146,7 +151,7 @@ const DeviceSelector = ({
               <button
                 key={t.id}
                 onClick={() => handleDeviceSelect(t.id)}
-                className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] ${
+                className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] relative overflow-hidden ${
                   selectedTarget === t.id
                     ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
                     : t.online
@@ -154,14 +159,19 @@ const DeviceSelector = ({
                       : 'bg-white/3 border-white/5 opacity-40'
                 }`}
               >
-                <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-white text-sm font-medium truncate">{t.name}</p>
-                  <p className="text-[10px] text-slate-500 truncate">{t.room}</p>
-                </div>
                 {selectedTarget === t.id && (
-                  <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />
+                  <div className="absolute inset-0 bg-cyan-500/5 pointer-events-none" />
                 )}
+                <div className="relative flex items-center gap-2.5">
+                  <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${t.online ? 'bg-green-400' : 'bg-slate-600'}`} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-white text-sm font-medium truncate">{t.name}</p>
+                    <p className="text-[10px] text-slate-500 truncate">{t.room}</p>
+                  </div>
+                  {selectedTarget === t.id && (
+                    <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />
+                  )}
+                </div>
               </button>
             ))}
           </>
@@ -196,6 +206,7 @@ const NowPlayingCard = ({
   onFavoriteToggle,
   onSeek,
   onStopPlayback,
+  maPlayer,
 }: {
   mediaStatus: MediaStatus | null;
   selectedTarget: string;
@@ -214,6 +225,7 @@ const NowPlayingCard = ({
   onFavoriteToggle?: () => void;
   onSeek?: (time: number) => void;
   onStopPlayback?: () => void;
+  maPlayer?: { isConnected: boolean; connectionState: string; reconnect: () => void };
 }) => {
   const nowPlaying = mediaStatus?.state === 'playing' || mediaStatus?.state === 'paused';
 
@@ -351,7 +363,20 @@ const NowPlayingCard = ({
         <div className="relative mt-4 pt-3 border-t border-white/5">
           <div className="flex items-center justify-center gap-2 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-sm">
             <Music size={14} className="animate-pulse" />
-            Web Player (Browser Audio) Active. Ready to stream locally.
+            {maPlayer.isConnected 
+              ? 'Web Player (Browser Audio) — Connected to MA' 
+              : maPlayer.connectionState === 'FAILED'
+                ? 'Web Player Connection Failed — '
+                : 'Web Player (Browser Audio) — Connecting...'
+            }
+            {maPlayer.connectionState === 'FAILED' && (
+              <button
+                onClick={maPlayer.reconnect}
+                className="ml-2 text-xs underline hover:text-cyan-300"
+              >
+                Reconnect
+              </button>
+            )}
           </div>
         </div>
       ) : !selectedTarget ? (
@@ -361,7 +386,14 @@ const NowPlayingCard = ({
             Select a device above to enable playback
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="relative mt-4 pt-3 border-t border-white/5">
+          <div className="flex items-center justify-center gap-2 py-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 text-sm">
+            <Cast size={14} />
+            Playing through {selectedTarget.replace('_', ' ')} (HA/MA Device)
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -468,6 +500,14 @@ const MediaExplorerModal = ({
     staleTime: 60000,
   });
 
+  const { data: maSearchResults, isLoading: maSearchLoading, error: maSearchError } = useQuery({
+    queryKey: ['ma-search', search],
+    queryFn: () => api.searchMusicAssistant(search),
+    enabled: show && tab === 'ma' && search.length >= 2,
+    retry: 2,
+    staleTime: 60000,
+  });
+
   const { data: maPlaylists, isLoading: playlistsLoading, error: maPlaylistsError } = useQuery({
     queryKey: ['ma-playlists'],
     queryFn: () => api.getMusicAssistantPlaylists(),
@@ -563,7 +603,7 @@ const MediaExplorerModal = ({
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input type="text"
-              placeholder={tab === 'abs' ? 'Search audiobooks...' : 'Filter playlists and recent...'}
+              placeholder={tab === 'abs' ? 'Search audiobooks...' : 'Search music...'}
               value={search} onChange={(e) => setSearch(e.target.value)}
               className="w-full glass-input pl-9 h-10 text-sm rounded-xl" />
             {search && (
@@ -579,66 +619,98 @@ const MediaExplorerModal = ({
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
           {tab === 'ma' && (
             <div className="space-y-6">
-              <div>
-                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <List size={12} />Playlists
-                </h3>
-                {playlistsLoading ? loadingSection() : maPlaylistsError ? (
-                  <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
-                    <p className="text-sm text-red-400">Failed to load playlists. Check your server connection.</p>
-                    <button
-                      onClick={() => { /* query will auto-retry via staleTime */ }}
-                      className="mt-2 text-xs text-red-300 underline hover:text-red-200"
-                    >
-                      Retry
-                    </button>
-                  </div>
-                ) : !maPlaylists?.playlists?.length ? emptySection('No playlists found') : (
-                  <div className="space-y-1.5">
-                    {maPlaylists.playlists
-                      .filter((pl) => !search || pl.name.toLowerCase().includes(search.toLowerCase()))
-                      .map((pl) => (
-                        <PlaylistItem key={pl.uri} name={pl.name} trackCount={pl.items}
-                          onPlay={() => handlePlay(pl.uri, 'playlist', pl.name, pl.items > 0 ? `${pl.items} tracks` : 'Playlist')}
-                          isDisabled={!localMode && !selectedTarget} isLoading={itemLoading === `pl-${pl.uri}`} />
-                      ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <Clock size={12} />Recently Played
-                </h3>
-                {maRecentLoading ? loadingSection() : maRecentError ? (
-                  <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
-                    <p className="text-sm text-red-400">Failed to load recent items. Check your server connection.</p>
-                    <button
-                      onClick={() => { /* query will auto-retry via staleTime */ }}
-                      className="mt-2 text-xs text-red-300 underline hover:text-red-200"
-                    >
-                      Retry
-                    </button>
-                  </div>
-                ) : !maRecent?.recent?.length ? emptySection('No recent items') : (
-                  <div className="space-y-1.5">
-                    {maRecent.recent
-                      .filter((i) => !search || i.name.toLowerCase().includes(search.toLowerCase()) || i.artist.toLowerCase().includes(search.toLowerCase()))
-                      .map((item) => (
-                        <button key={item.uri} onClick={() => handlePlay(item.uri, 'music', item.name, item.artist)} disabled={!localMode && !selectedTarget}
+              {search.length >= 2 ? (
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Search size={12} />Search Results ({maSearchResults?.results?.length || 0})
+                  </h3>
+                  {maSearchLoading ? loadingSection() : maSearchError ? (
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
+                      <p className="text-sm text-red-400">Search failed. Check your server connection.</p>
+                    </div>
+                  ) : !maSearchResults?.results?.length ? emptySection(`No results for "${search}"`) : (
+                    <div className="space-y-1.5">
+                      {maSearchResults.results.map((item) => (
+                        <button key={item.uri} onClick={() => handlePlay(item.uri, item.type === 'playlist' ? 'playlist' : 'music', item.name, item.artist || item.type)} disabled={!localMode && !selectedTarget}
                           className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
                           {itemLoading === `ma-${item.uri}` ?
                             <Loader2 size={18} className="text-purple-400 animate-spin shrink-0" /> :
                             <Music size={18} className="text-purple-400 shrink-0" />}
                           <div className="min-w-0 flex-1">
                             <p className="text-white text-sm font-medium truncate">{item.name}</p>
-                            <p className="text-xs text-slate-400 truncate">{item.artist}</p>
+                            <p className="text-xs text-slate-400 truncate">
+                              {item.artist || 'Unknown Artist'}{item.album ? ` • ${item.album}` : ''}
+                            </p>
                           </div>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 shrink-0 capitalize">{item.type}</span>
                           <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
                         </button>
                       ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <List size={12} />Playlists
+                    </h3>
+                    {playlistsLoading ? loadingSection() : maPlaylistsError ? (
+                      <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
+                        <p className="text-sm text-red-400">Failed to load playlists. Check your server connection.</p>
+                        <button
+                          onClick={() => { /* query will auto-retry via staleTime */ }}
+                          className="mt-2 text-xs text-red-300 underline hover:text-red-200"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : !maPlaylists?.playlists?.length ? emptySection('No playlists found') : (
+                      <div className="space-y-1.5">
+                        {maPlaylists.playlists
+                          .map((pl) => (
+                            <PlaylistItem key={pl.uri} name={pl.name} trackCount={pl.items}
+                              onPlay={() => handlePlay(pl.uri, 'playlist', pl.name, pl.items > 0 ? `${pl.items} tracks` : 'Playlist')}
+                              isDisabled={!localMode && !selectedTarget} isLoading={itemLoading === `pl-${pl.uri}`} />
+                          ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                      <Clock size={12} />Recently Played
+                    </h3>
+                    {maRecentLoading ? loadingSection() : maRecentError ? (
+                      <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
+                        <p className="text-sm text-red-400">Failed to load recent items. Check your server connection.</p>
+                        <button
+                          onClick={() => { /* query will auto-retry via staleTime */ }}
+                          className="mt-2 text-xs text-red-300 underline hover:text-red-200"
+                        >
+                          Retry
+                        </button>
+                      </div>
+                    ) : !maRecent?.recent?.length ? emptySection('No recent items') : (
+                      <div className="space-y-1.5">
+                        {maRecent.recent
+                          .map((item) => (
+                            <button key={item.uri} onClick={() => handlePlay(item.uri, 'music', item.name, item.artist)} disabled={!localMode && !selectedTarget}
+                              className="w-full flex items-center gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors text-left disabled:opacity-50 group">
+                              {itemLoading === `ma-${item.uri}` ?
+                                <Loader2 size={18} className="text-purple-400 animate-spin shrink-0" /> :
+                                <Music size={18} className="text-purple-400 shrink-0" />}
+                              <div className="min-w-0 flex-1">
+                                <p className="text-white text-sm font-medium truncate">{item.name}</p>
+                                <p className="text-xs text-slate-400 truncate">{item.artist}</p>
+                              </div>
+                              <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1010,8 +1082,12 @@ const Media = () => {
   }, [mediaStatus?.state, mediaStatus?.duration, localMode]);
 
   // If localMode is turned off, pause the local player automatically so it doesn't leak audio
+  // When switching back to localMode, restore WebPlayer state and resume if it was playing
   useEffect(() => {
     if (!localMode && localIsPlaying) {
+      // Saving state before pausing for recovery later
+      const savedPosition = maPlayer.position || 0;
+      
       setLocalIsPlaying(false);
       maPlayer.pause();
       if (localTrack) {
@@ -1022,12 +1098,16 @@ const Media = () => {
           media_content_id: localTrack.id,
           media_title: localTrack.title,
           media_artist: localTrack.subtitle,
-          position: maPlayer.position || 0,
+          position: savedPosition,
           duration: localDuration,
           volume_level: localVolume / 100,
           is_volume_muted: localMuted
         }).catch(err => console.error('Failed to sync local pause on mode change:', err));
       }
+    } else if (localMode && localTrack && !maPlayer.isConnected) {
+      // Auto-reconnect WebPlayer when switching back to local mode with a track
+      console.log('[Media] Switching back to local mode, reconnecting WebPlayer...');
+      maPlayer.connect().catch(err => console.error('[Media] Reconnect failed:', err));
     }
   }, [localMode, localTrack, localDuration, localVolume, localMuted, localIsPlaying, maPlayer]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -1638,6 +1718,7 @@ const Media = () => {
         onFavoriteToggle={activeUri ? handleFavoriteToggle : undefined}
         onSeek={localMode ? handleLocalSeek : undefined}
         onStopPlayback={localMode && localTrack ? handleStopPlayback : undefined}
+        maPlayer={maPlayer}
       />
 
       {/* 3. Jump Back In */}

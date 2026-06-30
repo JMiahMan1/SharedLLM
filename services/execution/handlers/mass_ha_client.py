@@ -58,6 +58,7 @@ async def search(
     limit: int = 10,
     artist: str = "",
     album: str = "",
+    library_only: bool = True,
 ) -> List[Dict[str, Any]]:
     """Search MA for media items via HA proxy.
     
@@ -68,6 +69,7 @@ async def search(
         limit: Max results to return
         artist: Artist name to refine search
         album: Album name to refine search
+        library_only: Restrict search results to local library items only
     
     Returns:
         List of media items with name, uri, type fields
@@ -78,6 +80,7 @@ async def search(
     service_data: dict[str, Any] = {
         "name": query,
         "limit": limit,
+        "library_only": library_only,
     }
     
     if mass_entry_id:
@@ -95,8 +98,8 @@ async def search(
         service_data["album"] = album
 
     result = await _call_ha_ma_service(ha_url, ha_token, "search", service_data)
-    if not result:
-        return []
+    if result is None:
+        raise RuntimeError("Home Assistant Music Assistant service call failed")
 
     log.info(f"[mass_ha] raw search response: {result}")
 

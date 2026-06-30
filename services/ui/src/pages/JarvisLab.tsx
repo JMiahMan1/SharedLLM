@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle, FlaskConical, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { HealthStatus, LogEntry, SmokeTestResult, Workspace } from '../services/api';
 import RavenLiveTrace from '../components/settings/RavenLiveTrace';
+import { useAuth } from '../context/AuthContext';
 
 const MISSION_TEMPLATES = [
   { label: 'Audit Codebase', query: 'Audit the codebase for lint errors, unused imports, and code quality issues. Fix all findings.' },
@@ -13,43 +15,131 @@ const MISSION_TEMPLATES = [
   { label: 'Check Dependencies', query: 'Review requirements.txt and package.json for outdated or vulnerable dependencies.' },
 ];
 
+// ─── User View ───────────────────────────────────────────────────────────────
+
 const JarvisLab = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'logs' | 'missions'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'missions'>('overview');
+  const { user } = useAuth();
+  const isAdmin = user?.is_admin ?? false;
+  const navigate = useNavigate();
 
   return (
     <div className="space-y-8 pb-12">
       <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h2 className="text-4xl font-black tracking-tighter text-white uppercase">Jarvis Lab</h2>
-          <p className="mt-2 text-slate-400">Live verification, smoke execution, workspaces, and telemetry.</p>
+          <p className="mt-2 text-slate-400">Live verification, autonomous missions, and workspace management.</p>
         </div>
-        <div className="flex rounded-2xl border border-white/10 bg-white/5 p-1">
-          {([
-            ['overview', 'Overview'],
-            ['tests', 'Tests'],
-            ['logs', 'Logs'],
-            ['missions', 'Missions'],
-          ] as const).map(([key, label]) => (
+        <div className="flex items-center gap-3">
+          <div className="flex rounded-2xl border border-white/10 bg-white/5 p-1">
+            {([
+              ['overview', 'Overview'],
+              ['tests', 'Tests'],
+              ['missions', 'Missions'],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest ${
+                  activeTab === key ? 'bg-indigo-600/40 text-white' : 'text-slate-500 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {isAdmin && (
             <button
-              key={key}
-              onClick={() => setActiveTab(key)}
-              className={`rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest ${
-                activeTab === key ? 'bg-indigo-600/40 text-white' : 'text-slate-500 hover:text-white'
-              }`}
+              onClick={() => navigate('/lab/admin')}
+              className="flex items-center gap-2 rounded-xl border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-purple-300 hover:bg-purple-500/20 transition-colors"
+              title="Switch to Admin Lab view"
             >
-              {label}
+              <Shield size={14} />
+              <span className="hidden md:inline">Admin View</span>
             </button>
-          ))}
+          )}
         </div>
       </header>
 
       {activeTab === 'overview' && <OverviewPane />}
       {activeTab === 'tests' && <TestsPane />}
-      {activeTab === 'logs' && <LogTelemetryStream />}
       {activeTab === 'missions' && <MissionsPane />}
     </div>
   );
 };
+
+// ─── Admin View ───────────────────────────────────────────────────────────────
+
+export const JarvisLabAdmin = () => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'logs'>('overview');
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  // Guard: non-admins should not reach this page, but redirect defensively
+  if (!user?.is_admin) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 py-24 text-center">
+        <Shield size={48} className="text-slate-600" />
+        <p className="text-slate-400">You don't have permission to view this page.</p>
+        <button
+          onClick={() => navigate('/lab')}
+          className="glass-button px-6 py-3 text-[10px] font-black uppercase tracking-widest"
+        >
+          Go to Jarvis Lab
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8 pb-12">
+      <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="flex items-center gap-3">
+            <h2 className="text-4xl font-black tracking-tighter text-white uppercase">Advanced Lab</h2>
+            <span className="inline-flex items-center px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/20">
+              Admin
+            </span>
+          </div>
+          <p className="mt-2 text-slate-400">System-wide diagnostics, live telemetry, and advanced controls.</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="flex rounded-2xl border border-white/10 bg-white/5 p-1">
+            {([
+              ['overview', 'System Health'],
+              ['logs', 'Live Telemetry'],
+              ['tests', 'Verification'],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key)}
+                className={`rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest ${
+                  activeTab === key ? 'bg-indigo-600/40 text-white' : 'text-slate-500 hover:text-white'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => navigate('/lab')}
+            className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            title="Switch to User Lab view"
+          >
+            <FlaskConical size={14} />
+            <span className="hidden md:inline">User View</span>
+          </button>
+        </div>
+      </header>
+
+      {activeTab === 'overview' && <AdvancedOverviewPane />}
+      {activeTab === 'tests' && <TestsPane advanced />}
+      {activeTab === 'logs' && <LogTelemetryStream />}
+    </div>
+  );
+};
+
+// ─── Shared Panes ─────────────────────────────────────────────────────────────
 
 const OverviewPane = () => {
   const { data: health } = useQuery<HealthStatus>({
@@ -111,7 +201,70 @@ const OverviewPane = () => {
   );
 };
 
-const TestsPane = () => {
+// Advanced overview adds faster polling and more runtime detail
+const AdvancedOverviewPane = () => {
+  const { data: health } = useQuery<HealthStatus>({
+    queryKey: ['health'],
+    queryFn: () => api.getHealth(),
+    refetchInterval: 3000,
+  });
+
+  const { data: workspaces = [] } = useQuery<Workspace[]>({
+    queryKey: ['workspaces'],
+    queryFn: () => api.getWorkspaces(),
+    refetchInterval: 5000,
+  });
+
+  return (
+    <div className="grid gap-8 xl:grid-cols-[0.9fr_1.1fr]">
+      <section className="glass-panel p-6">
+        <div className="mb-6 flex items-center gap-3">
+          <CheckCircle2 size={20} className="text-emerald-300" />
+          <div>
+            <h3 className="text-xl font-bold text-white">Mesh Health</h3>
+            <p className="text-sm text-slate-400">Real-time readiness across the running stack.</p>
+          </div>
+        </div>
+        <div className="space-y-3">
+          {Object.entries(health?.services || {}).map(([service, status]) => (
+            <div key={service} className="glass-card flex items-center justify-between p-4 gap-4 overflow-hidden">
+              <span className="font-semibold text-white truncate">{service}</span>
+              <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${status === 'OK' ? 'text-emerald-300' : 'text-red-300'}`}>
+                {status}
+              </span>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="glass-panel p-6">
+        <div className="mb-6 flex items-center gap-3">
+          <Wrench size={20} className="text-cyan-300" />
+          <div>
+            <h3 className="text-xl font-bold text-white">Workspace Runtime</h3>
+            <p className="text-sm text-slate-400">Registered workspaces exposed by the workspace runtime service.</p>
+          </div>
+        </div>
+        <div className="space-y-3">
+          {workspaces.map((workspace) => (
+            <div key={workspace.id} className="glass-card p-4">
+              <div className="flex items-center justify-between gap-4 overflow-hidden">
+                <p className="font-semibold text-white truncate">{workspace.display_name || workspace.id}</p>
+                <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${workspace.available ? 'text-emerald-300' : 'text-red-300'}`}>
+                  {workspace.available ? 'Available' : 'Unavailable'}
+                </span>
+              </div>
+              <p className="mt-2 font-mono text-xs text-slate-400 break-all">{workspace.resolved_path}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+};
+
+// `advanced` prop unlocks both smoke tests and unit tests; user view shows smoke only
+const TestsPane = ({ advanced = false }: { advanced?: boolean }) => {
   const runSmokeMutation = useMutation<SmokeTestResult>({
     mutationFn: () => api.runSmokeTest(),
     onSuccess: () => toast.success('Smoke test completed'),
@@ -131,18 +284,26 @@ const TestsPane = () => {
     <section className="glass-panel p-6">
       <div className="mb-6 flex items-center justify-between gap-4">
         <div>
-          <h3 className="text-xl font-bold text-white">Verification Engine</h3>
-          <p className="text-sm text-slate-400">Execute system-wide functional and logic verification suites.</p>
+          <h3 className="text-xl font-bold text-white">
+            {advanced ? 'Verification Engine' : 'Test Runner'}
+          </h3>
+          <p className="text-sm text-slate-400">
+            {advanced
+              ? 'Execute system-wide functional and logic verification suites.'
+              : 'Run a smoke test to verify core system connectivity.'}
+          </p>
         </div>
         <div className="flex gap-3">
-          <button
-            onClick={() => runUnitMutation.mutate()}
-            disabled={!!activeMutation}
-            className="glass-button flex items-center gap-2 px-4 py-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-          >
-            {runUnitMutation.isPending ? <RefreshCcw size={14} className="animate-spin" /> : <Terminal size={14} />}
-            Run Unit Tests
-          </button>
+          {advanced && (
+            <button
+              onClick={() => runUnitMutation.mutate()}
+              disabled={!!activeMutation}
+              className="glass-button flex items-center gap-2 px-4 py-3 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+            >
+              {runUnitMutation.isPending ? <RefreshCcw size={14} className="animate-spin" /> : <Terminal size={14} />}
+              Run Unit Tests
+            </button>
+          )}
           <button
             onClick={() => runSmokeMutation.mutate()}
             disabled={!!activeMutation}
@@ -177,6 +338,7 @@ const TestsPane = () => {
   );
 };
 
+// Single shared log stream — used by both admin and (previously) user views
 const LogTelemetryStream = () => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [hideHealthChecks, setHideHealthChecks] = useState(true);
@@ -234,7 +396,7 @@ const LogTelemetryStream = () => {
         <div className="flex items-center gap-3">
           <Terminal size={20} className="text-indigo-300" />
           <div>
-            <h3 className="text-xl font-bold text-white">Live Logs</h3>
+            <h3 className="text-xl font-bold text-white">Live Telemetry</h3>
             <p className="text-sm text-slate-400">Streaming websocket telemetry from the logging service.</p>
           </div>
         </div>
@@ -263,7 +425,7 @@ const LogTelemetryStream = () => {
           </div>
         ))}
         {!visibleLogs.length && (
-          <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
+          <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
             {logs.length > 0
               ? 'All visible logs are health checks. Toggle the filter to see them.'
               : 'Waiting for live log traffic...'}
