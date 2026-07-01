@@ -232,13 +232,17 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   }, [msgId]);
 
   const initPlayer = useCallback(async () => {
+    console.log('[MAWebPlayer] initPlayer called, playerRef.current:', !!playerRef.current);
     if (playerRef.current) return;
 
     const urlParams = new URLSearchParams(window.location.search);
     const urlToken = urlParams.get('token')?.trim();
-    const apiToken = urlToken || storageGetSync(API_KEY_STORAGE) || '';
+    const storedToken = storageGetSync(API_KEY_STORAGE);
+    const apiToken = urlToken || storedToken || '';
+    console.log('[MAWebPlayer] initPlayer token check: urlToken=', !!urlToken, 'storedToken=', !!storedToken, 'apiToken=', !!apiToken);
     const playerId = getPlayerIdRef();
     if (!apiToken) {
+      console.error('[MAWebPlayer] initPlayer FAILED: no API token available');
       setStateLocal(s => ({ ...s, error: 'No API token available — use ?token=xxx in URL or login to UI' }));
       return;
     }
@@ -615,10 +619,14 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   }, [setError]);
 
   const connect = useCallback(async () => {
-    console.log('[MAWebPlayer] connect called');
+    console.log('[MAWebPlayer] connect called, playerRef.current:', !!playerRef.current, 'isConnected:', state.isConnected);
     try {
       if (!playerRef.current) {
+        console.log('[MAWebPlayer] connect: player not initialized, calling initPlayer...');
         await initPlayer();
+        console.log('[MAWebPlayer] connect: initPlayer completed, playerRef.current:', !!playerRef.current);
+      } else {
+        console.log('[MAWebPlayer] connect: player already initialized');
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
