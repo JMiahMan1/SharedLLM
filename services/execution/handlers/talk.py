@@ -72,6 +72,28 @@ def validate_jarvis_mention(message: Optional[str]) -> bool:
     return message.startswith("@Jarvis")
 
 
+async def _get_talk_model_from_settings() -> str:
+    """Resolve assistant/librarian model from Identity settings for Talk. Never use 'auto'."""
+    try:
+        import httpx
+        from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/settings",
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status_code == 200:
+                settings = {item["key"]: item["value"] for item in resp.json()}
+                model = (settings.get("ollama_librarian_model") or
+                        settings.get("librarian_model") or
+                        settings.get("assistant_model"))
+                if model and model not in ("", "auto"):
+                    return model
+    except Exception as e:
+        log.warning(f"Failed to resolve Talk model from settings: {e}")
+    raise RuntimeError("No assistant/librarian model configured in Identity settings")
+
+
 async def run_jarvis_orchestration(query: str, token: str, user_context: Any):
     """Invokes the execution loop orchestrator and delivers the result back to NextCloud Talk."""
     try:
@@ -106,7 +128,7 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any):
 
         job_payload = {
             "query": query,
-            "model": "auto",
+            "model": await _get_talk_model_from_settings(),
             "creds": creds,
             "system": system_prompt,
             "show_thinking": False
