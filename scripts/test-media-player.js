@@ -100,15 +100,25 @@ async function login(page, opts) {
     // SPA navigation
   }
 
-  // Wait for page to navigate away from login
+  // Wait for navigation
   try {
     await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 10000 });
   } catch {
-    // Might still be on login (bad credentials)
+    // SPA might still be on login
   }
 
   // Wait for page to settle
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise(r => setTimeout(r, 3000));
+
+  // Check if we're still on login (bad credentials or error)
+  if (page.url().includes('/login')) {
+    // Check for error message
+    const errorText = await page.locator('div:text("Authentication failed"), div:text("Invalid username or password"), div:text("Invalid credentials")').first().textContent();
+    if (errorText) {
+      return false;
+    }
+  }
+
   return true;
 }
 
