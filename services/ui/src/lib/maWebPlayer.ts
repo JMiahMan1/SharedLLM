@@ -266,12 +266,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         setError('Sendspin WebSocket error', event);
       };
 
-      sendspinWs.onclose = (event) => {
-        console.error('[MAWebPlayer] Sendspin WebSocket closed:', event.code, event.reason);
-        if (sendspinWsRef.current === sendspinWs) {
-          setError(`Sendspin WebSocket closed (code: ${event.code}, reason: ${event.reason})`);
-        }
-      };
+      let sendspinCloseHandler: ((event: CloseEvent) => void) | null = null;
 
       // 2. Create audio element
       console.log('[MAWebPlayer] [2/6] Creating audio element...');
@@ -317,11 +312,29 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
       // 4. Connect SendspinPlayer
       console.log('[MAWebPlayer] [4/6] Calling player.connect()...');
-      await player.connect();
+      try {
+        await player.connect();
+      } catch (connectErr) {
+        const msg = connectErr instanceof Error ? connectErr.message : String(connectErr);
+        console.error('[MAWebPlayer] player.connect() failed:', msg);
+        setError(`Player connection failed: ${msg}`);
+        player.disconnect('connect_failed');
+        playerRef.current = null;
+        return;
+      }
       sendspinWs = (player as unknown as { core: { wsManager: { ws: WebSocket } } }).core.wsManager.ws;
       sendspinWsRef.current = sendspinWs;
       markSendspinConnected();
       console.log('[MAWebPlayer] player.connect() completed, volume:', player.volume, 'muted:', player.muted);
+
+      // Set up onclose handler AFTER adopt() to avoid being overwritten
+      sendspinCloseHandler = (event) => {
+        console.error('[MAWebPlayer] Sendspin WebSocket closed:', event.code, event.reason);
+        if (sendspinWsRef.current === sendspinWs) {
+          setError(`Sendspin WebSocket closed (code: ${event.code}, reason: ${event.reason})`);
+        }
+      };
+      sendspinWs.onclose = sendspinCloseHandler;
 
       // 5. Create plain JSON-RPC WebSocket
       console.log('[MAWebPlayer] [5/6] Creating JSON-RPC WebSocket...');
