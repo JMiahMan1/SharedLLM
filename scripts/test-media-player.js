@@ -10,11 +10,8 @@
  *
  * Usage:
  *   cd services/ui && npx playwright install
- *   node ../scripts/test-media-player.js [--host URL] [--user USERNAME] [--pass PASSWORD]
- *
- * Examples:
- *   node ../scripts/test-media-player.js
- *   node ../scripts/test-media-player.js --host https://jarvis.sumemail.com --user admin --pass secret
+ *   JARVIS_USER=x JARVIS_PASS=y node ../scripts/test-media-player.js [--host URL]
+ *   node ../scripts/test-media-player.js --user USERNAME --pass PASSWORD
  */
 
 const { chromium } = require('playwright');
@@ -37,6 +34,13 @@ function parseArgs() {
     if (flag === '--headful') opts.headless = false;
   }
   return opts;
+}
+
+const opts = parseArgs();
+if (!opts.user || !opts.pass) {
+  console.error('❌ --user and --pass are required');
+  console.error('   Usage: node test-media-player.js --user USERNAME --pass PASSWORD');
+  process.exit(1);
 }
 
 // Test result tracker
