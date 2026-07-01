@@ -21,8 +21,8 @@ const { chromium } = require('playwright');
 
 const DEFAULTS = {
   host: process.env.JARVIS_HOST || 'https://jarvis.sumemail.com',
-  user: process.env.JARVIS_USER || 'admin',
-  pass: process.env.JARVIS_PASS || 'admin',
+  user: process.env.JARVIS_USER,
+  pass: process.env.JARVIS_PASS,
 };
 
 // Parse CLI args
