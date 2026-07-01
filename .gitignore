@@ -25,7 +25,6 @@ services/workspace_runtime/config/
 node_modules/
 
 # AI Agent Configs
-AGENTS.md
 .claude/
 .claude.json
 .cursor/
@@ -40,4 +39,3 @@ AGENTS.md
 .bmad/
 .kiro/
 .opencode/
-AGENTS.md
