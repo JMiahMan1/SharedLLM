@@ -873,6 +873,7 @@ const Media = () => {
   const [localCurrentTime, setLocalCurrentTime] = useState(0);
   const [localDuration, setLocalDuration] = useState(0);
   const localProgressTimerRef = useRef<number | null>(null);
+  const connectAttemptedRef = useRef(false);
 
   // MA Web Player (sendspin-js)
   const maPlayer = useMAWebPlayer(useCallback((playerState) => {
@@ -905,12 +906,18 @@ const Media = () => {
   }, []));
 
   // Auto-connect Web Player when local mode is active
+  // maPlayer is intentionally excluded - it's a new object every render from useMAWebPlayer
   useEffect(() => {
-    if (localMode && !maPlayer.isConnected) {
+    if (localMode && !connectAttemptedRef.current) {
+      connectAttemptedRef.current = true;
       console.log('[Media] Auto-connecting Web Player since localMode is active...');
-      maPlayer.connect().catch(err => console.error('[Media] Auto-connect failed:', err));
+      maPlayer.connect().catch(err => {
+        console.error('[Media] Auto-connect failed:', err);
+        connectAttemptedRef.current = false;
+      });
     }
-  }, [localMode, maPlayer]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [localMode]);
 
   // Music Assistant metadata & favorites state
   const [detailedMetadata, setDetailedMetadata] = useState<TrackDetail | null>(null);
