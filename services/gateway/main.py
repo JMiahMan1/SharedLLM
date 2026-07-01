@@ -5596,6 +5596,13 @@ async def sendspin_proxy(websocket: WebSocket):
     # Receive the first message from the browser (client/hello)
     log.info("[sendspin] STEP 1: Waiting for browser to send first message...")
     message = await websocket.receive()
+    # Handle disconnect events from browser (e.g., SendspinPlayer timeout)
+    msg_type = message.get("type")
+    if msg_type == "websocket.disconnect":
+        code = message.get("code", 1000)
+        reason = message.get("reason", "")
+        log.warning(f"[sendspin] Browser disconnected before sending hello (code={code}, reason='{reason}')")
+        return
     first_text = message.get("text")
     first_bytes = message.get("bytes")
     if first_text is not None:
