@@ -59,6 +59,18 @@ class RavenWorker:
             pass
         raise RuntimeError("No coding model configured in Identity settings")
 
+    async def _get_model_from_settings(self) -> str:
+        """Resolve assistant/librarian model from Identity settings. Never hardcode."""
+        try:
+            from services.gateway.orchestrator import get_all_settings
+            settings = await get_all_settings()
+            model = settings.get("ollama_librarian_model") or settings.get("librarian_model") or settings.get("assistant_model")
+            if model and model not in ("", "auto"):
+                return model
+        except Exception:
+            pass
+        raise RuntimeError("No assistant/librarian model configured in Identity settings")
+
     async def start(self):
         if self.is_running:
             return
@@ -256,11 +268,12 @@ class RavenWorker:
                         query = content.replace("@jarvis", "").strip()
                         log.info(f"[TalkMonitor] Detected @jarvis mention in room {token}: {query}")
                         
+                        model = await self._get_model_from_settings()
                         await self.job_queue.enqueue_job(
                             user_id=creds["user"],
                             payload={
                                 "query": query,
-                                "model": "auto",
+                                "model": model,
                                 "creds": creds,
                                 "_talk_token": token,
                                 "_talk_source": "nextcloud"
