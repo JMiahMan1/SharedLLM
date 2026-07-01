@@ -15,11 +15,26 @@
  */
 
 const { chromium } = require('playwright');
+const path = require('path');
+const fs = require('fs');
+
+// Load credentials from .env.test in repo root
+const envPath = path.join(__dirname, '..', '.env.test');
+const env = {};
+if (fs.existsSync(envPath)) {
+  fs.readFileSync(envPath, 'utf-8')
+    .split('\n')
+    .filter(l => l.trim() && !l.trim().startsWith('#'))
+    .forEach(l => {
+      const [key, ...rest] = l.split('=');
+      env[key.trim()] = rest.join('=').trim();
+    });
+}
 
 const DEFAULTS = {
-  host: process.env.JARVIS_HOST || 'https://jarvis.sumemail.com',
-  user: process.env.JARVIS_USER,
-  pass: process.env.JARVIS_PASS,
+  host: process.env.JARVIS_HOST || env.JARVIS_HOST || 'https://jarvis.sumemail.com',
+  user: process.env.JARVIS_USER || env.JARVIS_USER,
+  pass: process.env.JARVIS_PASS || env.JARVIS_PASS,
 };
 
 // Parse CLI args
