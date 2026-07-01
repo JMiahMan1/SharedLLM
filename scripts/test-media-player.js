@@ -68,40 +68,47 @@ function formatConsole(msg) {
 }
 
 async function login(page, opts) {
-  // Fill and submit login form
-  const emailInput = page.locator('input[type="email"], input[name="email"], input[placeholder*="email"]');
-  const passwordInput = page.locator('input[type="password"]');
+  // Fill login form - Jarvis uses type="text" for username, type="password" for password
+  const usernameInput = page.locator('input[type="text"], input[placeholder="Enter username"]');
+  const passwordInput = page.locator('input[type="password"], input[placeholder="Enter password"]');
 
-  const hasEmailInput = await emailInput.count() > 0;
+  const hasUsernameInput = await usernameInput.count() > 0;
   const hasPasswordInput = await passwordInput.count() > 0;
 
-  if (!hasEmailInput || !hasPasswordInput) {
+  if (!hasUsernameInput || !hasPasswordInput) {
     return false;
   }
 
-  await emailInput.fill(opts.user);
+  await usernameInput.fill(opts.user);
   await passwordInput.fill(opts.pass);
   console.log('🔑 Credentials filled');
 
-  // Find and click login button
-  const loginBtn = page.locator('button[type="submit"], button:has-text("Login"), button:has-text("Sign In")');
-  const hasLoginBtn = await loginBtn.count() > 0;
+  // Submit the form (button says "Sign In")
+  const submitBtn = page.locator('button[type="submit"], button:has-text("Sign In")');
+  const hasSubmitBtn = await submitBtn.count() > 0;
 
-  if (!hasLoginBtn) {
+  if (!hasSubmitBtn) {
     return false;
   }
 
-  await loginBtn.click();
+  await submitBtn.click();
 
-  // Wait for navigation or network idle
+  // Wait for navigation
   try {
     await page.waitForLoadState('networkidle', { timeout: 15000 });
   } catch {
-    // Might have navigated before networkidle fired
+    // SPA navigation
   }
 
-  // Wait for redirect
-  await new Promise(r => setTimeout(r, 3000));
+  // Wait for page to navigate away from login
+  try {
+    await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 10000 });
+  } catch {
+    // Might still be on login (bad credentials)
+  }
+
+  // Wait for page to settle
+  await new Promise(r => setTimeout(r, 2000));
   return true;
 }
 
