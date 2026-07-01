@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { getPlayerId, savePlayerId, setState } from './webPlayer';
-import type { SendspinPlayer, PlayerState } from '@sendspin/sendspin-js';
+import { SendspinPlayer, type PlayerState } from '@sendspin/sendspin-js';
 import type { ConnectionState } from './wsManager';
 
 const STORAGE_KEY = 'sendspin_webplayer_id';
