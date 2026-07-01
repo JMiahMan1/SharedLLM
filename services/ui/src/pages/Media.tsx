@@ -1422,6 +1422,7 @@ const Media = () => {
   }, [selectedTarget, trigger, fetchMediaStatus, maPlayer, localVolume, localMuted]);
 
  const playLocal = useCallback(async (id: string, title: string, subtitle: string, type: 'audiobook' | 'music', source: 'abs' | 'ma') => {
+    console.log('[Media] playLocal CALLED with id:', id, 'title:', title, 'localMode:', localMode, 'isConnected:', maPlayer.isConnected);
     trigger('heavy');
     setError(null);
     const idClean = id.replace('abs-', '').replace('ma-', '');
@@ -1429,15 +1430,19 @@ const Media = () => {
     setLocalVolume((prev) => { setLocalIsPlaying(true); return prev; });
 
     // Initialize player if not connected (establishes Sendspin + JSON-RPC)
+    console.log('[Media] playLocal checking isConnected:', maPlayer.isConnected);
     if (!maPlayer.isConnected) {
       console.log('[Media] Connecting MA WebPlayer before play...');
       try {
         await maPlayer.connect();
+        console.log('[Media] playLocal: connect completed successfully');
       } catch (err) {
         console.error('[Media] WebPlayer connect failed:', err);
         setError('Failed to connect Web Player');
         return;
       }
+    } else {
+      console.log('[Media] playLocal: already connected, skipping connect');
     }
 
     // Set initial volume and muted state
@@ -1474,7 +1479,11 @@ const Media = () => {
   }, [trigger, localVolume, localMuted, maPlayer, setLocalTrack, setLocalVolume, setLocalIsPlaying]);
 
   const toggleLocalPlay = useCallback(() => {
-    if (!localTrack) return;
+    console.log('[Media] toggleLocalPlay CALLED, localTrack:', !!localTrack, 'localIsPlaying:', localIsPlaying, 'isConnected:', maPlayer.isConnected);
+    if (!localTrack) {
+      console.log('[Media] toggleLocalPlay: no localTrack, returning early');
+      return;
+    }
     const nextPlaying = !localIsPlaying;
     if (localIsPlaying) {
       setLocalIsPlaying(false);
@@ -1489,6 +1498,8 @@ const Media = () => {
           console.error('[Media] WebPlayer connect failed:', err);
           setError('Failed to connect Web Player');
         });
+      } else {
+        console.log('[Media] toggleLocalPlay: already connected, skipping connect');
       }
       // Re-send play_media in case it was lost
       const mediaUri = localTrack.source === 'abs'
