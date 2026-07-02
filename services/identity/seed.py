@@ -263,6 +263,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         "SKYLIGHT_EMAIL": "skylight_email",
         "HF_TOKEN": "huggingface_token",
         "HUGGING_FACE_TOKEN": "huggingface_token",
+        "DNS_MAPPINGS": "dns_mappings",
     }
     for env_key, global_key in env_to_global.items():
         env_val = os.getenv(env_key)
