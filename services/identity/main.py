@@ -435,13 +435,19 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
                 log.error(f"[resolve] No system default user found in database!")
                 raise HTTPException(status_code=404, detail="No valid identity found")
 
-    # Fetch system user for shared skylight credentials
+    # Fetch system user for shared skylight credentials and MA fallback
     sys_user = session.exec(select(User).where(User.id == 1)).first()
     if not sys_user:
         sys_user = session.exec(select(User).where(User.username == "default")).first()
 
-    # Decrypt sensitive fields
-    log.info(f"[resolve] Returning credentials for user={user.username}, mass_token={'set' if user.mass_token_enc else 'NOT SET'}")
+    # Fallback MA credentials to admin if user doesn't have them
+    use_admin_mass_url = sys_user.mass_url if (not user.mass_url and sys_user and sys_user.mass_url) else user.mass_url
+    use_admin_mass_token = (
+        decrypt(sys_user.mass_token_enc) if (sys_user and sys_user.mass_token_enc) else None
+    ) if (not user.mass_token_enc) else (decrypt(user.mass_token_enc) if user.mass_token_enc else None)
+    
+    log.info(f"[resolve] Returning credentials for user={user.username}, mass_token={'set' if (user.mass_token_enc or use_admin_mass_token) else 'NOT SET'}, using_admin_mass={'YES' if use_admin_mass_url != user.mass_url else 'NO'}")
+    
     return ResolvedCredentials(
         user=user.username,
         is_admin=user.is_admin,
@@ -461,8 +467,8 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         audiobookshelf_user=user.audiobookshelf_user,
         audiobookshelf_pass=decrypt(user.audiobookshelf_pass_enc) if user.audiobookshelf_pass_enc else None,
         audiobookshelf_api_key=decrypt(user.audiobookshelf_api_key_enc) if user.audiobookshelf_api_key_enc else None,
-        mass_url=user.mass_url,
-        mass_token=decrypt(user.mass_token_enc) if user.mass_token_enc else None,
+        mass_url=use_admin_mass_url,
+        mass_token=use_admin_mass_token,
         git_url=user.git_url,
         git_user=user.git_user,
         git_token=decrypt(user.git_token_enc) if user.git_token_enc else None,
