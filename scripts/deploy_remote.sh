@@ -13,8 +13,52 @@ fi
 HOST="$ARG_HOST"
 DIR="${2:-/home/jeremiah/SharedLLM}"
 
+# Function to wait for GitHub Actions build to complete
+wait_for_build() {
+    echo "Checking GitHub Actions build status..."
+    local max_attempts=60
+    local attempt=0
+    local wait_time=10  # 10 seconds between checks
+    
+    while [ $attempt -lt $max_attempts ]; do
+        # Check for running builds
+        local running_builds
+        running_builds=$(gh run list --branch=microservices --json status --jq '.[] | select(.status=="in_progress")' | wc -l)
+        
+        if [ "$running_builds" -eq 0 ]; then
+            # No running builds, check for failures
+            local failed_builds
+            failed_builds=$(gh run list --branch=microservices --json status,name --jq '.[] | select(.status=="failure" and .name=="Build & Push Images")' | wc -l)
+            
+            if [ "$failed_builds" -gt 0 ]; then
+                echo "[FAIL] GitHub Actions build failed!"
+                gh run list --branch=microservices --json name,conclusion --jq '.[] | select(.status=="completed")'
+                exit 1
+            fi
+            
+            local completed_builds
+            completed_builds=$(gh run list --branch=microservices --json status,name --jq '.[] | select(.status=="completed" and .name=="Build & Push Images")' | wc -l)
+            
+            if [ "$completed_builds" -gt 0 ]; then
+                echo "[OK] Build completed successfully."
+                return 0
+            fi
+        fi
+        
+        echo "Build in progress... (${attempt}/${max_attempts})"
+        sleep $wait_time
+        attempt=$((attempt + 1))
+    done
+    
+    echo "[FAIL] Timeout waiting for build to complete."
+    exit 1
+}
+
 # SSH options for robustness: auto-accept new host keys, fail on broken pipe
 SSH_OPTS="-o StrictHostKeyChecking=accept-new -o BatchMode=yes -o ConnectTimeout=10"
+
+# Wait for GitHub Actions build to complete before deploying
+wait_for_build
 
 # Sync non-git files to remote to ensure config match
 for NON_GIT_FILE in ".env" "prompts/"; do
