@@ -287,6 +287,20 @@ test.describe('MA Web Player (Sendspin)', () => {
   });
 
   test('ABS audiobook plays via Web Player', async ({ page }) => {
+    // Attach WebSocket listener BEFORE navigation
+    const sendspinUrls: string[] = [];
+    const maJsonRpcUrls: string[] = [];
+    page.on('websocket', (ws: WebSocket) => {
+      const url = ws.url();
+      console.log(`[TEST] WebSocket connected: ${url}`);
+      if (url.includes('/api/sendspin')) {
+        sendspinUrls.push(url);
+      }
+      if (url.includes('/api/ma-jsonrpc')) {
+        maJsonRpcUrls.push(url);
+      }
+    });
+
     await loginAsDefault(page);
     await page.goto(`${UI_URL}/media`);
     await page.waitForLoadState('domcontentloaded');
@@ -320,17 +334,12 @@ test.describe('MA Web Player (Sendspin)', () => {
       test.skip();
     }
 
-    await Promise.all([
-      page.waitForEvent('websocket', (ws: WebSocket) =>
-        ws.url().includes('/api/sendspin'),
-      ),
-      page.waitForEvent('websocket', (ws: WebSocket) =>
-        ws.url().includes('/api/ma-jsonrpc'),
-      ),
-    ]);
-
     await playBtn.click();
     await page.waitForTimeout(3000);
+
+    // Verify WebSocket connections were established
+    expect(sendspinUrls.length).toBeGreaterThan(0);
+    expect(maJsonRpcUrls.length).toBeGreaterThan(0);
 
     // Verify player card shows active playback
     const playerCard = page.locator('.glass-panel.border-cyan-500\\/20');
