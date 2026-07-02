@@ -31,6 +31,40 @@ import type {
   ImagePullResult,
   CheckUpdatesResponse,
   SearchResult,
+  SystemHealthStatus,
+  TelemetrySummary,
+  TelemetryDataResponse,
+  TelemetryInsights,
+  ModelInfo,
+  ModelsResponse,
+  ModelSwitchResponse,
+  GenerateRequest,
+  GenerateResponse,
+  EmbeddingsRequest,
+  EmbeddingsResponse,
+  TagsResponse,
+  ShowRequest,
+  WorkspaceFilesListResponse,
+  WorkspaceFileReadResponse,
+  WorkspaceFileWriteResponse,
+  PytestRequest,
+  PytestResponse,
+  WorkflowWriteSyncCommitRequest,
+  VolumesResponse,
+  ServiceLogsResponse,
+  ContainerExecResponse,
+  RagIndexedPathsResponse,
+  RagSyncFilesRequest,
+  RagSyncCapabilitiesRequest,
+  WorkspaceShellRequest,
+  WorkspaceShellResponse,
+  WorkspaceFilePatchExecuteRequest,
+  WorkspaceLintRequest,
+  WorkspaceLintResponse,
+  VolumesExecuteRequest,
+  DiscoveryProfileResponse,
+  NetworkScanRequest,
+  NetworkScanResponse,
 } from '../types/api';
 
 declare module 'axios' {
@@ -801,39 +835,8 @@ export const api = {
     return resp.data.enrollments || [];
   },
 
-  async enrollTelemetry(data: { entity_id: string; offline_alert_threshold_minutes: number }): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/api/telemetry/enroll', {
-      entity_id: data.entity_id,
-      power_tracking: true,
-      availability_tracking: true,
-      usage_tracking: true,
-      offline_alert_threshold_minutes: data.offline_alert_threshold_minutes,
-    });
-    return resp.data;
-  },
-
-  async unenrollTelemetry(entity_id: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.delete(`/api/telemetry/enroll/${encodeURIComponent(entity_id)}`);
-    return resp.data;
-  },
-
   async analyzeTelemetry(): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/api/telemetry/analyze', { hours: 168 });
-    return resp.data;
-  },
-
-  async getTelemetrySummary(entityId: string): Promise<{
-    entity_id: string;
-    summary: {
-      current_power_w: number | null;
-      peak_power_w: number | null;
-      avg_power_w: number | null;
-      availability_pct: number;
-      total_activations: number;
-      data_points: Array<{ recorded_at: number; power_w?: number; is_available?: boolean; state?: string; source?: string }>;
-    } | null;
-  }> {
-    const resp = await apiClient.get(`/api/telemetry/summary/${encodeURIComponent(entityId)}`);
     return resp.data;
   },
 
@@ -1135,6 +1138,197 @@ export const api = {
 
   async getSystemHealth(): Promise<SystemHealthStatus> {
     const resp = await apiClient.get('/api/admin/services/health');
+    return resp.data;
+  },
+
+  // Telemetry
+  async getTelemetryData(entityId: string, hours?: number): Promise<TelemetryDataResponse> {
+    const params = hours ? { hours } : {};
+    const resp = await apiClient.get(`/api/telemetry/data/${entityId}`, { params });
+    return resp.data;
+  },
+
+  async getTelemetrySummary(entityId: string): Promise<TelemetrySummary> {
+    const resp = await apiClient.get(`/api/telemetry/summary/${entityId}`);
+    return resp.data;
+  },
+
+  async triggerTelemetrySnapshot(entityId: string): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post(`/api/telemetry/snapshot/${entityId}`);
+    return resp.data;
+  },
+
+  async getTelemetryInsights(entityId: string): Promise<TelemetryInsights> {
+    const resp = await apiClient.get(`/api/telemetry/insights/${entityId}`);
+    return resp.data;
+  },
+
+  async enrollTelemetry(entityId: string, config: Partial<TelemetryEnrollment>): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post(`/api/telemetry/enroll/${entityId}`, config);
+    return resp.data;
+  },
+
+  async unenrollTelemetry(entityId: string): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post(`/api/telemetry/unenroll/${entityId}`);
+    return resp.data;
+  },
+
+  // Models
+  async getModels(): Promise<ModelsResponse> {
+    const resp = await apiClient.get('/api/models');
+    return resp.data;
+  },
+
+  async switchModel(modelName: string): Promise<ModelSwitchResponse> {
+    const resp = await apiClient.post('/api/models/switch', { model_name: modelName });
+    return resp.data;
+  },
+
+  async unloadModel(): Promise<ModelSwitchResponse> {
+    const resp = await apiClient.post('/api/models/unload');
+    return resp.data;
+  },
+
+  // Ollama-compatible endpoints
+  async generate(request: GenerateRequest): Promise<GenerateResponse> {
+    const resp = await apiClient.post('/api/generate', request);
+    return resp.data;
+  },
+
+  async embed(request: EmbeddingsRequest): Promise<EmbeddingsResponse> {
+    const resp = await apiClient.post('/api/embeddings', request);
+    return resp.data;
+  },
+
+  async getTags(): Promise<TagsResponse> {
+    const resp = await apiClient.get('/api/tags');
+    return resp.data;
+  },
+
+  async showModel(request: ShowRequest): Promise<ModelInfo> {
+    const resp = await apiClient.post('/api/show', request);
+    return resp.data;
+  },
+
+  async getHistory(): Promise<Record<string, unknown>[]> {
+    const resp = await apiClient.get('/api/history');
+    return resp.data;
+  },
+
+  async deleteHistory(): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.delete('/api/history');
+    return resp.data;
+  },
+
+  // Workspace files
+  async getWorkspaceFiles(workspaceId: string, path: string = ''): Promise<WorkspaceFilesListResponse> {
+    const resp = await apiClient.get('/api/workspaces/files/list', { params: { workspace_id: workspaceId, path } });
+    return resp.data;
+  },
+
+  async readWorkspaceFile(workspaceId: string, path: string): Promise<WorkspaceFileReadResponse> {
+    const resp = await apiClient.get('/api/workspaces/files/read', { params: { workspace_id: workspaceId, path } });
+    return resp.data;
+  },
+
+  async writeWorkspaceFile(workspaceId: string, path: string, content: string): Promise<WorkspaceFileWriteResponse> {
+    const resp = await apiClient.post('/api/workspaces/files/write', { workspace_id: workspaceId, path, content });
+    return resp.data;
+  },
+
+  async runPytest(request: PytestRequest): Promise<PytestResponse> {
+    const resp = await apiClient.post('/api/workspaces/tests/pytest', request);
+    return resp.data;
+  },
+
+  async runWorkflowWriteSyncCommit(request: WorkflowWriteSyncCommitRequest): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/api/workspaces/workflow/write-sync-commit', request);
+    return resp.data;
+  },
+
+  async resolveWorkspace(workspaceId: string): Promise<{ status: string; resolved_path: string }> {
+    const resp = await apiClient.post('/api/workspaces/resolve', { workspace_id: workspaceId });
+    return resp.data;
+  },
+
+  async bootstrapWorkspace(workspaceId: string): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/api/workspaces/bootstrap', { workspace_id: workspaceId });
+    return resp.data;
+  },
+
+  // Admin volumes & service logs
+  async getVolumes(): Promise<VolumesResponse> {
+    const resp = await apiClient.get('/api/admin/volumes');
+    return resp.data;
+  },
+
+  async getServiceLogs(serviceName: string, lines?: number): Promise<ServiceLogsResponse> {
+    const params = lines ? { lines } : {};
+    const resp = await apiClient.get(`/api/admin/services/${serviceName}/logs`, { params });
+    return resp.data;
+  },
+
+  // Control plane exec
+  async execContainer(serviceName: string, cmd: string[], env?: Record<string, string>): Promise<ContainerExecResponse> {
+    const resp = await apiClient.post(`/api/containers/${serviceName}/exec`, { cmd, env });
+    return resp.data;
+  },
+
+  // RAG
+  async getRagIndexedPaths(): Promise<RagIndexedPathsResponse> {
+    const resp = await apiClient.get('/rag/indexed-paths');
+    return resp.data;
+  },
+
+  async syncRagFiles(request: RagSyncFilesRequest): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/rag/sync/files', request);
+    return resp.data;
+  },
+
+  async syncRagCapabilities(request: RagSyncCapabilitiesRequest): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/rag/sync/capabilities', request);
+    return resp.data;
+  },
+
+  // Execution service endpoints
+  async workspaceShell(request: WorkspaceShellRequest): Promise<WorkspaceShellResponse> {
+    const resp = await apiClient.post('/execute/workspace_shell', request);
+    return resp.data;
+  },
+
+  async workspaceFileRead(workspaceId: string, path: string): Promise<WorkspaceFileReadResponse> {
+    const resp = await apiClient.get('/execute/workspace_file_read', { params: { workspace_id: workspaceId, path } });
+    return resp.data;
+  },
+
+  async workspaceFileWrite(workspaceId: string, path: string, content: string): Promise<WorkspaceFileWriteResponse> {
+    const resp = await apiClient.post('/execute/workspace_file_write', { workspace_id: workspaceId, path, content });
+    return resp.data;
+  },
+
+  async workspaceFilePatch(request: WorkspaceFilePatchExecuteRequest): Promise<WorkspaceFileWriteResponse> {
+    const resp = await apiClient.post('/execute/workspace_file_patch', request);
+    return resp.data;
+  },
+
+  async workspaceLint(request: WorkspaceLintRequest): Promise<WorkspaceLintResponse> {
+    const resp = await apiClient.post('/execute/workspace_lint', request);
+    return resp.data;
+  },
+
+  async executeVolumes(request: VolumesExecuteRequest): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.post('/execute/volumes', request);
+    return resp.data;
+  },
+
+  // Discovery
+  async getDiscoveryProfile(entityId: string): Promise<DiscoveryProfileResponse> {
+    const resp = await apiClient.get(`/discovery/profile/${entityId}`);
+    return resp.data;
+  },
+
+  async networkScan(request: NetworkScanRequest): Promise<NetworkScanResponse> {
+    const resp = await apiClient.post('/discovery/network_scan', request);
     return resp.data;
   },
 
