@@ -386,3 +386,247 @@ export interface WorkspaceFilePatchRequest {
   commit_after?: boolean;
   commit_message?: string | null;
 }
+
+export interface TelemetryDataPoint {
+  recorded_at: number;
+  power_w?: number;
+  is_available?: boolean;
+  state?: string;
+  source?: string;
+}
+
+export interface TelemetrySummary {
+  entity_id: string;
+  summary: {
+    current_power_w: number | null;
+    peak_power_w: number | null;
+    avg_power_w: number | null;
+    availability_pct: number;
+    total_activations: number;
+    data_points: TelemetryDataPoint[];
+  } | null;
+}
+
+export interface TelemetryDataResponse {
+  entity_id: string;
+  data: TelemetryDataPoint[];
+}
+
+export interface TelemetryInsights {
+  entity_id: string;
+  insights: Array<{
+    type: string;
+    message: string;
+    severity: 'info' | 'warning' | 'critical';
+    timestamp: number;
+  }>;
+}
+
+export interface ModelInfo {
+  name: string;
+  size: number;
+  digest: string;
+  modified_at: string;
+  details: {
+    format: string;
+    family: string;
+    families: string[];
+    parameter_size: string;
+    quantization_level: string;
+  };
+}
+
+export interface ModelsResponse {
+  models: ModelInfo[];
+}
+
+export interface ModelSwitchRequest {
+  model_name: string;
+}
+
+export interface ModelSwitchResponse {
+  status: string;
+  message: string;
+}
+
+export interface GenerateRequest {
+  model: string;
+  prompt: string;
+  stream?: boolean;
+  options?: Record<string, unknown>;
+}
+
+export interface GenerateResponse {
+  response: string;
+  done: boolean;
+  context?: number[];
+  total_duration?: number;
+  load_duration?: number;
+  prompt_eval_count?: number;
+  eval_count?: number;
+  eval_duration?: number;
+}
+
+export interface EmbeddingsRequest {
+  model: string;
+  input: string | string[];
+}
+
+export interface EmbeddingsResponse {
+  embeddings: number[][];
+}
+
+export interface TagsResponse {
+  models: Array<{
+    name: string;
+    size: number;
+    digest: string;
+    modified_at: string;
+  }>;
+}
+
+export interface ShowRequest {
+  name: string;
+  verbose?: boolean;
+}
+
+export interface WorkspaceFileEntry {
+  path: string;
+  name: string;
+  is_dir: boolean;
+  size?: number;
+  mtime?: string;
+  content?: string;
+}
+
+export interface WorkspaceFilesListResponse {
+  files: WorkspaceFileEntry[];
+}
+
+export interface WorkspaceFileReadResponse {
+  content: string;
+  path: string;
+}
+
+export interface WorkspaceFileWriteRequest {
+  path: string;
+  content: string;
+}
+
+export interface WorkspaceFileWriteResponse {
+  status: string;
+  message: string;
+}
+
+export interface PytestRequest {
+  workspace_id: string;
+  test_path?: string;
+  args?: string[];
+}
+
+export interface PytestResponse {
+  status: string;
+  output: string;
+  passed: boolean;
+}
+
+export interface WorkflowWriteSyncCommitRequest {
+  workspace_id: string;
+  branch?: string;
+  message?: string;
+}
+
+export interface VolumeInfo {
+  name: string;
+  driver: string;
+  mountpoint: string;
+  labels: Record<string, string>;
+  scope: string;
+}
+
+export interface VolumesResponse {
+  volumes: VolumeInfo[];
+}
+
+export interface ServiceLogsResponse {
+  logs: string;
+  service: string;
+}
+
+export interface ContainerExecRequest {
+  cmd: string[];
+  env?: Record<string, string>;
+}
+
+export interface ContainerExecResponse {
+  output: string;
+  exit_code: number;
+}
+
+export interface RagIndexedPathsResponse {
+  paths: string[];
+}
+
+export interface RagSyncFilesRequest {
+  paths: string[];
+  recursive?: boolean;
+}
+
+export interface RagSyncCapabilitiesRequest {
+  force?: boolean;
+}
+
+export interface WorkspaceShellRequest {
+  workspace_id: string;
+  command: string;
+  cwd?: string;
+}
+
+export interface WorkspaceShellResponse {
+  output: string;
+  exit_code: number;
+}
+
+export interface WorkspaceFilePatchExecuteRequest {
+  workspace_id: string;
+  file_path: string;
+  patch: PatchChunk[];
+  commit_after?: boolean;
+  commit_message?: string | null;
+}
+
+export interface WorkspaceLintRequest {
+  workspace_id: string;
+  path?: string;
+  fix?: boolean;
+}
+
+export interface WorkspaceLintResponse {
+  status: string;
+  output: string;
+}
+
+export interface VolumesExecuteRequest {
+  action: string;
+  volume_name?: string;
+  options?: Record<string, unknown>;
+}
+
+export interface DiscoveryProfileResponse {
+  entity_id: string;
+  profile: Record<string, unknown>;
+}
+
+export interface NetworkScanRequest {
+  subnet?: string;
+}
+
+export interface NetworkScanResponse {
+  hosts: Array<{
+    ip: string;
+    hostname?: string;
+    mac?: string;
+    vendor?: string;
+    open_ports: number[];
+  }>;
+}
