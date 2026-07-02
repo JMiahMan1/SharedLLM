@@ -58,7 +58,7 @@ RAVEN_CHECK_INTERVAL = _safe_int("RAVEN_CHECK_INTERVAL", 300)
 RAVEN_ERROR_THRESHOLD = _safe_int("RAVEN_ERROR_THRESHOLD", 5)
 
 # --- ABS / media timeouts ---
-ABS_TIMEOUT = _safe_int("ABS_TIMEOUT", 8)
+ABS_TIMEOUT = _safe_int("ABS_TIMEOUT", 30)
 
 # --- Misc ---
 FAST_PATH_THRESHOLD = _safe_float("FAST_PATH_THRESHOLD", 0.85)
