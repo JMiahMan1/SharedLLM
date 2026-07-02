@@ -191,6 +191,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     # --- DNS MAPPINGS (multi-IP fallback support) ---
     # Format: {"hostname": ["primary_ip", "fallback_ip", ...]}
     # dnsmasq generates multiple A records; clients try in order
-    {"key": "dns_mappings", "value": "{\"ai.local\": [\"host-gateway\"], \"execution.local\": [\"host-gateway\"], \"ollama-server.local\": [\"192.168.2.200\", \"192.168.2.114\", \"192.168.4.179\", \"192.168.1.204\", \"192.168.1.216\"]}", "description": "DNS hostname-to-IP mappings. Supports multiple IPs per host for fallback (JSON object). Primary Ollama server: 192.168.2.200"}
+    # Configure via DNS_MAPPINGS env var or UI. Default: empty (no mappings)
+    {"key": "dns_mappings", "value": "{}", "description": "DNS hostname-to-IP mappings. Supports multiple IPs per host for fallback (JSON object). Configure via DNS_MAPPINGS env var or UI."}
 ]
 
