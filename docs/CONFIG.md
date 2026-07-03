@@ -65,19 +65,6 @@ These are not configurable via Identity; they are container/install paths:
 | `WORKSPACE_ROOT` | `/workspaces` | Workspace root |
 | `CHROMA_PERSIST_DIR` | `/data/chroma_db` | ChromaDB storage |
 
-## How Services Use Config
-
-Each service imports from `services/config.py`:
-
-```python
-from config import INTERNAL_SECRET, IDENTITY_SVC_URL, resolve_runtime_config
-
-@app.on_event("startup")
-async def startup():
-    await resolve_runtime_config()
-    # Now all config variables are populated from Identity
-```
-
 ### Special Variables (Required at Bootstrap)
 
 These variables are used for authentication/encryption and must be set in `.env`:
@@ -213,25 +200,3 @@ WORKSPACE_ROOT=/workspaces
 ```
 
 Mount this `.env` file in the Identity Service container to seed initial values into the database.
-
-## Why This Architecture?
-
-1. **Single source of truth**: Identity holds all runtime configuration
-2. **Hot-reloadable**: Settings can be changed via UI and picked up on next restart
-3. **Secure**: Secrets (tokens, passwords) are encrypted in Identity's database
-4. **Container-safe**: No need to rebuild images or restart with new env vars
-5. **Audit trail**: All config changes go through Identity's API
-
-## .env File Purpose
-
-The `.env` file exists **only for bootstrapping**:
-
-- Seeding the initial `INTERNAL_SECRET`
-- Providing `IDENTITY_SVC_URL` so the service can contact Identity
-- Docker Compose uses it to inject these two values into containers
-
-**Never add new variables to `.env` for runtime configuration.** If a service needs a new setting, add it to:
-
-1. `services/config.py` (with a default value)
-2. `resolve_runtime_config()` settings map
-3. The Identity settings UI or API
