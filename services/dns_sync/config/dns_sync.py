@@ -34,7 +34,7 @@ except ImportError:
 
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 DNS_POLL_INTERVAL = int(os.environ.get("DNS_POLL_INTERVAL", "30"))
-DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "53"))
+DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "5353"))
 UPSTREAM_DNS = os.environ.get("UPSTREAM_DNS", "127.0.0.11")
 HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", "10"))
 HEALTH_CHECK_TIMEOUT = int(os.environ.get("HEALTH_CHECK_TIMEOUT", "2"))
@@ -690,6 +690,27 @@ def discover_identity_url():
     print(f"[dns-sync] Using default identity URL: {IDENTITY_URL}", flush=True)
 
 
+def setup_iptables_for_host_network():
+    """Forward port 53 queries from host network to Docker network DNS sync."""
+    try:
+        import subprocess
+        # Get Docker network gateway IP (where DNS sync runs)
+        gateway = DISCOVERED_NETWORKS.get('gateway', '')
+        if not gateway:
+            print("[dns-sync] Warning: No gateway IP discovered for iptables setup", flush=True)
+            return
+        
+        # Forward all port 53 UDP queries to DNS sync container on non-standard port
+        subprocess.run([
+            "iptables", "-t", "nat", "-A", "PREROUTING",
+            "-p", "udp", "--dport", "53",
+            "-j", "DNAT", "--to-destination", f"{gateway}:{DNS_LISTEN_PORT}"
+        ], check=True, capture_output=True)
+        print(f"[dns-sync] iptables: host port 53 → {gateway}:{DNS_LISTEN_PORT}", flush=True)
+    except Exception as e:
+        print(f"[dns-sync] Warning: Could not setup iptables: {e}", flush=True)
+
+
 def main():
     global running
     print(f"[dns-sync] Starting DNS sync sidecar (poll every {POLL_INTERVAL}s)", flush=True)
@@ -701,6 +722,9 @@ def main():
     
     if not DISCOVERED_NETWORKS.get('gateway'):
         print("[dns-sync] Warning: No network gateway discovered, using default upstream DNS", flush=True)
+    
+    # Forward host network DNS queries to DNS sync
+    setup_iptables_for_host_network()
     
     # Start health checker
     health_thread = threading.Thread(target=health_checker, daemon=True)
