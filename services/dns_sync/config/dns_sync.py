@@ -70,10 +70,10 @@ signal.signal(signal.SIGINT, handle_signal)
 
 def get_host_ip():
     """Get host's IP address on the Docker network (gateway IP)."""
-    # Use Docker network gateway IP as the host IP
-    # This is the correct approach for containers on a Docker network
+    print(f"[dns-sync] DEBUG get_host_ip: DISCOVERED_NETWORKS keys={list(DISCOVERED_NETWORKS.keys())}", flush=True)
     for net_config in DISCOVERED_NETWORKS.values():
-        gateway = net_config.get('gateway')
+        gateway = net_config.get('gateway') if net_config else None
+        print(f"[dns-sync] DEBUG get_host_ip: checking config {net_config} -> gateway={gateway}", flush=True)
         if gateway:
             return gateway
     
