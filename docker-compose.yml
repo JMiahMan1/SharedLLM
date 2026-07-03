@@ -15,8 +15,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_dns_sync
     restart: unless-stopped
-    group_add:
-      - docker
+    user: "0:980"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
