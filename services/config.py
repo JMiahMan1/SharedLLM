@@ -222,6 +222,10 @@ async def resolve_runtime_config():
                 globals()["STORAGE_SVC"] = globals()["STORAGE_SVC_URL"]
                 globals()["LOGGING_SVC"] = globals()["LOGGING_SVC_URL"]
                 globals()["WORKSPACE_RUNTIME_SVC"] = globals()["WORKSPACE_RUNTIME_SVC_URL"]
+                
+                # Check if special variables were updated in UI and sync to .env
+                _sync_special_vars_to_env()
+                
                 return
         except Exception as e:
             if attempt < max_retries - 1:
@@ -230,6 +234,68 @@ async def resolve_runtime_config():
             else:
                 log.warning(f"Failed to resolve runtime config from Identity after {max_retries} attempts: {e}")
 
+
+def _sync_special_vars_to_env():
+    """Sync special variables (INTERNAL_SECRET, FERNET_KEY) from database to .env file.
+    
+    If these values were changed in the UI, update the .env file to match.
+    This ensures the values are available for services that read from .env.
+    """
+    import os
+    import dotenv
+    
+    # Try to find and update .env file
+    # Search in common locations
+    env_paths = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".env"),  # project root
+        os.path.join(os.getcwd(), ".env"),  # current directory
+    ]
+    
+    for env_path in env_paths:
+        if os.path.exists(env_path):
+            # Load current .env values
+            env_vals = dotenv.dotenv_values(env_path)
+            
+            # Check if special vars in database differ from .env
+            changes_made = False
+            for var in ["INTERNAL_SECRET", "FERNET_KEY"]:
+                db_value = globals().get(var)
+                env_value = env_vals.get(var)
+                
+                if db_value and env_value and db_value != env_value:
+                    log.info(f"Special variable {var} differs between database and .env. Updating .env.")
+                    changes_made = True
+            
+            if changes_made:
+                # Re-write .env with updated values (preserve comments and order)
+                _update_env_file(env_path, {"INTERNAL_SECRET": globals().get("INTERNAL_SECRET"), "FERNET_KEY": globals().get("FERNET_KEY")})
+                log.info("Special variables synced to .env file")
+            break
+
+
+def _update_env_file(filepath: str, updates: dict):
+    """Update specific keys in a .env file while preserving comments and structure."""
+    try:
+        with open(filepath, "r") as f:
+            lines = f.readlines()
+        
+        updated = False
+        new_lines = []
+        for line in lines:
+            for key in updates:
+                if line.strip().startswith(f"{key}="):
+                    new_lines.append(f"{key}={updates[key]}\n")
+                    updated = True
+                    break
+            else:
+                new_lines.append(line)
+        
+        if updated:
+            with open(filepath, "w") as f:
+                f.writelines(new_lines)
+    except Exception as e:
+        log.error(f"Failed to update .env file {filepath}: {e}")
+
 CONFIG = {
     "assistant_model": ASSISTANT_MODEL or "",
     "librarian_model": LIBRARIAN_MODEL or "",
@@ -237,18 +303,23 @@ CONFIG = {
     "mass_config_entry_id": MASS_CONFIG_ENTRY_ID,
 }
 
-# --- Validation: critical runtime paths that must exist ---
-_MISSING_REQUIRED: list[str] = []
-for _v in ("EXECUTION_SVC_URL", "HA_URL", "HA_TOKEN", "WORKSPACE_ROOT", "TEMP_MEDIA_DIR", "MODELS_DIR", "DEFAULT_TTS_VOICE"):
-    if not os.getenv(_v):
-        _MISSING_REQUIRED.append(_v)
+# --- Special variables required for application startup ---
+# These are used for authentication/encryption and must be set in .env
+# If changed in UI, update .env to match the database values
+_SPECIAL_REQUIRED = ["INTERNAL_SECRET", "FERNET_KEY"]
 
-if _MISSING_REQUIRED and not _is_testing():
+_MISSING_SPECIAL: list[str] = []
+for _v in _SPECIAL_REQUIRED:
+    if not os.getenv(_v):
+        _MISSING_SPECIAL.append(_v)
+
+if _MISSING_SPECIAL and not _is_testing():
     logging.basicConfig(level="CRITICAL")
     logging.critical(
-        f"FATAL: Missing required environment variables: {', '.join(_MISSING_REQUIRED)}\n"
-        "These must be set in .env and seeded via Identity Service.\n"
-        "See README.md for first-run setup instructions."
+        f"FATAL: Missing special required environment variables: {', '.join(_MISSING_SPECIAL)}\n"
+        f"These variables (INTERNAL_SECRET, FERNET_KEY) are required for authentication/encryption.\n"
+        "They must be set in .env and kept in sync with Identity Service database.\n"
+        "If changed in the UI, update .env to match the database values."
     )
     sys.exit(1)
 
