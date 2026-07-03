@@ -328,6 +328,46 @@ def check_ip_alive(ip, port):
         return False
 
 
+def check_ip_alive_http(ip, port, path="/health"):
+    """HTTP health check as fallback for more reliable status detection."""
+    try:
+        import urllib.request
+        
+        url = f"http://{ip}:{port}{path}"
+        req = urllib.request.Request(url, method="GET")
+        req.add_header("X-Internal-Secret", INTERNAL_SECRET)
+        
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(HEALTH_CHECK_TIMEOUT)
+        
+        # Try to establish connection first
+        result = sock.connect_ex((ip, port))
+        if result != 0:
+            sock.close()
+            return False
+        
+        # Send HTTP request over socket
+        http_request = f"GET {path} HTTP/1.0\r\nHost: {ip}:{port}\r\nX-Internal-Secret: {INTERNAL_SECRET}\r\n\r\n"
+        sock.send(http_request.encode())
+        
+        # Read response
+        response = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+        sock.close()
+        
+        # Check for 200 OK
+        if response.startswith(b"HTTP/1.0 200") or response.startswith(b"HTTP/1.1 200"):
+            return True
+        
+        return False
+    except Exception:
+        return False
+
+
 def health_checker():
     """Background thread that health-checks all configured IPs."""
     global health_status
@@ -343,7 +383,13 @@ def health_checker():
         for hostname, ips in current_records.items():
             port = get_health_port(hostname)
             for ip in ips:
+                # Try TCP connect first, then HTTP health check as fallback
                 alive = check_ip_alive(ip, port)
+                
+                # If TCP fails but HTTP health endpoint might exist, try HTTP
+                if not alive and port != 80:  # Skip if already on default HTTP port
+                    alive = check_ip_alive_http(ip, port)
+                
                 key = (hostname, ip)
                 with health_lock:
                     old = health_status.get(key)
@@ -351,7 +397,7 @@ def health_checker():
                         changed = True
                         status_str = "ALIVE" if alive else "DEAD"
                         print(f"[dns-sync] HEALTH: {ip}:{port} {hostname} -> {status_str}", flush=True)
-                    health_status[key] = alive
+                health_status[key] = alive
                 new_health[key] = alive
         
         if changed:
