@@ -38,8 +38,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_dns_forwarder
     restart: unless-stopped
-    ports:
-      - "53:53/udp"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
     networks:
