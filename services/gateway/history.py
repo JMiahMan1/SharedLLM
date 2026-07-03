@@ -8,9 +8,18 @@ import httpx
 log = logging.getLogger("gateway.history")
 
 # INTERNAL_SECRET sourced from config.py which enforces fail-secure at gateway startup.
-from services.gateway.config import INTERNAL_SECRET, REDIS_URL
+from services.gateway.config import INTERNAL_SECRET
 
-_redis = redis.from_url(REDIS_URL, decode_responses=True)
+_redis = None
+
+def get_redis():
+    global _redis
+    if _redis is None:
+        from services.gateway.config import REDIS_URL
+        if not REDIS_URL:
+            raise RuntimeError("REDIS_URL not configured")
+        _redis = redis.from_url(REDIS_URL, decode_responses=True)
+    return _redis
 
 def _get_history_key(user: str) -> str:
     return f"rag:history:{user}"
