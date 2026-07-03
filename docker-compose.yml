@@ -63,7 +63,6 @@ services:
       - ui
       - gateway
       - identity
-    dns:
     networks:
       - sharedllm
 
@@ -95,7 +94,6 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ./.env:/app/.env:ro
       - ./prompts:/app/prompts:ro
-    dns:
     networks:
       - sharedllm
     healthcheck:
@@ -185,7 +183,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 120s
-    dns:
     networks:
       - sharedllm
 
@@ -210,7 +207,6 @@ services:
       rag:
         condition: service_healthy
     command: python3 scripts/index_capabilities.py
-    dns:
     networks:
       - sharedllm
 
@@ -252,7 +248,6 @@ services:
       - huggingface_cache:/home/sharedllm/.cache/huggingface
       - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
-    dns:
     networks:
       - sharedllm
 
@@ -285,7 +280,6 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - redis
-    dns:
     networks:
       - sharedllm
 
@@ -324,7 +318,6 @@ services:
     depends_on:
       - redis
       - execution
-    dns:
     networks:
       - sharedllm
 
@@ -357,7 +350,6 @@ services:
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
-    dns:
     networks:
       - sharedllm
 
@@ -403,7 +395,6 @@ services:
       - workspace_runtime_data:/data
       - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
-    dns:
     networks:
       - sharedllm
 
@@ -416,7 +407,6 @@ services:
       - TZ=America/Phoenix
     depends_on:
       - gateway
-    dns:
     networks:
       - sharedllm
 
@@ -429,7 +419,6 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    dns:
     networks:
       - sharedllm
 
@@ -470,7 +459,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
-    dns:
     networks:
       - sharedllm
 
