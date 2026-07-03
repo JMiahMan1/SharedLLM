@@ -7,10 +7,9 @@ import redis.asyncio as redis
 from datetime import datetime
 from typing import Optional, Any, Dict, List, Callable, Awaitable
 
-from services.gateway.history import REDIS_URL
 from services.gateway.config import (
     IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
-    STORAGE_SVC, RAG_SVC, INTERNAL_SECRET,
+    STORAGE_SVC, RAG_SVC, INTERNAL_SECRET, REDIS_URL,
     RAVEN_MAX_TOTAL_SECONDS,
     RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
 )
