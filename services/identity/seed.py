@@ -295,6 +295,26 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 session.add(existing)
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
 
+    # ── Seed execution service paths from .env ──
+    env_paths = {
+        "TEMP_MEDIA_DIR": "temp_media_dir",
+        "WORKSPACE_ROOT": "workspace_root",
+        "MODELS_DIR": "models_dir",
+        "LOCAL_NOTES_ROOT": "local_notes_root",
+        "PHRASEBOOK_PATH": "phrasebook_path",
+    }
+    for env_key, global_key in env_paths.items():
+        env_val = os.getenv(env_key)
+        if env_val:
+            existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
+            if not existing:
+                session.add(GlobalSetting(key=global_key, value=env_val, description=f"Execution service path. Seeded from .env {env_key} on first startup."))
+                log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
+            elif not existing.value or force:
+                existing.value = env_val
+                session.add(existing)
+                log.info(f"[seed] Re-seeded {env_key} -> {global_key}: {env_val}")
+
     # ── Seed SKYLIGHT_PASS (encrypted) ────────────────────────────────────────
     skylight_pass = os.getenv("SKYLIGHT_PASS")
     if skylight_pass:
