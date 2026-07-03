@@ -50,12 +50,33 @@ jobs:
     - name: Run Pytest
       env:
         PYTHONPATH: ${{ github.workspace }}/services
-        FERNET_KEY: bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=
+        FERNET_KEY: i5ugdUh4AW_VfBsJHebDimXBS7d1AVUhAdC3P_h8Zig=
         INTERNAL_SECRET: test-secret-github-actions
+        IDENTITY_SVC_URL: http://localhost:8001
+        EXECUTION_SVC_URL: http://localhost:8003
+        RAG_SVC_URL: http://localhost:8004
+        STORAGE_SVC_URL: http://localhost:8005
+        LOGGING_SVC_URL: http://localhost:8006
+        WORKSPACE_RUNTIME_SVC_URL: http://localhost:8007
+        CONTROL_PLANE_URL: http://localhost:8008
+        SEARXNG_URL: http://localhost:8009
+        HA_URL: http://localhost:8123
+        HA_TOKEN: test-token
+        NEXTCLOUD_URL: http://localhost:8010
+        NEXTCLOUD_USER: testuser
+        NEXTCLOUD_PASS: testpass
+        GIT_URL: http://localhost:8011
+        GIT_USER: testuser
+        GIT_TOKEN: testtoken
+        REDIS_URL: redis://localhost:6379/0
         DEFAULT_ADMIN_PASSWORD: test-admin-password
+        DEFAULT_MODEL: qwen3:8b
         ASSISTANT_MODEL: qwen3:8b
         CODING_MODEL: qwen2.5-coder:7b
         LIBRARIAN_MODEL: qwen3:8b
+        DEFAULT_TTS_VOICE: alloy
+        WORKSPACE_ROOT: /tmp/workspace
+        TEMP_MEDIA_DIR: /tmp/media
       run: |
         pytest \
           services/tests/test_gateway_model_selection.py \
