@@ -71,6 +71,8 @@ jobs:
               - 'services/workspace_runtime/**'
             dns_sync:
               - 'services/dns_sync/**'
+            dns_forwarder:
+              - 'services/dns_forwarder/**'
             control_plane:
               - 'services/control_plane/**'
 
@@ -82,7 +84,7 @@ jobs:
           
           # If base changed, build all services
           if echo "$CHANGES" | grep -q '"base"'; then
-            SERVICES_JSON='["identity","gateway","rag","execution","storage","logging","automation","workspace_runtime","dns_sync","control_plane"]'
+            SERVICES_JSON='["identity","gateway","rag","execution","storage","logging","automation","workspace_runtime","dns_sync","dns_forwarder","control_plane"]'
             BUILD_BASE='true'
           else
             # Filter out base and ui from changes to build only changed services
