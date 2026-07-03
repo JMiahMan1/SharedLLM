@@ -69,33 +69,20 @@ signal.signal(signal.SIGINT, handle_signal)
 
 
 def get_host_ip():
-    """Get host's actual IP address (not Docker gateway)."""
-    # Use socket to get IP of default route
+    """Get host's IP address on the Docker network (gateway IP)."""
+    # Use Docker network gateway IP as the host IP
+    # This is the correct approach for containers on a Docker network
+    gateway = DISCOVERED_NETWORKS.get('gateway')
+    if gateway:
+        return gateway
+    
+    # Fallback: try to get IP via socket (works for non-Docker)
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
         ip = s.getsockname()[0]
         s.close()
         return ip
-    except Exception:
-        try:
-            s.close()
-        except Exception:
-            pass
-    
-    # Fallback: try hostname -I
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["hostname", "-I"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            ips = result.stdout.strip().split()
-            if ips:
-                return ips[0]
     except Exception:
         pass
     

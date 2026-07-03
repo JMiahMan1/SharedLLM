@@ -205,7 +205,6 @@ services:
       identity:
         condition: service_healthy
     extra_hosts:
-      - "ai-server:192.168.2.205"
       - "host.docker.internal:host-gateway"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
