@@ -43,7 +43,7 @@ INTERNAL_SECRET = _required("INTERNAL_SECRET")
 FERNET_KEY = _required("FERNET_KEY")
 
 # --- Identity service endpoint (bootstrap only) ---
-IDENTITY_SVC_URL = _required("IDENTITY_SVC_URL")
+IDENTITY_SVC_URL = _optional("IDENTITY_SVC_URL", "http://identity:8001")
 
 # --- Runtime config: fetched from Identity service at startup ---
 # These are module-level placeholders; populated by resolve_runtime_config()
@@ -251,3 +251,5 @@ if _MISSING_REQUIRED and not _is_testing():
         "See README.md for first-run setup instructions."
     )
     sys.exit(1)
+
+# --- Note: IDENTITY_SVC_URL has a default for the Identity service bootstrap ---
