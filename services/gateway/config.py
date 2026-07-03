@@ -33,17 +33,17 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
 
 # --- Default service URLs (Docker DNS) — overridable via Identity settings ---
 # These are import-time defaults. Runtime code should use get_all_settings() from orchestrator.
-IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
-EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL", "http://execution:8003")
-RAG_SVC = os.getenv("RAG_SVC_URL", "http://rag:8004")
-STORAGE_SVC = os.getenv("STORAGE_SVC_URL", "http://storage:8005")
-LOGGING_SVC = os.getenv("LOGGING_SVC_URL", "http://logging:8006")
-WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL", "http://workspace_runtime:8007")
-CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL", "http://control_plane:8008")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "")  # .env is seed-only; runtime resolved from Identity settings
-REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
-SEARXNG_URL = os.getenv("SEARXNG_URL", "")
-LLAMA_SERVER_PROXY_URL = os.getenv("LLAMA_SERVER_PROXY_URL", "")
+IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL")
+EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL")
+RAG_SVC = os.getenv("RAG_SVC_URL")
+STORAGE_SVC = os.getenv("STORAGE_SVC_URL")
+LOGGING_SVC = os.getenv("LOGGING_SVC_URL")
+WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL")
+CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
+OLLAMA_URL = os.getenv("OLLAMA_URL")  # .env is seed-only; runtime resolved from Identity settings
+REDIS_URL = os.getenv("REDIS_URL")
+SEARXNG_URL = os.getenv("SEARXNG_URL")
+LLAMA_SERVER_PROXY_URL = os.getenv("LLAMA_SERVER_PROXY_URL")
 OLLAMA_TIMEOUT = 600.0
 
 # --- Constants (not user-configurable) ---
@@ -62,13 +62,13 @@ ABS_TIMEOUT = _safe_int("ABS_TIMEOUT", 30)
 
 # --- Misc ---
 FAST_PATH_THRESHOLD = _safe_float("FAST_PATH_THRESHOLD", 0.85)
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
-PHRASEBOOK_PATH = os.getenv("PHRASEBOOK_PATH", "")
-TIMEZONE = os.getenv("TIMEZONE", "")  # Resolved at runtime from Identity settings
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
+PHRASEBOOK_PATH = os.getenv("PHRASEBOOK_PATH")
+TIMEZONE = os.getenv("TIMEZONE")  # Resolved at runtime from Identity settings
 
 # --- CONFIG dict for backward compat (resolved at runtime from Identity) ---
 CONFIG = {
-    "assistant_model": "",
-    "librarian_model": "",
-    "coding_model": "",
+    "assistant_model": os.getenv("ASSISTANT_MODEL"),
+    "librarian_model": os.getenv("LIBRARIAN_MODEL"),
+    "coding_model": os.getenv("CODING_MODEL"),
 }
