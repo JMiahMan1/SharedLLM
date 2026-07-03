@@ -1,5 +1,20 @@
 # AGENTS.md
 
+## CRITICAL RULES
+
+### NO LOCAL DOCKER
+- **NEVER EVER** run Docker commands locally on your machine
+- **ONLY** run Docker commands on the remote server: `192.168.2.205`
+- Use `ssh jeremiah@192.168.2.205 "docker compose ..." ` for Docker operations
+- This includes: `docker build`, `docker run`, `docker compose up`, `docker compose stop`, etc.
+- Violating this will crash everything - Docker does not run locally
+
+### NO HARDCODED IPs
+- **NEVER** hardcode IP addresses like `192.168.1.1`, `192.168.2.205`, etc.
+- Use network discovery to find IPs dynamically
+- DNS sync service discovers network configuration via Docker API
+- Services should use hostnames or discovered gateway IPs
+
 ## Deployment Workflow
 
 ### Build and Deploy Process
