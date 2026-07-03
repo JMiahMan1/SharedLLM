@@ -16,7 +16,7 @@ services:
     container_name: sharedllm_dns_sync
     restart: unless-stopped
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro,z
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - DNS_POLL_INTERVAL=30
