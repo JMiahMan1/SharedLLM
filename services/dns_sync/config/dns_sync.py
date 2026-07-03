@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""DNS Sync Sidecar - Cross-network DNS discovery and serving.
+"""DNS Sync - Cross-network DNS discovery and serving.
 
 Discovers all containers (any network) via Docker API and serves DNS
 records with health checking for both Docker-networked and host-networked
 services. Discovers network configuration dynamically.
 
 Integration Points:
-- REST API for service discovery (control plane can query)
-- Webhook notifications on network changes
+- REST API for service discovery
 """
 import os
 import json
@@ -16,12 +15,8 @@ import signal
 import socket
 import struct
 import threading
-import tempfile
-import shutil
-from urllib.request import Request, urlopen
-from urllib.error import URLError
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse
 
 # Try to import docker library for container discovery
 try:
@@ -38,19 +33,9 @@ DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "5353"))
 UPSTREAM_DNS = os.environ.get("UPSTREAM_DNS", "127.0.0.11")
 HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", "10"))
 HEALTH_CHECK_TIMEOUT = int(os.environ.get("HEALTH_CHECK_TIMEOUT", "2"))
-HOSTS_FILE = os.environ.get("HOSTS_FILE", "/etc/hosts")
-HOSTS_SYNC = os.environ.get("HOSTS_SYNC", "true").lower() == "true"
-
-# Integration: Control plane webhook URL
-CONTROL_PLANE_WEBHOOK_URL = os.environ.get("CONTROL_PLANE_WEBHOOK_URL", "")
 
 # Network discovery
 DISCOVERED_NETWORKS = {}
-IDENTITY_URL = None
-IDENTITY_URL_INITIALIZED = False
-
-# Integration: Service discovery state
-LAST_CONTAINER_COUNT = 0
 LAST_DISCOVERY_TIME = 0
 
 # Default health check ports by hostname pattern
@@ -243,7 +228,6 @@ class DiscoveryAPIHandler(BaseHTTPRequestHandler):
         """Handle GET requests."""
         parsed = urlparse(self.path)
         path = parsed.path
-        params = parse_qs(parsed.query)
         
         # Check authentication
         secret = self.headers.get("X-Internal-Secret", "")
@@ -318,73 +302,6 @@ def start_discovery_api():
     return server
 
 
-# ─── Integration: Webhook Notifications ──────────────────────────────────────
-
-def notify_control_plane(event, data):
-    """Send webhook notification to control plane about changes."""
-    if not CONTROL_PLANE_WEBHOOK_URL:
-        return
-    
-    payload = json.dumps({
-        "event": event,
-        "data": data,
-        "timestamp": time.time()
-    }).encode()
-    
-    try:
-        req = Request(
-            CONTROL_PLANE_WEBHOOK_URL,
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        urlopen(req, timeout=5)
-        print(f"[dns-sync] Webhook sent: {event}", flush=True)
-    except Exception as e:
-        print(f"[dns-sync] Webhook failed: {e}", flush=True)
-
-
-def on_network_change(old_containers, new_containers):
-    """Handle network changes by notifying control plane."""
-    global LAST_CONTAINER_COUNT
-    
-    added = []
-    removed = []
-    
-    for name in new_containers:
-        if name not in old_containers:
-            added.append(name)
-    
-    for name in old_containers:
-        if name not in new_containers:
-            removed.append(name)
-    
-    if added or removed:
-        notify_control_plane("network_change", {
-            "added": added,
-            "removed": removed,
-            "total": len(new_containers)
-        })
-        LAST_CONTAINER_COUNT = len(new_containers)
-
-
-def fetch_dns_mappings():
-    """Fetch DNS mappings from Identity settings (fallback)."""
-    try:
-        req = Request(
-            f"{IDENTITY_URL}/api/settings",
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        with urlopen(req, timeout=10) as resp:
-            settings = json.loads(resp.read())
-            for s in settings:
-                if s["key"] == "dns_mappings":
-                    return json.loads(s["value"]) if s["value"] else {}
-    except (URLError, Exception) as e:
-        print(f"[dns-sync] Error fetching settings: {e}", flush=True)
-    return {}
-
-
 def get_health_port(hostname):
     """Determine health check port for a hostname."""
     base = hostname.replace('.local', '')
@@ -434,7 +351,6 @@ def health_checker():
         
         if changed:
             _print_health_summary()
-            _sync_hosts_file()
         
         for _ in range(HEALTH_CHECK_INTERVAL):
             if not running:
@@ -454,79 +370,6 @@ def _print_health_summary():
         dead_ips = [ip for ip in ips if not status.get((hostname, ip), False)]
         if alive_ips:
             print(f"[dns-sync] DNS {hostname}: alive={alive_ips}, dead={dead_ips}", flush=True)
-
-
-def _sync_hosts_file():
-    """Write alive IPs to /etc/hosts so host-networked services resolve .local domains."""
-    if not HOSTS_SYNC:
-        return
-    
-    try:
-        with dns_lock:
-            records = dict(dns_records)
-        with health_lock:
-            status = dict(health_status)
-        
-        desired = {}
-        for hostname, ips in records.items():
-            alive = [ip for ip in ips if status.get((hostname, ip), False)]
-            if alive:
-                desired[hostname] = alive[0]
-        
-        current = {}
-        try:
-            with open(HOSTS_FILE, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#'):
-                        parts = line.split()
-                        if len(parts) >= 2 and parts[1].endswith('.local'):
-                            current[parts[1]] = parts[0]
-        except FileNotFoundError:
-            pass
-        
-        if current == desired:
-            return
-        
-        print(f"[dns-sync] Updating {HOSTS_FILE}: {desired}", flush=True)
-        
-        try:
-            with open(HOSTS_FILE, 'r') as f:
-                lines = f.readlines()
-        except FileNotFoundError:
-            lines = []
-        
-        new_lines = []
-        seen_local = set()
-        for line in lines:
-            stripped = line.strip()
-            if stripped and not stripped.startswith('#'):
-                parts = stripped.split()
-                if len(parts) >= 2 and parts[1].endswith('.local'):
-                    hostname = parts[1]
-                    seen_local.add(hostname)
-                    if hostname in desired:
-                        new_lines.append(f"{desired[hostname]} {hostname}\n")
-                    continue
-            new_lines.append(line)
-        
-        for hostname, ip in desired.items():
-            if hostname not in seen_local:
-                new_lines.append(f"{ip} {hostname}\n")
-        
-        fd, tmp_path = tempfile.mkstemp(dir='/etc')
-        try:
-            with os.fdopen(fd, 'w') as f:
-                f.writelines(new_lines)
-            shutil.move(tmp_path, HOSTS_FILE)
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            raise
-    except Exception as e:
-        print(f"[dns-sync] Failed to update {HOSTS_FILE}: {e}", flush=True)
 
 
 def get_alive_ips(hostname):
@@ -656,61 +499,6 @@ def dns_server():
     print("[dns-sync] DNS server stopped", flush=True)
 
 
-def discover_identity_url():
-    """Discover Identity service URL from Docker networks."""
-    global IDENTITY_URL, IDENTITY_URL_INITIALIZED
-    if IDENTITY_URL_INITIALIZED:
-        return
-    
-    # First check environment
-    env_url = os.environ.get("IDENTITY_SVC_URL")
-    if env_url:
-        IDENTITY_URL = env_url
-        IDENTITY_URL_INITIALIZED = True
-        return
-    
-    # Try to find identity service in Docker networks
-    if DOCKER_AVAILABLE:
-        try:
-            for container in DOCKER_CLIENT.containers.list(all=True):
-                if 'identity' in container.name.lower():
-                    networks = container.attrs['NetworkSettings']['Networks']
-                    for net_config in networks.values():
-                        if net_config.get('IPAddress'):
-                            IDENTITY_URL = f"http://{net_config['IPAddress']}:8001"
-                            IDENTITY_URL_INITIALIZED = True
-                            print(f"[dns-sync] Discovered identity URL: {IDENTITY_URL}", flush=True)
-                            return
-        except Exception as e:
-            print(f"[dns-sync] Error discovering identity URL: {e}", flush=True)
-    
-    # Default fallback
-    IDENTITY_URL = "http://localhost:8001"
-    IDENTITY_URL_INITIALIZED = True
-    print(f"[dns-sync] Using default identity URL: {IDENTITY_URL}", flush=True)
-
-
-def setup_iptables_for_host_network():
-    """Forward port 53 queries from host network to Docker network DNS sync."""
-    try:
-        import subprocess
-        # Get Docker network gateway IP (where DNS sync runs)
-        gateway = DISCOVERED_NETWORKS.get('gateway', '')
-        if not gateway:
-            print("[dns-sync] Warning: No gateway IP discovered for iptables setup", flush=True)
-            return
-        
-        # Forward all port 53 UDP queries to DNS sync container on non-standard port
-        subprocess.run([
-            "iptables", "-t", "nat", "-A", "PREROUTING",
-            "-p", "udp", "--dport", "53",
-            "-j", "DNAT", "--to-destination", f"{gateway}:{DNS_LISTEN_PORT}"
-        ], check=True, capture_output=True)
-        print(f"[dns-sync] iptables: host port 53 → {gateway}:{DNS_LISTEN_PORT}", flush=True)
-    except Exception as e:
-        print(f"[dns-sync] Warning: Could not setup iptables: {e}", flush=True)
-
-
 def main():
     global running
     print(f"[dns-sync] Starting DNS sync sidecar (poll every {POLL_INTERVAL}s)", flush=True)
@@ -718,13 +506,9 @@ def main():
     
     # Discover network configuration
     discover_networks()
-    discover_identity_url()
     
     if not DISCOVERED_NETWORKS.get('gateway'):
         print("[dns-sync] Warning: No network gateway discovered, using default upstream DNS", flush=True)
-    
-    # Forward host network DNS queries to DNS sync
-    setup_iptables_for_host_network()
     
     # Start health checker
     health_thread = threading.Thread(target=health_checker, daemon=True)
@@ -754,16 +538,6 @@ def main():
                 print(f"[dns-sync] Discovered {len(containers)} containers, {len(records)} DNS records", flush=True)
             
             last_discovery = time.time()
-        
-        # Also fetch from Identity (fallback for external services)
-        mappings = fetch_dns_mappings()
-        if mappings:
-            for hostname, ips in mappings.items():
-                if isinstance(ips, str):
-                    ips = [ips]
-                full_hostname = hostname if hostname.endswith('.local') else f"{hostname}.local"
-                with dns_lock:
-                    dns_records[full_hostname.lower()] = ips
         
         for _ in range(POLL_INTERVAL):
             if not running:

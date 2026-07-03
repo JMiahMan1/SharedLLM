@@ -15,8 +15,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_dns_sync
     restart: unless-stopped
-    dns:
-      - 127.0.0.11
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
@@ -24,8 +22,6 @@ services:
       - DNS_POLL_INTERVAL=30
       - DNS_LISTEN_PORT=5353
       - UPSTREAM_DNS=127.0.0.11
-    depends_on:
-      - identity
     networks:
       - sharedllm
 
@@ -132,8 +128,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_rag
     restart: unless-stopped
-    dns:
-      - dns-sync
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -200,13 +194,9 @@ services:
     container_name: sharedllm_gateway
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
-    dns:
-      - dns-sync
     depends_on:
       identity:
         condition: service_healthy
-      dns-sync:
-        condition: service_started
     extra_hosts:
       - "ai-server:192.168.2.205"
       - "host.docker.internal:host-gateway"
@@ -245,8 +235,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_logging
     restart: unless-stopped
-    dns:
-      - dns-sync
     ports:
       - "8006:8006"
     environment:
@@ -279,8 +267,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_automation
     restart: unless-stopped
-    dns:
-      - dns-sync
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
@@ -319,8 +305,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_storage
     restart: unless-stopped
-    dns:
-      - "172.26.0.10"
     ports:
       - 8005:8005
     environment:
@@ -353,8 +337,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
-    dns:
-      - dns-sync
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
@@ -424,8 +406,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_control_plane
     restart: always
-    dns:
-      - dns-sync
     ports:
       - 8008:8008
     user: "${PUID:-1000}:${PGID:-1000}"

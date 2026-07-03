@@ -92,11 +92,8 @@
         reverse_proxy control_plane:8008
     }
 
-    # DNS Sync Service Discovery API
+    # DNS Sync Service Discovery API (for host-networked services)
     handle /api/dns-sync* {
-        reverse_proxy dns-sync:8009
-    }
-    handle /dns-sync* {
         reverse_proxy dns-sync:8009
     }
 
