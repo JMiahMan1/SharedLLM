@@ -92,8 +92,12 @@
         reverse_proxy control_plane:8008
     }
 
-    handle /discovery* {
-        reverse_proxy localhost:8003
+    # DNS Sync Service Discovery API
+    handle /api/dns-sync* {
+        reverse_proxy dns-sync:8009
+    }
+    handle /dns-sync* {
+        reverse_proxy dns-sync:8009
     }
 
     # 3. Route Identity/Auth API traffic

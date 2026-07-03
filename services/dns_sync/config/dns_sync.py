@@ -3,10 +3,13 @@
 
 Discovers all containers (any network) via Docker API and serves DNS
 records with health checking for both Docker-networked and host-networked
-services.
+services. Discovers network configuration dynamically.
+
+Integration Points:
+- REST API for service discovery (control plane can query)
+- Webhook notifications on network changes
 """
 import os
-import sys
 import json
 import time
 import signal
@@ -17,6 +20,8 @@ import tempfile
 import shutil
 from urllib.request import Request, urlopen
 from urllib.error import URLError
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 
 # Try to import docker library for container discovery
 try:
@@ -28,15 +33,25 @@ except ImportError:
     DOCKER_AVAILABLE = False
 
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
-IDENTITY_URL = os.environ.get("IDENTITY_SVC_URL", "http://localhost:8001")
 DNS_POLL_INTERVAL = int(os.environ.get("DNS_POLL_INTERVAL", "30"))
-DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "53"))
+DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "5353"))
 UPSTREAM_DNS = os.environ.get("UPSTREAM_DNS", "127.0.0.11")
-UPSTREAM_DNS_2 = os.environ.get("UPSTREAM_DNS_2", "192.168.1.1")
 HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", "10"))
 HEALTH_CHECK_TIMEOUT = int(os.environ.get("HEALTH_CHECK_TIMEOUT", "2"))
 HOSTS_FILE = os.environ.get("HOSTS_FILE", "/etc/hosts")
 HOSTS_SYNC = os.environ.get("HOSTS_SYNC", "true").lower() == "true"
+
+# Integration: Control plane webhook URL
+CONTROL_PLANE_WEBHOOK_URL = os.environ.get("CONTROL_PLANE_WEBHOOK_URL", "")
+
+# Network discovery
+DISCOVERED_NETWORKS = {}
+IDENTITY_URL = None
+IDENTITY_URL_INITIALIZED = False
+
+# Integration: Service discovery state
+LAST_CONTAINER_COUNT = 0
+LAST_DISCOVERY_TIME = 0
 
 # Default health check ports by hostname pattern
 DEFAULT_HEALTH_PORTS = {
@@ -102,6 +117,33 @@ def get_host_ip():
     return None
 
 
+def discover_networks():
+    """Discover Docker networks and gateway IPs."""
+    global DISCOVERED_NETWORKS
+    if not DOCKER_AVAILABLE:
+        return
+    
+    try:
+        for network in DOCKER_CLIENT.networks.list():
+            net_config = network.attrs.get('IPAM', {}).get('Config', [])
+            gateway = None
+            subnet = None
+            for config in net_config:
+                if config.get('Gateway'):
+                    gateway = config['Gateway']
+                if config.get('Subnet'):
+                    subnet = config['Subnet']
+            
+            if gateway:
+                DISCOVERED_NETWORKS[network.name] = {
+                    'gateway': gateway,
+                    'subnet': subnet
+                }
+                print(f"[dns-sync] Network: {network.name} -> gateway={gateway}, subnet={subnet}", flush=True)
+    except Exception as e:
+        print(f"[dns-sync] Error discovering networks: {e}", flush=True)
+
+
 def discover_containers_via_docker():
     """Discover all containers and their IPs via Docker API.
     
@@ -120,7 +162,7 @@ def discover_containers_via_docker():
             # Get container IP from any network
             networks = container.attrs['NetworkSettings']['Networks']
             ip = None
-            for net_name, net_config in networks.items():
+            for _, net_config in networks.items():
                 if net_config.get('IPAddress'):
                     ip = net_config['IPAddress']
                     break
@@ -161,6 +203,169 @@ def build_dns_records(containers, host_ip):
             records[hostname] = [info['ip']]
     
     return records
+
+
+# ─── Integration: Service Discovery API ───────────────────────────────────────
+
+def get_service_discovery_data():
+    """Get current service discovery data for control plane."""
+    with dns_lock:
+        records = dict(dns_records)
+    with health_lock:
+        status = dict(health_status)
+    
+    services = {}
+    for hostname, ips in records.items():
+        alive_ips = [ip for ip in ips if status.get((hostname, ip), False)]
+        services[hostname] = {
+            "ips": ips,
+            "alive_ips": alive_ips,
+            "healthy": len(alive_ips) > 0
+        }
+    
+    return {
+        "services": services,
+        "networks": DISCOVERED_NETWORKS,
+        "container_count": len(records),
+        "last_discovery": LAST_DISCOVERY_TIME,
+        "host_ip": get_host_ip()
+    }
+
+
+class DiscoveryAPIHandler(BaseHTTPRequestHandler):
+    """HTTP handler for service discovery API."""
+    
+    def log_message(self, format, *args):
+        """Suppress default logging."""
+        pass
+    
+    def do_GET(self):
+        """Handle GET requests."""
+        parsed = urlparse(self.path)
+        path = parsed.path
+        params = parse_qs(parsed.query)
+        
+        # Check authentication
+        secret = self.headers.get("X-Internal-Secret", "")
+        if secret != INTERNAL_SECRET:
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
+            return
+        
+        if path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "status": "ok",
+                "service": "dns_sync",
+                "container_count": len(dns_records)
+            }).encode())
+        
+        elif path == "/api/discovery":
+            data = get_service_discovery_data()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(data).encode())
+        
+        elif path == "/api/discovery/services":
+            services = get_service_discovery_data()["services"]
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(services).encode())
+        
+        elif path == "/api/discovery/alive":
+            services = get_service_discovery_data()["services"]
+            alive = {k: v for k, v in services.items() if v["healthy"]}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(alive).encode())
+        
+        elif path.startswith("/api/discovery/"):
+            # Get specific service: /api/discovery/identity.local
+            service_name = path.split("/")[-1]
+            services = get_service_discovery_data()["services"]
+            if service_name in services:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps(services[service_name]).encode())
+            else:
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": "Service not found"}).encode())
+        
+        else:
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Not found"}).encode())
+
+
+def start_discovery_api():
+    """Start the service discovery HTTP API server."""
+    api_port = 8009
+    server = HTTPServer(("0.0.0.0", api_port), DiscoveryAPIHandler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    print(f"[dns-sync] Service discovery API listening on port {api_port}", flush=True)
+    return server
+
+
+# ─── Integration: Webhook Notifications ──────────────────────────────────────
+
+def notify_control_plane(event, data):
+    """Send webhook notification to control plane about changes."""
+    if not CONTROL_PLANE_WEBHOOK_URL:
+        return
+    
+    payload = json.dumps({
+        "event": event,
+        "data": data,
+        "timestamp": time.time()
+    }).encode()
+    
+    try:
+        req = Request(
+            CONTROL_PLANE_WEBHOOK_URL,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        urlopen(req, timeout=5)
+        print(f"[dns-sync] Webhook sent: {event}", flush=True)
+    except Exception as e:
+        print(f"[dns-sync] Webhook failed: {e}", flush=True)
+
+
+def on_network_change(old_containers, new_containers):
+    """Handle network changes by notifying control plane."""
+    global LAST_CONTAINER_COUNT
+    
+    added = []
+    removed = []
+    
+    for name in new_containers:
+        if name not in old_containers:
+            added.append(name)
+    
+    for name in old_containers:
+        if name not in new_containers:
+            removed.append(name)
+    
+    if added or removed:
+        notify_control_plane("network_change", {
+            "added": added,
+            "removed": removed,
+            "total": len(new_containers)
+        })
+        LAST_CONTAINER_COUNT = len(new_containers)
 
 
 def fetch_dns_mappings():
@@ -385,7 +590,12 @@ def build_dns_response(txid, hostname, answers, rcode=0):
 
 def forward_query(hostname, qtype):
     """Forward query to upstream DNS server with fallback."""
-    for upstream in [UPSTREAM_DNS, UPSTREAM_DNS_2]:
+    upstreams = [UPSTREAM_DNS]
+    if DISCOVERED_NETWORKS.get('gateway'):
+        upstreams.append(DISCOVERED_NETWORKS['gateway'])
+    upstreams.append("8.8.8.8")
+    
+    for upstream in upstreams:
         try:
             query = bytearray()
             query += b'\x00\x01'
@@ -412,7 +622,7 @@ def dns_server():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(('0.0.0.0', DNS_LISTEN_PORT))
-    print(f"[dns-sync] DNS server listening on 0.0.0.0:{DNS_LISTEN_PORT}", flush=True)
+    print(f"[dns-sync] DNS server listening on 0.0.0.0:{DNS_LISTEN_PORT} (non-standard port)", flush=True)
     
     while running:
         try:
@@ -446,10 +656,69 @@ def dns_server():
     print("[dns-sync] DNS server stopped", flush=True)
 
 
+def discover_identity_url():
+    """Discover Identity service URL from Docker networks."""
+    global IDENTITY_URL, IDENTITY_URL_INITIALIZED
+    if IDENTITY_URL_INITIALIZED:
+        return
+    
+    # First check environment
+    env_url = os.environ.get("IDENTITY_SVC_URL")
+    if env_url:
+        IDENTITY_URL = env_url
+        IDENTITY_URL_INITIALIZED = True
+        return
+    
+    # Try to find identity service in Docker networks
+    if DOCKER_AVAILABLE:
+        try:
+            for container in DOCKER_CLIENT.containers.list(all=True):
+                if 'identity' in container.name.lower():
+                    networks = container.attrs['NetworkSettings']['Networks']
+                    for net_config in networks.values():
+                        if net_config.get('IPAddress'):
+                            IDENTITY_URL = f"http://{net_config['IPAddress']}:8001"
+                            IDENTITY_URL_INITIALIZED = True
+                            print(f"[dns-sync] Discovered identity URL: {IDENTITY_URL}", flush=True)
+                            return
+        except Exception as e:
+            print(f"[dns-sync] Error discovering identity URL: {e}", flush=True)
+    
+    # Default fallback
+    IDENTITY_URL = "http://localhost:8001"
+    IDENTITY_URL_INITIALIZED = True
+    print(f"[dns-sync] Using default identity URL: {IDENTITY_URL}", flush=True)
+
+
+def setup_iptables():
+    """Setup iptables rules to redirect Docker network DNS queries to port 5353."""
+    try:
+        import subprocess
+        # Redirect DNS queries from Docker network (172.26.0.0/16) to port 5353
+        subprocess.run([
+            "iptables", "-t", "nat", "-A", "PREROUTING",
+            "-s", "172.26.0.0/16", "-p", "udp", "--dport", "53",
+            "-j", "REDIRECT", "--to-port", "5353"
+        ], check=True, capture_output=True)
+        print("[dns-sync] iptables: Docker DNS → port 5353", flush=True)
+    except Exception as e:
+        print(f"[dns-sync] Warning: Could not setup iptables: {e}", flush=True)
+
+
 def main():
     global running
     print(f"[dns-sync] Starting DNS sync sidecar (poll every {POLL_INTERVAL}s)", flush=True)
     print(f"[dns-sync] Docker API available: {DOCKER_AVAILABLE}", flush=True)
+    
+    # Discover network configuration
+    discover_networks()
+    discover_identity_url()
+    
+    if not DISCOVERED_NETWORKS.get('gateway'):
+        print("[dns-sync] Warning: No network gateway discovered, using default upstream DNS", flush=True)
+    
+    # Setup iptables to redirect Docker DNS queries
+    setup_iptables()
     
     # Start health checker
     health_thread = threading.Thread(target=health_checker, daemon=True)
@@ -464,8 +733,9 @@ def main():
     discovery_interval = 10  # Discover containers every 10 seconds
     
     while running:
-        # Discover containers periodically
+        # Discover networks and containers periodically
         if time.time() - last_discovery > discovery_interval:
+            discover_networks()
             host_ip = get_host_ip()
             containers = discover_containers_via_docker()
             records = build_dns_records(containers, host_ip)

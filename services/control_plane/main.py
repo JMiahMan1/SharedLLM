@@ -771,6 +771,21 @@ def exec_in_container(service_name: str, body: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ─── Integration: DNS Sync Webhook ───────────────────────────────────────────
+
+@app.post("/api/webhooks/dns-sync")
+async def dns_sync_webhook(request: dict):
+    """Handle webhook notifications from DNS sync service."""
+    event = request.get("event")
+    data = request.get("data", {})
+    log.info(f"[dns-sync webhook] Event: {event}, Data: {data}")
+    
+    if event == "network_change":
+        log.info(f"[dns-sync] Network change: added={data.get('added')}, removed={data.get('removed')}")
+    
+    return {"status": "ok", "event": event}
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8008)
