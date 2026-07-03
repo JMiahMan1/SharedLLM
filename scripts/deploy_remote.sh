@@ -120,7 +120,8 @@ if ssh $SSH_OPTS "$HOST" << EOF
     SUCCESS=0
 
     # Check logs until success message or timeout
-    GATEWAY_CONTAINER=$(docker ps --format '{{.Names}}' | awk '/_sharedllm_gateway/{print; exit}')
+    GATEWAY_CONTAINER=$(docker ps --format '{{.Names}}' | grep '_sharedllm_gateway' | head -1)
+    GATEWAY_CONTAINER=${GATEWAY_CONTAINER:-$(docker ps --format '{{.Names}}' | grep 'gateway' | head -1)}
     GATEWAY_CONTAINER=${GATEWAY_CONTAINER:-sharedllm_gateway}
     while [ \$ELAPSED -lt \$TIMEOUT ]; do
         if docker logs --tail 200 \$GATEWAY_CONTAINER 2>&1 | grep -q "Application startup complete"; then
