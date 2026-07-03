@@ -70,10 +70,17 @@ signal.signal(signal.SIGINT, handle_signal)
 
 def get_host_ip():
     """Get host's IP address on the Docker network (gateway IP)."""
-    print(f"[dns-sync] DEBUG get_host_ip: DISCOVERED_NETWORKS keys={list(DISCOVERED_NETWORKS.keys())}", flush=True)
+    # Prioritize sharedllm network gateway
+    for net_name, net_config in DISCOVERED_NETWORKS.items():
+        if 'sharedllm' in net_name:
+            gateway = net_config.get('gateway') if net_config else None
+            if gateway:
+                print(f"[dns-sync] Using sharedllm gateway: {gateway}", flush=True)
+                return gateway
+    
+    # Fallback: return first available gateway
     for net_config in DISCOVERED_NETWORKS.values():
         gateway = net_config.get('gateway') if net_config else None
-        print(f"[dns-sync] DEBUG get_host_ip: checking config {net_config} -> gateway={gateway}", flush=True)
         if gateway:
             return gateway
     
