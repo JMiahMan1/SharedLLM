@@ -21,9 +21,8 @@ services:
       - /etc/hosts:/etc/hosts
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - IDENTITY_SVC_URL=http://192.168.2.205:8001
       - DNS_POLL_INTERVAL=30
-      - UPSTREAM_DNS_2=192.168.1.1
+
     depends_on:
       - identity
 
@@ -131,7 +130,6 @@ services:
     restart: unless-stopped
     dns:
       - "172.26.0.10"
-      - "192.168.1.1"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -245,7 +243,6 @@ services:
     restart: unless-stopped
     dns:
       - "172.26.0.10"
-      - "192.168.1.1"
     ports:
       - "8006:8006"
     environment:
@@ -280,7 +277,6 @@ services:
     restart: unless-stopped
     dns:
       - "172.26.0.10"
-      - "192.168.1.1"
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
@@ -321,7 +317,6 @@ services:
     restart: unless-stopped
     dns:
       - "172.26.0.10"
-      - "192.168.1.1"
     ports:
       - 8005:8005
     environment:
@@ -356,7 +351,6 @@ services:
     restart: unless-stopped
     dns:
       - "172.26.0.10"
-      - "192.168.1.1"
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
@@ -428,7 +422,6 @@ services:
     restart: always
     dns:
       - "172.26.0.10"
-      - "192.168.1.1"
     ports:
       - 8008:8008
     user: "${PUID:-1000}:${PGID:-1000}"
