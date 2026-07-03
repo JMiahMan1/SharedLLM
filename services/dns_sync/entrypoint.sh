@@ -20,4 +20,4 @@ sleep 2
 
 # Run the sync script
 echo "[entrypoint] Starting DNS sync sidecar..."
-exec python dns_sync.py
+exec python config/dns_sync.py

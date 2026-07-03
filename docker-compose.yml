@@ -15,16 +15,13 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_dns_sync
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:5354:53/udp"
+    network_mode: host
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - /etc/hosts:/etc/hosts
-    networks:
-      sharedllm:
-        ipv4_address: 172.26.0.10
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - IDENTITY_SVC_URL=http://identity:8001
+      - IDENTITY_SVC_URL=http://192.168.2.205:8001
       - DNS_POLL_INTERVAL=30
       - UPSTREAM_DNS_2=192.168.1.1
     depends_on:
