@@ -56,12 +56,15 @@ services:
     restart: unless-stopped
     ports:
       - 8001:8001
+    env_file:
+      - .env
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////data/identity.db
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - LEGACY_ENV_PATH=/app/.env
       - FORCE_RESEED=${FORCE_RESEED:-false}
+      - IDENTITY_SVC_URL=${IDENTITY_SVC_URL}
       - TZ=America/Phoenix
     volumes:
       - identity_db:/data
@@ -104,6 +107,7 @@ services:
       - REDIS_URL=redis://localhost:6379/0
       - SEARXNG_URL=http://localhost:8080
       - EXECUTION_EXTERNAL_HOST=192.168.2.205
+      - TEMP_VIDEO_DIR=/workspaces
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
       - WORKSPACE_ROOT=/workspaces
