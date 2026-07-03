@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
-"""DNS Sync Sidecar - Polls Identity for DNS mappings, health-checks IPs, and serves DNS with automatic failover."""
+"""DNS Sync Sidecar - Cross-network DNS discovery and serving.
+
+Discovers all containers (any network) via Docker API and serves DNS
+records with health checking for both Docker-networked and host-networked
+services.
+"""
 import os
+import sys
 import json
 import time
 import signal
@@ -10,6 +16,16 @@ import threading
 import tempfile
 import shutil
 from urllib.request import Request, urlopen
+from urllib.error import URLError
+
+# Try to import docker library for container discovery
+try:
+    import docker
+    DOCKER_CLIENT = docker.from_env()
+    DOCKER_AVAILABLE = True
+except ImportError:
+    DOCKER_CLIENT = None
+    DOCKER_AVAILABLE = False
 
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 IDENTITY_URL = os.environ.get("IDENTITY_SVC_URL", "http://localhost:8001")
@@ -28,11 +44,12 @@ DEFAULT_HEALTH_PORTS = {
     "llama-server": 11434,
     "ai": 8080,
     "execution": 8003,
-}
-
-# Host-networked services that can't use Docker DNS
-HOST_NETWORKED_SERVICES = {
-    "execution.local": 8003,
+    "identity": 8001,
+    "gateway": 11435,
+    "rag": 8002,
+    "ui": 8080,
+    "caddy": 80,
+    "redis": 6379,
 }
 
 POLL_INTERVAL = DNS_POLL_INTERVAL
@@ -42,6 +59,7 @@ health_status = {}      # (hostname, ip) -> bool (True = alive)
 dns_lock = threading.Lock()
 health_lock = threading.Lock()
 
+
 def handle_signal(signum, frame):
     global running
     running = False
@@ -49,8 +67,104 @@ def handle_signal(signum, frame):
 signal.signal(signal.SIGTERM, handle_signal)
 signal.signal(signal.SIGINT, handle_signal)
 
+
+def get_host_ip():
+    """Get host's actual IP address (not Docker gateway)."""
+    # Use socket to get IP of default route
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            s.close()
+        except Exception:
+            pass
+    
+    # Fallback: try hostname -I
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["hostname", "-I"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            ips = result.stdout.strip().split()
+            if ips:
+                return ips[0]
+    except Exception:
+        pass
+    
+    return None
+
+
+def discover_containers_via_docker():
+    """Discover all containers and their IPs via Docker API.
+    
+    Returns dict of service_name -> {ip, host_networked}
+    """
+    if not DOCKER_AVAILABLE:
+        return {}
+    
+    containers = {}
+    try:
+        for container in DOCKER_CLIENT.containers.list(all=True):
+            name = container.name.replace('sharedllm_', '')
+            if not name:
+                continue
+            
+            # Get container IP from any network
+            networks = container.attrs['NetworkSettings']['Networks']
+            ip = None
+            for net_name, net_config in networks.items():
+                if net_config.get('IPAddress'):
+                    ip = net_config['IPAddress']
+                    break
+            
+            # Check if host-networked
+            network_mode = container.attrs['HostConfig'].get('NetworkMode', '')
+            host_networked = (network_mode == 'host')
+            
+            containers[name] = {
+                'ip': ip,
+                'host_networked': host_networked,
+                'status': container.status
+            }
+    except Exception as e:
+        print(f"[dns-sync] Error discovering containers: {e}", flush=True)
+    
+    return containers
+
+
+def build_dns_records(containers, host_ip):
+    """Build DNS records mapping hostnames to IPs.
+    
+    For host-networked services, use host IP.
+    For Docker-networked services, use container IP.
+    """
+    records = {}
+    
+    for name, info in containers.items():
+        hostname = f"{name}.local" if not name.endswith('.local') else name
+        hostname = hostname.lower()
+        
+        if info['host_networked'] or not info['ip']:
+            # Use host IP for host-networked services or if no container IP
+            if host_ip:
+                records[hostname] = [host_ip]
+        elif info['ip']:
+            # Use container IP
+            records[hostname] = [info['ip']]
+    
+    return records
+
+
 def fetch_dns_mappings():
-    """Fetch DNS mappings from Identity settings."""
+    """Fetch DNS mappings from Identity settings (fallback)."""
     try:
         req = Request(
             f"{IDENTITY_URL}/api/settings",
@@ -61,9 +175,10 @@ def fetch_dns_mappings():
             for s in settings:
                 if s["key"] == "dns_mappings":
                     return json.loads(s["value"]) if s["value"] else {}
-    except Exception as e:
+    except (URLError, Exception) as e:
         print(f"[dns-sync] Error fetching settings: {e}", flush=True)
     return {}
+
 
 def get_health_port(hostname):
     """Determine health check port for a hostname."""
@@ -72,6 +187,7 @@ def get_health_port(hostname):
         if pattern in base:
             return port
     return 80  # default fallback
+
 
 def check_ip_alive(ip, port):
     """TCP connect check to see if an IP is reachable."""
@@ -83,6 +199,7 @@ def check_ip_alive(ip, port):
         return result == 0
     except Exception:
         return False
+
 
 def health_checker():
     """Background thread that health-checks all configured IPs."""
@@ -119,6 +236,7 @@ def health_checker():
                 break
             time.sleep(1)
 
+
 def _print_health_summary():
     """Print current health status summary."""
     with dns_lock:
@@ -131,6 +249,7 @@ def _print_health_summary():
         dead_ips = [ip for ip in ips if not status.get((hostname, ip), False)]
         if alive_ips:
             print(f"[dns-sync] DNS {hostname}: alive={alive_ips}, dead={dead_ips}", flush=True)
+
 
 def _sync_hosts_file():
     """Write alive IPs to /etc/hosts so host-networked services resolve .local domains."""
@@ -204,6 +323,7 @@ def _sync_hosts_file():
     except Exception as e:
         print(f"[dns-sync] Failed to update {HOSTS_FILE}: {e}", flush=True)
 
+
 def get_alive_ips(hostname):
     """Get list of alive IPs for a hostname. Only returns alive IPs."""
     with dns_lock:
@@ -218,110 +338,6 @@ def get_alive_ips(hostname):
     # Only return alive IPs. If all dead, return all as last resort.
     return alive if alive else all_ips
 
-_cached_gateway_ip = None
-
-def get_host_gateway_ip():
-    """Get host's actual IP address (not Docker gateway)."""
-    global _cached_gateway_ip
-    if _cached_gateway_ip is not None:
-        return _cached_gateway_ip
-    
-    # Method 1: Socket connection to external IP (gets local interface IP)
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        _cached_gateway_ip = ip
-        print(f"[dns-sync] Resolved host IP via socket: {ip}", flush=True)
-        return ip
-    except Exception:
-        try:
-            s.close()
-        except Exception:
-            pass
-    
-    # Method 2: Read from /proc/net/route (standard Linux)
-    try:
-        with open("/proc/net/route") as f:
-            for line in f:
-                parts = line.strip().split()
-                if len(parts) >= 3 and parts[1] == "00000000":
-                    ip = socket.inet_ntoa(struct.pack("<L", int(parts[2], 16)))
-                    _cached_gateway_ip = ip
-                    print(f"[dns-sync] Resolved host IP from routing table: {ip}", flush=True)
-                    return ip
-    except Exception:
-        pass
-
-    # Method 3: Fallback to socket resolution of host.docker.internal
-    try:
-        ip = socket.gethostbyname("host.docker.internal")
-        _cached_gateway_ip = ip
-        print(f"[dns-sync] Resolved host IP via host.docker.internal DNS: {ip}", flush=True)
-        return ip
-    except Exception:
-        pass
-
-    # Method 4: Try to get from network interfaces (eth0)
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["hostname", "-I"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode == 0:
-            ips = result.stdout.strip().split()
-            if ips:
-                ip = ips[0]
-                _cached_gateway_ip = ip
-                print(f"[dns-sync] Resolved host IP from hostname -I: {ip}", flush=True)
-                return ip
-    except Exception:
-        pass
-
-    # Last resort: return localhost (won't work for remote hosts, but won't crash)
-    print(f"[dns-sync] WARNING: Could not determine host IP, using 127.0.0.1", flush=True)
-    return "127.0.0.1"
-
-def update_dns_records(mappings):
-    """Update in-memory DNS records from mappings."""
-    global dns_records
-    new_records = {}
-    for hostname, ips in mappings.items():
-        if not hostname:
-            continue
-        if isinstance(ips, str):
-            ips = [ips]
-        elif not isinstance(ips, list):
-            continue
-        if not hostname.endswith('.local'):
-            hostname = f"{hostname}.local"
-        
-        clean_ips = []
-        for ip in ips:
-            if ip == "host-gateway":
-                resolved_ip = get_host_gateway_ip()
-                if resolved_ip:
-                    clean_ips.append(resolved_ip)
-            elif ip:
-                clean_ips.append(ip)
-        new_records[hostname.lower()] = clean_ips
-    
-    # Auto-discover host-networked services via the bridge gateway (host IP)
-    host_ip = get_host_gateway_ip()
-    if host_ip:
-        for service_name, port in HOST_NETWORKED_SERVICES.items():
-            hostname = service_name if service_name.endswith('.local') else f"{service_name}.local"
-            if hostname not in new_records:
-                new_records[hostname.lower()] = [host_ip]
-                print(f"[dns-sync] Auto-added host-networked service: {hostname} -> {host_ip}:{port}", flush=True)
-    
-    with dns_lock:
-        dns_records = new_records
-    print(f"[dns-sync] Updated DNS records: {len(new_records)} hostnames", flush=True)
 
 def parse_dns_query(data):
     """Parse a DNS query and return (txid, hostname, qtype)."""
@@ -349,6 +365,7 @@ def parse_dns_query(data):
     qtype = struct.unpack('!H', data[idx:idx+2])[0]
     return txid, hostname, qtype
 
+
 def build_dns_response(txid, hostname, answers, rcode=0):
     """Build a DNS response packet."""
     flags = 0x8180 | rcode
@@ -364,6 +381,7 @@ def build_dns_response(txid, hostname, answers, rcode=0):
         ans += struct.pack('!HHIH', 1, 1, 5, 4)  # TTL 5s for fast failover
         ans += bytes(int(x) for x in ip.split('.'))
     return header + question + ans
+
 
 def forward_query(hostname, qtype):
     """Forward query to upstream DNS server with fallback."""
@@ -387,6 +405,7 @@ def forward_query(hostname, qtype):
         except Exception:
             continue
     return None
+
 
 def dns_server():
     """Run a simple DNS server with health-aware responses."""
@@ -426,9 +445,11 @@ def dns_server():
     sock.close()
     print("[dns-sync] DNS server stopped", flush=True)
 
+
 def main():
     global running
     print(f"[dns-sync] Starting DNS sync sidecar (poll every {POLL_INTERVAL}s)", flush=True)
+    print(f"[dns-sync] Docker API available: {DOCKER_AVAILABLE}", flush=True)
     
     # Start health checker
     health_thread = threading.Thread(target=health_checker, daemon=True)
@@ -438,13 +459,35 @@ def main():
     dns_thread = threading.Thread(target=dns_server, daemon=True)
     dns_thread.start()
     
-    last_mappings = None
+    last_records = {}
+    last_discovery = time.time()
+    discovery_interval = 10  # Discover containers every 10 seconds
     
     while running:
+        # Discover containers periodically
+        if time.time() - last_discovery > discovery_interval:
+            host_ip = get_host_ip()
+            containers = discover_containers_via_docker()
+            records = build_dns_records(containers, host_ip)
+            
+            if records != last_records:
+                with dns_lock:
+                    global dns_records
+                    dns_records = records
+                last_records = records
+                print(f"[dns-sync] Discovered {len(containers)} containers, {len(records)} DNS records", flush=True)
+            
+            last_discovery = time.time()
+        
+        # Also fetch from Identity (fallback for external services)
         mappings = fetch_dns_mappings()
-        if mappings != last_mappings:
-            update_dns_records(mappings)
-            last_mappings = mappings
+        if mappings:
+            for hostname, ips in mappings.items():
+                if isinstance(ips, str):
+                    ips = [ips]
+                full_hostname = hostname if hostname.endswith('.local') else f"{hostname}.local"
+                with dns_lock:
+                    dns_records[full_hostname.lower()] = ips
         
         for _ in range(POLL_INTERVAL):
             if not running:
@@ -452,6 +495,7 @@ def main():
             time.sleep(1)
     
     print("[dns-sync] Shutting down", flush=True)
+
 
 if __name__ == "__main__":
     main()

@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     traceroute \
     nmap \
-    && rm -rf /var/lib/apt/lists/*
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir docker
 
 CMD ["python", "config/dns_sync.py"]
