@@ -265,6 +265,7 @@ def _sync_special_vars_to_env():
                 if db_value and env_value and db_value != env_value:
                     log.info(f"Special variable {var} differs between database and .env. Updating .env.")
                     changes_made = True
+                    break
             
             if changes_made:
                 # Re-write .env with updated values (preserve comments and order)
