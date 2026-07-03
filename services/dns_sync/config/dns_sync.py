@@ -497,6 +497,25 @@ def main():
     if not DISCOVERED_NETWORKS.get('gateway'):
         print("[dns-sync] Warning: No network gateway discovered, using default upstream DNS", flush=True)
     
+    # Get our own container IP
+    own_ip = None
+    try:
+        with open('/etc/hostname') as f:
+            own_hostname = f.read().strip()
+        # Get container IP from Docker network
+        if DOCKER_AVAILABLE:
+            try:
+                for network in DOCKER_CLIENT.networks.list():
+                    containers = network.containers
+                    for c in containers:
+                        if c.name == os.environ.get('HOSTNAME', ''):
+                            own_ip = c.attrs['NetworkSettings']['Networks']['sharedllm_default']['IPAddress'] if 'sharedllm_default' in c.attrs['NetworkSettings']['Networks'] else None
+                            break
+            except Exception as e:
+                print(f"[dns-sync] Warning: Could not get own IP: {e}", flush=True)
+    except Exception as e:
+        print(f"[dns-sync] Warning: Could not get hostname: {e}", flush=True)
+    
     # Start health checker
     health_thread = threading.Thread(target=health_checker, daemon=True)
     health_thread.start()
@@ -516,6 +535,12 @@ def main():
             host_ip = get_host_ip()
             containers = discover_containers_via_docker()
             records = build_dns_records(containers, host_ip)
+            
+            # Add ourselves to the DNS records
+            if own_ip:
+                own_hostname = f"dns-sync.local"
+                records[own_hostname] = [own_ip]
+                print(f"[dns-sync] Registered self: {own_hostname} -> {own_ip}", flush=True)
             
             if records != last_records:
                 with dns_lock:
