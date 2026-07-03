@@ -72,9 +72,10 @@ def get_host_ip():
     """Get host's IP address on the Docker network (gateway IP)."""
     # Use Docker network gateway IP as the host IP
     # This is the correct approach for containers on a Docker network
-    gateway = DISCOVERED_NETWORKS.get('gateway')
-    if gateway:
-        return gateway
+    for net_config in DISCOVERED_NETWORKS.values():
+        gateway = net_config.get('gateway')
+        if gateway:
+            return gateway
     
     # Fallback: try to get IP via socket (works for non-Docker)
     try:
