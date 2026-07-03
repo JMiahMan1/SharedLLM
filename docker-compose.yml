@@ -15,6 +15,8 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_dns_sync
     restart: unless-stopped
+    group_add:
+      - docker
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
@@ -107,7 +109,7 @@ services:
       - REDIS_URL=redis://localhost:6379/0
       - SEARXNG_URL=http://localhost:8080
       - EXECUTION_EXTERNAL_HOST=192.168.2.205
-      - TEMP_VIDEO_DIR=/workspaces
+      - TEMP_MEDIA_DIR=/workspaces
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
       - WORKSPACE_ROOT=/workspaces
