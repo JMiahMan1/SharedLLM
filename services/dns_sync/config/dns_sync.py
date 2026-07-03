@@ -34,7 +34,7 @@ except ImportError:
 
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 DNS_POLL_INTERVAL = int(os.environ.get("DNS_POLL_INTERVAL", "30"))
-DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "5353"))
+DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "53"))
 UPSTREAM_DNS = os.environ.get("UPSTREAM_DNS", "127.0.0.11")
 HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", "10"))
 HEALTH_CHECK_TIMEOUT = int(os.environ.get("HEALTH_CHECK_TIMEOUT", "2"))
@@ -622,7 +622,7 @@ def dns_server():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(('0.0.0.0', DNS_LISTEN_PORT))
-    print(f"[dns-sync] DNS server listening on 0.0.0.0:{DNS_LISTEN_PORT} (non-standard port)", flush=True)
+    print(f"[dns-sync] DNS server listening on 0.0.0.0:{DNS_LISTEN_PORT}", flush=True)
     
     while running:
         try:
@@ -690,21 +690,6 @@ def discover_identity_url():
     print(f"[dns-sync] Using default identity URL: {IDENTITY_URL}", flush=True)
 
 
-def setup_iptables():
-    """Setup iptables rules to redirect Docker network DNS queries to port 5353."""
-    try:
-        import subprocess
-        # Redirect DNS queries from Docker network (172.26.0.0/16) to port 5353
-        subprocess.run([
-            "iptables", "-t", "nat", "-A", "PREROUTING",
-            "-s", "172.26.0.0/16", "-p", "udp", "--dport", "53",
-            "-j", "REDIRECT", "--to-port", "5353"
-        ], check=True, capture_output=True)
-        print("[dns-sync] iptables: Docker DNS → port 5353", flush=True)
-    except Exception as e:
-        print(f"[dns-sync] Warning: Could not setup iptables: {e}", flush=True)
-
-
 def main():
     global running
     print(f"[dns-sync] Starting DNS sync sidecar (poll every {POLL_INTERVAL}s)", flush=True)
@@ -716,9 +701,6 @@ def main():
     
     if not DISCOVERED_NETWORKS.get('gateway'):
         print("[dns-sync] Warning: No network gateway discovered, using default upstream DNS", flush=True)
-    
-    # Setup iptables to redirect Docker DNS queries
-    setup_iptables()
     
     # Start health checker
     health_thread = threading.Thread(target=health_checker, daemon=True)

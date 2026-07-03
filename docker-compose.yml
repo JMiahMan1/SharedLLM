@@ -15,16 +15,19 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_dns_sync
     restart: unless-stopped
-    network_mode: host
+    dns:
+      - 127.0.0.11
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /etc/hosts:/etc/hosts
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - DNS_POLL_INTERVAL=30
-
+      - DNS_LISTEN_PORT=53
     depends_on:
       - identity
+    networks:
+      - sharedllm
 
   caddy:
     image: caddy:2-alpine
@@ -129,7 +132,7 @@ services:
     container_name: sharedllm_rag
     restart: unless-stopped
     dns:
-      - "172.26.0.10"
+      - dns-sync
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -197,7 +200,7 @@ services:
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
     dns:
-      - "172.26.0.1"
+      - dns-sync
     depends_on:
       identity:
         condition: service_healthy
@@ -242,7 +245,7 @@ services:
     container_name: sharedllm_logging
     restart: unless-stopped
     dns:
-      - "172.26.0.10"
+      - dns-sync
     ports:
       - "8006:8006"
     environment:
@@ -276,7 +279,7 @@ services:
     container_name: sharedllm_automation
     restart: unless-stopped
     dns:
-      - "172.26.0.10"
+      - dns-sync
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
@@ -350,7 +353,7 @@ services:
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
     dns:
-      - "172.26.0.10"
+      - dns-sync
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
@@ -421,7 +424,7 @@ services:
     container_name: sharedllm_control_plane
     restart: always
     dns:
-      - "172.26.0.10"
+      - dns-sync
     ports:
       - 8008:8008
     user: "${PUID:-1000}:${PGID:-1000}"
