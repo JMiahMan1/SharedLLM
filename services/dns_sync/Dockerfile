@@ -10,9 +10,6 @@ WORKDIR /app
 COPY . .
 ENV PYTHONUNBUFFERED=1
 
-# Create docker group and add current user to it
-RUN groupadd -g 999 docker 2>/dev/null || true
-
 # DNS sync-specific: DNS/network tools (dnsutils already provides dig, host, nslookup)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils \
