@@ -35,7 +35,7 @@ if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
     from services.config import LEGACY_ENV_PATH as _LEGACY_ENV_PATH
 
     _legacy_env = _LEGACY_ENV_PATH
-    if os.path.exists(_legacy_env):
+    if _legacy_env and os.path.exists(_legacy_env):
         load_dotenv(_legacy_env)
     elif os.path.exists(".env"):
         load_dotenv(".env")
