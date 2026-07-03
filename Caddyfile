@@ -47,18 +47,20 @@
         reverse_proxy gateway:11435
     }
     handle /api/sendspin {
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up Connection {>Connection}
-        header_up Upgrade {>Upgrade}
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up Connection {>Connection}
+            header_up Upgrade {>Upgrade}
+        }
     }
     handle /api/ma-jsonrpc {
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-Proto {scheme}
-        header_up Connection {>Connection}
-        header_up Upgrade {>Upgrade}
-        reverse_proxy gateway:11435
+        reverse_proxy gateway:11435 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up Connection {>Connection}
+            header_up Upgrade {>Upgrade}
+        }
     }
     handle /api/presence* {
         reverse_proxy gateway:11435
