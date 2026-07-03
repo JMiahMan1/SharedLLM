@@ -37,13 +37,16 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_dns-forwarder
     restart: unless-stopped
-    network_mode: host
+    ports:
+      - "53:53/udp"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DNS_SYNC_HOST=127.0.0.1
+      - DNS_SYNC_HOST=172.17.0.1
       - DNS_SYNC_PORT=5353
     depends_on:
       - dns-sync
+    networks:
+      - sharedllm
 
   caddy:
     image: caddy:2-alpine
