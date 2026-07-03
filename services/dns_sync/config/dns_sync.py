@@ -92,26 +92,37 @@ def get_host_ip():
 
 def discover_networks():
     """Discover Docker networks and gateway IPs."""
+    global DISCOVERED_NETWORKS
     if not DOCKER_AVAILABLE:
         return
     
+    DISCOVERED_NETWORKS = {}
+    
     try:
-        for network in DOCKER_CLIENT.networks.list():
-            net_config = network.attrs.get('IPAM', {}).get('Config', [])
-            gateway = None
-            subnet = None
-            for config in net_config:
-                if config.get('Gateway'):
-                    gateway = config['Gateway']
-                if config.get('Subnet'):
-                    subnet = config['Subnet']
-            
-            if gateway:
-                DISCOVERED_NETWORKS[network.name] = {
-                    'gateway': gateway,
-                    'subnet': subnet
-                }
-                print(f"[dns-sync] Network: {network.name} -> gateway={gateway}, subnet={subnet}", flush=True)
+        networks = DOCKER_CLIENT.networks.list()
+        if not networks:
+            return
+        
+        for network in networks:
+            try:
+                net_config = network.attrs.get('IPAM', {}).get('Config') or []
+                gateway = None
+                subnet = None
+                for config in net_config:
+                    if config and config.get('Gateway'):
+                        gateway = config['Gateway']
+                    if config and config.get('Subnet'):
+                        subnet = config['Subnet']
+                
+                if gateway:
+                    DISCOVERED_NETWORKS[network.name] = {
+                        'gateway': gateway,
+                        'subnet': subnet
+                    }
+                    print(f"[dns-sync] Network: {network.name} -> gateway={gateway}, subnet={subnet}", flush=True)
+            except Exception as e:
+                print(f"[dns-sync] Error processing network {network.name}: {e}", flush=True)
+                continue
     except Exception as e:
         print(f"[dns-sync] Error discovering networks: {e}", flush=True)
 
