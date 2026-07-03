@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 
+# Configuration module - handles bootstrap and runtime config resolution
 log = logging.getLogger(__name__)
 
 def _is_testing() -> bool:
