@@ -91,7 +91,6 @@ def get_host_ip():
 
 def discover_networks():
     """Discover Docker networks and gateway IPs."""
-    global DISCOVERED_NETWORKS
     if not DOCKER_AVAILABLE:
         return
     
