@@ -236,3 +236,18 @@ CONFIG = {
     "coding_model": CODING_MODEL or "",
     "mass_config_entry_id": MASS_CONFIG_ENTRY_ID,
 }
+
+# --- Validation: critical runtime paths that must exist ---
+_MISSING_REQUIRED: list[str] = []
+for _v in ("EXECUTION_SVC_URL", "HA_URL", "HA_TOKEN", "WORKSPACE_ROOT", "TEMP_MEDIA_DIR", "MODELS_DIR", "DEFAULT_TTS_VOICE"):
+    if not os.getenv(_v):
+        _MISSING_REQUIRED.append(_v)
+
+if _MISSING_REQUIRED and not _is_testing():
+    logging.basicConfig(level="CRITICAL")
+    logging.critical(
+        f"FATAL: Missing required environment variables: {', '.join(_MISSING_REQUIRED)}\n"
+        "These must be set in .env and seeded via Identity Service.\n"
+        "See README.md for first-run setup instructions."
+    )
+    sys.exit(1)
