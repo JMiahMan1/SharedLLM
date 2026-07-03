@@ -27,6 +27,24 @@ services:
     networks:
       - sharedllm
 
+  dns_forwarder:
+    image: ghcr.io/jmiahman1/sharedllm-dns_forwarder:latest
+    build:
+      context: .
+      dockerfile: services/dns_forwarder/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_dns_forwarder
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+    networks:
+      - sharedllm
+
   caddy:
     image: caddy:2-alpine
     container_name: sharedllm_caddy
@@ -42,6 +60,8 @@ services:
       - ui
       - gateway
       - identity
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
@@ -73,6 +93,8 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ./.env:/app/.env:ro
       - ./prompts:/app/prompts:ro
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
     healthcheck:
@@ -162,6 +184,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 120s
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
@@ -186,6 +210,8 @@ services:
       rag:
         condition: service_healthy
     command: python3 scripts/index_capabilities.py
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
@@ -227,6 +253,8 @@ services:
       - huggingface_cache:/home/sharedllm/.cache/huggingface
       - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
@@ -259,6 +287,8 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - redis
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
@@ -297,6 +327,8 @@ services:
     depends_on:
       - redis
       - execution
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
@@ -329,6 +361,8 @@ services:
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
@@ -374,6 +408,8 @@ services:
       - workspace_runtime_data:/data
       - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
@@ -386,6 +422,8 @@ services:
       - TZ=America/Phoenix
     depends_on:
       - gateway
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
@@ -398,6 +436,8 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
@@ -438,6 +478,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
+    dns:
+      - dns_forwarder
     networks:
       - sharedllm
 
