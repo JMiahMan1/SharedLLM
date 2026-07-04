@@ -4,6 +4,6 @@ RUN pip install --no-cache-dir docker aiohttp
 
 WORKDIR /app
 
-COPY services/dns_service/main.py .
+COPY services/dns/main.py .
 
 CMD ["python", "main.py"]
