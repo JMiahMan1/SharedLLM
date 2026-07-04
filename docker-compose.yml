@@ -1,7 +1,10 @@
 networks:
   sharedllm:
-    external: true
-    name: sharedllm_default
+    name: sharedllm
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.26.0.0/16
 
 services:
   dns:
@@ -15,13 +18,18 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_dns
     restart: unless-stopped
-    network_mode: host
+    networks:
+      sharedllm:
+        ipv4_address: 172.26.0.254
+    ports:
+      - "5353:53/udp"
+      - "5353:53/tcp"
     security_opt:
       - label=disable
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
-      - DNS_PORT=5353
+      - DNS_PORT=53
       - UPSTREAM_DNS=8.8.8.8
 
   caddy:
@@ -50,7 +58,7 @@ services:
       - gateway
       - identity
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
 
   identity:
     image: ghcr.io/jmiahman1/sharedllm-identity:latest
@@ -79,7 +87,7 @@ services:
       - ./.env:/app/.env:ro
       - ./prompts:/app/prompts:ro
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
     healthcheck:
@@ -168,7 +176,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
 
@@ -194,7 +202,7 @@ services:
         condition: service_healthy
     command: python3 scripts/index_capabilities.py
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
 
@@ -235,7 +243,7 @@ services:
       - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
 
@@ -269,7 +277,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
 
@@ -311,7 +319,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
 
@@ -345,7 +353,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
 
@@ -390,7 +398,7 @@ services:
       - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
 
@@ -404,7 +412,7 @@ services:
     depends_on:
       - gateway
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
 
@@ -418,7 +426,7 @@ services:
     volumes:
       - redis_data:/data
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
 
@@ -460,7 +468,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:
-      - 172.26.0.1
+      - 172.26.0.254
     networks:
       - sharedllm
 
