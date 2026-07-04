@@ -145,9 +145,11 @@ jobs:
           pip install -r services/logging/requirements.txt
           pip install pytest pytest-asyncio pytest-httpx respx redis testcontainers
 
-      - name: Build shared base image first
+      - name: Pull shared base image from GHCR
         run: |
-          docker build -f docker/Dockerfile.base -t sharedllm-base:local .
+          docker pull ghcr.io/jmiahman1/sharedllm-base:latest || docker pull ghcr.io/jmiahman1/sharedllm-base:microservices || echo "Base image not found in GHCR, building locally"
+          docker tag ghcr.io/jmiahman1/sharedllm-base:latest sharedllm-base:local 2>/dev/null || true
+          docker tag ghcr.io/jmiahman1/sharedllm-base:microservices sharedllm-base:local 2>/dev/null || true
 
       - name: Start test services
         run: |
