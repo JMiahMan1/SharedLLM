@@ -15,7 +15,7 @@ from typing import Dict, Optional, Tuple
 
 import docker
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -179,6 +179,7 @@ class DNSResolver:
 
     async def resolve(self, query: 'DNSQuery') -> Optional[list]:
         """Resolve a DNS query"""
+        logger.debug(f"Resolver called for: {query.question_name}")
         name = query.question_name.rstrip('.')
 
         # Check if it's a .docker suffix query
@@ -369,19 +370,24 @@ class UDPServer(asyncio.DatagramProtocol):
         logger.info("UDP DNS server started")
 
     def datagram_received(self, data, addr):
+        logger.debug(f"DNS query received from {addr}, {len(data)} bytes")
         asyncio.ensure_future(self._handle_query(data, addr))
 
     async def _handle_query(self, data: bytes, addr: Tuple[str, int]):
         """Handle a DNS query"""
         try:
+            logger.debug(f"Processing DNS query from {addr}")
             query = self._parse_query(data)
             if not query:
+                logger.debug(f"Failed to parse query from {addr}")
                 return
 
+            logger.debug(f"Resolved {query.question_name} -> {addr}")
             records = await self.resolver.resolve(query)
             if records:
                 response = self._build_response(query, records)
                 self.transport.sendto(response, addr)
+                logger.debug(f"Sent response to {addr}: {len(response)} bytes")
         except Exception as e:
             logger.error(f"Error handling DNS query: {e}")
 
