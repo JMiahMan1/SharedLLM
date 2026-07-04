@@ -124,6 +124,7 @@ class DockerWatcher:
 
     async def _watch_events(self):
         """Watch Docker events without blocking the event loop"""
+        logger.info("Watcher: starting event loop")
         event_queue = asyncio.Queue()
         
         def watch_sync():
@@ -137,7 +138,10 @@ class DockerWatcher:
             except Exception as e:
                 logger.error(f"Error watching Docker events: {e}")
         
+        logger.info("Watcher: creating thread task")
         watcher_task = asyncio.create_task(asyncio.to_thread(watch_sync))
+        await asyncio.sleep(0.1)  # Give thread time to start
+        logger.info("Watcher: thread task created, continuing")
         
         while self._running:
             try:
@@ -503,11 +507,17 @@ async def main():
     logger.info(f"HTTP API listening on port 8009")
 
     # Run DNS server
-    loop = asyncio.get_event_loop()
-    transport, _ = await loop.create_datagram_endpoint(
-        lambda: UDPServer(resolver),
-        local_addr=('0.0.0.0', port)
-    )
+    logger.info("Starting UDP DNS server...")
+    try:
+        loop = asyncio.get_event_loop()
+        transport, _ = await loop.create_datagram_endpoint(
+            lambda: UDPServer(resolver),
+            local_addr=('0.0.0.0', port)
+        )
+        logger.info(f"UDP DNS server listening on port {port}")
+    except Exception as e:
+        logger.error(f"Failed to start UDP DNS server: {e}")
+        raise
 
     try:
         await asyncio.Future()  # Run forever
