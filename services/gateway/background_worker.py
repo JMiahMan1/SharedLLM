@@ -7,6 +7,8 @@ Jarvis Background Worker — The "heartbeat" and "brain" of the autonomous Raven
 import asyncio
 import logging
 import httpx
+import aiohttp
+import json
 import os
 from typing import Any, Dict, Optional
 from services.gateway.orchestrator import process_full_orchestration
@@ -222,28 +224,33 @@ class RavenWorker:
             return
 
         # 2. List rooms
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        url = f"{EXECUTION_SVC}/execute/talk"
+        async with aiohttp.ClientSession() as client:
             list_resp = await client.post(
-                f"{EXECUTION_SVC}/execute/talk",
+                url,
                 json={"user_context": creds, "action": "list"},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if list_resp.status_code != 200:
+            if list_resp.status != 200:
                 return
             
-            rooms = list_resp.json().get("detail", {}).get("conversations", [])
+            list_text = await list_resp.text()
+            list_json = json.loads(list_text) if list_text else {}
+            rooms = list_json.get("detail", {}).get("conversations", [])
             for room in rooms:
                 token = room["token"]
                 
                 msg_resp = await client.post(
-                    f"{EXECUTION_SVC}/execute/talk",
+                    url,
                     json={"user_context": creds, "action": "messages", "token": token, "limit": 5},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                if msg_resp.status_code != 200:
+                if msg_resp.status != 200:
                     continue
                     
-                messages = msg_resp.json().get("detail", {}).get("messages", [])
+                msg_text = await msg_resp.text()
+                msg_json = json.loads(msg_text) if msg_text else {}
+                messages = msg_json.get("detail", {}).get("messages", [])
                 if not messages:
                     continue
                     
@@ -285,14 +292,15 @@ class RavenWorker:
 
     async def _get_system_creds(self) -> Optional[Dict[str, Any]]:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with aiohttp.ClientSession() as client:
                 resp = await client.post(
                     "http://identity:8001/api/resolve",
                     json={"rag_user": "default"},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                if resp.status_code == 200:
-                    return resp.json()
+                if resp.status == 200:
+                    resp_text = await resp.text()
+                    return json.loads(resp_text) if resp_text else None
         except Exception as e:
             log.error(f"Failed to resolve system credentials: {e}")
         return None
@@ -583,7 +591,7 @@ class RavenWorker:
                 "volume": 0.6
             }
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with aiohttp.ClientSession() as client:
                 await client.post(
                     f"{EXECUTION_SVC}/execute/announce",
                     json=announce_payload,
@@ -608,7 +616,7 @@ class RavenWorker:
                 "message": message
             }
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with aiohttp.ClientSession() as client:
                 await client.post(
                     f"{EXECUTION_SVC}/execute/talk",
                     json=talk_payload,
@@ -635,20 +643,24 @@ class RavenWorker:
 
     async def _get_containers(self):
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(f"{EXECUTION_SVC}/execute/docker_containers", headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=5.0)
-                if resp.status_code == 200:
-                    return resp.json().get("detail", {}).get("containers", [])
+            async with aiohttp.ClientSession() as client:
+                resp = await client.get(f"{EXECUTION_SVC}/execute/docker_containers", headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=5.0))
+                if resp.status == 200:
+                    resp_text = await resp.text()
+                    resp_json = json.loads(resp_text) if resp_text else {}
+                    return resp_json.get("detail", {}).get("containers", [])
         except Exception:
             return []
 
     async def _get_errors(self, name):
         try:
             payload = {"user_context": {"user": SYSTEM_IDENTITY, "is_admin": True}, "container_name": name, "tail": 100, "filter_level": "ERROR"}
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(f"{EXECUTION_SVC}/execute/docker_logs", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=5.0)
-                if resp.status_code == 200:
-                    return resp.json().get("detail", {}).get("lines", [])
+            async with aiohttp.ClientSession() as client:
+                resp = await client.post(f"{EXECUTION_SVC}/execute/docker_logs", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=5.0))
+                if resp.status == 200:
+                    resp_text = await resp.text()
+                    resp_json = json.loads(resp_text) if resp_text else {}
+                    return resp_json.get("detail", {}).get("lines", [])
         except Exception:
             return []
 
@@ -742,28 +754,30 @@ class RavenWorker:
             
             try:
                 # Fetch live entities from HA
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with aiohttp.ClientSession() as client:
                     resp = await client.get(
                         f"{EXECUTION_SVC}/discovery/entities",
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
-                    if resp.status_code != 200:
+                    if resp.status != 200:
                         continue
-                    data = resp.json()
+                    resp_text = await resp.text()
+                    data = json.loads(resp_text) if resp_text else {}
                     entities = data.get("entities", []) if isinstance(data, dict) else []
                 
                 if not entities:
                     continue
                 
                 # Sync to RAG (triggers orphan cleanup in RAG collection)
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with aiohttp.ClientSession() as client:
                     sync_resp = await client.post(
                         f"{RAG_SVC}/rag/sync/ha",
                         json={"entities": entities, "user_id": username},
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
-                    if sync_resp.status_code == 200:
-                        result = sync_resp.json()
+                    if sync_resp.status == 200:
+                        sync_text = await sync_resp.text()
+                        result = json.loads(sync_text) if sync_text else {}
                         orphaned = result.get("orphaned_entity_ids", [])
                         total_orphaned += len(orphaned)
                         
