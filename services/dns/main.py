@@ -129,19 +129,28 @@ class DockerWatcher:
         
         def watch_sync():
             """Sync event watcher that puts events in queue"""
+            import threading
+            logger.info(f"Watcher thread started (thread={threading.current_thread().name})")
             try:
                 events = self.client.events(decode=True)
                 for event in events:
                     if not self._running:
                         break
                     event_queue.put_nowait(event)
+                logger.info("Watcher thread: events loop completed")
             except Exception as e:
                 logger.error(f"Error watching Docker events: {e}")
+                import traceback
+                traceback.print_exc()
         
         logger.info("Watcher: creating thread task")
-        watcher_task = asyncio.create_task(asyncio.to_thread(watch_sync))
-        await asyncio.sleep(0.1)  # Give thread time to start
-        logger.info("Watcher: thread task created, continuing")
+        try:
+            watcher_task = asyncio.create_task(asyncio.to_thread(watch_sync))
+            await asyncio.sleep(0.1)  # Give thread time to start
+            logger.info("Watcher: thread task created, continuing")
+        except Exception as e:
+            logger.error(f"Failed to create watcher thread task: {e}")
+            raise
         
         while self._running:
             try:
