@@ -29,7 +29,7 @@ except ImportError:
 
 INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "")
 DNS_POLL_INTERVAL = int(os.environ.get("DNS_POLL_INTERVAL", "30"))
-DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "5353"))
+DNS_LISTEN_PORT = int(os.environ.get("DNS_LISTEN_PORT", "53"))
 UPSTREAM_DNS = os.environ.get("UPSTREAM_DNS", "127.0.0.11")
 HEALTH_CHECK_INTERVAL = int(os.environ.get("HEALTH_CHECK_INTERVAL", "10"))
 HEALTH_CHECK_TIMEOUT = int(os.environ.get("HEALTH_CHECK_TIMEOUT", "2"))

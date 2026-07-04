@@ -11,7 +11,7 @@ services:
     image: ghcr.io/jmiahman1/sharedllm-dns:latest
     build:
       context: .
-      dockerfile: services/dns_service/Dockerfile
+      dockerfile: services/dns/Dockerfile
       args:
         - GIT_SHA=${GIT_SHA:-unknown}
         - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
