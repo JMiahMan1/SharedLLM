@@ -654,10 +654,12 @@ async def readiness():
     results: dict[str, Any] = {"status": "READY", "services": services_status, "service_details": service_details}
     all_ok = True
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=2.0) as client:
       for name, url in services.items():
           try:
+            log.info(f"[health] Checking {name} at {url}")
             resp = await client.get(url)
+            log.info(f"[health] {name} response: {resp.status_code}")
             if resp.status_code == 200:
                 services_status[name] = "OK"
                 try:
@@ -672,7 +674,8 @@ async def readiness():
             else:
                 services_status[name] = f"ERROR ({resp.status_code})"
                 all_ok = False
-          except Exception:
+          except Exception as e:
+            log.error(f"[health] {name} failed: {e}")
             services_status[name] = "UNREACHABLE"
             all_ok = False
 
