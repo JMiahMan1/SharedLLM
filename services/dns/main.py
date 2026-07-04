@@ -200,6 +200,10 @@ class DNSResolver:
                 ip = info['ip']
                 return [self._make_a_record(name, ip, 300)]
 
+        # Handle host.docker.internal
+        if name == 'host.docker.internal':
+            return [self._make_a_record(name, '172.26.0.1', 300)]
+
         # Forward to upstream DNS
         return await self.upstream_client.resolve(name, query.question_type)
 
