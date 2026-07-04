@@ -61,8 +61,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_identity
     restart: unless-stopped
-    ports:
-      - 8001:8001
     env_file:
       - .env
     environment:
@@ -154,8 +152,6 @@ services:
       - TZ=America/Phoenix
       - HUGGINGFACE_HUB_DISABLE_XET=1
       - EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
-    ports:
-      - "8004:8004"
     volumes:
       - chroma_data:/data
       - huggingface_cache:/root/.cache/huggingface
@@ -229,8 +225,6 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
-    ports:
-      - "11435:11435"
     volumes:
       - ./data/phrasebook.json:/app/data/phrasebook.json:ro
       - huggingface_cache:/home/sharedllm/.cache/huggingface
@@ -252,8 +246,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_logging
     restart: unless-stopped
-    ports:
-      - "8006:8006"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -326,8 +318,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_storage
     restart: unless-stopped
-    ports:
-      - 8005:8005
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -367,8 +357,6 @@ services:
       - "${DOCKER_GID:-999}"
     security_opt:
       - label=disable
-    ports:
-      - 8007:8007
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -435,8 +423,6 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_control_plane
     restart: always
-    ports:
-      - 8008:8008
     user: "${PUID:-1000}:${PGID:-1000}"
     env_file:
       - .env
