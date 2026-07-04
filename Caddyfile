@@ -14,6 +14,9 @@
     handle /api/* {
         reverse_proxy gateway:11435
     }
+    handle /health, /health/* {
+        reverse_proxy gateway:11435
+    }
     handle / {
         reverse_proxy gateway:11435
     }
@@ -178,6 +181,10 @@
 
     handle /api/webhook* {
         reverse_proxy workspace_runtime:8007
+    }
+
+    handle /health, /health/* {
+        reverse_proxy gateway:11435
     }
 
     # Catch-all: Route UI traffic to the React container

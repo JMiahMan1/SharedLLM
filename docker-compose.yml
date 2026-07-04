@@ -25,7 +25,7 @@ services:
       - UPSTREAM_DNS=8.8.8.8
 
   caddy:
-    image: caddy:2-alpine
+    image: ghcr.io/jmiahman1/sharedllm-caddy:latest
     container_name: sharedllm_caddy
     restart: unless-stopped
     networks:
