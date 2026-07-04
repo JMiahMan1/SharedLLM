@@ -38,6 +38,7 @@ jobs:
       build_base: ${{ steps.set-outputs.outputs.build_base }}
       services: ${{ steps.set-outputs.outputs.services }}
       ui: ${{ steps.filter.outputs.ui }}
+      caddy: ${{ steps.filter.outputs.caddy }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
