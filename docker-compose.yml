@@ -4,16 +4,16 @@ networks:
     name: sharedllm_default
 
 services:
-  dns-sync:
-    image: ghcr.io/jmiahman1/sharedllm-dns_sync:latest
+  dns:
+    image: ghcr.io/jmiahman1/sharedllm-dns:latest
     build:
       context: .
-      dockerfile: services/dns_sync/Dockerfile
+      dockerfile: services/dns_service/Dockerfile
       args:
         - GIT_SHA=${GIT_SHA:-unknown}
         - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
-    container_name: sharedllm_dns_sync
+    container_name: sharedllm_dns
     restart: unless-stopped
     network_mode: host
     security_opt:
@@ -21,40 +21,24 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DNS_POLL_INTERVAL=30
-      - DNS_LISTEN_PORT=5353
-      - UPSTREAM_DNS=127.0.0.11
-
-  dns-forwarder:
-    image: ghcr.io/jmiahman1/sharedllm-dns-forwarder:latest
-    build:
-      context: .
-      dockerfile: services/dns-forwarder/Dockerfile
-      args:
-        - GIT_SHA=${GIT_SHA:-unknown}
-        - BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-        - SERVICE_NAME=${SERVICE_NAME:-unknown}
-    container_name: sharedllm_dns-forwarder
-    restart: unless-stopped
-    ports:
-      - "53:53/udp"
-    environment:
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DNS_SYNC_HOST=172.17.0.1
-      - DNS_SYNC_PORT=5353
-    depends_on:
-      - dns-sync
-    networks:
-      - sharedllm
+      - DNS_PORT=5353
+      - UPSTREAM_DNS=8.8.8.8
 
   caddy:
     image: caddy:2-alpine
     container_name: sharedllm_caddy
     restart: unless-stopped
+    networks:
+      - sharedllm
     ports:
       - "8080:80"
       - "8443:443"
+      - "8001:8001"  # Host:8001 -> Caddy -> identity:8001
+      - "8095:8095"  # Host:8095 -> Caddy -> ma:8095
+      - "11435:11435" # Host:11435 -> Caddy -> gateway:11435
+      - "8005:8005"  # Host:8005 -> Caddy -> storage:8005
+      - "8006:8006"  # Host:8006 -> Caddy -> logging:8006
+      - "8007:8007"  # Host:8007 -> Caddy -> workspace_runtime:8007
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
@@ -65,8 +49,6 @@ services:
       - identity
     dns:
       - 172.26.0.1
-    networks:
-      - sharedllm
 
   identity:
     image: ghcr.io/jmiahman1/sharedllm-identity:latest
@@ -123,8 +105,6 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server.local:11434
-      # Host-networked: use Caddy to proxy DNS sync REST API
-      - DNS_SYNC_API_URL=http://localhost:8080/api/dns-sync
       - IDENTITY_SVC_URL=http://localhost:8001
       - EXECUTION_SVC_URL=http://execution.local:8003
       - RAG_SVC_URL=http://localhost:8004

@@ -1,8 +1,35 @@
+# Cross-Network Routes (Host Network → Bridge Network)
+:8001 {
+    reverse_proxy identity:8001
+}
+
+:8095 {
+    reverse_proxy ma:8095
+}
+
+:11435 {
+    reverse_proxy gateway:11435
+}
+
+:8005 {
+    reverse_proxy storage:8005
+}
+
+:8006 {
+    reverse_proxy logging:8006
+}
+
+:8007 {
+    reverse_proxy workspace_runtime:8007
+}
+
+# Health Check Endpoints
+handle /health* {
+    reverse_proxy gateway:11435
+}
+
+# Standard Routes
 :80 {
-    # 0. Health Routes
-    handle /health* {
-        reverse_proxy gateway:11435
-    }
 
 
 
@@ -92,11 +119,6 @@
     handle /control_plane* {
         uri strip_prefix /control_plane
         reverse_proxy control_plane:8008
-    }
-
-    # DNS Sync Service Discovery API (for host-networked services)
-    handle /api/dns-sync* {
-        reverse_proxy dns-sync:8009
     }
 
     # 3. Route Identity/Auth API traffic

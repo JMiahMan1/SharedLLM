@@ -1,0 +1,4 @@
+# Python DNS Proxy
+# Minimal DNS resolver for Docker containers
+
+aiohttp>=3.9.0
