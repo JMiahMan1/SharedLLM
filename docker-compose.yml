@@ -165,6 +165,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 120s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     dns:
       - 172.26.0.1
     networks:
@@ -264,6 +266,8 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     dns:
       - 172.26.0.1
     networks:
@@ -304,6 +308,8 @@ services:
     depends_on:
       - redis
       - execution
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     dns:
       - 172.26.0.1
     networks:
@@ -336,6 +342,8 @@ services:
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     dns:
       - 172.26.0.1
     networks:
@@ -449,6 +457,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     dns:
       - 172.26.0.1
     networks:
