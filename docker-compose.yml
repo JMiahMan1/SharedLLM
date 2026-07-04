@@ -1,6 +1,6 @@
 networks:
   sharedllm:
-    name: sharedllm
+    name: sharedllm_default
     driver: bridge
     ipam:
       config:
