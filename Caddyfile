@@ -31,11 +31,6 @@
     reverse_proxy control_plane:8008
 }
 
-# Health Check Endpoints
-handle /health* {
-    reverse_proxy gateway:11435
-}
-
 # Standard Routes
 :80 {
 
