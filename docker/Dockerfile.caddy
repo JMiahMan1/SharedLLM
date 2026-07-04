@@ -1,0 +1,7 @@
+FROM caddy:2-alpine
+
+COPY Caddyfile /etc/caddy/Caddyfile
+
+EXPOSE 80 443 8001 8095 11435 8004 8005 8006 8007 8008
+
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
