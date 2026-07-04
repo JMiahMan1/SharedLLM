@@ -169,6 +169,19 @@
         reverse_proxy gateway:11435
     }
 
+    # Root-level API routes (without /api/ prefix)
+    handle /info* {
+        reverse_proxy gateway:11435
+    }
+
+    handle /rag* {
+        reverse_proxy rag:8004
+    }
+
+    handle /discovery* {
+        reverse_proxy gateway:11435
+    }
+
     handle /api/admin/raven* {
         reverse_proxy gateway:11435
     }
