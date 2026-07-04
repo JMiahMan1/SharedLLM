@@ -8,7 +8,15 @@
 }
 
 :11435 {
-    reverse_proxy gateway:11435
+    handle /v1/* {
+        reverse_proxy gateway:11435
+    }
+    handle /api/* {
+        reverse_proxy gateway:11435
+    }
+    handle / {
+        reverse_proxy gateway:11435
+    }
 }
 
 :8004 {
