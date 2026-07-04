@@ -80,6 +80,9 @@ jobs:
               - 'services/workspace_runtime/**'
             control_plane:
               - 'services/control_plane/**'
+            dns:
+              - 'services/dns_service/**'
+              - '.github/workflows/build-images.yml'
 
       - name: Set Outputs
         id: set-outputs
@@ -89,7 +92,7 @@ jobs:
           
           # If base changed, build all services
           if echo "$CHANGES" | grep -q '"base"'; then
-            SERVICES_JSON='["identity","gateway","rag","execution","storage","logging","automation","workspace_runtime","control_plane"]'
+            SERVICES_JSON='["identity","gateway","rag","execution","storage","logging","automation","workspace_runtime","control_plane","dns"]'
             BUILD_BASE='true'
           else
             # Filter out base, caddy, and ui from changes to build only changed services
