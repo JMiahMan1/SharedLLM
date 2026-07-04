@@ -11,6 +11,10 @@
     reverse_proxy gateway:11435
 }
 
+:8004 {
+    reverse_proxy rag:8004
+}
+
 :8005 {
     reverse_proxy storage:8005
 }
@@ -21,6 +25,10 @@
 
 :8007 {
     reverse_proxy workspace_runtime:8007
+}
+
+:8008 {
+    reverse_proxy control_plane:8008
 }
 
 # Health Check Endpoints
