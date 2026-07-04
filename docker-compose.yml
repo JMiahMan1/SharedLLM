@@ -5,6 +5,10 @@ networks:
     ipam:
       config:
         - subnet: 172.26.0.0/16
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.26.0.0/16
 
 services:
   dns:
