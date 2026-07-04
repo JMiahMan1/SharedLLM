@@ -654,7 +654,7 @@ async def readiness():
     results: dict[str, Any] = {"status": "READY", "services": services_status, "service_details": service_details}
     all_ok = True
 
-    async with httpx.AsyncClient(timeout=2.0) as client:
+    async with httpx.AsyncClient(timeout=10.0) as client:
       for name, url in services.items():
           try:
             resp = await client.get(url)
