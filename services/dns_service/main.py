@@ -62,17 +62,8 @@ class DockerWatcher:
         # Initial scan
         await self._sync_containers()
 
-        # Watch for events
-        while self._running:
-            try:
-                events = self.client.events(decode=True)
-                for event in events:
-                    if not self._running:
-                        break
-                    await self._handle_event(event)
-            except Exception as e:
-                logger.error(f"Error watching Docker events: {e}")
-                await asyncio.sleep(1)
+        # Watch for events - use executor to avoid blocking event loop
+        await self._watch_events()
 
     async def _sync_containers(self):
         """Sync all running containers"""
@@ -130,6 +121,35 @@ class DockerWatcher:
                     self.registry.remove_container(container.name)
             except Exception:
                 pass
+
+    async def _watch_events(self):
+        """Watch Docker events without blocking the event loop"""
+        event_queue = asyncio.Queue()
+        
+        def watch_sync():
+            """Sync event watcher that puts events in queue"""
+            try:
+                events = self.client.events(decode=True)
+                for event in events:
+                    if not self._running:
+                        break
+                    event_queue.put_nowait(event)
+            except Exception as e:
+                logger.error(f"Error watching Docker events: {e}")
+        
+        watcher_task = asyncio.create_task(asyncio.to_thread(watch_sync))
+        
+        while self._running:
+            try:
+                event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
+                await self._handle_event(event)
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Error processing Docker event: {e}")
+                await asyncio.sleep(1)
+        
+        watcher_task.cancel()
 
     def stop(self):
         """Stop the watcher"""
