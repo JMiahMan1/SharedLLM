@@ -14,7 +14,10 @@
     handle /api/* {
         reverse_proxy gateway:11435
     }
-    handle /health, /health/* {
+    handle /health {
+        reverse_proxy gateway:11435
+    }
+    handle /health/* {
         reverse_proxy gateway:11435
     }
     handle / {
@@ -183,7 +186,11 @@
         reverse_proxy workspace_runtime:8007
     }
 
-    handle /health, /health/* {
+    handle /health {
+        reverse_proxy gateway:11435
+    }
+
+    handle /health/* {
         reverse_proxy gateway:11435
     }
 
