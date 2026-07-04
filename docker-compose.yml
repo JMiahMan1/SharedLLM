@@ -36,9 +36,11 @@ services:
       - "8001:8001"  # Host:8001 -> Caddy -> identity:8001
       - "8095:8095"  # Host:8095 -> Caddy -> ma:8095
       - "11435:11435" # Host:11435 -> Caddy -> gateway:11435
+      - "8004:8004"  # Host:8004 -> Caddy -> rag:8004
       - "8005:8005"  # Host:8005 -> Caddy -> storage:8005
       - "8006:8006"  # Host:8006 -> Caddy -> logging:8006
       - "8007:8007"  # Host:8007 -> Caddy -> workspace_runtime:8007
+      - "8008:8008"  # Host:8008 -> Caddy -> control_plane:8008
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
