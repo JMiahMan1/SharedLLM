@@ -7,6 +7,7 @@ on:
       - 'services/**'
       - 'docker/**'
       - 'docker-compose.yml'
+      - 'Caddyfile'
       - 'requirements.txt'
       - '.github/workflows/build-images.yml'
   pull_request:
@@ -15,6 +16,7 @@ on:
       - 'services/**'
       - 'docker/**'
       - 'docker-compose.yml'
+      - 'Caddyfile'
       - 'requirements.txt'
       - '.github/workflows/build-images.yml'
   workflow_dispatch:
@@ -52,6 +54,10 @@ jobs:
               - 'docker/Dockerfile.base'
               - 'requirements.txt'
               - '.github/workflows/build-images.yml'
+            caddy:
+              - 'Caddyfile'
+              - 'docker/Dockerfile.caddy'
+              - '.github/workflows/build-images.yml'
             ui:
               - 'services/ui/**'
               - '.github/workflows/build-images.yml'
@@ -85,8 +91,8 @@ jobs:
             SERVICES_JSON='["identity","gateway","rag","execution","storage","logging","automation","workspace_runtime","control_plane"]'
             BUILD_BASE='true'
           else
-            # Filter out base and ui from changes to build only changed services
-            SERVICES_JSON=$(echo "$CHANGES" | jq -c '[.[] | select(. != "base" and . != "ui")]')
+            # Filter out base, caddy, and ui from changes to build only changed services
+            SERVICES_JSON=$(echo "$CHANGES" | jq -c '[.[] | select(. != "base" and . != "caddy" and . != "ui")]')
             BUILD_BASE='false'
           fi
           
@@ -276,4 +282,51 @@ jobs:
           build-args: |
             GIT_SHA=${{ steps.build-args.outputs.GIT_SHA }}
             BUILD_DATE=${{ steps.build-args.outputs.BUILD_DATE }}
+          platforms: linux/amd64
+
+  build-caddy:
+    name: Build & Push Caddy
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && needs.detect-changes.outputs.caddy == 'true' }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set git short SHA
+        id: sha
+        run: echo "short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Get branch slug
+        id: slug
+        run: echo "slug=$(echo ${{ github.ref_name }} | sed 's/[^a-zA-Z0-9]/-/g')" >> $GITHUB_OUTPUT
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-caddy
+          tags: |
+            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+
+      - name: Build and push Caddy
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.caddy
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64
