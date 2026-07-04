@@ -8,6 +8,10 @@
 }
 
 :11435 {
+    log {
+        output stdout
+        level INFO
+    }
     handle /v1/* {
         reverse_proxy gateway:11435
     }
@@ -47,8 +51,10 @@
 
 # Standard Routes
 :80 {
-
-
+    log {
+        output stdout
+        level INFO
+    }
 
     # 2. Route Chat/Gateway API traffic
     handle /v1/* {
