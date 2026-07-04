@@ -81,7 +81,7 @@ jobs:
             control_plane:
               - 'services/control_plane/**'
             dns:
-              - 'services/dns_service/**'
+              - 'services/dns/**'
               - '.github/workflows/build-images.yml'
 
       - name: Set Outputs
