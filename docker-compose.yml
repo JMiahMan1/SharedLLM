@@ -4,23 +4,70 @@ networks:
     name: sharedllm_default
 
 services:
-  # =====================================================
-  # DNS Infrastructure (Proven DPS - DNS Proxy Server)
-  # =====================================================
-  dns-proxy-server:
-    image: defreitas/dns-proxy-server:latest
-    container_name: sharedllm_dns-proxy
+  dns-sync:
+    image: ghcr.io/jmiahman1/sharedllm-dns_sync:latest
+    build:
+      context: .
+      dockerfile: services/dns_sync/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_dns_sync
     restart: unless-stopped
     network_mode: host
+    security_opt:
+      - label=disable
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
-      - DOCKER_NETWORK=sharedllm_default
-    command: ["-default-dns=false", "-listen=0.0.0.0:5354"]
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DNS_POLL_INTERVAL=30
+      - DNS_LISTEN_PORT=5353
+      - UPSTREAM_DNS=127.0.0.11
 
-  # =====================================================
-  # Identity Service
-  # =====================================================
+  dns-forwarder:
+    image: ghcr.io/jmiahman1/sharedllm-dns-forwarder:latest
+    build:
+      context: .
+      dockerfile: services/dns-forwarder/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_dns-forwarder
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DNS_SYNC_HOST=172.17.0.1
+      - DNS_SYNC_PORT=5353
+    depends_on:
+      - dns-sync
+    networks:
+      - sharedllm
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: sharedllm_caddy
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - ui
+      - gateway
+      - identity
+    dns:
+      - 172.26.0.1
+    networks:
+      - sharedllm
+
   identity:
     image: ghcr.io/jmiahman1/sharedllm-identity:latest
     build:
@@ -49,6 +96,8 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - ./.env:/app/.env:ro
       - ./prompts:/app/prompts:ro
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
     healthcheck:
@@ -74,6 +123,7 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=http://ollama-server.local:11434
+      # Host-networked: use Caddy to proxy DNS sync REST API
       - DNS_SYNC_API_URL=http://localhost:8080/api/dns-sync
       - IDENTITY_SVC_URL=http://localhost:8001
       - EXECUTION_SVC_URL=http://execution.local:8003
@@ -85,7 +135,7 @@ services:
       - SEARXNG_URL=http://localhost:8080
       - EXECUTION_EXTERNAL_HOST=192.168.2.205
       - TEMP_MEDIA_DIR=/workspaces
-      - MODELS_DIR=/workspaces
+      - MODELS_DIR=/workspaces/models
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
       - WORKSPACE_ROOT=/workspaces
@@ -137,6 +187,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 120s
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
 
@@ -161,6 +213,8 @@ services:
       rag:
         condition: service_healthy
     command: python3 scripts/index_capabilities.py
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
 
@@ -202,6 +256,8 @@ services:
       - huggingface_cache:/home/sharedllm/.cache/huggingface
       - qdrant_cache:/home/sharedllm/.cache/qdrant
       - /etc/localtime:/etc/localtime:ro
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
 
@@ -234,6 +290,8 @@ services:
       - /etc/localtime:/etc/localtime:ro
     depends_on:
       - redis
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
 
@@ -272,6 +330,8 @@ services:
     depends_on:
       - redis
       - execution
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
 
@@ -304,6 +364,8 @@ services:
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
 
@@ -349,6 +411,8 @@ services:
       - workspace_runtime_data:/data
       - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
 
@@ -361,6 +425,8 @@ services:
       - TZ=America/Phoenix
     depends_on:
       - gateway
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
 
@@ -373,6 +439,8 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
 
@@ -413,6 +481,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
+    dns:
+      - 172.26.0.1
     networks:
       - sharedllm
 
