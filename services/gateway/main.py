@@ -505,6 +505,21 @@ async def retry_http_request(func, service_name: str, max_retries: int = 2, base
     for attempt in range(max_retries + 1):
         try:
             return await func()
+        except RuntimeError as e:
+            # Handle race condition where client was closed by DNS recovery
+            if "client has been closed" in str(e):
+                if attempt == max_retries:
+                    log.error(f"{service_name}: Client closed, all retries exhausted")
+                    raise
+                log.warning(f"{service_name}: HTTP client was closed, recreating and retrying")
+                try:
+                    await recreate_http_client()
+                except Exception as rec_err:
+                    log.error(f"{service_name}: Failed to recreate HTTP client: {rec_err}")
+                delay = base_delay * (2 ** attempt)
+                await asyncio.sleep(delay)
+            else:
+                raise
         except httpx.RequestError as e:
             if attempt == max_retries:
                 log.error(f"{service_name}: All {max_retries + 1} attempts failed: {e}")
@@ -1664,8 +1679,8 @@ async def decompose_command_query(query: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 async def resolve_identity(body: dict) -> Any:
-    client = get_http_client()
     async def do_resolve():
+        client = get_http_client()
         resp = await client.post(
             f"{IDENTITY_SVC}/api/resolve",
             json=body,
