@@ -4,6 +4,7 @@ import logging
 import json
 import asyncio
 import httpx
+import aiohttp
 import re
 import traceback
 import time
@@ -1758,32 +1759,39 @@ async def _proxy_execution_with_identity(
 ) -> JSONResponse:
     creds_data = await _resolve_identity_from_request(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    url = f"{EXECUTION_SVC}{endpoint}"
+    async with aiohttp.ClientSession() as client:
         if method.upper() == "GET":
-            params = {"user_id": creds_data.get("user") or ""}
-            resp = await client.get(f"{EXECUTION_SVC}{endpoint}", headers=headers, params=params)
+            resp = await client.get(url, headers=headers, params={"user_id": creds_data.get("user") or ""})
         else:
             exec_payload = {"user_context": creds_data, **(payload or {})}
-            resp = await client.post(f"{EXECUTION_SVC}{endpoint}", json=exec_payload, headers=headers)
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+            resp = await client.post(url, json=exec_payload, headers=headers)
+        resp_text = await resp.text()
+        try:
+            resp_json = json.loads(resp_text)
+        except (json.JSONDecodeError, ValueError):
+            resp_json = {"detail": resp_text}
+    return JSONResponse(status_code=resp.status, content=resp_json)
 
 async def fetch_ha_entities(creds: dict) -> list:
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        url = f"{EXECUTION_SVC}/discovery/entities"
+        async with aiohttp.ClientSession() as client:
             resp = await client.get(
-                f"{EXECUTION_SVC}/discovery/entities",
+                url,
                 params={"ha_url": creds.get("ha_url"), "ha_token": creds.get("ha_token")},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             
-            if resp.status_code != 200:
-                log.warning(f"Failed to fetch entities: {resp.status_code}")
+            if resp.status != 200:
+                log.warning(f"Failed to fetch entities: {resp.status}")
                 return []
-
+            
             try:
-                data = resp.json()
-            except Exception as e:
-                log.error(f"Failed to parse HA entities JSON: {e} | Body: {resp.text[:200]}")
+                resp_text = await resp.text()
+                data = json.loads(resp_text)
+            except (json.JSONDecodeError, ValueError) as e:
+                log.error(f"Failed to parse HA entities JSON: {e} | Body: {resp_text[:200] if resp_text else 'None'}")
                 return []
             
             entities = data.get("entities", []) if isinstance(data, dict) else []
