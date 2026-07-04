@@ -22,8 +22,8 @@ services:
       sharedllm:
         ipv4_address: 172.26.0.254
     ports:
-      - "5353:53/udp"
-      - "5353:53/tcp"
+      - "15353:53/udp"
+      - "15353:53/tcp"
     security_opt:
       - label=disable
     volumes:
