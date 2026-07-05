@@ -1765,7 +1765,7 @@ async def _proxy_execution_with_identity(
         else:
             exec_payload = {"user_context": creds_data, **(payload or {})}
             resp = await client.post(url, json=exec_payload, headers=headers)
-        resp_text = await resp.text()()
+        resp_text = await resp.text()
         try:
             resp_json = json.loads(resp_text)
         except (json.JSONDecodeError, ValueError):
