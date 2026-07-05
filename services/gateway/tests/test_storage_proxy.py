@@ -1,6 +1,6 @@
 import pytest
 import respx
-import httpx
+import aiohttp
 from fastapi.testclient import TestClient
 from services.gateway.main import app, IDENTITY_SVC, STORAGE_SVC, RAG_SVC, INTERNAL_SECRET
 
@@ -14,7 +14,7 @@ def auth_headers():
 def test_storage_list_proxy(auth_headers):
     # Mock identity resolution
     respx.post(f"{IDENTITY_SVC}/api/resolve").mock(
-        return_value=httpx.Response(200, json={
+        return_value=MagicMock(200, json={
             "user": "testuser",
             "nextcloud_url": "http://nc.local",
             "nextcloud_user": "ncuser",
@@ -24,7 +24,7 @@ def test_storage_list_proxy(auth_headers):
     
     # Mock storage service call
     respx.post(f"{STORAGE_SVC}/providers/list").mock(
-        return_value=httpx.Response(200, json={
+        return_value=MagicMock(200, json={
             "status": "SUCCESS",
             "entries": [{"path": "/test.txt", "name": "test.txt", "is_dir": False}]
         })
@@ -49,7 +49,7 @@ def test_storage_list_proxy(auth_headers):
 def test_storage_index_proxy(auth_headers):
     # Mock identity resolution
     respx.post(f"{IDENTITY_SVC}/api/resolve").mock(
-        return_value=httpx.Response(200, json={
+        return_value=MagicMock(200, json={
             "user": "testuser",
             "nextcloud_url": "http://nc.local",
             "nextcloud_user": "ncuser",
@@ -59,7 +59,7 @@ def test_storage_index_proxy(auth_headers):
     
     # Mock storage indexing call
     respx.post(f"{STORAGE_SVC}/index/full").mock(
-        return_value=httpx.Response(202, json={"status": "ACCEPTED"})
+        return_value=MagicMock(202, json={"status": "ACCEPTED"})
     )
     
     response = client.post("/api/storage/index", json={"path": "/"}, headers=auth_headers)
@@ -70,7 +70,7 @@ def test_storage_index_proxy(auth_headers):
 def test_storage_stats_proxy():
     # Mock identity resolution (called by _resolve_identity_from_request)
     respx.post(f"{IDENTITY_SVC}/api/resolve").mock(
-        return_value=httpx.Response(200, json={
+        return_value=MagicMock(200, json={
             "user": "testuser",
             "nextcloud_user": "ncuser"
         })
@@ -78,7 +78,7 @@ def test_storage_stats_proxy():
     
     # Mock RAG stats call
     respx.get(f"{RAG_SVC}/rag/stats").mock(
-        return_value=httpx.Response(200, json={"total_chunks": 100, "total_documents": 10})
+        return_value=MagicMock(200, json={"total_chunks": 100, "total_documents": 10})
     )
     
     response = client.get("/api/storage/stats")

@@ -1,5 +1,6 @@
 import pytest
 import os
+import aiohttp
 from unittest.mock import MagicMock, patch, AsyncMock
 
 def test_kill_switch_logic():
@@ -31,10 +32,9 @@ async def test_identity_resolution_mock():
         "ha_url": "http://ha.local"
     }
     
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_resp)):
-        import httpx
-        async with httpx.AsyncClient() as client:
+    with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)):
+        async with aiohttp.ClientSession() as client:
             resp = await client.get("http://identity:8001/api/resolve")
-            data = resp.json()
+            data = await resp.json()
             assert data["user"] == "raven_test"
             assert data["is_admin"] is True

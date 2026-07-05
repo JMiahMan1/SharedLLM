@@ -1,6 +1,6 @@
 # services/gateway/orchestrator.py
 import asyncio
-import httpx
+import aiohttp
 import json
 import logging
 import re
@@ -55,12 +55,12 @@ async def get_all_settings() -> Dict[str, str]:
         return _settings_cache
 
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
             resp = await client.get(
                 f"{IDENTITY_SVC}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
+            if resp.status == 200:
                 fetched = {item["key"]: item["value"] for item in resp.json()}
                 # Merge with defaults for non-model keys only
                 model_keys = {
@@ -341,7 +341,7 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
         total_hits = 0
         total_chars = 0
         
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             for coll in collections:
                 if total_hits >= MAX_TOTAL_HITS or total_chars >= TOTAL_CHARS_LIMIT:
                     break
@@ -351,7 +351,7 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
                     json={"collection_name": coll, "query": query, "user_id": user_id, "k": MAX_HITS_PER_COLL},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                if resp.status_code == 200:
+                if resp.status == 200:
                     hits = resp.json().get("results", [])
                     if hits:
                         # For HA entities, enrich with live state from HA
@@ -402,13 +402,13 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
     
     try:
         # Fetch all entities to find weather domain
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             resp = await client.get(
                 f"{exec_svc}/discovery/entities",
                 params={"ha_url": ha_url, "ha_token": ha_token},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code != 200:
+            if resp.status != 200:
                 return ""
             data = resp.json()
             entities = data.get("entities", []) if isinstance(data, dict) else []
@@ -537,15 +537,15 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
         if not service_name:
             return "Error: service_name is required"
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
                 if sub_action == "restart":
                     resp = await client.post(f"{control_plane}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
                 else:
                     resp = await client.get(f"{control_plane}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
                 
-                if resp.status_code == 200:
+                if resp.status == 200:
                     return f"Control Plane '{sub_action}' succeeded on {service_name}: {resp.text}"
-                return f"Control Plane error {resp.status_code}: {resp.text}"
+                return f"Control Plane error {resp.status}: {resp.text}"
         except Exception as e:
             log.error(f"Control Plane execution error: {e}")
             return f"Control Plane execution failed: {e}"
@@ -583,9 +583,9 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     payload["device_name"] = device_name
                     log.info(f"[_execute_single_tool] Auto-resolved device_name='{device_name}' from query")
             
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
                 resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
-                if resp.status_code == 200:
+                if resp.status == 200:
                     result = resp.json()
                     if action == "executionlogrequest":
                         detail = result.get("detail") or {}
@@ -605,7 +605,7 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                         return result.get("message", "Action completed successfully.")
                     return result.get("message", "Action completed successfully.")
                 else:
-                    return f"Tool execution failed ({resp.status_code}): {resp.text}"
+                    return f"Tool execution failed ({resp.status}): {resp.text}"
         except Exception as e:
             log.error(f"Single-turn tool execution error: {e}")
             return f"I encountered an error while executing the tool: {e}"

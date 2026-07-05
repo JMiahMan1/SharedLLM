@@ -1,7 +1,7 @@
 import logging
 import json
 import asyncio
-import httpx
+import aiohttp
 import re
 import redis.asyncio as redis
 from datetime import datetime
@@ -107,7 +107,7 @@ class OllamaProvider(BaseLLMProvider):
         }
 
         full_content = ""
-        async with httpx.AsyncClient(headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as client:
+        async with aiohttp.ClientSession(headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as client:
             log.info(f"[OllamaProvider-Hardened] Calling {self.base_url}/api/chat for model {model}")
             if not chunk_callback:
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)
@@ -377,12 +377,12 @@ def extract_action_json(text: str) -> dict | None:
 async def get_dynamic_llm_settings() -> dict:
     """Fetches elastic LLM routing configuration directly from the Identity DB."""
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
             resp = await client.get(
                 f"{IDENTITY_SVC}/api/settings", 
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
+            if resp.status == 200:
                 fetched = {item["key"]: item["value"] for item in resp.json()}
                 for k, v in list(fetched.items()):
                     if v in ["auto", ""]:
@@ -414,9 +414,9 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
             resp = await client.get(f"{local_url.rstrip('/')}/api/ps")
-            if resp.status_code == 200:
+            if resp.status == 200:
                 raw_text = resp.text.strip()
                 if not raw_text:
                     return params
@@ -465,11 +465,11 @@ async def execute_inference(provider: BaseLLMProvider, model: str, messages: lis
     content = await provider.generate(model, messages, options=options, chunk_callback=chunk_callback)
     return {"message": {"role": "assistant", "content": content}}
 
-_original_async_client = httpx.AsyncClient
-_global_http_client: Optional[httpx.AsyncClient] = None
+_original_async_client = aiohttp.ClientSession
+_global_http_client: Optional[aiohttp.ClientSession] = None
 _global_http_client_loop: Optional[asyncio.AbstractEventLoop] = None
 
-def get_http_client() -> httpx.AsyncClient:
+def get_http_client() -> aiohttp.ClientSession:
     global _global_http_client, _global_http_client_loop
     try:
         current_loop = asyncio.get_running_loop()
@@ -478,8 +478,8 @@ def get_http_client() -> httpx.AsyncClient:
 
     if _global_http_client is None or _global_http_client_loop != current_loop:
         _global_http_client = _original_async_client(
-            timeout=httpx.Timeout(300.0, connect=30.0),
-            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
+            timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
+            limits=aiohttp.TCPConnector(max_connections=100, max_keepalive_connections=20)
         )
         _global_http_client_loop = current_loop
     return _global_http_client
@@ -1173,7 +1173,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "git_token": creds.git_token,
                 }
 
-                async with httpx.AsyncClient(timeout=120.0) as client:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120.0)) as client:
                     # Secure Log Redaction
                     log_payload = json.loads(json.dumps(payload)) # Deep copy
                     def redact(d):
@@ -1191,9 +1191,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     await stream_event("action_payload", json.dumps(log_payload, indent=2))
                     log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
-                    log.info(f"[AgentLoop] Tool response: {resp.status_code}")
+                    log.info(f"[AgentLoop] Tool response: {resp.status}")
                     
-                    if resp.status_code == 422:
+                    if resp.status == 422:
                         try:
                             error_detail = resp.json().get("detail", "Validation failed")
                             # Sanitize error detail before exposing to LLM — 422 responses
@@ -1280,14 +1280,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "tags": list(dict.fromkeys(tags)),
             }
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
                 resp = await client.post(
                     f"{EXECUTION_SVC}/execute/learning",
                     json=payload,
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                 )
-                if resp.status_code != 200:
-                    log.warning(f"[AgentLoop] Learning persistence failed: {resp.status_code} {resp.text}")
+                if resp.status != 200:
+                    log.warning(f"[AgentLoop] Learning persistence failed: {resp.status} {resp.text}")
         except Exception as e:
             log.warning(f"[AgentLoop] Learning persistence skipped: {e}")
 
@@ -1349,7 +1349,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     if mission_id and full_audit_log:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                 await client.patch(
                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                     json={"output_log": json.dumps(full_audit_log)},
@@ -1378,13 +1378,13 @@ async def run_post_write_lint(file_path: str, execution_svc: str, internal_secre
         lint_payload: dict[str, Any] = {"path": file_path}
         if user_context:
             lint_payload["user_context"] = user_context
-        async with httpx.AsyncClient(timeout=15.0) as lint_client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as lint_client:
             lint_resp = await lint_client.post(
                 f"{execution_svc}/execute/workspace_lint",
                 json=lint_payload,
                 headers={"X-Internal-Secret": internal_secret},
             )
-            if lint_resp.status_code == 200:
+            if lint_resp.status == 200:
                 lint_data = lint_resp.json()
                 lint_passed = lint_data.get("detail", {}).get("passed", True)
                 if lint_passed is False:

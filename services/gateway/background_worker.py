@@ -6,7 +6,6 @@ Jarvis Background Worker — The "heartbeat" and "brain" of the autonomous Raven
 """
 import asyncio
 import logging
-import httpx
 import aiohttp
 import json
 import os
@@ -92,14 +91,14 @@ class RavenWorker:
         automatically from their last checkpoint.
         """
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
                 resp = await client.get(
                     "http://identity:8001/api/raven/missions",
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                if resp.status_code != 200:
+                if resp.status != 200:
                     return
-                missions = resp.json()
+                missions = await resp.json()
                 orphans = [m for m in missions if m.get("status") in ("executing", "paused")]
                 for mission in orphans:
                     mid = mission["id"]
@@ -328,7 +327,7 @@ class RavenWorker:
                     mission_id = payload.get("_mission_id")
                     if mission_id:
                         try:
-                            async with httpx.AsyncClient(timeout=10.0) as client:
+                            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                                 await client.patch(
                                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                                     json={"status": "executing"},
@@ -376,7 +375,7 @@ class RavenWorker:
                                 if kill_monitor:
                                     kill_monitor.cancel()
                             break  # Success, exit retry loop
-                        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout, ConnectionResetError, BrokenPipeError) as e:
+                        except (aiohttp.ClientConnectorError, aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, ConnectionResetError, BrokenPipeError) as e:
                             log.warning(f"[Worker] Infrastructure error on attempt {attempt + 1}/{INFRA_RETRIES}: {e}")
                             if attempt < INFRA_RETRIES - 1:
                                 log.info(f"[Worker] Retrying orchestration in {INFRA_RETRY_DELAY}s...")
@@ -390,7 +389,7 @@ class RavenWorker:
                     mission_id = payload.get("_mission_id")
                     if mission_id:
                         try:
-                            async with httpx.AsyncClient(timeout=10.0) as client:
+                            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                                 await client.patch(
                                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                                     json={"status": "executing"},
@@ -409,7 +408,7 @@ class RavenWorker:
                         try:
                             ans = await process_full_orchestration(payload, chunk_callback=chunk_callback)
                             break  # Success, exit retry loop
-                        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.PoolTimeout, ConnectionResetError, BrokenPipeError) as e:
+                        except (aiohttp.ClientConnectorError, aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, ConnectionResetError, BrokenPipeError) as e:
                             log.warning(f"[Worker] Infrastructure error on attempt {attempt + 1}/{INFRA_RETRIES}: {e}")
                             if attempt < INFRA_RETRIES - 1:
                                 log.info(f"[Worker] Retrying orchestration in {INFRA_RETRY_DELAY}s...")
@@ -453,7 +452,7 @@ class RavenWorker:
                         else:
                             result_str = "The mission did not produce a meaningful result. The LLM returned an empty or invalid response."
                         log.warning(f"[Worker] Mission {mission_id} marked failed — no meaningful work accomplished")
-                    async with httpx.AsyncClient(timeout=10.0) as client:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                         await client.patch(
                             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                             json={"status": status, "result": result_str},
@@ -471,7 +470,7 @@ class RavenWorker:
             mission_id = payload.get("_mission_id")
             if mission_id:
                 try:
-                    async with httpx.AsyncClient(timeout=10.0) as client:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                         await client.patch(
                             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                             json={"status": "failed", "result": str(e)},
@@ -530,12 +529,12 @@ class RavenWorker:
             ollama_url = _get(settings, "llm_local_url")
             if not ollama_url:
                 raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                 resp = await client.get(f"{ollama_url}/api/tags")
-                if resp.status_code != 200:
-                    log.warning(f"[Worker] Failed to fetch Ollama models: {resp.status_code}")
+                if resp.status != 200:
+                    log.warning(f"[Worker] Failed to fetch Ollama models: {resp.status}")
                     return current_model
-                models = resp.json().get("models", [])
+                models = (await resp.json()).get("models", [])
                 if not models:
                     log.warning("[Worker] No models available from Ollama")
                     return current_model
@@ -562,7 +561,7 @@ class RavenWorker:
         retry_count = payload["_retry_count"]
         log.warning(f"[Worker] Upgrading mission {mission_id} from {original_model} → {upgrade_model} (retry {retry_count})")
         
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             await client.patch(
                 f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                 json={"status": "executing", "result": f"Retrying with larger model ({upgrade_model}). Previous attempt: {result_str[:200]}"},
@@ -684,16 +683,16 @@ class RavenWorker:
             
             try:
                 # Push to Identity Triage Queue instead of executing immediately
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                     resp = await client.post(
                         f"{IDENTITY_SVC}/api/raven/missions",
                         json=mission_payload,
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
-                    if resp.status_code == 200:
+                    if resp.status == 200:
                         log.info(f"Mission for {c['name']} successfully pushed to Triage Queue.")
                     else:
-                        log.error(f"Failed to push mission to Triage Queue: {resp.text}")
+                        log.error(f"Failed to push mission to Triage Queue: {await resp.text()}")
             except Exception as e:
                 log.error(f"Error pushing to Triage Queue: {e}")
 
@@ -727,14 +726,14 @@ class RavenWorker:
         
         # 1. Fetch all users from Identity to sync their HA entities
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                 resp = await client.get(
                     f"{IDENTITY_SVC}/api/users",
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                if resp.status_code != 200:
+                if resp.status != 200:
                     return
-                users = resp.json()
+                users = await resp.json()
         except Exception as e:
             log.error(f"Cleanup: failed to fetch users: {e}")
             return

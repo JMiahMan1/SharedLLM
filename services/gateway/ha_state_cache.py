@@ -7,7 +7,7 @@ Redis caches live state with a short TTL.
 entity_id is the stable join key between the two.
 """
 import logging
-import httpx
+import aiohttp
 import redis
 
 log = logging.getLogger("gateway.ha_state_cache")
@@ -67,13 +67,13 @@ def cache_all_states(entities: list[dict]) -> int:
 async def fetch_live_states(execution_url: str, ha_url: str, ha_token: str, internal_secret: str) -> list[dict]:
     """Fetch all states from HA via execution service and cache them."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             resp = await client.get(
                 f"{execution_url}/discovery/entities",
                 params={"ha_url": ha_url, "ha_token": ha_token},
                 headers={"X-Internal-Secret": internal_secret}
             )
-            if resp.status_code == 200:
+            if resp.status == 200:
                 data = resp.json()
                 entities = data.get("entities", []) if isinstance(data, dict) else []
                 cache_all_states(entities)
@@ -97,7 +97,7 @@ def get_live_state(entity_id: str, execution_url: str, ha_url: str, ha_token: st
             headers={"X-Internal-Secret": internal_secret},
             timeout=10
         )
-        if resp.status_code == 200:
+        if resp.status == 200:
             data = resp.json()
             entities = data.get("entities", []) if isinstance(data, dict) else []
             cache_all_states(entities)

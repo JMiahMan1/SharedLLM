@@ -71,7 +71,7 @@ class TestDynamicModelSelection:
         mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
 
         with patch("services.gateway.orchestrator.get_all_settings", mock_settings):
-            with patch("httpx.AsyncClient") as mock_client:
+            with patch("aiohttp.ClientSession") as mock_client:
                 mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
                 mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_client.return_value.get = AsyncMock(return_value=mock_resp)
@@ -93,7 +93,7 @@ class TestDynamicModelSelection:
         mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
 
         with patch("services.gateway.orchestrator.get_all_settings", mock_settings):
-            with patch("httpx.AsyncClient") as mock_client:
+            with patch("aiohttp.ClientSession") as mock_client:
                 mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
                 mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
                 mock_client.return_value.get = AsyncMock(return_value=mock_resp)
@@ -106,7 +106,7 @@ class TestDynamicModelSelection:
         mock_resp = MagicMock()
         mock_resp.status_code = 500
 
-        with patch("httpx.AsyncClient") as mock_client:
+        with patch("aiohttp.ClientSession") as mock_client:
             mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
             mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.return_value.get = AsyncMock(return_value=mock_resp)
@@ -120,7 +120,7 @@ class TestDynamicModelSelection:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"models": []}
 
-        with patch("httpx.AsyncClient") as mock_client:
+        with patch("aiohttp.ClientSession") as mock_client:
             mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
             mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_client.return_value.get = AsyncMock(return_value=mock_resp)
@@ -130,7 +130,7 @@ class TestDynamicModelSelection:
 
     @pytest.mark.asyncio
     async def test_returns_current_on_exception(self):
-        with patch("httpx.AsyncClient") as mock_client:
+        with patch("aiohttp.ClientSession") as mock_client:
             mock_client.return_value.__aenter__ = AsyncMock(side_effect=Exception("Connection refused"))
             mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
 

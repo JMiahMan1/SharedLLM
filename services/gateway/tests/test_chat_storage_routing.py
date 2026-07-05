@@ -1,6 +1,6 @@
 import pytest
 import respx
-import httpx
+import aiohttp
 import sys
 from unittest.mock import MagicMock, AsyncMock
 _mock_redis_async = MagicMock()
@@ -44,8 +44,8 @@ def get_test_settings():
         identity_url = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
         internal_secret = os.getenv("INTERNAL_SECRET", "change-me-in-production")
         try:
-            import httpx
-            with httpx.Client(timeout=5.0) as client:
+            import aiohttp
+            with aiohttp.ClientSession(timeout=5.0) as client:
                 resp = client.get(
                     f"{identity_url}/api/settings",
                     headers={"X-Internal-Secret": internal_secret}
@@ -118,14 +118,14 @@ def test_chat_storage_routing(auth_headers):
 
     # Mock identity settings (needed by get_assistant_model in chat path)
     respx.get(f"{identity_svc}/api/settings").mock(
-        return_value=httpx.Response(200, json=[
+        return_value=MagicMock(200, json=[
             {"key": k, "value": v} for k, v in settings.items()
         ])
     )
     
     # Mock identity resolution
     respx.post(f"{identity_svc}/api/resolve").mock(
-        return_value=httpx.Response(200, json={
+        return_value=MagicMock(200, json={
             "user": "testuser",
             "is_admin": True,
             "ha_url": "http://ha.local",
@@ -138,7 +138,7 @@ def test_chat_storage_routing(auth_headers):
     
     # Mock the RAG search
     respx.post(f"{rag_svc}/rag/search").mock(
-        return_value=httpx.Response(200, json={"results": []})
+        return_value=MagicMock(200, json={"results": []})
     )
 
     # Mock Ollama generation - simulate a generated JSON tool block from LLM
@@ -166,16 +166,16 @@ def test_chat_storage_routing(auth_headers):
     response_iter = iter(responses)
     def ollama_side_effect(request):
         try:
-            return httpx.Response(200, json=next(response_iter))
+            return MagicMock(200, json=next(response_iter))
         except StopIteration:
-            return httpx.Response(200, json=responses[-1])
+            return MagicMock(200, json=responses[-1])
 
     llm_local_url = settings.get("llm_local_url")
     llm_route = respx.post(f"{llm_local_url}/api/chat").mock(side_effect=ollama_side_effect)
 
     # Mock Storage Index call
     storage_route = respx.post(f"{storage_svc}/index/full").mock(
-        return_value=httpx.Response(200, json={"message": "Indexing started"})
+        return_value=MagicMock(200, json={"message": "Indexing started"})
     )
 
     # Trigger chat handler
