@@ -196,15 +196,15 @@ async def list_provider_entries(req: IndexScanRequest):
         user_id = req.provider.settings.get("username", "admin")
         indexed_paths = set()
         
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             try:
                 # Query RAG for all indexed paths for this user
                 rag_resp = await client.get(
                     f"{RAG_SVC}/rag/indexed-paths?user_id={user_id}",
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                if rag_resp.status_code == 200:
-                    indexed_paths = set(rag_resp.json().get("paths", []))
+                if rag_resp.status == 200:
+                    indexed_paths = set((await rag_resp.json()).get("paths", []))
             except Exception as e:
                 log.warning(f"Failed to fetch indexed paths from RAG: {e}")
 
@@ -251,7 +251,7 @@ async def write_provider_content(req: ProviderWriteRequest):
         import base64
         provider = build_provider(req.provider)
         
-        content = req.content
+        content: str | bytes | None = req.content
         is_binary = False
         if req.content_b64:
             content = base64.b64decode(req.content_b64)

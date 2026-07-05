@@ -33,9 +33,9 @@ class NextCloudClient:
             
         self.base_url = f"{self.protocol}://{self.host}"
         
-        self.client = httpx.AsyncClient(
-            auth=(self.username, self.password),
-            timeout=httpx.Timeout(15.0, read=60.0), # 15s general, 60s for reads/writes
+        self.client = aiohttp.ClientSession(
+            auth=aiohttp.BasicAuth(self.username, self.password),
+            timeout=aiohttp.ClientTimeout(total=15.0, sock_read=60.0),
             headers={"User-Agent": "JarvisOS-Storage/1.0"}
         )
 
@@ -66,14 +66,20 @@ class NextCloudClient:
             ns = {"d": "DAV:"}
             
             for response in root.findall(".//d:response", ns):
-                href = response.find("d:href", ns).text
+                href_node = response.find("d:href", ns)
+                if href_node is None or href_node.text is None:
+                    continue
+                href = href_node.text
                 propstats = response.findall("d:propstat", ns)
                 
                 # We usually want the one with 200 OK
                 props = {}
                 for propstat in propstats:
-                    status = propstat.find("d:status", ns).text
-                    if status is not None and "200" in status:
+                    status_node = propstat.find("d:status", ns)
+                    if status_node is None or status_node.text is None:
+                        continue
+                    status = status_node.text
+                    if "200" in status:
                         prop_node = propstat.find("d:prop", ns)
                         if prop_node is not None:
                             # Extract properties
@@ -104,8 +110,10 @@ class NextCloudClient:
         headers = {"Depth": "1"}
         try:
             resp = await self.client.request("PROPFIND", url, headers=headers)
-            resp.raise_for_status()
-            return self._parse_dav_response(resp.content)
+            if resp.status >= 400:
+                raise Exception(f"HTTP {resp.status}")
+            xml_content = await resp.read()
+            return self._parse_dav_response(xml_content)
         except Exception as e:
             log.error(f"Failed to list files in {remote_path}: {e}")
             return []
@@ -179,8 +187,9 @@ class NextCloudClient:
         
         try:
             resp = await self.client.get(url)
-            resp.raise_for_status()
-            return resp.text
+            if resp.status >= 400:
+                raise Exception(f"HTTP {resp.status}")
+            return await resp.text()
         except Exception as e:
             log.error(f"Failed to fetch content for {remote_path}: {e}")
             return None
@@ -199,8 +208,8 @@ class NextCloudClient:
                 # WebDAV requires MKCOL to create a directory
                 resp = await self.client.request("MKCOL", url)
                 # 405 Method Not Allowed often means the directory already exists
-                if resp.status_code not in {200, 201, 204, 301, 302, 405}:
-                    log.warning(f"MKCOL {current} returned status {resp.status_code}")
+                if resp.status not in {200, 201, 204, 301, 302, 405}:
+                    log.warning(f"MKCOL {current} returned status {resp.status}")
             except Exception as e:
                 log.error(f"Failed to ensure directory {current}: {e}")
                 raise
@@ -226,7 +235,7 @@ class NextCloudClient:
         url = await self._full_url(normalized)
         try:
             headers = {"Content-Type": "application/octet-stream" if is_binary else "text/plain; charset=utf-8"}
-            resp = await self.client.put(url, content=content_bytes, headers=headers)
+            resp = await self.client.put(url, data=content_bytes, headers=headers)
             resp.raise_for_status()
         except Exception as e:
             log.error(f"Failed to upload content for {normalized}: {e}")
@@ -243,9 +252,9 @@ class NextCloudClient:
         url = await self._full_url(remote_path)
         try:
             with open(local_path, "wb") as f:
-                async with self.client.stream("GET", url) as resp:
+                async with self.client.get(url) as resp:
                     resp.raise_for_status()
-                    async for chunk in resp.aiter_bytes():
+                    async for chunk in resp.content.iter_chunked(8192):
                         f.write(chunk)
             return True
         except Exception as e:
@@ -307,7 +316,7 @@ class NextCloudClient:
         }
 
     async def close(self):
-        await self.client.aclose()
+        await self.client.close()
 
     async def __aenter__(self):
         return self
