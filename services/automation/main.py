@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import json
-import httpx
+import aiohttp
 from datetime import datetime
 import redis.asyncio as redis
 

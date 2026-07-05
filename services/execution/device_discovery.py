@@ -149,7 +149,7 @@ async def _discover_via_ha_registry(
     entity_id: str, ha_url: str, ha_token: str, device_type: Optional[str] = None
 ) -> Optional[dict]:
     """Look up IP/MAC via HA device registry REST API."""
-    import httpx
+    import aiohttp
     try:
         headers = {"Authorization": f"Bearer {ha_token}"}
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -230,7 +230,7 @@ async def _discover_via_ha_registry(
     # ESPHome-specific: check config entries for host
     if device_type == "esphome" or not device_type:
         try:
-            import httpx
+            import aiohttp
             headers = {"Authorization": f"Bearer {ha_token}"}
             state = await ha_client.get_state(ha_url, ha_token, entity_id)
             if not state:
@@ -272,7 +272,7 @@ async def _discover_via_homekit_diagnostics(
     controller diagnostics expose AccessoryIPs. This bridges the gap by
     matching webostv devices to their HomeKit sibling entries.
     """
-    import httpx
+    import aiohttp
     try:
         headers = {"Authorization": f"Bearer {ha_token}"}
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -406,7 +406,7 @@ async def _discover_via_arp(
     """Get IPs from ARP table, probe for device ports, match by device info."""
     try:
         import subprocess
-        import httpx
+        import aiohttp
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
         if not state:
             return None
@@ -476,7 +476,7 @@ async def _discover_via_arp_scan(
     """Scan subnets with arp-scan, probe for device ports, match by device info."""
     try:
         import subprocess
-        import httpx
+        import aiohttp
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
         if not state:
             return None
@@ -712,7 +712,7 @@ async def _discover_via_network_scan(
     (friendly name, model, or serial match). Prevents all entities mapping to
     the first responding IP on the subnet.
     """
-    import httpx
+    import aiohttp
     import ipaddress
 
     try:
@@ -885,7 +885,7 @@ async def bulk_scan(
 
     # Step 1: Scan subnet once to build IP -> device map
     log.info(f"[discovery] Scanning subnet {subnet} for devices...")
-    import httpx
+    import aiohttp
     import ipaddress
     device_map = {}  # ip -> {type, metadata}
     

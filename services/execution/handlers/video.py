@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 import re
-import httpx
+import aiohttp
 import urllib.parse
 from services.config import TEMP_MEDIA_DIR as _TEMP_MEDIA_DIR
 from services.execution import ha_client

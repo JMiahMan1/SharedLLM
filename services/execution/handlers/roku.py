@@ -157,7 +157,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     if not ma_entity:
         return ExecutionResult(status="FAILURE", message=f"Could not find Music Assistant player for {roku_entity}.", service="roku_music")
 
-    import httpx
+    import aiohttp
     params = {"t": "a", "autoplay": "true"}
 
     search_result = await ha_client.call_service(
@@ -292,7 +292,7 @@ async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_ur
             await ha_client.call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {"command": "Home"})
             await asyncio.sleep(2)
 
-    import httpx
+    import aiohttp
     import re
     clean_title = re.sub(r'[^\w\s\-\.\(\)\[\]]', '', title)[:100]
     params = {"t": "v", "u": video_url, "videoName": clean_title or "Video", "videoFormat": "mp4"}

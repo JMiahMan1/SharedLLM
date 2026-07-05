@@ -2,7 +2,7 @@
 import logging
 import uuid
 from typing import List, Dict, Any
-import httpx
+import aiohttp
 
 log = logging.getLogger(__name__)
 

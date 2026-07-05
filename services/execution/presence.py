@@ -231,7 +231,7 @@ class PresenceTracker:
 
     async def _get_user_gps_location(self, user_id: str) -> Optional[Dict[str, Any]]:
         try:
-            import httpx
+            import aiohttp
             import services.config as config
             async with httpx.AsyncClient(timeout=3.0) as client:
                 resp = await client.get(
@@ -292,7 +292,7 @@ class PresenceTracker:
 
         # Integrate GPS fallback for users not in the BLE presence list
         try:
-            import httpx
+            import aiohttp
             import services.config as config
             async with httpx.AsyncClient(timeout=3.0) as client:
                 resp = await client.get(

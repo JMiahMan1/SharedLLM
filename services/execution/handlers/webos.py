@@ -68,7 +68,7 @@ async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
 async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> dict:  # pyright: ignore[reportUnusedFunction]
     """Get WebOS device info (IP, MAC) via HomeKit diagnostics or device registry."""
     # noqa: F811 - kept for potential use
-    import httpx
+    import aiohttp
     import websockets
     headers = {"Authorization": f"Bearer {ha_token}"}
     state = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -167,7 +167,7 @@ async def back(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResult:
 
 async def _find_homekit_entity(ha_url: str, ha_token: str, entity_id: str) -> str | None:
     """Find the HomeKit controller sibling for a webostv entity."""
-    import httpx
+    import aiohttp
     import websockets
     headers = {"Authorization": f"Bearer {ha_token}"}
     state = await ha_client.get_state(ha_url, ha_token, entity_id)

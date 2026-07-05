@@ -10,7 +10,7 @@ try:
 except ImportError:
     from ..schemas import ExecutionResult
 
-import httpx
+import aiohttp
 
 log = logging.getLogger("execution.ha_config")
 

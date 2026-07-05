@@ -75,7 +75,7 @@ def validate_jarvis_mention(message: Optional[str]) -> bool:
 async def _get_talk_model_from_settings() -> str:
     """Resolve assistant/librarian model from Identity settings for Talk. Never use 'auto'."""
     try:
-        import httpx
+        import aiohttp
         from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(

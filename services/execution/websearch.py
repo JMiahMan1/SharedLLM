@@ -9,7 +9,7 @@ log = logging.getLogger("execution.websearch")
 async def web_search(query: str, num_results: int = 5) -> List[Dict[str, Any]]:
     """Search via SearXNG JSON API, with fallback to empty results."""
     try:
-        import httpx
+        import aiohttp
         searxng_url = None
         try:
             from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET

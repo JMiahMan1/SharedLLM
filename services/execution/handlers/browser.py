@@ -5,7 +5,7 @@ import re
 import sys
 import time
 import html2text
-import httpx
+import aiohttp
 from urllib.parse import urlencode
 from playwright.async_api import async_playwright
 from typing import Optional

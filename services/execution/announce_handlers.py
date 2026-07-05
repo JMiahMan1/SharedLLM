@@ -225,7 +225,7 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
     roku_ip = roku_result.get("ip") if roku_result else None
     
     if roku_ip:
-        import httpx
+        import aiohttp
         try:
             log.info(f"[announce.roku] Sending Home key via ECP to {roku_ip}")
             async with httpx.AsyncClient(verify=False, timeout=5) as client:
@@ -239,7 +239,7 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
     
     # 2. Launch Media Assistant with audio URL via ECP (matching main branch video flow)
     if roku_ip:
-        import httpx
+        import aiohttp
         try:
             ecp_url = f"http://{roku_ip}:8060/launch/782875"
             params = {

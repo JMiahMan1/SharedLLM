@@ -1,6 +1,6 @@
 # services/execution/handlers/learning.py
 import logging
-import httpx
+import aiohttp
 from services.config import RAG_SVC_URL, INTERNAL_SECRET
 from services.execution.schemas import SystemLearningRequest, ExecutionResult
 

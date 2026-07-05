@@ -535,7 +535,7 @@ async def _roku_play_audiobook(roku_entity: str, stream_url: str, title: str, ha
     """Play audiobook on Roku: ECP launch Media Assistant app + delegate audio to MA sibling."""
     from . import roku as roku_handler
     import asyncio
-    import httpx
+    import aiohttp
 
     ma_entity = await roku_handler.find_ma_player_sibling(ha_url, ha_token, roku_entity)
     if not ma_entity:
