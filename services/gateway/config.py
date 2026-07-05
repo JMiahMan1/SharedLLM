@@ -10,6 +10,50 @@ Service URLs default to Docker DNS names but are overridable via Identity settin
 """
 import os
 
+# Import runtime-resolved values from services.config (updated by resolve_runtime_config)
+try:
+    from services.config import (
+        IDENTITY_SVC_URL,
+        EXECUTION_SVC_URL,
+        RAG_SVC_URL,
+        STORAGE_SVC_URL,
+        LOGGING_SVC_URL,
+        WORKSPACE_RUNTIME_SVC_URL,
+        CONTROL_PLANE_URL,
+        OLLAMA_URL,
+        REDIS_URL,
+        SEARXNG_URL,
+        LLAMA_SERVER_PROXY_URL,
+    )
+except ImportError:
+    # Fallback to environment variables if services.config is not available
+    IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
+    EXECUTION_SVC_URL = os.getenv("EXECUTION_SVC_URL")
+    RAG_SVC_URL = os.getenv("RAG_SVC_URL")
+    STORAGE_SVC_URL = os.getenv("STORAGE_SVC_URL")
+    LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL")
+    WORKSPACE_RUNTIME_SVC_URL = os.getenv("WORKSPACE_RUNTIME_SVC_URL")
+    CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
+    OLLAMA_URL = os.getenv("OLLAMA_URL")
+    REDIS_URL = os.getenv("REDIS_URL")
+    SEARXNG_URL = os.getenv("SEARXNG_URL")
+    LLAMA_SERVER_PROXY_URL = os.getenv("LLAMA_SERVER_PROXY_URL")
+
+# Use runtime-resolved values (or fallback to env vars)
+IDENTITY_SVC = IDENTITY_SVC_URL
+EXECUTION_SVC = EXECUTION_SVC_URL
+RAG_SVC = RAG_SVC_URL
+STORAGE_SVC = STORAGE_SVC_URL
+LOGGING_SVC = LOGGING_SVC_URL
+WORKSPACE_RUNTIME_SVC = WORKSPACE_RUNTIME_SVC_URL
+CONTROL_PLANE_URL = CONTROL_PLANE_URL
+OLLAMA_URL = OLLAMA_URL
+OLLAMA_TIMEOUT = 600.0
+REDIS_URL = REDIS_URL
+SEARXNG_URL = SEARXNG_URL
+LLAMA_SERVER_PROXY_URL = LLAMA_SERVER_PROXY_URL
+
+
 def _safe_int(key: str, default: int) -> int:
     val = os.getenv(key)
     if val is None or val.strip() == "":
@@ -18,6 +62,7 @@ def _safe_int(key: str, default: int) -> int:
         return int(float(val))
     except ValueError:
         return default
+
 
 def _safe_float(key: str, default: float) -> float:
     val = os.getenv(key)
@@ -28,23 +73,9 @@ def _safe_float(key: str, default: float) -> float:
     except ValueError:
         return default
 
+
 # --- Inter-service auth (set by docker-compose) ---
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
-
-# --- Default service URLs (Docker DNS) — overridable via Identity settings ---
-# These are import-time defaults. Runtime code should use get_all_settings() from orchestrator.
-IDENTITY_SVC = os.getenv("IDENTITY_SVC_URL")
-EXECUTION_SVC = os.getenv("EXECUTION_SVC_URL")
-RAG_SVC = os.getenv("RAG_SVC_URL")
-STORAGE_SVC = os.getenv("STORAGE_SVC_URL")
-LOGGING_SVC = os.getenv("LOGGING_SVC_URL")
-WORKSPACE_RUNTIME_SVC = os.getenv("WORKSPACE_RUNTIME_SVC_URL")
-CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
-OLLAMA_URL = os.getenv("OLLAMA_URL")  # .env is seed-only; runtime resolved from Identity settings
-REDIS_URL = os.getenv("REDIS_URL")
-SEARXNG_URL = os.getenv("SEARXNG_URL")
-LLAMA_SERVER_PROXY_URL = os.getenv("LLAMA_SERVER_PROXY_URL")
-OLLAMA_TIMEOUT = 600.0
 
 # --- Constants (not user-configurable) ---
 SYSTEM_IDENTITY = "raven_system"
