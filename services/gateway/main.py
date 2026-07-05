@@ -1787,7 +1787,7 @@ async def fetch_ha_entities(creds: dict) -> list:
                 return []
             
             try:
-                resp_text = await resp.text()()
+        resp_text = await resp.text()
                 data = json.loads(resp_text)
             except (json.JSONDecodeError, ValueError) as e:
                 log.error(f"Failed to parse HA entities JSON: {e} | Body: {resp_text[:200] if resp_text else 'None'}")
@@ -1937,8 +1937,9 @@ async def secure_logging_middleware(request: Request, call_next):
     
     response = await call_next(request)
     
-    log.info(f"RESPONSE: {request.method} {request.url} | Status: {response.status}")
-    asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {response.status}", {}))
+    status_code = getattr(response, 'status_code', None) or getattr(response, 'status', 'N/A')
+    log.info(f"RESPONSE: {request.method} {request.url} | Status: {status_code}")
+    asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
     return response
 
 # --- Core Handlers ---
