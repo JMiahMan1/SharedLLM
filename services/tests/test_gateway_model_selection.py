@@ -294,9 +294,9 @@ async def test_workspace_bootstrap_proxy_uses_gateway_route(monkeypatch):
         captured["json"] = json
         captured["headers"] = headers
         return SimpleNamespace(
-            status_code=200,
-            json=lambda: {"status": "SUCCESS", "workspace": {"id": "alice-demo"}},
-            text="",
+            status=200,
+            json=AsyncMock(return_value={"status": "SUCCESS", "workspace": {"id": "alice-demo"}}),
+            text=AsyncMock(return_value=""),
         )
 
     mock_client = SimpleNamespace(request=fake_request)
@@ -334,9 +334,9 @@ async def test_workspace_pytest_proxy_uses_gateway_route(monkeypatch):
         captured["json"] = json
         captured["headers"] = headers
         return SimpleNamespace(
-            status_code=200,
-            json=lambda: {"status": "SUCCESS", "exit_code": 0},
-            text="",
+            status=200,
+            json=AsyncMock(return_value={"status": "SUCCESS", "exit_code": 0}),
+            text=AsyncMock(return_value=""),
         )
 
     mock_client = SimpleNamespace(request=fake_request)
@@ -484,7 +484,7 @@ async def test_single_turn_inference_supports_capability_index_tool(monkeypatch)
     captured = {}
 
     class FakeAsyncClient:
-        def __init__(self, timeout=None):
+        def __init__(self, timeout=None, connector=None):
             self.timeout = timeout
 
         async def __aenter__(self):
@@ -498,9 +498,9 @@ async def test_single_turn_inference_supports_capability_index_tool(monkeypatch)
             captured["json"] = json
             captured["headers"] = headers
             return SimpleNamespace(
-                status_code=200,
-                text="",
-                json=lambda: {"message": "Capability index refreshed."},
+                status=200,
+                text=AsyncMock(return_value=""),
+                json=AsyncMock(return_value={"message": "Capability index refreshed."}),
             )
 
     monkeypatch.setattr(
@@ -517,7 +517,7 @@ async def test_single_turn_inference_supports_capability_index_tool(monkeypatch)
         ),
     )
     monkeypatch.setattr(gateway_orchestrator, "load_prompt_sync", lambda x: "test-single-turn-guide")
-    monkeypatch.setattr(gateway_orchestrator.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(gateway_orchestrator.aiohttp, "ClientSession", FakeAsyncClient)
 
     creds = gateway_main.ResolvedCredentials(user="alice")
     result = await gateway_orchestrator._single_turn_inference(

@@ -21,18 +21,16 @@ async def handle_system_learning(req: SystemLearningRequest) -> ExecutionResult:
             }
         }
         
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            async with client.post(
                 f"{RAG_SVC}/rag/ingest",
                 json=payload,
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=10.0
-            )
-            
-            if resp.status_code == 200:
-                return ExecutionResult(status="SUCCESS", message="Learning persisted successfully.", service="learning")
-            else:
-                return ExecutionResult(status="FAILURE", message=f"RAG ingestion failed: {resp.text}", service="learning")
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            ) as resp:
+                if resp.status == 200:
+                    return ExecutionResult(status="SUCCESS", message="Learning persisted successfully.", service="learning")
+                else:
+                    return ExecutionResult(status="FAILURE", message=f"RAG ingestion failed: {await resp.text()}", service="learning")
                 
     except Exception as e:
         log.error(f"System learning persistence failed: {e}")

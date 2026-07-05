@@ -37,13 +37,13 @@ async def _get_searxng_url() -> str | None:
         return _SEARXNG_URL_CACHE
     try:
         from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+            async with client.get(
                 f"{IDENTITY_SVC_URL}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if resp.status_code == 200:
-                settings_list = resp.json()
+            ) as resp:
+                if resp.status == 200:
+                    settings_list = await resp.json()
                 for item in settings_list:
                     if item.get("key") == "searxng_url":
                         url = item.get("value", "").rstrip("/")
@@ -97,10 +97,10 @@ async def search_youtube(query: str) -> str | None:
             })
             search_url = f"{searxng_url}/search?{params}"
             log.info(f"[video] SearXNG YouTube search (HTML): {search_url}")
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(search_url)
-                resp.raise_for_status()
-                html = resp.text
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
+                async with client.get(search_url) as resp:
+                    resp.raise_for_status()
+                    html = await resp.text()
 
             youtube_pattern = r'href="(https?://(?:www\.)?youtube\.com/watch\?[^"]+)"'
             matches = re.findall(youtube_pattern, html)

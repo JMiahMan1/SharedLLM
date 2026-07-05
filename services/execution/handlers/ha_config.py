@@ -20,15 +20,15 @@ async def _get_ha_credentials(user_context: dict) -> tuple:
     from services.config import INTERNAL_SECRET, IDENTITY_SVC_URL
 
     rag_user = user_context.get("user", "default")
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        resp = await client.post(
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+        async with client.post(
             f"{IDENTITY_SVC_URL}/api/resolve",
             json={"rag_user": rag_user},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        if resp.status_code == 200:
-            creds = resp.json()
-            return creds.get("ha_url"), creds.get("ha_token")
+        ) as resp:
+            if resp.status == 200:
+                creds = await resp.json()
+                return creds.get("ha_url"), creds.get("ha_token")
     return None, None
 
 
@@ -174,12 +174,13 @@ async def handle_ha_config(req_data: dict) -> ExecutionResult:
             )
 
         elif action == "get_config":
-            async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
-                resp = await client.get(f"{ha_url}/api/config", headers={"Authorization": f"Bearer {ha_token}"})
-                if resp.status_code != 200:
-                    return ExecutionResult(status="FAILURE", message=f"REST API error: {resp.status_code} {resp.text}", service="ha_config")
+            connector = aiohttp.TCPConnector(verify_ssl=False)
+            async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+                async with client.get(f"{ha_url}/api/config", headers={"Authorization": f"Bearer {ha_token}"}) as resp:
+                    if resp.status != 200:
+                        return ExecutionResult(status="FAILURE", message=f"REST API error: {resp.status} {await resp.text()}", service="ha_config")
 
-                config = resp.json()
+                    config = await resp.json()
                 summary = {
                     "ha_version": config.get("version"),
                     "location_name": config.get("location_name"),
