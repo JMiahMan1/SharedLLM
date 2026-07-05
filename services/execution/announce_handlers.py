@@ -230,7 +230,7 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
             log.info(f"[announce.roku] Sending Home key via ECP to {roku_ip}")
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5), connector=aiohttp.TCPConnector(ssl=False)) as client:
                 resp = await client.post(f"http://{roku_ip}:8060/keypress/Home")
-                log.info(f"[announce.roku] ECP Home key response: {resp.status_code}")
+                log.info(f"[announce.roku] ECP Home key response: {resp.status}")
         except Exception as e:
             log.warning(f"[announce.roku] ECP Home key failed: {e}")
     
@@ -252,8 +252,8 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
             log.info(f"[announce.roku] ECP launch: {ecp_url} params={params}")
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), connector=aiohttp.TCPConnector(ssl=False)) as client:
                 resp = await client.post(ecp_url, params=params)
-                log.info(f"[announce.roku] ECP response: {resp.status_code}")
-                if resp.status_code in (200, 204):
+                log.info(f"[announce.roku] ECP response: {resp.status}")
+                if resp.status in (200, 204):
                     return {"ok": True}
         except Exception as e:
             log.warning(f"[announce.roku] ECP launch failed: {e}")
