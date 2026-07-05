@@ -1935,7 +1935,19 @@ async def secure_logging_middleware(request: Request, call_next):
     log.info(f"REQUEST: {request.method} {request.url} | Headers: {safe_headers}")
     asyncio.create_task(emit_log("INFO", f"{request.method} {request.url.path}", {"headers": safe_headers}))
     
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except HTTPException as e:
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"status": "ERROR", "message": str(e.detail)}
+        )
+    except Exception as e:
+        log.error(f"Middleware error: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "ERROR", "message": "Internal Gateway Error"}
+        )
     
     status_code = getattr(response, 'status_code', None) or getattr(response, 'status', 'N/A')
     log.info(f"RESPONSE: {request.method} {request.url} | Status: {status_code}")

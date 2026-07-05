@@ -179,10 +179,11 @@ class OllamaProvider(BaseLLMProvider):
             async with client.post(f"{self.base_url}/api/chat", json=payload) as response:
                 if response.status >= 400:
                     await response.read()
-                    raise RuntimeError(f"Ollama stream HTTP {response.status}: {response.text}")
+                    raise RuntimeError(f"Ollama stream HTTP {response.status}: {await response.text()}")
                 response.raise_for_status()
-                async for line in response.content.iter_any():
-                    clean_line = line.decode("utf-8").strip()
+                async for chunk in response.content.iter_any():
+                    line = chunk.decode("utf-8")
+                    clean_line = line.strip()
                     if not clean_line:
                         continue
                     try:
