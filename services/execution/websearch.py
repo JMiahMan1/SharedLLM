@@ -18,7 +18,7 @@ async def web_search(query: str, num_results: int = 5) -> List[Dict[str, Any]]:
                     f"{IDENTITY_SVC_URL}/api/settings",
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                if resp.status_code == 200:
+                if resp.status == 200:
                     for item in resp.json():
                         if item.get("key") == "searxng_url":
                             url = item.get("value", "").rstrip("/")
@@ -40,7 +40,7 @@ async def web_search(query: str, num_results: int = 5) -> List[Dict[str, Any]]:
         url = f"{searxng_url}/search?{urllib.parse.urlencode(params)}"
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             resp = await client.get(url)
-            if resp.status_code == 200:
+            if resp.status == 200:
                 data = resp.json()
                 results = []
                 for r in data.get("results", [])[:num_results]:
