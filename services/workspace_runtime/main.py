@@ -7,6 +7,7 @@ import hashlib
 import tempfile
 import time
 import fnmatch
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -43,17 +44,18 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 WORKSPACE_REGISTRY_PATH = _WRP or "/app/config/workspaces.json"
 _DEFAULT_WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_RUNTIME_ROOT", "/workspace")).resolve()
 
-def get_workspace_root() -> Path:
-    """Fetch the current workspace root from global settings or fallback to env/default."""
+async def _get_workspace_root_async() -> Path:
+    """Async implementation of get_workspace_root."""
     try:
         # We use a short timeout and cache or just fallback if identity is down
-        with httpx.Client(timeout=2.0) as client:
-            resp = client.get(
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.0)) as client:
+            resp = await client.get(
                 f"{IDENTITY_SVC_URL}/api/settings/workspace_runtime_root",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
-                val = resp.json().get("value")
+            if resp.status == 200:
+                data = await resp.json()
+                val = data.get("value")
                 if val:
                     return Path(val).resolve()
     except Exception as e:
@@ -61,7 +63,17 @@ def get_workspace_root() -> Path:
     
     return _DEFAULT_WORKSPACE_ROOT
 
-WORKSPACE_ROOT = get_workspace_root() # Initial value
+
+def get_workspace_root() -> Path:
+    """Fetch the current workspace root from global settings or fallback to env/default."""
+    try:
+        return asyncio.get_event_loop().run_until_complete(_get_workspace_root_async())
+    except Exception as e:
+        log.debug(f"Failed to fetch workspace_runtime_root from identity: {e}")
+        return _DEFAULT_WORKSPACE_ROOT
+
+
+WORKSPACE_ROOT = _DEFAULT_WORKSPACE_ROOT
 DEFAULT_PYTEST_TIMEOUT_SECONDS = WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS
 DEFAULT_FILE_READ_LIMIT = WORKSPACE_RUNTIME_FILE_READ_LIMIT
 DEFAULT_PROTECTED_BRANCH_PATTERNS = [
@@ -459,23 +471,34 @@ def _resolve_identity_context(ref: WorkspaceRef) -> Optional[dict[str, Any]]:
         return None
 
     try:
-        resp = httpx.post(
+        loop = asyncio.get_event_loop()
+        data = loop.run_until_complete(_http_post_async(
             f"{IDENTITY_SVC_URL}/api/resolve",
             json=payload,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=httpx.Timeout(45.0, connect=5.0),
-        )
-    except httpx.RequestError as exc:
+            timeout=45.0,
+        ))
+    except aiohttp.ClientError as exc:
         raise HTTPException(status_code=503, detail=f"Identity service unreachable: {exc}") from exc
 
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=f"Identity resolution failed: {resp.text}")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=500, detail="Identity resolution returned invalid response")
 
-    data = resp.json()
-    user = str(data.get("user") or "").strip() if isinstance(data, dict) else ""
+    user = str(data.get("user") or "").strip()
     if not user:
         raise HTTPException(status_code=500, detail="Identity resolution did not return a user")
     return data
+
+
+async def _http_post_async(url: str, **kwargs) -> Any:
+    """Async HTTP POST helper using aiohttp."""
+    timeout = kwargs.pop("timeout", 30.0)
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as client:
+        resp = await client.post(url, **kwargs)
+        if resp.status != 200:
+            text = await resp.text()
+            raise HTTPException(status_code=resp.status, detail=f"Request failed: {text}")
+        return await resp.json()
 
 
 def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Path:
@@ -1098,14 +1121,19 @@ def _provider_child_path(base_path: str, relative_path: str) -> str:
     return clean_base if not clean_relative else f"{clean_base}/{clean_relative}"
 
 
-def _storage_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def _storage_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
-        resp = httpx.post(path, json=payload, timeout=30.0)
-    except httpx.RequestError as exc:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
+            resp = await client.post(
+                f"{STORAGE_SVC_URL}{path}" if not path.startswith("http") else path,
+                json=payload,
+            )
+            if resp.status != 200:
+                text = await resp.text()
+                raise HTTPException(status_code=resp.status, detail=f"Storage request failed: {text}")
+            data = await resp.json()
+    except aiohttp.ClientError as exc:
         raise HTTPException(status_code=503, detail=f"Storage service unreachable: {exc}") from exc
-    if resp.status_code != 200:
-        raise HTTPException(status_code=resp.status_code, detail=f"Storage request failed: {resp.text}")
-    data = resp.json()
     if data.get("status") != "SUCCESS":
         raise HTTPException(status_code=500, detail=f"Storage request failed: {data}")
     return data
@@ -1530,13 +1558,13 @@ def delete_file(req: FileDeleteRequest, x_internal_secret: Optional[str] = Heade
 
 
 @app.post("/provider/scan")
-def provider_scan(req: ProviderScanRequest, x_internal_secret: Optional[str] = Header(default=None)):
+async def provider_scan(req: ProviderScanRequest, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "read")
     identity = workspace.get("resolved_identity") or {}
     provider_kind, provider_settings, provider_path = _workspace_provider_binding(workspace, identity)
-    data = _storage_post(
+    data = await _storage_post(
         f"{STORAGE_SVC_URL}/providers/list",
         {
             "provider": {"kind": provider_kind, "settings": provider_settings},
@@ -1555,7 +1583,7 @@ def provider_scan(req: ProviderScanRequest, x_internal_secret: Optional[str] = H
 
 
 @app.post("/provider/sync/file")
-def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Optional[str] = Header(default=None)):
+async def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
@@ -1589,7 +1617,7 @@ def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Optional
             "verify": req.verify,
         }
 
-    data = _storage_post(f"{STORAGE_SVC_URL}/providers/write", payload)
+    data = await _storage_post(f"{STORAGE_SVC_URL}/providers/write", payload)
     return {
         "status": "SUCCESS",
         "workspace": workspace,
@@ -1601,7 +1629,7 @@ def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Optional
 
 
 @app.post("/provider/sync/directory")
-def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_secret: Optional[str] = Header(default=None)):
+async def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_secret: Optional[str] = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
@@ -1626,7 +1654,7 @@ def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_secret
         "local_path": str(target_dir),
     }
     
-    data = _storage_post(f"{STORAGE_SVC_URL}/providers/mirror", payload)
+    data = await _storage_post(f"{STORAGE_SVC_URL}/providers/mirror", payload)
     return {
         "status": "SUCCESS",
         "workspace": workspace,
@@ -2569,17 +2597,18 @@ async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path
     log.info(f"Starting Nextcloud sync for {workspace_id} (owner: {owner_user})")
     try:
         # 1. Resolve credentials from Identity
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             resp = await client.post(
                 f"{IDENTITY_SVC_URL}/api/resolve",
                 json={"rag_user": owner_user},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code != 200:
-                log.error(f"Failed to resolve identity for {owner_user}: {resp.text}")
+            if resp.status != 200:
+                text = await resp.text()
+                log.error(f"Failed to resolve identity for {owner_user}: {text}")
                 return
             
-            creds = resp.json()
+            creds = await resp.json()
             nc_url = creds.get("nextcloud_url")
             nc_user = creds.get("nextcloud_user")
             nc_pass = creds.get("nextcloud_pass")
@@ -2608,10 +2637,11 @@ async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path
                 json=mirror_req,
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
+            if resp.status == 200:
                 log.info(f"Successfully triggered Nextcloud mirror for {workspace_id}")
             else:
-                log.error(f"Failed to trigger Nextcloud mirror: {resp.text}")
+                text = await resp.text()
+                log.error(f"Failed to trigger Nextcloud mirror: {text}")
 
     except Exception as e:
         log.error(f"Error in _trigger_nextcloud_sync: {e}")
