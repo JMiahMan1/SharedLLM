@@ -121,7 +121,7 @@ services:
       - WORKSPACE_RUNTIME_SVC_URL=http://localhost:8007
       - REDIS_URL=redis://localhost:6379/0
       - SEARXNG_URL=http://localhost:8080
-      - EXECUTION_EXTERNAL_HOST=192.168.2.205
+      - EXECUTION_EXTERNAL_HOST=host.docker.internal
       - TEMP_MEDIA_DIR=/workspaces
       - MODELS_DIR=/workspaces/models
       - TZ=America/Phoenix
