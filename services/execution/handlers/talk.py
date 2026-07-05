@@ -77,13 +77,13 @@ async def _get_talk_model_from_settings() -> str:
     try:
         import aiohttp
         from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+            async with client.get(
                 f"{IDENTITY_SVC}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if resp.status_code == 200:
-                settings = {item["key"]: item["value"] for item in resp.json()}
+            ) as resp:
+                if resp.status == 200:
+                    settings = {item["key"]: item["value"] for item in await resp.json()}
                 model = (settings.get("ollama_librarian_model") or
                         settings.get("librarian_model") or
                         settings.get("assistant_model"))

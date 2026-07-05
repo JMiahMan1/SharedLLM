@@ -57,38 +57,38 @@ async def _resolve_workspace_path(
     # Try to resolve specific workspace
     if workspace_id:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
                 user_ctx = user_context or {"user": "system", "is_admin": True}
                 if hasattr(user_ctx, "model_dump"):
                     user_ctx = user_ctx.model_dump()
                 elif hasattr(user_ctx, "dict"):
                     user_ctx = user_ctx.dict()
                     
-                resp = await client.post(
+                async with client.post(
                     f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
                     json={"workspace_id": workspace_id, "user_context": user_ctx},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if data.get("status") == "SUCCESS":
-                        workspace = data["workspace"]
-                        if required_capability:
-                            identity = workspace.get("resolved_identity") or {}
-                            if not identity.get("is_admin"):
-                                capabilities = workspace.get("capabilities", [])
-                                if required_capability not in capabilities:
-                                    raise HTTPException(
-                                        status_code=403,
-                                        detail=f"Workspace '{workspace.get('id')}' does not allow capability '{required_capability}'"
-                                    )
-                        return workspace["resolved_path"]
-                else:
-                    try:
-                        err_detail = resp.json().get("detail", resp.text)
-                    except Exception:
-                        err_detail = resp.text
-                    raise HTTPException(status_code=resp.status_code, detail=err_detail)
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("status") == "SUCCESS":
+                            workspace = data["workspace"]
+                            if required_capability:
+                                identity = workspace.get("resolved_identity") or {}
+                                if not identity.get("is_admin"):
+                                    capabilities = workspace.get("capabilities", [])
+                                    if required_capability not in capabilities:
+                                        raise HTTPException(
+                                            status_code=403,
+                                            detail=f"Workspace '{workspace.get('id')}' does not allow capability '{required_capability}'"
+                                        )
+                            return workspace["resolved_path"]
+                    else:
+                        try:
+                            err_detail = (await resp.json()).get("detail", await resp.text())
+                        except Exception:
+                            err_detail = await resp.text()
+                        raise HTTPException(status_code=resp.status, detail=err_detail)
         except HTTPException:
             raise
         except Exception as e:
@@ -96,42 +96,42 @@ async def _resolve_workspace_path(
     
     # Fallback: list workspaces and find default or first available
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+            async with client.get(
                 f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces",
                 params={"rag_user": "system"},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if resp.status_code == 200:
-                data = resp.json()
-                workspaces = data.get("workspaces", []) if isinstance(data, dict) else data
-                
-                # First try to find the default workspace
-                for ws in workspaces:
-                    if ws.get("is_default") and ws.get("resolved_path"):
-                        log.info(f"Using default workspace: {ws.get('id')} -> {ws['resolved_path']}")
-                        return ws["resolved_path"]
-                
-                # Handle workspaces that require user context (resolved_path is null in list response)
-                system_user_ctx = {"user": "system", "is_admin": True}
-                for ws in workspaces:
-                    ws_id = ws.get("id")
-                    if ws_id and not ws.get("resolved_path") and ws.get("requires_user_context"):
-                        try:
-                            resolve_resp = await client.post(
-                                f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
-                                json={"workspace_id": ws_id, "user_context": system_user_ctx},
-                                headers={"X-Internal-Secret": INTERNAL_SECRET}
-                            )
-                            if resolve_resp.status_code == 200:
-                                resolve_data = resolve_resp.json()
-                                if resolve_data.get("status") == "SUCCESS":
-                                    resolved_path = resolve_data["workspace"].get("resolved_path")
-                                    if resolved_path:
-                                        log.info(f"Resolved workspace '{ws_id}' -> {resolved_path}")
-                                        return resolved_path
-                        except Exception as resolve_err:
-                            log.warning(f"Failed to resolve workspace {ws_id}: {resolve_err}")
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    workspaces = data.get("workspaces", []) if isinstance(data, dict) else data
+                    
+                    # First try to find the default workspace
+                    for ws in workspaces:
+                        if ws.get("is_default") and ws.get("resolved_path"):
+                            log.info(f"Using default workspace: {ws.get('id')} -> {ws['resolved_path']}")
+                            return ws["resolved_path"]
+                    
+                    # Handle workspaces that require user context (resolved_path is null in list response)
+                    system_user_ctx = {"user": "system", "is_admin": True}
+                    for ws in workspaces:
+                        ws_id = ws.get("id")
+                        if ws_id and not ws.get("resolved_path") and ws.get("requires_user_context"):
+                            try:
+                                async with client.post(
+                                    f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
+                                    json={"workspace_id": ws_id, "user_context": system_user_ctx},
+                                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                                ) as resolve_resp:
+                                    if resolve_resp.status == 200:
+                                        resolve_data = await resolve_resp.json()
+                                        if resolve_data.get("status") == "SUCCESS":
+                                            resolved_path = resolve_data["workspace"].get("resolved_path")
+                                            if resolved_path:
+                                                log.info(f"Resolved workspace '{ws_id}' -> {resolved_path}")
+                                                return resolved_path
+                            except Exception as resolve_err:
+                                log.warning(f"Failed to resolve workspace {ws_id}: {resolve_err}")
                 
                 # Then try first workspace with git capabilities
                 for ws in workspaces:

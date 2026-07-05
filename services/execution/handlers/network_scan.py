@@ -193,10 +193,17 @@ async def _enrich_devices(
     timeout: float,
 ) -> list[dict]:
     """Enrich responsive IPs with device-specific API data."""
+    import ssl
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+    aio_timeout = aiohttp.ClientTimeout(total=timeout)
+
     seen_ips = set()
     devices = []
 
-    async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
+    async with aiohttp.ClientSession(connector=connector, timeout=aio_timeout) as client:
         for ip, port in responsive:
             if ip in seen_ips:
                 continue
@@ -241,62 +248,62 @@ async def _enrich_devices(
     return devices
 
 
-async def _probe_roku(client: httpx.AsyncClient, ip: str, timeout: float) -> Optional[dict]:
+async def _probe_roku(client: aiohttp.ClientSession, ip: str, timeout: float) -> Optional[dict]:
     """Probe Roku device via ECP API."""
     try:
-        resp = await client.get(f"http://{ip}:8060/query/device-info", timeout=timeout)
-        if resp.status_code != 200:
-            return None
+        async with client.get(f"http://{ip}:8060/query/device-info", timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            if resp.status != 200:
+                return None
 
-        import xml.etree.ElementTree as ET
-        root = ET.fromstring(resp.content)
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(await resp.read())
 
-        return {
-            "ip": ip,
-            "type": "roku",
-            "friendly_name": root.findtext("user-device-name", "") or root.findtext("friendly-device-name", ""),
-            "model": root.findtext("model-name", ""),
-            "model_number": root.findtext("model-number", ""),
-            "serial": root.findtext("serial-number", ""),
-            "software_version": root.findtext("software-version", ""),
-            "power_mode": root.findtext("power-mode", ""),
-            "screen_size": root.findtext("screen-size", ""),
-            "is_tv": root.findtext("is-tv", "false") == "true",
-            "supports_ethernet": root.findtext("supports-ethernet", "false") == "true",
-            "wifi_mac": root.findtext("wifi-mac", ""),
-            "location": root.findtext("user-device-location", ""),
-        }
+            return {
+                "ip": ip,
+                "type": "roku",
+                "friendly_name": root.findtext("user-device-name", "") or root.findtext("friendly-device-name", ""),
+                "model": root.findtext("model-name", ""),
+                "model_number": root.findtext("model-number", ""),
+                "serial": root.findtext("serial-number", ""),
+                "software_version": root.findtext("software-version", ""),
+                "power_mode": root.findtext("power-mode", ""),
+                "screen_size": root.findtext("screen-size", ""),
+                "is_tv": root.findtext("is-tv", "false") == "true",
+                "supports_ethernet": root.findtext("supports-ethernet", "false") == "true",
+                "wifi_mac": root.findtext("wifi-mac", ""),
+                "location": root.findtext("user-device-location", ""),
+            }
     except Exception as e:
         log.debug(f"[network_scan] Roku probe failed for {ip}: {e}")
         return None
 
 
-async def _probe_webos(client: httpx.AsyncClient, ip: str, timeout: float) -> Optional[dict]:
+async def _probe_webos(client: aiohttp.ClientSession, ip: str, timeout: float) -> Optional[dict]:
     """Probe webOS TV via status endpoint and WebSocket."""
     try:
         # Try port 9080 first (Netflix chip status)
-        resp = await client.get(f"http://{ip}:9080/", timeout=timeout)
-        if resp.status_code == 200 and "status=ok" in resp.text:
-            # Try to get more info via WebSocket on port 3000
-            try:
-                import websockets
-                uri = f"ws://{ip}:3000/"
-                async with websockets.connect(uri, ping_interval=None, close_timeout=2) as ws:
-                    msg = '{"id":"1","type":"request","uri":"ssap://system/getSystemInfo"}'
-                    await ws.send(msg)
-                    resp_ws = await asyncio.wait_for(ws.recv(), timeout=3)
-                    import json
-                    data = json.loads(resp_ws)
-                    if data.get("returnValue"):
-                        return {
-                            "ip": ip,
-                            "type": "webos",
-                            "model": data.get("modelName", ""),
-                            "software_version": data.get("softwareVersion", ""),
-                            "device_id": data.get("deviceId", ""),
-                        }
-            except Exception:
-                pass
+        async with client.get(f"http://{ip}:9080/", timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            if resp.status == 200 and "status=ok" in await resp.text():
+                # Try to get more info via WebSocket on port 3000
+                try:
+                    import websockets
+                    uri = f"ws://{ip}:3000/"
+                    async with websockets.connect(uri, ping_interval=None, close_timeout=2) as ws:
+                        msg = '{"id":"1","type":"request","uri":"ssap://system/getSystemInfo"}'
+                        await ws.send(msg)
+                        resp_ws = await asyncio.wait_for(ws.recv(), timeout=3)
+                        import json
+                        data = json.loads(resp_ws)
+                        if data.get("returnValue"):
+                            return {
+                                "ip": ip,
+                                "type": "webos",
+                                "model": data.get("modelName", ""),
+                                "software_version": data.get("softwareVersion", ""),
+                                "device_id": data.get("deviceId", ""),
+                            }
+                except Exception:
+                    pass
 
             # Fallback: just return basic info
             return {
@@ -309,61 +316,61 @@ async def _probe_webos(client: httpx.AsyncClient, ip: str, timeout: float) -> Op
     return None
 
 
-async def _probe_samsung(client: httpx.AsyncClient, ip: str, timeout: float) -> Optional[dict]:
+async def _probe_samsung(client: aiohttp.ClientSession, ip: str, timeout: float) -> Optional[dict]:
     """Probe Samsung TV via REST API."""
     for port in (8001, 8002):
         try:
             scheme = "https" if port == 8002 else "http"
-            resp = await client.get(f"{scheme}://{ip}:{port}/api/v2/", timeout=timeout)
-            if resp.status_code == 200:
-                data = resp.json()
-                device = data.get("device", {})
-                return {
-                    "ip": ip,
-                    "type": "samsung",
-                    "friendly_name": data.get("name", ""),
-                    "model": device.get("modelName", ""),
-                    "serial": device.get("serialNumber", ""),
-                    "software_version": data.get("softwareVersion", ""),
-                    "os_type": device.get("OS", ""),
-                    "udn": device.get("udn", ""),
-                    "wifi_mac": device.get("wifiMac", ""),
-                    "supports_wol": device.get("supportWOL", False),
-                }
+            async with client.get(f"{scheme}://{ip}:{port}/api/v2/", timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    device = data.get("device", {})
+                    return {
+                        "ip": ip,
+                        "type": "samsung",
+                        "friendly_name": data.get("name", ""),
+                        "model": device.get("modelName", ""),
+                        "serial": device.get("serialNumber", ""),
+                        "software_version": data.get("softwareVersion", ""),
+                        "os_type": device.get("OS", ""),
+                        "udn": device.get("udn", ""),
+                        "wifi_mac": device.get("wifiMac", ""),
+                        "supports_wol": device.get("supportWOL", False),
+                    }
         except Exception:
             continue
     return None
 
 
-async def _probe_sony_bravia(client: httpx.AsyncClient, ip: str, timeout: float) -> Optional[dict]:
+async def _probe_sony_bravia(client: aiohttp.ClientSession, ip: str, timeout: float) -> Optional[dict]:
     """Probe Sony Bravia TV via UPnP/IRCC API."""
     try:
         # Try the Sony ScalarWeb API descriptor
-        resp = await client.get(f"http://{ip}:8008/ssdp/device-desc.xml", timeout=timeout)
-        if resp.status_code == 200 and "Sony" in resp.text:
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(resp.content)
-            # Parse namespaces
-            ns = {"root": "urn:schemas-upnp-org:device-1-0"}
-            model = root.find(".//root:modelName", ns)
-            return {
-                "ip": ip,
-                "type": "sony_bravia",
-                "friendly_name": root.findtext(".//root:friendlyName", "", ns),
-                "model": model.text if model is not None else "",
-            }
+        async with client.get(f"http://{ip}:8008/ssdp/device-desc.xml", timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            if resp.status == 200 and "Sony" in await resp.text():
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(await resp.read())
+                # Parse namespaces
+                ns = {"root": "urn:schemas-upnp-org:device-1-0"}
+                model = root.find(".//root:modelName", ns)
+                return {
+                    "ip": ip,
+                    "type": "sony_bravia",
+                    "friendly_name": root.findtext(".//root:friendlyName", "", ns),
+                    "model": model.text if model is not None else "",
+                }
     except Exception:
         pass
 
     # Try port 52323 (DLNA/IRCC)
     try:
-        resp = await client.get(f"http://{ip}:52323/dmr.xml", timeout=timeout)
-        if resp.status_code == 200:
-            return {
-                "ip": ip,
-                "type": "sony_bravia",
-                "friendly_name": "Sony Bravia TV",
-            }
+        async with client.get(f"http://{ip}:52323/dmr.xml", timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            if resp.status == 200:
+                return {
+                    "ip": ip,
+                    "type": "sony_bravia",
+                    "friendly_name": "Sony Bravia TV",
+                }
     except Exception:
         pass
 
@@ -393,19 +400,19 @@ async def _probe_chromecast(ip: str, timeout: float) -> Optional[dict]:
     return None
 
 
-async def _probe_dlna(client: httpx.AsyncClient, ip: str, timeout: float) -> Optional[dict]:
+async def _probe_dlna(client: aiohttp.ClientSession, ip: str, timeout: float) -> Optional[dict]:
     """Probe DLNA device."""
     try:
-        resp = await client.get(f"http://{ip}:9197/dmr", timeout=timeout)
-        if resp.status_code == 200:
-            import xml.etree.ElementTree as ET
-            root = ET.fromstring(resp.content)
-            ns = {"root": "urn:schemas-upnp-org:device-1-0"}
-            return {
-                "ip": ip,
-                "type": "dlna",
-                "friendly_name": root.findtext(".//root:friendlyName", "", ns),
-                "model": root.findtext(".//root:modelName", "", ns),
+        async with client.get(f"http://{ip}:9197/dmr", timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+            if resp.status == 200:
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(await resp.read())
+                ns = {"root": "urn:schemas-upnp-org:device-1-0"}
+                return {
+                    "ip": ip,
+                    "type": "dlna",
+                    "friendly_name": root.findtext(".//root:friendlyName", "", ns),
+                    "model": root.findtext(".//root:modelName", "", ns),
                 "manufacturer": root.findtext(".//root:manufacturer", "", ns),
             }
     except Exception:

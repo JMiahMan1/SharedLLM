@@ -33,13 +33,13 @@ async def _get_searxng_url() -> str:
         return os.environ.get("SEARXNG_URL", "http://localhost:8080").rstrip("/")
     try:
         from main import IDENTITY_SVC_URL, INTERNAL_SECRET
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+            async with client.get(
                 f"{IDENTITY_SVC_URL}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if resp.status_code == 200:
-                settings_list = resp.json()
+            ) as resp:
+                if resp.status == 200:
+                    settings_list = await resp.json()
                 for item in settings_list:
                     if item.get("key") == "searxng_url":
                         url = item.get("value", "").rstrip("/")
@@ -92,10 +92,10 @@ async def _searxng_html_search(req: WebSearchRequest) -> Optional[ExecutionResul
     url = f"{searxng_url}/search?{urlencode(params)}"
     log.info(f"[browser/search] SearXNG HTML search: {url}")
 
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        html = resp.text
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
+        async with client.get(url) as resp:
+            resp.raise_for_status()
+            html = await resp.text()
 
     results = []
     link_pattern = r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>'

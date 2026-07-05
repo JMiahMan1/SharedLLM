@@ -31,30 +31,30 @@ async def _ma_api(mass_url: str, mass_token: str, command: str, params: Dict[str
 
     for url in urls_to_try:
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as client:
+                async with client.post(
                     url,
                     json=payload,
                     headers={
                         "Content-Type": "application/json",
                         "Authorization": f"Bearer {mass_token}",
                     }
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    # MA API returns {"result": [...]} for list commands
-                    if isinstance(data, dict):
-                        result = data.get("result", data.get("items", []))
-                        if isinstance(result, list):
-                            return result
-                        # Some commands return data directly in a key
-                        for key in ("playlists", "items", "data"):
-                            if key in data and isinstance(data[key], list):
-                                return data[key]
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        # MA API returns {"result": [...]} for list commands
+                        if isinstance(data, dict):
+                            result = data.get("result", data.get("items", []))
+                            if isinstance(result, list):
+                                return result
+                            # Some commands return data directly in a key
+                            for key in ("playlists", "items", "data"):
+                                if key in data and isinstance(data[key], list):
+                                    return data[key]
                     elif isinstance(data, list):
                         return data
-                else:
-                    log.warning(f"[mass] MA API returned {resp.status_code} for {command} on {url}: {resp.text[:200]}")
+                    else:
+                        log.warning(f"[mass] MA API returned {resp.status} for {command} on {url}: {await resp.text()[:200]}")
         except Exception as e:
             log.debug(f"[mass] MA API call to {url} failed: {e}")
             continue

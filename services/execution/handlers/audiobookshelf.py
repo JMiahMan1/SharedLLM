@@ -546,10 +546,11 @@ async def _roku_play_audiobook(roku_entity: str, stream_url: str, title: str, ha
         params = {"t": "a", "autoplay": "true", "songName": title}
         ecp_url = f"http://{roku_ip}:8060/launch/{roku_handler.MEDIA_ASSISTANT_CHANNEL_ID}"
         try:
-            async with httpx.AsyncClient(verify=False, timeout=10) as client:
-                resp = await client.post(ecp_url, params=params)
-                if resp.status_code in (200, 204):
-                    await asyncio.sleep(3)
+            connector = aiohttp.TCPConnector(verify_ssl=False)
+            async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as client:
+                async with client.post(ecp_url, params=params) as resp:
+                    if resp.status in (200, 204):
+                        await asyncio.sleep(3)
         except Exception as e:
             log.warning(f"[abs.roku] ECP launch failed: {e}")
 

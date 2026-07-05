@@ -122,12 +122,13 @@ async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> 
         return {}
 
     # Get HomeKit diagnostics for matching entry IDs
-    async with httpx.AsyncClient(verify=False, timeout=10) as client:
+    connector = aiohttp.TCPConnector(verify_ssl=False)
+    async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
         for hk_entry_id in homekit_entry_ids:
-            diag_resp = await client.get(f"{ha_url}/api/diagnostics/config_entry/{hk_entry_id}", headers=headers)
-            if diag_resp.status_code != 200:
-                continue
-            diag_data = diag_resp.json()
+            async with session.get(f"{ha_url}/api/diagnostics/config_entry/{hk_entry_id}", headers=headers) as diag_resp:
+                if diag_resp.status != 200:
+                    continue
+                diag_data = await diag_resp.json()
             config_entry = diag_data.get("data", {}).get("config-entry", {})
             accessory_data = config_entry.get("data", {})
             accessory_ips = accessory_data.get("AccessoryIPs", [])
@@ -209,7 +210,8 @@ async def _find_homekit_entity(ha_url: str, ha_token: str, entity_id: str) -> st
         return None
 
     # Find HomeKit controller media_player with matching model
-    async with httpx.AsyncClient(verify=False, timeout=10) as client:
+    connector = aiohttp.TCPConnector(verify_ssl=False)
+    async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
         states = await ha_client.get_states(ha_url, ha_token)
         for s in states:
             eid = s.get("entity_id", "")
@@ -221,11 +223,11 @@ async def _find_homekit_entity(ha_url: str, ha_token: str, entity_id: str) -> st
             if webos_model in fn or any(part in fn for part in friendly_lower.split() if len(part) > 2):
                 # Verify it's homekit_controller via entity registry
                 try:
-                    r = await client.get(f"{ha_url}/api/config/entity_registry", headers=headers)
-                    if r.status_code == 200:
-                        for e in r.json():
-                            if e.get("entity_id") == eid and e.get("platform") == "homekit_controller":
-                                return eid
+                    async with session.get(f"{ha_url}/api/config/entity_registry", headers=headers) as r:
+                        if r.status == 200:
+                            for e in await r.json():
+                                if e.get("entity_id") == eid and e.get("platform") == "homekit_controller":
+                                    return eid
                 except Exception:
                     pass
     return None
