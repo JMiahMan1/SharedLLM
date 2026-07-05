@@ -96,7 +96,7 @@ async def resolve_internal_user(user_id: Optional[int] = None, rag_user: Optiona
                 json=payload,
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
+            if resp.status == 200:
                 return resp.json()
     except Exception as e:
         sample_user = user_id if user_id is not None else rag_user
@@ -502,8 +502,8 @@ async def execute_identity(req: IdentityRequest):
             else:
                 return _fail(f"Action {action} not supported", "identity")
             
-            if resp.status_code in (200, 201, 204):
-                data = resp.json() if resp.status_code != 204 else {}
+            if resp.status in (200, 201, 204):
+                data = resp.json() if resp.status != 204 else {}
                 msg = f"Identity action '{action}' successful."
                 if isinstance(data, list):
                     msg += f" Found {len(data)} results."
@@ -511,7 +511,7 @@ async def execute_identity(req: IdentityRequest):
                     msg = data["message"]
                 return _ok(msg, "identity", {"data": data})
             else:
-                return _fail(f"Identity service returned {resp.status_code}: {resp.text}", "identity")
+                return _fail(f"Identity service returned {resp.status}: {resp.text}", "identity")
     except Exception as e:
         log.error(f"Identity proxy error: {e}")
         return _fail(f"Identity proxy failed: {e}", "identity")
@@ -832,11 +832,11 @@ async def execute_discovery_sync(req: DiscoverySyncRequest):
                 json={"api_key": "internal"}, # Simplified for internal bridge
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
+            if resp.status == 200:
                 data = resp.json()
                 return _ok(f"Discovery sync completed. Found {data.get('entities_count', 0)} entities.", "discovery")
             else:
-                return _fail(f"Discovery sync failed with status {resp.status_code}", "discovery")
+                return _fail(f"Discovery sync failed with status {resp.status}", "discovery")
     except Exception as e:
         return _fail(f"Discovery sync bridge error: {e}", "discovery")
 
@@ -912,8 +912,8 @@ async def execute_identity_admin(req: IdentityManageRequest):
             else:
                 return _fail(f"Identity admin action '{action}' not supported. Use primary /execute/identity for list/create/delete/discover.", "identity_admin")
 
-            if resp.status_code in (200, 201, 204):
-                data = resp.json() if resp.status_code != 204 else {}
+            if resp.status in (200, 201, 204):
+                data = resp.json() if resp.status != 204 else {}
                 msg = f"Identity admin action '{action}' succeeded."
                 if isinstance(data, list):
                     msg += f" Found {len(data)} results."
@@ -921,7 +921,7 @@ async def execute_identity_admin(req: IdentityManageRequest):
                     msg = data["message"]
                 return _ok(msg, "identity_admin", {"data": data})
             else:
-                return _fail(f"Identity service returned {resp.status_code}: {resp.text}", "identity_admin")
+                return _fail(f"Identity service returned {resp.status}: {resp.text}", "identity_admin")
     except Exception as e:
         log.error(f"Identity admin error: {e}")
         return _fail(f"Identity admin bridge error: {e}", "identity_admin")
@@ -1189,12 +1189,12 @@ async def execute_announce(req: AnnouncementRequest):
                 try:
                     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.0)) as client:
                         resp = await client.get(media_url)
-                        if resp.status_code == 200 and len(resp.content) > 0:
+                        if resp.status == 200 and len(resp.content) > 0:
                             media_ready = True
                             log.info(f"[announce] Media endpoint verified: {len(resp.content)} bytes, content-type={resp.headers.get('content-type')}")
                             break
                         else:
-                            log.warning(f"[announce] Media check attempt {attempt+1}/5: status={resp.status_code}, size={len(resp.content)}")
+                            log.warning(f"[announce] Media check attempt {attempt+1}/5: status={resp.status}, size={len(resp.content)}")
                 except Exception as e:
                     log.warning(f"[announce] Media check attempt {attempt+1}/5 failed: {e}")
                 
@@ -1939,7 +1939,7 @@ async def execute_llm_info(req: LLMInfoRequest):
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
             resp = await client.get(f"{IDENTITY_SVC_URL}/api/settings", headers={"X-Internal-Secret": INTERNAL_SECRET})
-            if resp.status_code == 200:
+            if resp.status == 200:
                 for s in resp.json():
                     if s.get("key") == "llm_local_url" and s.get("value"):
                         ollama_url = s["value"]
@@ -1974,7 +1974,7 @@ async def execute_llm_info(req: LLMInfoRequest):
             else:
                 resp = await client.get(f"{OLLAMA_URL}{endpoint}")
             
-            if resp.status_code == 200:
+            if resp.status == 200:
                 data = resp.json()
                 if action == "list":
                     models = [m.get("name", "?") for m in data.get("models", [])]
@@ -1995,7 +1995,7 @@ async def execute_llm_info(req: LLMInfoRequest):
                     }
                     return _ok(f"Model: {details['name']} ({details['parameters']}, {details['quantization']})", "llm_info", details)
             else:
-                return _fail(f"Alpaca returned {resp.status_code}: {resp.text[:200]}", "llm_info")
+                return _fail(f"Alpaca returned {resp.status}: {resp.text[:200]}", "llm_info")
     except Exception as e:
         return _fail(f"Failed to query Alpaca: {e}", "llm_info")
 
@@ -2266,7 +2266,7 @@ async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None
                 f"{url}/api/v1/auth/login",
                 json={"email": email, "password": password}
             )
-            if resp.status_code == 200:
+            if resp.status == 200:
                 token = resp.json().get("token") or resp.json().get("access_token")
                 if token:
                     _skylight_tokens[email] = token
@@ -2283,9 +2283,9 @@ async def _skylight_api(url: str, token: str, method: str, path: str, json_body:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
             headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
             resp = await client.request(method, f"{url}{path}", json=json_body, headers=headers)
-            if resp.status_code in (200, 201):
+            if resp.status in (200, 201):
                 return resp.json()
-            log.error(f"[skylight] API error {resp.status_code}: {resp.text[:200]}")
+            log.error(f"[skylight] API error {resp.status}: {resp.text[:200]}")
             return None
     except Exception as e:
         log.error(f"[skylight] API exception: {e}")

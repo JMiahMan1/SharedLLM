@@ -86,5 +86,5 @@ def ocs_request(
 def ensure_webdav_dir(base_url: str, username: str, password: str, path: str) -> None:
     folder_url = webdav_url(base_url, username, path)
     resp = requests.request("PROPFIND", folder_url, auth=(username, password), timeout=30, verify=False)
-    if resp.status_code == 404:
+    if resp.status == 404:
         requests.request("MKCOL", folder_url, auth=(username, password), timeout=30, verify=False)

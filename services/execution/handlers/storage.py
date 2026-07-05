@@ -23,13 +23,13 @@ async def handle_storage_read(req: StorageFileReadRequest) -> ExecutionResult:
         file_url = webdav_url(url, user, req.path)
         resp = requests.get(file_url, auth=(user, pw), timeout=30, verify=False)
         
-        if resp.status_code == 200:
+        if resp.status == 200:
             content = resp.text
             return _ok(f"Read {len(content)} bytes from storage:{req.path}", {"content": content, "path": req.path})
-        elif resp.status_code == 404:
+        elif resp.status == 404:
             return _fail(f"File not found in storage: {req.path}")
         else:
-            return _fail(f"Nextcloud error {resp.status_code}: {resp.text[:200]}")
+            return _fail(f"Nextcloud error {resp.status}: {resp.text[:200]}")
             
     except Exception as e:
         log.error(f"Storage read failed: {e}")
@@ -47,10 +47,10 @@ async def handle_storage_write(req: StorageFileWriteRequest) -> ExecutionResult:
         # For simplicity in this handler, we'll just try the PUT
         resp = requests.put(file_url, auth=(user, pw), data=req.content, timeout=30, verify=False)
         
-        if resp.status_code in (200, 201, 204):
+        if resp.status in (200, 201, 204):
             return _ok(f"Successfully wrote to storage:{req.path}")
         else:
-            return _fail(f"Nextcloud error {resp.status_code}: {resp.text[:200]}")
+            return _fail(f"Nextcloud error {resp.status}: {resp.text[:200]}")
             
     except Exception as e:
         log.error(f"Storage write failed: {e}")
@@ -67,8 +67,8 @@ async def handle_storage_tts(req: StorageTextToAudioRequest) -> ExecutionResult:
         input_url = webdav_url(url, user, req.input_path)
         log.info(f"[storage_tts] Reading input: {req.input_path}")
         resp = requests.get(input_url, auth=(user, pw), timeout=30, verify=False)
-        if resp.status_code != 200:
-            return _fail(f"Failed to read input file ({resp.status_code})")
+        if resp.status != 200:
+            return _fail(f"Failed to read input file ({resp.status})")
         
         text = resp.text
         if not text.strip():
@@ -91,10 +91,10 @@ async def handle_storage_tts(req: StorageTextToAudioRequest) -> ExecutionResult:
         log.info(f"[storage_tts] Writing output: {out_path}")
         put_resp = requests.put(output_url, auth=(user, pw), data=audio_bytes, timeout=60, verify=False)
         
-        if put_resp.status_code in (200, 201, 204):
+        if put_resp.status in (200, 201, 204):
             return _ok(f"Successfully converted {req.input_path} to audio at {out_path}", {"path": out_path, "size": len(audio_bytes)})
         else:
-            return _fail(f"Failed to write output audio ({put_resp.status_code}): {put_resp.text[:200]}")
+            return _fail(f"Failed to write output audio ({put_resp.status}): {put_resp.text[:200]}")
             
     except Exception as e:
         log.error(f"Storage TTS failed: {e}")

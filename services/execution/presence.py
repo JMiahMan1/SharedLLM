@@ -238,7 +238,7 @@ class PresenceTracker:
                     f"{config.IDENTITY_SVC_URL}/api/users/{user_id}/location",
                     headers={"X-Internal-Secret": config.INTERNAL_SECRET}
                 )
-                if resp.status_code == 200:
+                if resp.status == 200:
                     return resp.json()
         except Exception as e:
             log.warning(f"[presence] Failed to fetch GPS location for {user_id} from Identity: {e}")
@@ -299,7 +299,7 @@ class PresenceTracker:
                     f"{config.IDENTITY_SVC_URL}/api/users/location/all",
                     headers={"X-Internal-Secret": config.INTERNAL_SECRET}
                 )
-                if resp.status_code == 200:
+                if resp.status == 200:
                     gps_locations = resp.json()
                     home_coords = await self._get_home_coordinates()
                     if home_coords:

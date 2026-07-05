@@ -105,7 +105,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             url = provider.file_url(f"{req.category or 'Notes'}/{filename}")
             content = f"# {req.title}\nCategory: {req.category}\n\n{req.content or ''}"
             resp = requests.put(url, data=content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
-            if resp.status_code in [200, 201, 204]:
+            if resp.status in [200, 201, 204]:
                 return ExecutionResult(status="SUCCESS", message=f"Note '{req.title}' created.", service="note_create")
             
         elif action == "read":
@@ -115,9 +115,9 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 file_title = provider.sanitize_filename(req.title or "", "note")
                 url = provider.file_url(f"Notes/{file_title}.md")
             resp = requests.get(url, auth=(provider.username, provider.password), verify=False)
-            if resp.status_code == 200:
+            if resp.status == 200:
                 return ExecutionResult(status="SUCCESS", message=resp.text, service="note_read")
-            elif resp.status_code == 404:
+            elif resp.status == 404:
                 return ExecutionResult(status="FAILURE", message=f"Note '{req.title}' not found.", service="note_read")
         
         elif action == "append":
@@ -127,10 +127,10 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 file_title = provider.sanitize_filename(req.title or "", "note")
                 url = provider.file_url(f"Notes/{file_title}.md")
             r_resp = requests.get(url, auth=(provider.username, provider.password), verify=False)
-            existing = r_resp.text if r_resp.status_code == 200 else ""
+            existing = r_resp.text if r_resp.status == 200 else ""
             new_content = f"{existing}\n\n- [ ] {req.content}"
             resp = requests.put(url, data=new_content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
-            if resp.status_code in [200, 201, 204]:
+            if resp.status in [200, 201, 204]:
                 return ExecutionResult(status="SUCCESS", message=f"Appended to '{req.title}'.", service="note_append")
 
         elif action == "delete":
@@ -140,7 +140,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                 file_title = provider.sanitize_filename(req.title or "", "note")
                 url = provider.file_url(f"Notes/{file_title}.md")
             resp = requests.delete(url, auth=(provider.username, provider.password), verify=False)
-            if resp.status_code in [200, 204]:
+            if resp.status in [200, 204]:
                 return ExecutionResult(status="SUCCESS", message=f"Note '{req.title}' deleted.", service="note_delete")
 
         elif action == "list":
@@ -168,7 +168,7 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
                     note_path = note["path"]
                     url = provider.file_url(note_path.lstrip("/"))
                     resp = requests.get(url, auth=(provider.username, provider.password), verify=False)
-                    if resp.status_code == 200:
+                    if resp.status == 200:
                         synced.append({
                             "path": note_path,
                             "content": resp.text,
@@ -202,7 +202,7 @@ async def _walk_webdav_dir(provider, base_dir: str, current_path: str = "") -> l
             timeout=30,
         )
         
-        if resp.status_code != 207:
+        if resp.status != 207:
             return []
         
         notes = []
