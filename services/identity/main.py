@@ -844,7 +844,7 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
     log.info(f"[test_connection] Testing {service} with config: { {k: '***' if 'token' in k.lower() or 'pass' in k.lower() else v for k, v in config.items()} }")
     
     try:
-        async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0), connector=aiohttp.TCPConnector(ssl=False)) as client:
             if service == "Home Assistant":
                 url = config.get("ha_url")
                 token = config.get("ha_token")
@@ -855,11 +855,11 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                     f"{url.rstrip('/')}/api/config",
                     headers={"Authorization": f"Bearer {token}"}
                 )
-                log.info(f"[test_connection] HA response: {resp.status_code}")
-                if resp.status_code == 200:
+                log.info(f"[test_connection] HA response: {resp.status}")
+                if resp.status == 200:
                     return {"status": "SUCCESS", "message": "Connected to Home Assistant"}
                 else:
-                    return {"status": "ERROR", "message": f"HA returned {resp.status_code}: {resp.text[:100]}"}
+                    return {"status": "ERROR", "message": f"HA returned {resp.status}: {(await resp.text())[:100]}"}
             
             elif service == "Nextcloud":
                 url = config.get("nextcloud_url")
@@ -871,12 +871,12 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                 resp = await client.get(
                     f"{url.rstrip('/')}/ocs/v1.php/cloud/users?format=json",
                     headers={"OCS-APIRequest": "true"},
-                    auth=(user, password)
+                    auth=aiohttp.BasicAuth(user, password)
                 )
-                if resp.status_code == 200:
+                if resp.status == 200:
                     return {"status": "SUCCESS", "message": "Connected to Nextcloud"}
                 else:
-                    return {"status": "ERROR", "message": f"Nextcloud returned {resp.status_code}"}
+                    return {"status": "ERROR", "message": f"Nextcloud returned {resp.status}"}
             
             elif service == "GitHub":
                 url = config.get("github_url") or "https://api.github.com"
@@ -886,12 +886,13 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                 
                 resp = await client.get(
                     f"{url.rstrip('/')}/user",
-                    headers={"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
+                    auth=aiohttp.BasicAuth(user, password)
                 )
-                if resp.status_code == 200:
-                    return {"status": "SUCCESS", "message": f"Connected to GitHub as {resp.json().get('login')}"}
+                if resp.status == 200:
+                    json_data = await resp.json()
+                    return {"status": "SUCCESS", "message": f"Connected to GitHub as {json_data.get('login')}"}
                 else:
-                    return {"status": "ERROR", "message": f"GitHub returned {resp.status_code}"}
+                    return {"status": "ERROR", "message": f"GitHub returned {resp.status}"}
 
             elif service == "GitLab":
                 url = config.get("gitlab_url") or "https://gitlab.com"
@@ -903,10 +904,11 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                     f"{url.rstrip('/')}/api/v4/user",
                     headers={"PRIVATE-TOKEN": token}
                 )
-                if resp.status_code == 200:
-                    return {"status": "SUCCESS", "message": f"Connected to GitLab as {resp.json().get('username')}"}
+                if resp.status == 200:
+                    json_data = await resp.json()
+                    return {"status": "SUCCESS", "message": f"Connected to GitLab as {json_data.get('username')}"}
                 else:
-                    return {"status": "ERROR", "message": f"GitLab returned {resp.status_code}"}
+                    return {"status": "ERROR", "message": f"GitLab returned {resp.status}"}
 
             elif service == "Audiobookshelf":
                 url = config.get("audiobookshelf_url") or config.get("abs_url")
@@ -921,12 +923,12 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                     f"{url.rstrip('/')}/api/login",
                     json={"username": username, "password": password}
                 )
-                if resp.status_code == 200:
-                    data = resp.json()
+                if resp.status == 200:
+                    data = await resp.json()
                     user_info = data.get("user", {})
                     return {"status": "SUCCESS", "message": f"Connected to Audiobookshelf as {user_info.get('username')}"}
                 else:
-                    return {"status": "ERROR", "message": f"Audiobookshelf returned {resp.status_code}: {resp.text[:100]}"}
+                    return {"status": "ERROR", "message": f"Audiobookshelf returned {resp.status}: {(await resp.text())[:100]}"}
 
             return {"status": "ERROR", "message": f"Service {service} not testable yet"}
             
@@ -1023,13 +1025,13 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
     if ha_url and ha_token_enc:
         ha_token = decrypt(ha_token_enc)
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                 resp = await client.get(
                     f"{ha_url.rstrip('/')}/api/states",
                     headers={"Authorization": f"Bearer {ha_token}"}
                 )
-                if resp.status_code == 200:
-                    for state in resp.json():
+                if resp.status == 200:
+                    for state in await resp.json():
                         if state['entity_id'].startswith('person.'):
                             username = state['entity_id'].split('.')[1]
                             ha_users[username] = {
@@ -1044,14 +1046,14 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
         nc_pass = decrypt(nc_pass_enc)
         assert nc_pass is not None
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                 resp = await client.get(
                     f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users?format=json",
                     headers={"OCS-APIRequest": "true"},
-                    auth=(nc_user, nc_pass)
+                    auth=aiohttp.BasicAuth(nc_user, nc_pass)
                 )
-                if resp.status_code == 200:
-                    data = resp.json()
+                if resp.status == 200:
+                    data = await resp.json()
                     # Handle Nextcloud API error responses
                     meta = data.get("ocs", {}).get("meta", {})
                     if meta.get("status") == "failure":
@@ -1068,11 +1070,11 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                                 detail_resp = await client.get(
                                     f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users/{username}",
                                     headers={"OCS-APIRequest": "true", "Accept": "application/json"},
-                                    auth=(nc_user, nc_pass),
+                                    auth=aiohttp.BasicAuth(nc_user, nc_pass),
                                     params={"format": "json"}
                                 )
-                                if detail_resp.status_code == 200:
-                                    nc_data = detail_resp.json().get("ocs", {}).get("data", {})
+                                if detail_resp.status == 200:
+                                    nc_data = (await detail_resp.json()).get("ocs", {}).get("data", {})
                                     nc_users[username.lower()]["display_name"] = nc_data.get("display-name") or nc_data.get("displayname")
                                     nc_users[username.lower()]["email"] = nc_data.get("email")
                             except Exception:
@@ -1486,13 +1488,13 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
         # Fetch HA person entities
         if ha_url and ha_token:
             try:
-                async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0), connector=aiohttp.TCPConnector(ssl=False)) as client:
                     resp = await client.get(
                         f"{ha_url.rstrip('/')}/api/states",
                         headers={"Authorization": f"Bearer {ha_token}"}
                     )
-                    if resp.status_code == 200:
-                        for state in resp.json():
+                    if resp.status == 200:
+                        for state in await resp.json():
                             if state['entity_id'].startswith('person.'):
                                 username = state['entity_id'].split('.')[1]
                                 attrs = state.get('attributes', {})
@@ -1507,17 +1509,17 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
 
         # Fetch Nextcloud users with detailed info
         try:
-            async with httpx.AsyncClient(verify=False) as client:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as client:
                 resp = await client.get(
                     f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users",
-                    auth=(nc_admin_user, nc_admin_pass),
+                    auth=aiohttp.BasicAuth(nc_admin_user, nc_admin_pass),
                     headers={"OCS-APIRequest": "true", "Accept": "application/json"},
                     params={"format": "json"}
                 )
-                if resp.status_code != 200:
-                    raise HTTPException(status_code=resp.status_code, detail=f"Nextcloud API error: {resp.text}")
+                if resp.status != 200:
+                    raise HTTPException(status_code=resp.status, detail=f"Nextcloud API error: {await resp.text()}")
                 
-                nc_resp = resp.json()
+                nc_resp = await resp.json()
                 # Handle Nextcloud API error responses (e.g., 403 for non-admin users)
                 meta = nc_resp.get("ocs", {}).get("meta", {})
                 if meta.get("status") == "failure":
@@ -1534,12 +1536,12 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
                     try:
                         detail_resp = await client.get(
                             f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users/{nc_username}",
-                            auth=(nc_admin_user, nc_admin_pass),
+                            auth=aiohttp.BasicAuth(nc_admin_user, nc_admin_pass),
                             headers={"OCS-APIRequest": "true", "Accept": "application/json"},
                             params={"format": "json"}
                         )
-                        if detail_resp.status_code == 200:
-                            udata = detail_resp.json().get("ocs", {}).get("data", {})
+                        if detail_resp.status == 200:
+                            udata = (await detail_resp.json()).get("ocs", {}).get("data", {})
                             nc_data["display_name"] = udata.get("display-name") or udata.get("displayname")
                             nc_data["email"] = udata.get("email")
                             nc_data["phone"] = udata.get("phone")
