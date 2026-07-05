@@ -48,9 +48,9 @@ class OllamaProvider(BaseLLMProvider):
     async def _check_slots(self, client: aiohttp.ClientSession) -> Optional[dict]:
         """Check slot availability via /api/ps. Returns slot info dict or None."""
         try:
-            resp = await client.get(f"{self.base_url}/api/ps", timeout=3.0)
+            resp = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
             if resp.status == 200:
-                data = resp.json()
+                data = await resp.json()
                 return data.get("slots")
         except Exception:
             pass
@@ -62,10 +62,10 @@ class OllamaProvider(BaseLLMProvider):
         If /api/ps is unreachable, returns True (graceful degradation)."""
         loop = asyncio.get_running_loop()
         try:
-            resp = await client.get(f"{self.base_url}/api/ps", timeout=3.0)
+            resp = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
             if resp.status != 200:
                 return True
-            data = resp.json()
+            data = await resp.json()
             if "slots" not in data:
                 log.debug(f"[OllamaProvider] No slot info in /api/ps, proceeding without wait")
                 return True
@@ -77,9 +77,9 @@ class OllamaProvider(BaseLLMProvider):
             poll_interval = 1.0
             while loop.time() < deadline:
                 await asyncio.sleep(poll_interval)
-                resp2 = await client.get(f"{self.base_url}/api/ps", timeout=3.0)
+                resp2 = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
                 if resp2.status == 200:
-                    d2 = resp2.json()
+                    d2 = await resp2.json()
                     s2 = d2.get("slots", {})
                     if s2.get("available", 0) > 0:
                         log.info(f"[OllamaProvider] Slot available after waiting")
@@ -118,11 +118,12 @@ class OllamaProvider(BaseLLMProvider):
             if not chunk_callback:
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)
                 if resp.status >= 400:
-                    raise RuntimeError(f"Ollama HTTP {resp.status}: {resp.text}")
+                    raw_text = await resp.text()
+                    raise RuntimeError(f"Ollama HTTP {resp.status}: {raw_text}")
                 resp.raise_for_status()
                 
                 # Harden: Strip keep-alive spaces and handle potential multi-line/streamed JSON
-                raw_text = resp.text.strip()
+                raw_text = (await resp.text()).strip()
                 if not raw_text:
                     return ""
                 
@@ -175,13 +176,13 @@ class OllamaProvider(BaseLLMProvider):
                     return ""
 
             # Streaming
-            async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
+            async with client.post(f"{self.base_url}/api/chat", json=payload) as response:
                 if response.status >= 400:
-                    await response.aread()
+                    await response.read()
                     raise RuntimeError(f"Ollama stream HTTP {response.status}: {response.text}")
                 response.raise_for_status()
-                async for line in response.aiter_lines():
-                    clean_line = line.strip()
+                async for line in response.content.iter_any():
+                    clean_line = line.decode("utf-8").strip()
                     if not clean_line:
                         continue
                     try:
@@ -243,9 +244,10 @@ class OpenRouterProvider(BaseLLMProvider):
             if not chunk_callback:
                 resp = await client.post(self.base_url, json=payload, headers=headers)
                 if resp.status >= 400:
-                    raise RuntimeError(f"OpenRouter HTTP {resp.status}: {resp.text}")
+                    raw_text = await resp.text()
+                    raise RuntimeError(f"OpenRouter HTTP {resp.status}: {raw_text}")
                 resp.raise_for_status()
-                data = resp.json()
+                data = await resp.json()
                 msg = data.get("choices", [{}])[0].get("message", {})
                 content = msg.get("content", "") or ""
                 reasoning = msg.get("reasoning_content", "") or ""
@@ -257,12 +259,13 @@ class OpenRouterProvider(BaseLLMProvider):
             # to chunk_callback. Accumulate separately as a fallback only.
             full_content = ""
             full_reasoning = ""
-            async with client.stream("POST", self.base_url, json=payload, headers=headers) as response:
+            async with client.post(self.base_url, json=payload, headers=headers) as response:
                 if response.status >= 400:
-                    await response.aread()
+                    await response.read()
                     raise RuntimeError(f"OpenRouter stream HTTP {response.status}: {response.text}")
                 response.raise_for_status()
-                async for line in response.aiter_lines():
+                async for chunk in response.content.iter_any():
+                    line = chunk.decode("utf-8")
                     if not line:
                         continue
                     if line.startswith("data: "):

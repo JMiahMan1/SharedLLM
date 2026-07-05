@@ -34,7 +34,8 @@ async def get_history(user_id: str) -> list:
     """Retrieves conversation history as a list of dicts."""
     try:
         key = _get_history_key(user_id)
-        raw_msgs: list = _redis.lrange(key, 0, -1)  # type: ignore[assignment]
+        r = get_redis()
+        raw_msgs: list = await r.lrange(key, 0, -1)  # type: ignore[misc]
         if not raw_msgs: return []
         
         msgs = []
@@ -56,9 +57,10 @@ async def update_history(user_id: str, role: str, content: str):
     try:
         key = _get_history_key(user_id)
         msg = json.dumps({"role": role, "content": content})
-        _redis.rpush(key, msg)
-        _redis.ltrim(key, -10, -1) # Keep last 10 msgs (5 turns)
-        _redis.expire(key, 3600 * 2) # 2 hour TTL
+        r = get_redis()
+        r.rpush(key, msg)
+        r.ltrim(key, -10, -1) # Keep last 10 msgs (5 turns)
+        r.expire(key, 3600 * 2) # 2 hour TTL
     except Exception as e:
         log.warning(f"History write error: {e}")
 
@@ -88,7 +90,7 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
             if resp.status != 200:
                 return ""
 
-            data = resp.json()
+            data = await resp.json()
             facts = data.get("results", [])
             if not facts:
                 return ""
@@ -138,7 +140,8 @@ Return ONLY a bulleted list of facts, or 'NONE'.
             )
             if resp.status != 200: return
             
-            text = resp.json().get("response", "").strip()
+            data = await resp.json()
+            text = data.get("response", "").strip()
             if "NONE" in text.upper() or not text:
                 return
 
