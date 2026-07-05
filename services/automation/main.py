@@ -47,24 +47,27 @@ async def scheduler_loop():
                 if now >= expires:
                     log.info(f"Triggering Timer: {t.get('title')} ({t.get('id')})")
                     # Dispatch to Execution Service for actual audio/action
-                    async with httpx.AsyncClient() as client:
-                        # We use a special internal endpoint in execution for triggers
-                        try:
-                            await client.post(
+                    try:
+                        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+                            # We use a special internal endpoint in execution for triggers
+                            resp = await client.post(
                                 f"{EXECUTION_SVC}/execute/trigger",
                                 json={"timer": t},
                                 headers={"X-Internal-Secret": INTERNAL_SECRET},
-                                timeout=10.0
                             )
-                            # Remove one-time timer or update recurring
-                            if not t.get("recurrence"):
-                                await redis_client.delete(key)
-                                log.info(f"One-time timer {t.get('id')} deleted.")
+                            if resp.status == 200:
+                                # Remove one-time timer or update recurring
+                                if not t.get("recurrence"):
+                                    await redis_client.delete(key)
+                                    log.info(f"One-time timer {t.get('id')} deleted.")
+                                else:
+                                    # Logic for recurrence would go here (update expires_at)
+                                    pass
                             else:
-                                # Logic for recurrence would go here (update expires_at)
-                                pass
-                        except Exception as e:
-                            log.error(f"Failed to trigger timer {t.get('id')}: {e}")
+                                text = await resp.text()
+                                log.error(f"Failed to trigger timer {t.get('id')}: {resp.status} {text}")
+                    except Exception as e:
+                        log.error(f"Failed to trigger timer {t.get('id')}: {e}")
                     
         except Exception as e:
             log.error(f"Scheduler Error: {e}")
