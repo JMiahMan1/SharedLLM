@@ -188,16 +188,16 @@ async def resolve_runtime_config():
     max_retries = 5
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                 resp = await client.get(
                     f"{IDENTITY_SVC_URL}/api/settings",
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                if resp.status_code != 200:
-                    log.warning(f"Failed to fetch runtime config from Identity (HTTP {resp.status_code})")
+                if resp.status != 200:
+                    log.warning(f"Failed to fetch runtime config from Identity (HTTP {resp.status})")
                     return
                 
-                settings = {s["key"]: s["value"] for s in resp.json()}
+                settings = {s["key"]: s["value"] for s in await resp.json()}
                 
                 for setting_key, var_name in settings_map.items():
                     if setting_key in settings and settings[setting_key]:
