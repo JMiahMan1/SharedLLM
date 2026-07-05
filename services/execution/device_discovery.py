@@ -22,12 +22,12 @@ import socket
 from typing import Optional, cast
 
 try:
-    from . import device_registry as _device_registry_mod
+    from . import device_registry as _device_registry_mod  # noqa: F401
 
-    from . import ha_client as _ha_client_mod
+    from . import ha_client as _ha_client_mod  # noqa: F401
 except ImportError:
-    _device_registry_mod = None
-    _ha_client_mod = None
+    _device_registry_mod = None  # type: ignore[no-redef, assignment]
+    _ha_client_mod = None  # type: ignore[no-redef, assignment]
 
 # Backwards compat aliases
 device_registry = _device_registry_mod
@@ -192,7 +192,7 @@ async def _discover_via_ha_registry(
                     try:
                         dev_resp = await client.get(f"{ha_url}/api/config/device_registry/list", headers=headers)
                         if dev_resp.status == 200:
-                            device_registry_list = dev_await resp.json()
+                            device_registry_list = await dev_resp.json()
                     except Exception:
                         device_registry_list = []
 
@@ -288,7 +288,7 @@ async def _discover_via_homekit_diagnostics(
             dev_resp = await client.get(f"{ha_url}/api/config/device_registry/list", headers=headers)
             if dev_resp.status != 200:
                 return None
-            device_registry_list = dev_await resp.json()
+            device_registry_list = await dev_resp.json()
 
             # Find the webostv device for this entity
             webos_device = None
@@ -319,7 +319,7 @@ async def _discover_via_homekit_diagnostics(
             if entries_resp.status != 200:
                 return None
 
-            for entry in entries_await resp.json():
+            for entry in await entries_resp.json():
                 if entry.get("domain") != "homekit_controller":
                     continue
 
@@ -332,7 +332,7 @@ async def _discover_via_homekit_diagnostics(
                 if diag_resp.status != 200:
                     continue
 
-                diag_data = diag_await resp.json()
+                diag_data = await diag_resp.json()
                 config_entry_data = diag_data.get("data", {}).get("config-entry", {})
                 accessory_data = config_entry_data.get("data", {})
                 accessory_ips = accessory_data.get("AccessoryIPs", [])
@@ -446,10 +446,10 @@ async def _discover_via_arp(
             for ip, mac in arp_ips:
                 for port in webos_ports:
                     try:
-                        resp = await client.get(f"http://{ip}:{port}", timeout=1)
+                        resp = await client.get(f"http://{ip}:{port}", timeout=aiohttp.ClientTimeout(total=1))
                         if resp.status == 200:
                             # Check if device info matches entity
-                            body = resp.text.lower()
+                            body = (await resp.text()).lower()
                             searchable = f"{body} {ip} {mac}".lower()
                             if any(word in searchable for word in friendly.split() if len(word) > 2) or \
                                any(word in searchable for word in entity_base.split() if len(word) > 2) or \
@@ -527,9 +527,9 @@ async def _discover_via_arp_scan(
             for ip, mac, vendor in found_devices:
                 for port in webos_ports:
                     try:
-                        resp = await client.get(f"http://{ip}:{port}", timeout=1)
+                        resp = await client.get(f"http://{ip}:{port}", timeout=aiohttp.ClientTimeout(total=1))
                         if resp.status == 200:
-                            body = resp.text.lower()
+                            body = (await resp.text()).lower()
                             searchable = f"{body} {ip} {mac} {vendor}".lower()
                             if any(word in searchable for word in friendly.split() if len(word) > 2) or \
                                any(word in searchable for word in entity_base.split() if len(word) > 2) or \
@@ -766,7 +766,7 @@ async def _discover_via_network_scan(
                         tasks.append(_probe_port(client, ip, port))
                         task_map.append(ip)
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                for (ip, port), resp in zip(zip(task_map, [p for _, p in ports] * len(batch)), results):
+                for (ip, port), resp in zip(zip(task_map, [p for _, p in ports] * len(batch)), results):  # type: ignore[assignment, misc]
                     if isinstance(resp, dict) and resp.get("ip"):
                         if _name_matches(resp):
                             await device_registry.set_device(
