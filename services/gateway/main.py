@@ -455,7 +455,7 @@ def get_http_client() -> aiohttp.ClientSession:
         _global_http_client = _original_async_client(
             headers={"X-Request-Source": "shared-llm/app"},
             timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-            limits=aiohttp.TCPConnector(max_connections=100, max_keepalive_connections=20)
+            connector=aiohttp.TCPConnector(limit=100, limit_per_host=20)
         )
         _global_http_client_loop = current_loop
     return _global_http_client
@@ -476,7 +476,7 @@ async def recreate_http_client():
             current_loop = None
         _global_http_client = _original_async_client(
             timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-            limits=aiohttp.TCPConnector(max_connections=100, max_keepalive_connections=20)
+            connector=aiohttp.TCPConnector(limit=100, limit_per_host=20)
         )
         _global_http_client_loop = current_loop
         log.info("[DNSRecovery] New HTTP client created with fresh DNS resolution")

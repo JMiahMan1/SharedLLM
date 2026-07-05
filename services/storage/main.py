@@ -53,13 +53,13 @@ async def get_storage_status():
 
     rag_stats = {}
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as client:
             resp = await client.get(
                 f"{RAG_SVC}/rag/stats",
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
             )
-            if resp.status_code == 200:
-                rag_data = resp.json()
+            if resp.status == 200:
+                rag_data = await resp.json()
                 rag_stats = {
                     "total_chunks": rag_data.get("total_chunks", 0),
                     "total_documents": rag_data.get("total_documents", 0),
@@ -128,7 +128,7 @@ async def _run_full_index_task(req: IndexScanRequest):
         BATCH_SIZE = 25
         total_synced = 0
         
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0, connect=5.0)) as client:
             try:
                 # 3.5. Cleanup old entries BEFORE syncing new ones
                 purge_resp = await client.post(
@@ -136,8 +136,8 @@ async def _run_full_index_task(req: IndexScanRequest):
                     params={"user_id": user_id},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
-                if purge_resp.status_code != 200:
-                    log.warning(f"Purge failed (non-fatal): {purge_resp.status_code} {purge_resp.text}")
+                if purge_resp.status != 200:
+                    log.warning(f"Purge failed (non-fatal): {purge_resp.status} {await purge_resp.text()}")
                 else:
                     log.info(f"Cleaned old {collection_name} entries for user {user_id}")
                 
@@ -158,18 +158,16 @@ async def _run_full_index_task(req: IndexScanRequest):
                         json=sync_payload,
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
-                    if resp.status_code != 200:
-                        raise httpx.HTTPStatusError(
-                            f"RAG sync failed (batch {batch_num}/{total_batches}): {resp.status_code} {resp.text}",
-                            request=resp.request,
-                            response=resp
+                    if resp.status != 200:
+                        raise RuntimeError(
+                            f"RAG sync failed (batch {batch_num}/{total_batches}): {resp.status}"
                         )
                     total_synced += len(batch)
                     log.info(f"RAG batch {batch_num}/{total_batches} synced: {len(batch)} chunks")
                 
                 log.info(f"Background index complete for {user_id}. Synced {total_synced}/{len(chunks)} chunks.")
-            except httpx.HTTPStatusError as e:
-                log.error(f"Failed to sync background index to RAG: HTTP {e.response.status_code} - {e.response.text}")
+            except aiohttp.ClientResponseError as e:
+                log.error(f"Failed to sync background index to RAG: HTTP {e.status} - {e.message}")
             except Exception as e:
                 log.error(f"Failed to sync background index to RAG: {type(e).__name__}: {e}")
     except Exception as e:
