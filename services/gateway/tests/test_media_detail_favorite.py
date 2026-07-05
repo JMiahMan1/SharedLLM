@@ -54,7 +54,7 @@ async def test_get_media_detail_success(client):
         mock_httpx_client.__aenter__.return_value = mock_httpx_client
         mock_httpx_client.post.side_effect = post_side_effect
 
-        with patch('services.gateway.main.httpx.AsyncClient', return_value=mock_httpx_client):
+        with patch('services.gateway.main.aiohttp.ClientSession', return_value=mock_httpx_client):
             resp = client.get("/api/media/detail?uri=library://track/123")
 
             assert resp.status_code == 200
@@ -98,7 +98,7 @@ async def test_toggle_favorite_add(client):
         mock_httpx_client.__aenter__.return_value = mock_httpx_client
         mock_httpx_client.post.side_effect = post_side_effect
 
-        with patch('services.gateway.main.httpx.AsyncClient', return_value=mock_httpx_client):
+        with patch('services.gateway.main.aiohttp.ClientSession', return_value=mock_httpx_client):
             resp = client.post("/api/media/favorite", json={"uri": "library://track/123", "favorite": True})
 
             assert resp.status_code == 200
@@ -150,7 +150,7 @@ async def test_toggle_favorite_remove(client):
         mock_httpx_client.__aenter__.return_value = mock_httpx_client
         mock_httpx_client.post.side_effect = post_side_effect
 
-        with patch('services.gateway.main.httpx.AsyncClient', return_value=mock_httpx_client):
+        with patch('services.gateway.main.aiohttp.ClientSession', return_value=mock_httpx_client):
             resp = client.post("/api/media/favorite", json={"uri": "library://track/123", "favorite": False})
 
             assert resp.status_code == 200

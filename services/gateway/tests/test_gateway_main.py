@@ -69,7 +69,7 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
 
     monkeypatch.setattr(main, "call_ollama", AsyncMock(return_value=MockResponse({"message": {"content": "Mocked LLM response"}})))
     
-    # Mock the RAG httpx call
+    # Mock the RAG aiohttp call
     async def mock_post_rag(*args, **kwargs):
         if "/rag/search" in args[0]:
             return MockResponse({"results": []})

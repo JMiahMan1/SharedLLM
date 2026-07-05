@@ -3,7 +3,6 @@ import os
 import logging
 import json
 import asyncio
-import httpx
 import aiohttp
 import re
 import traceback
@@ -206,13 +205,13 @@ _DEFAULT_FAST_PATH_THRESHOLD = 0.85
 async def fetch_global_setting(key: str, default: str = "") -> str:
     """Fetch a global setting from the Identity Service."""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
             resp = await client.get(
                 f"{IDENTITY_SVC}/api/settings/{key}",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
-                val = resp.json().get("value", default)
+            if resp.status == 200:
+                val = await resp.json().get("value", default)
                 return val if val != "auto" else default
     except Exception as e:
         log.warning(f"Failed to fetch global setting '{key}': {e}")
@@ -344,10 +343,10 @@ async def get_resident_model() -> Optional[str]:
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
-        async with httpx.AsyncClient(timeout=1.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1.0)) as client:
             resp = await client.get(f"{ollama_url}/api/ps")
-            if resp.status_code == 200:
-                models = resp.json().get("models", [])
+            if resp.status == 200:
+                models = await resp.json().get("models", [])
                 if models:
                     return models[0]["name"]
     except Exception:
@@ -439,13 +438,13 @@ HUMAN_READABLE_CAPABILITIES = {
 }
 
 # --- Global Clients ---
-_original_async_client = httpx.AsyncClient
-_global_http_client: Optional[httpx.AsyncClient] = None
+_original_async_client = aiohttp.ClientSession
+_global_http_client: Optional[aiohttp.ClientSession] = None
 _global_http_client_loop: Optional[asyncio.AbstractEventLoop] = None
 _dns_recovery_lock = asyncio.Lock()
 
-def get_http_client() -> httpx.AsyncClient:
-    """Lazy initializer for the global httpx client to ensure test compatibility."""
+def get_http_client() -> aiohttp.ClientSession:
+    """Lazy initializer for the global aiohttp client to ensure test compatibility."""
     global _global_http_client, _global_http_client_loop
     try:
         current_loop = asyncio.get_running_loop()
@@ -455,8 +454,8 @@ def get_http_client() -> httpx.AsyncClient:
     if _global_http_client is None or _global_http_client_loop != current_loop:
         _global_http_client = _original_async_client(
             headers={"X-Request-Source": "shared-llm/app"},
-            timeout=httpx.Timeout(300.0, connect=30.0),
-            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
+            timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
+            limits=aiohttp.TCPConnector(max_connections=100, max_keepalive_connections=20)
         )
         _global_http_client_loop = current_loop
     return _global_http_client
@@ -464,27 +463,27 @@ def get_http_client() -> httpx.AsyncClient:
 async def recreate_http_client():
     """Close the current client and create a new one with fresh DNS resolution.
     This is needed when DNS changes (e.g., dns-sync restart) cause stale keepalive
-    connections to fail with empty httpx.RequestError messages."""
+    connections to fail with empty aiohttp.ClientError messages."""
     async with _dns_recovery_lock:
         global _global_http_client, _global_http_client_loop
         if _global_http_client is not None:
             log.info("[DNSRecovery] Closing stale HTTP client to refresh DNS resolution")
-            await _global_http_client.aclose()
+            await _global_http_client.close()
             _global_http_client = None
         try:
             current_loop = asyncio.get_running_loop()
         except RuntimeError:
             current_loop = None
         _global_http_client = _original_async_client(
-            timeout=httpx.Timeout(300.0, connect=30.0),
-            limits=httpx.Limits(max_connections=100, max_keepalive_connections=20)
+            timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
+            limits=aiohttp.TCPConnector(max_connections=100, max_keepalive_connections=20)
         )
         _global_http_client_loop = current_loop
         log.info("[DNSRecovery] New HTTP client created with fresh DNS resolution")
 
-def _is_dns_failure(e: httpx.RequestError) -> bool:
+def _is_dns_failure(e: aiohttp.ClientError) -> bool:
     """Detect DNS-related failures that indicate stale DNS cache.
-    These manifest as httpx.RequestError with empty messages when using
+    These manifest as aiohttp.ClientError with empty messages when using
     keepalive connections that were established before a DNS change."""
     msg = str(e).strip()
     # Empty message on a keepalive connection = stale DNS resolution
@@ -500,7 +499,7 @@ async def borrow_http_client():
     yield get_http_client()
 
 async def retry_http_request(func, service_name: str, max_retries: int = 2, base_delay: float = 0.1, dns_recovery: bool = True):
-    """Retry an httpx request with exponential backoff for transient errors.
+    """Retry an aiohttp request with exponential backoff for transient errors.
     Detects DNS-related failures (empty RequestError messages on stale connections)
     and automatically recreates the HTTP client to refresh DNS resolution."""
     for attempt in range(max_retries + 1):
@@ -521,7 +520,7 @@ async def retry_http_request(func, service_name: str, max_retries: int = 2, base
                 await asyncio.sleep(delay)
             else:
                 raise
-        except httpx.RequestError as e:
+        except aiohttp.ClientError as e:
             if attempt == max_retries:
                 log.error(f"{service_name}: All {max_retries + 1} attempts failed: {e}")
                 raise
@@ -579,7 +578,7 @@ async def lifespan(app: FastAPI):
     
     global _global_http_client
     if _global_http_client:
-        await _global_http_client.aclose()
+        await _global_http_client.close()
         _global_http_client = None
 
 app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
@@ -655,16 +654,16 @@ async def readiness():
     results: dict[str, Any] = {"status": "READY", "services": services_status, "service_details": service_details}
     all_ok = True
 
-    async with httpx.AsyncClient(timeout=2.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.0)) as client:
       for name, url in services.items():
           try:
             log.info(f"[health] Checking {name} at {url}")
             resp = await client.get(url)
-            log.info(f"[health] {name} response: {resp.status_code}")
-            if resp.status_code == 200:
+            log.info(f"[health] {name} response: {resp.status}")
+            if resp.status == 200:
                 services_status[name] = "OK"
                 try:
-                    data = resp.json()
+                    data = await resp.json()
                     if isinstance(data, dict):
                         service_details[name] = {
                             "git_sha": data.get("git_sha", "unknown"),
@@ -673,7 +672,7 @@ async def readiness():
                 except Exception:
                     pass
             else:
-                services_status[name] = f"ERROR ({resp.status_code})"
+                services_status[name] = f"ERROR ({resp.status})"
                 all_ok = False
           except Exception as e:
             log.error(f"[health] {name} failed: {e}")
@@ -783,7 +782,7 @@ async def emit_log(level: str, message: str, context: dict | None = None):
       from services.gateway.agent_loop import sanitize_for_llm
       safe_context = sanitize_for_llm(context) if context else None
       safe_message = sanitize_for_llm(message)
-      async with httpx.AsyncClient() as client:
+      async with aiohttp.ClientSession() as client:
           await client.post(
             f"{LOGGING_SVC}/log",
             json={"service": "gateway", "level": level, "message": safe_message, "context": safe_context},
@@ -795,9 +794,9 @@ async def emit_log(level: str, message: str, context: dict | None = None):
 
 @app.get("/api/logs")
 async def get_api_logs(limit: int = 50):
-    async with httpx.AsyncClient() as client:
+    async with aiohttp.ClientSession() as client:
       resp = await client.get(f"{LOGGING_SVC}/logs", params={"limit": limit})
-      return resp.json()
+      return await resp.json()
 
 # --- Contextualization Logic ---
 async def contextualize_query(query: str, history: list) -> str:
@@ -1083,9 +1082,9 @@ async def workspace_runtime_request(method: str, path: str, *, json_payload: dic
       headers={"X-Internal-Secret": INTERNAL_SECRET},
       timeout=120.0,
     )
-    if resp.status_code != 200:
-      raise HTTPException(status_code=resp.status_code, detail=f"Workspace runtime request failed: {resp.text}")
-    data = resp.json()
+    if resp.status != 200:
+      raise HTTPException(status_code=resp.status, detail=f"Workspace runtime request failed: {await resp.text()}")
+    data = await resp.json()
     if not isinstance(data, dict):
       raise HTTPException(status_code=500, detail=f"Workspace runtime returned invalid payload for {path}")
     return data
@@ -1689,20 +1688,20 @@ async def resolve_identity(body: dict) -> Any:
             f"{IDENTITY_SVC}/api/resolve",
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=httpx.Timeout(300.0, connect=30.0)
+            timeout=aiohttp.ClientTimeout(300.0, connect=30.0)
         )
-        if resp.status_code != 200:
-            err_detail = f"Identity resolution failed: {resp.status_code} {resp.text}"
+        if resp.status != 200:
+            err_detail = f"Identity resolution failed: {resp.status} {await resp.text()}"
             log.error(err_detail)
-            raise HTTPException(status_code=resp.status_code, detail=err_detail)
-        data = resp.json()
+            raise HTTPException(status_code=resp.status, detail=err_detail)
+        data = await resp.json()
         if not isinstance(data, dict):
             log.error(f"Identity resolution returned non-dict: {data}")
             raise HTTPException(status_code=500, detail="Identity resolution format error")
         return data
     try:
         return await retry_http_request(do_resolve, "Identity resolution", max_retries=2, base_delay=0.1)
-    except httpx.RequestError as e:
+    except aiohttp.ClientError as e:
       log.error(f"Identity service unreachable: {e}")
       raise HTTPException(status_code=503, detail="Identity service unreachable")
 
@@ -1766,7 +1765,7 @@ async def _proxy_execution_with_identity(
         else:
             exec_payload = {"user_context": creds_data, **(payload or {})}
             resp = await client.post(url, json=exec_payload, headers=headers)
-        resp_text = await resp.text()
+        resp_text = await resp.text()()
         try:
             resp_json = json.loads(resp_text)
         except (json.JSONDecodeError, ValueError):
@@ -1788,7 +1787,7 @@ async def fetch_ha_entities(creds: dict) -> list:
                 return []
             
             try:
-                resp_text = await resp.text()
+                resp_text = await resp.text()()
                 data = json.loads(resp_text)
             except (json.JSONDecodeError, ValueError) as e:
                 log.error(f"Failed to parse HA entities JSON: {e} | Body: {resp_text[:200] if resp_text else 'None'}")
@@ -1808,8 +1807,8 @@ async def fetch_ha_entities(creds: dict) -> list:
                             json={"entities": entities, "user_id": user_id},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
-                        if resp.status_code == 200:
-                            result = resp.json()
+                        if resp.status == 200:
+                            result = await resp.json()
                             orphaned = result.get("orphaned_entity_ids", [])
                             if orphaned:
                                 from services.gateway.ha_state_cache import get_redis
@@ -1860,9 +1859,9 @@ async def fetch_device_history(creds: dict, entity_id: str, days: int = 1) -> li
           headers={"X-Internal-Secret": INTERNAL_SECRET},
           timeout=5.0
       )
-      if resp.status_code != 200:
+      if resp.status != 200:
           return []
-      data = resp.json()
+      data = await resp.json()
       if isinstance(data, list):
           return [d for d in data if isinstance(d, dict)]
       return []
@@ -1888,9 +1887,9 @@ async def get_entities(request: Request):
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=15.0,
         )
-        if resp.status_code != 200:
+        if resp.status != 200:
             return {"entities": []}
-        data = resp.json()
+        data = await resp.json()
         entities = data.get("entities", [])
         # Return lightweight format for UI dropdown
         return {
@@ -1915,7 +1914,7 @@ async def execute_command(endpoint: str, payload: dict) -> Any:
           headers={"X-Internal-Secret": INTERNAL_SECRET},
           timeout=120.0
       )
-      data = resp.json()
+      data = await resp.json()
       if not isinstance(data, dict):
           return {"status": "FAILURE", "message": str(data)}
       return data
@@ -1938,8 +1937,8 @@ async def secure_logging_middleware(request: Request, call_next):
     
     response = await call_next(request)
     
-    log.info(f"RESPONSE: {request.method} {request.url} | Status: {response.status_code}")
-    asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {response.status_code}", {}))
+    log.info(f"RESPONSE: {request.method} {request.url} | Status: {response.status}")
+    asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {response.status}", {}))
     return response
 
 # --- Core Handlers ---
@@ -2002,13 +2001,13 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         log.info(f"[ShadowExecution] Requesting proposal from {assistant} (Timeout: {OLLAMA_TIMEOUT}s)")
         # Wait for available slot if all are busy
         try:
-            async with httpx.AsyncClient(timeout=3.0) as slot_client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as slot_client:
                 deadline = asyncio.get_running_loop().time() + 120.0
                 while asyncio.get_running_loop().time() < deadline:
                     try:
                         ps_resp = await slot_client.get(f"{ollama_url}/api/ps", timeout=3.0)
-                        if ps_resp.status_code == 200:
-                            slots = ps_resp.json().get("slots", {})
+                        if ps_resp.status == 200:
+                            slots = await ps_resp.json().get("slots", {})
                             if slots.get("available", 0) > 0:
                                 break
                     except Exception:
@@ -2021,13 +2020,13 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         start_t = asyncio.get_event_loop().time()
         resp = await get_http_client().post(f"{ollama_url}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
         elapsed = asyncio.get_event_loop().time() - start_t
-        log.info(f"[ShadowExecution] Ollama responded in {elapsed:.1f}s with status {resp.status_code}")
+        log.info(f"[ShadowExecution] Ollama responded in {elapsed:.1f}s with status {resp.status}")
         
-        if resp.status_code == 200:
-            proposal = resp.json().get("message", {}).get("content", "")
+        if resp.status == 200:
+            proposal = await resp.json().get("message", {}).get("content", "")
             return f"\n\n### LIVE SYSTEM PROPOSAL (Shadow Execution)\n{proposal}\n\n[Dev Agent: Compare this proposal against the codebase and architectural intent. Identify any deltas and select the optimal path.]"
         else:
-            log.warning(f"[ShadowExecution] Non-200 response: {resp.status_code} - {resp.text}")
+            log.warning(f"[ShadowExecution] Non-200 response: {resp.status} - {await resp.text()}")
     except Exception as e:
         log.warning(f"[ShadowExecution] Failed: {type(e).__name__}: {e}")
     return ""
@@ -2121,7 +2120,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ans = resp.get("message", {}).get("content", "Error.")
             ollama_ms = (asyncio.get_event_loop().time() - iter_start) * 1000
             log.info(f"[AgentLoop] Ollama responded in {ollama_ms:.0f}ms — iter {agent_iter + 1}")
-        except (httpx.TimeoutException, httpx.ConnectError):
+        except (aiohttp.ClientTimeoutException, aiohttp.ClientConnectorError):
             heartbeat_stop.set()
             await hb_task
             ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
@@ -2473,8 +2472,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 )
 
                 exec_msg = ""
-                if exec_resp.status_code == 200:
-                    exec_data = exec_resp.json()
+                if exec_resp.status == 200:
+                    exec_data = await exec_resp.json()
                     exec_msg = exec_data.get("message", "Action completed.")
                     detail = exec_data.get("detail")
                     if detail:
@@ -2490,9 +2489,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         exec_msg += f"\n\n[DETAIL]\n{detail_txt[:10000]}"
                 else:
                     try:
-                        err_detail = exec_resp.json().get("detail", exec_resp.text)
+                        err_detail = await exec_resp.json().get("detail", await exec_resp.text())
                     except:
-                        err_detail = exec_resp.text
+                        err_detail = await exec_resp.text()
                     exec_msg = f"Failed: {err_detail}"
 
                 log.info(f"[AgentLoop] Tool result (iter {agent_iter + 1}): {exec_msg[:200]}...")
@@ -2587,7 +2586,7 @@ async def chat_handler(request: Request, background_tasks=None):
         creds = ResolvedCredentials(**creds_data)
         user_id = creds.user
     except HTTPException as he:
-        if he.status_code == 401:
+        if he.status == 401:
             msg = "Authentication failed. Please log in or provide a valid API key."
             if is_openai:
                 return _make_openai_response(msg, selected_model, "unauthorized")
@@ -2736,9 +2735,9 @@ async def chat_handler(request: Request, background_tasks=None):
                 svc_base = EXECUTION_SVC
 
             fast_timeout = 120.0 if intent == "play_media" else 30.0
-            async with httpx.AsyncClient(timeout=fast_timeout) as client:
+            async with aiohttp.ClientSession(timeout=fast_timeout) as client:
                 exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
-                ans = exec_resp.json().get("message", "Action completed.")
+                ans = await exec_resp.json().get("message", "Action completed.")
             
             if resolved_entity and intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
                 entity_map = {e.get("entity_id"): e for e in media_entities or []}
@@ -2778,7 +2777,7 @@ async def chat_handler(request: Request, background_tasks=None):
                     timeout=10.0
                 )
                 resp.raise_for_status()
-                res = resp.json()
+                res = await resp.json()
                 hits = res.get("results", [])
                 if hits:
                     rag_context += f"\n[{coll.upper()}]\n" + "\n".join([h["content"] for h in hits])
@@ -3011,21 +3010,21 @@ async def get_chat_job_status(job_id: str):
 @app.post("/api/auth/login")
 async def proxy_login(request: Request):
     body = await request.json()
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(f"{IDENTITY_SVC}/api/auth/login", json=body)
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/auth/change-password")
 async def proxy_change_password(request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/auth/change-password", 
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.post("/api/users/{username}/password")
@@ -3037,7 +3036,7 @@ async def proxy_admin_set_password(username: str, request: Request):
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.post("/api/auth/import/nextcloud")
@@ -3047,98 +3046,98 @@ async def proxy_import_nextcloud_users(request: Request):
             f"{IDENTITY_SVC}/api/auth/import/nextcloud",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.post("/api/auth/test-connection")
 async def proxy_test_connection(request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/auth/test-connection", 
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/auth/discover")
 async def proxy_discover(request: Request):
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/auth/discover",
             headers={"Authorization": auth_header} if auth_header else {}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.patch("/api/users/me")
 async def proxy_update_me(request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.patch(
             f"{IDENTITY_SVC}/api/users/me",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.patch("/api/users/{username}")
 async def proxy_update_user(username: str, request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.patch(
             f"{IDENTITY_SVC}/api/users/{username}",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/settings")
 async def proxy_get_settings(request: Request):
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/settings",
             headers={"Authorization": auth_header} if auth_header else {}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.patch("/api/settings/{key}")
 async def proxy_update_setting(key: str, request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.patch(
             f"{IDENTITY_SVC}/api/settings/{key}",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/settings")
 async def proxy_update_settings_bulk(request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/settings",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/users")
 async def proxy_users(request: Request):
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/users",
             headers={"Authorization": auth_header} if auth_header else {}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 # --- Telemetry Monitoring ---
@@ -3151,7 +3150,7 @@ async def proxy_list_telemetry_enrollments(request: Request):
             f"{IDENTITY_SVC}/api/telemetry/enroll",
             headers=headers
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/telemetry/enroll")
 async def proxy_enroll_telemetry(request: Request):
@@ -3164,7 +3163,7 @@ async def proxy_enroll_telemetry(request: Request):
             json=body,
             headers=headers
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.delete("/api/telemetry/enroll/{entity_id:path}")
 async def proxy_unenroll_telemetry(entity_id: str, request: Request):
@@ -3175,7 +3174,7 @@ async def proxy_unenroll_telemetry(entity_id: str, request: Request):
             f"{IDENTITY_SVC}/api/telemetry/enroll/{entity_id}",
             headers=headers
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/telemetry/analyze")
 async def proxy_trigger_telemetry_analysis(request: Request):
@@ -3188,7 +3187,7 @@ async def proxy_trigger_telemetry_analysis(request: Request):
             json=body,
             headers=headers
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/telemetry/summary/{entity_id:path}")
 async def proxy_get_telemetry_summary(entity_id: str, request: Request):
@@ -3199,7 +3198,7 @@ async def proxy_get_telemetry_summary(entity_id: str, request: Request):
             f"{IDENTITY_SVC}/api/telemetry/summary/{entity_id}",
             headers=headers
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/telemetry/data/{entity_id:path}")
 async def proxy_get_telemetry_data(entity_id: str, request: Request):
@@ -3210,7 +3209,7 @@ async def proxy_get_telemetry_data(entity_id: str, request: Request):
             f"{IDENTITY_SVC}/api/telemetry/data/{entity_id}",
             headers=headers
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/telemetry/snapshot")
 async def proxy_ingest_telemetry_snapshot(request: Request):
@@ -3223,7 +3222,7 @@ async def proxy_ingest_telemetry_snapshot(request: Request):
             json=body,
             headers=headers
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/telemetry/insights")
 async def proxy_get_telemetry_insights(request: Request):
@@ -3234,18 +3233,18 @@ async def proxy_get_telemetry_insights(request: Request):
             f"{IDENTITY_SVC}/api/telemetry/insights",
             headers=headers
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.delete("/api/devices/{device_id:path}")
 async def proxy_delete_device(device_id: str, request: Request):
     auth_header = request.headers.get("Authorization")
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.delete(
             f"{IDENTITY_SVC}/api/devices/{device_id}",
             headers={"Authorization": auth_header} if auth_header else {}
         )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.get("/api/communication/timers")
@@ -3386,9 +3385,9 @@ async def proxy_get_skylight_chores(request: Request, user: Optional[str] = None
     
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", ""), "date": date or ""}
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
         resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/chores", headers=headers, params=params)
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.post("/api/integrations/skylight/chores/{chore_id}/complete")
@@ -3399,9 +3398,9 @@ async def proxy_complete_skylight_chore(chore_id: str, request: Request):
     
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/complete", headers=headers, params=params)
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.post("/api/integrations/skylight/chores/{chore_id}/uncomplete")
@@ -3412,9 +3411,9 @@ async def proxy_uncomplete_skylight_chore(chore_id: str, request: Request):
     
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/uncomplete", headers=headers, params=params)
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.get("/api/integrations/skylight/rewards")
@@ -3425,9 +3424,9 @@ async def proxy_get_skylight_rewards(request: Request):
     
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
         resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/rewards", headers=headers, params=params)
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.post("/api/integrations/skylight/rewards/{reward_id}/redeem")
@@ -3439,9 +3438,9 @@ async def proxy_redeem_skylight_reward(reward_id: str, request: Request):
     body = await request.json() if await request.body() else {}
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/rewards/{reward_id}/redeem", json=body, headers=headers, params=params)
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.post("/api/communication/announcements")
@@ -3518,12 +3517,12 @@ async def proxy_generate(request: Request):
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
-        async with httpx.AsyncClient(timeout=None) as client:
+        async with aiohttp.ClientSession(timeout=None) as client:
             req = client.build_request("POST", f"{ollama_url}/api/generate", json=body)
             resp = await client.send(req, stream=True)
-            if resp.status_code != 200:
+            if resp.status != 200:
                 await resp.aread()
-                return JSONResponse({"status": "ERROR", "message": resp.text}, status_code=resp.status_code)
+                return JSONResponse({"status": "ERROR", "message": await resp.text()}, status_code=resp.status)
             
             async def generate():
                 async for chunk in resp.aiter_raw():
@@ -3541,11 +3540,11 @@ async def proxy_tags():
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return JSONResponse({"models": []}, status_code=503)
-        async with httpx.AsyncClient() as client:
+        async with aiohttp.ClientSession() as client:
             resp = await client.get(f"{ollama_url}/api/tags")
-            if resp.status_code != 200:
+            if resp.status != 200:
                 return JSONResponse({"models": []}, status_code=200)
-            data = resp.json()
+            data = await resp.json()
             if not isinstance(data, dict):
                 return {"models": []}
             return data
@@ -3565,11 +3564,11 @@ async def proxy_show(request: Request):
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
             resp = await client.post(f"{ollama_url}/api/show", json=body)
-            if resp.status_code == 200:
-                return resp.json()
-            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+            if resp.status == 200:
+                return await resp.json()
+            return JSONResponse(content=await resp.json(), status_code=resp.status)
     except Exception as e:
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 
@@ -3582,11 +3581,11 @@ async def proxy_embeddings(request: Request):
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
             resp = await client.post(f"{ollama_url}/api/embeddings", json=body)
-            if resp.status_code == 200:
-                return resp.json()
-            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+            if resp.status == 200:
+                return await resp.json()
+            return JSONResponse(content=await resp.json(), status_code=resp.status)
     except Exception as e:
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 
@@ -3599,11 +3598,11 @@ async def proxy_embed(request: Request):
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
             resp = await client.post(f"{ollama_url}/api/embed", json=body)
-            if resp.status_code == 200:
-                return resp.json()
-            return JSONResponse(content=resp.json(), status_code=resp.status_code)
+            if resp.status == 200:
+                return await resp.json()
+            return JSONResponse(content=await resp.json(), status_code=resp.status)
     except Exception as e:
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 @app.get("/api/search")
@@ -3619,8 +3618,8 @@ async def global_search(q: str, request: Request):
                 f"{IDENTITY_SVC}/api/resolve",
                 headers={"Authorization": auth_header, "X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
-                user_id = resp.json().get("user", "admin")
+            if resp.status == 200:
+                user_id = await resp.json().get("user", "admin")
         except Exception:
             pass
 
@@ -3631,10 +3630,10 @@ async def global_search(q: str, request: Request):
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=10.0
         )
-        if resp.status_code != 200:
+        if resp.status != 200:
             return JSONResponse({"status": "ERROR", "message": "Search failed"}, status_code=502)
         
-        data = resp.json()
+        data = await resp.json()
         # Transform for UI
         results = data.get("results", [])
         return {
@@ -3665,7 +3664,7 @@ async def get_workspaces_proxy(request: Request):
                 params=params,
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            return JSONResponse(status_code=resp.status_code, content=resp.json())
+            return JSONResponse(status_code=resp.status, content=await resp.json())
     except Exception as e:
         log.error(f"Workspaces proxy failed: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
@@ -3678,7 +3677,7 @@ async def _proxy_workspace_runtime_json(method: str, path: str, request = None):
         json=body,
         headers={"X-Internal-Secret": INTERNAL_SECRET},
     )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/workspaces")
 async def create_workspace_proxy(request: Request):
@@ -3756,7 +3755,7 @@ async def list_storage_files(request: Request, body: StorageListRequest):
         json=payload,
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/storage/index")
 async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
@@ -3783,7 +3782,7 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
         json=payload,
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/storage/stats")
 async def get_storage_stats(request: Request):
@@ -3824,7 +3823,7 @@ async def get_storage_stats(request: Request):
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
     try:
-        content = resp1.json()
+        content = await resp1.json()
     except Exception as e:
         log.error(f"Failed to parse Jarvis RAG stats: {e}")
         content = {"status": "ERROR", "message": "Failed to fetch Jarvis stats", "breakdown": {}}
@@ -3836,7 +3835,7 @@ async def get_storage_stats(request: Request):
                 f"{RAG_SVC}/rag/stats?user_id={nc_user}",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            content = merge_stats(content, resp2.json())
+            content = merge_stats(content, await resp2.json())
         except Exception as e:
             log.warning(f"Failed to fetch or merge Nextcloud RAG stats: {e}")
         
@@ -3857,12 +3856,12 @@ async def get_collection_docs(collection_name: str, request: Request, limit: int
     )
     
     try:
-        content = resp.json()
+        content = await resp.json()
     except Exception as e:
         log.error(f"Failed to parse collection docs JSON: {e} | Body: {resp.text[:200]}")
         content = {"status": "ERROR", "message": "Upstream RAG service returned non-JSON response", "detail": str(e)}
         
-    return JSONResponse(status_code=resp.status_code, content=content)
+    return JSONResponse(status_code=resp.status, content=content)
 
 
 @app.post("/api/storage/purge/{collection_name}")
@@ -3882,7 +3881,7 @@ async def purge_storage_collection(collection_name: str, request: Request):
             json=body.get("filter", {}),
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.post("/api/admin/tests/smoke")
@@ -3893,7 +3892,7 @@ async def proxy_smoke_test(request: Request):
         headers={"X-Internal-Secret": INTERNAL_SECRET},
         timeout=65.0
     )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.post("/api/admin/tests/unit")
@@ -3904,7 +3903,7 @@ async def proxy_unit_tests(request: Request):
         headers={"X-Internal-Secret": INTERNAL_SECRET},
         timeout=130.0
     )
-    return JSONResponse(status_code=resp.status_code, content=resp.json())
+    return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.get("/api/admin/volumes")
@@ -3920,7 +3919,7 @@ async def proxy_admin_volumes(request: Request):
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=120.0,
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 # ---- Autonomous Ops (Raven) Endpoints ----
 @app.get("/api/admin/raven/config")
 async def get_raven_config(request: Request):
@@ -3965,7 +3964,7 @@ async def get_raven_tts_voices(request: Request):
             f"{EXECUTION_SVC}/execute/tts/voices",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
 @app.get("/api/admin/raven/queue")
@@ -3979,7 +3978,7 @@ async def get_raven_queue(request: Request):
             f"{IDENTITY_SVC}/api/raven/missions",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/admin/services/{service_name}/restart")
 async def restart_service(service_name: str, request: Request):
@@ -3992,11 +3991,11 @@ async def restart_service(service_name: str, request: Request):
             f"{CONTROL_PLANE_URL}/api/restart/{service_name}",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 404:
+        if resp.status == 404:
             raise HTTPException(status_code=404, detail=f"Service {service_name} not found")
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        if resp.status != 200:
+            raise HTTPException(status_code=resp.status, detail=await resp.text())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/admin/services")
 async def list_services(request: Request):
@@ -4009,7 +4008,7 @@ async def list_services(request: Request):
             f"{CONTROL_PLANE_URL}/api/containers",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/admin/services/{service_name}/pull")
 async def pull_service_image(service_name: str, request: Request):
@@ -4022,7 +4021,7 @@ async def pull_service_image(service_name: str, request: Request):
             f"{CONTROL_PLANE_URL}/api/containers/{service_name}/pull",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/admin/services/health")
 async def get_system_health(request: Request):
@@ -4035,7 +4034,7 @@ async def get_system_health(request: Request):
             f"{CONTROL_PLANE_URL}/api/health",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/admin/services/updates")
 async def check_service_updates(request: Request):
@@ -4050,10 +4049,10 @@ async def check_service_updates(request: Request):
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=60.0,  # registry checks can be slow
         )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        if resp.status != 200:
+            raise HTTPException(status_code=resp.status, detail=await resp.text())
         
-        data = resp.json()
+        data = await resp.json()
         updates_available = data.get("updates_available", 0)
         if updates_available > 0:
             services = [s.get("service", "unknown").replace("sharedllm_", "") for s in data.get("services", []) if s.get("has_update")]
@@ -4064,7 +4063,7 @@ async def check_service_updates(request: Request):
                 context={"updates": services}
             )
 
-        return JSONResponse(status_code=resp.status_code, content=data)
+        return JSONResponse(status_code=resp.status, content=data)
 
 @app.get("/api/admin/services/{service_name}/logs")
 async def get_service_logs(service_name: str, request: Request, tail: int = 100):
@@ -4078,9 +4077,9 @@ async def get_service_logs(service_name: str, request: Request, tail: int = 100)
             f"{CONTROL_PLANE_URL}/api/containers/{service_name}/logs?tail={tail}",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code != 200:
-            return JSONResponse(status_code=resp.status_code, content={"detail": resp.text})
-        return JSONResponse(status_code=200, content=resp.json())
+        if resp.status != 200:
+            return JSONResponse(status_code=resp.status, content={"detail": await resp.text()})
+        return JSONResponse(status_code=200, content=await resp.json())
 
 @app.get("/api/models")
 async def list_models(request: Request):
@@ -4092,8 +4091,8 @@ async def list_models(request: Request):
     if isinstance(provider, OllamaProvider):
         async with borrow_http_client() as client:
             resp = await client.get(f"{provider.base_url}/api/tags")
-            if resp.status_code == 200:
-                tags = resp.json().get("models", [])
+            if resp.status == 200:
+                tags = await resp.json().get("models", [])
                 return {"status": "SUCCESS", "models": [m["name"] for m in tags]}
     
     # For OpenRouter or others, we might return the config models
@@ -4131,12 +4130,12 @@ async def switch_model(request: Request):
                     "stream": False
                 })
                 
-                if chat_resp.status_code == 200:
+                if chat_resp.status == 200:
                     return {"status": "loaded", "model": model}
                 else:
                     return JSONResponse(
-                        status_code=chat_resp.status_code, 
-                        content={"error": chat_resp.text}
+                        status_code=chat_resp.status, 
+                        content={"error": await chat_resp.text()}
                     )
         except Exception as e:
             log.error(f"Error switching model: {e}")
@@ -4159,8 +4158,8 @@ async def unload_model(request: Request):
                 # If model not specified, get whatever is loaded
                 if not model:
                     ps_resp = await client.get(f"{provider.base_url}/api/ps")
-                    if ps_resp.status_code == 200:
-                        ps_data = ps_resp.json()
+                    if ps_resp.status == 200:
+                        ps_data = await ps_resp.json()
                         loaded = ps_data.get("models", [])
                         if loaded:
                             model = loaded[0].get("model")
@@ -4178,8 +4177,8 @@ async def unload_model(request: Request):
                 
                 # Verify the model was actually unloaded
                 ps_resp = await client.get(f"{provider.base_url}/api/ps")
-                if ps_resp.status_code == 200:
-                    ps_data = ps_resp.json()
+                if ps_resp.status == 200:
+                    ps_data = await ps_resp.json()
                     remaining = [m["model"] for m in ps_data.get("models", [])]
                     if model not in remaining:
                         return {"status": "unloaded", "model": model}
@@ -4202,8 +4201,8 @@ async def list_openai_models(request: Request):
         try:
             async with borrow_http_client() as client:
                 resp = await client.get(f"{provider.base_url}/api/tags")
-                if resp.status_code == 200:
-                    tags = resp.json().get("models", [])
+                if resp.status == 200:
+                    tags = await resp.json().get("models", [])
                     model_names = [m["name"] for m in tags]
         except Exception as e:
             log.error(f"Error querying Ollama models for OpenAI list: {e}")
@@ -4251,15 +4250,15 @@ async def openai_embeddings(request: Request):
         if not ollama_url:
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
             
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
             resp = await client.post(
                 f"{ollama_url}/api/embed", 
                 json={"model": model, "input": inputs}
             )
-            if resp.status_code != 200:
-                return JSONResponse(content=resp.json(), status_code=resp.status_code)
+            if resp.status != 200:
+                return JSONResponse(content=await resp.json(), status_code=resp.status)
                 
-            data = resp.json()
+            data = await resp.json()
             embeddings_list = data.get("embeddings", [])
             
             # Map to OpenAI list format
@@ -4292,7 +4291,7 @@ async def execute_raven_mission(id: int, request: Request):
     async with borrow_http_client() as client:
         # Get mission
         resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions", headers={"X-Internal-Secret": INTERNAL_SECRET})
-        missions = resp.json()
+        missions = await resp.json()
         target = next((m for m in missions if m["id"] == id), None)
         if not target:
             raise HTTPException(status_code=404, detail="Mission not found")
@@ -4356,10 +4355,10 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
             json=mission_payload,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        if resp.status != 200:
+            raise HTTPException(status_code=resp.status, detail=await resp.text())
         
-        mission_data = resp.json()
+        mission_data = await resp.json()
         
         # Enqueue the job for execution
         target_model = (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or coding_model
@@ -4398,9 +4397,9 @@ async def get_mission_details(request: Request, id_or_slug: str):
             f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail="Mission not found")
-        return resp.json()
+        if resp.status != 200:
+            raise HTTPException(status_code=resp.status, detail="Mission not found")
+        return await resp.json()
 
 @app.post("/api/raven/missions/{id_or_slug}/kill")
 async def kill_mission(request: Request, id_or_slug: str):
@@ -4411,9 +4410,9 @@ async def kill_mission(request: Request, id_or_slug: str):
     async with borrow_http_client() as client:
         # Resolve to real ID
         m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
-        if m_resp.status_code != 200:
-            raise HTTPException(status_code=m_resp.status_code, detail="Mission not found")
-        mission_data = m_resp.json()
+        if m_resp.status != 200:
+            raise HTTPException(status_code=m_resp.status, detail="Mission not found")
+        mission_data = await m_resp.json()
         real_id = mission_data["id"]
 
         # 1. Update status in database
@@ -4425,8 +4424,8 @@ async def kill_mission(request: Request, id_or_slug: str):
             },
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail="Failed to update mission status")
+        if resp.status != 200:
+            raise HTTPException(status_code=resp.status, detail="Failed to update mission status")
         
         # 2. Publish kill signal to Redis
         from services.gateway.history import REDIS_URL
@@ -4447,9 +4446,9 @@ async def pause_mission(request: Request, id_or_slug: str):
 
     async with borrow_http_client() as client:
         m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
-        if m_resp.status_code != 200:
-            raise HTTPException(status_code=m_resp.status_code, detail="Mission not found")
-        mission_data = m_resp.json()
+        if m_resp.status != 200:
+            raise HTTPException(status_code=m_resp.status, detail="Mission not found")
+        mission_data = await m_resp.json()
         real_id = mission_data["id"]
 
         from services.gateway.history import REDIS_URL
@@ -4468,9 +4467,9 @@ async def resume_mission(request: Request, id_or_slug: str):
 
     async with borrow_http_client() as client:
         m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
-        if m_resp.status_code != 200:
-            raise HTTPException(status_code=m_resp.status_code, detail="Mission not found")
-        mission_data = m_resp.json()
+        if m_resp.status != 200:
+            raise HTTPException(status_code=m_resp.status, detail="Mission not found")
+        mission_data = await m_resp.json()
         real_id = mission_data["id"]
 
         from services.gateway.history import REDIS_URL
@@ -4492,8 +4491,8 @@ async def delete_mission(request: Request, id_or_slug: str):
             f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        if resp.status != 200:
+            raise HTTPException(status_code=resp.status, detail=await resp.text())
         return {"status": "SUCCESS", "message": f"Mission {id_or_slug} deleted."}
 
 @app.get("/api/raven/missions")
@@ -4508,8 +4507,8 @@ async def get_user_missions(request: Request):
             f"{IDENTITY_SVC}/api/raven/missions",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        missions = [m for m in resp.json() if m["mission_type"] != "admin_fix" or creds.get("is_admin")]
-        return JSONResponse(status_code=resp.status_code, content=missions)
+        missions = [m for m in await resp.json() if m["mission_type"] != "admin_fix" or creds.get("is_admin")]
+        return JSONResponse(status_code=resp.status, content=missions)
 
 @app.patch("/api/raven/missions/{id_or_slug}")
 async def update_mission_status(id_or_slug: str, body: Dict[str, Any], request: Request):
@@ -4523,9 +4522,9 @@ async def update_mission_status(id_or_slug: str, body: Dict[str, Any], request: 
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code != 200:
-            raise HTTPException(status_code=resp.status_code, detail=resp.text)
-        return resp.json()
+        if resp.status != 200:
+            raise HTTPException(status_code=resp.status, detail=await resp.text())
+        return await resp.json()
 
 # --- Docker Control API ---
 @app.get("/api/docker/containers")
@@ -4539,7 +4538,7 @@ async def proxy_list_containers(request: Request):
             f"{CONTROL_PLANE_URL}/api/containers",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/docker/exec/{service_name}")
 async def proxy_docker_exec(service_name: str, body: Dict[str, Any], request: Request):
@@ -4553,7 +4552,7 @@ async def proxy_docker_exec(service_name: str, body: Dict[str, Any], request: Re
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status_code, content=resp.json())
+        return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/raven/missions/{id_or_slug}/logs")
 async def get_mission_logs(id_or_slug: str, request: Request):
@@ -4564,9 +4563,9 @@ async def get_mission_logs(id_or_slug: str, request: Request):
     # Resolve to real ID
     async with borrow_http_client() as client:
         resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
-        if resp.status_code != 200:
+        if resp.status != 200:
             raise HTTPException(status_code=404, detail="Mission not found")
-        mission_data = resp.json()
+        mission_data = await resp.json()
         real_id = mission_data["id"]
     
     from services.gateway.history import REDIS_URL
@@ -4600,8 +4599,8 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
                     f"{IDENTITY_SVC}/api/users/me",
                     headers={"Authorization": f"Bearer {token}"}
                 )
-                if auth_resp.status_code != 200:
-                    log.warning(f"[WebSocket] Token validation failed for mission {id_or_slug}: {auth_resp.status_code}")
+                if auth_resp.status != 200:
+                    log.warning(f"[WebSocket] Token validation failed for mission {id_or_slug}: {auth_resp.status}")
                     await websocket.close(code=1008, reason="Invalid token")
                     return
         except Exception as e:
@@ -4619,11 +4618,11 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
     try:
         async with borrow_http_client() as client:
             resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
-            if resp.status_code != 200:
+            if resp.status != 200:
                 await websocket.send_text(json.dumps({"type": "system", "data": f"Mission {id_or_slug} not found"}))
                 await websocket.close()
                 return
-            mission_data = resp.json()
+            mission_data = await resp.json()
             real_id = mission_data["id"]
 
         from services.gateway.history import REDIS_URL
@@ -4724,13 +4723,13 @@ async def get_ollama_models():
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return {"status": "ERROR", "message": "Ollama URL not configured in Identity settings", "models": []}
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             resp = await client.get(f"{ollama_url}/api/tags")
-            if resp.status_code == 200:
-                data = resp.json()
+            if resp.status == 200:
+                data = await resp.json()
                 models = sorted(list(set(m["name"] for m in data.get("models", []))))
                 return {"status": "SUCCESS", "models": models}
-            return {"status": "ERROR", "message": f"Ollama returned {resp.status_code}", "models": []}
+            return {"status": "ERROR", "message": f"Ollama returned {resp.status}", "models": []}
     except Exception as e:
         return {"status": "ERROR", "message": str(e), "models": []}
 
@@ -4752,7 +4751,7 @@ async def get_gateway_config():
 @app.post("/api/config")
 async def update_gateway_config(new_config: dict):
     # Save the new configuration to the Identity Service GlobalSettings
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
         for key in ["assistant_model", "coding_model", "librarian_model"]:
             if key in new_config:
                 val = new_config[key]
@@ -4763,9 +4762,9 @@ async def update_gateway_config(new_config: dict):
                         json={"value": val},
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
-                    if resp.status_code != 200:
-                        log.error(f"Failed to sync global config {key}: Identity SVC returned {resp.status_code}")
-                        raise HTTPException(status_code=resp.status_code, detail=f"Identity Service error for {key}")
+                    if resp.status != 200:
+                        log.error(f"Failed to sync global config {key}: Identity SVC returned {resp.status}")
+                        raise HTTPException(status_code=resp.status, detail=f"Identity Service error for {key}")
                     
                     # Refresh the internal CONFIG cache ONLY on success
                     CONFIG[key] = val
@@ -4821,7 +4820,7 @@ async def register_dns_entry(request: Request):
 
     dns_mappings[hostname] = ip
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
         await client.patch(
             f"{IDENTITY_SVC}/api/settings/dns_mappings",
             json={"value": json.dumps(dns_mappings)},
@@ -4845,7 +4844,7 @@ async def remove_dns_entry(hostname: str, request: Request):
 
     del dns_mappings[hostname]
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
         await client.patch(
             f"{IDENTITY_SVC}/api/settings/dns_mappings",
             json={"value": json.dumps(dns_mappings)},
@@ -4861,7 +4860,7 @@ async def update_dns_config(request: Request):
     body = await request.json()
 
     if "dns_upstream" in body:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
             await client.patch(
                 f"{IDENTITY_SVC}/api/settings/dns_upstream",
                 json={"value": body["dns_upstream"]},
@@ -4869,7 +4868,7 @@ async def update_dns_config(request: Request):
             )
 
     if "dns_poll_interval" in body:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
             await client.patch(
                 f"{IDENTITY_SVC}/api/settings/dns_poll_interval",
                 json={"value": str(body["dns_poll_interval"])},
@@ -4877,7 +4876,7 @@ async def update_dns_config(request: Request):
             )
 
     if "dns_mappings" in body:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
             await client.patch(
                 f"{IDENTITY_SVC}/api/settings/dns_mappings",
                 json={"value": json.dumps(body["dns_mappings"])},
@@ -4892,39 +4891,39 @@ async def update_dns_config(request: Request):
 @app.get("/api/presence/{user_id}")
 async def get_user_presence(user_id: str):
     """Get presence data for a user."""
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/presence/{user_id}",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     raise HTTPException(status_code=502, detail="Presence service unavailable")
 
 
 @app.get("/api/presence/all")
 async def get_all_presence():
     """Get presence data for all users."""
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/presence/all",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     raise HTTPException(status_code=502, detail="Presence service unavailable")
 
 
 @app.get("/api/presence/rooms")
 async def get_presence_rooms():
     """Get list of all known rooms."""
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/presence/rooms",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     raise HTTPException(status_code=502, detail="Presence service unavailable")
 
 
@@ -4932,27 +4931,27 @@ async def get_presence_rooms():
 async def update_user_location(user_id: str, request: Request):
     """Update user GPS location."""
     body = await request.json()
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/users/{user_id}/location",
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     raise HTTPException(status_code=502, detail="Identity service unavailable")
 
 
 @app.get("/api/users/{user_id}/location")
 async def get_user_location(user_id: str):
     """Get user GPS location."""
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/users/{user_id}/location",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     raise HTTPException(status_code=404, detail="Location not found")
 
 
@@ -4968,15 +4967,15 @@ async def transcribe_audio(request: Request):
     if not audio_file:
         raise HTTPException(status_code=400, detail="audio file required")
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/stt/transcribe",
             files={"file": (audio_file.filename, audio_file.file, "audio/wav")},
             data={"model": model, "language": language},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     raise HTTPException(status_code=502, detail="STT service unavailable")
 
 
@@ -4984,14 +4983,14 @@ async def transcribe_audio(request: Request):
 async def execute_voice_command(request: Request):
     """Route voice command to execution service."""
     body = await request.json()
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/voice/command",
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     raise HTTPException(status_code=502, detail="Voice command service unavailable")
 
 
@@ -5003,14 +5002,14 @@ async def get_ma_playlists(request: Request):
     except HTTPException as e:
         log.error(f"[media/playlists] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "playlists": []}
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/playlists",
             params={"user_id": creds.get("user") or ""},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     return {"status": "SUCCESS", "playlists": []}
 
 
@@ -5022,14 +5021,14 @@ async def get_ma_recent(request: Request):
     except HTTPException as e:
         log.error(f"[media/recent] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "recent": []}
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/recent",
             params={"user_id": creds.get("user") or ""},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     return {"status": "SUCCESS", "recent": []}
 
 
@@ -5041,14 +5040,14 @@ async def get_ma_browse(request: Request, media_type: str = "TRACKS", offset: in
     except HTTPException as e:
         log.error(f"[ma/browse] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "items": []}
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/browse",
             params={"user_id": creds.get("user") or "", "media_type": media_type, "offset": offset, "limit": limit, "search": search, "order_by": order_by},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     return {"status": "SUCCESS", "items": []}
 
 
@@ -5060,14 +5059,14 @@ async def search_ma(request: Request, query: str = "", media_type: str = "", lim
     except HTTPException as e:
         log.error(f"[ma/search] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "results": []}
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/search",
             params={"user_id": creds.get("user") or "", "query": query, "media_type": media_type, "limit": limit, "artist": artist, "album": album, "library_only": library_only},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        if resp.status_code == 200:
-            return resp.json()
+        if resp.status == 200:
+            return await resp.json()
     return {"status": "SUCCESS", "results": []}
 
 
@@ -5080,14 +5079,14 @@ async def get_abs_libraries(request: Request):
         log.error(f"[abs/libraries] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "libraries": []}
     try:
-        async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
+        async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "libraries", "user_id": creds.get("user") or ""},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
-                data = resp.json()
+            if resp.status == 200:
+                data = await resp.json()
                 detail = data.get("detail") or {}
                 if detail.get("libraries"):
                     # Normalize 'type' → 'media_type' for UI compatibility
@@ -5099,7 +5098,7 @@ async def get_abs_libraries(request: Request):
                             for lib in libs
                         ],
                     }
-    except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as e:
+    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientTimeoutException) as e:
         log.warning(f"[abs/libraries] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/libraries] ABS error: {e}")
@@ -5115,18 +5114,18 @@ async def get_abs_last_played(request: Request):
         log.error(f"[abs/last-played] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": []}
     try:
-        async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
+        async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "last_played", "user_id": creds.get("user") or ""},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
-                data = resp.json()
+            if resp.status == 200:
+                data = await resp.json()
                 detail = data.get("detail") or {}
                 if detail.get("books"):
                     return {"status": "SUCCESS", "books": detail["books"]}
-    except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as e:
+    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientTimeoutException) as e:
         log.warning(f"[abs/last-played] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/last-played] ABS error: {e}")
@@ -5142,18 +5141,18 @@ async def get_abs_library_items(library_id: str, request: Request, limit: int = 
         log.error(f"[abs/library] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": []}
     try:
-        async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
+        async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "list", "library_id": library_id, "limit": limit, "user_id": creds.get("user") or ""},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
-                data = resp.json()
+            if resp.status == 200:
+                data = await resp.json()
                 detail = data.get("detail") or {}
                 if detail.get("books"):
                     return {"status": "SUCCESS", "books": detail["books"]}
-    except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as e:
+    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientTimeoutException) as e:
         log.warning(f"[abs/library] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/library] ABS error: {e}")
@@ -5169,14 +5168,14 @@ async def search_abs(q: str, request: Request, limit: int = 20):
         log.error(f"[abs/search] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": [], "podcasts": [], "authors": [], "total": 0}
     try:
-        async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
+        async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "search", "query": q, "limit": limit, "user_id": creds.get("user") or ""},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
-                data = resp.json()
+            if resp.status == 200:
+                data = await resp.json()
                 detail = data.get("detail") or {}
                 books = detail.get("books", [])
                 podcasts = detail.get("podcasts", [])
@@ -5189,7 +5188,7 @@ async def search_abs(q: str, request: Request, limit: int = 20):
                     "authors": authors,
                     "total": total,
                 }
-    except (httpx.ReadTimeout, httpx.ConnectTimeout, httpx.TimeoutException) as e:
+    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientTimeoutException) as e:
         log.warning(f"[abs/search] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/search] ABS error: {e}")
@@ -5203,14 +5202,14 @@ async def get_abs_status():
     """Check ABS server connectivity by pinging the login endpoint."""
     try:
         from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-        async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as client:
+        async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as client:
             # Resolve ABS URL from identity settings
             settings_resp = await client.get(
                 f"{IDENTITY_SVC_URL}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if settings_resp.status_code == 200:
-                settings = settings_resp.json()
+            if settings_resp.status == 200:
+                settings = await settings_resp.json()
                 abs_url = ""
                 for s in settings:
                     if s.get("key") == "audiobookshelf_url" and s.get("value"):
@@ -5220,15 +5219,15 @@ async def get_abs_status():
                     return {"status": "UNAVAILABLE", "error": "ABS URL not configured", "reachable": False}
 
             # Ping ABS with a lightweight HEAD request
-            async with httpx.AsyncClient(timeout=ABS_TIMEOUT) as ping_client:
+            async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as ping_client:
                 resp = await ping_client.get(f"{abs_url}/api/books?limit=1")
-                if resp.status_code == 200:
+                if resp.status == 200:
                     return {"status": "AVAILABLE", "url": abs_url, "reachable": True}
-                return {"status": "ERROR", "url": abs_url, "reachable": False, "code": resp.status_code}
-    except httpx.TimeoutException as e:
+                return {"status": "ERROR", "url": abs_url, "reachable": False, "code": resp.status}
+    except aiohttp.ClientTimeoutException as e:
         log.warning(f"[abs/status] ABS timeout: {e}")
         return {"status": "UNREACHABLE", "error": "Connection timed out", "reachable": False}
-    except httpx.ConnectError as e:
+    except aiohttp.ClientConnectorError as e:
         log.warning(f"[abs/status] ABS connect error: {e}")
         return {"status": "UNREACHABLE", "error": str(e), "reachable": False}
     except Exception as e:
@@ -5276,10 +5275,10 @@ async def proxy_media_status(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return JSONResponse(content=await resp.json(), status_code=resp.status)
     try:
         return await retry_http_request(do_proxy, "Execution service (media status)", max_retries=2, base_delay=0.1)
-    except httpx.RequestError as e:
+    except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for media status: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
@@ -5297,10 +5296,10 @@ async def proxy_media_transport(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return JSONResponse(content=await resp.json(), status_code=resp.status)
     try:
         return await retry_http_request(do_proxy, "Execution service (media transport)", max_retries=2, base_delay=0.1)
-    except httpx.RequestError as e:
+    except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for media transport: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
@@ -5318,10 +5317,10 @@ async def proxy_media_play(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return JSONResponse(content=await resp.json(), status_code=resp.status)
     try:
         return await retry_http_request(do_proxy, "Execution service (media play)", max_retries=2, base_delay=0.1)
-    except httpx.RequestError as e:
+    except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for media play: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
@@ -5339,10 +5338,10 @@ async def proxy_media_state_sync(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return JSONResponse(content=await resp.json(), status_code=resp.status)
     try:
         return await retry_http_request(do_proxy, "Execution service (media state sync)", max_retries=2, base_delay=0.1)
-    except httpx.RequestError as e:
+    except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for media state sync: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
@@ -5360,14 +5359,14 @@ async def proxy_entity_search(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        data = resp.json()
+        data = await resp.json()
         if isinstance(data, dict):
             entities = data.get("detail", {}).get("entities", [])
             data["result"] = entities
-        return JSONResponse(content=data, status_code=resp.status_code)
+        return JSONResponse(content=data, status_code=resp.status)
     try:
         return await retry_http_request(do_proxy, "Execution service (entity search)", max_retries=2, base_delay=0.1)
-    except httpx.RequestError as e:
+    except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for entity search: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
@@ -5385,10 +5384,10 @@ async def proxy_audiobookshelf(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(content=resp.json(), status_code=resp.status_code)
+        return JSONResponse(content=await resp.json(), status_code=resp.status)
     try:
         return await retry_http_request(do_proxy, "Execution service (audiobookshelf)", max_retries=2, base_delay=0.1)
-    except httpx.RequestError as e:
+    except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for audiobookshelf: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
@@ -5425,17 +5424,17 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         if not abs_key and abs_user and abs_pass:
             log.info(f"[stream/abs] No API key present. Attempting username/password login for user '{abs_user}' to {abs_url}")
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
                     login_resp = await client.post(
                         f"{abs_url.rstrip('/')}/login",
                         json={"username": abs_user, "password": abs_pass}
                     )
-                    log.info(f"[stream/abs] Login response code: {login_resp.status_code}")
-                    if login_resp.status_code == 200:
-                        abs_key = login_resp.json().get("user", {}).get("token")
+                    log.info(f"[stream/abs] Login response code: {login_resp.status}")
+                    if login_resp.status == 200:
+                        abs_key = await login_resp.json().get("user", {}).get("token")
                         log.info("[stream/abs] Successfully obtained token from ABS login")
                     else:
-                        log.error(f"[stream/abs] Login failed with status {login_resp.status_code}: {login_resp.text}")
+                        log.error(f"[stream/abs] Login failed with status {login_resp.status}: {await login_resp.text()}")
             except Exception as e:
                 log.error(f"[stream/abs] Exception during login attempt: {e}", exc_info=True)
 
@@ -5463,13 +5462,13 @@ async def stream_audiobookshelf(book_id: str, request: Request):
                 log.error(f"[stream/abs/generator] Error streaming chunks for book {book_id}: {e}", exc_info=True)
                 raise
             finally:
-                await r.aclose()
-                await cli.aclose()
+                await r.close()
+                await cli.close()
 
         range_header = request.headers.get("range")
         log.info(f"[stream/abs] Client requested range: {range_header} for book {book_id}")
-        client = httpx.AsyncClient(
-            timeout=httpx.Timeout(300.0, connect=15.0),
+        client = aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(300.0, connect=15.0),
             follow_redirects=True,
         )
         try:
@@ -5486,7 +5485,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
                 client.build_request("GET", stream_url, headers=req_headers),
                 stream=True
             )
-            log.info(f"[stream/abs] ABS stream response status: {resp.status_code}, headers: {dict(resp.headers)}")
+            log.info(f"[stream/abs] ABS stream response status: {resp.status}, headers: {dict(resp.headers)}")
             
             response_headers = {
                 "Accept-Ranges": "bytes",
@@ -5497,7 +5496,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
                 if val:
                     response_headers[key] = val
                     
-            status_code = resp.status_code
+            status_code = resp.status
             
             return StreamingResponse(
                 stream_generator(client, resp),
@@ -5507,7 +5506,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
             )
         except Exception as e:
             log.error(f"[stream/abs] Stream initiation failed: {e}", exc_info=True)
-            await client.aclose()
+            await client.close()
             raise HTTPException(status_code=502, detail="Failed to connect to media source")
     except HTTPException as he:
         raise he
@@ -5600,7 +5599,7 @@ async def sendspin_proxy(websocket: WebSocket):
         mass_token = creds.get("mass_token") or ""
         log.info(f"[sendspin] Identity resolved: user={creds.get('user', 'unknown')}, mass_url={mass_url}, mass_token={'set' if mass_token else 'NOT SET'}")
     except HTTPException as e:
-        log.error(f"[sendspin] Identity resolution HTTP error: status={e.status_code}, detail={e.detail}")
+        log.error(f"[sendspin] Identity resolution HTTP error: status={e.status}, detail={e.detail}")
         await websocket.close(code=1008, reason="Authentication failed")
         return
     except Exception as e:
@@ -5805,7 +5804,7 @@ async def sendspin_proxy(websocket: WebSocket):
         )
         log.info("[sendspin] STEP 15: Proxy loops complete — both directions ended")
     except websockets.exceptions.InvalidStatusCode as e:
-        log.error(f"[sendspin] MA sendspin connection failed (status {e.status_code}): {e}", exc_info=True)
+        log.error(f"[sendspin] MA sendspin connection failed (status {e.status}): {e}", exc_info=True)
         try:
             await websocket.close(code=1011, reason=f"MA connection failed: {e}")
         except Exception:
@@ -5857,13 +5856,13 @@ async def debug_list_players(request: Request):
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
     
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
             ma_api,
             json={"message_id": "debug_players", "command": "players/all"},
             headers={"Content-Type": "application/json", **auth_headers},
         )
-    return {"status": resp.status_code, "result": resp.json()} if resp.status_code == 200 else {"status": resp.status_code, "error": resp.text}
+    return {"status": resp.status, "result": await resp.json()} if resp.status == 200 else {"status": resp.status, "error": await resp.text()}
 
 
 @app.get("/api/ma-jsonrpc/debug/queues")
@@ -5887,13 +5886,13 @@ async def debug_list_queues(request: Request):
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
     
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
             ma_api,
             json={"message_id": "debug_queues", "command": "player_queues/all"},
             headers={"Content-Type": "application/json", **auth_headers},
         )
-    return {"status": resp.status_code, "result": resp.json()} if resp.status_code == 200 else {"status": resp.status_code, "error": resp.text}
+    return {"status": resp.status, "result": await resp.json()} if resp.status == 200 else {"status": resp.status, "error": await resp.text()}
 
 
 @app.get("/api/ma-jsonrpc/debug/player/{player_id}")
@@ -5917,13 +5916,13 @@ async def debug_get_player(request: Request, player_id: str):
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
     
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
             ma_api,
             json={"message_id": "debug_player", "command": "players/get", "args": {"player_id": player_id}},
             headers={"Content-Type": "application/json", **auth_headers},
         )
-    return {"status": resp.status_code, "result": resp.json()} if resp.status_code == 200 else {"status": resp.status_code, "error": resp.text}
+    return {"status": resp.status, "result": await resp.json()} if resp.status == 200 else {"status": resp.status, "error": await resp.text()}
 
 
 @app.websocket("/api/ma-jsonrpc")
@@ -5968,7 +5967,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
         mass_token = creds.get("mass_token") or ""
         log.info(f"[ma-jsonrpc] STEP 2 PASS: Identity resolved — user={creds.get('user', 'unknown')}")
     except HTTPException as e:
-        log.error(f"[ma-jsonrpc] STEP 2 FAIL: Identity resolution HTTP error: status={e.status_code}, detail={e.detail}")
+        log.error(f"[ma-jsonrpc] STEP 2 FAIL: Identity resolution HTTP error: status={e.status}, detail={e.detail}")
         await websocket.close(code=1008, reason="Authentication failed")
         return
     except Exception as e:
@@ -6079,7 +6078,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
             )
             log.info("[ma-jsonrpc] STEP 7: Proxy loops complete — both directions ended")
     except websockets.exceptions.InvalidStatusCode as e:
-        log.error(f"[ma-jsonrpc] MA JSON-RPC connection failed (status {e.status_code}): {e}")
+        log.error(f"[ma-jsonrpc] MA JSON-RPC connection failed (status {e.status}): {e}")
         try:
             await websocket.close(code=1011, reason=f"MA connection failed: {e}")
         except Exception:
@@ -6141,16 +6140,16 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
         log.info("[stream/ma] Discovering MA players...")
         available_players: dict[str, dict[str, Any]] = {}
         import uuid as _uuid
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
             try:
                 resp = await client.post(
                     ma_api,
                     json={"message_id": _uuid.uuid4().hex, "command": "players/all"},
                     headers={"Content-Type": "application/json", **auth_headers},
                 )
-                log.info(f"[stream/ma] players/all status: {resp.status_code}")
-                if resp.status_code == 200:
-                    data = resp.json()
+                log.info(f"[stream/ma] players/all status: {resp.status}")
+                if resp.status == 200:
+                    data = await resp.json()
                     # MA v2 REST returns data directly (not wrapped in {"result": ...})
                     if isinstance(data, list):
                         for p in data:
@@ -6340,13 +6339,13 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                     log.error(f"[stream/ma/generator] Error streaming chunks: {e}", exc_info=True)
                     raise
                 finally:
-                    await r.aclose()
-                    await cli.aclose()
+                    await r.close()
+                    await cli.close()
 
             range_header = request.headers.get("range")
             log.info(f"[stream/ma] Client requested range: {range_header}")
-            proxy_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(300.0, connect=15.0),
+            proxy_client = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(300.0, connect=15.0),
                 follow_redirects=False,
             )
             try:
@@ -6357,18 +6356,18 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                 if range_header:
                     proxy_headers["Range"] = range_header
 
-                proxy_resp: httpx.Response | None = None
+                proxy_resp: aiohttp.ClientResponse | None = None
                 last_status_code: int | None = None
                 for attempt in range(1, 11):
                     proxy_resp = await proxy_client.send(
                         proxy_client.build_request("GET", stream_url, headers=proxy_headers),
                         stream=True,
                     )
-                    last_status_code = proxy_resp.status_code
-                    log.info(f"[stream/ma] MA stream response status: {proxy_resp.status_code} (attempt {attempt}/10)")
-                    if proxy_resp.status_code != 404:
+                    last_status_code = proxy_resp.status
+                    log.info(f"[stream/ma] MA stream response status: {proxy_resp.status} (attempt {attempt}/10)")
+                    if proxy_resp.status != 404:
                         break
-                    await proxy_resp.aclose()
+                    await proxy_resp.close()
                     proxy_resp = None
                     if attempt < 10:
                         await asyncio.sleep(0.5)
@@ -6379,16 +6378,16 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                         detail=f"MA stream endpoint returned HTTP {last_status_code} while waiting for audio readiness",
                     )
 
-                if proxy_resp.status_code >= 400:
+                if proxy_resp.status >= 400:
                     body = ""
                     try:
                         body = (await proxy_resp.aread()).decode("utf-8", errors="ignore").strip()
                     except Exception:
                         pass
-                    await proxy_resp.aclose()
+                    await proxy_resp.close()
                     raise HTTPException(
                         status_code=502,
-                        detail=f"MA stream endpoint returned HTTP {proxy_resp.status_code}{f': {body[:200]}' if body else ''}",
+                        detail=f"MA stream endpoint returned HTTP {proxy_resp.status}{f': {body[:200]}' if body else ''}",
                     )
 
                 proxy_response_headers = {
@@ -6400,7 +6399,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                     if val:
                         proxy_response_headers[key] = val
 
-                proxy_status_code = proxy_resp.status_code
+                proxy_status_code = proxy_resp.status
 
                 return StreamingResponse(
                     stream_generator_ma(proxy_client, proxy_resp),
@@ -6412,7 +6411,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                 raise he
             except Exception as e:
                 log.error(f"[stream/ma] Stream proxy failed: {e}", exc_info=True)
-                await proxy_client.aclose()
+                await proxy_client.close()
                 raise HTTPException(status_code=502, detail=f"Failed to proxy MA stream: {e}")
 
         except HTTPException:
@@ -6457,15 +6456,15 @@ async def media_imageproxy(path: str, request: Request):
         target_url = path
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             headers = {"Authorization": f"Bearer {ha_token}"}
             resp = await client.get(target_url, headers=headers)
-            if resp.status_code == 200:
+            if resp.status == 200:
                 content_type = resp.headers.get("Content-Type", "image/jpeg")
-                return Response(content=resp.content, media_type=content_type)
+                return Response(content=await resp.content(), media_type=content_type)
             else:
-                log.error(f"[imageproxy] Upstream returned status {resp.status_code}")
-                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch image from upstream")
+                log.error(f"[imageproxy] Upstream returned status {resp.status}")
+                raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
     except Exception as e:
         log.error(f"[imageproxy] Exception proxying image: {e}")
         raise HTTPException(status_code=500, detail="Error fetching image")
@@ -6493,18 +6492,18 @@ async def get_media_detail(uri: str, request: Request):
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         try:
             resp = await client.post(
                 ma_api,
                 json={"command": "music/item_by_uri", "args": {"uri": uri}},
                 headers={"Content-Type": "application/json", **auth_headers},
             )
-            if resp.status_code == 200:
-                return resp.json()
+            if resp.status == 200:
+                return await resp.json()
             else:
-                log.error(f"[media/detail] Music Assistant returned status {resp.status_code}: {resp.text}")
-                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch media details from Music Assistant")
+                log.error(f"[media/detail] Music Assistant returned status {resp.status}: {await resp.text()}")
+                raise HTTPException(status_code=resp.status, detail="Failed to fetch media details from Music Assistant")
         except Exception as e:
             log.error(f"[media/detail] Exception: {e}", exc_info=True)
             raise HTTPException(status_code=502, detail="Error communicating with Music Assistant")
@@ -6540,7 +6539,7 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         try:
             if req.favorite:
                 # Add to favorites
@@ -6549,11 +6548,11 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
                     json={"command": "music/favorites/add_item", "args": {"item": req.uri}},
                     headers={"Content-Type": "application/json", **auth_headers},
                 )
-                if resp.status_code == 200:
+                if resp.status == 200:
                     return {"status": "SUCCESS", "favorite": True}
                 else:
-                    log.error(f"[media/favorite] Add failed: {resp.status_code} - {resp.text}")
-                    raise HTTPException(status_code=resp.status_code, detail="Failed to add to favorites")
+                    log.error(f"[media/favorite] Add failed: {resp.status} - {await resp.text()}")
+                    raise HTTPException(status_code=resp.status, detail="Failed to add to favorites")
             else:
                 # To remove, first resolve item details to get item_id and media_type
                 resolve_resp = await client.post(
@@ -6561,11 +6560,11 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
                     json={"command": "music/item_by_uri", "args": {"uri": req.uri}},
                     headers={"Content-Type": "application/json", **auth_headers},
                 )
-                if resolve_resp.status_code != 200:
-                    log.error(f"[media/favorite] Resolve failed: {resolve_resp.status_code} - {resolve_resp.text}")
-                    raise HTTPException(status_code=resolve_resp.status_code, detail="Failed to resolve item details")
+                if resolve_resp.status != 200:
+                    log.error(f"[media/favorite] Resolve failed: {resolve_resp.status} - {await resolve_resp.text()}")
+                    raise HTTPException(status_code=resolve_resp.status, detail="Failed to resolve item details")
 
-                item = resolve_resp.json()
+                item = await resolve_resp.json()
                 item_id = item.get("item_id")
                 media_type = item.get("media_type")
 
@@ -6586,11 +6585,11 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
                     },
                     headers={"Content-Type": "application/json", **auth_headers},
                 )
-                if resp.status_code == 200:
+                if resp.status == 200:
                     return {"status": "SUCCESS", "favorite": False}
                 else:
-                    log.error(f"[media/favorite] Remove failed: {resp.status_code} - {resp.text}")
-                    raise HTTPException(status_code=resp.status_code, detail="Failed to remove from favorites")
+                    log.error(f"[media/favorite] Remove failed: {resp.status} - {await resp.text()}")
+                    raise HTTPException(status_code=resp.status, detail="Failed to remove from favorites")
         except HTTPException as he:
             raise he
         except Exception as e:

@@ -62,7 +62,7 @@ async def test_bulk_settings_proxy_forwards_post(monkeypatch):
             captured["headers"] = headers
             return MockResponse(payload={"status": "SUCCESS"})
 
-    monkeypatch.setattr(main.httpx, "AsyncClient", lambda timeout=10.0: MockAsyncClient())
+    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
 
     class FakeRequest:
         headers = {"Authorization": "Bearer test-token"}
@@ -225,7 +225,7 @@ async def test_list_ollama_tags(client: TestClient, monkeypatch):
                 })
             return MockResponse({})
             
-    monkeypatch.setattr(main.httpx, "AsyncClient", lambda *args, **kwargs: MockAsyncClient())
+    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda *args, **kwargs: MockAsyncClient())
     
     resp = client.get("/api/tags")
     assert resp.status_code == 200
@@ -263,7 +263,7 @@ async def test_proxy_show_embed_embeddings(client: TestClient, monkeypatch):
                 return MockResponse({"embeddings": [[0.1, 0.2, 0.3]]})
             return MockResponse({})
             
-    monkeypatch.setattr(main.httpx, "AsyncClient", lambda *args, **kwargs: MockAsyncClient())
+    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda *args, **kwargs: MockAsyncClient())
     
     # 1. /api/show
     resp_show = client.post("/api/show", json={"name": "qwen3.6-35b-a3b:q4_k_m"})
