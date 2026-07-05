@@ -233,7 +233,7 @@ class PresenceTracker:
         try:
             import aiohttp
             import services.config as config
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
                 resp = await client.get(
                     f"{config.IDENTITY_SVC_URL}/api/users/{user_id}/location",
                     headers={"X-Internal-Secret": config.INTERNAL_SECRET}
@@ -294,7 +294,7 @@ class PresenceTracker:
         try:
             import aiohttp
             import services.config as config
-            async with httpx.AsyncClient(timeout=3.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
                 resp = await client.get(
                     f"{config.IDENTITY_SVC_URL}/api/users/location/all",
                     headers={"X-Internal-Secret": config.INTERNAL_SECRET}

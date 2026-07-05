@@ -1,6 +1,6 @@
 # services/execution/ha_client.py
 """
-Asynchronous Home Assistant REST client using httpx.
+Asynchronous Home Assistant REST client using aiohttp.
 """
 import logging
 import aiohttp
@@ -8,7 +8,7 @@ import aiohttp
 log = logging.getLogger("execution.ha_client")
 
 import re
-_TIMEOUT = httpx.Timeout(45.0, connect=15.0)
+_TIMEOUT = aiohttp.ClientTimeout(total=45.0, connect=15.0)
 
 def authorize_action(user_context: dict, domain: str, action: str) -> bool:
     """
@@ -76,26 +76,29 @@ async def call_service(
     if service_data:
         payload.update(service_data)
         
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.info(f"HA CALL: {domain}.{service} -> {entity_id or '(no target)'} | url={url} | payload={payload}")
-            resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
-            log.info(f"[ha_client] {domain}.{service} OK (HTTP {resp.status_code})")
-            if return_response:
-                return {"ok": True, "status_code": resp.status_code, "service_response": resp.json()}
-            return {"ok": True, "status_code": resp.status_code}
-        except httpx.HTTPStatusError as e:
+            async with client.post(url, headers=headers, json=payload) as resp:
+                resp.raise_for_status()
+                log.info(f"[ha_client] {domain}.{service} OK (HTTP {resp.status})")
+                if return_response:
+                    service_response = await resp.json()
+                    return {"ok": True, "status_code": resp.status, "service_response": service_response}
+                return {"ok": True, "status_code": resp.status}
+        except aiohttp.ClientResponseError as e:
             log.error(f"[ha_client] HTTP error: {e}")
             detail = ""
             try:
-                detail = e.response.json().get("detail", e.response.text)
+                resp_detail = await client.get(url, headers=headers, json=payload)
+                await resp_detail.release()
+                detail = str(e)
             except:
-                detail = e.response.text
-            if e.response.status_code in (401, 403):
-                return {"ok": False, "error": "Your Home Assistant token is invalid or expired. Please update it in Jarvis.", "status_code": e.response.status_code}
-            return {"ok": False, "error": f"HA returned {e.response.status_code}: {detail}", "status_code": e.response.status_code}
-        except httpx.RequestError as e:
+                detail = str(e)
+            if e.status in (401, 403):
+                return {"ok": False, "error": "Your Home Assistant token is invalid or expired. Please update it in Jarvis.", "status_code": e.status}
+            return {"ok": False, "error": f"HA returned {e.status}: {detail}", "status_code": e.status}
+        except aiohttp.ClientError as e:
             log.error(f"[ha_client] Request error: {e}")
             return {"ok": False, "error": f"Home Assistant is unreachable: {e}"}
         except Exception as e:
@@ -111,14 +114,14 @@ async def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states/{entity_id}"
     
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.debug(f"[ha_client] GET {url}")
-            resp = await client.get(url, headers=headers)
-            if resp.status_code == 404:
-                return None
-            resp.raise_for_status()
-            return resp.json()
+            async with client.get(url, headers=headers) as resp:
+                if resp.status == 404:
+                    return None
+                resp.raise_for_status()
+                return await resp.json()
         except Exception as e:
             log.error(f"[ha_client] get_state({entity_id}) failed: {type(e).__name__}: {e}")
             return None
@@ -132,12 +135,12 @@ async def get_all_states(ha_url: str, ha_token: str) -> list:
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states"
     
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.debug(f"[ha_client] GET {url}")
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            return resp.json()
+            async with client.get(url, headers=headers) as resp:
+                resp.raise_for_status()
+                return await resp.json()
         except Exception as e:
             log.error(f"[ha_client] get_all_states failed: {type(e).__name__}: {e}")
             return []
@@ -148,11 +151,11 @@ async def get_config(ha_url: str, ha_token: str) -> dict:
         return {}
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/config"
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            return resp.json()
+            async with client.get(url, headers=headers) as resp:
+                resp.raise_for_status()
+                return await resp.json()
         except Exception as e:
             log.error(f"[ha_client] get_config failed: {e}")
             return {}
@@ -165,11 +168,11 @@ async def get_config_entries(ha_url: str, ha_token: str, domain: str = "") -> li
     url = f"{ha_url.rstrip('/')}/api/config/config_entries/entry"
     if domain:
         url += f"?domain={domain}"
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            return resp.json()
+            async with client.get(url, headers=headers) as resp:
+                resp.raise_for_status()
+                return await resp.json()
         except Exception as e:
             log.error(f"[ha_client] get_config_entries failed: {e}")
             return []
@@ -193,12 +196,12 @@ async def get_states(ha_url: str, ha_token: str) -> list:
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states"
     
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.info(f"[ha_client] GET {url}")
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            return resp.json()
+            async with client.get(url, headers=headers) as resp:
+                resp.raise_for_status()
+                return await resp.json()
         except Exception as e:
             log.error(f"[ha_client] get_states failed: {type(e).__name__}: {e}")
             return []  # Ensure empty list on error
@@ -215,14 +218,14 @@ async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
     url = f"{ha_url.rstrip('/')}/api/history/period/{start_time}"
     params = {"filter_entity_id": entity_id, "no_attributes": ""}
     
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.info(f"[ha_client] GET {url}")
-            resp = await client.get(url, headers=headers, params=params)
-            resp.raise_for_status()
-            data = resp.json()
-            # HA returns a list of lists (one per entity)
-            return data[0] if data else []
+            async with client.get(url, headers=headers, params=params) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                # HA returns a list of lists (one per entity)
+                return data[0] if data else []
         except Exception as e:
             log.error(f"[ha_client] get_history({entity_id}) failed: {e}")
             return []
@@ -239,12 +242,12 @@ async def get_logbook(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
     url = f"{ha_url.rstrip('/')}/api/logbook/{start_time}"
     params = {"entity": entity_id}
     
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.info(f"[ha_client] GET {url} | entity={entity_id}")
-            resp = await client.get(url, headers=headers, params=params)
-            resp.raise_for_status()
-            return resp.json()
+            async with client.get(url, headers=headers, params=params) as resp:
+                resp.raise_for_status()
+                return await resp.json()
         except Exception as e:
             log.error(f"[ha_client] get_logbook({entity_id}) failed: {e}")
             return []
@@ -269,15 +272,15 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
     ]
     """
     
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
-            resp = await client.post(url, headers=headers, json={"template": template})
-            resp.raise_for_status()
-            raw_data = resp.json()
-            # Convert list of dicts to a single mapping dict
-            if isinstance(raw_data, list):
-                return {item["eid"]: item["a"] for item in raw_data if item.get("a")}
-            return {}
+            async with client.post(url, headers=headers, json={"template": template}) as resp:
+                resp.raise_for_status()
+                raw_data = await resp.json()
+                # Convert list of dicts to a single mapping dict
+                if isinstance(raw_data, list):
+                    return {item["eid"]: item["a"] for item in raw_data if item.get("a")}
+                return {}
         except Exception as e:
             log.error(f"[ha_client] get_areas failed: {e}")
             return {}

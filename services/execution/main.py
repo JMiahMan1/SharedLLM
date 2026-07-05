@@ -90,7 +90,7 @@ async def resolve_internal_user(user_id: Optional[int] = None, rag_user: Optiona
     if rag_user is not None:
         payload["rag_user"] = rag_user
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
             resp = await client.post(
                 f"{IDENTITY_SVC_URL}/api/resolve",
                 json=payload,
@@ -482,7 +482,7 @@ async def execute_identity(req: IdentityRequest):
     log.info(f"[identity] Proxying action={action} for user={req.user_context.user}")
     
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
             headers = {"X-Internal-Secret": INTERNAL_SECRET}
             if action == "import_nextcloud":
                 resp = await client.post(f"{IDENTITY_SVC_URL}/api/auth/import/nextcloud", headers=headers)
@@ -826,7 +826,7 @@ async def execute_discovery_sync(req: DiscoverySyncRequest):
     from services.config import GATEWAY_INTERNAL_URL
     GATEWAY_INTERNAL = GATEWAY_INTERNAL_URL or "http://localhost:11435"
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
             resp = await client.post(
                 f"{GATEWAY_INTERNAL}/api/discovery/sync",
                 json={"api_key": "internal"}, # Simplified for internal bridge
@@ -852,7 +852,7 @@ async def execute_identity_admin(req: IdentityManageRequest):
     try:
         action = req.action
         username = req.username or req.user_context.user
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
             headers = {"X-Internal-Secret": INTERNAL_SECRET}
 
             if action == "update_password":
@@ -1187,7 +1187,7 @@ async def execute_announce(req: AnnouncementRequest):
             media_ready = False
             for attempt in range(5):
                 try:
-                    async with httpx.AsyncClient(timeout=2.0) as client:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.0)) as client:
                         resp = await client.get(media_url)
                         if resp.status_code == 200 and len(resp.content) > 0:
                             media_ready = True
@@ -1937,7 +1937,7 @@ async def execute_llm_info(req: LLMInfoRequest):
     from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
     ollama_url = ""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
             resp = await client.get(f"{IDENTITY_SVC_URL}/api/settings", headers={"X-Internal-Secret": INTERNAL_SECRET})
             if resp.status_code == 200:
                 for s in resp.json():
@@ -1968,7 +1968,7 @@ async def execute_llm_info(req: LLMInfoRequest):
         return _fail("model is required for 'show' action", "llm_info")
     
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             if payload:
                 resp = await client.post(f"{OLLAMA_URL}{endpoint}", json=payload)
             else:
@@ -2261,7 +2261,7 @@ async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None
 
     
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             resp = await client.post(
                 f"{url}/api/v1/auth/login",
                 json={"email": email, "password": password}
@@ -2280,7 +2280,7 @@ async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None
 async def _skylight_api(url: str, token: str, method: str, path: str, json_body: Optional[dict] = None) -> Optional[dict]:
     """Make a Skylight API call."""
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
             headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
             resp = await client.request(method, f"{url}{path}", json=json_body, headers=headers)
             if resp.status_code in (200, 201):
