@@ -13,7 +13,7 @@ async def web_search(query: str, num_results: int = 5) -> List[Dict[str, Any]]:
         searxng_url = None
         try:
             from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
                 resp = await client.get(
                     f"{IDENTITY_SVC_URL}/api/settings",
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
@@ -38,7 +38,7 @@ async def web_search(query: str, num_results: int = 5) -> List[Dict[str, Any]]:
             "categories": "general",
         }
         url = f"{searxng_url}/search?{urllib.parse.urlencode(params)}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             resp = await client.get(url)
             if resp.status_code == 200:
                 data = resp.json()
