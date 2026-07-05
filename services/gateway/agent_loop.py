@@ -383,7 +383,7 @@ async def get_dynamic_llm_settings() -> dict:
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status == 200:
-                fetched = {item["key"]: item["value"] for item in resp.json()}
+                fetched = {item["key"]: item["value"] for item in await resp.json()}
                 for k, v in list(fetched.items()):
                     if v in ["auto", ""]:
                         fetched[k] = None

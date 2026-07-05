@@ -61,7 +61,7 @@ async def get_all_settings() -> Dict[str, str]:
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status == 200:
-                fetched = {item["key"]: item["value"] for item in resp.json()}
+                fetched = {item["key"]: item["value"] for item in await resp.json()}
                 # Merge with defaults for non-model keys only
                 model_keys = {
                     "active_llm_provider", "assistant_model", "coding_model", "librarian_model",
