@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional
 
-import httpx
+import aiohttp
 
 try:
     from schemas import ExecutionResult, UserContext

@@ -3,7 +3,7 @@
 Asynchronous Home Assistant REST client using httpx.
 """
 import logging
-import httpx
+import aiohttp
 
 log = logging.getLogger("execution.ha_client")
 

@@ -27,7 +27,7 @@ from services.identity.schemas import (
 from services.identity.crypto import encrypt, decrypt, digest_secret
 from services.identity.seed import seed_from_env, hash_password, verify_password
 
-import httpx
+import aiohttp
 from services.shared.info_endpoint import info_router
 
 # ─── Config ────────────────────────────────────────────────────────────────────
