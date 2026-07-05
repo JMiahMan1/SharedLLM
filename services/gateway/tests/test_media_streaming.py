@@ -69,7 +69,7 @@ async def test_stream_abs_uses_dict_get_not_dot_notation(monkeypatch, client):
         mock_httpx_client.aclose = AsyncMock()
         mock_httpx_client.build_request = MagicMock(return_value=MagicMock())
 
-        with patch('services.gateway.main.httpx.AsyncClient', return_value=mock_httpx_client):
+        with patch('services.gateway.main.aiohttp.ClientSession', return_value=mock_httpx_client):
             resp = client.get("/api/media/stream/audiobookshelf/book-123")
 
             # If dot notation was used, this would 500 with AttributeError
@@ -95,7 +95,7 @@ async def test_stream_ma_uses_dict_get_not_dot_notation(monkeypatch, client):
     }
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        # Mock httpx.AsyncClient (used for player/list and player/status calls)
+        # Mock aiohttp.ClientSession (used for player/list and player/status calls)
         mock_httpx_client = AsyncMock()
         mock_httpx_client.post = AsyncMock(return_value=MagicMock(
             status_code=200,
@@ -105,7 +105,7 @@ async def test_stream_ma_uses_dict_get_not_dot_notation(monkeypatch, client):
         mock_httpx_cm.__aenter__.return_value = mock_httpx_client
         mock_httpx_cm.__aexit__.return_value = None
 
-        with patch('services.gateway.main.httpx.AsyncClient', return_value=mock_httpx_cm):
+        with patch('services.gateway.main.aiohttp.ClientSession', return_value=mock_httpx_cm):
             resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
 
             # If dot notation was used, this would 500 with AttributeError
@@ -163,7 +163,7 @@ async def test_stream_ma_no_players_returns_404(monkeypatch, client):
     }
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.httpx.AsyncClient') as mock_httpx:
+        with patch('services.gateway.main.aiohttp.ClientSession') as mock_httpx:
             mock_httpx_instance = AsyncMock()
             mock_httpx_instance.post = AsyncMock(return_value=MagicMock(
                 status_code=200,
@@ -234,7 +234,7 @@ async def test_stream_abs_credential_fields_accessed_correctly(monkeypatch, clie
             yield chunk
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.httpx.AsyncClient') as mock_httpx:
+        with patch('services.gateway.main.aiohttp.ClientSession') as mock_httpx:
             mock_httpx_instance = AsyncMock()
 
             # First call: ABS login, second call: stream
@@ -250,7 +250,7 @@ async def test_stream_abs_credential_fields_accessed_correctly(monkeypatch, clie
             ])
             mock_httpx_instance.aclose = AsyncMock()
             mock_httpx_instance.build_request = MagicMock(return_value=MagicMock())
-            mock_httpx.AsyncClient.return_value = mock_httpx_instance
+            mock_aiohttp.ClientSession.return_value = mock_httpx_instance
 
             resp = client.get("/api/media/stream/audiobookshelf/book-456")
 
@@ -324,7 +324,7 @@ async def test_stream_ma_targets_browser_player_without_muting(monkeypatch, clie
     mock_proxy_client.aclose = AsyncMock()
     mock_proxy_client.build_request = MagicMock(return_value=MagicMock())
 
-    # All httpx.AsyncClient instances use a unified mock
+    # All aiohttp.ClientSession instances use a unified mock
     unified_httpx = AsyncMock()
     unified_httpx.post = AsyncMock(return_value=mock_players_resp)
     unified_httpx.send = AsyncMock(return_value=mock_flow_resp)
@@ -333,7 +333,7 @@ async def test_stream_ma_targets_browser_player_without_muting(monkeypatch, clie
 
     class MockAsyncClient:
         def __init__(self, **kwargs):
-            pass  # Accept all httpx.AsyncClient kwargs (timeout, follow_redirects, etc.)
+            pass  # Accept all aiohttp.ClientSession kwargs (timeout, follow_redirects, etc.)
 
         async def __aenter__(self):
             return unified_httpx
@@ -351,7 +351,7 @@ async def test_stream_ma_targets_browser_player_without_muting(monkeypatch, clie
             return unified_httpx.build_request(*args, **kwargs)
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.httpx.AsyncClient', MockAsyncClient):
+        with patch('services.gateway.main.aiohttp.ClientSession', MockAsyncClient):
             with patch('services.gateway.main.MAWebSocketClient', return_value=mock_ma_client):
                 resp = client.get("/api/media/stream/music-assistant?uri=library://track/123")
 

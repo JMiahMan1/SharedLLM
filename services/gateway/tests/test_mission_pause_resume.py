@@ -28,7 +28,7 @@ class TestPauseMission:
 
         monkeypatch.setattr("redis.asyncio", mock_redis_module)
 
-        with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_mission_resp)):
+        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_mission_resp)):
             with patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
                 response = client.post("/api/raven/missions/42/pause")
                 assert response.status_code == 200
@@ -60,7 +60,7 @@ class TestResumeMission:
 
         monkeypatch.setattr("redis.asyncio", mock_redis_module)
 
-        with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_mission_resp)):
+        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_mission_resp)):
             with patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
                 response = client.post("/api/raven/missions/42/resume")
                 assert response.status_code == 200
@@ -78,7 +78,7 @@ class TestPauseMissionNotFound:
         mock_resp = MagicMock()
         mock_resp.status_code = 404
 
-        with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_resp)):
+        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)):
             with patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
                 response = client.post("/api/raven/missions/999/pause")
                 assert response.status_code == 404
@@ -88,7 +88,7 @@ class TestPauseMissionNotFound:
         mock_resp = MagicMock()
         mock_resp.status_code = 404
 
-        with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_resp)):
+        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)):
             with patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
                 response = client.post("/api/raven/missions/999/resume")
                 assert response.status_code == 404

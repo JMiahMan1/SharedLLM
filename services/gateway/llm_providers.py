@@ -6,7 +6,7 @@ import re
 from abc import ABC, abstractmethod
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-import httpx
+import aiohttp
 
 log = logging.getLogger("gateway.providers")
 
@@ -45,25 +45,25 @@ class OllamaProvider(BaseLLMProvider):
         self.timeout = timeout
         self.slot_wait_timeout = slot_wait_timeout
 
-    async def _check_slots(self, client: httpx.AsyncClient) -> Optional[dict]:
+    async def _check_slots(self, client: aiohttp.ClientSession) -> Optional[dict]:
         """Check slot availability via /api/ps. Returns slot info dict or None."""
         try:
             resp = await client.get(f"{self.base_url}/api/ps", timeout=3.0)
-            if resp.status_code == 200:
+            if resp.status == 200:
                 data = resp.json()
                 return data.get("slots")
         except Exception:
             pass
         return None
 
-    async def _wait_for_slot(self, client: httpx.AsyncClient) -> bool:
+    async def _wait_for_slot(self, client: aiohttp.ClientSession) -> bool:
         """Poll /api/ps until a slot is available or timeout.
         If /api/ps has no slot info, returns immediately (no slot mgmt).
         If /api/ps is unreachable, returns True (graceful degradation)."""
         loop = asyncio.get_running_loop()
         try:
             resp = await client.get(f"{self.base_url}/api/ps", timeout=3.0)
-            if resp.status_code != 200:
+            if resp.status != 200:
                 return True
             data = resp.json()
             if "slots" not in data:
@@ -78,7 +78,7 @@ class OllamaProvider(BaseLLMProvider):
             while loop.time() < deadline:
                 await asyncio.sleep(poll_interval)
                 resp2 = await client.get(f"{self.base_url}/api/ps", timeout=3.0)
-                if resp2.status_code == 200:
+                if resp2.status == 200:
                     d2 = resp2.json()
                     s2 = d2.get("slots", {})
                     if s2.get("available", 0) > 0:
@@ -98,7 +98,7 @@ class OllamaProvider(BaseLLMProvider):
         chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> str:
         # Queue-and-wait: check if Ollama has available slots before submitting
-        async with httpx.AsyncClient(timeout=3.0) as slot_client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as slot_client:
             if not await self._wait_for_slot(slot_client):
                 raise RuntimeError(f"No slots available within {self.slot_wait_timeout}s")
 
@@ -113,12 +113,12 @@ class OllamaProvider(BaseLLMProvider):
         }
 
         full_content = ""
-        async with httpx.AsyncClient(headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as client:
+        async with aiohttp.ClientSession(headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as client:
             log.info(f"[OllamaProvider] Calling {self.base_url}/api/chat for model {model}")
             if not chunk_callback:
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)
-                if resp.status_code >= 400:
-                    raise RuntimeError(f"Ollama HTTP {resp.status_code}: {resp.text}")
+                if resp.status >= 400:
+                    raise RuntimeError(f"Ollama HTTP {resp.status}: {resp.text}")
                 resp.raise_for_status()
                 
                 # Harden: Strip keep-alive spaces and handle potential multi-line/streamed JSON
@@ -176,9 +176,9 @@ class OllamaProvider(BaseLLMProvider):
 
             # Streaming
             async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
-                if response.status_code >= 400:
+                if response.status >= 400:
                     await response.aread()
-                    raise RuntimeError(f"Ollama stream HTTP {response.status_code}: {response.text}")
+                    raise RuntimeError(f"Ollama stream HTTP {response.status}: {response.text}")
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     clean_line = line.strip()
@@ -238,12 +238,12 @@ class OpenRouterProvider(BaseLLMProvider):
             payload["enable_thinking"] = options["enable_thinking"]
 
         full_content = ""
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
+        async with aiohttp.ClientSession(timeout=self.timeout) as client:
             log.info(f"[OpenRouterProvider] Calling {self.base_url} for model {model}")
             if not chunk_callback:
                 resp = await client.post(self.base_url, json=payload, headers=headers)
-                if resp.status_code >= 400:
-                    raise RuntimeError(f"OpenRouter HTTP {resp.status_code}: {resp.text}")
+                if resp.status >= 400:
+                    raise RuntimeError(f"OpenRouter HTTP {resp.status}: {resp.text}")
                 resp.raise_for_status()
                 data = resp.json()
                 msg = data.get("choices", [{}])[0].get("message", {})
@@ -258,9 +258,9 @@ class OpenRouterProvider(BaseLLMProvider):
             full_content = ""
             full_reasoning = ""
             async with client.stream("POST", self.base_url, json=payload, headers=headers) as response:
-                if response.status_code >= 400:
+                if response.status >= 400:
                     await response.aread()
-                    raise RuntimeError(f"OpenRouter stream HTTP {response.status_code}: {response.text}")
+                    raise RuntimeError(f"OpenRouter stream HTTP {response.status}: {response.text}")
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if not line:

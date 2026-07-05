@@ -28,7 +28,7 @@ UNUSED PROMPTS REMOVED:
                                          RAVEN_AUTONOMOUS_PROTOCOL
 """
 
-import httpx
+import aiohttp
 
 from services.gateway.config import INTERNAL_SECRET, IDENTITY_SVC
 
@@ -55,20 +55,20 @@ PROMPT_SINGLE_TURN_TOOL_GUIDE = "single_turn_tool_guide"
 _settings_cache: dict = {}
 _settings_cache_time: float = 0
 _settings_ttl = 30  # seconds
-_sync_client: httpx.Client | None = None
+_sync_client: aiohttp.Client | None = None
 
 
-def _ensure_sync_client() -> httpx.Client:
+def _ensure_sync_client() -> aiohttp.Client:
     global _sync_client
     if _sync_client is None:
-        _sync_client = httpx.Client(timeout=5.0)
+        _sync_client = aiohttp.Client(timeout=5.0)
     return _sync_client
 
 
 def load_prompt_sync(prompt_key: str) -> str:
     """Fetch a prompt from the Identity service GlobalSettings table (sync).
     
-    Uses a cached httpx client and settings cache to minimize overhead.
+    Uses a cached aiohttp client and settings cache to minimize overhead.
     
     Raises ValueError if the prompt key is not found in the DB.
     """
@@ -84,7 +84,7 @@ def load_prompt_sync(prompt_key: str) -> str:
                 f"{IDENTITY_SVC}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            if resp.status_code == 200:
+            if resp.status == 200:
                 _settings_cache = {item["key"]: item["value"] for item in resp.json()}
                 _settings_cache_time = now
         except Exception:
@@ -96,7 +96,7 @@ def load_prompt_sync(prompt_key: str) -> str:
     raise ValueError(f"Prompt not found in settings DB: {prompt_key}")
 
 
-async def load_prompt(client: httpx.AsyncClient, prompt_key: str) -> str:
+async def load_prompt(client: aiohttp.ClientSession, prompt_key: str) -> str:
     """Fetch a prompt from the Identity service GlobalSettings table (async).
     
     Raises ValueError if the prompt key is not found in the DB,
@@ -106,8 +106,8 @@ async def load_prompt(client: httpx.AsyncClient, prompt_key: str) -> str:
         f"{IDENTITY_SVC}/api/settings",
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
-    if resp.status_code != 200:
-        raise RuntimeError(f"Identity service unavailable ({resp.status_code})")
+    if resp.status != 200:
+        raise RuntimeError(f"Identity service unavailable ({resp.status})")
     settings = {item["key"]: item["value"] for item in resp.json()}
     value = settings.get(prompt_key)
     if not value:

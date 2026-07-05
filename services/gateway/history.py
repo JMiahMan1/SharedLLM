@@ -3,7 +3,7 @@ import json
 import redis
 import logging
 import time
-import httpx
+import aiohttp
 
 log = logging.getLogger("gateway.history")
 
@@ -79,13 +79,13 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
             "k": 5
         }
         
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
             resp = await client.post(
                 f"{rag_svc}/rag/search",
                 json=payload,
                 headers={"X-Internal-Secret": secret}
             )
-            if resp.status_code != 200:
+            if resp.status != 200:
                 return ""
 
             data = resp.json()
@@ -131,12 +131,12 @@ Conversation:
 
 Return ONLY a bulleted list of facts, or 'NONE'.
 """
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
             resp = await client.post(
                 f"{ollama_url}/api/generate",
                 json={"model": LIBRARIAN_MODEL, "prompt": prompt, "stream": False},
             )
-            if resp.status_code != 200: return
+            if resp.status != 200: return
             
             text = resp.json().get("response", "").strip()
             if "NONE" in text.upper() or not text:

@@ -49,7 +49,7 @@ async def test_raven_mission_stream_websocket(monkeypatch):
     mock_resp.status_code = 200
     mock_resp.json.return_value = {"id": 999, "status": "executing", "output_log": "[]"}
     
-    with patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_resp)):
+    with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)):
         with client.websocket_connect("/api/raven/missions/999/stream") as websocket:
             data1 = websocket.receive_text()
             assert "Thinking..." in data1
