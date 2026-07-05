@@ -11,33 +11,19 @@ Service URLs default to Docker DNS names but are overridable via Identity settin
 import os
 
 # Import runtime-resolved values from services.config (updated by resolve_runtime_config)
-try:
-    from services.config import (
-        IDENTITY_SVC_URL,
-        EXECUTION_SVC_URL,
-        RAG_SVC_URL,
-        STORAGE_SVC_URL,
-        LOGGING_SVC_URL,
-        WORKSPACE_RUNTIME_SVC_URL,
-        CONTROL_PLANE_URL,
-        OLLAMA_URL,
-        REDIS_URL,
-        SEARXNG_URL,
-        LLAMA_SERVER_PROXY_URL,
-    )
-except ImportError:
-    # Fallback to environment variables if services.config is not available
-    IDENTITY_SVC_URL = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
-    EXECUTION_SVC_URL = os.getenv("EXECUTION_SVC_URL")
-    RAG_SVC_URL = os.getenv("RAG_SVC_URL")
-    STORAGE_SVC_URL = os.getenv("STORAGE_SVC_URL")
-    LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL")
-    WORKSPACE_RUNTIME_SVC_URL = os.getenv("WORKSPACE_RUNTIME_SVC_URL")
-    CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
-    OLLAMA_URL = os.getenv("OLLAMA_URL")
-    REDIS_URL = os.getenv("REDIS_URL")
-    SEARXNG_URL = os.getenv("SEARXNG_URL")
-    LLAMA_SERVER_PROXY_URL = os.getenv("LLAMA_SERVER_PROXY_URL")
+from services.config import (
+    IDENTITY_SVC_URL,
+    EXECUTION_SVC_URL,
+    RAG_SVC_URL,
+    STORAGE_SVC_URL,
+    LOGGING_SVC_URL,
+    WORKSPACE_RUNTIME_SVC_URL,
+    CONTROL_PLANE_URL,
+    OLLAMA_URL,
+    REDIS_URL,
+    SEARXNG_URL,
+)
+LLAMA_SERVER_PROXY_URL = os.getenv("LLAMA_SERVER_PROXY_URL")
 
 # Use runtime-resolved values (or fallback to env vars)
 IDENTITY_SVC = IDENTITY_SVC_URL
