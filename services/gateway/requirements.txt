@@ -2,6 +2,6 @@ fastembed
 redis
 fastapi
 uvicorn[standard]
-httpx
+aiohttp
 pydantic
 websockets
