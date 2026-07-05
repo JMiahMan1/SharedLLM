@@ -228,7 +228,7 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
         import aiohttp
         try:
             log.info(f"[announce.roku] Sending Home key via ECP to {roku_ip}")
-            async with httpx.AsyncClient(verify=False, timeout=5) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5), connector=aiohttp.TCPConnector(ssl=False)) as client:
                 resp = await client.post(f"http://{roku_ip}:8060/keypress/Home")
                 log.info(f"[announce.roku] ECP Home key response: {resp.status_code}")
         except Exception as e:
@@ -250,7 +250,7 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
                 "autoplay": "true"
             }
             log.info(f"[announce.roku] ECP launch: {ecp_url} params={params}")
-            async with httpx.AsyncClient(verify=False, timeout=15) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), connector=aiohttp.TCPConnector(ssl=False)) as client:
                 resp = await client.post(ecp_url, params=params)
                 log.info(f"[announce.roku] ECP response: {resp.status_code}")
                 if resp.status_code in (200, 204):

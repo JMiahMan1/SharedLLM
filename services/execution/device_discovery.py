@@ -159,12 +159,12 @@ async def _discover_via_ha_registry(
         attrs = state.get("attributes", {})
         friendly_name = attrs.get("friendly_name", "")
 
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), connector=aiohttp.TCPConnector(ssl=False)) as client:
             resp = await client.get(f"{ha_url}/api/config/config_entries/entry", headers=headers)
-            if resp.status_code != 200:
+            if resp.status != 200:
                 return None
 
-            entries = resp.json()
+            entries = await resp.json()
             device_registry_list = None
 
             for entry in entries:
@@ -191,8 +191,8 @@ async def _discover_via_ha_registry(
                 if device_registry_list is None:
                     try:
                         dev_resp = await client.get(f"{ha_url}/api/config/device_registry/list", headers=headers)
-                        if dev_resp.status_code == 200:
-                            device_registry_list = dev_resp.json()
+                        if dev_resp.status == 200:
+                            device_registry_list = dev_await resp.json()
                     except Exception:
                         device_registry_list = []
 
@@ -236,10 +236,10 @@ async def _discover_via_ha_registry(
             if not state:
                 return None
             friendly_name = state.get("attributes", {}).get("friendly_name", "")
-            async with httpx.AsyncClient(verify=False, timeout=10) as client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), connector=aiohttp.TCPConnector(ssl=False)) as client:
                 resp = await client.get(f"{ha_url}/api/config/config_entries/entry", headers=headers)
-                if resp.status_code == 200:
-                    for entry in resp.json():
+                if resp.status == 200:
+                    for entry in await resp.json():
                         if entry.get("domain") == "esphome":
                             title = (entry.get("title") or "").lower()
                             entity_lower = entity_id.lower()
@@ -283,12 +283,12 @@ async def _discover_via_homekit_diagnostics(
         entity_lower = entity_id.lower()
         friendly_lower = friendly_name.lower()
 
-        async with httpx.AsyncClient(verify=False, timeout=10) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), connector=aiohttp.TCPConnector(ssl=False)) as client:
             # Get device registry to find webostv device info
             dev_resp = await client.get(f"{ha_url}/api/config/device_registry/list", headers=headers)
-            if dev_resp.status_code != 200:
+            if dev_resp.status != 200:
                 return None
-            device_registry_list = dev_resp.json()
+            device_registry_list = dev_await resp.json()
 
             # Find the webostv device for this entity
             webos_device = None
@@ -316,10 +316,10 @@ async def _discover_via_homekit_diagnostics(
 
             # Find matching homekit_controller config entries
             entries_resp = await client.get(f"{ha_url}/api/config/config_entries/entry", headers=headers)
-            if entries_resp.status_code != 200:
+            if entries_resp.status != 200:
                 return None
 
-            for entry in entries_resp.json():
+            for entry in entries_await resp.json():
                 if entry.get("domain") != "homekit_controller":
                     continue
 
@@ -329,10 +329,10 @@ async def _discover_via_homekit_diagnostics(
 
                 # Call diagnostics endpoint
                 diag_resp = await client.get(f"{ha_url}/api/diagnostics/config_entry/{entry_id}", headers=headers)
-                if diag_resp.status_code != 200:
+                if diag_resp.status != 200:
                     continue
 
-                diag_data = diag_resp.json()
+                diag_data = diag_await resp.json()
                 config_entry_data = diag_data.get("data", {}).get("config-entry", {})
                 accessory_data = config_entry_data.get("data", {})
                 accessory_ips = accessory_data.get("AccessoryIPs", [])
@@ -442,12 +442,12 @@ async def _discover_via_arp(
 
         # Probe ARP IPs for WebOS ports
         webos_ports = [3000, 7676, 1300, 8080]
-        async with httpx.AsyncClient(verify=False, timeout=2) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2), connector=aiohttp.TCPConnector(ssl=False)) as client:
             for ip, mac in arp_ips:
                 for port in webos_ports:
                     try:
                         resp = await client.get(f"http://{ip}:{port}", timeout=1)
-                        if resp.status_code == 200:
+                        if resp.status == 200:
                             # Check if device info matches entity
                             body = resp.text.lower()
                             searchable = f"{body} {ip} {mac}".lower()
@@ -523,12 +523,12 @@ async def _discover_via_arp_scan(
 
         # Probe found IPs for WebOS ports
         webos_ports = [3000, 7676, 1300, 8080]
-        async with httpx.AsyncClient(verify=False, timeout=2) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2), connector=aiohttp.TCPConnector(ssl=False)) as client:
             for ip, mac, vendor in found_devices:
                 for port in webos_ports:
                     try:
                         resp = await client.get(f"http://{ip}:{port}", timeout=1)
-                        if resp.status_code == 200:
+                        if resp.status == 200:
                             body = resp.text.lower()
                             searchable = f"{body} {ip} {mac} {vendor}".lower()
                             if any(word in searchable for word in friendly.split() if len(word) > 2) or \
@@ -751,7 +751,7 @@ async def _discover_via_network_scan(
 
             return False
 
-        async with httpx.AsyncClient(verify=False) as client:
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as client:
             candidates = [
                 str(ip) for ip in ipaddress.IPv4Network(subnet)
                 if not str(ip).endswith(".0") and not str(ip).endswith(".255")
@@ -790,7 +790,7 @@ async def _probe_port(client, ip: str, port: int) -> dict:
     try:
         if port == 8060:
             resp = await client.get(f"http://{ip}:8060/query/device-info", timeout=1)
-            if resp.status_code == 200 and b"roku" in resp.content.lower():
+            if resp.status == 200 and b"roku" in resp.content.lower():
                 import xml.etree.ElementTree as ET
                 try:
                     root = ET.fromstring(resp.content)
@@ -801,13 +801,13 @@ async def _probe_port(client, ip: str, port: int) -> dict:
                     return {"ip": ip, "metadata": {"type": "roku"}}
         elif port == 3000:
             resp = await client.get(f"http://{ip}:3000", timeout=1)
-            if resp.status_code == 200:
+            if resp.status == 200:
                 return {"ip": ip, "metadata": {"type": "webos"}}
         elif port == 8001:
             resp = await client.get(f"http://{ip}:8001/api/v2/", timeout=1)
-            if resp.status_code == 200:
+            if resp.status == 200:
                 try:
-                    info = resp.json()
+                    info = await resp.json()
                     return {"ip": ip, "metadata": {"model": info.get("device", {}).get("modelName", ""), "type": "samsung"}}
                 except Exception:
                     return {"ip": ip, "metadata": {"type": "samsung"}}
@@ -829,7 +829,7 @@ async def _probe_port(client, ip: str, port: int) -> dict:
                 pass
         elif port == 80:
             resp = await client.get(f"http://{ip}/", timeout=1)
-            if resp.status_code == 200:
+            if resp.status == 200:
                 content = resp.text.lower()
                 import re
                 name_match = re.search(r"<title>(.*?)</title>", resp.text, re.IGNORECASE)
@@ -840,13 +840,13 @@ async def _probe_port(client, ip: str, port: int) -> dict:
                     return {"ip": ip, "metadata": {"device_name": device_name, "type": "esphome"}}
         elif port == 8080:
             resp = await client.get(f"http://{ip}:8080/", timeout=1)
-            if resp.status_code == 200:
+            if resp.status == 200:
                 content = resp.text.lower()
                 if "esp" in content or "cam" in content or "stream" in content:
                     return {"ip": ip, "metadata": {"type": "espcam"}}
             try:
                 stream_resp = await client.get(f"http://{ip}:8080/stream", timeout=1)
-                if stream_resp.status_code == 200:
+                if stream_resp.status == 200:
                     return {"ip": ip, "metadata": {"type": "espcam", "has_stream": True}}
             except Exception:
                 pass
@@ -901,7 +901,7 @@ async def bulk_scan(
     ]
     
     batch_size = 30
-    async with httpx.AsyncClient(verify=False) as client:
+    async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as client:
         for i in range(0, len(candidates), batch_size):
             batch = candidates[i:i + batch_size]
             tasks = []

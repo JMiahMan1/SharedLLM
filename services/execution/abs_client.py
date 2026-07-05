@@ -9,7 +9,7 @@ from typing import Optional, Any
 
 log = logging.getLogger("execution.abs_client")
 
-_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
+_TIMEOUT = aiohttp.ClientTimeout(total=30.0, connect=5.0)
 
 
 def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
@@ -36,12 +36,12 @@ def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[
 async def abs_login(abs_url: str, username: str, password: str) -> Optional[str]:
     """Login to ABS with username/password and return API token."""
     url = f"{abs_url.rstrip('/')}/login"
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
-            resp = await client.post(url, json={"username": username, "password": password})
-            resp.raise_for_status()
-            data = resp.json()
-            return data.get("user", {}).get("token")
+            async with client.post(url, json={"username": username, "password": password}) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                return data.get("user", {}).get("token")
         except Exception as e:
             log.error(f"[abs_client] Login failed: {e}")
             return None
@@ -53,14 +53,14 @@ async def abs_get(
     """GET request to ABS API."""
     url = f"{abs_url.rstrip('/')}{path}"
     headers = {"Authorization": f"Bearer {abs_api_key}"}
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
-            resp = await client.get(url, headers=headers, params=params)
-            resp.raise_for_status()
-            return resp.json()
-        except httpx.HTTPStatusError as e:
+            async with client.get(url, headers=headers, params=params) as resp:
+                resp.raise_for_status()
+                return await resp.json()
+        except aiohttp.ClientResponseError as e:
             log.error(f"[abs_client] HTTP error on GET {path}: {e}")
-            return {"error": f"ABS returned {e.response.status_code}: {e.response.text}"}
+            return {"error": f"ABS returned {e.status}: {e.message}"}
         except Exception as e:
             log.error(f"[abs_client] GET {path} failed: {e}")
             return {"error": f"Audiobookshelf is unreachable: {e}"}
@@ -72,14 +72,15 @@ async def abs_post(
     """POST request to ABS API."""
     url = f"{abs_url.rstrip('/')}{path}"
     headers = {"Authorization": f"Bearer {abs_api_key}", "Content-Type": "application/json"}
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
-            resp = await client.post(url, headers=headers, json=json)
-            resp.raise_for_status()
-            return resp.json() if resp.text else {}
-        except httpx.HTTPStatusError as e:
+            async with client.post(url, headers=headers, json=json) as resp:
+                resp.raise_for_status()
+                data = await resp.json() if resp.text else {}
+                return data
+        except aiohttp.ClientResponseError as e:
             log.error(f"[abs_client] HTTP error on POST {path}: {e}")
-            return {"error": f"ABS returned {e.response.status_code}: {e.response.text}"}
+            return {"error": f"ABS returned {e.status}: {e.message}"}
         except Exception as e:
             log.error(f"[abs_client] POST {path} failed: {e}")
             return {"error": f"Audiobookshelf is unreachable: {e}"}
