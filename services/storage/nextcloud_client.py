@@ -1,6 +1,6 @@
 # services/storage/nextcloud_client.py
 import logging
-import httpx
+import aiohttp
 import xml.etree.ElementTree as ET
 from pathlib import PurePosixPath
 from urllib.parse import quote, urlparse

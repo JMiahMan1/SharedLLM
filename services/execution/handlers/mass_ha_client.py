@@ -8,7 +8,7 @@ The HA integration exposes domain-level services:
 These use HA's existing MA connection, avoiding direct MA REST API auth issues.
 """
 import logging
-import httpx
+import aiohttp
 from typing import List, Dict, Any
 
 log = logging.getLogger("execution.mass_ha")

@@ -52,7 +52,7 @@ async def _resolve_workspace_path(
     3. First available workspace with git capabilities
     4. Fallback to WORKSPACE_ROOT
     """
-    import httpx
+    import aiohttp
     
     # Try to resolve specific workspace
     if workspace_id:

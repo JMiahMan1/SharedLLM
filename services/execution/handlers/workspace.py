@@ -67,7 +67,7 @@ def _fail(message: str, detail: dict | None = None) -> ExecutionResult:
 
 async def _resolve_workspace_info(workspace_id: Optional[str], user_context: Optional[dict] = None) -> tuple[str, dict]:
     """Resolves workspace path and details from workspace_runtime service, and checks capability."""
-    import httpx
+    import aiohttp
     # Defaults
     resolved_path = WORKSPACE_ROOT
     workspace_details = {}

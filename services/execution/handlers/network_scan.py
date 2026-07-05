@@ -12,7 +12,7 @@ import logging
 import socket
 from typing import Optional
 
-import httpx
+import aiohttp
 
 log = logging.getLogger("execution.network_scan")
 

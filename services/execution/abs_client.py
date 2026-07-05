@@ -4,7 +4,7 @@ Audiobookshelf (ABS) REST API client.
 Handles authentication, library search, playback progress, and streaming.
 """
 import logging
-import httpx
+import aiohttp
 from typing import Optional, Any
 
 log = logging.getLogger("execution.abs_client")

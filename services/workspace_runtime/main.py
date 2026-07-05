@@ -13,7 +13,7 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 
-import httpx
+import aiohttp
 import redis
 from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse

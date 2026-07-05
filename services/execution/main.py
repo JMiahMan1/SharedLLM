@@ -2,7 +2,7 @@
 import os
 import logging
 import asyncio
-import httpx
+import aiohttp
 import warnings
 from typing import Dict, Any, List, Optional
 from uuid import uuid4

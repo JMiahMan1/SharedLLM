@@ -135,7 +135,7 @@ async def resolve_runtime_config():
     if _is_testing():
         return
     
-    import httpx
+    import aiohttp
     
     settings_map = {
         "llm_local_url": "OLLAMA_URL",

@@ -1,6 +1,6 @@
 # services/storage/main.py
 import logging
-import httpx
+import aiohttp
 import re
 
 from services.config import RAG_SVC_URL, INTERNAL_SECRET
