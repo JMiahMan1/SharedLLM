@@ -13,7 +13,7 @@ from typing import List, Dict, Any
 
 log = logging.getLogger("execution.mass_ha")
 
-_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+_TIMEOUT = aiohttp.ClientTimeout(total=30.0, connect=10.0)
 
 
 async def _call_ha_ma_service(
@@ -38,12 +38,13 @@ async def _call_ha_ma_service(
         payload.update(service_data)
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, verify=False) as client:
-            resp = await client.post(url, headers=headers, json=payload)
-            if resp.status_code == 200:
-                return resp.json()
-            log.error(f"[mass_ha] Service {service} returned {resp.status_code}: {resp.text[:300]}")
-            return None
+        async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+            async with client.post(url, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                text = await resp.text()
+                log.error(f"[mass_ha] Service {service} returned {resp.status}: {text[:300]}")
+                return None
     except Exception as e:
         log.error(f"[mass_ha] Service {service} failed: {e}")
         return None
@@ -310,13 +311,13 @@ async def play_media(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, verify=False) as client:
+        async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
             headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
             url = f"{ha_url.rstrip('/')}/api/services/media_player/play_media"
-            resp = await client.post(url, headers=headers, json=payload)
-            if resp.status_code == 200:
-                return {"ok": True, "message": f"Playing on {entity_id}"}
-            return {"ok": False, "error": f"HA returned {resp.status_code}", "status_code": resp.status_code}
+            async with client.post(url, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    return {"ok": True, "message": f"Playing on {entity_id}"}
+                return {"ok": False, "error": f"HA returned {resp.status}", "status_code": resp.status}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -331,31 +332,31 @@ async def get_ma_players(ha_url: str, ha_token: str) -> List[Dict[str, Any]]:
         return []
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT, verify=False) as client:
+        async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
             headers = {"Authorization": f"Bearer {ha_token}"}
-            resp = await client.get(f"{ha_url.rstrip('/')}/api/states", headers=headers)
-            if resp.status_code != 200:
-                return []
-            
-            players = []
-            for state in resp.json():
-                eid = state.get("entity_id", "")
-                attrs = state.get("attributes", {})
-                if attrs.get("app_id") == "music_assistant" or attrs.get("mass_player_type"):
-                    players.append({
-                        "entity_id": eid,
-                        "friendly_name": attrs.get("friendly_name", ""),
-                        "state": state.get("state", "unknown"),
-                        "volume_level": attrs.get("volume_level"),
-                        "is_volume_muted": attrs.get("is_volume_muted", False),
-                        "media_title": attrs.get("media_title", ""),
-                        "media_artist": attrs.get("media_artist", ""),
-                        "app_id": attrs.get("app_id", ""),
-                        "mass_player_type": attrs.get("mass_player_type"),
-                        "active_queue": attrs.get("active_queue"),
-                        "supported_features": attrs.get("supported_features", 0),
-                    })
-            return players
+            async with client.get(f"{ha_url.rstrip('/')}/api/states", headers=headers) as resp:
+                if resp.status != 200:
+                    return []
+                
+                players = []
+                for state in await resp.json():
+                    eid = state.get("entity_id", "")
+                    attrs = state.get("attributes", {})
+                    if attrs.get("app_id") == "music_assistant" or attrs.get("mass_player_type"):
+                        players.append({
+                            "entity_id": eid,
+                            "friendly_name": attrs.get("friendly_name", ""),
+                            "state": state.get("state", "unknown"),
+                            "volume_level": attrs.get("volume_level"),
+                            "is_volume_muted": attrs.get("is_volume_muted", False),
+                            "media_title": attrs.get("media_title", ""),
+                            "media_artist": attrs.get("media_artist", ""),
+                            "app_id": attrs.get("app_id", ""),
+                            "mass_player_type": attrs.get("mass_player_type"),
+                            "active_queue": attrs.get("active_queue"),
+                            "supported_features": attrs.get("supported_features", 0),
+                        })
+                return players
     except Exception as e:
         log.error(f"[mass_ha] Failed to get MA players: {e}")
         return []

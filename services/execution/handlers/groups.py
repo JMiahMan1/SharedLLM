@@ -17,22 +17,22 @@ except ImportError:
 log = logging.getLogger("execution.groups")
 
 
-async def _get_identity_session() -> httpx.AsyncClient:
+async def _get_identity_session() -> aiohttp.ClientSession:
     """Create an authenticated session to the Identity service."""
     from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-    return httpx.AsyncClient(
+    return aiohttp.ClientSession(
         base_url=IDENTITY_SVC_URL,
         headers={"X-Internal-Secret": INTERNAL_SECRET},
-        timeout=10.0,
+        timeout=aiohttp.ClientTimeout(total=10.0),
     )
 
 
 async def _call_identity(method: str, path: str, json_data: Optional[Dict] = None) -> Dict:
     """Make a request to the Identity service."""
     async with await _get_identity_session() as client:
-        resp = await client.request(method, path, json=json_data)
-        resp.raise_for_status()
-        return resp.json()
+        async with client.request(method, path, json=json_data) as resp:
+            resp.raise_for_status()
+            return await resp.json()
 
 
 # ─── Media Groups ──────────────────────────────────────────────────────────────
