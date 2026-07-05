@@ -162,7 +162,8 @@ Return ONLY a bulleted list of facts, or 'NONE'.
 def ping_redis() -> bool:
     """Verifies Redis connectivity for health checks."""
     try:
-        result = _redis.ping()  # type: ignore[assignment]
+        r = get_redis()
+        result = r.ping()
         return bool(result)
     except:
         return False
