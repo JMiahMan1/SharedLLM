@@ -168,7 +168,7 @@ DEFAULT_GLOBAL_SETTINGS = [
 
     # --- SERVICE ENDPOINTS (overridable, Docker DNS defaults) ---
     {"key": "identity_svc_url", "value": "http://identity:8001", "description": "Identity service URL"},
-    {"key": "execution_svc_url", "value": "http://execution:8003", "description": "Execution service URL"},
+    {"key": "execution_svc_url", "value": "http://host.docker.internal:8003", "description": "Execution service URL"},
     {"key": "rag_svc_url", "value": "http://rag:8004", "description": "RAG service URL"},
     {"key": "storage_svc_url", "value": "http://storage:8005", "description": "Storage service URL"},
     {"key": "logging_svc_url", "value": "http://logging:8006", "description": "Logging service URL"},
