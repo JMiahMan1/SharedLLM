@@ -7,7 +7,7 @@ from typing import Optional
 from sqlmodel import SQLModel, Field, Relationship
 
 
-class User(SQLModel, table=True):
+class User(SQLModel, table=True):  # type: ignore
     """A user account with service credentials."""
     __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -58,7 +58,7 @@ class User(SQLModel, table=True):
     api_keys: list["APIKey"] = Relationship(back_populates="user")
 
 
-class DeviceAssignment(SQLModel, table=True):
+class DeviceAssignment(SQLModel, table=True):  # type: ignore
     """Maps an HA entity_id to a User for device-based identity resolution."""
     __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -67,7 +67,7 @@ class DeviceAssignment(SQLModel, table=True):
     revoked: bool = Field(default=False)
     user: Optional[User] = Relationship(back_populates="devices")
 
-class APIKey(SQLModel, table=True):
+class APIKey(SQLModel, table=True):  # type: ignore
     """Secure access tokens for users and external clients."""
     __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -79,7 +79,7 @@ class APIKey(SQLModel, table=True):
     user_id: int = Field(foreign_key="user.id")
     user: Optional[User] = Relationship(back_populates="api_keys")
 
-class GlobalSetting(SQLModel, table=True):
+class GlobalSetting(SQLModel, table=True):  # type: ignore
     """System-wide configuration settings."""
     __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -87,7 +87,19 @@ class GlobalSetting(SQLModel, table=True):
     value: str
     description: Optional[str] = None
 
-class RavenMission(SQLModel, table=True):
+class DnsRecord(SQLModel, table=True):  # type: ignore
+    """DNS record configuration. Supports A (multiple IPs) and CNAME (single target)."""
+    __table_args__ = {"extend_existing": True}
+    id: Optional[int] = Field(default=None, primary_key=True)
+    domain_name: str = Field(index=True)
+    record_type: str = Field(default="A", description="Record type: A or CNAME")
+    values: str = Field(default="[]", description="JSON array of values (IPs for A, hostname for CNAME)")
+    ttl: int = Field(default=300)
+    is_active: bool = Field(default=True)
+    created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+class RavenMission(SQLModel, table=True):  # type: ignore
     """Pending or completed autonomous missions for Raven (Admin ROZ or User Tasks)."""
     __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -106,7 +118,7 @@ class RavenMission(SQLModel, table=True):
     result: Optional[str] = None
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
 
-class UserWidget(SQLModel, table=True):
+class UserWidget(SQLModel, table=True):  # type: ignore
     """Per-user widget customization settings for the Bento Dashboard."""
     __table_args__ = {"extend_existing": True}
     id: Optional[int] = Field(default=None, primary_key=True)

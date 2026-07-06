@@ -4,7 +4,7 @@ Pydantic schemas for all Execution Bridge endpoints.
 Strict validation is the primary defense against malformed gateway payloads.
 """
 from typing import Optional, Literal, Any, Dict, List
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 
 class BaseRequest(BaseModel):
@@ -388,7 +388,7 @@ class WorkspaceFileReadRequest(BaseRequest):
                 data["path"] = data.pop("file_path")
         return data
 
-    model_config = {"extra": "ignore", "populate_by_name": True}
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 class WorkspaceFileWriteRequest(BaseRequest):
     """
@@ -409,7 +409,7 @@ class WorkspaceFileWriteRequest(BaseRequest):
                 data["path"] = data.pop("file_path")
         return data
 
-    model_config = {"extra": "ignore", "populate_by_name": True}
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 class ReplacementChunk(BaseModel):
     model_config = {"extra": "ignore", "populate_by_name": True}
@@ -506,7 +506,7 @@ class WorkspaceFilePatchRequest(BaseRequest):
                 data.pop("patches", None)
         return data
 
-    model_config = {"extra": "ignore", "populate_by_name": True}
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
 
 class WorkspaceShellRequest(BaseRequest):
     """

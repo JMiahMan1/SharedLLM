@@ -626,7 +626,7 @@ const MediaExplorerModal = ({
                   </h3>
                   {maSearchLoading ? loadingSection() : maSearchError ? (
                     <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
-                      <p className="text-sm text-red-400">Search failed. Check your server connection.</p>
+                      <p className="text-sm text-red-400">Music Assistant search failed: {maSearchError.message || 'Connection to Music Assistant server is down or credentials are invalid.'}</p>
                     </div>
                   ) : !maSearchResults?.results?.length ? emptySection(`No results for "${search}"`) : (
                     <div className="space-y-1.5">
