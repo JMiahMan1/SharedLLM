@@ -935,6 +935,73 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
     except Exception as e:
         return {"status": "ERROR", "message": str(e)}
 
+# ─── Credential Seeding ──────────────────────────────────────────────────────
+
+SEEDABLE_CREDENTIALS = {
+    "nextcloud_pass": ("nextcloud_pass_enc", "nextcloud_pass"),
+    "ha_token": ("ha_token_enc", "ha_token"),
+    "github_token": ("github_token_enc", "github_token"),
+    "gitlab_token": ("gitlab_token_enc", "gitlab_token"),
+    "audiobookshelf_pass": ("audiobookshelf_pass_enc", "audiobookshelf_pass"),
+    "audiobookshelf_api_key": ("audiobookshelf_api_key_enc", "audiobookshelf_api_key"),
+    "mass_token": ("mass_token_enc", "mass_token"),
+    "git_token": ("git_token_enc", "git_token"),
+    "huggingface_token": ("huggingface_token_enc", "huggingface_token"),
+    "skylight_pass": ("skylight_pass_enc", "skylight_pass"),
+}
+
+@app.post("/api/admin/seed-credential")
+def seed_credential(body: dict, session: Session = Depends(get_session), admin: User = Depends(require_admin_or_internal)):
+    """Seed a single credential for the default user (User 1) without re-seeding the entire DB.
+    
+    Accepts a credential field name and its plain text value. The value is encrypted and stored.
+    """
+    if not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    
+    field = body.get("field")
+    value = body.get("value")
+    
+    if not field:
+        raise HTTPException(status_code=400, detail="field is required")
+    if field not in SEEDABLE_CREDENTIALS:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid field. Valid fields: {', '.join(SEEDABLE_CREDENTIALS.keys())}"
+        )
+    if value is None:
+        raise HTTPException(status_code=400, detail="value is required")
+    
+    enc_field, plain_field = SEEDABLE_CREDENTIALS[field]
+    
+    # Get the default user
+    user = session.exec(select(User).where(User.id == 1)).first()
+    if not user:
+        # Fall back to 'default' username
+        user = session.exec(select(User).where(User.username == "default")).first()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="Default user (ID 1) not found in database. Run full seed first.")
+    
+    # Encrypt and store
+    if value:
+        setattr(user, enc_field, encrypt(value))
+        log.info(f"[seed-credential] Updated {field} for user {user.username}")
+    else:
+        setattr(user, enc_field, None)
+        log.info(f"[seed-credential] Cleared {field} for user {user.username}")
+    
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    
+    return {
+        "status": "SUCCESS",
+        "message": f"Seeded {field} for user {user.username}",
+        "field": field,
+        "has_value": bool(value)
+    }
+
 # ─── API Key Management ────────────────────────────────────────────────────────
 
 @app.get("/api/users/me/keys")
