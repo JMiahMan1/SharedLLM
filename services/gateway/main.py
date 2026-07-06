@@ -3186,6 +3186,25 @@ async def proxy_enroll_telemetry(request: Request):
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
+
+@app.post("/api/telemetry/enroll/{entity_id:path}")
+async def proxy_enroll_telemetry_by_id(entity_id: str, request: Request):
+    """Path-based enrollment used by the UI (enrollTelemetry(entityId, config))."""
+    creds = await _resolve_identity_from_request(request)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    body = {**body, "entity_id": entity_id}
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/telemetry/enroll",
+            json=body,
+            headers=headers
+        )
+        return JSONResponse(status_code=resp.status, content=await resp.json())
+
 @app.delete("/api/telemetry/enroll/{entity_id:path}")
 async def proxy_unenroll_telemetry(entity_id: str, request: Request):
     creds = await _resolve_identity_from_request(request)
