@@ -1,9 +1,8 @@
-FROM ghcr.io/jmiahman1/sharedllm-base:latest
-
-RUN pip install --no-cache-dir docker aiohttp
-
+ARG BASE_IMAGE=ghcr.io/jmiahman1/sharedllm-base:latest
+FROM ${BASE_IMAGE} AS base
 WORKDIR /app
-
-COPY services/dns/main.py .
-
-CMD ["python", "main.py"]
+ENV PYTHONPATH=/app
+RUN pip install --no-cache-dir docker aiohttp
+ENV PYTHONUNBUFFERED=1
+COPY . .
+CMD ["python", "services/dns/main.py"]

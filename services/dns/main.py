@@ -179,34 +179,64 @@ class DNSResolver:
 
     async def resolve(self, query: 'DNSQuery') -> Optional[list]:
         """Resolve a DNS query"""
+        print(f"DEBUG: Resolver called for: {query.question_name}", flush=True)
         logger.debug(f"Resolver called for: {query.question_name}")
+        print(f"DEBUG: Entering try block", flush=True)
+        logger.debug(f"Entering try block")
         name = query.question_name.rstrip('.')
+        print(f"DEBUG: After rstrip, name={name}", flush=True)
 
-        # Check if it's a .docker suffix query
-        if name.endswith('.docker'):
-            container_name = name[:-6]  # Remove .docker
-            ip = self.registry.get_ip(container_name)
+        try:
+            print(f"DEBUG: Inside try block, name={name}", flush=True)
+            logger.debug(f"After try block, name={name}")
+            # Check if it's a .docker suffix query
+            if name.endswith('.docker'):
+                container_name = name[:-6]  # Remove .docker
+                ip = self.registry.get_ip(container_name)
+                if ip:
+                    logger.debug(f"Found .docker match: {name} -> {ip}")
+                    return [self._make_a_record(name, ip, 300)]
+                return None
+
+            # Check registry for exact match
+            ip = self.registry.get_ip(name)
             if ip:
+                logger.debug(f"Found exact match in registry: {name} -> {ip}")
                 return [self._make_a_record(name, ip, 300)]
+
+            # Check hostname match
+            for container_name, info in self.registry.containers.items():
+                if info.get('hostname') == name:
+                    ip = info['ip']
+                    logger.debug(f"Found hostname match: {name} -> {ip} (container: {container_name})")
+                    return [self._make_a_record(name, ip, 300)]
+
+            # Handle host.docker.internal
+            if name == 'host.docker.internal':
+                logger.debug(f"Found host.docker.internal match")
+                return [self._make_a_record(name, '172.26.0.1', 300)]
+
+            # Forward to upstream DNS
+            logger.debug(f"Forwarding {name} to upstream DNS {self.upstream_dns}")
+            logger.debug(f"upstream_client server: {self.upstream_client.server}, port: {self.upstream_client.port}")
+            logger.debug(f"About to call upstream_client.resolve for {name}")
+            records = await self.upstream_client.resolve(name, query.question_type)
+            logger.debug(f"upstream_client.resolve returned for {name}")
+            if records:
+                logger.debug(f"Upstream DNS returned {len(records)} records for {name}")
+                for record in records:
+                    if 'ip' in record:
+                        logger.debug(f"  Record: {record['name']} -> {record['ip']}")
+                    else:
+                        logger.debug(f"  Record: {record['name']} -> {record['rdata'].hex()}")
+            else:
+                logger.debug(f"Upstream DNS returned no records for {name}")
+            return records
+        except Exception as e:
+            logger.error(f"Error in upstream DNS resolution: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
-
-        # Check registry for exact match
-        ip = self.registry.get_ip(name)
-        if ip:
-            return [self._make_a_record(name, ip, 300)]
-
-        # Check hostname match
-        for container_name, info in self.registry.containers.items():
-            if info.get('hostname') == name:
-                ip = info['ip']
-                return [self._make_a_record(name, ip, 300)]
-
-        # Handle host.docker.internal
-        if name == 'host.docker.internal':
-            return [self._make_a_record(name, '172.26.0.1', 300)]
-
-        # Forward to upstream DNS
-        return await self.upstream_client.resolve(name, query.question_type)
 
     def _make_a_record(self, name: str, ip: str, ttl: int) -> dict:
         """Create an A record"""
@@ -231,12 +261,15 @@ class _DNSClient:
     async def resolve(self, name: str, qtype: int = 1) -> Optional[list]:
         """Resolve a name via upstream DNS"""
         try:
-            loop = asyncio.get_event_loop()
+            logger.debug(f"Sending DNS query for {name} to {self.server}")
             packet = self._build_query(name, qtype)
-            result = await loop.run_in_executor(None, self._send_query, packet)
+            result = await asyncio.to_thread(self._send_query, packet)
+            logger.debug(f"DNS query result for {name}: {len(result) if result else 0} records")
             return result
         except Exception as e:
             logger.error(f"Upstream DNS resolution failed for {name}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
 
     def _build_query(self, name: str, qtype: int) -> bytes:
@@ -283,31 +316,38 @@ class _DNSClient:
         records = []
         offset = 12
 
-        # Skip questions
-        for _ in range(qdcount):
-            offset = self._skip_name(data, offset)
-            offset += 4  # Skip type and class
+        try:
+            # Skip questions
+            for _ in range(qdcount):
+                offset = self._skip_name(data, offset)
+                offset += 4  # Skip type and class
 
-        # Parse answers
-        for _ in range(ancount):
-            if offset >= len(data):
-                break
+            # Parse answers
+            for _ in range(ancount):
+                if offset >= len(data):
+                    break
 
-            name, offset = self._parse_name(data, offset)
-            rtype, rclass, ttl, rdlength = struct.unpack('!HHIH', data[offset:offset+10])
-            offset += 10
+                name, offset = self._parse_name(data, offset)
+                rtype, rclass, ttl, rdlength = struct.unpack('!HHIH', data[offset:offset+10])
+                offset += 10
 
-            rdata = data[offset:offset+rdlength]
-            offset += rdlength
+                rdata = data[offset:offset+rdlength]
+                offset += rdlength
 
-            if rtype == 1 and rdlength == 4:  # A record
-                records.append({
-                    'name': name,
-                    'rtype': rtype,
-                    'rclass': rclass,
-                    'ttl': ttl,
-                    'rdata': rdata
-                })
+                if rtype == 1 and rdlength == 4:  # A record
+                    ip = '.'.join(str(b) for b in rdata)
+                    records.append({
+                        'name': name,
+                        'rtype': rtype,
+                        'rclass': rclass,
+                        'ttl': ttl,
+                        'rdata': rdata,
+                        'ip': ip
+                    })
+        except Exception as e:
+            logger.error(f"Error parsing DNS response: {e}")
+            logger.debug(f"Response data: {data.hex()}")
+            logger.debug(f"offset: {offset}, len(data): {len(data)}")
 
         return records
 
@@ -328,6 +368,7 @@ class _DNSClient:
         """Parse a DNS name from the packet"""
         names = []
         visited = set()
+        original_offset = offset  # Save original position to return
 
         while offset < len(data):
             length = data[offset]
@@ -345,7 +386,7 @@ class _DNSClient:
             names.append(data[offset:offset+length].decode('ascii', errors='ignore'))
             offset += length
 
-        return '.'.join(names), offset
+        return '.'.join(names), original_offset + 2
 
 
 class DNSQuery:
