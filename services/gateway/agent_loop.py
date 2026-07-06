@@ -1195,16 +1195,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     
                     if resp.status == 422:
                         try:
-                            error_detail = resp.json().get("detail", "Validation failed")
+                            error_detail = (await resp.json()).get("detail", "Validation failed")
                             # Sanitize error detail before exposing to LLM — 422 responses
                             # echo back the full request payload including credentials
                             error_detail = sanitize_for_llm(error_detail)
                             msg = f"SCHEMA ERROR (422): {error_detail}. Ensure you are using the correct field names (e.g. 'action', 'message') instead of 'command' or 'commit_message'."
                         except Exception:
-                            msg = f"SCHEMA ERROR (422): {resp.text}. Check your field names."
+                            msg = f"SCHEMA ERROR (422): {await resp.text()}. Check your field names."
                         exec_data = {"status": "ERROR", "message": msg}
                     else:
-                        exec_data = resp.json()
+                        exec_data = await resp.json()
 
                     # Sanitize execution results before any downstream use
                     exec_data = sanitize_for_llm(exec_data)
@@ -1385,7 +1385,7 @@ async def run_post_write_lint(file_path: str, execution_svc: str, internal_secre
                 headers={"X-Internal-Secret": internal_secret},
             )
             if lint_resp.status == 200:
-                lint_data = lint_resp.json()
+                lint_data = await lint_resp.json()
                 lint_passed = lint_data.get("detail", {}).get("passed", True)
                 if lint_passed is False:
                     lint_msg = lint_data.get("message", "")

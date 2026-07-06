@@ -1943,7 +1943,7 @@ async def secure_logging_middleware(request: Request, call_next):
             content={"status": "ERROR", "message": str(e.detail)}
         )
     except Exception as e:
-        log.error(f"Middleware error: {e}")
+        log.error(f"Middleware error: {type(e).__name__}: {e}", exc_info=True)
         return JSONResponse(
             status_code=500,
             content={"status": "ERROR", "message": "Internal Gateway Error"}
