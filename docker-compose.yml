@@ -31,6 +31,8 @@ services:
     environment:
       - DNS_PORT=53
       - UPSTREAM_DNS=8.8.8.8
+      - IDENTITY_SVC_URL=${IDENTITY_SVC_URL:-http://identity:8001}
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
 
   caddy:
     image: ghcr.io/jmiahman1/sharedllm-caddy:latest

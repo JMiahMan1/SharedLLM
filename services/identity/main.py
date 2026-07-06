@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from services.identity.models import User, DeviceAssignment, GlobalSetting, APIKey, DEFAULT_GLOBAL_SETTINGS, UserWidget
+from services.identity.models import User, DeviceAssignment, GlobalSetting, APIKey, DEFAULT_GLOBAL_SETTINGS, UserWidget, DnsRecord
 from services.identity.schemas import (
     ResolveRequest, ResolvedCredentials, 
     UserCreate, UserRead, UserUpdate,
@@ -41,7 +41,7 @@ def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-DATABASE_URL = IDENTITY_DATABASE_URL
+DATABASE_URL = IDENTITY_DATABASE_URL or "sqlite:///default.db"
 
 if "sqlite" in DATABASE_URL:
     engine = create_engine(
@@ -942,6 +942,8 @@ SEEDABLE_CREDENTIALS = {
     "ha_token": ("ha_token_enc", "ha_token"),
     "github_token": ("github_token_enc", "github_token"),
     "gitlab_token": ("gitlab_token_enc", "gitlab_token"),
+    "audiobookshelf_url": ("audiobookshelf_url", "audiobookshelf_url"),
+    "audiobookshelf_user": ("audiobookshelf_user", "audiobookshelf_user"),
     "audiobookshelf_pass": ("audiobookshelf_pass_enc", "audiobookshelf_pass"),
     "audiobookshelf_api_key": ("audiobookshelf_api_key_enc", "audiobookshelf_api_key"),
     "mass_token": ("mass_token_enc", "mass_token"),
@@ -1279,7 +1281,195 @@ def manual_seed(body: Optional[_SeedRequest] = None, force: bool = False, sessio
     count = seed_from_env(session, force=should_force)
     return {"status": "SUCCESS", "count": count}
 
-# ─── Widget Settings (Bento Dashboard) ─────────────────────────────────────────
+# ─── DNS Management ─────────────────────────────────────────────────────────────
+
+from pydantic import BaseModel
+import re
+from datetime import datetime as dt
+
+def validate_ip(value: str) -> bool:
+    """Validate IPv4 address."""
+    pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+    if not re.match(pattern, value):
+        return False
+    parts = value.split('.')
+    return all(0 <= int(part) <= 255 for part in parts)
+
+def validate_hostname(value: str) -> bool:
+    """Validate hostname."""
+    pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
+    return bool(re.match(pattern, value))
+
+def validate_value(value: str, record_type: str) -> bool:
+    """Validate a DNS record value based on type."""
+    if record_type == "A":
+        return validate_ip(value)
+    elif record_type == "CNAME":
+        return validate_hostname(value)
+    return True
+
+class DnsRecordCreate(BaseModel):
+    domain: str
+    record_type: str = "A"
+    values: list[str] = [""]
+    ttl: int = 300
+
+class DnsRecordRead(BaseModel):
+    id: int
+    domain: str
+    record_type: str
+    values: list[str]
+    ttl: int
+    is_active: bool
+    created_at: str
+    updated_at: str
+
+class DnsRecordUpdate(BaseModel):
+    domain: Optional[str] = None
+    record_type: Optional[str] = None
+    values: Optional[list[str]] = None
+    ttl: Optional[int] = None
+    is_active: Optional[bool] = None
+
+@app.get("/api/dns", response_model=list[DnsRecordRead])
+def list_dns_records(session: Session = Depends(get_session), auth: bool = Depends(require_admin_or_internal)):
+    """List all DNS records."""
+    records = session.exec(select(DnsRecord)).all()
+    result = []
+    for r in records:
+        try:
+            values = json.loads(r.values) if r.values else []
+        except (json.JSONDecodeError, TypeError):
+            values = []
+        result.append(DnsRecordRead(
+            id=r.id,
+            domain=r.domain_name,
+            record_type=r.record_type,
+            values=values,
+            ttl=r.ttl,
+            is_active=r.is_active,
+            created_at=r.created_at,
+            updated_at=r.updated_at,
+        ))
+    return result
+
+@app.post("/api/dns", response_model=DnsRecordRead, status_code=201)
+def create_dns_record(body: DnsRecordCreate, session: Session = Depends(get_session), auth: bool = Depends(require_admin_or_internal)):
+    """Create a new DNS record."""
+    if not body.domain:
+        raise HTTPException(status_code=400, detail="Domain is required")
+    
+    if body.record_type not in ["A", "CNAME"]:
+        raise HTTPException(status_code=400, detail="Record type must be A or CNAME")
+    
+    # Validate values
+    if body.record_type == "A":
+        if not body.values or body.values == [""]:
+            raise HTTPException(status_code=400, detail="At least one IP address is required for A records")
+        for value in body.values:
+            if not validate_value(value, "A"):
+                raise HTTPException(status_code=400, detail=f"Invalid IP address: {value}")
+    elif body.record_type == "CNAME":
+        if not body.values or body.values == [""] or len(body.values) > 1:
+            raise HTTPException(status_code=400, detail="CNAME records require exactly one hostname")
+        if not validate_value(body.values[0], "CNAME"):
+            raise HTTPException(status_code=400, detail=f"Invalid hostname: {body.values[0]}")
+    
+    # Check for duplicate domain
+    existing = session.exec(select(DnsRecord).where(DnsRecord.domain_name == body.domain)).first()
+    if existing:
+        raise HTTPException(status_code=409, detail=f"DNS record for '{body.domain}' already exists")
+    
+    record = DnsRecord(
+        domain_name=body.domain,
+        record_type=body.record_type,
+        values=json.dumps(body.values),
+        ttl=body.ttl,
+        is_active=True,
+        created_at=dt.now().isoformat(),
+        updated_at=dt.now().isoformat(),
+    )
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    
+    return DnsRecordRead(
+        id=record.id,
+        domain=record.domain_name,
+        record_type=record.record_type,
+        values=body.values,
+        ttl=record.ttl,
+        is_active=record.is_active,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+@app.put("/api/dns/{record_id}", response_model=DnsRecordRead)
+def update_dns_record(record_id: int, body: DnsRecordUpdate, session: Session = Depends(get_session), auth: bool = Depends(require_admin_or_internal)):
+    """Update a DNS record."""
+    record = session.exec(select(DnsRecord).where(DnsRecord.id == record_id)).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="DNS record not found")
+    
+    if body.domain is not None:
+        if body.domain != record.domain_name:
+            existing = session.exec(select(DnsRecord).where(DnsRecord.domain_name == body.domain)).first()
+            if existing:
+                raise HTTPException(status_code=409, detail=f"DNS record for '{body.domain}' already exists")
+        record.domain_name = body.domain
+    
+    if body.record_type is not None:
+        if body.record_type not in ["A", "CNAME"]:
+            raise HTTPException(status_code=400, detail="Record type must be A or CNAME")
+        record.record_type = body.record_type
+    
+    if body.values is not None:
+        if body.record_type == "A":
+            if not body.values or body.values == [""]:
+                raise HTTPException(status_code=400, detail="At least one IP address is required for A records")
+            for value in body.values:
+                if not validate_value(value, "A"):
+                    raise HTTPException(status_code=400, detail=f"Invalid IP address: {value}")
+        elif body.record_type == "CNAME":
+            if not body.values or body.values == [""] or len(body.values) > 1:
+                raise HTTPException(status_code=400, detail="CNAME records require exactly one hostname")
+            if not validate_value(body.values[0], "CNAME"):
+                raise HTTPException(status_code=400, detail=f"Invalid hostname: {body.values[0]}")
+        record.values = json.dumps(body.values)
+    
+    if body.ttl is not None:
+        record.ttl = body.ttl
+    
+    if body.is_active is not None:
+        record.is_active = body.is_active
+    
+    record.updated_at = dt.now().isoformat()
+    session.add(record)
+    session.commit()
+    session.refresh(record)
+    
+    values = json.loads(record.values) if record.values else []
+    return DnsRecordRead(
+        id=record.id,
+        domain=record.domain_name,
+        record_type=record.record_type,
+        values=values,
+        ttl=record.ttl,
+        is_active=record.is_active,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+@app.delete("/api/dns/{record_id}")
+def delete_dns_record(record_id: int, session: Session = Depends(get_session), auth: bool = Depends(require_admin_or_internal)):
+    """Delete a DNS record."""
+    record = session.exec(select(DnsRecord).where(DnsRecord.id == record_id)).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="DNS record not found")
+    
+    session.delete(record)
+    session.commit()
+    return {"status": "SUCCESS", "message": f"DNS record for '{record.domain_name}' deleted"}
 
 @app.get("/api/widgets/settings", response_model=WidgetSettingsRead)
 def get_widget_settings(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
@@ -1422,6 +1612,7 @@ try:
     from .models import RavenMission
     from .schemas import RavenMissionRead, RavenMissionCreate, RavenMissionUpdate
 except ImportError:
+    # type: ignore
     from models import RavenMission
     from schemas import RavenMissionRead, RavenMissionCreate, RavenMissionUpdate
 from typing import List

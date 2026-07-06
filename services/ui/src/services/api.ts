@@ -216,7 +216,7 @@ apiClient.interceptors.response.use(
       if (now - lastConnectivityToast > 15000) {
         lastConnectivityToast = now;
         const { toast: t } = await import('react-hot-toast');
-        t.error('Cannot connect to Jarvis server. Check your network connection.', {
+        t.error('Cannot connect to Jarvis API server. Check your network connection or that the Identity service is running.', {
           duration: 8000,
           style: {
             background: 'rgba(239, 68, 68, 0.2)',
@@ -380,23 +380,61 @@ export const api = {
     return resp.data;
   },
 
-  async getDnsConfig(): Promise<{ dns_mappings: Record<string, string>; dns_upstream: string; dns_poll_interval: number }> {
-    const resp = await apiClient.get('/api/admin/dns');
+  async getDnsRecords(): Promise<Array<{
+    id: number;
+    domain: string;
+    record_type: string;
+    values: string[];
+    ttl: number;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+  }>> {
+    const resp = await apiClient.get('/api/dns');
     return resp.data;
   },
 
-  async updateDnsConfig(config: { dns_mappings?: Record<string, string>; dns_upstream?: string; dns_poll_interval?: number }): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/api/admin/dns/update', config);
+  async createDnsRecord(record: {
+    domain: string;
+    record_type: string;
+    values: string[];
+    ttl: number;
+  }): Promise<{
+    id: number;
+    domain: string;
+    record_type: string;
+    values: string[];
+    ttl: number;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+  }> {
+    const resp = await apiClient.post('/api/dns', record);
     return resp.data;
   },
 
-  async registerDnsEntry(hostname: string, ip: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/api/admin/dns/register', { hostname, ip });
+  async updateDnsRecord(id: number, record: {
+    domain?: string;
+    record_type?: string;
+    values?: string[];
+    ttl?: number;
+    is_active?: boolean;
+  }): Promise<{
+    id: number;
+    domain: string;
+    record_type: string;
+    values: string[];
+    ttl: number;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string;
+  }> {
+    const resp = await apiClient.put(`/api/dns/${id}`, record);
     return resp.data;
   },
 
-  async removeDnsEntry(hostname: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.delete(`/api/admin/dns/${hostname}`);
+  async deleteDnsRecord(id: number): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.delete(`/api/dns/${id}`);
     return resp.data;
   },
 

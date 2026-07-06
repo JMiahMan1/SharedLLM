@@ -48,6 +48,7 @@ import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
 import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
+import DnsManagementPanel from '../components/settings/DnsManagementPanel';
 
 type AdminTab = 'users' | 'groups' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database' | 'services';
 
@@ -1424,8 +1425,21 @@ const Admin = () => {
       )}
 
       {activeTab === 'settings' && (
-        <section className="glass-panel p-8 border-purple-500/20">
-          <LLMSettings />
+        <section className="glass-panel p-8 border-purple-500/20 space-y-8">
+          <div className="glass-panel p-6 border border-white/10">
+            <h3 className="flex items-center gap-3 text-xl font-bold text-white mb-6">
+              <Globe size={20} className="text-blue-400" />
+              DNS Management
+            </h3>
+            <DnsManagementPanel />
+          </div>
+          <div className="glass-panel p-6 border border-white/10">
+            <h3 className="flex items-center gap-3 text-xl font-bold text-white mb-6">
+              <Code2 size={20} className="text-purple-400" />
+              LLM Configuration
+            </h3>
+            <LLMSettings />
+          </div>
         </section>
       )}
 

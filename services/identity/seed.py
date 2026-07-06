@@ -12,7 +12,7 @@ import logging
 from sqlmodel import Session, select, text
 from dotenv import dotenv_values, load_dotenv
 
-from services.identity.models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS
+from services.identity.models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS, DnsRecord
 from services.identity.crypto import encrypt
 
 def hash_password(password: str) -> str:
@@ -356,6 +356,61 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                     log.info(f"[seed] Force-updated prompt: {global_key}")
     except Exception as e:
         log.warning(f"[seed] Failed to seed prompts from .md files: {e}")
+
+    # ── Seed DNS records from INITIAL_DNS_RECORDS env var ──────────────────────
+    env_dns_records = os.getenv("INITIAL_DNS_RECORDS", "")
+    if env_dns_records:
+        has_dns_records = session.exec(select(DnsRecord)).first() is not None
+        force_dns = os.getenv("FORCE_DNS_SEED", "").lower() in {"1", "true", "yes"}
+        
+        if not has_dns_records or force_dns:
+            import json as json_lib
+            try:
+                dns_records = json_lib.loads(env_dns_records)
+                if isinstance(dns_records, list):
+                    for record_data in dns_records:
+                        domain = record_data.get("domain")
+                        record_type = record_data.get("type", "A")
+                        values = record_data.get("values", [])
+                        ttl = record_data.get("ttl", 300)
+                        
+                        if domain:
+                            # Ensure values is a list
+                            if isinstance(values, str):
+                                try:
+                                    values = json_lib.loads(values)
+                                    if not isinstance(values, list):
+                                        values = [values]
+                                except (json_lib.JSONDecodeError, TypeError):
+                                    values = [values]
+                            elif not isinstance(values, list):
+                                values = [values]
+                            
+                            existing = session.exec(
+                                select(DnsRecord).where(DnsRecord.domain_name == domain)
+                            ).first()
+                            
+                            if not existing or force_dns:
+                                record = DnsRecord(
+                                    domain_name=domain,
+                                    record_type=record_type,
+                                    values=json_lib.dumps(values),
+                                    ttl=ttl,
+                                    is_active=True,
+                                )
+                                if existing:
+                                    existing.values = record.values
+                                    existing.record_type = record.record_type
+                                    existing.ttl = record.ttl
+                                    existing.is_active = record.is_active
+                                    session.add(existing)
+                                else:
+                                    session.add(record)
+                                log.info(f"[seed] Seeded DNS record: {domain} ({record_type}) -> {values}")
+            except Exception as e:
+                log.warning(f"[seed] Failed to parse INITIAL_DNS_RECORDS: {e}")
+        
+        session.commit()
 
     session.commit()
     log.info(f"[seed] Seeded {count} user(s) and default settings.")
