@@ -2143,13 +2143,15 @@ def enroll_telemetry(enroll_data: dict, x_internal_secret: str = Header(...)):
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if existing:
             raise HTTPException(status_code=409, detail=f"'{entity_id}' already enrolled")
+        # Persist the full config (entity_id, power_tracking, etc.) so the
+        # Energy Insights widget can filter enrollments by capability.
+        record = dict(enroll_data)
+        record["entity_id"] = entity_id
+        record["enrolled_by"] = "system"
+        record["enrolled_at"] = datetime.now(timezone.utc).isoformat()
         enrollment = GlobalSetting(
             key=key,
-            value=json.dumps({
-                "entity_id": entity_id,
-                "enrolled_by": "system",
-                "enrolled_at": datetime.now(timezone.utc).isoformat(),
-            }),
+            value=json.dumps(record),
             description=f"Telemetry enrollment: {entity_id}",
         )
         session.add(enrollment)
