@@ -534,6 +534,14 @@ async def retry_http_request(func, service_name: str, max_retries: int = 2, base
             delay = base_delay * (2 ** attempt)
             log.warning(f"{service_name}: RequestError (attempt {attempt+1}/{max_retries+1}): {e}. Retrying in {delay}s")
             await asyncio.sleep(delay)
+        except asyncio.TimeoutError as e:
+            if attempt == max_retries:
+                log.error(f"{service_name}: Timed out after {max_retries + 1} attempts: {e}")
+                # Re-raise as aiohttp.ClientError so callers' error handling returns clean 5xx
+                raise aiohttp.ClientError(f"Timeout: {e}")
+            delay = base_delay * (2 ** attempt)
+            log.warning(f"{service_name}: Timeout (attempt {attempt+1}/{max_retries+1}): {e}. Retrying in {delay}s")
+            await asyncio.sleep(delay)
     raise Exception(f"Unexpected: exhausted retries for {service_name}")
 
 # Global config validation state
@@ -4057,11 +4065,18 @@ async def check_service_updates(request: Request):
         raise HTTPException(status_code=403, detail="Admin only")
 
     async with borrow_http_client() as client:
-        resp = await client.get(
-            f"{CONTROL_PLANE_URL}/api/admin/services/updates",
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=60.0,  # registry checks can be slow
-        )
+        try:
+            resp = await client.get(
+                f"{CONTROL_PLANE_URL}/api/admin/services/updates",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=60.0),  # registry checks can be slow
+            )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            log.error(f"Control plane unreachable for service updates: {e}")
+            return JSONResponse(
+                status_code=504,
+                content={"detail": "Control plane unreachable while checking for updates", "updates_available": 0, "services": []}
+            )
         if resp.status != 200:
             raise HTTPException(status_code=resp.status, detail=await resp.text())
         
@@ -5302,12 +5317,13 @@ async def proxy_media_status(request: Request):
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/media/status",
             json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=15.0)
         )
         return JSONResponse(content=await resp.json(), status_code=resp.status)
     try:
         return await retry_http_request(do_proxy, "Execution service (media status)", max_retries=2, base_delay=0.1)
-    except aiohttp.ClientError as e:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
         log.error(f"Execution service unreachable for media status: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
