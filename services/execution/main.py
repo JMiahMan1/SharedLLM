@@ -1630,13 +1630,129 @@ async def discovery_control_methods():
 START_TIME = time.time()
 
 @app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "service": "execution",
-        "git_sha": os.getenv("GIT_SHA", "unknown"),
-        "start_time": START_TIME
-    }
+async def health():
+    """Check execution service health and all critical dependencies."""
+    checks = {}
+    overall_status = "healthy"
+    
+    # Check Redis with retry
+    redis_ok = await _check_dependency(
+        "redis",
+        lambda: _ping_redis(),
+        max_retries=2,
+        retry_delay=0.5
+    )
+    checks["redis"] = redis_ok["status"]
+    if not redis_ok["healthy"]:
+        overall_status = "degraded"
+    
+    # Check Identity Service with retry
+    identity_ok = await _check_dependency(
+        "identity",
+        lambda: _check_service_health(IDENTITY_SVC_URL, "identity"),
+        max_retries=2,
+        retry_delay=0.5
+    )
+    checks["identity"] = identity_ok["status"]
+    if not identity_ok["healthy"]:
+        overall_status = "unhealthy"
+    
+    # Check RAG Service
+    rag_url = os.getenv("RAG_SVC_URL", "http://localhost:8004")
+    rag_ok = await _check_dependency(
+        "rag",
+        lambda: _check_service_health(rag_url, "rag"),
+        max_retries=1,
+        retry_delay=0.5
+    )
+    checks["rag"] = rag_ok["status"]
+    if not rag_ok["healthy"]:
+        overall_status = "degraded"
+    
+    # Check Storage Service
+    storage_url = os.getenv("STORAGE_SVC_URL", "http://localhost:8005")
+    storage_ok = await _check_dependency(
+        "storage",
+        lambda: _check_service_health(storage_url, "storage"),
+        max_retries=1,
+        retry_delay=0.5
+    )
+    checks["storage"] = storage_ok["status"]
+    if not storage_ok["healthy"]:
+        overall_status = "degraded"
+    
+    status_code = 200 if overall_status == "healthy" else 503
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "status": overall_status,
+            "service": "execution",
+            "checks": checks,
+            "git_sha": os.getenv("GIT_SHA", "unknown"),
+            "start_time": START_TIME
+        }
+    )
+
+
+async def _check_dependency(name: str, check_fn, max_retries: int = 2, retry_delay: float = 0.5) -> dict:
+    """Check a dependency with retry logic and proper error handling."""
+    for attempt in range(max_retries + 1):
+        try:
+            result = await check_fn()
+            if result["healthy"]:
+                return {"status": "ok", "healthy": True}
+            log.warning(f"[health] {name} unhealthy (attempt {attempt + 1}/{max_retries + 1}): {result['status']}")
+        except Exception as e:
+            log.error(f"[health] {name} check failed (attempt {attempt + 1}/{max_retries + 1}): {e}")
+        
+        if attempt < max_retries:
+            await asyncio.sleep(retry_delay)
+    
+    return {"status": f"unreachable after {max_retries + 1} attempts", "healthy": False}
+
+
+async def _ping_redis() -> dict:
+    """Ping Redis and return health status."""
+    try:
+        from redis.asyncio import Redis
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        redis_client = Redis.from_url(redis_url)
+        await redis_client.ping()
+        await redis_client.close()
+        return {"healthy": True, "status": "ok"}
+    except ImportError:
+        return {"healthy": False, "status": "redis library not installed"}
+    except Exception as e:
+        error_msg = str(e)
+        if "Timeout" in error_msg:
+            return {"healthy": False, "status": f"timeout: {error_msg[:80]}"}
+        elif "Connection refused" in error_msg:
+            return {"healthy": False, "status": f"connection refused: {error_msg[:80]}"}
+        else:
+            return {"healthy": False, "status": f"error: {error_msg[:100]}"}
+
+
+async def _check_service_health(service_url: str, service_name: str) -> dict:
+    """Check if a service is healthy by hitting its /health endpoint."""
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
+            resp = await client.get(f"{service_url.rstrip('/')}/health")
+            if resp.status == 200:
+                return {"healthy": True, "status": "ok"}
+            elif resp.status == 503:
+                body = await resp.json()
+                return {"healthy": False, "status": f"degraded: {body.get('status', 'unknown')}"}
+            else:
+                return {"healthy": False, "status": f"unexpected status: {resp.status}"}
+    except aiohttp.ClientError as e:
+        if "Timeout" in str(e):
+            return {"healthy": False, "status": f"timeout: {str(e)[:80]}"}
+        elif "Cannot assign" in str(e) or "Connection refused" in str(e):
+            return {"healthy": False, "status": f"connection refused: {str(e)[:80]}"}
+        else:
+            return {"healthy": False, "status": f"error: {str(e)[:100]}"}
+    except Exception as e:
+        return {"healthy": False, "status": f"unexpected error: {str(e)[:100]}"}
 
 @app.post("/execute/ha_logbook", response_model=ExecutionResult)
 async def execute_ha_logbook(req: LogbookRequest):
