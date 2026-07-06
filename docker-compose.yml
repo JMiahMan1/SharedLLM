@@ -463,6 +463,7 @@ services:
       - DOCKER_HOST=unix:///var/run/docker.sock
       - TZ=America/Phoenix
       - GHCR_TOKEN=${GHCR_TOKEN:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /etc/localtime:/etc/localtime:ro
