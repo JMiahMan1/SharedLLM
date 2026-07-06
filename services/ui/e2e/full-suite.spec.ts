@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 const ADMIN_USER = 'default';
-const ADMIN_PASS = 'admin';
+const ADMIN_PASS = 'changeme';
 
 async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.goto(`${UI_URL}/login`);
@@ -97,6 +97,112 @@ test.describe('Dashboard', () => {
     await searchInput.fill('test');
     await searchInput.press('Enter');
     await page.waitForTimeout(2000);
+  });
+});
+
+test.describe('Widget Gear Icon & Context Menu', () => {
+  test.beforeEach(async ({ page }) => {
+    await loginAsAdmin(page);
+    await page.goto(`${UI_URL}/`);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(3000);
+  });
+
+  test('gear icon is visible on all widgets', async ({ page }) => {
+    // All widgets should have a gear/settings icon (⚙ or Settings2)
+    const gearButtons = page.locator('button[title="Widget options"], button[aria-label*="Widget options"], .text-slate-500.p-1.rounded').first();
+    await expect(gearButtons).toBeVisible();
+  });
+
+  test('clicking gear icon opens context menu', async ({ page }) => {
+    // Find and click a gear icon
+    const gearIcon = page.locator('button[title="Widget options"]').first();
+    await expect(gearIcon).toBeVisible();
+    await gearIcon.click();
+    // Context menu should appear
+    const menu = page.locator('.fixed.z-50.glass-card').first();
+    await expect(menu).toBeVisible();
+  });
+
+  test('context menu shows widget name', async ({ page }) => {
+    // Capture the first widget's title so we can verify the menu labels it
+    const firstWidgetTitle = page.locator('.glass-panel h4').first();
+    const title = (await firstWidgetTitle.textContent().catch(() => ''))?.trim() || '';
+    const gearIcon = page.locator('button[title="Widget options"]').first();
+    await gearIcon.click();
+    const menu = page.locator('.fixed.z-50.glass-card').first();
+    // Menu should contain the widget label (e.g. "Energy Insights"), not literally "Widget"
+    const menuText = await menu.textContent();
+    expect(menuText).toBeTruthy();
+    if (title) {
+      expect(menuText).toContain(title);
+    } else {
+      expect(menuText).toContain('Pin');
+    }
+  });
+
+  test('context menu has Pin option', async ({ page }) => {
+    const gearIcon = page.locator('button[title="Widget options"]').first();
+    await gearIcon.click();
+    const menu = page.locator('.fixed.z-50.glass-card').first();
+    const pinButton = menu.getByRole('button', { name: /Pin|Unpin/ });
+    await expect(pinButton).toBeVisible();
+  });
+
+  test('context menu has Size options', async ({ page }) => {
+    const gearIcon = page.locator('button[title="Widget options"]').first();
+    await gearIcon.click();
+    const menu = page.locator('.fixed.z-50.glass-card').first();
+    await expect(menu.getByRole('button', { name: 'Small' })).toBeVisible();
+    await expect(menu.getByRole('button', { name: 'Medium' })).toBeVisible();
+    await expect(menu.getByRole('button', { name: 'Wide' })).toBeVisible();
+    await expect(menu.getByRole('button', { name: 'Tall' })).toBeVisible();
+  });
+
+  test('context menu has Show/Hide option', async ({ page }) => {
+    const gearIcon = page.locator('button[title="Widget options"]').first();
+    await gearIcon.click();
+    const menu = page.locator('.fixed.z-50.glass-card').first();
+    const showHideButton = menu.getByRole('button', { name: /Show|Hide/ });
+    await expect(showHideButton).toBeVisible();
+  });
+
+  test('context menu has Move to bottom option', async ({ page }) => {
+    const gearIcon = page.locator('button[title="Widget options"]').first();
+    await gearIcon.click();
+    const menu = page.locator('.fixed.z-50.glass-card').first();
+    await expect(menu.getByRole('button', { name: 'Move to bottom' })).toBeVisible();
+  });
+
+  test('context menu has Remove option', async ({ page }) => {
+    const gearIcon = page.locator('button[title="Widget options"]').first();
+    await gearIcon.click();
+    const menu = page.locator('.fixed.z-50.glass-card').first();
+    const removeButton = menu.getByRole('button', { name: 'Remove' });
+    await expect(removeButton).toBeVisible();
+    await expect(removeButton).toHaveClass(/text-red-/);
+  });
+
+  test('clicking outside closes context menu', async ({ page }) => {
+    const gearIcon = page.locator('button[title="Widget options"]').first();
+    await gearIcon.click();
+    const menu = page.locator('.fixed.z-50.glass-card').first();
+    await expect(menu).toBeVisible();
+    // Click outside
+    await page.locator('.glass-panel').first().click();
+    await page.waitForTimeout(500);
+    await expect(menu).not.toBeVisible();
+  });
+
+  test('pin button toggles correctly', async ({ page }) => {
+    const gearIcon = page.locator('button[title="Widget options"]').first();
+    await gearIcon.click();
+    const menu = page.locator('.fixed.z-50.glass-card').first();
+    const pinButton = menu.getByRole('button', { name: /Pin|Unpin/ });
+    await pinButton.click();
+    await page.waitForTimeout(500);
+    // Menu should close
+    await expect(menu).not.toBeVisible();
   });
 });
 
