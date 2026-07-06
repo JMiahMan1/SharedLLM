@@ -352,7 +352,7 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
                 if resp.status == 200:
-                    hits = resp.json().get("results", [])
+                    hits = (await resp.json()).get("results", [])
                     if hits:
                         # For HA entities, enrich with live state from HA
                         if coll == "ha_entities" and creds:
@@ -410,7 +410,7 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
             )
             if resp.status != 200:
                 return ""
-            data = resp.json()
+            data = await resp.json()
             entities = data.get("entities", []) if isinstance(data, dict) else []
         
         # Find weather domain entities
@@ -586,7 +586,7 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
                 resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                 if resp.status == 200:
-                    result = resp.json()
+                    result = await resp.json()
                     if action == "executionlogrequest":
                         detail = result.get("detail") or {}
                         logs = detail.get("logs", "")
