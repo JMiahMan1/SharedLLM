@@ -439,6 +439,7 @@ services:
         - GIT_SHA=${GIT_SHA:-unknown}
         - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    hostname: control-plane.local
     container_name: sharedllm_control_plane
     restart: always
     user: "${PUID:-1000}:${PGID:-1000}"
