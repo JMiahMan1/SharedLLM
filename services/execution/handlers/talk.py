@@ -276,10 +276,10 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             await asyncio.to_thread(provider.ensure_directory, TALK_UPLOAD_DIR)
 
             upload_resp = await asyncio.to_thread(provider.upload_file, remote_path, audio_bytes, req.mime_type or "audio/webm")
-            if upload_resp.status not in {200, 201, 204}:
+            if upload_resp.status_code not in {200, 201, 204}:
                 return ExecutionResult(
                     status="FAILURE",
-                    message=f"Failed to upload audio ({upload_resp.status}).",
+                    message=f"Failed to upload audio ({upload_resp.status_code}).",
                     service="talk_send_voice",
                 )
 
