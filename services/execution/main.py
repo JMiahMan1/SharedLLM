@@ -97,7 +97,7 @@ async def resolve_internal_user(user_id: Optional[int] = None, rag_user: Optiona
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status == 200:
-                return resp.json()
+                return await resp.json()
     except Exception as e:
         sample_user = user_id if user_id is not None else rag_user
         log.error(f"Failed to resolve internal user {sample_user}: {e}")
@@ -503,7 +503,7 @@ async def execute_identity(req: IdentityRequest):
                 return _fail(f"Action {action} not supported", "identity")
             
             if resp.status in (200, 201, 204):
-                data = resp.json() if resp.status != 204 else {}
+                data = await resp.json() if resp.status != 204 else {}
                 msg = f"Identity action '{action}' successful."
                 if isinstance(data, list):
                     msg += f" Found {len(data)} results."
@@ -833,7 +833,7 @@ async def execute_discovery_sync(req: DiscoverySyncRequest):
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status == 200:
-                data = resp.json()
+                data = await resp.json()
                 return _ok(f"Discovery sync completed. Found {data.get('entities_count', 0)} entities.", "discovery")
             else:
                 return _fail(f"Discovery sync failed with status {resp.status}", "discovery")
@@ -913,7 +913,7 @@ async def execute_identity_admin(req: IdentityManageRequest):
                 return _fail(f"Identity admin action '{action}' not supported. Use primary /execute/identity for list/create/delete/discover.", "identity_admin")
 
             if resp.status in (200, 201, 204):
-                data = resp.json() if resp.status != 204 else {}
+                data = await resp.json() if resp.status != 204 else {}
                 msg = f"Identity admin action '{action}' succeeded."
                 if isinstance(data, list):
                     msg += f" Found {len(data)} results."
@@ -1940,7 +1940,7 @@ async def execute_llm_info(req: LLMInfoRequest):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
             resp = await client.get(f"{IDENTITY_SVC_URL}/api/settings", headers={"X-Internal-Secret": INTERNAL_SECRET})
             if resp.status == 200:
-                for s in resp.json():
+                for s in await resp.json():
                     if s.get("key") == "llm_local_url" and s.get("value"):
                         ollama_url = s["value"]
                         break
@@ -1975,7 +1975,7 @@ async def execute_llm_info(req: LLMInfoRequest):
                 resp = await client.get(f"{OLLAMA_URL}{endpoint}")
             
             if resp.status == 200:
-                data = resp.json()
+                data = await resp.json()
                 if action == "list":
                     models = [m.get("name", "?") for m in data.get("models", [])]
                     return _ok(f"Available models: {', '.join(models)}", "llm_info", {"models": data.get("models", [])})
@@ -2236,6 +2236,7 @@ _skylight_tokens: dict[str, str] = {}
 async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None, str | None]:
     """Resolve Skylight credentials from identity service."""
     creds = await resolve_first_user()
+    log.debug(f"[skylight] resolve_first_user returned: type={type(creds).__name__}, creds={creds is not None}")
     if not creds:
         return None, None
     
@@ -2267,7 +2268,8 @@ async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None
                 json={"email": email, "password": password}
             )
             if resp.status == 200:
-                token = resp.json().get("token") or resp.json().get("access_token")
+                body = await resp.json()
+                token = body.get("token") or body.get("access_token")
                 if token:
                     _skylight_tokens[email] = token
                     return url, token
@@ -2284,7 +2286,7 @@ async def _skylight_api(url: str, token: str, method: str, path: str, json_body:
             headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
             resp = await client.request(method, f"{url}{path}", json=json_body, headers=headers)
             if resp.status in (200, 201):
-                return resp.json()
+                return await resp.json()
             log.error(f"[skylight] API error {resp.status}: {resp.text[:200]}")
             return None
     except Exception as e:

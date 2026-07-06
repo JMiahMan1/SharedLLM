@@ -74,7 +74,7 @@ async def fetch_live_states(execution_url: str, ha_url: str, ha_token: str, inte
                 headers={"X-Internal-Secret": internal_secret}
             )
             if resp.status == 200:
-                data = resp.json()
+                data = await resp.json()
                 entities = data.get("entities", []) if isinstance(data, dict) else []
                 cache_all_states(entities)
                 return entities

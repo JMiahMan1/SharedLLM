@@ -19,7 +19,7 @@ async def web_search(query: str, num_results: int = 5) -> List[Dict[str, Any]]:
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
                 if resp.status == 200:
-                    for item in resp.json():
+                    for item in await resp.json():
                         if item.get("key") == "searxng_url":
                             url = item.get("value", "").rstrip("/")
                             if url:
@@ -41,7 +41,7 @@ async def web_search(query: str, num_results: int = 5) -> List[Dict[str, Any]]:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             resp = await client.get(url)
             if resp.status == 200:
-                data = resp.json()
+                data = await resp.json()
                 results = []
                 for r in data.get("results", [])[:num_results]:
                     results.append({

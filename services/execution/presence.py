@@ -239,7 +239,7 @@ class PresenceTracker:
                     headers={"X-Internal-Secret": config.INTERNAL_SECRET}
                 )
                 if resp.status == 200:
-                    return resp.json()
+                    return await resp.json()
         except Exception as e:
             log.warning(f"[presence] Failed to fetch GPS location for {user_id} from Identity: {e}")
         return None
@@ -300,7 +300,7 @@ class PresenceTracker:
                     headers={"X-Internal-Secret": config.INTERNAL_SECRET}
                 )
                 if resp.status == 200:
-                    gps_locations = resp.json()
+                    gps_locations = await resp.json()
                     home_coords = await self._get_home_coordinates()
                     if home_coords:
                         home_lat, home_lon = home_coords

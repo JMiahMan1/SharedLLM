@@ -135,7 +135,7 @@ async def load_prompt(client: aiohttp.ClientSession, prompt_key: str) -> str:
     )
     if resp.status != 200:
         raise RuntimeError(f"Identity service unavailable ({resp.status})")
-    settings = {item["key"]: item["value"] for item in resp.json()}
+    settings = {item["key"]: item["value"] for item in await resp.json()}
     value = settings.get(prompt_key)
     if not value:
         raise ValueError(f"Prompt not found in settings DB: {prompt_key}")
