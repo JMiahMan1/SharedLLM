@@ -103,7 +103,7 @@ const ServerConfigBanner = () => {
         <AlertCircle size={16} className="text-red-400 shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-red-400">Server unreachable</p>
-          <p className="text-[11px] text-red-400/70 mt-0.5">Cannot connect to Jarvis server. Check your network or server URL.</p>
+          <p className="text-[11px] text-red-400/70 mt-0.5">Cannot connect to the Identity API service at {serverUrl}. Check your network connection or that the service is running.</p>
         </div>
         <div className="flex gap-1.5 shrink-0">
           <button

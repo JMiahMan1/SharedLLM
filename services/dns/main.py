@@ -7,6 +7,7 @@ Listens on host network port 5353 and resolves container names/IPs.
 """
 
 import asyncio
+import json
 import logging
 import os
 import socket
@@ -172,10 +173,11 @@ class DockerWatcher:
 class DNSResolver:
     """DNS query resolver"""
 
-    def __init__(self, registry: ContainerRegistry, upstream_dns: str = '8.8.8.8'):
+    def __init__(self, registry: ContainerRegistry, upstream_dns: str = '8.8.8.8', static_mappings: Optional[Dict[str, str]] = None):
         self.registry = registry
         self.upstream_dns = upstream_dns
         self.upstream_client = _DNSClient(upstream_dns)
+        self.static_mappings = static_mappings or {}
 
     async def resolve(self, query: 'DNSQuery') -> Optional[list]:
         """Resolve a DNS query"""
@@ -189,6 +191,13 @@ class DNSResolver:
         try:
             print(f"DEBUG: Inside try block, name={name}", flush=True)
             logger.debug(f"After try block, name={name}")
+            
+            # Check static mappings first (for external hosts like ollama-server.local)
+            if name in self.static_mappings:
+                ip = self.static_mappings[name]
+                logger.debug(f"Found static mapping: {name} -> {ip}")
+                return [self._make_a_record(name, ip, 300)]
+            
             # Check if it's a .docker suffix query
             if name.endswith('.docker'):
                 container_name = name[:-6]  # Remove .docker
@@ -542,11 +551,74 @@ async def main():
     # Configuration
     port = int(os.environ.get('DNS_PORT', 5353))
     upstream_dns = os.environ.get('UPSTREAM_DNS', '8.8.8.8')
-
+    
     # Initialize components
     client = docker.from_env()
     registry = ContainerRegistry()
     resolver = DNSResolver(registry, upstream_dns)
+    
+    # Parse static DNS mappings from DNS_MAPPINGS env var (fallback)
+    mappings_str = os.environ.get('DNS_MAPPINGS', '')
+    flat_mappings = {}
+    if mappings_str:
+        try:
+            mappings = json.loads(mappings_str)
+            for hostname, ip in mappings.items():
+                if isinstance(ip, list):
+                    for ip_addr in ip:
+                        flat_mappings[hostname] = ip_addr
+                else:
+                    flat_mappings[hostname] = ip
+            logger.info(f"Loaded {len(flat_mappings)} static DNS mappings from DNS_MAPPINGS env var")
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid DNS_MAPPINGS JSON: {e}")
+    
+    resolver.static_mappings = flat_mappings
+
+    # Fetch DNS records from Identity service and update periodically
+    async def refresh_dns_mappings():
+        """Fetch DNS records from Identity service and update resolver."""
+        import aiohttp
+        identity_url = os.environ.get('IDENTITY_SVC_URL')
+        internal_secret = os.environ.get('INTERNAL_SECRET')
+        
+        if not identity_url or not internal_secret:
+            logger.warning("IDENTITY_SVC_URL or INTERNAL_SECRET not set, using env var mappings only")
+            return
+        
+        while True:
+            try:
+                async with aiohttp.ClientSession() as http_session:
+                    resp = await http_session.get(
+                        f"{identity_url}/api/dns",
+                        headers={"X-Internal-Secret": internal_secret}
+                    )
+                    if resp.status == 200:
+                        records = await resp.json()
+                        new_mappings = {}
+                        for record in records:
+                            if not record.get('is_active', True):
+                                continue
+                            domain = record.get('domain')
+                            values = record.get('values', [])
+                            if domain and values:
+                                if len(values) == 1:
+                                    new_mappings[domain] = values[0]
+                                else:
+                                    # For multiple IPs, use first one (round-robin handled by resolver)
+                                    new_mappings[domain] = values[0]
+                                    logger.debug(f"DNS record with multiple values: {domain} -> {values}")
+                        
+                        resolver.static_mappings = new_mappings
+                        logger.info(f"Updated {len(new_mappings)} DNS mappings from Identity service")
+            except Exception as e:
+                logger.warning(f"Failed to fetch DNS records from Identity service: {e}")
+            
+            await asyncio.sleep(30)  # Refresh every 30 seconds
+    
+    # Start refresh task if Identity service URL is configured
+    if os.environ.get('IDENTITY_SVC_URL'):
+        asyncio.create_task(refresh_dns_mappings())
 
     # Start Docker watcher
     watcher = DockerWatcher(client, registry)
