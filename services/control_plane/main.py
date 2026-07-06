@@ -484,6 +484,10 @@ def check_all_updates():
     # Fallback to GHCR_TOKEN environment variable
     if not ghcr_token:
         ghcr_token = os.getenv("GHCR_TOKEN", "")
+    
+    # Fallback to GITHUB_TOKEN environment variable
+    if not ghcr_token:
+        ghcr_token = os.getenv("GITHUB_TOKEN", "")
 
     def _get_remote_digest(image_ref: str) -> str | None:
         """
