@@ -471,13 +471,16 @@ def _resolve_identity_context(ref: WorkspaceRef) -> Optional[dict[str, Any]]:
         return None
 
     try:
-        loop = asyncio.get_event_loop()
-        data = loop.run_until_complete(_http_post_async(
-            f"{IDENTITY_SVC_URL}/api/resolve",
-            json=payload,
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=45.0,
-        ))
+        loop = asyncio.new_event_loop()
+        try:
+            data = loop.run_until_complete(_http_post_async(
+                f"{IDENTITY_SVC_URL}/api/resolve",
+                json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=45.0,
+            ))
+        finally:
+            loop.close()
     except aiohttp.ClientError as exc:
         raise HTTPException(status_code=503, detail=f"Identity service unreachable: {exc}") from exc
 
