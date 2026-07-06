@@ -143,8 +143,13 @@ def discover_containers_via_docker():
         return {}
     
     containers = {}
+    print(f"[dns-sync] DISCOVER: Starting container discovery via Docker API", flush=True)
+    
     try:
-        for container in DOCKER_CLIENT.containers.list(all=True):
+        all_containers = DOCKER_CLIENT.containers.list(all=True)
+        print(f"[dns-sync] DISCOVER: Found {len(all_containers)} containers total", flush=True)
+        
+        for container in all_containers:
             name = container.name.replace('sharedllm_', '')
             if not name:
                 continue
@@ -166,9 +171,15 @@ def discover_containers_via_docker():
                 'host_networked': host_networked,
                 'status': container.status
             }
+            
+            if ip:
+                print(f"[dns-sync] DISCOVER: {name} -> {ip} (networked)", flush=True)
+            else:
+                print(f"[dns-sync] DISCOVER: {name} -> no IP (host_networked={host_networked})", flush=True)
     except Exception as e:
         print(f"[dns-sync] Error discovering containers: {e}", flush=True)
     
+    print(f"[dns-sync] DISCOVER: Discovered {len(containers)} containers", flush=True)
     return containers
 
 
@@ -179,6 +190,7 @@ def build_dns_records(containers, host_ip):
     For Docker-networked services, use container IP.
     """
     records = {}
+    print(f"[dns-sync] BUILD: Building DNS records for {len(containers)} containers", flush=True)
     
     for name, info in containers.items():
         hostname = f"{name}.local" if not name.endswith('.local') else name
@@ -188,10 +200,13 @@ def build_dns_records(containers, host_ip):
             # Use host IP for host-networked services or if no container IP
             if host_ip:
                 records[hostname] = [host_ip]
+                print(f"[dns-sync] BUILD: {hostname} -> {host_ip} (host-networked or no IP)", flush=True)
         elif info['ip']:
             # Use container IP
             records[hostname] = [info['ip']]
+            print(f"[dns-sync] BUILD: {hostname} -> {info['ip']} (container IP)", flush=True)
     
+    print(f"[dns-sync] BUILD: Total {len(records)} DNS records built", flush=True)
     return records
 
 
@@ -428,6 +443,8 @@ def get_alive_ips(hostname):
     with dns_lock:
         all_ips = list(dns_records.get(hostname, []))
     
+    print(f"[dns-sync] LOOKUP: hostname={hostname}, found {len(all_ips)} IPs in records: {all_ips}", flush=True)
+    
     if not all_ips:
         return []
     
@@ -435,7 +452,9 @@ def get_alive_ips(hostname):
         alive = [ip for ip in all_ips if health_status.get((hostname, ip), False)]
     
     # Only return alive IPs. If all dead, return all as last resort.
-    return alive if alive else all_ips
+    result = alive if alive else all_ips
+    print(f"[dns-sync] LOOKUP: returning {len(result)} alive IPs: {result}", flush=True)
+    return result
 
 
 def parse_dns_query(data):
@@ -462,6 +481,7 @@ def parse_dns_query(data):
     if idx + 4 > len(data):
         return txid, hostname, None
     qtype = struct.unpack('!H', data[idx:idx+2])[0]
+    print(f"[dns-sync] PARSE: query parsed - txid={txid}, hostname={hostname}, qtype={qtype}", flush=True)
     return txid, hostname, qtype
 
 
@@ -489,6 +509,8 @@ def forward_query(hostname, qtype):
         upstreams.append(DISCOVERED_NETWORKS['gateway'])
     upstreams.append("8.8.8.8")
     
+    print(f"[dns-sync] FORWARD: trying upstream servers for {hostname}: {upstreams}", flush=True)
+    
     for upstream in upstreams:
         try:
             query = bytearray()
@@ -505,9 +527,12 @@ def forward_query(hostname, qtype):
             sock.sendto(bytes(query), (upstream, 53))
             resp, _ = sock.recvfrom(512)
             sock.close()
+            print(f"[dns-sync] FORWARD: success from {upstream} for {hostname}", flush=True)
             return resp
-        except Exception:
+        except Exception as e:
+            print(f"[dns-sync] FORWARD: failed from {upstream} for {hostname}: {e}", flush=True)
             continue
+    print(f"[dns-sync] FORWARD: all upstreams failed for {hostname}", flush=True)
     return None
 
 
@@ -522,6 +547,7 @@ def dns_server():
         try:
             sock.settimeout(1)
             data, addr = sock.recvfrom(512)
+            print(f"[dns-sync] DNS: query received from {addr}", flush=True)
             txid, hostname, qtype = parse_dns_query(data)
             if hostname is None:
                 continue
@@ -531,16 +557,20 @@ def dns_server():
                 if answers:
                     resp = build_dns_response(txid, hostname, answers)
                     sock.sendto(resp, addr)
-                    print(f"[dns-sync] DNS: {hostname} -> {answers}", flush=True)
+                    print(f"[dns-sync] DNS: {hostname} -> {answers} (from records)", flush=True)
                     continue
+                else:
+                    print(f"[dns-sync] DNS: no records for {hostname}, forwarding...", flush=True)
 
             resp = forward_query(hostname, qtype or 1)
             if resp:
                 resp = struct.pack('!H', txid) + resp[2:]
                 sock.sendto(resp, addr)
+                print(f"[dns-sync] DNS: forwarded {hostname} successfully", flush=True)
             else:
                 resp = build_dns_response(txid, hostname, [], rcode=3)
                 sock.sendto(resp, addr)
+                print(f"[dns-sync] DNS: forwarding failed for {hostname}, sending NXDOMAIN", flush=True)
         except socket.timeout:
             continue
         except Exception as e:
