@@ -161,7 +161,7 @@
         reverse_proxy identity:8001
     }
     handle /api/telemetry* {
-        reverse_proxy identity:8001
+        reverse_proxy gateway:11435
     }
     
     # Optional: Route other service APIs if needed
