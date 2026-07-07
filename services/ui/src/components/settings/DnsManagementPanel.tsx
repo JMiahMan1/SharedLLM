@@ -7,7 +7,7 @@ import { api } from '../../services/api';
 interface DnsRecord {
   id: number;
   domain: string;
-  record_type: 'A' | 'CNAME';
+  record_type: string;
   values: string[];
   ttl: number;
   is_active: boolean;
@@ -37,7 +37,7 @@ export default function DnsManagementPanel() {
     if (editingRecord) {
       return {
         domain: editingRecord.domain,
-        record_type: editingRecord.record_type,
+        record_type: editingRecord.record_type as 'A' | 'CNAME',
         values: [...editingRecord.values],
         ttl: editingRecord.ttl,
       };

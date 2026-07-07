@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ShieldAlert, Search, Terminal } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, type RavenMission } from '../../services/api';
+import { api, apiClient, type RavenMission } from '../../services/api';
 import HelpTooltip from '../ui/HelpTooltip';
 
 interface RavenWorkspaceInvestigationPanelProps {
@@ -105,7 +105,7 @@ export default function RavenWorkspaceInvestigationPanel({
     setInvestigationStartTime(Date.now());
     
     try {
-      const response = await api.post('/api/manual/investigation', {
+      const response = await apiClient.post('/api/manual/investigation', {
         prompt: investigationPrompt,
         workspace_id: workspaceId,
         mission_id: selectedMission?.id || null,
@@ -134,7 +134,7 @@ export default function RavenWorkspaceInvestigationPanel({
     }
     
     try {
-      await api.post('/api/manual/correction', {
+      await apiClient.post('/api/manual/correction', {
         workspace_id: workspaceId,
         mission_id: selectedMission.id,
         correction: correctionInput,
@@ -271,7 +271,7 @@ export default function RavenWorkspaceInvestigationPanel({
                 🔍 Workspace investigation in progress...
               </span>
               <span className="text-xs text-slate-500">
-                Started: {new Date(investigationStartTime).toLocaleTimeString()}
+                Started: {investigationStartTime ? new Date(investigationStartTime).toLocaleTimeString() : '—'}
               </span>
             </div>
           </div>
