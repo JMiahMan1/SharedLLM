@@ -1165,6 +1165,8 @@ const Admin = () => {
                   enrollTelemetryMutation.mutate({
                     entity_id: telemetryEntityId.trim(),
                     offline_alert_threshold_minutes: telemetryOfflineThreshold,
+                    power_tracking: true,
+                    type: 'energy',
                   });
                 }}
                 disabled={enrollTelemetryMutation.isPending}
