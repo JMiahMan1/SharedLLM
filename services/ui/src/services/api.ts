@@ -67,6 +67,20 @@ import type {
   NetworkScanResponse,
 } from '../types/api';
 
+// Re-export domain types so consumers can import them from the api module.
+export type {
+  APIKey,
+  GlobalSetting,
+  HealthStatus,
+  LogEntry,
+  RavenMission,
+  RavenConfig,
+  SearchResult,
+  SmokeTestResult,
+  UserProfile,
+  Workspace,
+} from '../types/api';
+
 declare module 'axios' {
   export interface InternalAxiosRequestConfig {
     __retryCount?: number;

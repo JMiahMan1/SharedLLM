@@ -10,7 +10,6 @@ import {
   Globe,
   Loader2,
   Search,
-  Settings2,
   Shield,
   X,
   Mic,
@@ -21,7 +20,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
-import type { GlobalSetting, HealthStatus, LogEntry, Workspace, SearchResult } from '../services/api';
+import type { HealthStatus, LogEntry, Workspace, SearchResult } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useRavenMissions } from '../hooks/useRavenMissions';
 import { useHaptics } from '../hooks/useHaptics';
@@ -100,7 +99,7 @@ const SERVICE_ICON_MAP = {
 
 const ServiceCard = ({ service, onClick }: { service: ServiceSummary; onClick: () => void }) => {
   const Icon = service.icon;
-  const isOk = service.status === 'OK';
+  const isOk = service.status === 'READY';
 
   return (
     <button
@@ -329,12 +328,6 @@ const Dashboard = () => {
     retry: 1,
   });
 
-  const { data: settings = [] } = useQuery<GlobalSetting[]>({
-    queryKey: ['settings'],
-    queryFn: () => api.getSettings(),
-    retry: 1,
-  });
-
   const { data: activeMissions = [], isLoading: ravenLoading } = useRavenMissions();
 
   const serviceSummaries = useMemo<ServiceSummary[]>(() => {
@@ -375,8 +368,8 @@ const Dashboard = () => {
     clearSearch();
   }, [clearSearch]);
 
-  const overallHealthOk = !health || health.status === 'OK';
-  const unhealthyCount = serviceSummaries.filter((s) => s.status !== 'OK').length;
+  const overallHealthOk = !health || health.status === 'READY';
+  const unhealthyCount = serviceSummaries.filter((s) => s.status !== 'READY').length;
 
   return (
     <div className="space-y-6 md:space-y-8 pb-12 animate-fade-up">
@@ -603,40 +596,6 @@ const Dashboard = () => {
                   <div className="flex flex-col items-center justify-center py-8 text-center">
                     <FolderKanban size={28} className="text-slate-700 mb-2" />
                     <p className="text-sm text-slate-500">No workspaces registered</p>
-                  </div>
-                )}
-              </div>
-            </section>
-          </SectionErrorBoundary>
-
-          {/* System Settings */}
-          <SectionErrorBoundary label="System Settings">
-            <section className="glass-panel p-6">
-              <div className="mb-5 flex items-center gap-3">
-                <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-orange-500/10">
-                  <Settings2 size={16} className="text-orange-300" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-white">System Settings</h2>
-                  <p className="text-xs text-slate-500">Identity service config</p>
-                </div>
-              </div>
-              <div className="space-y-3">
-                {settings
-                  .filter((s) => !['assistant_model', 'coding_model', 'librarian_model'].includes(s.key))
-                  .map((setting) => (
-                    <div key={setting.key} className="px-3 py-2.5 rounded-xl bg-black/20 border border-white/5">
-                      <p className="font-mono text-xs text-purple-300 truncate">{setting.key}</p>
-                      <p className="mt-1 text-xs text-slate-300 break-words">{setting.value}</p>
-                      {setting.description && (
-                        <p className="mt-1 text-[10px] text-slate-600 italic">{setting.description}</p>
-                      )}
-                    </div>
-                  ))
-                }
-                {settings.length === 0 && (
-                  <div className="text-center py-6">
-                    <p className="text-sm text-slate-500">Settings unavailable</p>
                   </div>
                 )}
               </div>
