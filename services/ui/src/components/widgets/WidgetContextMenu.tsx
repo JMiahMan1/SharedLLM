@@ -84,7 +84,10 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
         <button
           onClick={(e) => {
             e.stopPropagation();
-            setMenuPos({ x: e.clientX || 0, y: e.clientY || 0 });
+            // Anchor the menu to the gear button so it always drops down
+            // from the control, instead of floating at raw click coords.
+            const rect = e.currentTarget.getBoundingClientRect();
+            setMenuPos({ x: rect.right, y: rect.bottom });
             setMenuOpen(true);
           }}
           className="text-slate-500 hover:text-white transition-colors p-1 rounded hover:bg-white/5"
