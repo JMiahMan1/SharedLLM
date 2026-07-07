@@ -120,6 +120,22 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
 
   const hasData = data.length > 0;
 
+  // Per-device breakdown: each enrolled entity's current draw and its share of total usage
+  const deviceBreakdown = useMemo(() => {
+    const total = Object.values(summaries).reduce((s, sum) => s + (sum.current_power_w || 0), 0);
+    return Object.entries(summaries)
+      .map(([entityId, sum]) => {
+        const current = sum.current_power_w || 0;
+        return {
+          entityId,
+          name: entityId.split('.').slice(1).join('.') || entityId,
+          current,
+          pct: total > 0 ? Math.round((current / total) * 100) : 0,
+        };
+      })
+      .sort((a, b) => b.current - a.current);
+  }, [summaries]);
+
   return (
     <WidgetCard
       title="Energy Insights"
@@ -153,6 +169,19 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
                 <TrendingUp size={12} className="text-emerald-400" />
                 <span className="text-xs font-bold text-emerald-400">{Object.keys(summaries).length}</span>
               </div>
+            </div>
+          )}
+
+          {deviceBreakdown.length > 0 && (
+            <div className="space-y-1.5 px-1">
+              {deviceBreakdown.map((d) => (
+                <div key={d.entityId} className="flex items-center justify-between text-xs">
+                  <span className="truncate text-slate-400 max-w-[62%]" title={d.entityId}>{d.name}</span>
+                  <span className="text-slate-300 font-medium tabular-nums">
+                    {d.current}W <span className="text-slate-600">· {d.pct}%</span>
+                  </span>
+                </div>
+              ))}
             </div>
           )}
 
