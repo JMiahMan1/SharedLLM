@@ -99,7 +99,7 @@ const SERVICE_ICON_MAP = {
 
 const ServiceCard = ({ service, onClick }: { service: ServiceSummary; onClick: () => void }) => {
   const Icon = service.icon;
-  const isOk = service.status === 'READY';
+  const isOk = service.status === 'OK';
 
   return (
     <button
@@ -369,7 +369,7 @@ const Dashboard = () => {
   }, [clearSearch]);
 
   const overallHealthOk = !health || health.status === 'READY';
-  const unhealthyCount = serviceSummaries.filter((s) => s.status !== 'READY').length;
+  const unhealthyCount = serviceSummaries.filter((s) => s.status !== 'OK').length;
 
   return (
     <div className="space-y-6 md:space-y-8 pb-12 animate-fade-up">
