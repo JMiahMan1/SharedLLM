@@ -79,6 +79,15 @@ export type {
   SmokeTestResult,
   UserProfile,
   Workspace,
+  DeviceAssignment,
+  DiscoveredUser,
+  RagStats,
+  TelemetryEnrollment,
+  ExecutionResponse,
+  TimerRecord,
+  StorageEntry,
+  TalkConversation,
+  TalkMessage,
 } from '../types/api';
 
 declare module 'axios' {

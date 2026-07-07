@@ -42,6 +42,7 @@ import type {
   LogEntry,
   UserProfile,
   RagStats,
+  TelemetryEnrollment,
 } from '../services/api';
 import Modal from '../components/ui/Modal';
 import HelpTooltip from '../components/ui/HelpTooltip';
@@ -470,7 +471,7 @@ const Admin = () => {
   });
 
   const enrollTelemetryMutation = useMutation({
-    mutationFn: (data: { entity_id: string; offline_alert_threshold_minutes: number }) => api.enrollTelemetry(data),
+    mutationFn: (data: Partial<TelemetryEnrollment>) => api.enrollTelemetry(data.entity_id!, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['telemetry-enrollments'] });
       setTelemetryEntityId('');
@@ -1167,7 +1168,6 @@ const Admin = () => {
                     entity_id: telemetryEntityId.trim(),
                     offline_alert_threshold_minutes: telemetryOfflineThreshold,
                     power_tracking: true,
-                    type: 'energy',
                   });
                 }}
                 disabled={enrollTelemetryMutation.isPending}
@@ -1725,8 +1725,8 @@ const Admin = () => {
                       <div className="mt-3 flex items-center justify-between gap-4 border-t border-white/5 pt-3 text-xs text-slate-500">
                         <div className="flex gap-4">
                           <span>Uptime: {service.uptime || 'N/A'}</span>
-                          {service.restart_count > 0 && (
-                            <span>Restarts: {service.restart_count}</span>
+                          {(service.restart_count ?? 0) > 0 && (
+                            <span>Restarts: {service.restart_count ?? 0}</span>
                           )}
                           {service.started_at && (
                             <span>Started: {new Date(service.started_at).toLocaleString()}</span>

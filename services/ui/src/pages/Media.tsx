@@ -363,15 +363,15 @@ const NowPlayingCard = ({
         <div className="relative mt-4 pt-3 border-t border-white/5">
           <div className="flex items-center justify-center gap-2 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-sm">
             <Music size={14} className="animate-pulse" />
-            {maPlayer.isConnected 
+            {maPlayer?.isConnected 
               ? 'Web Player (Browser Audio) — Connected to MA' 
-              : maPlayer.connectionState === 'FAILED'
+              : maPlayer?.connectionState === 'FAILED'
                 ? 'Web Player Connection Failed — '
                 : 'Web Player (Browser Audio) — Connecting...'
             }
-            {maPlayer.connectionState === 'FAILED' && (
+            {maPlayer?.connectionState === 'FAILED' && (
               <button
-                onClick={maPlayer.reconnect}
+                onClick={maPlayer?.reconnect}
                 className="ml-2 text-xs underline hover:text-cyan-300"
               >
                 Reconnect
