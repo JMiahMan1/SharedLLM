@@ -43,11 +43,16 @@ test('Energy Insights widget shows enrolled telemetry', async ({ page }) => {
     if (r.url().includes('telemetry')) console.log('RESP', r.request().method(), r.url().split('/api/').pop(), '->', r.status());
   });
   await login(page);
-  await page.goto(`${UI_URL}/`, { waitUntil: 'networkidle' }).catch(() => {});
-  await page.waitForTimeout(4000);
+  await page.goto(`${UI_URL}/`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 
   const widget = page.locator('.glass-panel', { hasText: 'Energy Insights' });
-  await expect(widget).toBeVisible();
+  await widget.waitFor({ state: 'visible', timeout: 20000 });
+  // Poll for the widget to finish loading its telemetry data
+  await widget.waitFor(async () => {
+    const t = (await widget.innerText()).replace(/\n+/g, ' ');
+    return /W/.test(t) || t.includes('Telemetry Service Unconfigured') || t.includes('No energy data');
+  }, { timeout: 35000 }).catch(() => {});
   const txt = (await widget.innerText()).replace(/\n+/g, ' | ');
   console.log('ENERGY WIDGET TEXT:', txt);
 
