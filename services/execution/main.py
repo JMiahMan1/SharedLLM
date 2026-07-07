@@ -124,7 +124,6 @@ async def _check_internal_secret(x_internal_secret: str | None):
 
 # ─── App ───────────────────────────────────────────────────────────────────────
 
-@asynccontextmanager
 async def telemetry_ingestion_loop(interval_seconds: int = 60):
     """Background task: periodically read each enrolled power/energy entity's
     current HA state and ingest it as a telemetry snapshot, so the Energy
@@ -200,6 +199,7 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
             log.error(f"[telemetry] ingestion loop error: {ex}")
 
 
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     # Patch DNS resolver to route .local domains through dns-sync for live failover
     try:
