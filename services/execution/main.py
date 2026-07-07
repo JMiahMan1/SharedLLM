@@ -125,6 +125,81 @@ async def _check_internal_secret(x_internal_secret: str | None):
 # ─── App ───────────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
+async def telemetry_ingestion_loop(interval_seconds: int = 60):
+    """Background task: periodically read each enrolled power/energy entity's
+    current HA state and ingest it as a telemetry snapshot, so the Energy
+    Insights dashboard reflects *live* usage instead of stale manual data.
+
+    Resilient by design: any single failure (HA down, bad entity, identity
+    error) is caught per-entity and the loop keeps running.
+    """
+    log.info("[telemetry] ingestion loop starting (interval=%ss)", interval_seconds)
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            creds = await resolve_internal_user()
+            ha_url = creds.get("ha_url") if creds else None
+            ha_token = creds.get("ha_token") if creds else None
+            if not ha_url or not ha_token:
+                continue
+
+            # Fetch enrollments (those flagged for power tracking)
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(
+                        f"{IDENTITY_SVC_URL}/api/telemetry/enroll",
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status != 200:
+                            continue
+                        enroll_data = await resp.json()
+            except Exception as ex:
+                log.warning(f"[telemetry] could not fetch enrollments: {ex}")
+                continue
+
+            enrollments = enroll_data.get("enrollments", [])
+            power_enrollments = [e for e in enrollments if e.get("power_tracking")]
+
+            for e in power_enrollments:
+                entity_id = e.get("entity_id")
+                if not entity_id:
+                    continue
+                try:
+                    state = await ha_client.get_state(ha_url, ha_token, entity_id)
+                    if not state:
+                        continue
+                    raw = state.get("state")
+                    is_available = raw not in (None, "unavailable", "unknown", "none", "")
+                    try:
+                        power_w = float(raw) if raw not in (None, "unavailable", "unknown") else None
+                    except (TypeError, ValueError):
+                        power_w = None
+                    snapshot = {
+                        "entity_id": entity_id,
+                        "power_w": power_w,
+                        "is_available": is_available,
+                        "state": raw,
+                        "source": "ha-poll",
+                    }
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(
+                            f"{IDENTITY_SVC_URL}/api/telemetry/snapshot",
+                            headers={"X-Internal-Secret": INTERNAL_SECRET},
+                            json=snapshot,
+                            timeout=aiohttp.ClientTimeout(total=10),
+                        ) as resp:
+                            if resp.status != 200:
+                                log.warning(f"[telemetry] snapshot ingest failed for {entity_id}: {resp.status}")
+                except Exception as ex:
+                    log.warning(f"[telemetry] failed to ingest {entity_id}: {ex}")
+        except asyncio.CancelledError:
+            log.info("[telemetry] ingestion loop cancelled")
+            break
+        except Exception as ex:
+            log.error(f"[telemetry] ingestion loop error: {ex}")
+
+
 async def lifespan(app: FastAPI):
     # Patch DNS resolver to route .local domains through dns-sync for live failover
     try:
@@ -220,7 +295,16 @@ async def lifespan(app: FastAPI):
         return thread
     
     media_server: threading.Thread = run_media_server()
+
+    # Background telemetry ingestion (live Energy Insights usage)
+    telemetry_task = asyncio.create_task(telemetry_ingestion_loop())
+
     yield
+    telemetry_task.cancel()
+    try:
+        await telemetry_task
+    except Exception:
+        pass
     media_server.join(timeout=5)
     log.info("Execution Bridge shutting down.")
 
