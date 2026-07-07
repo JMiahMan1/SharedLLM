@@ -1,9 +1,12 @@
 import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
-import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight } from 'lucide-react';
+import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { api } from '../services/api';
+import type { GlobalSetting } from '../services/api';
 import LocationPanel from '../components/location/LocationPanel';
 
 const Settings = () => {
@@ -98,6 +101,8 @@ const Settings = () => {
         </div>
       )}
 
+      <SystemConfigSection isAdmin={Boolean(user?.is_admin)} onEdit={() => navigate('/admin/integrations')} />
+
       <div className="glass-panel rounded-2xl p-4 space-y-1">
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider px-3 pt-1 mb-2">Account</h2>
 
@@ -164,5 +169,51 @@ const SettingToggle = ({ icon, label, description, value, onChange }: {
     </div>
   </button>
 );
+
+const SystemConfigSection = ({ isAdmin, onEdit }: { isAdmin: boolean; onEdit: () => void }) => {
+  const { trigger } = useHaptics();
+  const { data: settings = [] } = useQuery<GlobalSetting[]>({
+    queryKey: ['settings'],
+    queryFn: () => api.getSettings(),
+    retry: 1,
+  });
+
+  const visibleSettings = settings.filter(
+    (s) => !['assistant_model', 'coding_model', 'librarian_model'].includes(s.key)
+  );
+
+  return (
+    <div className="glass-panel rounded-2xl p-4 space-y-1">
+      <div className="flex items-center justify-between px-3 pt-1 mb-2">
+        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">System Configuration</h2>
+        {isAdmin && (
+          <button
+            onClick={() => { trigger('light'); onEdit(); }}
+            className="flex items-center gap-1 text-xs font-medium text-purple-400 hover:text-purple-300 transition-colors"
+          >
+            <SlidersHorizontal size={14} />
+            Edit
+          </button>
+        )}
+      </div>
+
+      {visibleSettings.length === 0 ? (
+        <p className="px-3 py-3 text-xs text-slate-500">No system configuration available.</p>
+      ) : (
+        <div className="space-y-1">
+          {visibleSettings.map((setting) => (
+            <div key={setting.key} className="px-3 py-2.5 rounded-xl bg-white/5">
+              <p className="font-mono text-xs text-purple-300 truncate">{setting.key}</p>
+              <p className="mt-1 text-xs text-slate-300 break-words">{setting.value}</p>
+              {setting.description && (
+                <p className="mt-1 text-[10px] text-slate-600 italic">{setting.description}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default Settings;

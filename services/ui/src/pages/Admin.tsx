@@ -14,6 +14,7 @@ import {
   UserPlus,
   Database,
   Cloud,
+  Globe,
   ShieldAlert,
   Code2,
   BarChart3,

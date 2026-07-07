@@ -3,6 +3,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { AuthProvider } from '../context/AuthContext';
+import { LocationProvider } from '../context/LocationContext';
 
 interface RenderOptions {
   queryClient?: QueryClient;
@@ -21,7 +22,9 @@ export const renderWithProviders = (ui: ReactElement, options: RenderOptions = {
   const result = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
-        <AuthProvider>{ui}</AuthProvider>
+        <AuthProvider>
+          <LocationProvider>{ui}</LocationProvider>
+        </AuthProvider>
       </MemoryRouter>
     </QueryClientProvider>,
   );
