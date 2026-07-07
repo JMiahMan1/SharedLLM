@@ -73,13 +73,13 @@ function getErrorDetails(error: Error | null, errorInfo: ErrorInfo | null): Erro
   if (error) {
     const extraProps = Object.keys(error).filter(
       key => 
-        !['name', 'message', 'stack', 'componentStack'].includes(key) && 
-        typeof (error as Record<string, unknown>)[key] === 'string'
+        !['name', 'message', 'stack', 'componentStack'].includes(key) &&
+        typeof (error as unknown as Record<string, unknown>)[key] === 'string'
     );
     
     if (extraProps.length > 0) {
       const extraInfo = extraProps
-        .map(key => `${key}: ${(error as Record<string, unknown>)[key]}`)
+        .map(key => `${key}: ${(error as unknown as Record<string, unknown>)[key]}`)
         .join('\n');
       details.push({
         label: 'Additional Details',
