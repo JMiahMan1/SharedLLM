@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle, Square, Terminal, Volume2, Search, Cpu, RefreshCw, List } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, type RavenConfig, type RavenMission } from '../../services/api';
+import { api, apiClient, type RavenConfig, type RavenMission } from '../../services/api';
 import HelpTooltip from '../ui/HelpTooltip';
 import RavenAuditLog from './RavenAuditLog';
 import RavenLiveTrace from './RavenLiveTrace';
@@ -108,7 +108,7 @@ export default function RavenOpsPanel() {
     setInvestigationStartTime(Date.now());
     
     try {
-      const response = await api.post('/api/manual/investigation', {
+      const response = await apiClient.post('/api/manual/investigation', {
         prompt: investigationPrompt,
         mission_id: selectedMission?.id || null,
         type: 'manual'
@@ -136,7 +136,7 @@ export default function RavenOpsPanel() {
     }
     
     try {
-      await api.post('/api/manual/correction', {
+      await apiClient.post('/api/manual/correction', {
         mission_id: selectedMission.id,
         correction: correctionInput,
         context: correctionContext
@@ -650,7 +650,7 @@ export default function RavenOpsPanel() {
                     🔍 Investigation in Progress...
                   </span>
                   <span className="text-xs text-slate-500">
-                    Started: {new Date(investigationStartTime).toLocaleTimeString()}
+                    Started: {investigationStartTime ? new Date(investigationStartTime).toLocaleTimeString() : '—'}
                   </span>
                 </div>
               </div>
