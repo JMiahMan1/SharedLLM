@@ -9,23 +9,25 @@ const DISMISSED_KEY = 'server_banner_dismissed';
 const ServerConfigBanner = () => {
   const [status, setStatus] = useState<'checking' | 'disconnected' | 'connected' | 'no-config'>('checking');
   const [dismissed, setDismissed] = useState(false);
+  const [serverUrl, setServerUrl] = useState('');
   const intervalRef = useRef<number | null>(null);
   const mountedRef = useRef(false);
 
   const check = useCallback(async () => {
     if (!mountedRef.current) return;
-    const serverUrl = await storageGet('jarvis_server_url');
+    const storedUrl = await storageGet('jarvis_server_url');
 
-    if (!serverUrl) {
+    if (!storedUrl) {
       setStatus('no-config');
       return;
     }
 
-    let url = serverUrl.trim();
+    let url = storedUrl.trim();
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
       url = 'http://' + url;
     }
     url = url.replace(/\/+$/, '');
+    setServerUrl(url);
 
     const result = await checkConnectivity(url);
     if (mountedRef.current) {

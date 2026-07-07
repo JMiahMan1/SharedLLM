@@ -38,7 +38,7 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
           });
         } else {
           setMedia(null);
-          if (!userSettings.is_pinned) onMediaStop();
+          if (!userSettings.is_pinned) onMediaStop?.();
         }
       } catch {
         setMedia(null);

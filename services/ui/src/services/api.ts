@@ -803,6 +803,11 @@ export const api = {
     return resp.data;
   },
 
+  async getWorkspaceRavenMissions(workspaceId: string): Promise<RavenMission[]> {
+    const resp = await apiClient.get(`/api/workspaces/${encodeURIComponent(workspaceId)}/raven/missions`);
+    return resp.data;
+  },
+
   async createUserMission(query: string, priority = 1): Promise<{ status: string; mission: RavenMission }> {
     const resp = await apiClient.post('/api/raven/missions', { query, priority });
     return resp.data;
