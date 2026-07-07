@@ -103,9 +103,13 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
     partial: WidgetState | Partial<WidgetState> | ((state: WidgetState) => WidgetState | Partial<WidgetState>),
     replace?: boolean
   ) => {
-    rawSet((state) => {
-      const next = typeof partial === 'function' ? partial(state) : partial;
-      const merged = { ...state, ...next };
+    (rawSet as (
+      p: WidgetState | Partial<WidgetState> | ((state: WidgetState) => WidgetState | Partial<WidgetState>),
+      r?: boolean
+    ) => void)(
+      (state) => {
+        const next = typeof partial === 'function' ? partial(state) : partial;
+        const merged = { ...state, ...next };
       const visibleWidgets = merged.widgetRegistry
         .filter((def) => {
           if (def.mountConditions && !def.mountConditions(merged.mountCapabilities)) return false;
