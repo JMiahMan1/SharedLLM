@@ -2090,19 +2090,33 @@ async def get_ma_library(user_id: str = "", media_type: str = "TRACKS", offset: 
 
 @app.get("/execute/media/music-assistant/search")
 async def search_ma(user_id: str = "", query: str = "", media_type: str = "", limit: int = 20, artist: str = "", album: str = "", library_only: bool = True):
-    """Search MA for media items via HA proxy."""
+    """Search MA for media items — prefer the direct MA token API, fall back to HA proxy."""
     try:
         creds = await _resolve_mass_ha_creds(user_id)
+        mass_url = creds.get("mass_url") if creds else None
+        mass_token = creds.get("mass_token") if creds else None
+
+        # Primary path: direct MA REST API using the MA token (no HA dependency)
+        if mass_url and mass_token:
+            from services.execution.handlers.mass_client import search as _direct_search
+            results = await _direct_search(
+                mass_url, mass_token, query,
+                limit=limit,
+                media_types=[media_type.lower()] if media_type else None,
+            )
+            if results:
+                return {"status": "SUCCESS", "results": results, "query": query, "source": "music_assistant"}
+
+        # Fallback: HA music_assistant.search service
         ha_url = creds.get("ha_url") if creds else None
         ha_token = creds.get("ha_token") if creds else None
         mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
+        if ha_url and ha_token:
+            from services.execution.handlers.mass_ha_client import search as _ma_search
+            results = await _ma_search(ha_url, ha_token, query, mass_entry_id=mass_entry_id, media_types=[media_type] if media_type else None, limit=limit, artist=artist, album=album, library_only=library_only)
+            return {"status": "SUCCESS", "results": results, "query": query, "source": "ha"}
 
-        if not ha_url or not ha_token:
-            return {"status": "SUCCESS", "results": [], "notice": "MA/HA not configured"}
-
-        from services.execution.handlers.mass_ha_client import search as _ma_search
-        results = await _ma_search(ha_url, ha_token, query, mass_entry_id=mass_entry_id, media_types=[media_type] if media_type else None, limit=limit, artist=artist, album=album, library_only=library_only)
-        return {"status": "SUCCESS", "results": results, "query": query}
+        return {"status": "SUCCESS", "results": [], "notice": "MA/HA not configured"}
     except Exception as e:
         log.error(f"[ma/search] Error: {e}")
         return {"status": "FAILURE", "message": str(e), "results": []}
