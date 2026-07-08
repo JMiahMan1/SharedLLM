@@ -17,6 +17,7 @@ import {
   RefreshCw,
   CheckCircle2,
   XCircle,
+  Settings2,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
