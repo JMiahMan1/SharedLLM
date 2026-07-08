@@ -1,3 +1,13 @@
+from unittest.mock import MagicMock, AsyncMock, patch
+
+def _aio_resp(status=200, json_data=None, text=""):
+    """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
+    m = MagicMock()
+    m.status = status
+    m.json = AsyncMock(return_value=json_data if json_data is not None else {"status": "SUCCESS"})
+    m.text = AsyncMock(return_value=text)
+    return m
+
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -45,9 +55,7 @@ async def test_raven_mission_stream_websocket(monkeypatch):
     import redis.asyncio as redis
     monkeypatch.setattr(redis, "from_url", MockRedisModule.from_url)
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"id": 999, "status": "executing", "output_log": "[]"}
+    mock_resp = _aio_resp(200, {"id": 999, "status": "executing", "output_log": "[]"})
     
     with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)):
         with client.websocket_connect("/api/raven/missions/999/stream") as websocket:

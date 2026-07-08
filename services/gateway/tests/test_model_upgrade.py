@@ -1,3 +1,13 @@
+from unittest.mock import MagicMock, AsyncMock, patch
+
+def _aio_resp(status=200, json_data=None, text=""):
+    """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
+    m = MagicMock()
+    m.status = status
+    m.json = AsyncMock(return_value=json_data if json_data is not None else {"status": "SUCCESS"})
+    m.text = AsyncMock(return_value=text)
+    return m
+
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from services.gateway.background_worker import RavenWorker
@@ -58,15 +68,13 @@ class TestDynamicModelSelection:
 
     @pytest.mark.asyncio
     async def test_selects_largest_model(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
+        mock_resp = _aio_resp(200, {
             "models": [
                 {"name": "qwen3:8b", "size": 5_000_000_000},
                 {"name": "qwen3.6-35b-a3b:q4_k_m", "size": 21_000_000_000},
                 {"name": "qwen2.5-coder:7b", "size": 4_000_000_000},
             ]
-        }
+        })
 
         mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
 
@@ -81,14 +89,12 @@ class TestDynamicModelSelection:
 
     @pytest.mark.asyncio
     async def test_excludes_current_model(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
+        mock_resp = _aio_resp(200, {
             "models": [
                 {"name": "qwen3.6-35b-a3b:q4_k_m", "size": 21_000_000_000},
                 {"name": "qwen3:8b", "size": 5_000_000_000},
             ]
-        }
+        })
 
         mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
 
@@ -103,8 +109,7 @@ class TestDynamicModelSelection:
 
     @pytest.mark.asyncio
     async def test_returns_current_on_api_failure(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
+        mock_resp = _aio_resp(500)
 
         with patch("aiohttp.ClientSession") as mock_client:
             mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
@@ -116,9 +121,7 @@ class TestDynamicModelSelection:
 
     @pytest.mark.asyncio
     async def test_returns_current_on_no_models(self):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"models": []}
+        mock_resp = _aio_resp(200, {"models": []})
 
         with patch("aiohttp.ClientSession") as mock_client:
             mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)

@@ -81,7 +81,7 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - LEGACY_ENV_PATH=/app/.env
       - FORCE_RESEED=${FORCE_RESEED:-false}
-      - IDENTITY_SVC_URL=${IDENTITY_SVC_URL}
+      - IDENTITY_SVC_URL=${IDENTITY_SVC_URL:-http://identity:8001}
       - TZ=America/Phoenix
     volumes:
       - identity_db:/data

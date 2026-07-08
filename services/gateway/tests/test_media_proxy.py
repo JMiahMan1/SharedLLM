@@ -37,13 +37,16 @@ def client_fixture(monkeypatch):
     return TestClient(app)
 
 
-class MockHTTPXResponse:
-    def __init__(self, status_code=200, json_data=None):
-        self.status_code = status_code
+class MockAioResponse:
+    def __init__(self, status=200, json_data=None):
+        self.status = status
         self._json_data = json_data or {"status": "SUCCESS"}
-    
-    def json(self):
+
+    async def json(self):
         return self._json_data
+
+    async def text(self):
+        return ""
 
 
 @pytest.mark.asyncio
@@ -57,7 +60,7 @@ async def test_proxy_media_status_resolves_identity(monkeypatch, client):
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
         with patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=MockHTTPXResponse(json_data={
+            mock_client.post = AsyncMock(return_value=MockAioResponse(json_data={
                 "status": "SUCCESS",
                 "detail": {"active": None, "available": [], "all_players": []}
             }))
@@ -83,7 +86,7 @@ async def test_proxy_media_status_falls_back_to_first_user(monkeypatch, client):
         })):
             with patch('aiohttp.ClientSession') as mock_client_cls:
                 mock_client = AsyncMock()
-                mock_client.post = AsyncMock(return_value=MockHTTPXResponse(json_data={
+                mock_client.post = AsyncMock(return_value=MockAioResponse(json_data={
                     "status": "SUCCESS",
                     "detail": {"active": None, "available": [], "all_players": []}
                 }))
@@ -105,7 +108,7 @@ async def test_proxy_media_transport_resolves_identity(monkeypatch, client):
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
         with patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=MockHTTPXResponse(json_data={
+            mock_client.post = AsyncMock(return_value=MockAioResponse(json_data={
                 "status": "SUCCESS"
             }))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -126,7 +129,7 @@ async def test_proxy_media_play_resolves_identity(monkeypatch, client):
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
         with patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=MockHTTPXResponse(json_data={
+            mock_client.post = AsyncMock(return_value=MockAioResponse(json_data={
                 "status": "SUCCESS"
             }))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -147,7 +150,7 @@ async def test_proxy_audiobookshelf_resolves_identity(monkeypatch, client):
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
         with patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=MockHTTPXResponse(json_data={
+            mock_client.post = AsyncMock(return_value=MockAioResponse(json_data={
                 "status": "SUCCESS"
             }))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -167,7 +170,7 @@ async def test_proxy_media_status_forwards_correct_payload(monkeypatch, client):
     
     def capture_post(*args, **kwargs):
         captured_payload.update(kwargs.get("json", {}))
-        return MockHTTPXResponse(json_data={"status": "SUCCESS"})
+        return MockAioResponse(json_data={"status": "SUCCESS"})
     
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
     
@@ -194,7 +197,7 @@ async def test_proxy_media_status_preserves_request_body(monkeypatch, client):
     
     def capture_post(*args, **kwargs):
         captured_payload.update(kwargs.get("json", {}))
-        return MockHTTPXResponse(json_data={"status": "SUCCESS"})
+        return MockAioResponse(json_data={"status": "SUCCESS"})
     
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
     
@@ -221,7 +224,7 @@ async def test_proxy_media_transport_preserves_command(monkeypatch, client):
     
     def capture_post(*args, **kwargs):
         captured_payload.update(kwargs.get("json", {}))
-        return MockHTTPXResponse(json_data={"status": "SUCCESS"})
+        return MockAioResponse(json_data={"status": "SUCCESS"})
     
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
     
@@ -251,7 +254,7 @@ async def test_proxy_media_play_preserves_query(monkeypatch, client):
     
     def capture_post(*args, **kwargs):
         captured_payload.update(kwargs.get("json", {}))
-        return MockHTTPXResponse(json_data={"status": "SUCCESS"})
+        return MockAioResponse(json_data={"status": "SUCCESS"})
     
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
     
@@ -283,7 +286,7 @@ async def test_proxy_audiobookshelf_preserves_action(monkeypatch, client):
     
     def capture_post(*args, **kwargs):
         captured_payload.update(kwargs.get("json", {}))
-        return MockHTTPXResponse(json_data={"status": "SUCCESS"})
+        return MockAioResponse(json_data={"status": "SUCCESS"})
     
     mock_creds = {"user": "testuser", "ha_url": "http://ha.local", "ha_token": "secret"}
     
@@ -311,7 +314,7 @@ async def test_proxy_media_status_empty_body(monkeypatch, client):
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
         with patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=MockHTTPXResponse(json_data={"status": "SUCCESS"}))
+            mock_client.post = AsyncMock(return_value=MockAioResponse(json_data={"status": "SUCCESS"}))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
             mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
             
@@ -330,7 +333,7 @@ async def test_proxy_media_status_execution_returns_error(monkeypatch, client):
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
         with patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
-            mock_client.post = AsyncMock(return_value=MockHTTPXResponse(status_code=500, json_data={
+            mock_client.post = AsyncMock(return_value=MockAioResponse(status=500, json_data={
                 "status": "FAILURE",
                 "message": "HA connection failed"
             }))

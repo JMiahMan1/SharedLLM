@@ -7,6 +7,16 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, AsyncMock, patch
 
+def _aio_resp(status=200, json_data=None, text=""):
+    """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
+    m = MagicMock()
+    m.status = status
+    m.json = AsyncMock(return_value=json_data if json_data is not None else {"status": "SUCCESS"})
+    m.text = AsyncMock(return_value=text)
+    return m
+
+
+
 
 @pytest.fixture(name="client")
 def client_fixture(monkeypatch):
@@ -37,15 +47,11 @@ async def test_get_media_detail_success(client):
         "mass_token": "test-mass-token",
     }
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"item_id": "123", "name": "Test Song", "favorite": True}
+    mock_response = _aio_resp(200, {"item_id": "123", "name": "Test Song", "favorite": True})
 
     async def post_side_effect(url, **kwargs):
         if "log" in url:
-            log_resp = MagicMock()
-            log_resp.status_code = 200
-            log_resp.json.return_value = {}
+            log_resp = _aio_resp(200, {})
             return log_resp
         return mock_response
 
@@ -81,15 +87,11 @@ async def test_toggle_favorite_add(client):
         "mass_token": "test-mass-token",
     }
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {}
+    mock_response = _aio_resp(200, {})
 
     async def post_side_effect(url, **kwargs):
         if "log" in url:
-            log_resp = MagicMock()
-            log_resp.status_code = 200
-            log_resp.json.return_value = {}
+            log_resp = _aio_resp(200, {})
             return log_resp
         return mock_response
 
@@ -126,22 +128,16 @@ async def test_toggle_favorite_remove(client):
     }
 
     # First call: music/item_by_uri, Second call: music/favorites/remove_item
-    mock_resolve_resp = MagicMock()
-    mock_resolve_resp.status_code = 200
-    mock_resolve_resp.json.return_value = {"item_id": "123", "media_type": "track"}
+    mock_resolve_resp = _aio_resp(200, {"item_id": "123", "media_type": "track"})
 
-    mock_remove_resp = MagicMock()
-    mock_remove_resp.status_code = 200
-    mock_remove_resp.json.return_value = {}
+    mock_remove_resp = _aio_resp(200, {})
 
     ma_responses = [mock_resolve_resp, mock_remove_resp]
     ma_response_iter = iter(ma_responses)
 
     async def post_side_effect(url, **kwargs):
         if "log" in url:
-            log_resp = MagicMock()
-            log_resp.status_code = 200
-            log_resp.json.return_value = {}
+            log_resp = _aio_resp(200, {})
             return log_resp
         return next(ma_response_iter)
 
