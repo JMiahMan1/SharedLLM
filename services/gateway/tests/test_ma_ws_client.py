@@ -114,6 +114,16 @@ class TestInitialization:
     def test_msg_id_starts_at_zero(self, client):
         assert client._msg_id == 0
 
+    def test_init_ws_url_with_https(self):
+        """HTTPS URLs should use wss:// for WebSocket connections."""
+        client = MAWebSocketClient("https://ha.sumemail.com:8095", "test-token")
+        assert "wss://ha.sumemail.com:8095/ws?token=test-token" == client.ws_url
+
+    def test_init_ws_url_with_http(self):
+        """HTTP URLs should use ws:// for WebSocket connections."""
+        client = MAWebSocketClient("http://ha.sumemail.com:8095", "test-token")
+        assert "ws://ha.sumemail.com:8095/ws?token=test-token" == client.ws_url
+
 
 # ---------------------------------------------------------------------------
 # Connection Tests
