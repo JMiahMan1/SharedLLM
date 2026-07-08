@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { Settings2 } from 'lucide-react';
 import type { WidgetSize, WidgetContextMenuProps } from '../../types/widget';
 
 const SIZE_OPTIONS: { value: WidgetSize; label: string }[] = [
@@ -92,8 +93,9 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
           }}
           className="text-slate-500 hover:text-white transition-colors p-1 rounded hover:bg-white/5"
           title="Widget options"
+          aria-label="Widget options"
         >
-          ⚙
+          <Settings2 size={14} />
         </button>
       </div>
     );

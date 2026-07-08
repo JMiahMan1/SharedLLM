@@ -29,6 +29,7 @@ import HaloBanner from '../components/presence/HaloBanner';
 import VoiceAssistantOverlay from '../components/voice/VoiceAssistantOverlay';
 import Modal from '../components/ui/Modal';
 import BentoBoxDashboard from '../components/dashboard/BentoBoxDashboard';
+import DashboardSettingsPanel from '../components/dashboard/DashboardSettingsPanel';
 
 // ── Per-section Error Boundary ───────────────────────────────────────────────
 
@@ -260,6 +261,7 @@ const Dashboard = () => {
   const { user } = useAuth();
   const { trigger } = useHaptics();
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const debouncedSearch = useDebounce(searchQuery, 300);
   const { results: searchResults, error: searchError, isSearching, clear: clearSearch } = useSearch(debouncedSearch);
@@ -424,6 +426,15 @@ const Dashboard = () => {
             aria-label="Open voice assistant"
           >
             <Mic size={18} />
+          </button>
+
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="flex items-center justify-center w-10 h-10 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+            aria-label="Dashboard settings"
+            title="Dashboard settings"
+          >
+            <Settings2 size={16} />
           </button>
         </div>
       </header>
@@ -695,6 +706,12 @@ const Dashboard = () => {
         onCommand={(transcript) => {
           setSearchQuery(transcript);
         }}
+      />
+
+      {/* ── Dashboard Settings ── */}
+      <DashboardSettingsPanel
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );

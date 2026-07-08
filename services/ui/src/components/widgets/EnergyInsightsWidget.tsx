@@ -53,8 +53,15 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
         });
 
         setSummaries(summaryMap);
-      } catch {
-        setError('Telemetry Service Unconfigured');
+      } catch (err) {
+        const msg = (err as Error).message?.toLowerCase() ?? '';
+        if (msg.includes('not found') || msg.includes('404')) {
+          setError('Telemetry service is not running. Please check the service status in the Dashboard.');
+        } else if (msg.includes('connect') || msg.includes('refused') || msg.includes('econnrefused')) {
+          setError('Cannot reach telemetry service. Ensure the logging service is running and network discovery is active.');
+        } else {
+          setError('Telemetry service is unconfigured. Enroll devices in Admin → Telemetry to enable energy tracking.');
+        }
       } finally {
         setLoading(false);
       }
@@ -213,8 +220,10 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
       ) : (
         <div className="flex flex-col items-center justify-center h-full text-center py-4">
           <Zap size={28} className="text-slate-700 mb-2" />
-          <p className="text-sm text-slate-500">No energy data</p>
-          <p className="text-xs text-slate-600 mt-1">Enroll devices in Admin → Telemetry</p>
+          <p className="text-sm text-slate-500">No energy data available</p>
+          <p className="text-xs text-slate-600 mt-1">
+            Enroll power-tracking entities via Admin → Telemetry, or ensure devices are reporting.
+          </p>
         </div>
       )}
     </WidgetCard>
