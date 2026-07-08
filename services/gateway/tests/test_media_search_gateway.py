@@ -7,6 +7,16 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, AsyncMock, patch
 
+def _aio_resp(status=200, json_data=None, text=""):
+    """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
+    m = MagicMock()
+    m.status = status
+    m.json = AsyncMock(return_value=json_data if json_data is not None else {"status": "SUCCESS"})
+    m.text = AsyncMock(return_value=text)
+    return m
+
+
+
 
 @pytest.fixture(name="client")
 def client_fixture(monkeypatch):
@@ -41,9 +51,7 @@ async def test_gateway_search_ma_library_only_default_not_found(monkeypatch, cli
     mock_search_results = {"status": "SUCCESS", "results": []}
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_search_results
+        mock_response = _aio_resp(200, mock_search_results)
         
         mock_get = AsyncMock(return_value=mock_response)
         
@@ -71,9 +79,7 @@ async def test_gateway_search_ma_not_library_only_found(monkeypatch, client):
     }
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_search_results
+        mock_response = _aio_resp(200, mock_search_results)
         
         mock_get = AsyncMock(return_value=mock_response)
         
@@ -101,9 +107,7 @@ async def test_gateway_search_ma_failure_propagation(monkeypatch, client):
     }
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_failure_results
+        mock_response = _aio_resp(200, mock_failure_results)
         
         mock_get = AsyncMock(return_value=mock_response)
         

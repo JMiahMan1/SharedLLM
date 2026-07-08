@@ -43,10 +43,10 @@ async def test_bulk_settings_proxy_forwards_post(monkeypatch):
 
     class MockResponse:
         def __init__(self, status_code=200, payload=None):
-            self.status_code = status_code
+            self.status = status_code
             self._payload = payload or {"status": "SUCCESS"}
 
-        def json(self):
+        async def json(self):
             return self._payload
 
     class MockAsyncClient:
@@ -106,11 +106,10 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     class MockResponse:
         def __init__(self, json_data, status_code=200):
             self.json_data = json_data
-            self.status_code = status_code
-        def json(self): return self.json_data
+            self.status = status_code
+        async def json(self): return self.json_data
         def raise_for_status(self): pass
-        @property
-        def text(self): return str(self.json_data)
+        async def text(self): return str(self.json_data)
 
     monkeypatch.setattr(main, "call_ollama", AsyncMock(return_value=MockResponse({"message": {"content": "Mocked LLM response"}})))
     
@@ -204,11 +203,10 @@ async def test_list_ollama_tags(client: TestClient, monkeypatch):
     class MockResponse:
         def __init__(self, json_data, status_code=200):
             self.json_data = json_data
-            self.status_code = status_code
-        def json(self): return self.json_data
+            self.status = status_code
+        async def json(self): return self.json_data
         def raise_for_status(self): pass
-        @property
-        def text(self): return str(self.json_data)
+        async def text(self): return str(self.json_data)
         
     class MockAsyncClient:
         async def __aenter__(self): return self
@@ -245,11 +243,10 @@ async def test_proxy_show_embed_embeddings(client: TestClient, monkeypatch):
     class MockResponse:
         def __init__(self, json_data, status_code=200):
             self.json_data = json_data
-            self.status_code = status_code
-        def json(self): return self.json_data
+            self.status = status_code
+        async def json(self): return self.json_data
         def raise_for_status(self): pass
-        @property
-        def text(self): return str(self.json_data)
+        async def text(self): return str(self.json_data)
         
     class MockAsyncClient:
         async def __aenter__(self): return self
