@@ -669,6 +669,45 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
   }, [cmdPrevious, setError]);
 
+  // Send an arbitrary MA JSON-RPC command. Used to control a *physical* MA
+  // player selected from the device picker (e.g. players/play_media with a
+  // player_id). Reuses the browser's ma-jsonrpc WebSocket, which reaches MA
+  // directly and sidesteps the gateway's server-side hostname loop.
+  const maCommand = useCallback(
+    (command: string, args: Record<string, unknown> = {}): Promise<unknown> => sendJsonRpc(command, args),
+    [sendJsonRpc],
+  );
+
+  // List Music Assistant players so the UI device picker can offer them.
+  const listMaPlayers = useCallback(async (): Promise<
+    Array<{ player_id: string; name: string; available: boolean; state: string; powered: boolean }>
+  > => {
+    try {
+      const raw = (await sendJsonRpc('players/all', {})) as { result?: unknown } | unknown;
+      const players = (
+        raw && typeof raw === 'object' && 'result' in (raw as Record<string, unknown>)
+          ? (raw as { result: unknown }).result
+          : raw
+      ) as unknown[];
+      if (!Array.isArray(players)) return [];
+      return players
+        .map((p) => {
+          const pl = p as Record<string, unknown>;
+          return {
+            player_id: String(pl.player_id ?? ''),
+            name: String(pl.name ?? pl.display_name ?? pl.player_id ?? 'Unknown Player'),
+            available: Boolean(pl.available ?? true),
+            state: String(pl.state ?? 'idle'),
+            powered: Boolean(pl.powered ?? true),
+          };
+        })
+        .filter((p) => p.player_id);
+    } catch (err) {
+      console.error('[MAWebPlayer] listMaPlayers failed:', err);
+      return [];
+    }
+  }, [sendJsonRpc]);
+
   const setVolume = useCallback((volume: number) => {
     console.log('[MAWebPlayer] setVolume called:', volume);
     try {
@@ -771,6 +810,8 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     cmdPrevious,
     next,
     previous,
+    maCommand,
+    listMaPlayers,
     audioRef,
     jsonrpcWs: jsonrpcWsRef,
     sendspinWs: sendspinWsRef,
