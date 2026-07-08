@@ -9,9 +9,8 @@ import {
   X,
   Settings2,
 } from 'lucide-react';
-import { useWidgetStore } from '../stores/widgetStore';
+import { useWidgetStore, defaultWidgetDefs } from '../stores/widgetStore';
 import type { UserWidgetSettings, WidgetVisibility } from '../types/widget';
-import { defaultWidgetDefs } from './defaultWidgetDefs';
 
 interface DashboardSettingsPanelProps {
   isOpen: boolean;

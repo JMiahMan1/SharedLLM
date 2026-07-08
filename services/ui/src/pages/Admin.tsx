@@ -23,7 +23,6 @@ import {
   Play,
   Plus,
   Activity,
-  TrendingUp,
   Radio,
   Megaphone,
   Phone,
@@ -42,11 +41,9 @@ import type {
   LogEntry,
   UserProfile,
   RagStats,
-  TelemetryEnrollment,
 } from '../services/api';
 import Modal from '../components/ui/Modal';
 import HelpTooltip from '../components/ui/HelpTooltip';
-import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
 import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
@@ -170,8 +167,6 @@ const Admin = () => {
   const [newPatternSteps, setNewPatternSteps] = useState('');
   const [executePatternName, setExecutePatternName] = useState('');
   const [executeTargetCluster, setExecuteTargetCluster] = useState('');
-  const [telemetryEntityId, setTelemetryEntityId] = useState('');
-  const [telemetryOfflineThreshold, setTelemetryOfflineThreshold] = useState(30);
   const [intercomTab, setIntercomTab] = useState<'sessions' | 'broadcast' | 'announce' | 'config'>('sessions');
   const [broadcastMessage, setBroadcastMessage] = useState('');
   const [broadcastTargets, setBroadcastTargets] = useState('');
@@ -463,39 +458,6 @@ const Admin = () => {
       toast.success('Pattern execution started');
     },
     onError: (error: Error) => toast.error(error.message || 'Failed to execute pattern'),
-  });
-
-  interface TelemetryEnrollmentItem { entity_id: string; power_tracking: boolean; availability_tracking: boolean; offline_alert_threshold_minutes: number }
-  const { data: telemetryEnrollments = [] } = useQuery<TelemetryEnrollmentItem[]>({
-    queryKey: ['telemetry-enrollments'],
-    queryFn: () => api.getTelemetryEnrollments(),
-  });
-
-  const enrollTelemetryMutation = useMutation({
-    mutationFn: (data: Partial<TelemetryEnrollment>) => api.enrollTelemetry(data.entity_id!, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['telemetry-enrollments'] });
-      setTelemetryEntityId('');
-      toast.success('Device enrolled in telemetry');
-    },
-    onError: (error: Error) => toast.error(error.message || 'Failed to enroll device'),
-  });
-
-  const unenrollTelemetryMutation = useMutation({
-    mutationFn: (entity_id: string) => api.unenrollTelemetry(entity_id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['telemetry-enrollments'] });
-      toast.success('Device unenrolled from telemetry');
-    },
-    onError: (error: Error) => toast.error(error.message || 'Failed to unenroll device'),
-  });
-
-  const analyzeTelemetryMutation = useMutation({
-    mutationFn: () => api.analyzeTelemetry(),
-    onSuccess: () => {
-      toast.success('Telemetry analysis queued');
-    },
-    onError: (error: Error) => toast.error(error.message || 'Failed to trigger analysis'),
   });
 
   const { data: intercomSessions = [] } = useQuery<IntercomSessionItem[]>({
@@ -1126,10 +1088,6 @@ const Admin = () => {
       )}
 
       {activeTab === 'telemetry' && <TelemetryAdminPanel />}
-            </div>
-          </section>
-        </div>
-      )}
 
       {activeTab === 'intercom' && (
         <div className="space-y-6">
