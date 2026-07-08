@@ -94,16 +94,12 @@ class MAWebSocketClient:
         # Token is passed as a query parameter — this is how MA's WebSocket
         # middleware expects authentication (not via headers).
         #
-        # MA is exposed in two different ways in this deployment:
-        # - direct MA HTTP port (8095), which should always use `ws://`
-        # - proxied HTTPS origins, which may need `wss://`
-        #
-        # The previous scheme selection followed the URL prefix alone, which
-        # broke direct MA connections when the stored URL happened to be
-        # `https://...:8095` even though the websocket itself is plain WS.
+        # The WebSocket scheme must match the original URL scheme:
+        # - https:// -> wss://
+        # - http:// -> ws://
         parsed_url = urlparse(self._mass_url)
         port = parsed_url.port or (8095 if parsed_url.scheme == "http" else 443)
-        ws_scheme = "ws://" if port == 8095 else ("wss://" if parsed_url.scheme == "https" else "ws://")
+        ws_scheme = "wss://" if parsed_url.scheme == "https" else "ws://"
         http_base = self._mass_url.replace("http://", "").replace("https://", "")
         self._ws_url = f"{ws_scheme}{http_base}/ws?token={mass_token}"
         self._reconnect_base_delay = reconnect_base_delay
