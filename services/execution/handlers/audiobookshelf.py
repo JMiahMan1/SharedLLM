@@ -86,21 +86,24 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
         log.warning(f"[abs] Library search failed, falling back to external: {library_result.get('error')}")
         # Fall through to external metadata search
 
-    books = library_result.get("book", [])
+    books = library_result.get("results", [])
     if books:
         book_summaries = []
         for b in books[:req.limit]:
-            library_item = b.get("libraryItem", {})
+            library_item = b.get("libraryItem", b)
             media = library_item.get("media", {})
             meta = media.get("metadata", {})
             book_id = library_item.get("id", "")
             chapters = media.get("chapters", [])
+            cover = media.get("coverPath", "")
+            if not cover and isinstance(media.get("cover"), dict):
+                cover = media.get("cover", {}).get("path", "")
             book_summaries.append({
                 "id": book_id,
                 "title": meta.get("title", "Unknown"),
                 "author": meta.get("authorName", "Unknown"),
                 "narrator": meta.get("narratorName", ""),
-                "series": meta.get("series", ""),
+                "series": meta.get("seriesName", ""),
                 "publishedYear": meta.get("publishedYear", ""),
                 "genres": meta.get("genres", []),
                 "duration": media.get("duration", 0),
@@ -109,7 +112,7 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
                 "status": library_item.get("status", ""),
                 "chapter_count": len(chapters) if isinstance(chapters, list) else 0,
                 "play_url": await abs_client.get_stream_url(abs_url, abs_key, book_id) if book_id else "",
-                "cover": media.get("cover", {}).get("path", "") if isinstance(media.get("cover"), dict) else (media.get("cover", "") or ""),
+                "cover": cover,
             })
 
         return ExecutionResult(
