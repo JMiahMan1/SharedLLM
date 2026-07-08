@@ -1,20 +1,22 @@
-import pytest
-import respx
-import aiohttp
 import sys
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
 _mock_redis_async = MagicMock()
 _mock_redis = MagicMock()
 _mock_redis.asyncio = _mock_redis_async
 sys.modules['redis'] = _mock_redis
 sys.modules['redis.asyncio'] = _mock_redis_async
 
-from fastapi.testclient import TestClient
-from services.gateway.main import app, STORAGE_SVC
-from services.gateway.config import IDENTITY_SVC, RAG_SVC
-import json
 import os
+import json
+
+from fastapi.testclient import TestClient
 from sqlmodel import Session, create_engine, select
+
+from services.gateway import main as gateway_main
+from services.gateway.main import app
 from services.identity.models import GlobalSetting
 
 # Provide default model values so get_test_settings() doesn't raise
@@ -22,6 +24,24 @@ os.environ.setdefault("ASSISTANT_MODEL", "qwen3:8b")
 os.environ.setdefault("CODING_MODEL", "qwen2.5-coder:7b")
 os.environ.setdefault("LIBRARIAN_MODEL", "qwen3:8b")
 os.environ.setdefault("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
+
+
+def _aio_resp(status=200, json_data=None, text=None):
+    if json_data is None:
+        json_data = {"status": "SUCCESS"}
+    if text is None:
+        text = json.dumps(json_data)
+    m = MagicMock()
+    m.status = status
+    m.json = AsyncMock(return_value=json_data)
+    m.text = AsyncMock(return_value=text)
+    m.content = MagicMock()
+    m.content.iter_chunked = MagicMock(return_value=iter([text.encode()]))
+    m.read = AsyncMock(return_value=text.encode())
+    m.release = AsyncMock()
+    m.raise_for_status = MagicMock()
+    return m
+
 
 def get_test_settings():
     db_path = "/data/identity.db"
@@ -39,13 +59,12 @@ def get_test_settings():
         except Exception:
             pass
 
-    # If DB has no values or doesn't exist, try querying identity service API directly
     if not settings.get("assistant_model") or not settings.get("coding_model"):
         identity_url = os.getenv("IDENTITY_SVC_URL", "http://127.0.0.1:8001")
         internal_secret = os.getenv("INTERNAL_SECRET", "change-me-in-production")
         try:
-            import aiohttp
-            with aiohttp.ClientSession(timeout=5.0) as client:
+            import aiohttp as _aio
+            with _aio.ClientSession(timeout=5.0) as client:
                 resp = client.get(
                     f"{identity_url}/api/settings",
                     headers={"X-Internal-Secret": internal_secret}
@@ -56,7 +75,6 @@ def get_test_settings():
         except Exception:
             pass
 
-    # Fallback to env without hardcoded strings
     if not settings.get("assistant_model"):
         settings["assistant_model"] = os.getenv("ASSISTANT_MODEL")
     if not settings.get("coding_model"):
@@ -70,19 +88,6 @@ def get_test_settings():
     if not settings.get("active_llm_provider"):
         settings["active_llm_provider"] = os.getenv("ACTIVE_LLM_PROVIDER") or "ollama"
 
-    # Validate that we actually got model values
-    if not settings.get("assistant_model"):
-        raise ValueError(
-            "assistant_model could not be loaded from database, identity API, or environment. "
-            "Please configure ASSISTANT_MODEL."
-        )
-    if not settings.get("coding_model"):
-        raise ValueError(
-            "coding_model could not be loaded from database, identity API, or environment. "
-            "Please configure CODING_MODEL."
-        )
-
-    # Force service URLs to match the test environment
     for key, env_var in [
         ("identity_svc_url", "IDENTITY_SVC_URL"),
         ("execution_svc_url", "EXECUTION_SVC_URL"),
@@ -98,52 +103,57 @@ def get_test_settings():
 
     return settings
 
+
 client = TestClient(app)
+
 
 @pytest.fixture
 def auth_headers():
     return {"Authorization": "Bearer test-token"}
 
-@respx.mock
-def test_chat_storage_routing(auth_headers):
+
+def _make_session(settings, ollama_iter):
+    """Mock aiohttp session; monkeypatch get_http_client to return it."""
+    settings_list = [{"key": k, "value": v} for k, v in settings.items()]
+
+    async def post_side_effect(url, **kwargs):
+        if "/api/resolve" in url:
+            return _aio_resp(200, {
+                "user": "testuser", "is_admin": True,
+                "ha_url": "http://ha.local", "ha_token": "token",
+                "nextcloud_url": "http://nc.local",
+                "nextcloud_user": "ncuser", "nextcloud_pass": "ncpass",
+            })
+        if "/rag/search" in url:
+            return _aio_resp(200, {"results": []})
+        if "/api/chat" in url:
+            return _aio_resp(200, next(ollama_iter))
+        if "/index/full" in url:
+            return _aio_resp(200, {"message": "Indexing started"})
+        return _aio_resp(200, {})
+
+    async def get_side_effect(url, **kwargs):
+        if "/api/settings" in url:
+            return _aio_resp(200, settings_list)
+        return _aio_resp(200, {})
+
+    sess = AsyncMock()
+    sess.post.side_effect = post_side_effect
+    sess.get.side_effect = get_side_effect
+    sess.__aenter__.return_value = sess
+    sess.__aexit__.return_value = False
+    return sess
+
+
+@pytest.mark.asyncio
+async def test_chat_storage_routing(auth_headers, monkeypatch):
     settings = get_test_settings()
-    identity_svc = settings.get("identity_svc_url") or IDENTITY_SVC
-    rag_svc = settings.get("rag_svc_url") or RAG_SVC
-    storage_svc = settings.get("storage_svc_url") or STORAGE_SVC
 
     # Mock system instruction loading to avoid real Identity service calls
-    import services.gateway.main as gateway_main
     gateway_main.select_system_instruction_for_query = lambda q, m: "# System instruction mock"
     gateway_main.load_prompt = AsyncMock(return_value="# Raven protocol mock")
 
-    # Mock identity settings (needed by get_assistant_model in chat path)
-    respx.get(f"{identity_svc}/api/settings").mock(
-        return_value=MagicMock(200, json=[
-            {"key": k, "value": v} for k, v in settings.items()
-        ])
-    )
-    
-    # Mock identity resolution
-    respx.post(f"{identity_svc}/api/resolve").mock(
-        return_value=MagicMock(200, json={
-            "user": "testuser",
-            "is_admin": True,
-            "ha_url": "http://ha.local",
-            "ha_token": "token",
-            "nextcloud_url": "http://nc.local",
-            "nextcloud_user": "ncuser",
-            "nextcloud_pass": "ncpass"
-        })
-    )
-    
-    # Mock the RAG search
-    respx.post(f"{rag_svc}/rag/search").mock(
-        return_value=MagicMock(200, json={"results": []})
-    )
-
-    # Mock Ollama generation - simulate a generated JSON tool block from LLM
-    # We use a side effect to return a tool call the first time and a conversational response the second time
-    # to avoid infinite loops in the AgentLoop.
+    # Simulate a generated JSON tool block from LLM, then a conversational response.
     responses = [
         {
             "model": settings.get("assistant_model"),
@@ -162,42 +172,35 @@ def test_chat_storage_routing(auth_headers):
             "done": True
         }
     ]
-    
-    response_iter = iter(responses)
-    def ollama_side_effect(request):
-        try:
-            return MagicMock(200, json=next(response_iter))
-        except StopIteration:
-            return MagicMock(200, json=responses[-1])
+    ollama_iter = iter(responses)
 
-    llm_local_url = settings.get("llm_local_url")
-    llm_route = respx.post(f"{llm_local_url}/api/chat").mock(side_effect=ollama_side_effect)
+    sess = _make_session(settings, ollama_iter)
+    monkeypatch.setattr(gateway_main, "get_http_client", lambda: sess)
 
-    # Mock Storage Index call
-    storage_route = respx.post(f"{storage_svc}/index/full").mock(
-        return_value=MagicMock(200, json={"message": "Indexing started"})
-    )
+    # Also cover orchestrator's direct aiohttp.ClientSession usage for /api/settings
+    with patch("aiohttp.ClientSession", return_value=sess):
+        # Trigger chat handler
+        response = client.post("/api/chat", json={
+            "query": "index my storage please",
+            "stream": False
+        }, headers=auth_headers)
 
-    # Trigger chat handler
-    response = client.post("/api/chat", json={
-        "query": "index my storage please",
-        "stream": False
-    }, headers=auth_headers)
-    
     assert response.status_code == 200
     data = response.json()
     assert "Indexing started" in data["message"]["content"]
-    
+
     # 1. Verify the anti-refusal nudge was injected into the prompt
-    assert llm_route.called
-    llm_request_payload = json.loads(llm_route.calls.last.request.content)
+    chat_calls = [c for c in sess.post.call_args_list if "/api/chat" in str(c[0][0])]
+    assert chat_calls, "Ollama /api/chat was not called"
+    llm_request_payload = chat_calls[0][1]["json"]
     system_prompt = llm_request_payload["messages"][0]["content"]
     assert "CRITICAL DIRECTIVE: You have full permission to access the storage system" in system_prompt
-    
+
     # 2. Verify the storage routing correctly mapped the payload
-    assert storage_route.called
-    storage_request_payload = json.loads(storage_route.calls.last.request.content)
-    
+    storage_calls = [c for c in sess.post.call_args_list if "/index/full" in str(c[0][0])]
+    assert storage_calls, "Storage /index/full was not called"
+    storage_request_payload = storage_calls[0][1]["json"]
+
     # 3. Verify it overrode the payload to match NextCloud Provider schema
     assert "provider" in storage_request_payload
     assert storage_request_payload["provider"]["kind"] == "nextcloud"
