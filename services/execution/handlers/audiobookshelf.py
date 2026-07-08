@@ -21,14 +21,11 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
             message="Audiobookshelf URL not configured.",
             service="audiobookshelf",
         )
-    if not abs_key and (username and password):
-        abs_key = await abs_client.abs_login(abs_url, username, password)
-        if not abs_key:
-            return ExecutionResult(
-                status="FAILURE",
-                message="Audiobookshelf login failed with provided credentials.",
-                service="audiobookshelf",
-            )
+    if username and password:
+        # Always obtain a fresh token via login; the stored API key may be stale/expired.
+        fresh = await abs_client.abs_login(abs_url, username, password)
+        if fresh:
+            abs_key = fresh
     if not abs_key:
         return ExecutionResult(
             status="FAILURE",
