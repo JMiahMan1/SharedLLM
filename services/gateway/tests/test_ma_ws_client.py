@@ -114,13 +114,13 @@ class TestInitialization:
     def test_msg_id_starts_at_zero(self, client):
         assert client._msg_id == 0
 
-    def test_init_ws_url_with_https(self):
-        """HTTPS URLs should use wss:// for WebSocket connections."""
+    def test_init_ws_url_with_https_port_8095(self):
+        """HTTPS URL with port 8095 should use ws:// (MA direct port)."""
         client = MAWebSocketClient("https://ha.sumemail.com:8095", "test-token")
-        assert "wss://ha.sumemail.com:8095/ws?token=test-token" == client.ws_url
+        assert "ws://ha.sumemail.com:8095/ws?token=test-token" == client.ws_url
 
-    def test_init_ws_url_with_http(self):
-        """HTTP URLs should use ws:// for WebSocket connections."""
+    def test_init_ws_url_with_http_port_8095(self):
+        """HTTP URL with port 8095 should use ws://."""
         client = MAWebSocketClient("http://ha.sumemail.com:8095", "test-token")
         assert "ws://ha.sumemail.com:8095/ws?token=test-token" == client.ws_url
 

@@ -1741,12 +1741,14 @@ def _auth_body_from_request(request: Request, body: dict | None = None) -> Any:
 def _normalize_ma_url(mass_url: str) -> tuple[str, str, int]:
     """Normalize MA URL for direct connections to the gateway.
 
-    Preserves the original URL scheme (http vs https) to ensure
-    WebSocket connections use the correct protocol (ws vs wss).
+    Port 8095 is MA's direct HTTP port (never behind Caddy TLS).
+    If the user stored https://ha.sumemail.com:8095, returns ('http', hostname, 8095).
+    If the user stored https://ha.sumemail.com (port 443, through Caddy),
+    returns ('https', hostname, 443).
     """
     parsed = urlparse(mass_url)
     port = parsed.port or 8095
-    scheme = parsed.scheme
+    scheme = "http" if port == 8095 else parsed.scheme
     return scheme, parsed.hostname or "", port
 
 
