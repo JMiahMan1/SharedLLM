@@ -1,7 +1,9 @@
 """Tests for media streaming endpoints (stream_audiobookshelf, stream_music_assistant).
 
 These tests specifically verify that the streaming endpoints correctly access
-credential fields from the dict returned by _resolve_identity_from_request.
+credential fields from the dict returned by _resolve_identity_from_request and
+that the aiohttp streaming API (client.get / resp.content.iter_chunked /
+resp.release) is used correctly after the httpx -> aiohttp migration.
 """
 import os
 import sys
@@ -11,6 +13,74 @@ os.environ["INTERNAL_SECRET"] = "test-secret"
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, AsyncMock, patch
+
+
+class MockAioResp:
+    """Minimal aiohttp.ClientResponse mock for streaming assertions."""
+
+    def __init__(self, status=200, headers=None, chunks=None, text="", json_data=None):
+        self.status = status
+        self.headers = headers or {}
+        self._chunks = chunks or []
+        self._text = text
+        self._json = json_data
+
+    async def release(self):
+        pass
+
+    async def close(self):
+        pass
+
+    async def read(self):
+        return b"".join(self._chunks)
+
+    async def text(self):
+        return self._text
+
+    async def json(self):
+        return self._json if self._json is not None else {}
+
+    @property
+    def content(self):
+        # Streaming reads r.content.iter_chunked(...) — return self which provides it.
+        return self
+
+    async def iter_chunked(self, n):
+        for chunk in self._chunks:
+            yield chunk
+
+
+class MockAioSession:
+    """aiohttp.ClientSession mock supporting both `async with` and direct .get/.post.
+
+    Configure per-test via constructor kwargs:
+      - login_resp: response returned for POST .../login
+      - players_resp: response returned for POST .../api (MA players/all)
+      - stream_resp: response returned for GET of the stream/flow URL
+    """
+
+    def __init__(self, *, login_resp=None, players_resp=None, stream_resp=None, **kwargs):
+        self._login_resp = login_resp
+        self._players_resp = players_resp
+        self._stream_resp = stream_resp
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def close(self):
+        pass
+
+    async def post(self, url, **kwargs):
+        url = str(url)
+        if self._login_resp is not None and "login" in url:
+            return self._login_resp
+        return self._players_resp
+
+    async def get(self, url, **kwargs):
+        return self._stream_resp
 
 
 @pytest.fixture(name="client")
@@ -53,23 +123,15 @@ async def test_stream_abs_uses_dict_get_not_dot_notation(monkeypatch, client):
         "audiobookshelf_api_key": "test-api-key",
     }
 
-    async def async_byte_iterator():
-        for chunk in [b"test", b"stream"]:
-            yield chunk
+    stream_resp = MockAioResp(
+        status=200,
+        headers={"content-type": "audio/mpeg", "Content-Length": "10"},
+        chunks=[b"test", b"stream"],
+    )
+    session = MockAioSession(stream_resp=stream_resp)
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        # Mock the httpx client and its send method
-        mock_httpx_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "audio/mpeg", "Content-Length": "10"}
-        mock_response.aiter_bytes = MagicMock(return_value=async_byte_iterator())
-        mock_response.aclose = AsyncMock()
-        mock_httpx_client.send = AsyncMock(return_value=mock_response)
-        mock_httpx_client.aclose = AsyncMock()
-        mock_httpx_client.build_request = MagicMock(return_value=MagicMock())
-
-        with patch('services.gateway.main.aiohttp.ClientSession', return_value=mock_httpx_client):
+        with patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
             resp = client.get("/api/media/stream/audiobookshelf/book-123")
 
             # If dot notation was used, this would 500 with AttributeError
@@ -94,18 +156,14 @@ async def test_stream_ma_uses_dict_get_not_dot_notation(monkeypatch, client):
         "mass_token": "test-mass-token",
     }
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        # Mock aiohttp.ClientSession (used for player/list and player/status calls)
-        mock_httpx_client = AsyncMock()
-        mock_httpx_client.post = AsyncMock(return_value=MagicMock(
-            status_code=200,
-            json=lambda: {"result": {"players": []}}
-        ))
-        mock_httpx_cm = AsyncMock()
-        mock_httpx_cm.__aenter__.return_value = mock_httpx_client
-        mock_httpx_cm.__aexit__.return_value = None
+    players_resp = MockAioResp(
+        status=200,
+        json_data={"result": {"players": []}},
+    )
+    session = MockAioSession(players_resp=players_resp)
 
-        with patch('services.gateway.main.aiohttp.ClientSession', return_value=mock_httpx_cm):
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
+        with patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
             resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
 
             # If dot notation was used, this would 500 with AttributeError
@@ -162,18 +220,14 @@ async def test_stream_ma_no_players_returns_404(monkeypatch, client):
         "mass_token": "test-token",
     }
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.aiohttp.ClientSession') as mock_httpx:
-            mock_httpx_instance = AsyncMock()
-            mock_httpx_instance.post = AsyncMock(return_value=MagicMock(
-                status_code=200,
-                json=lambda: {"result": {"players": []}}
-            ))
-            mock_httpx_cm = AsyncMock()
-            mock_httpx_cm.__aenter__.return_value = mock_httpx_instance
-            mock_httpx_cm.__aexit__.return_value = None
-            mock_httpx.return_value = mock_httpx_cm
+    players_resp = MockAioResp(
+        status=200,
+        json_data={"result": {"players": []}},
+    )
+    session = MockAioSession(players_resp=players_resp)
 
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
+        with patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
             resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
 
             assert resp.status_code == 404
@@ -229,29 +283,16 @@ async def test_stream_abs_credential_fields_accessed_correctly(monkeypatch, clie
         "audiobookshelf_pass": "secretpass",
     }
 
-    async def async_stream_iterator():
-        for chunk in [b"streaming", b" audio"]:
-            yield chunk
+    login_resp = MockAioResp(status=200, json_data={"user": {"token": "new-token"}})
+    stream_resp = MockAioResp(
+        status=200,
+        headers={"content-type": "audio/mpeg", "Content-Length": "15"},
+        chunks=[b"streaming", b" audio"],
+    )
+    session = MockAioSession(login_resp=login_resp, stream_resp=stream_resp)
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.aiohttp.ClientSession') as mock_httpx:
-            mock_httpx_instance = AsyncMock()
-
-            # First call: ABS login, second call: stream
-            mock_stream_resp = MagicMock()
-            mock_stream_resp.status_code = 200
-            mock_stream_resp.headers = {"content-type": "audio/mpeg", "Content-Length": "15"}
-            mock_stream_resp.aiter_bytes = MagicMock(return_value=async_stream_iterator())
-            mock_stream_resp.aclose = AsyncMock()
-
-            mock_httpx_instance.send = AsyncMock(side_effect=[
-                MagicMock(status_code=200, json=lambda: {"user": {"token": "new-token"}}),
-                mock_stream_resp,
-            ])
-            mock_httpx_instance.aclose = AsyncMock()
-            mock_httpx_instance.build_request = MagicMock(return_value=MagicMock())
-            mock_aiohttp.ClientSession.return_value = mock_httpx_instance
-
+        with patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
             resp = client.get("/api/media/stream/audiobookshelf/book-456")
 
             # Should get 200 (streaming), not 500 (crash from dot notation)
@@ -301,57 +342,25 @@ async def test_stream_ma_targets_browser_player_without_muting(monkeypatch, clie
     mock_ma_client.get_queue_state_description = MagicMock(return_value="playing")
 
     # Mock players/all response
-    mock_players_resp = MagicMock()
-    mock_players_resp.status_code = 200
-    mock_players_resp.json.return_value = [
-        {"player_id": "office-tv", "name": "Office TV"},
-        {"player_id": "browser-player", "name": "Sendspin JS Client (test)"},
-    ]
+    players_resp = MockAioResp(
+        status=200,
+        json_data=[
+            {"player_id": "office-tv", "name": "Office TV"},
+            {"player_id": "browser-player", "name": "Sendspin JS Client (test)"},
+        ],
+    )
 
     # Mock /flow/ stream response
-    async def async_byte_iterator():
-        yield b"audio_bytes"
+    flow_resp = MockAioResp(
+        status=200,
+        headers={"content-type": "audio/mpeg", "Content-Length": "11"},
+        chunks=[b"audio_bytes"],
+    )
 
-    mock_flow_resp = MagicMock()
-    mock_flow_resp.status_code = 200
-    mock_flow_resp.headers = {"content-type": "audio/mpeg", "Content-Length": "11"}
-    mock_flow_resp.aiter_bytes = MagicMock(return_value=async_byte_iterator())
-    mock_flow_resp.aclose = AsyncMock()
-
-    # Mock proxy client for the /flow/ stream
-    mock_proxy_client = AsyncMock()
-    mock_proxy_client.send = AsyncMock(return_value=mock_flow_resp)
-    mock_proxy_client.aclose = AsyncMock()
-    mock_proxy_client.build_request = MagicMock(return_value=MagicMock())
-
-    # All aiohttp.ClientSession instances use a unified mock
-    unified_httpx = AsyncMock()
-    unified_httpx.post = AsyncMock(return_value=mock_players_resp)
-    unified_httpx.send = AsyncMock(return_value=mock_flow_resp)
-    unified_httpx.aclose = AsyncMock()
-    unified_httpx.build_request = MagicMock(return_value=MagicMock())
-
-    class MockAsyncClient:
-        def __init__(self, **kwargs):
-            pass  # Accept all aiohttp.ClientSession kwargs (timeout, follow_redirects, etc.)
-
-        async def __aenter__(self):
-            return unified_httpx
-
-        async def __aexit__(self, *args):
-            return None
-
-        async def aclose(self):
-            await unified_httpx.aclose()
-
-        async def send(self, *args, **kwargs):
-            return await unified_httpx.send(*args, **kwargs)
-
-        def build_request(self, *args, **kwargs):
-            return unified_httpx.build_request(*args, **kwargs)
+    session = MockAioSession(players_resp=players_resp, stream_resp=flow_resp)
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.aiohttp.ClientSession', MockAsyncClient):
+        with patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
             with patch('services.gateway.main.MAWebSocketClient', return_value=mock_ma_client):
                 resp = client.get("/api/media/stream/music-assistant?uri=library://track/123")
 
