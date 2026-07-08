@@ -25,6 +25,7 @@ interface MAWebPlayerState {
   error: string | null;
   mediaTitle: string | null;
   mediaArtist: string | null;
+  mediaImage: string | null;
   position: number;
   duration: number;
   connectionState: ConnectionState;
@@ -41,6 +42,21 @@ function storageGetSync(key: string): string | null {
   } catch {
     return null;
   }
+}
+
+// Extract a usable image URL from a Music Assistant image payload, which may be
+// a full URL string or an { uri, path, provider } object. Prefers the absolute
+// `uri` so the gateway can proxy it server-side (the browser often cannot reach
+// MA's internal IP directly).
+function extractMaImage(img: unknown): string | null {
+  if (!img) return null;
+  if (typeof img === 'string') return img;
+  if (typeof img === 'object') {
+    const i = img as Record<string, unknown>;
+    if (typeof i.uri === 'string' && i.uri) return i.uri;
+    if (typeof i.path === 'string' && i.path) return i.path;
+  }
+  return null;
 }
 
 /* ── Sendspin URL builder ──────────────────────────────────────────────────
@@ -82,6 +98,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     error: null,
     mediaTitle: null,
     mediaArtist: null,
+    mediaImage: null,
     position: 0,
     duration: 0,
     connectionState: 'DISCONNECTED',
@@ -147,6 +164,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         if (current) {
           next.mediaTitle = current.name || null;
           next.mediaArtist = current.artist || null;
+          next.mediaImage = extractMaImage(current.image) || next.mediaImage;
           next.duration = current.duration || 0;
         }
 
@@ -301,6 +319,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
               playerState: newState.isPlaying ? 'playing' : (newState.isConnected ? 'idle' : null),
               mediaTitle: (newState as unknown as { serverState?: { metadata?: { title?: string } } }).serverState?.metadata?.title ?? s.mediaTitle,
               mediaArtist: (newState as unknown as { serverState?: { metadata?: { artist?: string } } }).serverState?.metadata?.artist ?? s.mediaArtist,
+              mediaImage: extractMaImage((newState as unknown as { serverState?: { metadata?: { image?: unknown } } }).serverState?.metadata?.image) ?? s.mediaImage,
               duration: (newState as unknown as { serverState?: { metadata?: { duration?: number } } }).serverState?.metadata?.duration ?? s.duration,
               position: (newState as unknown as { serverState?: { position?: number } }).serverState?.position ?? s.position,
               error: newState.playerState === 'error' ? 'Playback error - attempting recovery' : s.error,
@@ -544,6 +563,40 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
   }, [sendJsonRpc, setError]);
 
+  // Send players/cmd_next to skip to the next track
+  const cmdNext = useCallback(async (player_id?: string) => {
+    const pid = player_id || playerIdRef.current;
+    if (!pid) {
+      console.error('[MAWebPlayer] No player_id for cmd_next');
+      return;
+    }
+    try {
+      console.log('[MAWebPlayer] cmd_next:', pid);
+      await sendJsonRpc('players/cmd_next', { player_id: pid });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[MAWebPlayer] cmd_next failed:', msg);
+      setError('cmd_next failed: ' + msg);
+    }
+  }, [sendJsonRpc, setError]);
+
+  // Send players/cmd_previous to skip to the previous track
+  const cmdPrevious = useCallback(async (player_id?: string) => {
+    const pid = player_id || playerIdRef.current;
+    if (!pid) {
+      console.error('[MAWebPlayer] No player_id for cmd_previous');
+      return;
+    }
+    try {
+      console.log('[MAWebPlayer] cmd_previous:', pid);
+      await sendJsonRpc('players/cmd_previous', { player_id: pid });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[MAWebPlayer] cmd_previous failed:', msg);
+      setError('cmd_previous failed: ' + msg);
+    }
+  }, [sendJsonRpc, setError]);
+
   /* ── Convenience Methods ───────────────────────────────────────────── */
 
   // Play: ensure connected, queue media if provided, then resume local playback.
@@ -591,6 +644,30 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       setError('seek failed: ' + msg);
     }
   }, [cmdSeek, setError]);
+
+  // Next track: send players/cmd_next
+  const next = useCallback(async () => {
+    console.log('[MAWebPlayer] next called');
+    try {
+      await cmdNext();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[MAWebPlayer] next failed:', msg);
+      setError('next failed: ' + msg);
+    }
+  }, [cmdNext, setError]);
+
+  // Previous track: send players/cmd_previous
+  const previous = useCallback(async () => {
+    console.log('[MAWebPlayer] previous called');
+    try {
+      await cmdPrevious();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[MAWebPlayer] previous failed:', msg);
+      setError('previous failed: ' + msg);
+    }
+  }, [cmdPrevious, setError]);
 
   const setVolume = useCallback((volume: number) => {
     console.log('[MAWebPlayer] setVolume called:', volume);
@@ -690,6 +767,10 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     cmdPlay,
     cmdPause,
     cmdSeek,
+    cmdNext,
+    cmdPrevious,
+    next,
+    previous,
     audioRef,
     jsonrpcWs: jsonrpcWsRef,
     sendspinWs: sendspinWsRef,
