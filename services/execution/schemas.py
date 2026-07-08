@@ -652,8 +652,7 @@ class GitOperationRequest(BaseRequest):
     branch: Optional[str] = Field("microservices", description="Branch for pull/push")
     log_count: Optional[int] = Field(10, ge=1, le=50, description="Number of commits for 'log'")
 
-    class Config:
-        extra = "ignore"
+    model_config = ConfigDict(extra='ignore')
 
     @model_validator(mode='before')
     @classmethod

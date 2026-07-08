@@ -783,7 +783,6 @@ test.describe('Comprehensive E2E UI Traversal', () => {
                 const { ok: elOk } = await isInteractable(el.locator);
                 if (!elOk) return;
 
-                const beforeUrl = page.url();
                 const clicked = await safeClick(el.locator);
                 if (clicked) {
                   await page.waitForTimeout(1000);

@@ -1,9 +1,9 @@
 # services/execution/handlers/storage.py
 import logging
-import requests
 from services.execution.schemas import StorageFileReadRequest, StorageFileWriteRequest, StorageTextToAudioRequest, ExecutionResult
 from ..tts import text_to_speech
 from ..nextcloud_client import resolve_credentials, webdav_url
+from ..http_client import request as http_request
 
 log = logging.getLogger("execution.storage")
 
@@ -21,15 +21,15 @@ async def handle_storage_read(req: StorageFileReadRequest) -> ExecutionResult:
         assert url is not None and user is not None and pw is not None
 
         file_url = webdav_url(url, user, req.path)
-        resp = requests.get(file_url, auth=(user, pw), timeout=30, verify=False)
+        resp = await http_request("GET", file_url, auth=(user, pw), timeout=30, verify=False)
         
-        if resp.status_code == 200:
-            content = resp.text
+        if resp["status_code"] == 200:
+            content = resp["text"]
             return _ok(f"Read {len(content)} bytes from storage:{req.path}", {"content": content, "path": req.path})
-        elif resp.status_code == 404:
+        elif resp["status_code"] == 404:
             return _fail(f"File not found in storage: {req.path}")
         else:
-            return _fail(f"Nextcloud error {resp.status_code}: {resp.text[:200]}")
+            return _fail(f"Nextcloud error {resp['status_code']}: {resp['text'][:200]}")
             
     except Exception as e:
         log.error(f"Storage read failed: {e}")
@@ -45,12 +45,12 @@ async def handle_storage_write(req: StorageFileWriteRequest) -> ExecutionResult:
         file_url = webdav_url(url, user, req.path)
         # Ensure parent directories exist (Nextcloud WebDAV doesn't do this automatically with PUT)
         # For simplicity in this handler, we'll just try the PUT
-        resp = requests.put(file_url, auth=(user, pw), data=req.content, timeout=30, verify=False)
+        resp = await http_request("PUT", file_url, auth=(user, pw), data=req.content, timeout=30, verify=False)
         
-        if resp.status_code in (200, 201, 204):
+        if resp["status_code"] in (200, 201, 204):
             return _ok(f"Successfully wrote to storage:{req.path}")
         else:
-            return _fail(f"Nextcloud error {resp.status_code}: {resp.text[:200]}")
+            return _fail(f"Nextcloud error {resp['status_code']}: {resp['text'][:200]}")
             
     except Exception as e:
         log.error(f"Storage write failed: {e}")
@@ -66,11 +66,11 @@ async def handle_storage_tts(req: StorageTextToAudioRequest) -> ExecutionResult:
         # 1. Read input file
         input_url = webdav_url(url, user, req.input_path)
         log.info(f"[storage_tts] Reading input: {req.input_path}")
-        resp = requests.get(input_url, auth=(user, pw), timeout=30, verify=False)
-        if resp.status_code != 200:
-            return _fail(f"Failed to read input file ({resp.status_code})")
+        resp = await http_request("GET", input_url, auth=(user, pw), timeout=30, verify=False)
+        if resp["status_code"] != 200:
+            return _fail(f"Failed to read input file ({resp['status_code']})")
         
-        text = resp.text
+        text = resp["text"]
         if not text.strip():
             return _fail("Input file is empty.")
 
@@ -89,12 +89,12 @@ async def handle_storage_tts(req: StorageTextToAudioRequest) -> ExecutionResult:
             
         output_url = webdav_url(url, user, out_path)
         log.info(f"[storage_tts] Writing output: {out_path}")
-        put_resp = requests.put(output_url, auth=(user, pw), data=audio_bytes, timeout=60, verify=False)
+        put_resp = await http_request("PUT", output_url, auth=(user, pw), data=audio_bytes, timeout=60, verify=False)
         
-        if put_resp.status_code in (200, 201, 204):
+        if put_resp["status_code"] in (200, 201, 204):
             return _ok(f"Successfully converted {req.input_path} to audio at {out_path}", {"path": out_path, "size": len(audio_bytes)})
         else:
-            return _fail(f"Failed to write output audio ({put_resp.status_code}): {put_resp.text[:200]}")
+            return _fail(f"Failed to write output audio ({put_resp['status_code']}): {put_resp['text'][:200]}")
             
     except Exception as e:
         log.error(f"Storage TTS failed: {e}")

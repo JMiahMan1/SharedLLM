@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test';
-import type { Page, WebSocket } from '@playwright/test';
+import { test } from '@playwright/test';
+import type { WebSocket } from '@playwright/test';
 
 const UI_URL = 'https://jarvis.sumemail.com';
 const TEST_USER = 'testuser';
@@ -13,10 +13,10 @@ test('click sequence debug', async ({ page }) => {
   // Listen for WebSocket connections
   page.on('websocket', (ws: WebSocket) => {
     wsEvents.push(`CONNECT: ${ws.url()}`);
-    ws.on('close', (event: any) => {
+    ws.on('close', (event: { code: number }) => {
       wsEvents.push(`CLOSE: ${ws.url()} code=${event.code}`);
     });
-    ws.on('framereceived', (frame: any) => {
+    ws.on('framereceived', (frame: { error?: string }) => {
       if (frame.error) {
         wsEvents.push(`ERROR: ${ws.url()} ${frame.error}`);
       }

@@ -2,9 +2,9 @@ import pytest
 import httpx
 import os
 
-EXECUTION_URL = os.getenv("EXECUTION_URL", "http://localhost:8012")
-IDENTITY_URL = os.getenv("IDENTITY_URL", "http://localhost:8011")
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6399/0")
+EXECUTION_URL = os.getenv("EXECUTION_SVC_URL", "http://localhost:8003")
+IDENTITY_URL = os.getenv("IDENTITY_SVC_URL", "http://localhost:8001")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "test-secret")
 
 
@@ -28,6 +28,7 @@ def redis_client():
     client.close()
 
 
+@pytest.mark.local_only
 @pytest.mark.integration
 class TestExecutionService:
     def test_health_check(self, http_client):
@@ -122,6 +123,7 @@ class TestExecutionService:
         assert resp.status_code == 403
 
 
+@pytest.mark.local_only
 @pytest.mark.integration
 class TestIntentEngineRouting:
     def test_intent_engine_imports(self):
@@ -149,6 +151,8 @@ class TestIntentEngineRouting:
         assert intent is not None
 
 
+@pytest.mark.local_only
+@pytest.mark.local_only
 @pytest.mark.integration
 class TestDeviceStateCaching:
     def test_device_state_redis_persistence(self, redis_client):

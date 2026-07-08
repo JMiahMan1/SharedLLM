@@ -633,7 +633,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       console.error('[MAWebPlayer] connect failed:', msg);
       setError('connect failed: ' + msg);
     }
-  }, [initPlayer, setError]);
+  }, [initPlayer, setError, state.isConnected]);
 
   const disconnect = useCallback(() => {
     playerRef.current?.disconnect('shutdown');

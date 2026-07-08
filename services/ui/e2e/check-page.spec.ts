@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test } from '@playwright/test';
 
 const UI_URL = 'https://jarvis.sumemail.com';
 const TEST_USER = 'testuser';

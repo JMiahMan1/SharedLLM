@@ -770,7 +770,7 @@ test.describe('E2E Recursive UI Crawler', () => {
           console.log(`[CRAWLER] ✓ Widget "${widget.name}" (${widget.key}) is present`);
         } else {
           console.log(`[CRAWLER] ⚠ Widget "${widget.name}" (${widget.key}) not found on dashboard`);
-          if ((widget as any).requiresConfig) {
+          if ((widget as { requiresConfig?: boolean }).requiresConfig) {
             console.log(`[CRAWLER]   Note: "${widget.name}" requires external service configuration`);
           }
         }

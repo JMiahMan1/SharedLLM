@@ -5,9 +5,9 @@ import json
 import time
 from datetime import datetime, timedelta
 
-AUTOMATION_URL = os.getenv("AUTOMATION_URL", "http://localhost:8017")
-EXECUTION_URL = os.getenv("EXECUTION_URL", "http://localhost:8012")
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6399/0")
+AUTOMATION_URL = os.getenv("EXECUTION_SVC_URL", "http://localhost:8003")
+EXECUTION_URL = os.getenv("EXECUTION_SVC_URL", "http://localhost:8003")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "test-secret")
 
 
@@ -31,6 +31,7 @@ def redis_client():
     client.close()
 
 
+@pytest.mark.local_only
 @pytest.mark.integration
 class TestRedisQueueFlow:
     def test_timer_creation_in_redis(self, redis_client):
@@ -117,10 +118,11 @@ class TestRedisQueueFlow:
         redis_client.delete(timer_key)
 
 
+@pytest.mark.local_only
 @pytest.mark.integration
 class TestLoggingServiceRedis:
     def test_log_entry_stored_in_redis(self, redis_client):
-        LOGGING_URL = os.getenv("LOGGING_URL", "http://localhost:8015")
+        LOGGING_URL = os.getenv("LOGGING_SVC_URL", "http://localhost:8006")
 
         log_entry = {
             "user_id": "test_user",
@@ -154,7 +156,7 @@ class TestLoggingServiceRedis:
         redis_client.delete("logs:entries")
 
     def test_log_sanitization(self, redis_client):
-        LOGGING_URL = os.getenv("LOGGING_URL", "http://localhost:8015")
+        LOGGING_URL = os.getenv("LOGGING_SVC_URL", "http://localhost:8006")
 
         log_entry = {
             "user_id": "test_user",
@@ -182,7 +184,7 @@ class TestLoggingServiceRedis:
         redis_client.delete("logs:entries")
 
     def test_log_retrieval(self, redis_client):
-        LOGGING_URL = os.getenv("LOGGING_URL", "http://localhost:8015")
+        LOGGING_URL = os.getenv("LOGGING_SVC_URL", "http://localhost:8006")
 
         redis_client.delete("logs:entries")
 
@@ -214,7 +216,7 @@ class TestLoggingServiceRedis:
         redis_client.delete("logs:entries")
 
     def test_log_clear_requires_secret(self):
-        LOGGING_URL = os.getenv("LOGGING_URL", "http://localhost:8015")
+        LOGGING_URL = os.getenv("LOGGING_SVC_URL", "http://localhost:8006")
 
         resp = httpx.delete(
             f"{LOGGING_URL}/api/logs",
@@ -223,7 +225,7 @@ class TestLoggingServiceRedis:
         assert resp.status_code == 403
 
     def test_log_clear_with_secret(self, redis_client):
-        LOGGING_URL = os.getenv("LOGGING_URL", "http://localhost:8015")
+        LOGGING_URL = os.getenv("LOGGING_SVC_URL", "http://localhost:8006")
 
         redis_client.zadd("logs:entries", {"test": time.time()})
 
