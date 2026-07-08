@@ -2,10 +2,10 @@ import pytest
 import httpx
 import os
 
-GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:8016")
-IDENTITY_URL = os.getenv("IDENTITY_URL", "http://localhost:8011")
-STORAGE_URL = os.getenv("STORAGE_URL", "http://localhost:8014")
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6399/0")
+GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:11435")
+IDENTITY_URL = os.getenv("IDENTITY_SVC_URL", "http://localhost:8001")
+STORAGE_URL = os.getenv("STORAGE_SVC_URL", "http://localhost:8005")
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "test-secret")
 DEFAULT_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "changeme")
 
@@ -30,6 +30,7 @@ def redis_client():
     client.close()
 
 
+@pytest.mark.local_only
 @pytest.mark.integration
 class TestIdentityService:
     def test_health_check(self, http_client):
@@ -124,6 +125,7 @@ class TestIdentityService:
         assert any(d["device_id"] == "media_player.test_speaker" for d in devices)
 
 
+@pytest.mark.local_only
 @pytest.mark.integration
 class TestStorageService:
     def test_health_check(self, http_client):
@@ -152,6 +154,7 @@ class TestStorageService:
         assert "checkpointed_files" in data
 
 
+@pytest.mark.local_only
 @pytest.mark.integration
 class TestGatewayService:
     def test_health_check(self, http_client):

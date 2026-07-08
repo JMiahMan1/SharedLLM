@@ -1,10 +1,12 @@
 import re
 import urllib.parse
-
-from services.config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
+import logging
 from typing import Any, Optional
 
-import requests
+from services.config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
+from .http_client import request
+
+log = logging.getLogger("execution.nextcloud")
 
 
 def resolve_credentials(user_context: Any) -> tuple[Optional[str], Optional[str], Optional[str]]:
@@ -39,24 +41,7 @@ def ocs_url(base_url: str, endpoint: str) -> str:
     return f"{base_url.rstrip('/')}{endpoint}"
 
 
-def parse_ocs_response(resp: requests.Response) -> tuple[bool, Any, str]:
-    try:
-        payload = resp.json()
-    except ValueError:
-        text = (resp.text or "").strip()
-        return resp.ok, None, text[:400]
-
-    if isinstance(payload, dict) and "ocs" in payload:
-        meta = payload.get("ocs", {}).get("meta", {}) or {}
-        data = payload.get("ocs", {}).get("data")
-        ok = str(meta.get("status", "")).lower() == "ok" or int(meta.get("statuscode", 0) or 0) in {100, 200}
-        message = str(meta.get("message", "") or "")
-        return ok and resp.ok, data, message
-
-    return resp.ok, payload, ""
-
-
-def ocs_request(
+async def ocs_request(
     method: str,
     base_url: str,
     username: str,
@@ -70,21 +55,46 @@ def ocs_request(
     request_params = {"format": "json"}
     if params:
         request_params.update(params)
-    resp = requests.request(
+
+    resp = await request(
         method,
         ocs_url(base_url, endpoint),
-        headers=ocs_headers(),
         auth=(username, password),
+        headers=ocs_headers(),
         params=request_params,
         data=data,
         timeout=timeout,
         verify=False,
     )
-    return parse_ocs_response(resp)
+
+    try:
+        payload = __import__("json").loads(resp["text"])
+    except ValueError:
+        text = (resp["text"] or "").strip()
+        return resp["ok"], None, text[:400]
+
+    if isinstance(payload, dict) and "ocs" in payload:
+        meta = payload.get("ocs", {}).get("meta", {}) or {}
+        data = payload.get("ocs", {}).get("data")
+        ok = str(meta.get("status", "")).lower() == "ok" or int(meta.get("statuscode", 0) or 0) in {100, 200}
+        message = str(meta.get("message", "") or "")
+        return ok and resp["ok"], data, message
+
+    return resp["ok"], payload, ""
 
 
-def ensure_webdav_dir(base_url: str, username: str, password: str, path: str) -> None:
+async def ensure_webdav_dir(base_url: str, username: str, password: str, path: str) -> None:
     folder_url = webdav_url(base_url, username, path)
-    resp = requests.request("PROPFIND", folder_url, auth=(username, password), timeout=30, verify=False)
-    if resp.status_code == 404:
-        requests.request("MKCOL", folder_url, auth=(username, password), timeout=30, verify=False)
+    resp = await request(
+        "PROPFIND", folder_url,
+        auth=(username, password),
+        timeout=30,
+        verify=False,
+    )
+    if resp["status_code"] == 404:
+        await request(
+            "MKCOL", folder_url,
+            auth=(username, password),
+            timeout=30,
+            verify=False,
+        )
