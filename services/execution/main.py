@@ -1,55 +1,109 @@
 # services/execution/main.py
-import os
-import logging
 import asyncio
-import aiohttp
+import logging
+import os
+import time
+import traceback
 import warnings
-from typing import Dict, Any, List, Optional
-from uuid import uuid4
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Depends, HTTPException, status, Header, Request, File, UploadFile
+from typing import Any
+from uuid import uuid4
+
+import aiohttp
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import traceback
-import time
 
 # Suppress InsecureRequestWarning for internal self-signed certs (homelab)
 from urllib3.exceptions import InsecureRequestWarning
+
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
+import threading
+
 from services.config import (
-    INTERNAL_SECRET,
     IDENTITY_SVC_URL,
+    INTERNAL_SECRET,
     OLLAMA_URL,
 )
-from pydantic import BaseModel
 
 # Now import everything from sibling modules
-from services.execution import ha_client
-from services.execution.tts import text_to_speech as _text_to_speech
-from services.execution.schemas import (
-    UserContext, LightControlRequest, MediaPlayRequest, MediaTransportRequest,
-    TVCastRequest, HAServiceRequest, AnnouncementRequest,
-    CalendarRequest, NoteRequest, TimerRequest, TalkRequest, IdentityRequest, IdentityManageRequest,
-    WebSearchRequest, WebReadRequest, ExecutionResult,
-       DockerLogsRequest, DockerComposeRequest, GitOperationRequest, DeploymentRequest, VolumeInventoryRequest,
-    WorkspaceFileReadRequest, WorkspaceFileWriteRequest, WorkspaceFilePatchRequest, WorkspaceLintRequest, WorkspaceSearchRequest, WorkspaceShellRequest, StorageFileReadRequest, StorageFileWriteRequest,
-      SystemLearningRequest, DiscoverySyncRequest, TTSRequest, StorageTextToAudioRequest, LogbookRequest, DiagnosticRequest, MediaStatusRequest, ExecutionLogRequest, VideoPlayRequest, AudiobookshelfRequest, EntitySearchRequest, LLMInfoRequest, HAConfigRequest, NetworkDeviceScanRequest, MediaStateSyncRequest, ResolveStreamRequest
+from services.execution import device_registry, ha_client
+from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
+from services.execution.handlers import (
+    audiobookshelf,
+    browser,
+    calendar,
+    climate,
+    composite,
+    diagnostics,
+    groups,
+    learning,
+    light,
+    media,
+    note,
+    security,
+    storage,
+    talk,
+    timer,
+    video,
+    workspace,
 )
-from services.execution.handlers import light, media, climate, security, calendar, note, timer, talk, browser, workspace, storage, learning, diagnostics, video, audiobookshelf, composite, groups
+from services.execution.handlers import deployment as deployment_handler
 from services.execution.handlers import docker_logs as docker_logs_handler
 from services.execution.handlers import git as git_handler
-from services.execution.handlers import deployment as deployment_handler
-from services.execution.handlers import volumes as volume_handler
 from services.execution.handlers import ha_config as ha_config_handler
-from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
-from services.execution import device_registry
+from services.execution.handlers import volumes as volume_handler
 from services.execution.media_playback_service import MediaPlaybackService
-
+from services.execution.schemas import (
+    AnnouncementRequest,
+    AudiobookshelfRequest,
+    CalendarRequest,
+    DeploymentRequest,
+    DiagnosticRequest,
+    DiscoverySyncRequest,
+    DockerComposeRequest,
+    DockerLogsRequest,
+    EntitySearchRequest,
+    ExecutionLogRequest,
+    ExecutionResult,
+    GitOperationRequest,
+    HAConfigRequest,
+    HAServiceRequest,
+    IdentityManageRequest,
+    IdentityRequest,
+    LightControlRequest,
+    LLMInfoRequest,
+    LogbookRequest,
+    MediaPlayRequest,
+    MediaStateSyncRequest,
+    MediaStatusRequest,
+    MediaTransportRequest,
+    NetworkDeviceScanRequest,
+    NoteRequest,
+    ResolveStreamRequest,
+    StorageFileReadRequest,
+    StorageFileWriteRequest,
+    StorageTextToAudioRequest,
+    SystemLearningRequest,
+    TalkRequest,
+    TimerRequest,
+    TTSRequest,
+    TVCastRequest,
+    UserContext,
+    VideoPlayRequest,
+    VolumeInventoryRequest,
+    WebReadRequest,
+    WebSearchRequest,
+    WorkspaceFilePatchRequest,
+    WorkspaceFileReadRequest,
+    WorkspaceFileWriteRequest,
+    WorkspaceLintRequest,
+    WorkspaceSearchRequest,
+    WorkspaceShellRequest,
+)
+from services.execution.tts import text_to_speech as _text_to_speech
 from services.shared.info_endpoint import info_router
-
-import threading
-from typing import Any, Callable
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -59,7 +113,7 @@ log = logging.getLogger("execution")
 text_to_speech = _text_to_speech
 detect_tv_type = _detect_tv_type
 
-async def resolve_internal_user(user_id: Optional[int] = None, rag_user: Optional[str] = None) -> Optional[Dict[str, Any]]:
+async def resolve_internal_user(user_id: int | None = None, rag_user: str | None = None) -> dict[str, Any] | None:
     """Query Identity Service for full user credentials using internal secret.
     
     If called with a single positional arg, auto-detect: int -> user_id param, str -> rag_user param.
@@ -84,7 +138,7 @@ async def resolve_internal_user(user_id: Optional[int] = None, rag_user: Optiona
     return None
 
 
-async def resolve_first_user() -> Optional[Dict[str, Any]]:
+async def resolve_first_user() -> dict[str, Any] | None:
     """Resolve the first (ID=1) user in the system — the system default."""
     return await resolve_internal_user(user_id=1)
 
@@ -124,15 +178,14 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
 
             # Fetch enrollments (those flagged for power tracking)
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"{IDENTITY_SVC_URL}/api/telemetry/enroll",
-                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                        timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        if resp.status != 200:
-                            continue
-                        enroll_data = await resp.json()
+                async with aiohttp.ClientSession() as session, session.get(
+                    f"{IDENTITY_SVC_URL}/api/telemetry/enroll",
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    enroll_data = await resp.json()
             except Exception as ex:
                 log.warning(f"[telemetry] could not fetch enrollments: {ex}")
                 continue
@@ -161,15 +214,14 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
                         "state": raw,
                         "source": "ha-poll",
                     }
-                    async with aiohttp.ClientSession() as session:
-                        async with session.post(
-                            f"{IDENTITY_SVC_URL}/api/telemetry/snapshot",
-                            headers={"X-Internal-Secret": INTERNAL_SECRET},
-                            json=snapshot,
-                            timeout=aiohttp.ClientTimeout(total=10),
-                        ) as resp:
-                            if resp.status != 200:
-                                log.warning(f"[telemetry] snapshot ingest failed for {entity_id}: {resp.status}")
+                    async with aiohttp.ClientSession() as session, session.post(
+                        f"{IDENTITY_SVC_URL}/api/telemetry/snapshot",
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                        json=snapshot,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        if resp.status != 200:
+                            log.warning(f"[telemetry] snapshot ingest failed for {entity_id}: {resp.status}")
                 except Exception as ex:
                     log.warning(f"[telemetry] failed to ingest {entity_id}: {ex}")
         except asyncio.CancelledError:
@@ -187,11 +239,11 @@ async def lifespan(app: FastAPI):
         patch_dns_resolver()
     except Exception as e:
         log.warning(f"DNS resolver patch failed: {e}")
-    
+
     # Resolve runtime config from Identity service
     from services.config import resolve_runtime_config
     await resolve_runtime_config()
-    
+
     log.info("Execution Bridge starting up.")
     # Auto-download Kokoro models if missing
     from services.config import MODELS_DIR
@@ -209,17 +261,18 @@ async def lifespan(app: FastAPI):
             log.info("Kokoro models downloaded successfully.")
         except Exception as e:
             log.error(f"Failed to auto-download Kokoro models: {e}")
-    
+
     # Start FastAPI media server on port 8888 for external access
     # Uses FileResponse (same as main branch) for proper HTTP Range support
     def run_media_server():
+        import threading
+
+        import uvicorn
         from fastapi import FastAPI, HTTPException
         from fastapi.responses import FileResponse, Response
-        import uvicorn
-        import threading
-        
+
         media_app = FastAPI(title="Media Server")
-        
+
         @media_app.get("/media/{media_id}")
         @media_app.head("/media/{media_id}")
         async def serve_media(media_id: str):  # pyright: ignore[reportUnusedFunction]
@@ -230,7 +283,7 @@ async def lifespan(app: FastAPI):
                     media_type="audio/wav",
                     headers={"Accept-Ranges": "bytes"},
                 )
-            
+
             # TTS audio from disk (.wav)
             wav_path = os.path.join(TEMP_AUDIO_DIR, f"{media_id}.wav")
             if os.path.exists(wav_path):
@@ -239,7 +292,7 @@ async def lifespan(app: FastAPI):
                     media_type="audio/wav",
                     headers={"Accept-Ranges": "bytes"},
                 )
-            
+
             # Video files from disk (.mp4) — FileResponse handles Range automatically
             mp4_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
             if os.path.exists(mp4_path):
@@ -251,7 +304,7 @@ async def lifespan(app: FastAPI):
                         "Cache-Control": "no-cache",
                     },
                 )
-            
+
             # Progressive download: serve .mp4.part files while download is in progress
             part_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4.part")
             if os.path.exists(part_path):
@@ -263,17 +316,17 @@ async def lifespan(app: FastAPI):
                         "Cache-Control": "no-cache",
                     },
                 )
-            
+
             raise HTTPException(status_code=404, detail="Media not found")
-        
+
         def _run():
             uvicorn.run(media_app, host="0.0.0.0", port=8888, log_level="warning")
-        
+
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
         log.info("Media server (FastAPI) running on port 8888")
         return thread
-    
+
     media_server: threading.Thread = run_media_server()
 
     # Background telemetry ingestion (live Energy Insights usage)
@@ -301,7 +354,7 @@ app.include_router(info_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    err_msg = f"Execution Error: {type(exc).__name__}: {str(exc)}"
+    err_msg = f"Execution Error: {type(exc).__name__}: {exc!s}"
     log.error(f"{err_msg}\n{traceback.format_exc()}")
     return JSONResponse(
         status_code=500,
@@ -310,9 +363,10 @@ async def global_exception_handler(request, exc):
 
 
 # Transient cache for locally-generated media (TTS announcements)
-TEMP_AUDIO_CACHE: Dict[str, bytes] = {}
+TEMP_AUDIO_CACHE: dict[str, bytes] = {}
 # Persistent disk cache for TTS files (survives container restarts)
 from services.config import TEMP_MEDIA_DIR
+
 TEMP_AUDIO_DIR = os.path.join(TEMP_MEDIA_DIR, "tts")
 os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 TEMP_VIDEO_DIR = TEMP_MEDIA_DIR
@@ -325,7 +379,7 @@ def get_public_host():
     if env_host:
         return env_host
     try:
-        with open("docker-compose.yml", "r") as f:
+        with open("docker-compose.yml") as f:
             for line in f:
                 if "ai-server:" in line:
                     return line.split(":")[1].strip().strip('"').strip("'")
@@ -333,7 +387,7 @@ def get_public_host():
         pass
     raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set and no compose IP was discovered.")
 
-async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_media_url: str, timeout: int = 10, device_type: str = "unknown") -> Dict[str, Any]:
+async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_media_url: str, timeout: int = 10, device_type: str = "unknown") -> dict[str, Any]:
     """Verify that a media player actually started playing the expected content.
     
     For speakers/Chromecast: requires 'playing' state with matching media URL.
@@ -345,18 +399,18 @@ async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_m
     start = time.time()
     is_tv = device_type in ("roku", "samsung", "webos", "android_tv", "bravia", "generic_tv")
     state_resp: dict | None = None
-    
+
     while time.time() - start < timeout:
         state_resp = await ha_client.get_state(ha_url, ha_token, entity_id)
         if not state_resp:
             await asyncio.sleep(0.5)
             continue
-            
+
         current_state = state_resp.get("state", "unknown")
         attrs = state_resp.get("attributes", {})
         current_media = attrs.get("media_content_id", "")
         app_name = attrs.get("app_name", attrs.get("app_id", ""))
-        
+
         # For TVs: accept 'on' or 'idle' as success (TVs don't report 'playing' for audio)
         if is_tv and current_state in ("on", "idle", "playing"):
             log.info(f"[verify_playback] TV device {entity_id} state='{current_state}' (acceptable for TV)")
@@ -367,7 +421,7 @@ async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_m
                 "app_name": app_name,
                 "detail": f"Playback confirmed on TV (state='{current_state}')"
             }
-        
+
         # For speakers/Chromecast: require 'playing' state with matching media URL
         if current_state == "playing" and expected_media_url in str(current_media):
             log.info(f"[verify_playback] CONFIRMED playing: {entity_id} -> {current_media[:60]}")
@@ -379,9 +433,9 @@ async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_m
                 "app_name": app_name,
                 "detail": "Playback confirmed via state transition to 'playing'"
             }
-        
+
         await asyncio.sleep(0.5)
-    
+
     # Timeout without seeing acceptable state
     last_state = state_resp.get("state", "unknown") if state_resp else "unknown"
     last_media = state_resp.get("attributes", {}).get("media_content_id", "") if state_resp else ""
@@ -397,11 +451,11 @@ async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_m
 async def get_temp_media(media_id: str):
     """Serves transient audio/video files for HA playback."""
     from fastapi.responses import FileResponse, Response
-    
+
     # Check audio cache first
     if media_id in TEMP_AUDIO_CACHE:
         return Response(content=TEMP_AUDIO_CACHE[media_id], media_type="audio/wav")
-    
+
     # Check video files on disk
     video_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
     if os.path.exists(video_path):
@@ -413,7 +467,7 @@ async def get_temp_media(media_id: str):
                 "Cache-Control": "no-cache",
             }
         )
-    
+
     # Return 503 (Service Unavailable) for media that's being prepared
     # This tells HA to retry instead of treating it as a permanent 404
     raise HTTPException(
@@ -434,7 +488,7 @@ async def verify_entity_access(ctx: UserContext, entity_id: str) -> bool:
     """
     if ctx.is_admin:
         return True
-    
+
     # In a stricter system, we would call Identity service here to check DeviceAssignment.
     # For now, we allow the request but log it.
     log.info(f"Access check for {ctx.user} on {entity_id}: ALLOWED (Implicit)")
@@ -544,7 +598,7 @@ async def execute_identity(req: IdentityRequest):
     """
     action = req.action
     log.info(f"[identity] Proxying action={action} for user={req.user_context.user}")
-    
+
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
             headers = {"X-Internal-Secret": INTERNAL_SECRET}
@@ -565,7 +619,7 @@ async def execute_identity(req: IdentityRequest):
                 resp = await client.delete(f"{IDENTITY_SVC_URL}/api/users/{req.username}", headers=headers)
             else:
                 return _fail(f"Action {action} not supported", "identity")
-            
+
             if resp.status in (200, 201, 204):
                 data = await resp.json() if resp.status != 204 else {}
                 msg = f"Identity action '{action}' successful."
@@ -589,17 +643,17 @@ async def execute_web_read(req: WebReadRequest):
     return await browser.handle_web_read(req)
 
 @app.get("/execute/timers")
-async def list_timers(user_id: Optional[str] = None):
+async def list_timers(user_id: str | None = None):
     return await timer.get_active_timers(user_id=user_id)
 
 @app.post("/execute/trigger", response_model=ExecutionResult)
-async def execute_trigger(payload: Dict[str, Any]):
+async def execute_trigger(payload: dict[str, Any]):
     """Internal endpoint for Automation scheduler."""
     timer_data = payload.get("timer", {})
     user_id = payload.get("user_id") or timer_data.get("user_id")
-    
+
     log.info(f"ALARM TRIGGERED: {timer_data.get('title')} for user {user_id}")
-    
+
     if not user_id:
         return _ok(f"Triggered {timer_data.get('title')} (no user context)", "automation_trigger")
 
@@ -617,7 +671,7 @@ async def execute_trigger(payload: Dict[str, Any]):
         # Construct a fake UserContext for the handler
         context = UserContext(**creds)
         target_device = timer_data.get("target_device")
-        
+
         if target_device:
             log.info(f"Dispatching media alert to {target_device}")
             await media.handle_media_play(
@@ -633,7 +687,7 @@ async def execute_trigger(payload: Dict[str, Any]):
                     volume=None,
                 )
             )
-        
+
         return _ok(f"Triggered {timer_data.get('title')} on {target_device}", "automation_trigger")
     except Exception as e:
         log.error(f"Trigger execution error: {e}")
@@ -689,7 +743,7 @@ async def execute_docker(req: DockerComposeRequest):
     services = req.services or req.containers or []
     if not services:
         return _fail("No services or containers specified", "docker")
-    
+
     if req.action == "up":
         import subprocess
         log.info(f"[docker] Running docker-compose up -d --build for services: {services}")
@@ -717,7 +771,7 @@ async def execute_docker(req: DockerComposeRequest):
         )
         res = await deployment_handler.handle_deployment(mock_req)
         results.append(res)
-    
+
     return _ok(f"Docker action '{req.action}' applied to {len(services)} services.", "docker", {"results": results})
 
 
@@ -750,7 +804,7 @@ async def execute_workspace_search(request: Request):
     """Accept workspace_search with hallucinated field names and normalize them."""
     body = await request.json()
     body = _normalize_llm_body(body)
-    
+
     # Handle nested query object (LLM sometimes nests search params inside query)
     if "query" in body and isinstance(body["query"], dict):
         q_obj = body.pop("query")
@@ -773,7 +827,7 @@ async def execute_workspace_search(request: Request):
             body["path"] = q_obj["path"]
         if "directory" in q_obj and "path" not in body:
             body["path"] = q_obj["directory"]
-    
+
     # Normalize common hallucinated field names
     if "search_term" in body and "query" not in body:
         body["query"] = body.pop("search_term")
@@ -790,11 +844,11 @@ async def execute_workspace_search(request: Request):
         body["path"] = body.pop("directory")
     if "search_path" in body and "path" not in body:
         body["path"] = body.pop("search_path")
-    
+
     # Ensure user_context exists
     if "user_context" not in body:
         body["user_context"] = {"user": "", "is_admin": True}
-    
+
     req = WorkspaceSearchRequest(**body)
     return await workspace.handle_workspace_search(req)
 
@@ -856,7 +910,7 @@ async def execute_workspace_lint(request: Request):
     """Lint a file in the local Git workspace with hallucinated field normalization."""
     body = await request.json()
     body = _normalize_llm_body(body)
-    
+
     # Normalize hallucinated field names
     if "file_path" in body and "path" not in body:
         body["path"] = body.pop("file_path")
@@ -872,10 +926,10 @@ async def execute_workspace_lint(request: Request):
         body["path"] = body.pop("filename")
     if "target" in body and "path" not in body:
         body["path"] = body.pop("target")
-    
+
     if "user_context" not in body:
         body["user_context"] = {"user": "", "is_admin": True}
-    
+
     req = WorkspaceLintRequest(**body)
     return await workspace.handle_workspace_lint(req)
 
@@ -1019,7 +1073,7 @@ async def execute_tts(req: TTSRequest):
         audio_bytes = await _text_to_speech(req.text, voice=req.voice, storybook=req.storybook)
         if not audio_bytes:
             return _fail("TTS generation returned empty bytes", "tts")
-        
+
         return _ok(
             f"TTS generated successfully ({len(audio_bytes)} bytes)",
             "tts",
@@ -1031,7 +1085,7 @@ async def execute_tts(req: TTSRequest):
         )
     except Exception as e:
         log.error(f"TTS endpoint error: {e}")
-        return _fail(f"TTS generation failed: {str(e)}", "tts")
+        return _fail(f"TTS generation failed: {e!s}", "tts")
 
 
 @app.post("/execute/storage_text_to_audio", response_model=ExecutionResult)
@@ -1058,7 +1112,7 @@ async def execute_index_capabilities():
     """
     import subprocess
     import sys
-    
+
     from services.config import SCRIPTS_DIR
     script_path = os.path.join(os.getcwd(), "scripts", "index_capabilities.py")
     if not os.path.exists(script_path):
@@ -1066,29 +1120,29 @@ async def execute_index_capabilities():
         fallback = os.path.join(SCRIPTS_DIR, "index_capabilities.py")
         if os.path.exists(fallback):
             script_path = fallback
-        
+
     try:
         log.info(f"Triggering capability indexing: {script_path}")
         # Run the script with current python interpreter and env
         # Ensure PYTHONPATH includes the workspace root for imports
         env = {**os.environ}
         env["PYTHONPATH"] = f"{os.getcwd()}:{os.path.expanduser('~/workspace')}:/app"
-        
+
         result = subprocess.run(
             [sys.executable, script_path],
             capture_output=True,
             text=True,
             env=env
         )
-        
+
         if result.returncode == 0:
             return _ok("Capabilities re-indexed successfully.", "capability_indexer", {"output": result.stdout})
         else:
             return _fail(f"Indexing failed (code {result.returncode})", "capability_indexer", {"error": result.stderr, "output": result.stdout})
-            
+
     except Exception as e:
         log.error(f"Failed to run indexing script: {e}")
-        return _fail(f"Subprocess error: {str(e)}", "capability_indexer")
+        return _fail(f"Subprocess error: {e!s}", "capability_indexer")
 
 
 # ─── Infrastructure Endpoints ────────────────────────────────────────────────────────
@@ -1107,12 +1161,12 @@ async def download_tts_voice(voice_type: str = "kokoro-v1.0"):
     """
     import subprocess
     log.info(f"[tts] Downloading model files for {voice_type}")
-    
+
     links = [
         ("kokoro-v1.0.onnx", "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx"),
         ("voices-v1.0.bin", "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin")
     ]
-    
+
     results = []
     for filename, url in links:
         path = f"/app/models/{filename}"
@@ -1131,7 +1185,7 @@ async def download_tts_voice(voice_type: str = "kokoro-v1.0"):
 async def execute_announce(req: AnnouncementRequest):
     ctx = req.user_context
     target_player = req.entity_id
-    
+
     # Resolve HA credentials via Identity service
     ha_url = ctx.ha_url
     ha_token = ctx.ha_token
@@ -1141,7 +1195,7 @@ async def execute_announce(req: AnnouncementRequest):
         ha_token = ha_token or (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
         return _fail("Home Assistant URL or token not configured (check Identity service).", "announce")
-    
+
     # Entity resolution: if entity_id is missing, resolve from device_name
     if not target_player and req.device_name:
         target_player = await ha_client.resolve_entity_by_name(ha_url, ha_token, req.device_name, "media_player")
@@ -1149,15 +1203,15 @@ async def execute_announce(req: AnnouncementRequest):
             log.info(f"[announce] Resolved device_name='{req.device_name}' -> entity_id='{target_player}'")
         else:
             return _fail(f"Could not find media_player matching '{req.device_name}'. Available devices: check HA entity list.", "announce")
-    
+
     if not target_player:
         return _fail("entity_id or device_name is required for announcements", "announce")
-    
+
     if not target_player.startswith("media_player."):
         target_player = f"media_player.{target_player}"
 
     log.info(f"[announce] START user={ctx.user} target={target_player} msg='{req.message}'")
-    
+
     # 0. Capture initial state for restoration
     all_states = await ha_client.get_states(ha_url, ha_token) or []
     initial_state = None
@@ -1165,7 +1219,7 @@ async def execute_announce(req: AnnouncementRequest):
         if s.get("entity_id") == target_player:
             initial_state = s
             break
-    
+
     # Detect if this is an MA-wrapped Roku and store both entities
     ma_player_entity = None
     if initial_state:
@@ -1187,21 +1241,21 @@ async def execute_announce(req: AnnouncementRequest):
                         break
                 else:
                     log.warning(f"[announce] No Roku entity found in all_states ({len(all_states)} entities)")
-    
+
     # Pass MA player entity in attributes for announce handler
     if ma_player_entity and initial_state:
         if "attributes" not in initial_state:
             initial_state["attributes"] = {}
         initial_state["attributes"]["_ma_player_entity"] = ma_player_entity
         log.info(f"[announce] Stored _ma_player_entity={ma_player_entity} in initial_state")
-    
+
     # Get loaded components for device type detection
     config = await ha_client.get_config(ha_url, ha_token) or {}
     loaded_components = set(config.get("components", []))
-    
+
     was_off = initial_state and initial_state.get("state") in ("off", "unavailable", "standby")
     log.info(f"[announce] Initial state: {initial_state.get('state') if initial_state else 'unknown'}, was_off={was_off}")
-    
+
     # 1. Power on if needed
     if was_off:
         log.info(f"[announce] Device was {initial_state.get('state') if initial_state else 'unknown'}, turning on...")
@@ -1210,7 +1264,7 @@ async def execute_announce(req: AnnouncementRequest):
         attrs = initial_state.get("attributes", {}) if initial_state else {}
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
         device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
-        
+
         # Samsung TVs need longer wait time (15-30s to boot)
         if device_type == "samsung":
             await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
@@ -1221,31 +1275,31 @@ async def execute_announce(req: AnnouncementRequest):
         else:
             await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", target_player, {})
             await asyncio.sleep(2.0)
-    
+
     # 2. Set volume
     await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", target_player, {"volume_level": req.volume})
-    
+
     # 3. TTS & Dispatch
     result = {"ok": False, "error": "No engine selected"}
     media_url = None
-    
+
     if req.tts_engine == "kokoro":
         try:
             log.info(f"[announce] Generating TTS audio (engine=kokoro, storybook={req.storybook})")
             audio_bytes = await _text_to_speech(req.message, storybook=req.storybook)
             if not audio_bytes:
                 return _fail("Kokoro returned empty audio", "announce")
-            
+
             log.info(f"[announce] TTS generated: {len(audio_bytes)} bytes")
             media_id = f"tts-{uuid4().hex[:8]}"
             TEMP_AUDIO_CACHE[media_id] = audio_bytes
             log.info(f"[announce] Audio cached: media_id={media_id}, cache_size={len(TEMP_AUDIO_CACHE)}")
-            
+
             public_host = get_public_host()
             # Use dedicated media port 8888 (accessible externally)
             media_url = f"http://{public_host}:8888/media/{media_id}"
             log.info(f"[announce] Media URL: {media_url}")
-            
+
             # VERIFY: Ensure media endpoint is accessible before dispatching to HA
             log.info("[announce] Verifying media endpoint accessibility...")
             media_ready = False
@@ -1261,27 +1315,28 @@ async def execute_announce(req: AnnouncementRequest):
                             log.warning(f"[announce] Media check attempt {attempt+1}/5: status={resp.status}, size={len(resp.content)}")
                 except Exception as e:
                     log.warning(f"[announce] Media check attempt {attempt+1}/5 failed: {e}")
-                
+
                 if attempt < 4:
                     await asyncio.sleep(0.5)
-            
+
             if not media_ready:
                 log.error(f"[announce] Media endpoint not accessible after 5 attempts. URL: {media_url}")
                 return _fail("Media endpoint not accessible - file not served correctly", "announce")
-            
+
             # Get entity attributes for TV type detection
             attrs = initial_state.get("attributes", {}) if initial_state else {}
             initial_state_str = initial_state.get("state", "unknown") if initial_state else ""
-            
+
             # Dispatch to TV-specific handler
             log.info(f"[announce] Dispatching: target={target_player}, state={initial_state_str}, attrs_keys={list(attrs.keys())}, _ma_player={attrs.get('_ma_player_entity')}")
             from announce_handlers import dispatch_announce
             result = await dispatch_announce(ha_url, ha_token, target_player, media_url, req.volume or 0.5, initial_state_str, attrs, loaded_components, message=req.message)
             log.info(f"[announce] Dispatch result: {result}")
-            
+
             if req.save_path:
-                from services.execution.handlers import storage as storage_handler
                 from schemas import StorageFileWriteRequest
+
+                from services.execution.handlers import storage as storage_handler
                 await storage_handler.handle_storage_write(StorageFileWriteRequest(
                     user_context=ctx, path=req.save_path, content=audio_bytes.decode('utf-8', errors='replace')
                 ))
@@ -1317,17 +1372,17 @@ async def execute_announce(req: AnnouncementRequest):
         attrs = initial_state.get("attributes", {}) if initial_state else {}
         initial_state_str = initial_state.get("state", "unknown") if initial_state else "unknown"
         device_type = detect_tv_type(target_player, initial_state_str, attrs, loaded_components)
-        
+
         # TVs need longer verification timeout
         verify_timeout = 30 if device_type in ("samsung", "webos", "roku") else 15
-        
+
         verification = await verify_playback(ha_url, ha_token, target_player, media_url, timeout=verify_timeout, device_type=device_type)
         if verification["verified"]:
             log.info(f"[announce] Playback VERIFIED: {verification['detail']}")
         else:
             log.warning(f"[announce] Playback NOT verified: {verification['detail']}")
             result = {"ok": False, "error": f"Playback not confirmed: {verification['detail']}", "verification": verification}
-    
+
     # 5. Quick confirmation via logbook (faster than polling state)
     if result.get("ok"):
         try:
@@ -1337,22 +1392,22 @@ async def execute_announce(req: AnnouncementRequest):
                 log.info(f"[announce] Logbook confirms: {latest.get('state', '?')} - {latest.get('message', '')[:80]}")
         except Exception as e:
             log.debug(f"[announce] Logbook check skipped: {e}")
-    
+
     # Wait for announcement audio to finish before restoring
     if result.get("ok"):
         await asyncio.sleep(10)
-    
+
     # 6. Restore initial state for ALL devices
     # Detect device type for restoration policy
     detect_tv_type = _detect_tv_type
     device_type = detect_tv_type(target_player, initial_state.get("state", "unknown") if initial_state else "unknown", initial_state.get("attributes", {}) if initial_state else {}, loaded_components)
-    
+
     # For Roku: restore the MA player entity (where volume/source/playback state lives)
     restore_target = target_player
     if device_type == "roku" and attrs.get("_ma_player_entity"):
         restore_target = attrs["_ma_player_entity"]
         log.info(f"[announce] Using MA player for state restoration: {restore_target}")
-    
+
     # Roku devices: never turn off after announcement (they handle their own power)
     # Other devices: only turn off if truly off/unavailable
     truly_off = initial_state and initial_state.get("state") in ("off", "unavailable")
@@ -1364,7 +1419,7 @@ async def execute_announce(req: AnnouncementRequest):
         # Restore volume, source, and resume playback if device was playing
         init_attrs = initial_state.get("attributes", {})
         initial_state_str = initial_state.get("state", "unknown")
-        
+
         # Restore volume
         saved_volume = init_attrs.get("volume_level")
         if saved_volume is not None:
@@ -1374,7 +1429,7 @@ async def execute_announce(req: AnnouncementRequest):
                 if current_volume is not None and abs(current_volume - saved_volume) > 0.01:
                     log.info(f"[announce] Restoring volume from {current_volume} to {saved_volume}")
                     await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", restore_target, {"volume_level": saved_volume})
-        
+
         # Restore source/input
         saved_source = init_attrs.get("source")
         if saved_source:
@@ -1385,7 +1440,7 @@ async def execute_announce(req: AnnouncementRequest):
                     log.info(f"[announce] Restoring source from '{current_source}' to '{saved_source}'")
                     await ha_client.call_service(ha_url, ha_token, "media_player", "select_source", restore_target, {"source": saved_source})
                     await asyncio.sleep(2)
-        
+
         # Resume playback if device was playing/paused
         if initial_state_str in ("playing", "paused"):
             saved_media = init_attrs.get("media_content_id")
@@ -1404,7 +1459,7 @@ async def execute_announce(req: AnnouncementRequest):
                     await ha_client.call_service(ha_url, ha_token, "media_player", "media_play", restore_target)
                 elif initial_state_str == "paused":
                     await ha_client.call_service(ha_url, ha_token, "media_player", "media_pause", restore_target)
-        
+
         # Restore mute state
         saved_muted = init_attrs.get("is_volume_muted")
         if saved_muted is not None:
@@ -1426,20 +1481,20 @@ async def execute_entity_search(req: EntitySearchRequest):
     ctx = req.user_context
     ha_url = ctx.ha_url
     ha_token = ctx.ha_token
-    
+
     if not ha_url or not ha_token:
         creds = await resolve_first_user()
         ha_url = ha_url or (creds or {}).get("ha_url", "")
         ha_token = ha_token or (creds or {}).get("ha_token", "")
-    
+
     if not ha_url or not ha_token:
         return _fail("Home Assistant URL or token not configured.", "entity_search")
-    
+
     all_states = await ha_client.get_states(ha_url, ha_token) or []
     results = []
-    
+
     search_terms = req.query.lower().split()
-    
+
     for state in all_states:
         eid = state.get("entity_id", "")
         attrs = state.get("attributes", {})
@@ -1447,7 +1502,7 @@ async def execute_entity_search(req: EntitySearchRequest):
         device_class = attrs.get("device_class", "")
         area = attrs.get("area_id", "")
         current_state = state.get("state", "")
-        
+
         # Apply filters
         if req.domain:
             allowed_domains = [d.strip() for d in req.domain.split(',') if d.strip()]
@@ -1458,13 +1513,13 @@ async def execute_entity_search(req: EntitySearchRequest):
             continue
         if req.state and req.state.lower() != current_state.lower():
             continue
-        
+
         # Search matching
         if search_terms:
             searchable = f"{eid} {friendly} {device_class} {area}".lower()
             if not any(term in searchable for term in search_terms):
                 continue
-        
+
         results.append({
             "entity_id": eid,
             "friendly_name": attrs.get("friendly_name", ""),
@@ -1478,7 +1533,7 @@ async def execute_entity_search(req: EntitySearchRequest):
             "supported_features": attrs.get("supported_features", 0),
             "platform": _detect_media_platform(eid, attrs),
         })
-    
+
     # Sort by relevance: exact matches first, then partial
     if search_terms:
         def relevance_score(r):
@@ -1491,7 +1546,7 @@ async def execute_entity_search(req: EntitySearchRequest):
                     score += 10
             return score
         results.sort(key=relevance_score, reverse=True)
-    
+
     return ExecutionResult(
         status="SUCCESS",
         message=f"Found {len(results)} matching entities.",
@@ -1512,7 +1567,7 @@ def _detect_media_platform(entity_id: str, attrs: dict) -> str:
     eid_lower = entity_id.lower()
     app_id = (attrs.get("app_id") or "").lower()
     source_list = [s.lower() for s in (attrs.get("source_list") or [])]
-    
+
     platform_map = {
         "roku": ["roku", "tcl", "sharp"],
         "webos": ["webos", "lg_", "lg.webos"],
@@ -1587,13 +1642,13 @@ async def discovery_device_refresh(entity_id: str, request: Request):
     body = await request.json() if request.headers.get("content-length") or request.headers.get("content-type") else {}
     device_type = body.get("device_type")
     subnet = body.get("subnet") or device_discovery.DEFAULT_SUBNET
-    
+
     creds = await resolve_first_user()
     ha_url = (creds or {}).get("ha_url", "")
     ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
         return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
-    
+
     await device_registry.invalidate_device(entity_id, reason="manual_refresh")
     result = await device_discovery.discover_device(
         entity_id, ha_url, ha_token, device_type, subnet, use_cache=False
@@ -1608,13 +1663,13 @@ async def discovery_bulk_scan(request: Request):
     import device_discovery
     body = await request.json() if request.headers.get("content-length") or request.headers.get("content-type") else {}
     subnet = body.get("subnet") or device_discovery.DEFAULT_SUBNET
-    
+
     creds = await resolve_first_user()
     ha_url = (creds or {}).get("ha_url", "")
     ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
         return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
-    
+
     discovered = await device_discovery.bulk_scan(ha_url, ha_token, subnet)
     return {"status": "SUCCESS", "discovered": discovered, "count": len(discovered)}
 
@@ -1663,13 +1718,13 @@ async def discovery_network_scan(req: NetworkDeviceScanRequest):
     from services.execution.handlers.network_scan import scan_network
     ctx = req.user_context
     log.info(f"[network_scan] user={ctx.user} subnet={req.subnet} type={req.device_type}")
-    
+
     devices = await scan_network(
         subnet=req.subnet,
         device_type=req.device_type,
         include_mac=req.include_mac if req.include_mac is not None else False,
     )
-    
+
     if devices:
         return ExecutionResult(
             status="SUCCESS",
@@ -1698,7 +1753,7 @@ async def health():
     """Check execution service health and all critical dependencies."""
     checks = {}
     overall_status = "healthy"
-    
+
     # Check Redis with retry
     redis_ok = await _check_dependency(
         "redis",
@@ -1709,7 +1764,7 @@ async def health():
     checks["redis"] = redis_ok["status"]
     if not redis_ok["healthy"]:
         overall_status = "degraded"
-    
+
     # Check Identity Service with retry
     identity_ok = await _check_dependency(
         "identity",
@@ -1720,7 +1775,7 @@ async def health():
     checks["identity"] = identity_ok["status"]
     if not identity_ok["healthy"]:
         overall_status = "unhealthy"
-    
+
     # Check RAG Service
     rag_url = os.getenv("RAG_SVC_URL", "http://localhost:8004")
     rag_ok = await _check_dependency(
@@ -1732,7 +1787,7 @@ async def health():
     checks["rag"] = rag_ok["status"]
     if not rag_ok["healthy"]:
         overall_status = "degraded"
-    
+
     # Check Storage Service
     storage_url = os.getenv("STORAGE_SVC_URL", "http://localhost:8005")
     storage_ok = await _check_dependency(
@@ -1744,7 +1799,7 @@ async def health():
     checks["storage"] = storage_ok["status"]
     if not storage_ok["healthy"]:
         overall_status = "degraded"
-    
+
     status_code = 200 if overall_status == "healthy" else 503
     return JSONResponse(
         status_code=status_code,
@@ -1768,10 +1823,10 @@ async def _check_dependency(name: str, check_fn, max_retries: int = 2, retry_del
             log.warning(f"[health] {name} unhealthy (attempt {attempt + 1}/{max_retries + 1}): {result['status']}")
         except Exception as e:
             log.error(f"[health] {name} check failed (attempt {attempt + 1}/{max_retries + 1}): {e}")
-        
+
         if attempt < max_retries:
             await asyncio.sleep(retry_delay)
-    
+
     return {"status": f"unreachable after {max_retries + 1} attempts", "healthy": False}
 
 
@@ -1823,9 +1878,9 @@ async def execute_ha_logbook(req: LogbookRequest):
     ctx = req.user_context
     full_entity_id = ha_client.sanitize_entity_id("sensor", req.entity_id)
     log.info(f"[ha_logbook] user={ctx.user} entity={full_entity_id}")
-    
+
     entries = await ha_client.get_logbook(ctx.ha_url or "", ctx.ha_token or "", full_entity_id, days=req.days)
-    
+
     if entries:
         return ExecutionResult(
             status="SUCCESS",
@@ -1877,34 +1932,34 @@ async def _resolve_mass_ha_creds(user_id: str):
     return creds
 
 
-async def _get_ma_playlists_via_ha(ha_url: str, ha_token: str, mass_entry_id: str = "", limit: int = 50) -> List[Dict[str, Any]]:
+async def _get_ma_playlists_via_ha(ha_url: str, ha_token: str, mass_entry_id: str = "", limit: int = 50) -> list[dict[str, Any]]:
     """Get MA playlists via HA's music_assistant.get_library service."""
     if not ha_url or not ha_token:
         return []
-    
+
     service_data = {
         "media_type": "playlist",
         "limit": limit,
     }
     if mass_entry_id:
         service_data["config_entry_id"] = mass_entry_id
-    
+
     result = await ha_client.call_service(
         ha_url, ha_token, "music_assistant", "get_library", entity_id="",
         service_data=service_data,
         return_response=True,
     )
-    
+
     if not result.get("ok") or not result.get("service_response"):
         log.warning(f"[ma/playlists] HA call failed or no response: {result}")
         return []
-    
+
     raw = result["service_response"]
     resp = raw.get("service_response", raw)
     log.info(f"[ma/playlists] HA response keys: {list(resp.keys()) if isinstance(resp, dict) else type(resp).__name__}, raw keys: {list(raw.keys())}")
     items = resp.get("playlists", resp.get("items", []))
     log.info(f"[ma/playlists] Found {len(items)} items in key 'playlists' or 'items'")
-    
+
     return [
         {
             "name": item.get("name", ""),
@@ -1918,11 +1973,11 @@ async def _get_ma_playlists_via_ha(ha_url: str, ha_token: str, mass_entry_id: st
     ]
 
 
-async def _get_ma_recent_via_ha(ha_url: str, ha_token: str, mass_entry_id: str = "", limit: int = 25) -> List[Dict[str, Any]]:
+async def _get_ma_recent_via_ha(ha_url: str, ha_token: str, mass_entry_id: str = "", limit: int = 25) -> list[dict[str, Any]]:
     """Get MA recently played via HA's music_assistant.get_library service (tracks)."""
     if not ha_url or not ha_token:
         return []
-    
+
     service_data = {
         "media_type": "track",
         "limit": limit,
@@ -1930,23 +1985,23 @@ async def _get_ma_recent_via_ha(ha_url: str, ha_token: str, mass_entry_id: str =
     }
     if mass_entry_id:
         service_data["config_entry_id"] = mass_entry_id
-    
+
     result = await ha_client.call_service(
         ha_url, ha_token, "music_assistant", "get_library", entity_id="",
         service_data=service_data,
         return_response=True,
     )
-    
+
     if not result.get("ok") or not result.get("service_response"):
         log.warning(f"[ma/recent] HA call failed or no response: {result}")
         return []
-    
+
     raw = result["service_response"]
     resp = raw.get("service_response", raw)
     log.info(f"[ma/recent] HA response keys: {list(resp.keys()) if isinstance(resp, dict) else type(resp).__name__}, raw keys: {list(raw.keys())}")
     items = resp.get("tracks", resp.get("items", []))
     log.info(f"[ma/recent] Found {len(items)} items in key 'tracks' or 'items'")
-    
+
     return [
         {
             "name": item.get("name", ""),
@@ -1967,20 +2022,20 @@ async def get_ma_playlists(user_id: str = ""):
         creds = await _resolve_mass_ha_creds(user_id)
         mass_url = creds.get("mass_url") if creds else None
         mass_token = creds.get("mass_token") if creds else None
-        
+
         if mass_url and mass_token:
             from services.execution.handlers.mass_client import get_playlists as _direct_playlists
             playlists = await _direct_playlists(mass_url, mass_token)
             if playlists:
                 return {"status": "SUCCESS", "playlists": playlists}
-        
+
         ha_url = creds.get("ha_url") if creds else None
         ha_token = creds.get("ha_token") if creds else None
         mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
         if ha_url and ha_token:
             playlists = await _get_ma_playlists_via_ha(ha_url, ha_token, mass_entry_id)
             return {"status": "SUCCESS", "playlists": playlists}
-            
+
         return {"status": "SUCCESS", "playlists": []}
     except Exception as e:
         log.error(f"[ma/playlists] Error: {e}")
@@ -1994,20 +2049,20 @@ async def get_ma_recent(user_id: str = ""):
         creds = await _resolve_mass_ha_creds(user_id)
         mass_url = creds.get("mass_url") if creds else None
         mass_token = creds.get("mass_token") if creds else None
-        
+
         if mass_url and mass_token:
             from services.execution.handlers.mass_client import get_recent as _direct_recent
             recent = await _direct_recent(mass_url, mass_token)
             if recent:
                 return {"status": "SUCCESS", "recent": recent}
-        
+
         ha_url = creds.get("ha_url") if creds else None
         ha_token = creds.get("ha_token") if creds else None
         mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
         if ha_url and ha_token:
             recent = await _get_ma_recent_via_ha(ha_url, ha_token, mass_entry_id)
             return {"status": "SUCCESS", "recent": recent}
-            
+
         return {"status": "SUCCESS", "recent": []}
     except Exception as e:
         log.error(f"[ma/recent] Error: {e}")
@@ -2021,10 +2076,10 @@ async def get_ma_library(user_id: str = "", media_type: str = "TRACKS", offset: 
         creds = await _resolve_mass_ha_creds(user_id)
         ha_url = creds.get("ha_url") if creds else None
         ha_token = creds.get("ha_token") if creds else None
-        
+
         if not ha_url or not ha_token:
             return {"status": "SUCCESS", "items": [], "notice": "MA/HA not configured"}
-        
+
         from services.execution.handlers.mass_ha_client import get_library as _ma_get_library
         items = await _ma_get_library(ha_url, ha_token, media_type, limit=limit, offset=offset, search=search, order_by=order_by)
         return {"status": "SUCCESS", "items": items, "media_type": media_type, "offset": offset, "limit": limit}
@@ -2041,10 +2096,10 @@ async def search_ma(user_id: str = "", query: str = "", media_type: str = "", li
         ha_url = creds.get("ha_url") if creds else None
         ha_token = creds.get("ha_token") if creds else None
         mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
-        
+
         if not ha_url or not ha_token:
             return {"status": "SUCCESS", "results": [], "notice": "MA/HA not configured"}
-        
+
         from services.execution.handlers.mass_ha_client import search as _ma_search
         results = await _ma_search(ha_url, ha_token, query, mass_entry_id=mass_entry_id, media_types=[media_type] if media_type else None, limit=limit, artist=artist, album=album, library_only=library_only)
         return {"status": "SUCCESS", "results": results, "query": query}
@@ -2059,7 +2114,7 @@ async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = 
     try:
         from services.execution.handlers.audiobookshelf import handle_audiobookshelf
         from services.execution.schemas import AudiobookshelfRequest, UserContext
-        
+
         # Resolve per-user credentials from Identity service
         user_ctx = UserContext(user=user_id)
         creds = await resolve_internal_user(rag_user=user_id)
@@ -2073,7 +2128,7 @@ async def handle_audiobookshelf_get(action: str = "last_played", user_id: str = 
                     audiobookshelf_pass=creds.get("audiobookshelf_pass"),
                     audiobookshelf_api_key=creds.get("audiobookshelf_api_key"),
                 )
-        
+
         req = AudiobookshelfRequest(
             action=action if action in ("search", "play", "resume", "progress", "libraries", "list", "get_book", "last_played") else "list",
             user_context=user_ctx,
@@ -2129,31 +2184,31 @@ async def execute_llm_info(req: LLMInfoRequest):
     if not ollama_url:
         return _fail("Ollama URL not configured in Identity settings", "llm_info")
     action = req.action.lower()
-    
+
     endpoints = {
         "list": "/api/tags",
         "ps": "/api/ps",
         "version": "/api/version",
         "show": "/api/show",
     }
-    
+
     if action not in endpoints:
         return _fail(f"Unknown action: {action}. Valid: {list(endpoints.keys())}", "llm_info")
-    
+
     endpoint = endpoints[action]
     payload = {}
     if action == "show" and req.model:
         payload = {"name": req.model}
     elif action == "show" and not req.model:
         return _fail("model is required for 'show' action", "llm_info")
-    
+
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             if payload:
                 resp = await client.post(f"{OLLAMA_URL}{endpoint}", json=payload)
             else:
                 resp = await client.get(f"{OLLAMA_URL}{endpoint}")
-            
+
             if resp.status == 200:
                 data = await resp.json()
                 if action == "list":
@@ -2215,7 +2270,6 @@ async def execute_ha_config(req: "HAConfigRequest"):
 async def execute_media_group(req):
     """Manage media device groups."""
     from schemas_groups import MediaGroupRequest
-    from pydantic import BaseModel
     if isinstance(req, BaseModel):
         dump = req.model_dump()
     else:
@@ -2232,7 +2286,6 @@ async def execute_media_group(req):
 async def execute_light_cluster(req):
     """Manage light clusters."""
     from schemas_groups import LightClusterRequest
-    from pydantic import BaseModel
     if isinstance(req, BaseModel):
         dump = req.model_dump()
     else:
@@ -2293,8 +2346,8 @@ async def get_presence_rooms(x_internal_secret: str = Header(None)):
 @app.post("/execute/stt/transcribe")
 async def transcribe_audio(file: UploadFile = File(...), model: str = "base", language: str = "en"):
     """Transcribe audio file using Whisper STT."""
-    import tempfile
     import os
+    import tempfile
     try:
         import whisper  # pyright: ignore[reportMissingImports]
     except ImportError:
@@ -2338,8 +2391,9 @@ async def transcribe_audio(file: UploadFile = File(...), model: str = "base", la
 async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)):
     """Route voice command transcript to appropriate handler."""
     await _check_internal_secret(x_internal_secret)
+    from schemas import LightControlRequest, MediaPlayRequest, UserContext
+
     from services.execution.handlers import light, media
-    from schemas import UserContext, LightControlRequest, MediaPlayRequest
 
     transcript = req.get("transcript", "").strip().lower()
     user_id = req.get("user_id") or ""
@@ -2356,9 +2410,7 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
         entity_id = req.get("entity_id", "")
         if not entity_id:
             return {"status": "FAILURE", "message": "entity_id required for light commands"}
-        if "turn on" in transcript or "on" in transcript:
-            action = "turn_on"
-        elif "dim" in transcript or "brightness" in transcript:
+        if "turn on" in transcript or "on" in transcript or "dim" in transcript or "brightness" in transcript:
             action = "turn_on"
         else:
             action = "turn_off"
@@ -2413,22 +2465,22 @@ _SKYLIGHT_BASE = os.environ.get("SKYLIGHT_BASE_URL", "https://app.ourskylight.co
 _skylight_tokens: dict[str, str] = {}
 
 
-async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None, str | None]:
+async def _get_skylight_auth(username: str | None = None) -> tuple[str | None, str | None]:
     """Resolve Skylight credentials from identity service."""
     creds = await resolve_first_user()
     log.debug(f"[skylight] resolve_first_user returned: type={type(creds).__name__}, creds={creds is not None}")
     if not creds:
         return None, None
-    
+
     url = creds.get("skylight_url") or _SKYLIGHT_BASE
     password = creds.get("skylight_pass")
-    
+
     # Determine the email/login name to use
     email = username if username else creds.get("skylight_email")
-    
+
     if not email or not password:
         return None, None
-        
+
     # Check if the user has disabled the integration
     if username:
         user_creds = await resolve_internal_user(rag_user=username)
@@ -2440,7 +2492,7 @@ async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None
     if email in _skylight_tokens:
         return url, _skylight_tokens[email]
 
-    
+
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             resp = await client.post(
@@ -2455,11 +2507,11 @@ async def _get_skylight_auth(username: Optional[str] = None) -> tuple[str | None
                     return url, token
     except Exception as e:
         log.error(f"[skylight] Auth failed for {email}: {e}")
-    
+
     return None, None
 
 
-async def _skylight_api(url: str, token: str, method: str, path: str, json_body: Optional[dict] = None) -> Optional[dict]:
+async def _skylight_api(url: str, token: str, method: str, path: str, json_body: dict | None = None) -> dict | None:
     """Make a Skylight API call."""
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
@@ -2476,35 +2528,35 @@ async def _skylight_api(url: str, token: str, method: str, path: str, json_body:
 
 @app.get("/api/integrations/skylight/chores")
 async def get_skylight_chores(
-    user: Optional[str] = None,
-    date: Optional[str] = None,
+    user: str | None = None,
+    date: str | None = None,
     x_internal_secret: str = Header(None)
 ):
     """Get chores from Skylight, optionally filtered by user and/or date."""
     url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
-    
+
     result = await _skylight_api(url, token, "GET", "/api/v1/chores")
     if not result:
         return {"status": "FAILURE", "message": "Failed to fetch chores"}
-    
+
     chores = result.get("data", []) if result else []
-    
+
     # Filter by user if specified
     if user:
         chores = [
             c for c in chores
             if user.lower() in [a.lower() for a in c.get("assignees", [])]
         ]
-    
+
     # Filter by date if specified
     if date:
         chores = [
             c for c in chores
             if c.get("due_date", "") == date
         ]
-    
+
     return {
         "status": "SUCCESS",
         "chores": chores,
@@ -2514,14 +2566,14 @@ async def get_skylight_chores(
 @app.post("/api/integrations/skylight/chores/{chore_id}/complete")
 async def complete_skylight_chore(
     chore_id: str,
-    user: Optional[str] = None,
+    user: str | None = None,
     x_internal_secret: str = Header(None)
 ):
     """Mark a Skylight chore as complete."""
     url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
-    
+
     result = await _skylight_api(url, token, "POST", f"/api/v1/chores/{chore_id}/complete")
     if result:
         return {"status": "SUCCESS", "message": "Chore completed"}
@@ -2531,14 +2583,14 @@ async def complete_skylight_chore(
 @app.post("/api/integrations/skylight/chores/{chore_id}/uncomplete")
 async def uncomplete_skylight_chore(
     chore_id: str,
-    user: Optional[str] = None,
+    user: str | None = None,
     x_internal_secret: str = Header(None)
 ):
     """Mark a Skylight chore as incomplete."""
     url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
-    
+
     result = await _skylight_api(url, token, "POST", f"/api/v1/chores/{chore_id}/uncomplete")
     if result:
         return {"status": "SUCCESS", "message": "Chore uncompleted"}
@@ -2547,18 +2599,18 @@ async def uncomplete_skylight_chore(
 
 @app.get("/api/integrations/skylight/rewards")
 async def get_skylight_rewards(
-    user: Optional[str] = None,
+    user: str | None = None,
     x_internal_secret: str = Header(None)
 ):
     """Get Skylight rewards."""
     url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
-    
+
     result = await _skylight_api(url, token, "GET", "/api/v1/rewards")
     if not result:
         return {"status": "FAILURE", "message": "Failed to fetch rewards"}
-    
+
     rewards = result.get("data", []) if result else []
     return {"status": "SUCCESS", "rewards": rewards}
 
@@ -2567,14 +2619,14 @@ async def get_skylight_rewards(
 async def redeem_skylight_reward(
     reward_id: str,
     body: dict = {},
-    user: Optional[str] = None,
+    user: str | None = None,
     x_internal_secret: str = Header(None)
 ):
     """Redeem a Skylight reward."""
     url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
-    
+
     result = await _skylight_api(url, token, "POST", f"/api/v1/rewards/{reward_id}/redeem", body)
     if result:
         return {"status": "SUCCESS", "message": "Reward redeemed"}

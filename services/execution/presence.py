@@ -17,7 +17,8 @@ import asyncio
 import json
 import logging
 import time
-from typing import Dict, Any, Optional, Callable, TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import paho.mqtt.client  # pyright: ignore[reportMissingImports]
@@ -58,10 +59,10 @@ class PresenceTracker:
         self.redis_url = redis_url
         self.redis_key_prefix = redis_key_prefix
         self.presence_ttl = presence_ttl
-        self._redis: Optional["aioredis.Redis"] = None  # type: ignore[valid-type]
+        self._redis: aioredis.Redis | None = None  # type: ignore[valid-type]
         self._mqtt_client = None
         self._running = False
-        self._user_mac_map: Dict[str, str] = {}  # user_id -> mac_address
+        self._user_mac_map: dict[str, str] = {}  # user_id -> mac_address
         self._callbacks: list[Callable] = []
         self._home_coordinates = None  # Tuple[float, float]
 
@@ -206,18 +207,18 @@ class PresenceTracker:
         phi2 = math.radians(lat2)
         delta_phi = math.radians(lat2 - lat1)
         delta_lambda = math.radians(lon2 - lon1)
-        
+
         a = math.sin(delta_phi / 2.0)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0)**2
         c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
         return R * c
 
-    async def _get_home_coordinates(self) -> Optional[tuple[float, float]]:
+    async def _get_home_coordinates(self) -> tuple[float, float] | None:
         if self._home_coordinates:
             return self._home_coordinates
-        
+
         try:
-            from services.execution import ha_client
             import services.config as config
+            from services.execution import ha_client
             if config.HA_URL and config.HA_TOKEN:
                 ha_cfg = await ha_client.get_config(config.HA_URL, config.HA_TOKEN)
                 lat = ha_cfg.get("latitude")
@@ -229,9 +230,10 @@ class PresenceTracker:
             log.warning(f"[presence] Failed to fetch home coordinates from HA: {e}")
         return None
 
-    async def _get_user_gps_location(self, user_id: str) -> Optional[Dict[str, Any]]:
+    async def _get_user_gps_location(self, user_id: str) -> dict[str, Any] | None:
         try:
             import aiohttp
+
             import services.config as config
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
                 resp = await client.get(
@@ -244,7 +246,7 @@ class PresenceTracker:
             log.warning(f"[presence] Failed to fetch GPS location for {user_id} from Identity: {e}")
         return None
 
-    async def get_user_presence(self, user_id: str) -> Optional[Dict[str, Any]]:
+    async def get_user_presence(self, user_id: str) -> dict[str, Any] | None:
         """Get current presence data for a user."""
         if self._redis:
             try:
@@ -267,7 +269,7 @@ class PresenceTracker:
                     dist = self._calculate_distance(user_lat, user_lon, home_lat, home_lon)
                     is_home = dist <= 200.0
                     room = "home" if is_home else "not_home"
-                    
+
                     return {
                         "room": room,
                         "confidence": 1.0,
@@ -280,7 +282,7 @@ class PresenceTracker:
                     }
         return None
 
-    async def get_all_presence(self) -> Dict[str, Dict[str, Any]]:
+    async def get_all_presence(self) -> dict[str, dict[str, Any]]:
         """Get presence data for all tracked users."""
         presence_dict = {}
         if self._redis:
@@ -293,6 +295,7 @@ class PresenceTracker:
         # Integrate GPS fallback for users not in the BLE presence list
         try:
             import aiohttp
+
             import services.config as config
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
                 resp = await client.get(
@@ -312,7 +315,7 @@ class PresenceTracker:
                                     dist = self._calculate_distance(user_lat, user_lon, home_lat, home_lon)
                                     is_home = dist <= 200.0
                                     room = "home" if is_home else "not_home"
-                                    
+
                                     presence_dict[user_id] = {
                                         "room": room,
                                         "confidence": 1.0,
@@ -346,7 +349,7 @@ class PresenceTracker:
 
 
 # Global presence tracker instance
-_presence_tracker: Optional[PresenceTracker] = None
+_presence_tracker: PresenceTracker | None = None
 
 
 def get_presence_tracker() -> PresenceTracker:

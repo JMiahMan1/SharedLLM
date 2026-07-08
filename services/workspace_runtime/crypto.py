@@ -3,8 +3,9 @@ Fernet encryption helpers for workspace-scoped secrets.
 """
 import logging
 
-from services.config import FERNET_KEY
 from cryptography.fernet import Fernet, InvalidToken
+
+from services.config import FERNET_KEY
 
 log = logging.getLogger("workspace_runtime.crypto")
 

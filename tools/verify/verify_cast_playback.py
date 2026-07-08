@@ -1,5 +1,6 @@
-import time
 import sys
+import time
+
 import pychromecast  # pyright: ignore[reportMissingImports]
 
 TARGET_IP = "192.168.2.240"  # Found via scan_cast_ips.py
@@ -14,24 +15,24 @@ try:
     cast = pychromecast.Chromecast(TARGET_IP)
     cast.wait()
     print(f"Connected to: {cast.cast_info.friendly_name} ({cast.model_name})")
-    
+
     # 2. Launch Media
     print("Launching media...")
     mc = cast.media_controller
     mc.play_media(VIDEO_URL, MIME_TYPE)
     mc.block_until_active()
-    
+
     print(f"Media State: {mc.status.player_state}")
-    
+
     # 3. Wait a bit
     time.sleep(5)
-    
+
     # 4. Check status again
     print("Updating status...")
     mc.update_status()
     print(f"Current Time: {mc.status.current_time}")
     print(f"Media State: {mc.status.player_state}")
-    
+
     if mc.status.player_state in ['PLAYING', 'BUFFERING']:
         print("SUCCESS: Video is playing/buffering.")
     else:

@@ -1,4 +1,5 @@
 import os
+
 import httpx
 import pytest
 
@@ -21,8 +22,8 @@ async def test_capability_read_success():
             "path": ".",
             "query": "SharedLLM",
             "user_context": {"user": "test_user", "is_admin": False}
-        }, headers=HEADERS)  # noqa: F841
-        
+        }, headers=HEADERS)
+
         # Capability check happens at workspace_runtime level, but routed through execution -> gateway
         assert resp.status_code == 200
         assert resp.json()["status"] == "SUCCESS"
@@ -40,7 +41,7 @@ async def test_capability_write_failure():
             "user_context": {"user": "test_user", "is_admin": False}
         }
         resp = await client.post(f"{GATEWAY_URL}/execute/workspace_file_write", json=payload, headers=HEADERS)
-        
+
         # Should return 403 Forbidden from workspace_runtime
         assert resp.status_code == 403
         assert "does not allow capability 'write'" in resp.json()["detail"]
@@ -56,7 +57,7 @@ async def test_capability_git_status_success():
             "user_context": {"user": "test_user", "is_admin": False}
         }
         resp = await client.post(f"{GATEWAY_URL}/execute/git", json=payload, headers=HEADERS)
-        
+
         assert resp.status_code == 200
         assert resp.json()["status"] == "SUCCESS"
 
@@ -72,7 +73,7 @@ async def test_capability_git_write_failure():
             "user_context": {"user": "test_user", "is_admin": False}
         }
         resp = await client.post(f"{GATEWAY_URL}/execute/git", json=payload, headers=HEADERS)
-        
+
         assert resp.status_code == 403
         assert "does not allow capability 'git_write'" in resp.json()["detail"]
 
@@ -87,7 +88,7 @@ async def test_capability_pytest_failure():
             "user_context": {"user": "test_user", "is_admin": False}
         }
         resp = await client.post(f"{GATEWAY_URL}/execute/workspace_shell", json=payload, headers=HEADERS)
-        
+
         assert resp.status_code == 403
         assert "does not allow capability 'pytest'" in resp.json()["detail"]
 
@@ -104,7 +105,7 @@ async def test_admin_bypass():
             "user_context": {"user": "admin_user", "is_admin": True}
         }
         resp = await client.post(f"{GATEWAY_URL}/execute/workspace_file_write", json=payload, headers=HEADERS)
-        
+
         # Should succeed because is_admin is True
         assert resp.status_code == 200
         assert resp.json()["status"] == "SUCCESS"

@@ -1,11 +1,12 @@
 # services/execution/handlers/media.py
-import logging
 import asyncio
+import logging
 import re
 from typing import cast
-from services.execution import ha_client
-from services.execution.schemas import MediaPlayRequest, ExecutionResult, AudiobookshelfRequest
+
 from services.config import MASS_CONFIG_ENTRY_ID
+from services.execution import ha_client
+from services.execution.schemas import AudiobookshelfRequest, ExecutionResult, MediaPlayRequest
 
 log = logging.getLogger("execution.media")
 
@@ -20,12 +21,12 @@ def detect_media_type(query: str, media_type_hint: str | None = None) -> str:
     """Detect media type from query content and hints."""
     if media_type_hint and media_type_hint in ("music", "video", "podcast", "audiobook", "radio", "url", "announcement"):
         return media_type_hint
-    
+
     if not query:
         return "music"
-    
+
     query_lower = query.lower()
-    
+
     # Check if query is a URL
     if query_lower.startswith(("http://", "https://")):
         for pattern in MUSIC_PATTERNS:
@@ -38,20 +39,20 @@ def detect_media_type(query: str, media_type_hint: str | None = None) -> str:
             if re.search(pattern, query_lower):
                 return "video"
         return "url"
-    
+
     # Check for media type keywords in query
     for pattern in VIDEO_PATTERNS:
         if re.search(pattern, query_lower):
             return "video"
-    
+
     # Check for audiobook indicators
     if any(kw in query_lower for kw in ["audiobook", "read by", "narrated by", "chapter"]):
         return "audiobook"
-    
+
     # Check for podcast indicators
     if any(kw in query_lower for kw in ["podcast", "episode of", "the daily show", "joe rogan"]):
         return "podcast"
-    
+
     # Default to music
     return "music"
 
@@ -59,12 +60,12 @@ async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, medi
     """Resolve entity_id from device_name if needed."""
     if req.entity_id:
         return ha_client.sanitize_entity_id("media_player", req.entity_id)
-    
+
     if req.device_name:
         entity_id = await ha_client.resolve_entity_by_name(ha_url, ha_token, req.device_name, "media_player", media_type)
         if entity_id:
             return entity_id
-    
+
     raise ValueError("entity_id or device_name is required")
 
 async def resolve_mass_entity(ctx, original_entity: str) -> str:
@@ -77,7 +78,7 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
     all_states = await ha_client.get_states(ctx.ha_url, ctx.ha_token)
     if not all_states:
         return original_entity
-    
+
     # Check if original entity is already an MA player with active_queue
     for state in all_states:
         if state.get("entity_id") == original_entity:
@@ -85,22 +86,22 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
             integration = attrs.get("integration", "")
             source = attrs.get("source", "").lower()
             active_queue = attrs.get("active_queue")
-            
+
             if active_queue and ("music assistant" in source or integration == "music_assistant"):
                 log.info(f"[media/play] Original entity {original_entity} is already an MA player (queue: {active_queue})")
                 return original_entity
-            
+
             original_friendly = attrs.get("friendly_name", "")
             break
     else:
         # Original entity not found in states
         return original_entity
-    
+
     if not original_friendly:
         return original_entity
-    
+
     search = original_friendly.lower()
-    
+
     # Look for MA player with matching friendly name
     for state in all_states:
         eid = state.get("entity_id", "")
@@ -108,48 +109,48 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
             continue
         if eid == original_entity:
             continue
-            
+
         attrs = state.get("attributes", {})
         friendly = attrs.get("friendly_name", "").lower()
         source = attrs.get("source", "").lower()
         integration = attrs.get("integration", "")
         active_queue = attrs.get("active_queue")
-        
+
         # Check if this is an MA player (via integration/source attributes)
         is_ma_player = "music assistant" in source or integration == "music_assistant"
-        
+
         # For MA players, allow any state (idle/playing/paused) - active_queue not required
         if is_ma_player and search in friendly:
             log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid} (integration={integration}, queue={active_queue})")
             return eid
-    
+
     # No MA variant found, return original (may still work for non-MA players)
     return original_entity
 
 async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play music via Music Assistant or fallback."""
     from . import roku as roku_handler
-    
+
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
-    
+
     # Samsung Tizen TV: use MASS search for music, then play URL via play_media
     from . import samsung as samsung_handler
     is_samsung = await samsung_handler.is_samsung_tv(ctx.ha_url, ctx.ha_token, entity_id)
-    
+
     # Resolve MA config entry at runtime if not seeded
     mass_entry = MASS_CONFIG_ENTRY_ID
     if not mass_entry:
         mass_entry = await ha_client.find_mass_config_entry(ctx.ha_url, ctx.ha_token)
-    
+
     if is_roku:
         log.info(f"[media/play] Detected Roku device, using Roku music handler for query '{req.query}'")
         return await roku_handler.roku_play_music(
             ctx.ha_url, ctx.ha_token, entity_id, req.query or "", mass_entry,
         )
-    
+
     mass_entity = await resolve_mass_entity(ctx, entity_id)
     log.info(f"[media/play] play_music configuration: entity_id={entity_id}, mass_entity={mass_entity}, mass_entry={mass_entry}, is_samsung={is_samsung}")
-    
+
     if req.query:
         # Check if the query is already a direct Music Assistant URI
         if "://" in req.query:
@@ -159,7 +160,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                 return await samsung_handler.play_music(
                     ctx.ha_url, ctx.ha_token, entity_id, req.query,
                 )
-            
+
             result = await ha_client.call_service(
                 ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
                 {"media_id": req.query, "enqueue": "play" if req.enqueue == "replace" else req.enqueue},
@@ -182,7 +183,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
             },
             return_response=True,
         )
-        
+
         log.info(f"[media/play] MASS search response: {search_result}")
         if search_result.get("ok") and search_result.get("service_response"):
             raw = search_result["service_response"]
@@ -197,10 +198,10 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                     media_type_label = category
                     log.info(f"[media/play] Best match in category '{category}': name='{items[0].get('name')}', uri='{uri}'")
                     break
-            
+
             if uri:
                 log.info(f"[media/play] MASS search resolved URI: {uri} ({media_type_label})")
-                
+
                 # Samsung TV: play the MA URL directly via play_media
                 if is_samsung:
                     log.info("[media/play] Samsung TV detected, playing MASS URL via play_media")
@@ -209,7 +210,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                     )
                     log.info(f"[media/play] Samsung play result: {samsung_res}")
                     return samsung_res
-                
+
                 log.info(f"[media/play] Calling music_assistant.play_media on '{mass_entity}' with media_id='{uri}'")
                 result = await ha_client.call_service(
                     ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
@@ -220,7 +221,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                     return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' ({media_type_label}) on {entity_id}.", service="media_play")
                 else:
                     log.error(f"[media/play] play_media service call failed: {result.get('error')}")
-        
+
         # Search returned nothing — try get_library random for generic queries
         log.warning(f"[media/play] MASS search returned 0 results or failed for query='{req.query}' (config_entry={mass_entry}), falling back to library random")
         library_result = await ha_client.call_service(
@@ -234,7 +235,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
             return_response=True,
         )
         log.info(f"[media/play] Library fallback search response: {library_result}")
-        
+
         if library_result.get("ok") and library_result.get("service_response"):
             raw = library_result["service_response"]
             resp = raw.get("service_response", raw)
@@ -243,14 +244,14 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                 uri = items[0].get("uri")
                 track_name = items[0].get("name", "unknown")
                 log.info(f"[media/play] Library random fallback selected: '{track_name}' ({uri})")
-                
+
                 # Samsung TV: play the MA URL directly via play_media
                 if is_samsung:
                     log.info("[media/play] Samsung TV fallback play")
                     return await samsung_handler.play_music(
                         ctx.ha_url, ctx.ha_token, entity_id, uri,
                     )
-                
+
                 log.info(f"[media/play] Calling fallback play_media on '{mass_entity}' with media_id='{uri}'")
                 result = await ha_client.call_service(
                     ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
@@ -261,7 +262,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                     return ExecutionResult(status="SUCCESS", message=f"Playing random track on {entity_id}.", service="media_play")
                 else:
                     log.error(f"[media/play] Fallback play_media service call failed: {result.get('error')}")
-        
+
         log.info(f"[media/play] Trying direct play_media fallback as last resort for media_id='{req.query}'")
         result = await ha_client.call_service(
             ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
@@ -272,14 +273,14 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
             return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' on {entity_id}.", service="media_play")
         else:
             log.error(f"[media/play] Last resort play_media service call failed: {result.get('error')}")
-    
+
     return ExecutionResult(status="FAILURE", message=f"Could not play '{req.query}' on {entity_id}.", service="media_play")
 
 
 async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play video via yt-dlp stream. Routes through Roku ECP for Roku devices."""
-    from . import video as video_handler
     from . import roku as roku_handler
+    from . import video as video_handler
 
     query = req.query or req.media_content_id or ""
 
@@ -470,10 +471,10 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
 async def play_audiobook(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play audiobook via Audiobookshelf."""
     from . import audiobookshelf as abs_handler
-    
+
     if not req.query:
         return ExecutionResult(status="FAILURE", message="Audiobook title or query is required.", service="media_play")
-    
+
     # Search ABS
     class _ABSRequest:
         def __init__(self, action, query=None, book_id=None, entity_id=None, limit=10):
@@ -487,7 +488,7 @@ async def play_audiobook(req: MediaPlayRequest, entity_id: str, ctx) -> Executio
     search_result = await abs_handler.handle_audiobookshelf(
         cast(AudiobookshelfRequest, _ABSRequest("search", query=req.query, limit=5, entity_id=entity_id))
     )
-    
+
     if search_result.status == "SUCCESS" and search_result.detail:
         books = search_result.detail.get("books", [])
         if books:
@@ -498,22 +499,22 @@ async def play_audiobook(req: MediaPlayRequest, entity_id: str, ctx) -> Executio
                 cast(AudiobookshelfRequest, _ABSRequest("play", book_id=book_id, entity_id=entity_id))
             )
             return play_result
-    
+
     return ExecutionResult(status="FAILURE", message=f"Could not find audiobook '{req.query}'.", service="media_play")
 
 async def play_url(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionResult:
     """Play a direct URL on the device."""
     url = req.media_content_id or req.query
     content_type = req.media_content_type or "url"
-    
+
     result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
         {"media_content_id": url, "media_content_type": content_type},
     )
-    
+
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Playing URL on {entity_id}.", service="media_play")
-    
+
     return ExecutionResult(status="FAILURE", message=f"Failed to play URL on {entity_id}.", service="media_play")
 
 async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
@@ -523,13 +524,13 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     ha_token = ctx.ha_token
     assert ha_url is not None
     assert ha_token is not None
-    
+
     log.info(f"[media/play] Incoming request: user={ctx.user} query='{req.query}' entity_id='{req.entity_id}' device_name='{req.device_name}' media_type='{req.media_type}' volume={req.volume} enqueue='{req.enqueue}'")
-    
+
     # Detect media type BEFORE resolving entity (needed for context-aware entity resolution)
     media_type = detect_media_type(req.query or req.media_content_id or "", req.media_type)
     log.info(f"[media/play] Detected media type: {media_type}")
-    
+
     # Resolve entity with media context
     try:
         entity_id = await resolve_entity(req, ha_url, ha_token, media_type)
@@ -537,27 +538,27 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
     except ValueError as e:
         log.error(f"[media/play] Failed to resolve entity: {e}")
         return ExecutionResult(status="FAILURE", message=str(e), service="media_play")
-    
+
     try:
         # Set volume if requested
         if req.volume is not None:
             log.info(f"[media/play] Setting volume to {req.volume} on {entity_id}")
             vol_res = await ha_client.call_service(ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": req.volume})
             log.info(f"[media/play] Volume set result: {vol_res}")
-        
+
         # Power on if needed
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
         if state:
             log.info(f"[media/play] Current state of {entity_id}: state='{state.get('state')}'")
         else:
             log.warning(f"[media/play] Could not retrieve state for {entity_id}")
-            
+
         if state and state.get("state") in ("off", "standby"):
             log.info(f"[media/play] Device {entity_id} is {state.get('state')}, turning on...")
             on_res = await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", entity_id)
             log.info(f"[media/play] Turn on result: {on_res}")
             await asyncio.sleep(2)
-        
+
         # Route to appropriate handler
         log.info(f"[media/play] Routing playback to handler for media_type='{media_type}'")
         if media_type == "video":
@@ -572,26 +573,26 @@ async def handle_media_play(req: MediaPlayRequest) -> ExecutionResult:
             return await play_music(req, entity_id, ctx)
     except Exception as e:
         log.error(f"[media/play] Error playing media for {ctx.user} on {entity_id}: {e}", exc_info=True)
-        return ExecutionResult(status="FAILURE", message=f"Media play failed: {str(e)}", service="media_play")
+        return ExecutionResult(status="FAILURE", message=f"Media play failed: {e!s}", service="media_play")
 
 async def handle_media_transport(req) -> ExecutionResult:
     """Handle media transport commands with TV-specific handling for Android TV, WebOS, Samsung, and Roku."""
-    from . import android_tv, webos, samsung, roku
     from ..announce_handlers import detect_tv_type
+    from . import android_tv, roku, samsung, webos
 
     ctx = req.user_context
     ha_url = ctx.ha_url
     ha_token = ctx.ha_token
     command = req.command.lower()
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
-    
+
     # Detect TV platform using centralized detection
     state = await ha_client.get_state(ha_url, ha_token, full_entity_id)
     attrs = state.get("attributes", {}) if state else {}
     tv_type = detect_tv_type(full_entity_id, state.get("state", "unknown") if state else "unknown", attrs)
-    
+
     log.info(f"[media/transport] Platform: {tv_type} for {full_entity_id}")
-    
+
     # Route to brand-specific handler
     if tv_type == "android_tv":
         return await android_tv.send_command(ha_url, ha_token, full_entity_id, command)
@@ -601,18 +602,18 @@ async def handle_media_transport(req) -> ExecutionResult:
         return await samsung.send_key(ha_url, ha_token, full_entity_id, command)
     elif tv_type == "roku":
         return await roku.roku_press(ha_url, ha_token, full_entity_id, command)
-    
+
     # Standard media transport commands (all devices)
     button_map = {
         "pause": "media_pause", "resume": "media_play", "play": "media_play", "stop": "media_stop",
         "next": "media_next_track", "previous": "media_previous_track",
         "volume_up": "volume_up", "volume_down": "volume_down", "volume_set": "volume_set", "mute": "volume_mute"
     }
-    
+
     service = button_map.get(command, command)
     domain = full_entity_id.split(".")[0]
     target_entity = full_entity_id
-    
+
     # Remote button commands (uppercase = remote.send_command)
     remote_buttons = {"home", "back", "up", "down", "left", "right", "select", "enter", "ok", "info", "replay"}
     if command in remote_buttons:
@@ -632,7 +633,7 @@ async def handle_media_transport(req) -> ExecutionResult:
     result = await ha_client.call_service(
         ha_url, ha_token, domain, service_cmd, target_entity, data or None,
     )
-    
+
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Media command '{command}' executed on {full_entity_id}.", service="media_transport")
     return ExecutionResult(status="FAILURE", message=f"Media command failed: {result.get('error')}", service="media_transport", detail=result)

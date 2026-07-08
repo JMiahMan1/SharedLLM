@@ -1,14 +1,16 @@
 # services/execution/handlers/video.py
-import logging
 import asyncio
 import json
+import logging
 import os
 import re
-import aiohttp
 import urllib.parse
+
+import aiohttp
+
 from services.config import TEMP_MEDIA_DIR as _TEMP_MEDIA_DIR
 from services.execution import ha_client
-from services.execution.schemas import VideoPlayRequest, ExecutionResult
+from services.execution.schemas import ExecutionResult, VideoPlayRequest
 
 log = logging.getLogger("execution.video")
 
@@ -37,20 +39,19 @@ async def _get_searxng_url() -> str | None:
         return _SEARXNG_URL_CACHE
     try:
         from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-            async with client.get(
-                f"{IDENTITY_SVC_URL}/api/settings",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            ) as resp:
-                if resp.status == 200:
-                    settings_list = await resp.json()
-                for item in settings_list:
-                    if item.get("key") == "searxng_url":
-                        url = item.get("value", "").rstrip("/")
-                        if url:
-                            _SEARXNG_URL_CACHE = url  # pyright: ignore[reportConstantRedefinition]
-                            _SEARXNG_CACHE_TS = time.time()  # pyright: ignore[reportConstantRedefinition]
-                            return url
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
+            f"{IDENTITY_SVC_URL}/api/settings",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        ) as resp:
+            if resp.status == 200:
+                settings_list = await resp.json()
+            for item in settings_list:
+                if item.get("key") == "searxng_url":
+                    url = item.get("value", "").rstrip("/")
+                    if url:
+                        _SEARXNG_URL_CACHE = url  # pyright: ignore[reportConstantRedefinition]
+                        _SEARXNG_CACHE_TS = time.time()  # pyright: ignore[reportConstantRedefinition]
+                        return url
     except Exception:
         pass
     return None
@@ -97,10 +98,9 @@ async def search_youtube(query: str) -> str | None:
             })
             search_url = f"{searxng_url}/search?{params}"
             log.info(f"[video] SearXNG YouTube search (HTML): {search_url}")
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
-                async with client.get(search_url) as resp:
-                    resp.raise_for_status()
-                    html = await resp.text()
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client, client.get(search_url) as resp:
+                resp.raise_for_status()
+                html = await resp.text()
 
             youtube_pattern = r'href="(https?://(?:www\.)?youtube\.com/watch\?[^"]+)"'
             matches = re.findall(youtube_pattern, html)
@@ -226,10 +226,10 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
     Files are stored on disk and streamed via /media/{media_id} endpoint.
     """
     import uuid
-    
+
     media_id = f"vid-{uuid.uuid4().hex[:8]}"
     tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
-    
+
     try:
         cookies_path = await _ensure_youtube_cookies()
         cmd = ["yt-dlp", "-f", "best[ext=mp4][vcodec^=avc1][acodec^=mp4a]/best[ext=mp4]/best", "--no-playlist", "--merge-output-format", "mp4", "-o", tmp_path]
@@ -242,18 +242,18 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
             stderr=asyncio.subprocess.PIPE,
         )
         _stdout, stderr = await proc.communicate()
-        
+
         if proc.returncode != 0:
             log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")
             return None, None
-        
+
         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
             log.error("[video] Download produced empty file")
             return None, None
-        
+
         file_size = os.path.getsize(tmp_path)
         log.info(f"[video] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
-        
+
         title = video_url
         try:
             info_cmd = ["yt-dlp", "--dump-json", "--no-download", "--no-playlist"]
@@ -271,9 +271,9 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
                 title = info.get("title", video_url)
         except:
             pass
-        
+
         return media_id, title
-        
+
     except Exception as e:
         log.error(f"[video] Download failed: {e}", exc_info=True)
         try:
@@ -293,13 +293,13 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
     while continuing the download in the background.
     """
     import uuid
-    
+
     media_id = f"vid-roku-{uuid.uuid4().hex[:8]}"
     tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
-    
+
     try:
         cookies_path = await _ensure_youtube_cookies()
-        
+
         info_cmd = ["yt-dlp", "--dump-json", "--no-download", "--no-playlist"]
         if cookies_path:
             info_cmd.extend(["--cookies", cookies_path])
@@ -320,7 +320,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
                 title = info.get("title", video_url)
             except json.JSONDecodeError:
                 pass
-        
+
         dl_cmd = ["yt-dlp", "-f", "22/18/best[ext=mp4][height<=720]", "--no-playlist", "-o", tmp_path]
         if cookies_path:
             dl_cmd.extend(["--cookies", cookies_path])
@@ -330,7 +330,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        
+
         while proc.returncode is None:
             await asyncio.sleep(0.5)
             if os.path.exists(tmp_path):
@@ -339,20 +339,20 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
                     log.info(f"[video] Progressive threshold reached: {current_size / 1024 / 1024:.1f} MB / {threshold / 1024 / 1024:.0f} MB — returning control to caller")
                     asyncio.create_task(_wait_for_download(proc, tmp_path, media_id))
                     return media_id, title
-        
+
         _stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
             log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")
             return None, None
-        
+
         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
             log.error("[video] Download produced empty file")
             return None, None
-        
+
         file_size = os.path.getsize(tmp_path)
         log.info(f"[video] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
         return media_id, title
-        
+
     except Exception as e:
         log.error(f"[video] Download failed: {e}", exc_info=True)
         try:
@@ -382,13 +382,13 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
     that require no local muxing, ensuring immediate streaming readiness.
     """
     import uuid
-    
+
     media_id = f"vid-roku-{uuid.uuid4().hex[:8]}"
     tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
-    
+
     try:
         cookies_path = await _ensure_youtube_cookies()
-        
+
         info_cmd = ["yt-dlp", "--dump-json", "--no-download", "--no-playlist"]
         if cookies_path:
             info_cmd.extend(["--cookies", cookies_path])
@@ -410,7 +410,7 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
                 title = video_url
         else:
             title = video_url
-        
+
         dl_cmd = ["yt-dlp", "-f", "22/18/best[ext=mp4][height<=720]", "--no-playlist", "-o", tmp_path]
         if cookies_path:
             dl_cmd.extend(["--cookies", cookies_path])
@@ -421,20 +421,20 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
             stderr=asyncio.subprocess.PIPE,
         )
         _stdout, stderr = await proc.communicate()
-        
+
         if proc.returncode != 0:
             log.error(f"[video] yt-dlp download failed: {stderr.decode()[:300]}")
             return None, None
-        
+
         if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
             log.error("[video] Download produced empty file")
             return None, None
-        
+
         file_size = os.path.getsize(tmp_path)
         log.info(f"[video] Downloaded {media_id} ({file_size / 1024 / 1024:.1f} MB)")
-        
+
         return media_id, title
-        
+
     except Exception as e:
         log.error(f"[video] Download failed: {e}", exc_info=True)
         try:
@@ -504,7 +504,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
         if not EXECUTION_EXTERNAL_HOST:
             raise RuntimeError("EXECUTION_EXTERNAL_HOST is not set. Cannot build media URL.")
         return EXECUTION_EXTERNAL_HOST
-    
+
     public_host = get_public_host()
     media_url = f"http://{public_host}:8888/media/{media_id}"
     log.info(f"[video/play] Casting URL: {media_url}")

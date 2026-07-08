@@ -1,12 +1,12 @@
 """Web search utility using SearXNG."""
 import logging
 import urllib.parse
-from typing import Any, Dict, List
+from typing import Any
 
 log = logging.getLogger("execution.websearch")
 
 
-async def web_search(query: str, num_results: int = 5) -> List[Dict[str, Any]]:
+async def web_search(query: str, num_results: int = 5) -> list[dict[str, Any]]:
     """Search via SearXNG JSON API, with fallback to empty results."""
     try:
         import aiohttp
@@ -52,5 +52,5 @@ async def web_search(query: str, num_results: int = 5) -> List[Dict[str, Any]]:
                 return results
     except Exception as e:
         log.warning(f"[websearch] Search failed: {e}")
-    
+
     return []

@@ -1,10 +1,11 @@
 # services/tests/test_searxng_search.py
 """Tests for SearXNG HTML search integration with Playwright fallback."""
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from services.execution.schemas import UserContext, WebSearchRequest
+import pytest
+
 from services.execution.handlers import browser
+from services.execution.schemas import UserContext, WebSearchRequest
 
 
 @pytest.fixture

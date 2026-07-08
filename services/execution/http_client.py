@@ -10,8 +10,8 @@ Provides:
 """
 import asyncio
 import logging
-from typing import Optional, Tuple, Union
-from aiohttp import ClientSession, ClientTimeout, TCPConnector, BasicAuth
+
+from aiohttp import BasicAuth, ClientSession, ClientTimeout, TCPConnector
 
 log = logging.getLogger("execution.http")
 
@@ -21,7 +21,7 @@ _MAX_CONNECTIONS = 50
 _MAX_CONNECTIONS_PER_HOST = 10
 
 # Global session cache: {host: (session, created_at)}
-_SESSION_CACHE: dict[str, Tuple[ClientSession, float]] = {}
+_SESSION_CACHE: dict[str, tuple[ClientSession, float]] = {}
 _CACHE_MAX_AGE = 300  # 5 minutes
 
 
@@ -36,12 +36,12 @@ async def request(
     method: str,
     url: str,
     *,
-    auth: Optional[Tuple[str, str]] = None,
-    headers: Optional[dict] = None,
-    params: Optional[dict] = None,
-    data: Optional[Union[bytes, str, dict]] = None,
-    json: Optional[dict] = None,
-    timeout: Optional[Union[ClientTimeout, int]] = None,
+    auth: tuple[str, str] | None = None,
+    headers: dict | None = None,
+    params: dict | None = None,
+    data: bytes | str | dict | None = None,
+    json: dict | None = None,
+    timeout: ClientTimeout | int | None = None,
     verify: bool = False,
 ) -> dict:
     """

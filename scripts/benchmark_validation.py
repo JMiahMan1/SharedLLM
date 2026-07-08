@@ -1,9 +1,10 @@
-import httpx
-import time
 import ast
-import os
 import asyncio
 import json
+import os
+import time
+
+import httpx
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 
@@ -32,13 +33,13 @@ def validate_code(code: str):
             code = code.split("```python")[1].split("```")[0].strip()
         elif "```" in code:
             code = code.split("```")[1].split("```")[0].strip()
-            
+
         tree = ast.parse(code)
-        
+
         has_class = False
         has_acquire = False
         has_release = False
-        
+
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name == "MultiTenantLock":
                 has_class = True
@@ -46,7 +47,7 @@ def validate_code(code: str):
                     if isinstance(item, ast.FunctionDef):
                         if item.name == "acquire": has_acquire = True
                         if item.name == "release": has_release = True
-        
+
         return {
             "valid_syntax": True,
             "has_class": has_class,
@@ -64,7 +65,7 @@ async def run_validation_benchmark():
             # Ensure clean state
             await unload_model(model)
             await asyncio.sleep(5)
-            
+
             print(f"\n--- Testing Model: {model} (Clean State) ---")
             start_t = time.time()
             try:
@@ -86,11 +87,11 @@ async def run_validation_benchmark():
                     print(f"Error: {resp.status_code}")
             except Exception as e:
                 print(f"Failed {model}: {e}")
-            
+
             # Unload again to be clean for next
             await unload_model(model)
             await asyncio.sleep(5)
-        
+
         print("\n=== FINAL RESULTS ===")
         print(json.dumps(results, indent=2))
 

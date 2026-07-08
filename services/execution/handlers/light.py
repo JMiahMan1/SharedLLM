@@ -1,11 +1,12 @@
 # services/execution/handlers/light.py
 import logging
+
 try:
     import ha_client
-    from schemas import LightControlRequest, ExecutionResult
+    from schemas import ExecutionResult, LightControlRequest
 except ImportError:
     from .. import ha_client
-    from ..schemas import LightControlRequest, ExecutionResult
+    from ..schemas import ExecutionResult, LightControlRequest
 
 log = logging.getLogger("execution.light")
 
@@ -19,7 +20,7 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
     # Resolve and sanitize entity_id
     full_entity_id = ha_client.sanitize_entity_id("light", req.entity_id)
     domain = full_entity_id.split(".")[0]
-    
+
     log.info(f"[light] user={ctx.user} (admin={ctx.is_admin}) entity={full_entity_id} action={req.action} (original={req.entity_id})")
 
     # 1. AUTHORIZATION CHECK
@@ -59,18 +60,18 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
         domain, req.action,
         full_entity_id, service_data or None,
     )
-    
+
     log.info(f"[light] RESULT: {result.get('ok')} | entity={full_entity_id} | error={result.get('error')}")
 
     if result.get("ok"):
         return ExecutionResult(
-            status="SUCCESS", 
-            message=f"Command '{req.action}' executed on {full_entity_id}.", 
+            status="SUCCESS",
+            message=f"Command '{req.action}' executed on {full_entity_id}.",
             service="light_control"
         )
     return ExecutionResult(
-        status="FAILURE", 
-        message=f"Light command failed: {result.get('error')}", 
+        status="FAILURE",
+        message=f"Light command failed: {result.get('error')}",
         service="light_control",
         detail=result
     )

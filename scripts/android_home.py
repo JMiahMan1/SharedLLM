@@ -3,9 +3,11 @@
 Test sending multiple HOME commands to Android TV
 """
 import sys
+
 sys.path.insert(0, '/home/jeremiah/Summers Drive/Code/SharedLLM')
 
 import asyncio
+
 from app.domains.shared import execute_ha_service
 from app.users import get_user_creds
 
@@ -14,11 +16,11 @@ ANDROID_TV_REMOTE = "remote.office_tv_remote"
 
 async def main():
     user_creds = get_user_creds("admin")
-    
+
     print("=" * 70)
     print("Testing Multiple HOME Commands for Android TV")
     print("=" * 70)
-    
+
     # Send multiple HOME presses
     for i in range(3):
         print(f"\n[{i+1}] Sending HOME button...")
@@ -32,7 +34,7 @@ async def main():
         )
         print(f"  Result: {result.get('status')}")
         await asyncio.sleep(2)
-    
+
     print("\n" + "=" * 70)
     print("Check if TV went to home screen")
     print("=" * 70)

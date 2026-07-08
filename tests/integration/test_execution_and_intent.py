@@ -1,6 +1,7 @@
-import pytest
-import httpx
 import os
+
+import httpx
+import pytest
 
 EXECUTION_URL = os.getenv("EXECUTION_SVC_URL", "http://localhost:8003")
 IDENTITY_URL = os.getenv("IDENTITY_SVC_URL", "http://localhost:8001")

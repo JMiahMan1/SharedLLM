@@ -1,7 +1,8 @@
-import sys
-import subprocess
 import os
+import subprocess
+import sys
 import warnings
+
 
 # --- 0. Dependency Auto-Heal ---
 def check_and_install(package, import_name=None):
@@ -37,7 +38,7 @@ project_root = os.path.dirname(test_dir)      # .../SharedLLM (The Root)
 env_path = os.path.join(project_root, '.env')
 
 print(f"\n{'='*60}")
-print(f"CONFIG DIAGNOSTIC")
+print("CONFIG DIAGNOSTIC")
 print(f"{'='*60}")
 print(f"Script Location: {script_path}")
 print(f"Project Root:    {project_root}")
@@ -61,7 +62,7 @@ def print_sep(title):
 # --- 2. Diagnostic Tests ---
 def test_json():
     print_sep("TEST 1: JSON API Mode (Preferred)")
-    
+
     if not WHOOGLE_URL:
         print("[!] CRITICAL: WHOOGLE_URL is not set in .env")
         return False
@@ -69,21 +70,21 @@ def test_json():
     # Clean URL
     target = f"{WHOOGLE_URL.rstrip('/')}/search?q={QUERY}&format=json"
     print(f"Target URL: {target}")
-    
+
     try:
         r = requests.get(target, headers=HEADERS, timeout=10, verify=False)
         print(f"HTTP Status: {r.status_code}")
-        
+
         if r.status_code != 200:
             print(f"FAIL: Non-200 Status. Response Preview:\n{r.text[:300]}")
             return False
-            
+
         try:
             data = r.json()
             results = data.get("results", [])
             print(f"JSON Keys: {list(data.keys())}")
             print(f"Results Found: {len(results)}")
-            
+
             if results:
                 print(f"\n[SUCCESS] Sample Result 1:\n   Title: {results[0].get('title')}\n   Content: {str(results[0].get('content', ''))[:100]}...")
                 return True
@@ -94,50 +95,50 @@ def test_json():
             print(f"[FAIL] Response was not valid JSON (likely HTML error page).\nError: {e}")
             # print(f"Raw Preview: {r.text[:200]}")
             return False
-            
+
     except Exception as e:
         print(f"[CRITICAL] Connection failed: {e}")
         return False
 
 def test_html():
     print_sep("TEST 2: HTML Scraping Mode (Fallback)")
-    
+
     if not WHOOGLE_URL: return
 
     target = f"{WHOOGLE_URL.rstrip('/')}/search?q={QUERY}"
     print(f"Target URL: {target}")
-    
+
     try:
         r = requests.get(target, headers=HEADERS, timeout=10, verify=False)
         print(f"HTTP Status: {r.status_code}")
-        
+
         soup = BeautifulSoup(r.text, "html.parser")
-        
+
         # A. Check Selectors
         selectors = [
-            ".result", 
-            "#main .result", 
-            ".result-content", 
-            ".g", 
+            ".result",
+            "#main .result",
+            ".result-content",
+            ".g",
             ".result-default",
             "div[class*='result']",
             "article",
             "#urls article",
             ".result-body"
         ]
-        
+
         found_selector = False
         print("\n--- Checking CSS Selectors ---")
         for sel in selectors:
             count = len(soup.select(sel))
             print(f"   '{sel}': {count} matches")
             if count > 0: found_selector = True
-            
+
         # B. Check Text Density (The Last Resort)
         print("\n--- Checking Text Density (Brute Force) ---")
         paragraphs = [p.get_text(strip=True) for p in soup.find_all('p') if len(p.get_text(strip=True)) > 60]
         print(f"   Found {len(paragraphs)} text-heavy paragraphs (>60 chars).")
-        
+
         if found_selector:
             print("\n>>> DIAGNOSIS: HTML Structure is standard. Logic.py Tier 2 will work.")
         elif paragraphs:
@@ -148,18 +149,18 @@ def test_html():
             print("\n[FAIL] No results found via Selectors OR Text Density.")
             print("Dumping HTML structure (First 500 chars):")
             print(soup.prettify()[:500])
-            
+
     except Exception as e:
         print(f"[CRITICAL] Connection failed: {e}")
 
 if __name__ == "__main__":
-    print(f"Diagnosing Search Engine Config...")
+    print("Diagnosing Search Engine Config...")
     if not WHOOGLE_URL:
         print("[!] ERROR: WHOOGLE_URL is missing. Please edit your .env file.")
         sys.exit(1)
-        
+
     print(f"URL: {WHOOGLE_URL}")
-    
+
     if test_json():
         print("\n>>> OVERALL STATUS: EXCELLENT. JSON API is active.")
     else:

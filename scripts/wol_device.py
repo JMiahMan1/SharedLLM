@@ -1,7 +1,7 @@
 
+import logging
 import os
 import socket
-import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
@@ -16,7 +16,7 @@ def send_wol(mac, ip_broadcast="255.255.255.255", port=9):
         raise ValueError("Invalid MAC address")
 
     data = bytes.fromhex("FF" * 6 + mac_clean * 16)
-    
+
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         sock.sendto(data, (ip_broadcast, port))

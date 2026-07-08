@@ -8,19 +8,20 @@ Tests cover:
 - Gateway stream_music_assistant endpoint flow
 - Media status filtering for MA-compatible devices only
 """
-import pytest
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, MagicMock as MM
 from typing import cast
+from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock as MM
 
+import pytest
+
+from services.execution.handlers.audiobookshelf import _handle_last_played, _handle_search
 from services.execution.handlers.media import (
-    resolve_mass_entity,
-    play_podcast,
     detect_media_type,
+    play_podcast,
+    resolve_mass_entity,
 )
-from services.execution.handlers.audiobookshelf import _handle_search, _handle_last_played
-from services.execution.schemas import ExecutionResult, AudiobookshelfRequest, MediaPlayRequest, UserContext
-
+from services.execution.schemas import AudiobookshelfRequest, ExecutionResult, MediaPlayRequest, UserContext
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -678,8 +679,10 @@ class TestGatewayStreamEndpoint:
     async def test_stream_ma_no_ma_players(self, ctx):
         """Stream endpoint should return 404 when no MA players available."""
         from unittest.mock import patch as mock_patch
-        from services.gateway.main import stream_music_assistant
+
         from fastapi import HTTPException, Request
+
+        from services.gateway.main import stream_music_assistant
         from services.gateway.schemas import ResolvedCredentials
 
         creds = ResolvedCredentials(
@@ -718,10 +721,11 @@ class TestGatewayStreamEndpoint:
     @pytest.mark.asyncio
     async def test_stream_ma_prefers_browser_player(self, ctx):
         """Stream endpoint should prefer the browser Sendspin player."""
-        from services.gateway.main import stream_music_assistant
         from fastapi import Request
-        from services.gateway.schemas import ResolvedCredentials
+
         from services.gateway.ma_ws_client import MAWebSocketClient
+        from services.gateway.main import stream_music_assistant
+        from services.gateway.schemas import ResolvedCredentials
 
         creds = ResolvedCredentials(
             user="test_user",

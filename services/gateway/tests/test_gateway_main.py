@@ -1,8 +1,9 @@
-import pytest
-from fastapi.testclient import TestClient
 import os
 import sys
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+from fastapi.testclient import TestClient
 
 # Ensure parent directory is in sys.path for imports
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,22 +14,22 @@ os.environ["INTERNAL_SECRET"] = "test-secret"
 def client_fixture(monkeypatch):
     # Mocking heavy/problematic dependencies
     sys.modules["fastembed"] = MagicMock()
-    
+
     # Mock intent_engine and background_worker
     mock_engine = MagicMock()
     mock_engine.engine = MagicMock()
     mock_engine.engine.classify.return_value = ("unknown", 0.0)
     mock_engine.engine.should_bypass_llm.return_value = False
     sys.modules["intent_engine"] = mock_engine
-    
+
     mock_worker = MagicMock()
     sys.modules["background_worker"] = mock_worker
-    
-    from main import app
+
     import main
+    from main import app
     # Disable background tasks for testing
     main.background_tasks = None  # type: ignore[assignment]
-    
+
     # Mock job_queue to avoid Redis dependency in tests
     mock_job_queue = MagicMock()
     mock_job_queue.enqueue_job = AsyncMock(return_value="test-job-123")
@@ -36,7 +37,7 @@ def client_fixture(monkeypatch):
     mock_job_queue.get_chunks = AsyncMock(return_value=["test"])
     mock_job_queue.get_queue_position = AsyncMock(return_value=0)
     monkeypatch.setattr(main, "job_queue", mock_job_queue)
-    
+
     return TestClient(app)
 
 def test_health_check(client: TestClient):
@@ -57,7 +58,7 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
     monkeypatch.setattr(main, "decompose_command_query", AsyncMock(return_value=[]))
     # Mock system instruction loading to avoid real Identity service calls
     monkeypatch.setattr(main, "select_system_instruction_for_query", lambda q, m: "# System instruction mock")
-    
+
     class MockResponse:
         def __init__(self, json_data, status_code=200):
             self.json_data = json_data
@@ -68,13 +69,13 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
         def text(self): return str(self.json_data)
 
     monkeypatch.setattr(main, "call_ollama", AsyncMock(return_value=MockResponse({"message": {"content": "Mocked LLM response"}})))
-    
+
     # Mock the RAG aiohttp call
     async def mock_post_rag(*args, **kwargs):
         if "/rag/search" in args[0]:
             return MockResponse({"results": []})
         return MockResponse({"status": "SUCCESS"})
-    
+
     # We need to mock get_http_client().post
     mock_http = MagicMock()
     mock_http.post = AsyncMock(side_effect=mock_post_rag)
@@ -84,7 +85,7 @@ async def test_chat_conversational_with_mocks(client: TestClient, monkeypatch):
         "query": "hello",
         "user_id": "alice"
     }, headers={"X-Internal-Secret": "test-secret"})
-    
+
     assert resp.status_code == 200
     data = resp.json()
     assert "Mocked" in data["message"]["content"]

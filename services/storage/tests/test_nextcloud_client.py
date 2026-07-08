@@ -1,8 +1,10 @@
+import httpx
 import pytest
 import respx
-import httpx
-from services.storage.nextcloud_client import NextCloudClient
+
 from services.storage.models import StorageEntry
+from services.storage.nextcloud_client import NextCloudClient
+
 
 @pytest.fixture
 def client():
@@ -101,7 +103,7 @@ async def test_write_file_content(client):
     respx.put("http://nextcloud.local/remote.php/dav/files/user/folder/test.txt").mock(
         return_value=httpx.Response(201)
     )
-    
+
     res = await client.write_file_content("/folder/test.txt", "content")
     assert res["bytes_written"] == 7
     assert res["path"] == "/folder/test.txt"

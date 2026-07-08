@@ -3,11 +3,13 @@
 Asynchronous Home Assistant REST client using aiohttp.
 """
 import logging
+
 import aiohttp
 
 log = logging.getLogger("execution.ha_client")
 
 import re
+
 _TIMEOUT = aiohttp.ClientTimeout(total=45.0, connect=15.0)
 
 def authorize_action(user_context: dict, domain: str, action: str) -> bool:
@@ -16,7 +18,7 @@ def authorize_action(user_context: dict, domain: str, action: str) -> bool:
     Strictly enforces the 'Admin-Only' rule for sensitive environmental changes.
     """
     is_admin = user_context.get("is_admin", False)
-    
+
     # SENSITIVE ACTIONS (Admins Only)
     sensitive_actions = {
         "lock": ["unlock", "open"],
@@ -24,12 +26,12 @@ def authorize_action(user_context: dict, domain: str, action: str) -> bool:
         "alarm_control_panel": ["alarm_disarm"],
         "climate": ["set_temperature"], # Some homes consider this sensitive
     }
-    
+
     if domain in sensitive_actions:
         if action in sensitive_actions[domain] and not is_admin:
             log.warning(f"[Security] BLOCK: Non-admin user '{user_context.get('user')}' attempted '{action}' on '{domain}'")
             return False
-            
+
     return True
 
 def sanitize_entity_id(domain: str, llm_target: str) -> str:
@@ -38,7 +40,7 @@ def sanitize_entity_id(domain: str, llm_target: str) -> str:
     Example: 'piano-lamp' -> 'light.piano_lamp'
     """
     if not llm_target: return ""
-    
+
     # If already has a dot, assume it's domain.name and sanitize the name part
     if "." in llm_target:
         prefix, name = llm_target.split(".", 1)
@@ -65,7 +67,7 @@ async def call_service(
     if not ha_url:
         log.error("[ha_client] ha_url is None or empty. Cannot call service.")
         return {"ok": False, "error": "Home Assistant URL not configured for this user."}
-    
+
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     url = f"{ha_url.rstrip('/')}/api/services/{domain}/{service}"
     if return_response:
@@ -75,7 +77,7 @@ async def call_service(
         payload["entity_id"] = entity_id
     if service_data:
         payload.update(service_data)
-        
+
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.info(f"HA CALL: {domain}.{service} -> {entity_id or '(no target)'} | url={url} | payload={payload}")
@@ -110,10 +112,10 @@ async def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
     if not ha_url:
         log.error("[ha_client] ha_url is None or empty. Cannot get state.")
         return None
-        
+
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states/{entity_id}"
-    
+
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.debug(f"[ha_client] GET {url}")
@@ -131,10 +133,10 @@ async def get_all_states(ha_url: str, ha_token: str) -> list:
     if not ha_url:
         log.error("[ha_client] ha_url is None or empty. Cannot get states.")
         return []
-        
+
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states"
-    
+
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.debug(f"[ha_client] GET {url}")
@@ -192,10 +194,10 @@ async def get_states(ha_url: str, ha_token: str) -> list:
     if not ha_url:
         log.error("[ha_client] ha_url is None or empty. Cannot get states.")
         return []
-        
+
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states"
-    
+
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.info(f"[ha_client] GET {url}")
@@ -211,13 +213,13 @@ async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
     if not ha_url:
         log.error("[ha_client] ha_url is None or empty. Cannot get history.")
         return []
-        
+
     import datetime
-    start_time = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)).isoformat()
+    start_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)).isoformat()
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/history/period/{start_time}"
     params = {"filter_entity_id": entity_id, "no_attributes": ""}
-    
+
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.info(f"[ha_client] GET {url}")
@@ -235,13 +237,13 @@ async def get_logbook(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
     if not ha_url:
         log.error("[ha_client] ha_url is None or empty. Cannot get logbook.")
         return []
-        
+
     import datetime
-    start_time = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)).isoformat()
+    start_time = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)).isoformat()
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/logbook/{start_time}"
     params = {"entity": entity_id}
-    
+
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             log.info(f"[ha_client] GET {url} | entity={entity_id}")
@@ -256,10 +258,10 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
     """Retrieve mapping of entity_id to area_name using HA Template API."""
     if not ha_url:
         return {}
-        
+
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     url = f"{ha_url.rstrip('/')}/api/template"
-    
+
     # Standard Jinja2 template to list all entity IDs and their area names
     template = """
     [
@@ -271,7 +273,7 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
       {%- endfor %}
     ]
     """
-    
+
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             async with client.post(url, headers=headers, json={"template": template}) as resp:
@@ -298,25 +300,25 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
     """
     if not ha_url or not device_name:
         return None
-    
+
     states = await get_states(ha_url, ha_token)
     if not states:
         return None
-    
+
     search = device_name.lower().strip()
     candidates = []
-    
+
     for state in states:
         entity_id = state.get("entity_id", "")
         if not entity_id.startswith(f"{domain}."):
             continue
-        
+
         friendly_name = state.get("attributes", {}).get("friendly_name", "").lower()
         eid_base = entity_id.lower().replace(f"{domain}.", "")
-        
+
         # Score: exact match gets highest priority
         score = 0
-        
+
         # Exact friendly name match (highest priority)
         if friendly_name == search:
             score += 100
@@ -333,14 +335,14 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
             score += 10
         elif search.replace(" ", "_") in eid_base:
             score += 5
-        
+
         # Bonus for word-level matches
         for word in search.split():
             if word in friendly_name:
                 score += 3
             if word in eid_base:
                 score += 2
-        
+
         # Bonus for device_class match (prefer actual TVs over speakers when searching for TV)
         attrs = state.get("attributes", {})
         device_class = attrs.get("device_class", "")
@@ -348,7 +350,7 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
             score += 200
         elif device_class == "speaker":
             score += 50
-        
+
         # Context-aware bonuses based on media_type
         if media_type == "music":
             # Prefer Music Assistant Queue entities for music playback
@@ -364,18 +366,18 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
                 score += 400
             if device_class == "tv":
                 score += 300
-        
+
         # Penalty for numeric suffixes (e.g., "office_tv_3" when searching "office tv")
         if search.replace(" ", "_") in eid_base and eid_base != search.replace(" ", "_"):
             if any(c.isdigit() for c in eid_base.split("_")[-1:]):
                 score -= 5
-        
+
         if score > 0:
             candidates.append((score, entity_id))
-    
+
     if not candidates:
         return None
-    
+
     # Return highest scoring candidate
     candidates.sort(key=lambda x: x[0], reverse=True)
     return candidates[0][1]

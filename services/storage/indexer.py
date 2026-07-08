@@ -1,12 +1,13 @@
 # services/storage/indexer.py
 from __future__ import annotations
+
 import asyncio
 import json
-import os
 import logging
-from typing import TYPE_CHECKING
+import os
 from collections import Counter, defaultdict
 from pathlib import PurePosixPath
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .providers import StorageProvider
@@ -33,7 +34,7 @@ def is_indexer_paused():
     return _indexer_state["paused"]
 
 GLOBAL_SKIP_LIST = [
-    "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", 
+    "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache",
     ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox",
     "site-packages", "bin", "include", "lib", "lib64"
 ]
@@ -46,7 +47,7 @@ class CheckpointManager:
     def _load(self):
         if os.path.exists(self.checkpoint_file):
             try:
-                with open(self.checkpoint_file, "r") as f:
+                with open(self.checkpoint_file) as f:
                     return json.load(f)
             except Exception as e:
                 log.error(f"Failed to load checkpoint: {e}")
@@ -181,11 +182,11 @@ async def extract_and_chunk_contents(
                             "is_chunk": True
                         }
                     })
-            
+
         if checkpoint and item.mtime:
             checkpoint.mark_indexed(item.path, item.mtime)
             checkpoint.save()
-            
+
     return chunks
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
@@ -215,17 +216,17 @@ def _classify_directory(
 ) -> ContentIndexItem:
     children = child_map.get(entry.path, [])
     child_exts = Counter(PurePosixPath(child.path).suffix.lower() for child in children if not child.is_dir)
-    
+
     subtype = "generic_directory"
     role = "folder"
     capabilities = ["structure_scan"]
     tools = ["indexer"]
-    
+
     if child_exts[".md"] >= 3:
         subtype = "document_collection"
         role = "document collection"
         capabilities.extend(["full_text", "semantic_search"])
-    
+
     return ContentIndexItem(
         path=entry.path,
         name=entry.name,

@@ -10,11 +10,12 @@ These tests verify that:
 """
 
 import os
-import pytest
-from typing import cast
-from unittest.mock import patch, AsyncMock
-from dotenv import dotenv_values
 from pathlib import Path
+from typing import cast
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from dotenv import dotenv_values
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
@@ -34,9 +35,8 @@ from services.gateway.prompts import PROMPT_RAVEN_AUTONOMOUS_PROTOCOL
 _env = dotenv_values(Path(__file__).resolve().parent.parent.parent / ".env")
 RAVEN_AUTONOMOUS_PROTOCOL = _env.get(f"PROMPT_{PROMPT_RAVEN_AUTONOMOUS_PROTOCOL}", "")
 
-from services.gateway.main import select_model_for_query, select_system_instruction_for_query, AUTONOMOUS_SIGNALS
 from services.gateway.agent_loop import extract_action_json
-
+from services.gateway.main import AUTONOMOUS_SIGNALS, select_model_for_query, select_system_instruction_for_query
 
 MISSION_TEMPLATES: list[dict[str, str | list[str]]] = [
     {

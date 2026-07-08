@@ -1,11 +1,14 @@
 """Tests for media detail and favorite endpoints."""
 import os
 import sys
+
 os.environ["INTERNAL_SECRET"] = "test-secret"
+
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, AsyncMock, patch
+
 
 def _aio_resp(status=200, json_data=None, text=""):
     """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
@@ -29,8 +32,8 @@ def client_fixture(monkeypatch):
     sys.modules["intent_engine"] = mock_engine
     sys.modules["background_worker"] = MagicMock()
 
-    from services.gateway.main import app
     from services.gateway import main
+    from services.gateway.main import app
     main.background_tasks = None  # pyright: ignore[reportAttributeAccessIssue]
 
     return TestClient(app)
@@ -65,7 +68,7 @@ async def test_get_media_detail_success(client):
 
             assert resp.status_code == 200
             assert resp.json() == {"item_id": "123", "name": "Test Song", "favorite": True}
-            
+
             ma_calls = [
                 c for c in mock_httpx_client.post.call_args_list
                 if "log" not in c[0][0]
@@ -105,7 +108,7 @@ async def test_toggle_favorite_add(client):
 
             assert resp.status_code == 200
             assert resp.json() == {"status": "SUCCESS", "favorite": True}
-            
+
             ma_calls = [
                 c for c in mock_httpx_client.post.call_args_list
                 if "log" not in c[0][0]
@@ -151,7 +154,7 @@ async def test_toggle_favorite_remove(client):
 
             assert resp.status_code == 200
             assert resp.json() == {"status": "SUCCESS", "favorite": False}
-            
+
             ma_calls = [
                 c for c in mock_httpx_client.post.call_args_list
                 if "log" not in c[0][0]

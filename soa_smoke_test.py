@@ -1,7 +1,8 @@
-import requests
 import os
 import sys
 import time
+
+import requests
 
 # Configuration
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://gateway:11435")
@@ -88,24 +89,24 @@ def test_workspace_list():
 def run_all():
     log("=== INITIALIZING SHAREDLLM SOA SMOKE TEST ===")
     results = []
-    
+
     # 1. Pings
     results.append(test_service_ping("Gateway", GATEWAY_URL))
     results.append(test_service_ping("Identity", IDENTITY_URL))
     results.append(test_service_ping("Execution", EXECUTION_URL))
     results.append(test_service_ping("RAG", RAG_URL))
     results.append(test_service_ping("Workspace", WORKSPACE_RUNTIME_URL))
-    
+
     # 2. Functional
     results.append(test_identity_resolve())
     results.append(test_rag_capability_search())
     results.append(test_execution_ha_link())
     results.append(test_workspace_list())
-    
+
     total = len(results)
     passed = sum(1 for r in results if r)
     log(f"=== TEST SUMMARY: {passed}/{total} PASSED ===")
-    
+
     if passed < total:
         sys.exit(1)
     sys.exit(0)

@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+
 import pytest
 from cryptography.fernet import Fernet
 
@@ -62,7 +63,7 @@ def redis_client(redis_container):
 
 @pytest.fixture(scope="function")
 def identity_db_session():
-    from sqlmodel import SQLModel, create_engine, Session
+    from sqlmodel import Session, SQLModel, create_engine
     engine = create_engine("sqlite:///:memory:")
     import services.identity.models  # noqa: F401 - registers models with SQLModel.metadata  # pyright: ignore[reportUnusedImport]
     SQLModel.metadata.create_all(engine)

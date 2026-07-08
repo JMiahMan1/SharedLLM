@@ -1,6 +1,7 @@
 """Tests for announcement power-on flow improvements."""
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 
 @pytest.mark.asyncio

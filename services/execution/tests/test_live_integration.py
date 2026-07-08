@@ -1,10 +1,11 @@
 """LIVE integration tests — hit actual services running on the server (192.168.2.205).
 No mocks. These tests validate real HTTP communication with each service."""
 import os
+
 os.environ["INTERNAL_SECRET"] = "RAVEN_SECURE_2026"
 
-import pytest
 import httpx
+import pytest
 
 # Service endpoints — resolved via Identity at runtime, but seeded for tests
 IDENTITY_URL = os.getenv("IDENTITY_SVC_URL", "http://localhost:8001")

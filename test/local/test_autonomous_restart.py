@@ -4,6 +4,7 @@ import os
 import httpx
 import pytest
 
+
 @pytest.mark.local_only
 async def test_control_plane_integration():
     """
@@ -12,7 +13,7 @@ async def test_control_plane_integration():
     base_url = os.getenv("LIVE_TEST_URL", "http://127.0.0.1:11435")
     gateway_url = f"{base_url}/api" if base_url != "http://127.0.0.1:11435" else "http://127.0.0.1:11435/api"
     headers = {"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "change-me-in-production")}
-    
+
     print(f"=== Testing SharedLLM Integration against {base_url} ===\n")
 
     with httpx.Client(timeout=30.0) as client:

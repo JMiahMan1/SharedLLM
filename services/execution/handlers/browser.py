@@ -4,16 +4,16 @@ import os
 import re
 import sys
 import time
-import html2text
-import aiohttp
 from urllib.parse import urlencode
+
+import aiohttp
+import html2text
 from playwright.async_api import async_playwright
-from typing import Optional
 
 try:
-    from schemas import ExecutionResult, WebSearchRequest, WebReadRequest
+    from schemas import ExecutionResult, WebReadRequest, WebSearchRequest
 except ImportError:
-    from ..schemas import ExecutionResult, WebSearchRequest, WebReadRequest
+    from ..schemas import ExecutionResult, WebReadRequest, WebSearchRequest
 
 log = logging.getLogger("execution.browser")
 
@@ -33,20 +33,19 @@ async def _get_searxng_url() -> str:
         return os.environ.get("SEARXNG_URL", "http://localhost:8080").rstrip("/")
     try:
         from main import IDENTITY_SVC_URL, INTERNAL_SECRET
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-            async with client.get(
-                f"{IDENTITY_SVC_URL}/api/settings",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            ) as resp:
-                if resp.status == 200:
-                    settings_list = await resp.json()
-                for item in settings_list:
-                    if item.get("key") == "searxng_url":
-                        url = item.get("value", "").rstrip("/")
-                        if url:
-                            _searxng_url_cache = url
-                            _searxng_cache_ts = time.time()
-                            return url
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
+            f"{IDENTITY_SVC_URL}/api/settings",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        ) as resp:
+            if resp.status == 200:
+                settings_list = await resp.json()
+            for item in settings_list:
+                if item.get("key") == "searxng_url":
+                    url = item.get("value", "").rstrip("/")
+                    if url:
+                        _searxng_url_cache = url
+                        _searxng_cache_ts = time.time()
+                        return url
     except Exception:
         pass
     return os.environ.get("SEARXNG_URL", "").rstrip("/") or "http://localhost:8080"
@@ -73,10 +72,10 @@ async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
         return await _playwright_fallback(req)
     except Exception as e:
         log.error(f"[browser/search] All search methods failed: {e}")
-        return ExecutionResult(status="FAILURE", message=f"Web search failed: {str(e)}", service="web_search")
+        return ExecutionResult(status="FAILURE", message=f"Web search failed: {e!s}", service="web_search")
 
 
-async def _searxng_html_search(req: WebSearchRequest) -> Optional[ExecutionResult]:
+async def _searxng_html_search(req: WebSearchRequest) -> ExecutionResult | None:
     """Primary path: SearXNG HTML response parsed with regex."""
     searxng_url = await _get_searxng_url()
     params = {
@@ -92,10 +91,9 @@ async def _searxng_html_search(req: WebSearchRequest) -> Optional[ExecutionResul
     url = f"{searxng_url}/search?{urlencode(params)}"
     log.info(f"[browser/search] SearXNG HTML search: {url}")
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
-        async with client.get(url) as resp:
-            resp.raise_for_status()
-            html = await resp.text()
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client, client.get(url) as resp:
+        resp.raise_for_status()
+        html = await resp.text()
 
     results = []
     link_pattern = r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>'
@@ -180,12 +178,12 @@ async def handle_web_read(req: WebReadRequest) -> ExecutionResult:
     Fetches a URL and converts it to markdown.
     """
     log.info(f"[browser/read] url='{req.url}'")
-    
+
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
-            
+
             if req.use_current_user_auth and req.user_context.api_key:
                 from urllib.parse import urlparse
                 domain = urlparse(req.url).netloc
@@ -200,31 +198,31 @@ async def handle_web_read(req: WebReadRequest) -> ExecutionResult:
 
             # Standard timeout and wait condition
             await page.goto(req.url, wait_until="domcontentloaded", timeout=30000)
-            
+
             # Get the page content
             content = await page.content()
             title = await page.title()
-            
+
             await browser.close()
-            
+
             # Convert to markdown
             h = html2text.HTML2Text()
             h.ignore_links = False
             h.ignore_images = True
             h.ignore_emphasis = False
             markdown = h.handle(content)
-            
+
             # Truncate if too large for LLM context (e.g., 15k chars)
             if len(markdown) > 15000:
                 markdown = markdown[:15000] + "\n\n... (Content truncated due to size) ..."
-                
+
             return ExecutionResult(
                 status="SUCCESS",
                 message=f"Successfully read page: {title}",
                 service="web_read",
                 detail={"title": title, "content": markdown}
             )
-            
+
     except Exception as e:
         log.error(f"Web read failed: {e}")
-        return ExecutionResult(status="FAILURE", message=f"Web read failed: {str(e)}", service="web_read")
+        return ExecutionResult(status="FAILURE", message=f"Web read failed: {e!s}", service="web_read")

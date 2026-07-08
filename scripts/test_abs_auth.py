@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Debug Audiobookshelf login flow — test with stored credentials."""
 import asyncio
-import httpx
 import os
 import sys
 from pathlib import Path
+
+import httpx
 
 # Load .env from project root
 env_path = Path(__file__).resolve().parents[1] / ".env"
@@ -56,10 +57,10 @@ async def test():
                 else:
                     print(f"\nWARN: No token in response. Keys: {list(data.keys())}")
             elif resp.status_code == 401:
-                print(f"\nERROR: 401 Unauthorized — credentials rejected by server")
+                print("\nERROR: 401 Unauthorized — credentials rejected by server")
                 # Try with different formats
                 print("\n--- Trying alternative formats ---\n")
-                
+
                 # Try email format
                 email = f"{username}@sumemail.com"
                 email_url = f"{base}/api/login"
@@ -70,7 +71,7 @@ async def test():
                 )
                 print(f"Status: {resp2.status_code}")
                 print(f"Body: {resp2.text[:500]}")
-                
+
                 # Try with email @ sumemail.com
                 print(f"\nPOST {email_url} with username={username}@abs.sumemail.com")
                 resp3 = await client.post(

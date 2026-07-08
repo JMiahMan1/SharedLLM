@@ -1,13 +1,15 @@
 # services/execution/handlers/security.py
 import logging
+
 try:
     import ha_client
-    from schemas import UserContext, ExecutionResult
+    from schemas import ExecutionResult, UserContext
 except ImportError:
     from .. import ha_client
-    from ..schemas import UserContext, ExecutionResult
-from pydantic import BaseModel
+    from ..schemas import ExecutionResult, UserContext
 from typing import Literal
+
+from pydantic import BaseModel
 
 log = logging.getLogger("execution.security")
 
@@ -21,7 +23,7 @@ async def handle_security(req: SecurityRequest) -> ExecutionResult:
     # Resolve and sanitize entity_id based on prefix or default to 'lock'/'cover'
     domain_guess = req.entity_id.split(".")[0] if "." in req.entity_id else "lock"
     full_entity_id = ha_client.sanitize_entity_id(domain_guess, req.entity_id)
-    
+
     log.info(f"[security] user={ctx.user} entity={full_entity_id} action={req.action} (original={req.entity_id})")
 
     if req.action == "status":
@@ -29,8 +31,8 @@ async def handle_security(req: SecurityRequest) -> ExecutionResult:
         state = await ha_client.get_state(ctx.ha_url, ctx.ha_token, full_entity_id)
         if state:
             return ExecutionResult(
-                status="SUCCESS", 
-                message=f"The {full_entity_id} is {state.get('state')}.", 
+                status="SUCCESS",
+                message=f"The {full_entity_id} is {state.get('state')}.",
                 service="security",
                 detail=state
             )
@@ -58,7 +60,7 @@ async def handle_security(req: SecurityRequest) -> ExecutionResult:
         domain, service,
         full_entity_id
     )
-    
+
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Security action '{req.action}' executed on {req.entity_id}.", service="security")
     return ExecutionResult(status="FAILURE", message=f"Security action failed: {result.get('error')}", service="security", detail=result)

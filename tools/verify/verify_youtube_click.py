@@ -1,14 +1,15 @@
 
 import asyncio
 import logging
-import sys
 import os
+import sys
 
 # Setup paths
 sys.path.append(os.getcwd())
 
-from app.settings import load_resources
 from app.domains.shared import execute_ha_service
+from app.settings import load_resources
+
 # from app.domains.media.integrations.cast import CastIntegration -- Removed to avoid circular import
 
 # Configure logging
@@ -25,30 +26,30 @@ async def main():
 
     entity_id = "media_player.office_tv_chrome"
     # Found via list_remotes.py
-    remote_id = "remote.office_tv_remote" 
+    remote_id = "remote.office_tv_remote"
 
     # 1. Launch YouTube App (using our known working payload)
     log.info(f"Step 1: Launching YouTube on {entity_id}...")
-    
+
     # We can manually reconstruct the service call to ensure we test the exact "App Mode" payload
     import json
     cast_payload = {
         "app_name": "youtube",
         "media_id": "HF6LSbMKvrw" # Fireplace video
     }
-    
+
     await execute_ha_service(
-         "media_player", 
-         "play_media", 
-         entity_id, 
-         USER_CREDS, 
+         "media_player",
+         "play_media",
+         entity_id,
+         USER_CREDS,
          {
              "media_content_id": json.dumps(cast_payload),
              "media_content_type": "cast"
-         }, 
+         },
          None
     )
-    
+
     log.info("Step 2: Waiting 15s for App Load & Profile Screen...")
     await asyncio.sleep(15)
 

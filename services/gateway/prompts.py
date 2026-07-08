@@ -30,8 +30,7 @@ UNUSED PROMPTS REMOVED:
 
 import aiohttp
 
-from services.gateway.config import INTERNAL_SECRET, IDENTITY_SVC
-
+from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET
 
 # =============================================================================
 # Prompt key constants (settings DB lookup keys)
@@ -64,9 +63,9 @@ def load_prompt_sync(prompt_key: str) -> str:
     
     Raises ValueError if the prompt key is not found in the DB.
     """
-    import time
     import asyncio
-    
+    import time
+
     # Refresh settings cache if expired
     global _settings_cache, _settings_cache_time
     now = time.time()
@@ -75,51 +74,49 @@ def load_prompt_sync(prompt_key: str) -> str:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
-        
+
         if loop:
+
             import aiohttp
-            import contextvars
-            
+
             async def _fetch():
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-                    async with client.get(
-                        f"{IDENTITY_SVC}/api/settings",
-                        headers={"X-Internal-Secret": INTERNAL_SECRET}
-                    ) as resp:
-                        if resp.status == 200:
-                            return await resp.json()
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
+                    f"{IDENTITY_SVC}/api/settings",
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.json()
                 return None
-            
+
             _settings_cache = loop.run_until_complete(_fetch()) or {}
         else:
             try:
                 import aiohttp
                 import nest_asyncio
                 nest_asyncio.apply()
-                
+
                 async def _fetch():
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-                        async with client.get(
-                            f"{IDENTITY_SVC}/api/settings",
-                            headers={"X-Internal-Secret": INTERNAL_SECRET}
-                        ) as resp:
-                            if resp.status == 200:
-                                return await resp.json()
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
+                        f"{IDENTITY_SVC}/api/settings",
+                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    ) as resp:
+                        if resp.status == 200:
+                            return await resp.json()
                     return None
-                
+
                 _settings_cache = asyncio.run(_fetch()) or {}
             except Exception:
-                raise ValueError(f"Identity service unavailable and no cached prompts available")
-        
+                raise ValueError("Identity service unavailable and no cached prompts available")
+
         _settings_cache_time = now
-    if prompt_key in _settings_cache and _settings_cache[prompt_key]:
+    if _settings_cache.get(prompt_key):
         return _settings_cache[prompt_key]
-    
+
     raise ValueError(f"Prompt not found in settings DB: {prompt_key}")
-    
-    if prompt_key in _settings_cache and _settings_cache[prompt_key]:
+
+    if _settings_cache.get(prompt_key):
         return _settings_cache[prompt_key]
-    
+
     raise ValueError(f"Prompt not found in settings DB: {prompt_key}")
 
 

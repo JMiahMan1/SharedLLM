@@ -7,13 +7,15 @@ monolith's .env and seeds the SQL database if it is empty. Run once on
 first startup or call via the /api/admin/seed endpoint.
 """
 import hashlib
-import os
 import logging
-from sqlmodel import Session, select, text
-from dotenv import dotenv_values, load_dotenv
+import os
 
-from services.identity.models import User, GlobalSetting, DEFAULT_GLOBAL_SETTINGS, DnsRecord
+from dotenv import dotenv_values, load_dotenv
+from sqlmodel import Session, select, text
+
 from services.identity.crypto import encrypt
+from services.identity.models import DEFAULT_GLOBAL_SETTINGS, DnsRecord, GlobalSetting, User
+
 
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
@@ -31,6 +33,7 @@ def verify_password(password: str, stored: str) -> bool:
 
 # Load legacy .env if available
 import sys
+
 if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
     from services.config import LEGACY_ENV_PATH as _LEGACY_ENV_PATH
 
@@ -156,7 +159,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             try:
                 session.execute(text(f"DELETE FROM {table}"))  # type: ignore[deprecated]
             except Exception:
-                pass 
+                pass
         session.commit()
 
     count = 0
@@ -177,7 +180,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                         env_vals = dotenv_values(env_path)
                         raw_pwd = env_vals.get("DEFAULT_ADMIN_PASSWORD", "")
                 if not raw_pwd:
-                    raise EnvironmentError(
+                    raise OSError(
                         "DEFAULT_ADMIN_PASSWORD is not set in .env.\n"
                         "The default admin user cannot be created without a password.\n"
                         "Set DEFAULT_ADMIN_PASSWORD in the .env file before starting the identity service."
@@ -342,7 +345,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                     continue
                 global_key = filename[:-3]  # strip .md
                 filepath = os.path.join(prompts_dir, filename)
-                with open(filepath, "r") as f:
+                with open(filepath) as f:
                     content = f.read().strip()
                 if not content:
                     continue
@@ -362,7 +365,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
     if env_dns_records:
         has_dns_records = session.exec(select(DnsRecord)).first() is not None
         force_dns = os.getenv("FORCE_DNS_SEED", "").lower() in {"1", "true", "yes"}
-        
+
         if not has_dns_records or force_dns:
             import json as json_lib
             try:
@@ -373,7 +376,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                         record_type = record_data.get("type", "A")
                         values = record_data.get("values", [])
                         ttl = record_data.get("ttl", 300)
-                        
+
                         if domain:
                             # Ensure values is a list
                             if isinstance(values, str):
@@ -385,11 +388,11 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                                     values = [values]
                             elif not isinstance(values, list):
                                 values = [values]
-                            
+
                             existing = session.exec(
                                 select(DnsRecord).where(DnsRecord.domain_name == domain)
                             ).first()
-                            
+
                             if not existing or force_dns:
                                 record = DnsRecord(
                                     domain_name=domain,
@@ -409,7 +412,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                                 log.info(f"[seed] Seeded DNS record: {domain} ({record_type}) -> {values}")
             except Exception as e:
                 log.warning(f"[seed] Failed to parse INITIAL_DNS_RECORDS: {e}")
-        
+
         session.commit()
 
     session.commit()

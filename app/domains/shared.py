@@ -5,9 +5,9 @@ call Home Assistant services directly.
 """
 from __future__ import annotations
 
-import os
 import logging
-from typing import Any, Dict, Optional
+import os
+from typing import Any
 
 log = logging.getLogger("app.domains.shared")
 
@@ -18,11 +18,11 @@ HA_TOKEN = os.environ.get("HA_TOKEN", "")
 async def execute_ha_service(
     domain: str,
     service: str,
-    entity_id: Optional[str] = None,
-    user_creds: Optional[Dict[str, str]] = None,
-    service_data: Optional[Dict[str, Any]] = None,
-    target: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    entity_id: str | None = None,
+    user_creds: dict[str, str] | None = None,
+    service_data: dict[str, Any] | None = None,
+    target: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Execute a Home Assistant service call.
 

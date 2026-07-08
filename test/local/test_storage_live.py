@@ -1,8 +1,9 @@
-import pytest
 import os
 
-from services.storage.providers import build_provider
+import pytest
+
 from services.storage.models import ProviderConfig
+from services.storage.providers import build_provider
 
 # Live credentials from environment
 NC_URL = os.getenv("NC_URL")
@@ -42,12 +43,12 @@ async def test_live_content_extraction():
     )
     provider = build_provider(config)
     entries = provider.list_entries(path="/", recursive=True)
-    
+
     txt_files = [e for e in entries if not e.is_dir and (e.path.endswith(".txt") or e.path.endswith(".md"))]
-    
+
     if not txt_files:
         pytest.skip("No text/md files found in NextCloud to test extraction.")
-        
+
     target = txt_files[0]
     content = provider.get_content(target.path)
     assert content is not None

@@ -1,30 +1,32 @@
-import httpx
 import asyncio
-import time
 import json
 import os
 import re
+import time
+
+import httpx
+
 
 def get_config_url():
     """Parses .env and docker-compose.yml to find the real physical Ollama URL."""
     ollama_url = "http://localhost:11434" # Default fallback
-    
+
     # 1. Try to get from .env
     if os.path.exists(".env"):
-        with open(".env", "r") as f:
+        with open(".env") as f:
             content = f.read()
             match = re.search(r"OLLAMA_URL=(.+)", content)
             if match:
                 ollama_url = match.group(1).strip()
-    
+
     # 2. Try to resolve alias from docker-compose.yml
     if os.path.exists("docker-compose.yml") and "://" in ollama_url:
         protocol, rest = ollama_url.split("://", 1)
         host_port = rest.split("/", 1)[0]
         host = host_port.split(":")[0]
         port = host_port.split(":")[1] if ":" in host_port else "11434"
-        
-        with open("docker-compose.yml", "r") as f:
+
+        with open("docker-compose.yml") as f:
             compose_content = f.read()
             # Look for extra_hosts mapping: "alias:ip"
             host_match = re.search(fr'"{host}:([\d\.]+)"', compose_content)
@@ -32,7 +34,7 @@ def get_config_url():
                 real_ip = host_match.group(1)
                 ollama_url = f"{protocol}://{real_ip}:{port}"
                 print(f"Resolved {host} to physical IP {real_ip} via extra_hosts")
-    
+
     return ollama_url
 
 async def test_model_direct(client, url, model_name):
@@ -57,13 +59,13 @@ async def test_model_direct(client, url, model_name):
             print(f"  FAILED: {model_name} returned status {response.status_code}")
             return {"model": model_name, "success": False, "error": response.text}
     except Exception as e:
-        print(f"  ERROR: {model_name} failed with {str(e)}")
+        print(f"  ERROR: {model_name} failed with {e!s}")
         return {"model": model_name, "success": False, "error": str(e)}
 
 async def main():
     target_url = get_config_url()
     print(f"Direct Diagnostic Target: {target_url}")
-    
+
     async with httpx.AsyncClient() as client:
         # 1. Get models from the physical IP
         try:
@@ -82,7 +84,7 @@ async def main():
         os.makedirs("data", exist_ok=True)
         with open("data/ollama_direct_results.json", "w") as f:
             json.dump(results, f, indent=2)
-        print(f"\nDirect testing complete. Results saved to data/ollama_direct_results.json")
+        print("\nDirect testing complete. Results saved to data/ollama_direct_results.json")
 
 if __name__ == "__main__":
     asyncio.run(main())

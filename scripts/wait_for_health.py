@@ -1,7 +1,8 @@
-import requests
-import time
-import sys
 import subprocess
+import sys
+import time
+
+import requests
 
 HEALTH_URL = "http://ai.local:11435/health"
 MAX_RETRIES = 12 # 2 minutes total (10s * 12) just to be safe

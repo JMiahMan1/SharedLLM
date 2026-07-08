@@ -1,18 +1,17 @@
 # services/tests/test_execution_handlers.py
 import os
-import pytest
-from unittest.mock import AsyncMock, Mock, patch
 from typing import Any, cast
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 os.environ["DEVICE_REGISTRY_PATH"] = ":memory:"
 
-from services.execution.schemas import (
-    UserContext, LightControlRequest, MediaTransportRequest,
-    TVCastRequest, TalkRequest, VolumeInventoryRequest
-)
-from services.execution.handlers import light, media, climate, security, talk, volumes
+from services.execution.handlers import climate, light, media, security, talk, volumes
 from services.execution.handlers.security import SecurityRequest
 from services.execution.personal_data import resolve_personal_data_provider
+from services.execution.schemas import LightControlRequest, MediaTransportRequest, TalkRequest, TVCastRequest, UserContext, VolumeInventoryRequest
+
 
 @pytest.fixture
 def user_ctx():
@@ -26,10 +25,10 @@ async def test_light_handler_success(user_ctx):
          patch("services.execution.ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
-        
+
         req = LightControlRequest(user_context=user_ctx, entity_id="light.test", action="turn_on", brightness_pct=50)
         res = await light.handle_light(req)
-        
+
         assert res.status == "SUCCESS"
         assert "light.test" in res.message
         mock_call.assert_called_once_with(
@@ -45,7 +44,7 @@ async def test_hyphenated_entity_resolution(user_ctx):
          patch("services.execution.ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
-        
+
         # Test 1: Bare hyphenated name
         req = LightControlRequest(user_context=user_ctx, entity_id="piano-lamp", action="turn_on")
         res = await light.handle_light(req)
@@ -66,10 +65,10 @@ async def test_security_status_check(user_ctx):
     with patch("services.execution.ha_client.get_state", new_callable=AsyncMock) as mock_get_state, \
          patch("services.execution.ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "open"}
-        
+
         req = SecurityRequest(user_context=user_ctx, entity_id="cover.garage_door", action="status")
         res = await security.handle_security(req)
-        
+
         assert res.status == "SUCCESS"
         assert "open" in res.message
         mock_get_state.assert_called_once_with("http://ha", "test_tok", "cover.garage_door")
@@ -82,10 +81,10 @@ async def test_media_transport_volume(user_ctx):
          patch("services.execution.ha_client.get_state", mock_get_state):
         mock_get_state.return_value = {"state": "off"}
         mock_call.return_value = {"ok": True}
-        
+
         req = MediaTransportRequest(user_context=user_ctx, entity_id="media_player.tv", command="volume_up", volume_level=0.5)
         res = await media.handle_media_transport(req)
-        
+
         assert res.status == "SUCCESS"
         # Verify it translated volume_up + level to volume_set
         args = mock_call.call_args[0]
@@ -99,11 +98,11 @@ async def test_climate_handler(user_ctx):
          patch("services.execution.ha_client.authorize_action", return_value=True) as mock_auth, \
          patch("services.execution.ha_client.authorize_action", mock_auth):
         mock_call.return_value = {"ok": True}
-        
+
         # Use the handler's own ClimateRequest which imports UserContext from execution schemas
         req = climate.ClimateRequest(user_context=user_ctx, entity_id="climate.nest", temperature=72.5)
         res = await climate.handle_climate(req)
-        
+
         assert res.status == "SUCCESS"
         assert "72.5" in res.message
         mock_call.assert_called_once_with(
@@ -119,7 +118,7 @@ async def test_tv_cast_macro(user_ctx):
          patch("services.execution.handlers.video.download_video_progressive", new_callable=AsyncMock) as mock_download, \
          patch("services.config.EXECUTION_EXTERNAL_HOST", "192.168.2.205"), \
          patch("asyncio.sleep", new_callable=AsyncMock):
-        
+
         mock_download.return_value = ("mock_media_id", "mock_title")
         async def get_state_side_effect(url, token, entity_id):
             if "remote." in entity_id:
@@ -127,16 +126,16 @@ async def test_tv_cast_macro(user_ctx):
             return {"state": "off"}
         mock_get_state.side_effect = get_state_side_effect
         mock_call.return_value = {"ok": True}
-        
+
         req = TVCastRequest(
-            user_context=user_ctx, 
+            user_context=user_ctx,
             media_player_entity_id="media_player.generic_tv",
             media_content_id="https://youtube.com/watch?v=mockvideo",
             media_content_type="url",
             power_on_wait_ms=100
         )
         res = await media.handle_tv_cast(req)
-        
+
         assert res.status == "SUCCESS"
         assert mock_call.call_count == 3
         assert mock_call.call_args_list[0][0][3] == "turn_on"

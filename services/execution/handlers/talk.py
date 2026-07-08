@@ -3,15 +3,16 @@ import base64
 import json
 import logging
 import urllib.parse
-from typing import Any, Optional
+from typing import Any
 from uuid import uuid4
+
 try:
-    from schemas import ExecutionResult, TalkRequest
     from personal_data import resolve_personal_data_provider
+    from schemas import ExecutionResult, TalkRequest
     from tts import text_to_speech
 except ImportError:
-    from ..schemas import ExecutionResult, TalkRequest
     from ..personal_data import resolve_personal_data_provider
+    from ..schemas import ExecutionResult, TalkRequest
     from ..tts import text_to_speech
 
 log = logging.getLogger("execution.talk")
@@ -25,12 +26,12 @@ def _decode_audio(audio_base64: str) -> bytes:
         b64_data = audio_base64
         if "," in b64_data:
             b64_data = b64_data.split(",")[1]
-        
+
         # Add padding if necessary
         missing_padding = len(b64_data) % 4
         if missing_padding:
             b64_data += '=' * (4 - missing_padding)
-            
+
         return base64.b64decode(b64_data)
     except Exception as e:
         log.error(f"Audio decoding failed: {e}")
@@ -65,7 +66,7 @@ def _message_summary(message: dict[str, Any]) -> dict[str, Any]:
         "is_replyable": message.get("isReplyable", False),
     }
 
-def validate_jarvis_mention(message: Optional[str]) -> bool:
+def validate_jarvis_mention(message: str | None) -> bool:
     """Parses real-time text input configurations looking for the identifier prefix: @Jarvis."""
     if not message:
         return False
@@ -76,19 +77,19 @@ async def _get_talk_model_from_settings() -> str:
     """Resolve assistant/librarian model from Identity settings for Talk. Never use 'auto'."""
     try:
         import aiohttp
+
         from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-            async with client.get(
-                f"{IDENTITY_SVC}/api/settings",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            ) as resp:
-                if resp.status == 200:
-                    settings = {item["key"]: item["value"] for item in await resp.json()}
-                model = (settings.get("ollama_librarian_model") or
-                        settings.get("librarian_model") or
-                        settings.get("assistant_model"))
-                if model and model not in ("", "auto"):
-                    return model
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
+            f"{IDENTITY_SVC}/api/settings",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        ) as resp:
+            if resp.status == 200:
+                settings = {item["key"]: item["value"] for item in await resp.json()}
+            model = (settings.get("ollama_librarian_model") or
+                    settings.get("librarian_model") or
+                    settings.get("assistant_model"))
+            if model and model not in ("", "auto"):
+                return model
     except Exception as e:
         log.warning(f"Failed to resolve Talk model from settings: {e}")
     raise RuntimeError("No assistant/librarian model configured in Identity settings")
@@ -98,7 +99,6 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any):
     """Invokes the execution loop orchestrator and delivers the result back to NextCloud Talk."""
     try:
         from services.gateway.orchestrator import process_full_orchestration, strip_json_from_response
-        from services.execution.websearch import web_search  # Bound tools module
 
         provider = resolve_personal_data_provider(user_context)
         if not provider:
@@ -229,7 +229,7 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             )
             if not ok:
                 return ExecutionResult(status="FAILURE", message=message or "Failed to send message.", service="talk_send")
-            
+
             # Check for @Jarvis mention and run background task
             if validate_jarvis_mention(req.message):
                 query = req.message[len("@Jarvis"):].strip()

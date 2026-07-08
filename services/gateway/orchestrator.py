@@ -1,19 +1,27 @@
 # services/gateway/orchestrator.py
 import asyncio
-import aiohttp
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Dict, List, Optional, Callable, Awaitable, Any
+from typing import Any
+
+import aiohttp
 
 from services.gateway.config import (
-    INTERNAL_SECRET, IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC,
-    LOGGING_SVC, WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL,
+    CONTROL_PLANE_URL,
+    EXECUTION_SVC,
+    IDENTITY_SVC,
+    INTERNAL_SECRET,
+    LOGGING_SVC,
+    RAG_SVC,
+    STORAGE_SVC,
+    WORKSPACE_RUNTIME_SVC,
 )
-from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider, OllamaProvider
+from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
-from services.gateway.prompts import load_prompt_sync, PROMPT_SINGLE_TURN_TOOL_GUIDE
 
 log = logging.getLogger("gateway.orchestrator")
 
@@ -41,12 +49,12 @@ _DEFAULTS = {
 }
 
 # --- Settings cache (refreshed periodically) ---
-_settings_cache: Optional[Dict[str, str]] = None
+_settings_cache: dict[str, str] | None = None
 _settings_cache_time: float = 0
 _SETTINGS_TTL = 30  # seconds
 
 
-async def get_all_settings() -> Dict[str, str]:
+async def get_all_settings() -> dict[str, str]:
     """Fetches ALL configuration from Identity service (single source of truth)."""
     global _settings_cache, _settings_cache_time
     import time
@@ -82,7 +90,7 @@ async def get_all_settings() -> Dict[str, str]:
     return _settings_cache or dict(_DEFAULTS)
 
 
-def _sync_main_constants(settings: Dict[str, str]) -> None:
+def _sync_main_constants(settings: dict[str, str]) -> None:
     """Update module-level constants in main.py for backward compatibility."""
     import services.gateway.main as main_mod
     mappings = {
@@ -105,7 +113,7 @@ _MODEL_KEYS = {
     "active_llm_provider", "assistant_model", "coding_model", "librarian_model",
 }
 
-def _get(settings: Dict[str, str], key: str, default: str = "") -> str:
+def _get(settings: dict[str, str], key: str, default: str = "") -> str:
     """Get setting with fallback to defaults (excludes model keys)."""
     val = settings.get(key, "")
     if val in ("", "auto"):
@@ -169,7 +177,7 @@ def strip_json_from_response(text: str) -> str:
     return text.strip()
 
 # Tool endpoint map (service base URL resolved at runtime from Identity)
-SINGLE_TURN_TOOL_ENDPOINTS: Dict[str, str] = {
+SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {
     "lightcontrolrequest": "/execute/light",
     "mediaplayrequest": "/execute/media/play",
     "mediatransportrequest": "/execute/media/transport",
@@ -223,12 +231,12 @@ _TOOL_SERVICE_MAP = {
 }
 
 
-async def get_llm_settings() -> Dict[str, str]:
+async def get_llm_settings() -> dict[str, str]:
     """Fetches full LLM settings from Identity service (cached)."""
     return await get_all_settings()
 
 
-async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
+async def get_provider(settings: dict[str, str]) -> BaseLLMProvider:
     """Instantiates the correct provider based on settings."""
     active_provider = settings.get("active_llm_provider", "ollama")
     timeout = float(_get(settings, "ollama_timeout", "600"))
@@ -248,7 +256,7 @@ async def get_provider(settings: Dict[str, str]) -> BaseLLMProvider:
         )
 
 
-async def call_ollama(payload: Dict[str, Any], use_chat: bool = True) -> Dict[str, Any]:
+async def call_ollama(payload: dict[str, Any], use_chat: bool = True) -> dict[str, Any]:
     """
     Legacy-compatible inference seam for tests and direct provider calls.
     The underlying provider is still resolved dynamically from Identity settings.
@@ -263,7 +271,7 @@ async def call_ollama(payload: Dict[str, Any], use_chat: bool = True) -> Dict[st
     )
     return {"message": {"content": content}}
 
-async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> str:
+async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback: Callable[[str], Awaitable[None]] | None = None) -> str:
     """
     Handles the full Jarvis orchestration pipeline:
     Decompose -> Memory -> RAG -> Inference -> Tools -> Update.
@@ -273,23 +281,23 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     creds = ResolvedCredentials(**job_payload["creds"])
     model = job_payload["model"]
     show_thinking = job_payload.get("show_thinking", False)
-    
+
     log.info(f"[Orchestrator] Job model from payload: '{model}'")
-    
+
     # 0. Query-based Model Override (e.g. "Raven use model qwen2.5:32b fix...")
     model_match = re.search(r"(?:use model|with model|run on model)\s+([a-zA-Z0-9.\-_:]+)", query, re.IGNORECASE)
     if model_match:
         model = model_match.group(1)
         log.info(f"[Orchestrator] Dynamic model override detected: {model}")
-    
+
     log.info(f"[Orchestrator] Starting orchestration for query: {query[:50]}...")
-    
+
     # 1. Retrieve Memory
     short_term = [] # Placeholder
-    
+
     # 2. Context Injection (RAG + live HA state)
     rag_context = await _fetch_rag_context(query, user_id, creds)
-    
+
     # 3. Autonomous Detection (Raven/Coding/Repair ONLY)
     # Raven runs in Workspaces and handles long-running or coding tasks.
     # Home Automation should NOT be treated as autonomous (no long-running loops)
@@ -305,7 +313,7 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     if not is_autonomous:
         first_word = query.lower().split()[0] if query.split() else ""
         is_autonomous = first_word in ("fix", "repair", "audit", "deploy", "convert", "review", "check", "update", "refactor")
-    
+
     # 4. Final Inference
     full_system = job_payload.get("system", "")
     if is_autonomous:
@@ -316,10 +324,10 @@ async def process_full_orchestration(job_payload: Dict[str, Any], chunk_callback
     else:
         # Librarian handles standard single-turn inference
         ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking)
-        
+
     return ans
 
-async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedCredentials] = None) -> str:
+async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredentials | None = None) -> str:
     rag_context = ""
     settings = await get_all_settings()
     rag_svc = _get(settings, "rag_svc_url")
@@ -327,25 +335,25 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
         # Prioritize collections based on query intent
         q = query.lower()
         collections = ["ha_entities", "nextcloud_files", "system_capabilities", "system_learnings"]
-        
+
         # Adjust priorities: if it looks like a coding/sys task, prioritize capabilities and files
         if any(token in q for token in ["file", "code", "git", "workspace", "fix", "repair"]):
             collections = ["system_capabilities", "nextcloud_files", "system_learnings", "ha_entities"]
-        
+
         # Context constraints
         MAX_TOTAL_HITS = 20
         MAX_HITS_PER_COLL = 8
         MAX_CHARS_PER_HIT = 2000
         TOTAL_CHARS_LIMIT = 15000 # Approx 4k tokens
-        
+
         total_hits = 0
         total_chars = 0
-        
+
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             for coll in collections:
                 if total_hits >= MAX_TOTAL_HITS or total_chars >= TOTAL_CHARS_LIMIT:
                     break
-                    
+
                 resp = await client.post(
                     f"{rag_svc}/rag/search",
                     json={"collection_name": coll, "query": query, "user_id": user_id, "k": MAX_HITS_PER_COLL},
@@ -357,24 +365,24 @@ async def _fetch_rag_context(query: str, user_id: str, creds: Optional[ResolvedC
                         # For HA entities, enrich with live state from HA
                         if coll == "ha_entities" and creds:
                             hits = await _enrich_entities_with_live_state(hits, creds)
-                        
+
                         coll_added = False
                         for h in hits:
                             content = h["content"]
                             if len(content) > MAX_CHARS_PER_HIT:
                                 content = content[:MAX_CHARS_PER_HIT] + "... [TRUNCATED]"
-                            
+
                             if total_chars + len(content) > TOTAL_CHARS_LIMIT:
                                 break
-                            
+
                             if not coll_added:
                                 rag_context += f"\n[{coll.upper()}]\n"
                                 coll_added = True
-                                
+
                             rag_context += f"- {content}\n"
                             total_chars += len(content)
                             total_hits += 1
-                            
+
                             if total_hits >= MAX_TOTAL_HITS:
                                 break
     except Exception as e:
@@ -394,12 +402,12 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
     """Dynamically discover weather entities from HA and return live forecast data."""
     settings = await get_all_settings()
     exec_svc = _get(settings, "execution_svc_url")
-    
+
     ha_url = getattr(creds, "ha_url", None)
     ha_token = getattr(creds, "ha_token", None)
     if not ha_url or not ha_token:
         return ""
-    
+
     try:
         # Fetch all entities to find weather domain
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
@@ -412,28 +420,28 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
                 return ""
             data = await resp.json()
             entities = data.get("entities", []) if isinstance(data, dict) else []
-        
+
         # Find weather domain entities
         weather_entities = [e for e in entities if e.get("entity_id", "").startswith("weather.")]
         if not weather_entities:
             return ""
-        
+
         # Cache all states for future lookups
         from services.gateway.ha_state_cache import cache_all_states
         cache_all_states(entities)
-        
+
         parts = []
         for e in weather_entities:
             eid = e.get("entity_id", "")
             friendly = e.get("attributes", {}).get("friendly_name", eid)
             state = e.get("state", "unknown")
             attrs = e.get("attributes", {})
-            
+
             details = [f"{friendly} ({eid}): {state}"]
             for key in ["temperature", "humidity", "forecast", "wind_speed", "pressure", "dew_point", "uv_index", "precipitation"]:
                 if key in attrs:
                     details.append(f"  {key}: {attrs[key]}")
-            
+
             # Include forecast if available
             forecast = attrs.get("forecast", [])
             if forecast:
@@ -452,9 +460,9 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
                         forecast_items.append(" ".join(f_parts))
                 if forecast_items:
                     details.append(f"  forecast: {' | '.join(forecast_items)}")
-            
+
             parts.append("\n".join(details))
-        
+
         return "\n".join(parts)
     except Exception as e:
         log.error(f"Failed to fetch weather context: {e}")
@@ -466,18 +474,18 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
     entity_id is the stable join key between RAG metadata and live state.
     Even if friendly_name changes in HA, entity_id remains constant.
     """
-    from services.gateway.ha_state_cache import get_cached_state, fetch_live_states
-    
+    from services.gateway.ha_state_cache import fetch_live_states, get_cached_state
+
     ha_url = getattr(creds, "ha_url", None)
     ha_token = getattr(creds, "ha_token", None)
     if not ha_url or not ha_token:
         return hits
-    
+
     # Collect entity_ids from RAG hits
     entity_ids = [h.get("entity_id", "") for h in hits if h.get("entity_id")]
     if not entity_ids:
         return hits
-    
+
     # Try Redis cache first
     live_states: dict[str, str] = {}
     cache_misses = []
@@ -487,7 +495,7 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
             live_states[eid] = cached
         else:
             cache_misses.append(eid)
-    
+
     # On cache miss, fetch all live states and repopulate cache
     if cache_misses:
         settings = await get_all_settings()
@@ -498,10 +506,10 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
             state = e.get("state", "unknown")
             if eid:
                 live_states[eid] = state
-    
+
     # Merge live state into RAG hits
     ACTIVE_STATES = {"on", "playing", "idle", "standby", "home", "cooling", "heating", "drying", "cleaning"}
-    
+
     for h in hits:
         eid = h.get("entity_id", "")
         live_state = live_states.get(eid)
@@ -517,7 +525,7 @@ async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredential
             else:
                 base += f" | Current State (live): {live_state}"
             h["content"] = base
-    
+
     # Sort: active devices first
     hits = sorted(hits, key=lambda h: not h.get("is_active", False), reverse=True)
     return hits
@@ -526,10 +534,10 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
     """Execute a single tool call and return the result string."""
     settings = await get_all_settings()
     control_plane = _get(settings, "control_plane_url")
-    
+
     # Normalize action: strip underscores/spaces, lowercase → canonical form
     action = re.sub(r'[\s_]+', '', action).lower()
-    
+
     if action == "controlplanerequest":
         payload = tool_data.get("payload", tool_data)
         service_name = payload.get("service_name")
@@ -542,26 +550,26 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     resp = await client.post(f"{control_plane}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
                 else:
                     resp = await client.get(f"{control_plane}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
-                
+
                 if resp.status == 200:
                     return f"Control Plane '{sub_action}' succeeded on {service_name}: {resp.text}"
                 return f"Control Plane error {resp.status}: {resp.text}"
         except Exception as e:
             log.error(f"Control Plane execution error: {e}")
             return f"Control Plane execution failed: {e}"
-    
+
     elif action in SINGLE_TURN_TOOL_ENDPOINTS:
         endpoint = SINGLE_TURN_TOOL_ENDPOINTS[action]
         svc_key = _TOOL_SERVICE_MAP.get(action, "execution_svc_url")
         svc_base = _get(settings, svc_key)
-        
+
         try:
             payload = tool_data.get("payload", tool_data)
             payload["user_context"] = creds.model_dump()
-            
+
             if action == "contextsearchrequest":
                 payload["user_id"] = creds.user or "default"
-            
+
             if action == "talkrequest" and not payload.get("action"):
                 if payload.get("message") or payload.get("text_to_voice"):
                     payload["action"] = "send"
@@ -569,7 +577,7 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     payload["action"] = "messages"
                 else:
                     payload["action"] = "list"
-            
+
             if action == "announcementrequest" and not payload.get("entity_id") and not payload.get("device_name"):
                 device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Z][A-Za-z\s]+?)(?:\s+(?:speaker|tv|device|display|cast|chrome))", query)
                 if not device_match:
@@ -582,7 +590,7 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                             device_name += " " + type_match.group(1)
                     payload["device_name"] = device_name
                     log.info(f"[_execute_single_tool] Auto-resolved device_name='{device_name}' from query")
-            
+
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
                 resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                 if resp.status == 200:
@@ -613,7 +621,7 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
         log.warning(f"[_execute_single_tool] Unsupported tool for single-turn: {action}")
         return f"I found a tool call for '{action}', but it is not supported in the standard path. Please ask Raven to perform this task."
 
-async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: List[Dict[str, str]], creds: ResolvedCredentials, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None, show_thinking: bool = False) -> str:
+async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False) -> str:
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
     single_turn_guide = load_prompt_sync(PROMPT_SINGLE_TURN_TOOL_GUIDE)
     system = f"{system_prompt.strip()}\n\nCurrent Date/Time: {now}\n\nSystem Capability Context:\n{single_turn_guide}\n\nRetrieved Context:\n{rag_context}"
@@ -623,7 +631,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}]
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
-    
+
     options = {"temperature": 0.0, "num_predict": 2048, "show_thinking": show_thinking}
 
     MAX_INFERENCE_RETRIES = 3

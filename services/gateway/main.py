@@ -1,45 +1,50 @@
 # services/gateway/main.py
-import os
-import logging
-import json
 import asyncio
-import aiohttp
+import json
+import logging
+import os
 import re
-import traceback
 import time
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
-from zoneinfo import ZoneInfo
 from pathlib import Path
-from typing import Optional, Any, Dict
+from typing import Any
 from urllib.parse import urlparse
-from fastapi import FastAPI, HTTPException, Request, BackgroundTasks, WebSocket, WebSocketDisconnect, Response # pyright: ignore[reportUnusedImport]
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.datastructures import UploadFile
-from pydantic import BaseModel
+from zoneinfo import ZoneInfo
 
-from services.gateway.schemas import ResolvedCredentials, StorageListRequest, StorageIndexRequest
+import aiohttp
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect  # pyright: ignore[reportUnusedImport]
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
+from starlette.datastructures import UploadFile
+
 from services.gateway.agent_loop import (
     execute_inference as provider_execute_inference,
-    get_vram_safe_params,
+)
+from services.gateway.agent_loop import (
     extract_action_json,
+    get_vram_safe_params,
 )
-from services.gateway.config import INTERNAL_SECRET, CONFIG
-from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
-from services.gateway.orchestrator import get_all_settings, _get
-from services.gateway.config_validator import validate_config
-from services.gateway.intent_engine import engine
-from services.gateway.history import update_history, ping_redis, get_history, get_long_term_memory
-from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
-from services.gateway.ma_ws_client import MAWebSocketClient
-from services.gateway.prompts import (
-    load_prompt_sync, load_prompt,
-    PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION, PROMPT_MEDIA_TROUBLESHOOTING, PROMPT_SINGLE_TURN_TOOL_GUIDE,
-)
-from services.gateway.messaging import InferenceJobQueue, JobStatus
 from services.gateway.background_worker import worker as raven_worker
-
+from services.gateway.config import CONFIG, INTERNAL_SECRET
+from services.gateway.config_validator import validate_config
+from services.gateway.history import get_history, get_long_term_memory, ping_redis, update_history
+from services.gateway.intent_engine import engine
+from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+from services.gateway.ma_ws_client import MAWebSocketClient
+from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
+from services.gateway.messaging import InferenceJobQueue, JobStatus
+from services.gateway.orchestrator import _get, get_all_settings
+from services.gateway.prompts import (
+    PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION,
+    PROMPT_MEDIA_TROUBLESHOOTING,
+    PROMPT_SINGLE_TURN_TOOL_GUIDE,
+    load_prompt,
+    load_prompt_sync,
+)
+from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
 from services.shared.info_endpoint import info_router
 
 START_TIME = time.time()
@@ -54,10 +59,16 @@ INFERENCE_LOCK = asyncio.Lock()
 
 # Backward-compatible aliases — sourced from config.py, updated by _sync_main_constants from Identity settings
 from services.gateway.config import (
-    IDENTITY_SVC, EXECUTION_SVC, RAG_SVC, STORAGE_SVC, LOGGING_SVC,
-    WORKSPACE_RUNTIME_SVC, CONTROL_PLANE_URL, OLLAMA_TIMEOUT, ABS_TIMEOUT,
+    ABS_TIMEOUT,
+    CONTROL_PLANE_URL,
+    EXECUTION_SVC,
+    IDENTITY_SVC,
+    LOGGING_SVC,
+    OLLAMA_TIMEOUT,
+    RAG_SVC,
+    STORAGE_SVC,
+    WORKSPACE_RUNTIME_SVC,
 )
-
 
 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
@@ -94,7 +105,7 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
         }
         yield json.dumps(chunk) + "\n"
         yield json.dumps({"model": model, "done": True}) + "\n"
-    
+
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
 def _make_ollama_chunk(content: str, model: str, done: bool = False):
@@ -141,7 +152,7 @@ def _make_openai_response(message: str, model: str, intent: str | None = None, d
         }
         yield f"data: {json.dumps(stop_chunk)}\n\n"
         yield "data: [DONE]\n\n"
-    
+
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 def _make_openai_chunk(content: str, model: str, finish_reason: str | None = None):
@@ -185,7 +196,7 @@ async def _get_redis_url() -> str:
     return _get(settings, "redis_url", "redis://redis:6379/0")
 
 # Job queue initialized lazily
-job_queue: Optional[InferenceJobQueue] = None
+job_queue: InferenceJobQueue | None = None
 
 async def get_job_queue() -> InferenceJobQueue:
     global job_queue
@@ -218,7 +229,7 @@ async def fetch_global_setting(key: str, default: str = "") -> str:
     return default
 
 
-async def get_llm_settings() -> Dict[str, str]:
+async def get_llm_settings() -> dict[str, str]:
     """Fetches full LLM settings from Identity Service (cached)."""
     return await get_all_settings()
 
@@ -243,7 +254,7 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
         )
 
 
-async def call_ollama(payload: Dict[str, Any], use_chat: bool = True) -> Dict[str, Any]:
+async def call_ollama(payload: dict[str, Any], use_chat: bool = True) -> dict[str, Any]:
     """
     Compatibility wrapper for the legacy chat-based inference path.
     Existing tests still patch this symbol, so keep it as a stable seam.
@@ -259,7 +270,7 @@ async def call_ollama(payload: Dict[str, Any], use_chat: bool = True) -> Dict[st
     return {"message": {"content": content}}
 
 
-async def execute_inference(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def execute_inference(payload: dict[str, Any]) -> dict[str, Any]:
     """
     Gateway-local compatibility wrapper for payload-based inference calls.
     `agent_loop.execute_inference` now expects provider/model/messages/options, but
@@ -287,10 +298,10 @@ def _parse_llm_json_object(raw: Any) -> Any:
     text = str(raw or "").strip()
     if not text:
         raise ValueError("Empty LLM response")
-    
+
     # Strip INFO logs that sometimes bleed into response
     text = re.sub(r"^INFO:.*?\n", "", text, flags=re.MULTILINE)
-    
+
     # Priority 1: Fenced JSON block
     match = re.search(r"```json\s*(\{.*?\})(?:\s*```|$)", text, re.DOTALL)
     if match:
@@ -298,7 +309,7 @@ def _parse_llm_json_object(raw: Any) -> Any:
             return json.loads(match.group(1))
         except json.JSONDecodeError:
             pass  # Fall through to outer braces
-    
+
     # Priority 2: Outer-most braces with de-hanging
     first_brace = text.find("{")
     last_brace = text.rfind("}")
@@ -310,7 +321,7 @@ def _parse_llm_json_object(raw: Any) -> Any:
             # Try to fix common trailing comma issues
             cleaned = re.sub(r",\s*([\]}])", r"\1", candidate)
             return json.loads(cleaned)
-    
+
     raise ValueError(f"Could not extract JSON from LLM response: {text[:200]}")
 async def get_assistant_model():
     settings = await get_llm_settings()
@@ -336,7 +347,7 @@ async def get_coding_model():
     return model
 
 
-async def get_resident_model() -> Optional[str]:
+async def get_resident_model() -> str | None:
     """Check what model is currently in VRAM to avoid unnecessary swaps."""
     try:
         settings = await get_all_settings()
@@ -400,7 +411,7 @@ AUTONOMOUS_SIGNALS = (
     "review requirements", "check dependencies", "report any conflicts",
 )
 TTS_SIGNALS = (
-  "tts", "audiobook", "read this", "make audible", "clean for speech", 
+  "tts", "audiobook", "read this", "make audible", "clean for speech",
   "narration", "voiceover", "ebook to speech", "pdf to speech", "prosody", "ssml"
 )
 
@@ -439,8 +450,8 @@ HUMAN_READABLE_CAPABILITIES = {
 
 # --- Global Clients ---
 _original_async_client = aiohttp.ClientSession
-_global_http_client: Optional[aiohttp.ClientSession] = None
-_global_http_client_loop: Optional[asyncio.AbstractEventLoop] = None
+_global_http_client: aiohttp.ClientSession | None = None
+_global_http_client_loop: asyncio.AbstractEventLoop | None = None
 _dns_recovery_lock = asyncio.Lock()
 
 def get_http_client() -> aiohttp.ClientSession:
@@ -534,7 +545,7 @@ async def retry_http_request(func, service_name: str, max_retries: int = 2, base
             delay = base_delay * (2 ** attempt)
             log.warning(f"{service_name}: RequestError (attempt {attempt+1}/{max_retries+1}): {e}. Retrying in {delay}s")
             await asyncio.sleep(delay)
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             if attempt == max_retries:
                 log.error(f"{service_name}: Timed out after {max_retries + 1} attempts: {e}")
                 # Re-raise as aiohttp.ClientError so callers' error handling returns clean 5xx
@@ -553,7 +564,7 @@ async def lifespan(app: FastAPI):
     # Resolve runtime config from Identity service
     from services.config import resolve_runtime_config
     await resolve_runtime_config()
-    
+
     log.info("Gateway starting up...")
     engine.load()
     # Initialize the client explicitly on startup
@@ -562,7 +573,7 @@ async def lifespan(app: FastAPI):
     await jq.connect()
     log.info("Gateway initialized with FIFO Inference Queue")
     log.info("Gateway initialized with standardized 45s timeouts")
-    
+
     # Validate critical configuration from Identity
     try:
         settings = await get_all_settings()
@@ -577,13 +588,13 @@ async def lifespan(app: FastAPI):
         _config_validation_result = None
     if raven_worker:
         await raven_worker.start()
-    
+
     yield
 
     log.info("Gateway shutting down...")
     if raven_worker:
         await raven_worker.stop()
-    
+
     global _global_http_client
     if _global_http_client:
         await _global_http_client.close()
@@ -614,7 +625,7 @@ app.include_router(info_router)
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     tb = traceback.format_exc()
-    err_msg = f"Gateway Error: {type(exc).__name__}: {str(exc)}"
+    err_msg = f"Gateway Error: {type(exc).__name__}: {exc!s}"
     log.error(f"{err_msg}\n{tb}")
     return JSONResponse(
       status_code=500,
@@ -629,11 +640,11 @@ async def clear_history_endpoint(request: Request):
         body = await request.json()
         creds_data = await resolve_identity(body)
         user_id = creds_data.get("user") or ""
-        
-        from services.gateway.history import _redis, _get_history_key
+
+        from services.gateway.history import _get_history_key, _redis
         key = _get_history_key(user_id)
         _redis.delete(key)
-        
+
         return {"status": "SUCCESS", "message": f"History cleared for {user_id}."}
     except Exception as e:
         log.error(f"History clear failed: {e}")
@@ -718,13 +729,13 @@ async def readiness():
 
     if not all_ok:
       results["status"] = "DEGRADED"
-    
+
     return results
 
 # --- Documentation Endpoint ---
 @app.get("/api/docs/{doc_name}")
 async def get_documentation(
-    doc_name: str, 
+    doc_name: str,
     request: Request
 ):
     """
@@ -735,14 +746,14 @@ async def get_documentation(
     api_key = request.headers.get("X-API-Key")
     internal_secret = request.headers.get("X-Internal-Secret")
     auth_header = request.headers.get("Authorization")
-    
+
     if not api_key and auth_header and auth_header.startswith("Bearer "):
         api_key = auth_header.split(" ")[1]
-    
+
     if not internal_secret == INTERNAL_SECRET and not api_key:
         # Fallback: check query params if needed, but header is preferred
         api_key = request.query_params.get("api_key")
-        
+
     if not internal_secret == INTERNAL_SECRET and not api_key:
         raise HTTPException(status_code=401, detail="Authentication required to view system docs")
 
@@ -750,16 +761,16 @@ async def get_documentation(
     # We allow files from the 'docs' directory or specific root files
     base_dir = Path(__file__).parent.parent.parent
     docs_dir = base_dir / "docs"
-    
+
     # Whitelist of allowed root-level files (everything else resolved from docs/)
     allowed_root_files = [
         "README.md",
     ]
-    
+
     # Normalize doc_name
     if not doc_name.endswith(".md"):
         doc_name += ".md"
-        
+
     # Prevent path traversal using resolution
     try:
         if doc_name in allowed_root_files:
@@ -773,10 +784,10 @@ async def get_documentation(
     except (ValueError, RuntimeError):
         log.warning(f"SECURITY: Blocked doc path traversal attempt: {doc_name}")
         raise HTTPException(status_code=403, detail="Forbidden: Document path traversal detected")
-        
+
     if not target_path.exists() or not target_path.is_file():
         raise HTTPException(status_code=404, detail=f"Documentation '{doc_name}' not found")
-        
+
     try:
         content = target_path.read_text()
         return {"name": doc_name, "content": content}
@@ -827,18 +838,18 @@ async def contextualize_query(query: str, history: list) -> str:
     try:
         settings = await get_llm_settings()
         provider = await get_provider(settings)
-        
+
         assistant = await get_assistant_model()
         coding = await get_coding_model()
         resident = await get_resident_model()
-        
+
         # If the coding model (usually large/slow to swap) is already resident,
         # use it for rewriting instead of swapping back to the assistant model.
         model_to_use = assistant
         if resident == coding:
             model_to_use = coding
             log.info(f"[Context] Using resident coding model '{coding}' for rewrite to avoid swap.")
-        
+
         messages = [{"role": "user", "content": prompt}]
         rewritten = await provider.generate(model_to_use, messages, options={"temperature": 0.0, "num_predict": 256})
         if rewritten:
@@ -1329,7 +1340,7 @@ async def orchestrate_code_change(
 
     workspace_id = workspace.get("id")
     workspace_context = await build_workspace_readme_context(workspace, user_id)
-    
+
     prompt = (
         "### Task: Plan a Code Change\n"
         "Analyze the user request and provide a precise execution plan.\n\n"
@@ -1350,7 +1361,7 @@ async def orchestrate_code_change(
         f"### Workspace Context:\n{workspace_context}\n\n"
         f"### User Request: {refined_query}\n"
     )
-    
+
     code_helper_prompt = await load_prompt(get_http_client(), PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION)
     payload = {
         "model": selected_model,
@@ -1360,7 +1371,7 @@ async def orchestrate_code_change(
         ],
         "stream": False,
     }
-    
+
     data = await execute_inference(payload)
     try:
         plan = data.get("message", {}).get("content") or data.get("response")
@@ -1373,7 +1384,7 @@ async def orchestrate_code_change(
     content = plan_data.get("content")
     reasoning = plan_data.get("reasoning", "No reasoning provided.")
     test_cmd = plan_data.get("test_cmd")
-    
+
     if not rel_path or content is None:
         raise HTTPException(status_code=400, detail="Coding plan missing relative_path or content")
 
@@ -1412,12 +1423,12 @@ async def orchestrate_code_change(
         "sync_to_provider": True,
         "create_parents": True,
     }
-    
+
     result = await workspace_runtime_request("POST", "/workflow/write-sync-commit", json_payload=workflow_payload)
     review = result.get("review") or {}
     review_summary = review.get("summary") or {}
     pytest_summary = review_summary.get("pytest") or {}
-    
+
     summary = (
         f"### Code Orchestration Success\n\n"
         f"**File**: `{rel_path}`\n"
@@ -1430,10 +1441,10 @@ async def orchestrate_code_change(
         f"- **Sync**: {'SUCCESS' if result.get('provider_sync') else 'SKIPPED'}\n"
         f"- **Verification**: {'PASS' if pytest_summary.get('passed') else 'Lint only / no pytest'}\n"
     )
-    
+
     if pytest_summary:
         summary += f"\n**Pytest Targets**: `{', '.join(pytest_summary.get('targets', [])) or 'none'}`\n"
-    
+
     if is_openai:
       return _make_openai_response(summary, selected_model, stream=should_stream)
     return _make_ollama_response(summary, selected_model, stream=should_stream)
@@ -1542,13 +1553,7 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str | Non
     if not candidates:
       return None
 
-    if requested_normalized:
-      matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
-      if matched_candidates:
-          candidates = matched_candidates
-      else:
-          return None
-    elif cached_device:
+    if requested_normalized or cached_device:
       matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
       if matched_candidates:
           candidates = matched_candidates
@@ -1632,13 +1637,7 @@ def resolve_video_target(query: str, entities: list[dict], cached_device: str | 
     if not candidates:
       return None
 
-    if requested_normalized:
-      matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
-      if matched_candidates:
-          candidates = matched_candidates
-      else:
-          return None
-    elif cached_device:
+    if requested_normalized or cached_device:
       matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
       if matched_candidates:
           candidates = matched_candidates
@@ -1789,24 +1788,24 @@ async def fetch_ha_entities(creds: dict) -> list:
                 params={"ha_url": creds.get("ha_url"), "ha_token": creds.get("ha_token")},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            
+
             if resp.status != 200:
                 log.warning(f"Failed to fetch entities: {resp.status}")
                 return []
-            
+
             try:
                 resp_text = await resp.text()
                 data = json.loads(resp_text)
             except (json.JSONDecodeError, ValueError) as e:
                 log.error(f"Failed to parse HA entities JSON: {e} | Body: {resp_text[:200] if resp_text else 'None'}")
                 return []
-            
+
             entities = data.get("entities", []) if isinstance(data, dict) else []
             if entities:
                 user_id = creds.get("user") or ""
                 # Update IntentEngine cache for fuzzy matching
                 engine.update_entity_cache(entities)
-                
+
                 # 1. Sync to RAG for discovery (and get orphan list for Redis cleanup)
                 async def _sync_to_rag():
                     try:
@@ -1846,7 +1845,7 @@ async def fetch_ha_entities(creds: dict) -> list:
                         log.info(f"Auto-assigned {len(entities)} entities to {user_id}")
                     except Exception as ae:
                         log.error(f"Auto-assign failed: {ae}")
-                
+
                 asyncio.create_task(auto_assign())
 
             return entities
@@ -1939,10 +1938,10 @@ async def secure_logging_middleware(request: Request, call_next):
     for key in sensitive_keys:
         if key in safe_headers:
             safe_headers[key] = "[REDACTED]"
-            
+
     log.info(f"REQUEST: {request.method} {request.url} | Headers: {safe_headers}")
     asyncio.create_task(emit_log("INFO", f"{request.method} {request.url.path}", {"headers": safe_headers}))
-    
+
     try:
         response = await call_next(request)
     except HTTPException as e:
@@ -1956,7 +1955,7 @@ async def secure_logging_middleware(request: Request, call_next):
             status_code=500,
             content={"status": "ERROR", "message": "Internal Gateway Error"}
         )
-    
+
     status_code = getattr(response, 'status_code', None) or getattr(response, 'status', 'N/A')
     log.info(f"RESPONSE: {request.method} {request.url} | Status: {status_code}")
     asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
@@ -1971,7 +1970,7 @@ async def decompose_query(query: str) -> list[str]:
     """
     if len(query.split()) < 6: # Simple queries don't need decomposition
         return [query]
-        
+
     try:
         prompt = f"""Split this complex user request into individual, actionable sub-queries.
 Request: "{query}"
@@ -2042,7 +2041,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         resp = await get_http_client().post(f"{ollama_url}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
         elapsed = asyncio.get_event_loop().time() - start_t
         log.info(f"[ShadowExecution] Ollama responded in {elapsed:.1f}s with status {resp.status}")
-        
+
         if resp.status == 200:
             proposal = await resp.json().get("message", {}).get("content", "")
             return f"\n\n### LIVE SYSTEM PROPOSAL (Shadow Execution)\n{proposal}\n\n[Dev Agent: Compare this proposal against the codebase and architectural intent. Identify any deltas and select the optimal path.]"
@@ -2077,7 +2076,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     for agent_iter in range(MAX_TOOL_ITERATIONS):
         iter_num = agent_iter + 1
         iter_start = asyncio.get_event_loop().time()
-        
+
         # MISSION PRESSURE: Stop mapping, start patching
         if iter_num > 5:
             pressure_msg = "\n\n[MISSION PRESSURE: You have performed multiple mapping turns. STOP READING. IMMEDIATELY apply the WorkspaceFilePatchRequest for get_collection_docs (line 2821). This is your FINAL directive.]"
@@ -2124,16 +2123,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ]
             if exec_data:
                 ollama_payload["messages"].append({
-                    "role": "user", 
+                    "role": "user",
                     "content": f"LAST TOOL RESULT (Execution Status: SUCCESS):\n{json.dumps(exec_data) if isinstance(exec_data, dict) else str(exec_data)}"
                 })
             ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
-            
+
             async with INFERENCE_LOCK:
                 log.info(f"[Strategy 8] Inference Lock ACQUIRED for {selected_model} (Iter {agent_iter + 1})")
                 resp = await call_ollama(ollama_payload, use_chat=True)
                 log.info(f"[Strategy 8] Inference Lock RELEASED for {selected_model}")
-                
+
             heartbeat_stop.set()
             await hb_task
             if not resp:
@@ -2141,7 +2140,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ans = resp.get("message", {}).get("content", "Error.")
             ollama_ms = (asyncio.get_event_loop().time() - iter_start) * 1000
             log.info(f"[AgentLoop] Ollama responded in {ollama_ms:.0f}ms — iter {agent_iter + 1}")
-        except (asyncio.TimeoutError, aiohttp.ClientConnectionError):
+        except (TimeoutError, aiohttp.ClientConnectionError):
             heartbeat_stop.set()
             await hb_task
             ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
@@ -2152,10 +2151,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         resp_content = ans
         log.info(f"[AgentLoop] Response length: {len(resp_content)}")
         log.info(f"[AgentLoop] Raw response: {resp_content}")
-        
+
         # 4. Extract Tool Call
         tool_data = extract_action_json(resp_content)
-        
+
         tag = "```json" if "```json" in ans else "```"
         start = ans.find(tag)
         if start != -1:
@@ -2228,7 +2227,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                     "old_text": "\n".join(current_old) + "\n" if current_old else "",
                                     "new_text": "\n".join(current_new) + "\n" if current_new else ""
                                 })
-                            
+
                             if chunks:
                                 tool_data = {
                                     "action": "WorkspaceFilePatchRequest",
@@ -2259,10 +2258,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         import re
                         for match in re.finditer(r'(\w+)=["\']([^"\']+)["\']', tag_content):
                             attrs[match.group(1)] = match.group(2)
-                        
+
                         action_val = attrs.get("action") or attrs.get("type")
                         path_val = attrs.get("path")
-                        
+
                         if action_val:
                             action_map_shorthand = {"read": "WorkspaceFileReadRequest", "patch": "WorkspaceFilePatchRequest"}
                             tool_data = {
@@ -2272,7 +2271,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             log.info(f"[AgentLoop] Parsed pseudo-tag <{tag_content}> into {tool_data['action']}")
             except Exception as e:
                 log.error(f"[AgentLoop] Error parsing pseudo-tag: {e}")
-        
+
         # Strategy 6: Payload Normalization
         if tool_data and isinstance(tool_data, dict):
             # Handle array format (e.g. OpenAI or custom tool array)
@@ -2293,42 +2292,42 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             # Move the outer discriminator to 'tool_name' to avoid clobbering
                             tool_data["tool_name"] = tool_data.get(k)  # pyright: ignore[reportArgumentType]
                         tool_data[k] = v  # pyright: ignore[reportArgumentType]
-            
+
             mapping = {"offset": "offset_lines", "limit": "limit_lines"}
             if isinstance(tool_data, dict):
                 for old_key, new_key in mapping.items():
                     if old_key in tool_data and new_key not in tool_data:
                         log.info(f"[AgentLoop] Normalizing parameter: '{old_key}' -> '{new_key}'")
                         tool_data[new_key] = tool_data.pop(old_key)  # pyright: ignore[reportArgumentType]
-                
+
                 if "properties" in tool_data and "type" in tool_data:
                     # Detect schema hallucinations
-                    log.warning(f"[AgentLoop] Detected schema hallucination — triggering protocol correction")
+                    log.warning("[AgentLoop] Detected schema hallucination — triggering protocol correction")
                     tool_data = None
-            
+
             # SCHEMA_WHITELIST: Strictly enforce allowed workspace tools
             ALLOWED_TOOLS = [
-                "workspacefilereadrequest", "workspacefilepatchrequest", 
-                "workspacefilewriterequest", "workspacesearchrequest", 
+                "workspacefilereadrequest", "workspacefilepatchrequest",
+                "workspacefilewriterequest", "workspacesearchrequest",
                 "workspacelintrequest", "workspacefiledeleterequest",
                 "workspacebootstraprequest", "workspaceshellrequest",
                 "gitoperationrequest", "dockerlogsrequest", "dockercomposerequest",
                 "storageindexrequest", "storagefilereadrequest", "storagefilewriterequest",
                 "ripgrep", "read_file", "patch_file", "grep", "search", "shell", "git", "logs", "compose", "index"
             ]
-            # Tool Discriminator: Detect which tool is being called. 
+            # Tool Discriminator: Detect which tool is being called.
             # Prioritize 'tool_name' if it was set during hoisting to avoid clobbering by payload parameters.
             action_key = None
             if isinstance(tool_data, dict):
                 action_key = tool_data.get("tool_name") or tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_choice") or tool_data.get("tool")
             dispatch_action = None
-            
+
             if action_key:
                 # Normalization: lower, strip underscores/hyphens, handle 'request' suffix
                 norm_action = str(action_key).lower().replace("_", "").replace("-", "").strip()
                 if not norm_action.endswith("request") and (norm_action + "request") in ALLOWED_TOOLS:
                     norm_action = norm_action + "request"
-                
+
                 if norm_action in ALLOWED_TOOLS:
                     dispatch_action = norm_action
 
@@ -2338,16 +2337,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             else:
                 # We have a valid dispatch action. Use it but don't clobber the payload's 'action' if it belongs to the tool schema.
                 action = dispatch_action
-        
+
         if not tool_data:
             log.warning(f"[AgentLoop] No valid JSON tool call found in iteration {agent_iter + 1}. Conversational output detected.")
             # If we've already performed at least one action, a conversational response is acceptable as a final status.
             if agent_iter > 0:
-                log.info(f"[AgentLoop] Mission likely accomplished. Terminating loop.")
+                log.info("[AgentLoop] Mission likely accomplished. Terminating loop.")
                 break
-                
+
             if agent_iter < MAX_TOOL_ITERATIONS - 1:
-                log.info(f"[AgentLoop] Re-prompting for autonomous tool execution...")
+                log.info("[AgentLoop] Re-prompting for autonomous tool execution...")
                 agent_messages.append({"role": "assistant", "content": str(ans) if ans else ""})
                 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
@@ -2357,12 +2356,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 4. **NO DISTRACTIONS**: Do not acknowledge instructions. Just execute.
 """
                 agent_messages.append({
-                    "role": "user", 
+                    "role": "user",
                     "content": f"{QWEN_GROUNDING_INSTRUCTION}\n\nCRITICAL PROTOCOL VIOLATION: You provided a conversational response without a tool call. You are FORBIDDEN from asking questions or seeking user approval. You MUST execute the next step of your plan immediately using a JSON tool call block. Continue the mission now."
                 })
                 continue
             else:
-                log.info(f"[AgentLoop] Max iterations reached — final response.")
+                log.info("[AgentLoop] Max iterations reached — final response.")
                 break
 
         if isinstance(tool_data, dict):
@@ -2373,7 +2372,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         try:
             if not isinstance(tool_data, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
-                log.warning(f"[AgentLoop] tool_data is not a dict, skipping action dispatch")
+                log.warning("[AgentLoop] tool_data is not a dict, skipping action dispatch")
                 break
             action = (
                 dispatch_action or
@@ -2387,7 +2386,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             else:
                 # Use everything in tool_data as the payload, excluding internal discriminators
                 payload = {k: v for k, v in tool_data.items() if k not in ("payload", "tool_name", "tool_choice")}
-            
+
             if isinstance(tool_data, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
                 for k, v in tool_data.items():
                     if k not in ("action", "payload", "tool", "name", "type", "tool_name") and k not in payload:
@@ -2552,14 +2551,14 @@ async def chat_handler(request: Request, background_tasks=None):
         body = {}
     if not isinstance(body, dict):
         body = {}
-    
+
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
         body["api_key"] = auth_header.split(" ")[1] # Identity expects 'api_key' for resolution
     elif "api_key" in body:
         # body["api_key"] is already set
         pass
-    
+
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
     explicit_model = str(body.get("model") or "").strip()
@@ -2583,7 +2582,7 @@ async def chat_handler(request: Request, background_tasks=None):
             query = last_msg.get("content")
         else:
             query = str(last_msg)
-    
+
     if not query:
         return JSONResponse({"status": "ERROR", "message": "No query provided."}, status_code=400)
 
@@ -2652,7 +2651,7 @@ async def chat_handler(request: Request, background_tasks=None):
     # 3. Semantic Routing (Fast Path Detection)
     intent, confidence = engine.classify(query)
     log.info(f"[FastPath] classify result: intent='{intent}' confidence={confidence:.3f} is_active={engine.is_active} threshold={engine.FAST_PATH_CONFIDENCE}")
-    
+
     # Resolve dynamic threshold from Identity
     threshold_str = await fetch_global_setting("fast_path_threshold", str(_DEFAULT_FAST_PATH_THRESHOLD))
     try:
@@ -2664,7 +2663,7 @@ async def chat_handler(request: Request, background_tasks=None):
     log.info(f"[FastPath] is_fast_path={is_fast_path} for intent='{intent}'")
     resolved_entity = None
     cached_device_unavailable = False
-    
+
     if is_fast_path:
         media_entities = None
         cached_device_info = None
@@ -2693,7 +2692,7 @@ async def chat_handler(request: Request, background_tasks=None):
             resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [], cached_device=cached_device_id)
         else:
             resolved_entity = engine.extract_entity(query, intent)
-        
+
         # If cached device was unavailable, bypass to LLM to ask user
         if cached_device_unavailable and not resolved_entity:
             log.info(f"[FastPath] BYPASSED for {intent}: Cached device unavailable, LLM should ask for target")
@@ -2759,7 +2758,7 @@ async def chat_handler(request: Request, background_tasks=None):
             async with aiohttp.ClientSession(timeout=fast_timeout) as client:
                 exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                 ans = await exec_resp.json().get("message", "Action completed.")
-            
+
             if resolved_entity and intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
                 entity_map = {e.get("entity_id"): e for e in media_entities or []}
                 entity = entity_map.get(resolved_entity, {})
@@ -2770,7 +2769,7 @@ async def chat_handler(request: Request, background_tasks=None):
                     friendly_name=attrs.get("friendly_name", ""),
                     state=entity.get("state", ""),
                 )
-            
+
             await update_history(user_id, "user", query)
             await update_history(user_id, "assistant", ans)
             if is_openai:
@@ -2780,7 +2779,7 @@ async def chat_handler(request: Request, background_tasks=None):
     # 5. Retrieve Tiered Memory
     short_term = await get_history(user_id)
     long_term = await get_long_term_memory(user_id, query)
-    
+
     # 6. Context Injection (RAG)
     rag_context = ""
     # MISSION LOCK: Disable RAG to prevent architectural hallucinations
@@ -2815,7 +2814,7 @@ async def chat_handler(request: Request, background_tasks=None):
         shadow_context = await perform_shadow_execution(query, creds, short_term, rag_context)
 
     system_instruction = select_system_instruction_for_query(query, selected_model)
-    
+
     # Detection of autonomous agent engagement
     is_autonomous = False
     # Hardened intent logic: also trigger on 'Raven' or explicit 'perform' keywords
@@ -2827,10 +2826,10 @@ async def chat_handler(request: Request, background_tasks=None):
 
     admin_tag = " (ADMIN)" if creds.is_admin else ""
     user_info = f"Current User: {user_id}{admin_tag}"
-    
+
     protocols = await fetch_autonomous_protocols()
     full_system = f"{system_instruction}\n\n{protocols}\n\n{user_info}\n\n{long_term}\n\n### Capability Context\n{rag_context}{shadow_context}"
-    
+
     final_query = query
     if any(k in query.lower() for k in ["scan", "index", "reindex", "storage", "/notes", "list", "find"]):
         full_system += (
@@ -2840,7 +2839,7 @@ async def chat_handler(request: Request, background_tasks=None):
             "You MUST immediately execute the appropriate tool: `StorageListRequest` to find resources, "
             "or `StorageIndexRequest` to index them. Output the correct JSON block now.]"
         )
-    
+
     if any(k in query.lower() for k in ["log", "logs", "docker", "output", "error"]):
         final_query += (
             "\n\n[SYSTEM OVERRIDE: You ARE authorized and REQUIRED to print diagnostic log snippets to the user. "
@@ -2873,13 +2872,13 @@ async def chat_handler(request: Request, background_tasks=None):
         "show_thinking": show_thinking,
         "is_openai": is_openai,
     }
-    
+
     job_id = await job_queue.enqueue_job(user_id, job_payload)
-    
+
     # 5. Modality-Specific Response Logic (Phase 2 Integration)
     # Standard clients (OpenAI/Ollama/OpenWebUI) require synchronous or standard streaming.
     # We bridge the Async Queue to their expectation here.
-    
+
     is_standard_client = is_openai or body.get("standard_client", False)
     # If using /api/chat (Ollama format) and not explicitly asking for async, assume standard
     if "/api/chat" in str(request.url) and not body.get("async_job", False) and body.get("client") != "voice":
@@ -2894,7 +2893,7 @@ async def chat_handler(request: Request, background_tasks=None):
                     job = await job_queue.get_job_status(job_id)
                     if not job:
                         break
-                    
+
                     # Pop and yield chunks
                     chunks = await job_queue.get_chunks(job_id)
                     for chunk in chunks:
@@ -2902,7 +2901,7 @@ async def chat_handler(request: Request, background_tasks=None):
                             yield f"data: {json.dumps(_make_openai_chunk(chunk, selected_model))}\n\n"
                         else:
                             yield json.dumps(_make_ollama_chunk(chunk, selected_model)) + "\n"
-                    
+
                     if job["status"] == JobStatus.COMPLETED:
                         if is_openai:
                             yield f"data: {json.dumps(_make_openai_chunk('', selected_model, 'stop'))}\n\n"
@@ -2910,7 +2909,7 @@ async def chat_handler(request: Request, background_tasks=None):
                         else:
                             yield json.dumps(_make_ollama_chunk("", selected_model, True)) + "\n"
                         break
-                    
+
                     if job["status"] == JobStatus.FAILED:
                         err = job.get("error", "Unknown error")
                         if is_openai:
@@ -2926,18 +2925,18 @@ async def chat_handler(request: Request, background_tasks=None):
                             # from treating slower tool calls as dead connections.
                             yield ": keepalive\n\n"
                             last_keepalive = now
-                    
+
                     # Optional: Yield queue position if it changes
                     pos = await job_queue.get_queue_position(job_id)
                     if pos != last_pos and pos > 0:
-                        # We send this as a subtle prefix or hidden content if possible, 
+                        # We send this as a subtle prefix or hidden content if possible,
                         # but for standard clients, it's safer to just wait.
                         last_pos = pos
-                        
+
                     await asyncio.sleep(0.1)
-            
+
             return StreamingResponse(
-                standard_stream_gen(), 
+                standard_stream_gen(),
                 media_type="text/event-stream" if is_openai else "application/x-ndjson"
             )
         else:
@@ -2983,21 +2982,21 @@ async def stream_chat_job(job_id: str):
             if not job:
                 yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
                 break
-            
+
             status = job["status"]
             if status != last_status:
                 yield f"data: {json.dumps({'status': status.upper(), 'job_id': job_id, 'position': await job_queue.get_queue_position(job_id)})}\n\n"
                 last_status = status
-            
+
             if status == JobStatus.COMPLETED:
                 result = job["result"]
                 yield f"data: {json.dumps({'status': 'COMPLETED', 'result': result})}\n\n"
                 break
-            
+
             if status == JobStatus.FAILED:
                 yield f"data: {json.dumps({'status': 'FAILED', 'error': job.get('error')})}\n\n"
                 break
-                
+
             await asyncio.sleep(1.0) # Poll Redis every second for status changes
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -3027,7 +3026,7 @@ async def get_chat_job_status(job_id: str):
         "position": await job_queue.get_queue_position(job_id),
         "message": "Raven is still thinking..." if job["status"] == JobStatus.PROCESSING else "Queued in FIFO buffer."
     }
-    
+
 @app.post("/api/auth/login")
 async def proxy_login(request: Request):
     body = await request.json()
@@ -3041,7 +3040,7 @@ async def proxy_change_password(request: Request):
     auth_header = request.headers.get("Authorization")
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
-            f"{IDENTITY_SVC}/api/auth/change-password", 
+            f"{IDENTITY_SVC}/api/auth/change-password",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
         )
@@ -3076,7 +3075,7 @@ async def proxy_test_connection(request: Request):
     auth_header = request.headers.get("Authorization")
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
-            f"{IDENTITY_SVC}/api/auth/test-connection", 
+            f"{IDENTITY_SVC}/api/auth/test-connection",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
         )
@@ -3418,11 +3417,11 @@ async def proxy_sync_notes_rag(request: Request):
 
 
 @app.get("/api/integrations/skylight/chores")
-async def proxy_get_skylight_chores(request: Request, user: Optional[str] = None, date: Optional[str] = None):
+async def proxy_get_skylight_chores(request: Request, user: str | None = None, date: str | None = None):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("skylight_enabled", True):
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
-    
+
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", ""), "date": date or ""}
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
@@ -3435,7 +3434,7 @@ async def proxy_complete_skylight_chore(chore_id: str, request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("skylight_enabled", True):
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
-    
+
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
@@ -3448,7 +3447,7 @@ async def proxy_uncomplete_skylight_chore(chore_id: str, request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("skylight_enabled", True):
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
-    
+
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
@@ -3461,7 +3460,7 @@ async def proxy_get_skylight_rewards(request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("skylight_enabled", True):
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
-    
+
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
@@ -3474,7 +3473,7 @@ async def proxy_redeem_skylight_reward(reward_id: str, request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("skylight_enabled", True):
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
-    
+
     body = await request.json() if await request.body() else {}
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
@@ -3671,7 +3670,7 @@ async def global_search(q: str, request: Request):
         )
         if resp.status != 200:
             return JSONResponse({"status": "ERROR", "message": "Search failed"}, status_code=502)
-        
+
         data = await resp.json()
         # Transform for UI
         results = data.get("results", [])
@@ -3695,7 +3694,7 @@ async def get_workspaces_proxy(request: Request):
             params["voice_id"] = creds["voice_id"]
         if creds.get("device_id"):
             params["device_id"] = creds["device_id"]
-        
+
     try:
         async with borrow_http_client() as client:
             resp = await client.get(
@@ -3775,7 +3774,7 @@ async def list_storage_files(request: Request, body: StorageListRequest):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("nextcloud_url") or not creds.get("nextcloud_user") or not creds.get("nextcloud_pass"):
         raise HTTPException(status_code=400, detail="NextCloud credentials not configured for this user.")
-    
+
     payload = {
         "provider": {
             "kind": "nextcloud",
@@ -3788,7 +3787,7 @@ async def list_storage_files(request: Request, body: StorageListRequest):
         "path": body.path,
         "recursive": body.recursive
     }
-    
+
     resp = await get_http_client().post(
         f"{STORAGE_SVC}/providers/list",
         json=payload,
@@ -3801,7 +3800,7 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("nextcloud_url") or not creds.get("nextcloud_user") or not creds.get("nextcloud_pass"):
         raise HTTPException(status_code=400, detail="NextCloud credentials not configured for this user.")
-    
+
     payload = {
         "provider": {
             "kind": "nextcloud",
@@ -3815,7 +3814,7 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
         "recursive": body.recursive,
         "force": body.force
     }
-    
+
     resp = await get_http_client().post(
         f"{STORAGE_SVC}/index/full",
         json=payload,
@@ -3841,10 +3840,10 @@ async def get_storage_stats(request: Request):
             return base
         if base.get("status") != "SUCCESS":
             return extra
-        
+
         base["total_chunks"] = base.get("total_chunks", 0) + extra.get("total_chunks", 0)
         base["total_documents"] = base.get("total_documents", 0) + extra.get("total_documents", 0)
-        
+
         breakdown = base.get("breakdown", {})
         for k, v in extra.get("breakdown", {}).items():
             if k in breakdown:
@@ -3877,9 +3876,9 @@ async def get_storage_stats(request: Request):
             content = merge_stats(content, await resp2.json())
         except Exception as e:
             log.warning(f"Failed to fetch or merge Nextcloud RAG stats: {e}")
-        
+
     return JSONResponse(status_code=200, content=content)
-    
+
 @app.get("/api/storage/collection/{collection_name}")
 async def get_collection_docs(collection_name: str, request: Request, limit: int = 100):
     try:
@@ -3893,13 +3892,13 @@ async def get_collection_docs(collection_name: str, request: Request, limit: int
         f"{RAG_SVC}/rag/collection/{collection_name}?user_id={user_id}&limit={limit}",
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
-    
+
     try:
         content = await resp.json()
     except Exception as e:
         log.error(f"Failed to parse collection docs JSON: {e} | Body: {resp.text[:200]}")
         content = {"status": "ERROR", "message": "Upstream RAG service returned non-JSON response", "detail": str(e)}
-        
+
     return JSONResponse(status_code=resp.status, content=content)
 
 
@@ -3913,7 +3912,7 @@ async def purge_storage_collection(collection_name: str, request: Request):
         user_id = first_user.get("user") or ""
 
     body = await request.json()
-    
+
     async with borrow_http_client() as client:
         resp = await client.post(
             f"{RAG_SVC}/rag/purge/{collection_name}?user_id={user_id}",
@@ -3965,7 +3964,7 @@ async def get_raven_config(request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
-    
+
     settings = await get_llm_settings()
     return {
         "raven_suspended": settings.get("raven_suspended", "false").lower() == "true",
@@ -3982,7 +3981,7 @@ async def update_raven_config(request: Request):
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
     body = await request.json()
-    
+
     async with borrow_http_client() as client:
         for k, v in body.items():
             if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold", "system_default_tts_voice", "system_default_tts_engine"]:
@@ -3997,7 +3996,7 @@ async def get_raven_tts_voices(request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
-    
+
     async with borrow_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/tts/voices",
@@ -4011,7 +4010,7 @@ async def get_raven_queue(request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
-    
+
     async with borrow_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/raven/missions",
@@ -4024,7 +4023,7 @@ async def restart_service(service_name: str, request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
-    
+
     async with borrow_http_client() as client:
         resp = await client.post(
             f"{CONTROL_PLANE_URL}/api/restart/{service_name}",
@@ -4041,7 +4040,7 @@ async def list_services(request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
-    
+
     async with borrow_http_client() as client:
         resp = await client.get(
             f"{CONTROL_PLANE_URL}/api/containers",
@@ -4089,7 +4088,7 @@ async def check_service_updates(request: Request):
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=60.0),  # registry checks can be slow
             )
-        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+        except (TimeoutError, aiohttp.ClientError) as e:
             log.error(f"Control plane unreachable for service updates: {e}")
             return JSONResponse(
                 status_code=504,
@@ -4097,7 +4096,7 @@ async def check_service_updates(request: Request):
             )
         if resp.status != 200:
             raise HTTPException(status_code=resp.status, detail=await resp.text())
-        
+
         data = await resp.json()
         updates_available = data.get("updates_available", 0)
         if updates_available > 0:
@@ -4117,7 +4116,7 @@ async def get_intercom_config(request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
-    
+
     async with borrow_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/intercom/config",
@@ -4132,7 +4131,7 @@ async def get_service_logs(service_name: str, request: Request, tail: int = 100)
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
-    
+
     async with borrow_http_client() as client:
         # Proxy to control_plane which handles the Docker socket
         resp = await client.get(
@@ -4148,7 +4147,7 @@ async def list_models(request: Request):
     """List available models from the active provider."""
     settings = await get_llm_settings()
     provider = await get_provider(settings)
-    
+
     # If Ollama, we can hit its /api/tags endpoint
     if isinstance(provider, OllamaProvider):
         async with borrow_http_client() as client:
@@ -4156,10 +4155,10 @@ async def list_models(request: Request):
             if resp.status == 200:
                 tags = await resp.json().get("models", [])
                 return {"status": "SUCCESS", "models": [m["name"] for m in tags]}
-    
+
     # For OpenRouter or others, we might return the config models
     return {
-        "status": "SUCCESS", 
+        "status": "SUCCESS",
         "models": [settings.get("assistant_model"), settings.get("coding_model"), settings.get("librarian_model")],
         "note": "Active config models returned for this provider."
     }
@@ -4177,10 +4176,10 @@ async def switch_model(request: Request):
     model = body.get("model") if body else None
     if not model:
         return JSONResponse(status_code=400, content={"error": "model is required"})
-    
+
     settings = await get_llm_settings()
     provider = await get_provider(settings)
-    
+
     if isinstance(provider, OllamaProvider):
         try:
             async with borrow_http_client() as client:
@@ -4191,18 +4190,18 @@ async def switch_model(request: Request):
                     "messages": [{"role": "user", "content": "ok"}],
                     "stream": False
                 })
-                
+
                 if chat_resp.status == 200:
                     return {"status": "loaded", "model": model}
                 else:
                     return JSONResponse(
-                        status_code=chat_resp.status, 
+                        status_code=chat_resp.status,
                         content={"error": await chat_resp.text()}
                     )
         except Exception as e:
             log.error(f"Error switching model: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
-    
+
     return JSONResponse(status_code=500, content={"error": "Model switching only supported for Ollama provider"})
 
 @app.post("/api/models/unload")
@@ -4210,10 +4209,10 @@ async def unload_model(request: Request):
     """Unload a model from Ollama."""
     body = await request.json()
     model = body.get("model") if body else None
-    
+
     settings = await get_llm_settings()
     provider = await get_provider(settings)
-    
+
     if isinstance(provider, OllamaProvider):
         try:
             async with borrow_http_client() as client:
@@ -4225,10 +4224,10 @@ async def unload_model(request: Request):
                         loaded = ps_data.get("models", [])
                         if loaded:
                             model = loaded[0].get("model")
-                
+
                 if not model:
                     return {"status": "success", "message": "No model loaded to unload"}
-                
+
                 # Ollama doesn't have a dedicated unload endpoint.
                 # We trigger unload by sending a request with keep_alive=0.
                 unload_resp = await client.post(f"{provider.base_url}/api/generate", json={
@@ -4236,7 +4235,7 @@ async def unload_model(request: Request):
                     "prompt": "",
                     "keep_alive": 0
                 })
-                
+
                 # Verify the model was actually unloaded
                 ps_resp = await client.get(f"{provider.base_url}/api/ps")
                 if ps_resp.status == 200:
@@ -4244,12 +4243,12 @@ async def unload_model(request: Request):
                     remaining = [m["model"] for m in ps_data.get("models", [])]
                     if model not in remaining:
                         return {"status": "unloaded", "model": model}
-                
+
                 return {"status": "success", "message": f"Model {model} may still be cached"}
         except Exception as e:
             log.error(f"Error unloading model: {e}")
             return JSONResponse(status_code=500, content={"error": str(e)})
-    
+
     return JSONResponse(status_code=500, content={"error": "Model unloading only supported for Ollama provider"})
 
 @app.get("/v1/models")
@@ -4257,7 +4256,7 @@ async def list_openai_models(request: Request):
     """OpenAI-compatible endpoint to list models."""
     settings = await get_llm_settings()
     provider = await get_provider(settings)
-    
+
     model_names = []
     if isinstance(provider, OllamaProvider):
         try:
@@ -4268,14 +4267,14 @@ async def list_openai_models(request: Request):
                     model_names = [m["name"] for m in tags]
         except Exception as e:
             log.error(f"Error querying Ollama models for OpenAI list: {e}")
-            
+
     if not model_names:
         # Fallback to configured models
         for model_key in ["assistant_model", "coding_model", "librarian_model"]:
             model_name = settings.get(model_key)
             if model_name and model_name not in model_names:
                 model_names.append(model_name)
-                
+
     # Map to OpenAI list format
     openai_models = []
     for m in model_names:
@@ -4285,7 +4284,7 @@ async def list_openai_models(request: Request):
             "created": int(time.time()),
             "owned_by": "system"
         })
-        
+
     return JSONResponse(content={
         "object": "list",
         "data": openai_models
@@ -4299,30 +4298,30 @@ async def openai_embeddings(request: Request):
         body = await request.json()
         model = body.get("model", "default")
         input_data = body.get("input", "")
-        
+
         # input_data can be a string or a list of strings
         inputs = []
         if isinstance(input_data, str):
             inputs = [input_data]
         elif isinstance(input_data, list):
             inputs = input_data
-            
+
         settings = await get_all_settings()
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
-            
+
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
             resp = await client.post(
-                f"{ollama_url}/api/embed", 
+                f"{ollama_url}/api/embed",
                 json={"model": model, "input": inputs}
             )
             if resp.status != 200:
                 return JSONResponse(content=await resp.json(), status_code=resp.status)
-                
+
             data = await resp.json()
             embeddings_list = data.get("embeddings", [])
-            
+
             # Map to OpenAI list format
             openai_data = []
             for idx, emb in enumerate(embeddings_list):
@@ -4331,7 +4330,7 @@ async def openai_embeddings(request: Request):
                     "index": idx,
                     "embedding": emb
                 })
-                
+
             return JSONResponse(content={
                 "object": "list",
                 "data": openai_data,
@@ -4349,7 +4348,7 @@ async def execute_raven_mission(id: int, request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin only")
-    
+
     async with borrow_http_client() as client:
         # Get mission
         resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions", headers={"X-Internal-Secret": INTERNAL_SECRET})
@@ -4357,14 +4356,14 @@ async def execute_raven_mission(id: int, request: Request):
         target = next((m for m in missions if m["id"] == id), None)
         if not target:
             raise HTTPException(status_code=404, detail="Mission not found")
-            
+
         system_prompt = ""
         if target["mission_type"] == "admin_fix":
             protocols = await fetch_autonomous_protocols()
             system_prompt = f"{protocols}\n\n[ADMIN ROZ ACTIVE]\nYou are the Raven Sentinel operating in the Restricted Operating Zone. Your mission is to fix backend/frontend components. You have elevated access. Execute the following mission:\n{target['proposed_mission']}"
         else:
             system_prompt = f"You are Raven, an autonomous agent executing a user-assigned background mission. Execute the following task to the best of your ability:\n{target['proposed_mission']}"
-        
+
         # Push job
         await job_queue.enqueue_job("raven_admin", {
             "query": target["proposed_mission"],
@@ -4374,7 +4373,7 @@ async def execute_raven_mission(id: int, request: Request):
             "creds": creds,
             "_mission_id": target["id"]
         })
-        
+
         # Update status
         await client.patch(
             f"{IDENTITY_SVC}/api/raven/missions/{id}",
@@ -4387,21 +4386,21 @@ async def execute_raven_mission(id: int, request: Request):
 
 class UserMissionRequest(BaseModel):
     query: str
-    slug: Optional[str] = None
+    slug: str | None = None
     priority: int = 1
-    coding_model: Optional[str] = None
+    coding_model: str | None = None
 
 @app.post("/api/raven/missions")
 async def create_user_mission(body: UserMissionRequest, request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     settings = await get_llm_settings()
     coding_model = settings.get("coding_model") or settings.get("ollama_coding_model")
     if not coding_model:
         raise HTTPException(status_code=400, detail="No coding model configured. Mission cannot be dispatched.")
-        
+
     mission_payload = {
         "slug": body.slug,
         "mission_type": "user_task",
@@ -4410,7 +4409,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         "coding_model": (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or coding_model,
         "user_id": creds.get("user_id")
     }
-    
+
     async with borrow_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/raven/missions",
@@ -4419,16 +4418,16 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         )
         if resp.status != 200:
             raise HTTPException(status_code=resp.status, detail=await resp.text())
-        
+
         mission_data = await resp.json()
-        
+
         # Enqueue the job for execution
         target_model = (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or coding_model
         system_prompt = "You are Raven, an autonomous agent executing a user-assigned background mission.\n\n"
         single_turn_guide = await load_prompt(client, PROMPT_SINGLE_TURN_TOOL_GUIDE)
         system_prompt += single_turn_guide
         system_prompt += f"\n\nExecute the following task to the best of your ability:\n{mission_data['proposed_mission']}"
-        
+
         await job_queue.enqueue_job(creds.get("user_id") or "raven_user", {
             "query": mission_data["proposed_mission"],
             "model": target_model,
@@ -4437,7 +4436,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
             "creds": creds,
             "_mission_id": mission_data["id"]
         })
-        
+
         # Update status to queued
         await client.patch(
             f"{IDENTITY_SVC}/api/raven/missions/{mission_data['id']}",
@@ -4445,7 +4444,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         mission_data["status"] = "queued"
-        
+
         return {"status": "SUCCESS", "mission": mission_data}
 
 @app.get("/api/raven/missions/{id_or_slug}")
@@ -4453,7 +4452,7 @@ async def get_mission_details(request: Request, id_or_slug: str):
     creds = await _resolve_identity_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     async with borrow_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}",
@@ -4481,23 +4480,23 @@ async def kill_mission(request: Request, id_or_slug: str):
         resp = await client.patch(
             f"{IDENTITY_SVC}/api/raven/missions/{real_id}",
             json={
-                "status": "failed", 
+                "status": "failed",
                 "result": "Aborted by user"
             },
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         if resp.status != 200:
             raise HTTPException(status_code=resp.status, detail="Failed to update mission status")
-        
+
         # 2. Publish kill signal to Redis
-        from services.gateway.config import REDIS_URL
-        
         import redis.asyncio as redis
+
+        from services.gateway.config import REDIS_URL
         r = redis.from_url(REDIS_URL, decode_responses=True)
         await r.set(f"raven:mission:kill:{real_id}", "KILL", ex=3600)
         await r.publish(f"raven:mission:kill:{real_id}", "KILL")
         await r.close()
-        
+
         return {"status": "SUCCESS", "message": f"Mission {real_id} kill signal sent."}
 
 @app.post("/api/raven/missions/{id_or_slug}/pause")
@@ -4513,12 +4512,13 @@ async def pause_mission(request: Request, id_or_slug: str):
         mission_data = await m_resp.json()
         real_id = mission_data["id"]
 
-        from services.gateway.config import REDIS_URL
         import redis.asyncio as redis
+
+        from services.gateway.config import REDIS_URL
         r = redis.from_url(REDIS_URL, decode_responses=True)
         await r.set(f"raven:mission:pause:{real_id}", "PAUSED", ex=3600)
         await r.close()
-        
+
         return {"status": "SUCCESS", "message": f"Mission {real_id} paused. LLM access will be deferred until resumed."}
 
 @app.post("/api/raven/missions/{id_or_slug}/resume")
@@ -4534,12 +4534,13 @@ async def resume_mission(request: Request, id_or_slug: str):
         mission_data = await m_resp.json()
         real_id = mission_data["id"]
 
-        from services.gateway.config import REDIS_URL
         import redis.asyncio as redis
+
+        from services.gateway.config import REDIS_URL
         r = redis.from_url(REDIS_URL, decode_responses=True)
         await r.delete(f"raven:mission:pause:{real_id}")
         await r.close()
-        
+
         return {"status": "SUCCESS", "message": f"Mission {real_id} resumed. LLM access restored."}
 
 @app.delete("/api/raven/missions/{id_or_slug}")
@@ -4562,7 +4563,7 @@ async def get_user_missions(request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     # Ideally filter by user_id if we want isolation, for now just proxy it all
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -4573,11 +4574,11 @@ async def get_user_missions(request: Request):
         return JSONResponse(status_code=resp.status, content=missions)
 
 @app.patch("/api/raven/missions/{id_or_slug}")
-async def update_mission_status(id_or_slug: str, body: Dict[str, Any], request: Request):
+async def update_mission_status(id_or_slug: str, body: dict[str, Any], request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     async with borrow_http_client() as client:
         resp = await client.patch(
             f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}",
@@ -4594,7 +4595,7 @@ async def proxy_list_containers(request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds or not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
-    
+
     async with borrow_http_client() as client:
         resp = await client.get(
             f"{CONTROL_PLANE_URL}/api/containers",
@@ -4603,11 +4604,11 @@ async def proxy_list_containers(request: Request):
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/docker/exec/{service_name}")
-async def proxy_docker_exec(service_name: str, body: Dict[str, Any], request: Request):
+async def proxy_docker_exec(service_name: str, body: dict[str, Any], request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds or not creds.get("is_admin"):
         raise HTTPException(status_code=403, detail="Admin access required")
-    
+
     async with borrow_http_client() as client:
         resp = await client.post(
             f"{CONTROL_PLANE_URL}/api/containers/{service_name}/exec",
@@ -4621,7 +4622,7 @@ async def get_mission_logs(id_or_slug: str, request: Request):
     creds = await _resolve_identity_from_request(request)
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     # Resolve to real ID
     async with borrow_http_client() as client:
         resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
@@ -4629,14 +4630,15 @@ async def get_mission_logs(id_or_slug: str, request: Request):
             raise HTTPException(status_code=404, detail="Mission not found")
         mission_data = await resp.json()
         real_id = mission_data["id"]
-    
-    from services.gateway.config import REDIS_URL
+
     import redis.asyncio as redis
+
+    from services.gateway.config import REDIS_URL
     r = redis.from_url(REDIS_URL, decode_responses=True)
     history_key = f"raven:mission:history:{real_id}"
     existing_logs = await r.lrange(history_key, 0, -1)  # type: ignore[misc]
     await r.close()
-    
+
     if not existing_logs and mission_data.get("output_log"):
         try:
             import json
@@ -4648,7 +4650,7 @@ async def get_mission_logs(id_or_slug: str, request: Request):
                 ]
         except Exception as e:
             log.warning(f"Failed to parse database output_log for mission {real_id}: {e}")
-    
+
     return JSONResponse(status_code=200, content={"logs": existing_logs})
 
 @app.websocket("/api/raven/missions/{id_or_slug}/stream")
@@ -4669,13 +4671,13 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
             log.warning(f"[WebSocket] Token validation error: {e}")
             await websocket.close(code=1011, reason="Auth service unavailable")
             return
-    
+
     try:
         await websocket.accept()
     except Exception as e:
         log.error(f"[WebSocket] Failed to accept connection: {e}")
         return
-        
+
     # Resolve to real ID
     try:
         async with borrow_http_client() as client:
@@ -4687,10 +4689,11 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
             mission_data = await resp.json()
             real_id = mission_data["id"]
 
-        from services.gateway.config import REDIS_URL
         import redis.asyncio as redis
+
+        from services.gateway.config import REDIS_URL
         r = redis.from_url(REDIS_URL, decode_responses=True)
-        
+
         # 1. Send all existing historical messages first
         history_key = f"raven:mission:history:{real_id}"
         existing_logs = await r.lrange(history_key, 0, -1)  # type: ignore[misc]
@@ -4699,12 +4702,12 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
                 await websocket.send_text(msg)
             except Exception:
                 pass
-                
+
         # 2. Subscribe to new messages
         pubsub = r.pubsub()
         channel = f"raven:mission:stream:{real_id}"
         await pubsub.subscribe(channel)
-        
+
         async def reader():
             try:
                 async for message in pubsub.listen():
@@ -4728,7 +4731,7 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
             while True:
                 try:
                     await asyncio.wait_for(websocket.receive_text(), timeout=30)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     pass  # Connection is still alive, handled by ping loop
                 except WebSocketDisconnect:
                     break
@@ -4764,7 +4767,7 @@ async def get_config_status():
             _config_validation_result = validate_config(settings)
         except Exception as e:
             return {"status": "ERROR", "message": f"Failed to validate config: {e}"}
-    
+
     return {
         "status": "OK" if _config_validation_result.is_functional else "CRITICAL",
         "functional": _config_validation_result.is_functional,
@@ -4802,7 +4805,7 @@ async def get_gateway_config():
     coding = await get_coding_model()
     librarian = await get_librarian_model()
     return {
-        "status": "SUCCESS", 
+        "status": "SUCCESS",
         "config": {
             "assistant_model": assistant,
             "coding_model": coding,
@@ -4827,14 +4830,14 @@ async def update_gateway_config(new_config: dict):
                     if resp.status != 200:
                         log.error(f"Failed to sync global config {key}: Identity SVC returned {resp.status}")
                         raise HTTPException(status_code=resp.status, detail=f"Identity Service error for {key}")
-                    
+
                     # Refresh the internal CONFIG cache ONLY on success
                     CONFIG[key] = val
                     log.info(f"Synchronized global config: {key} -> {val}")
                 except Exception as e:
                     log.error(f"Exception during global config sync for {key}: {e}")
                     raise HTTPException(status_code=500, detail=str(e))
-    
+
     log.info(f"Updated Gateway Config via Identity SVC: {new_config}")
     return {"status": "SUCCESS", "config": new_config}
 
@@ -5160,7 +5163,7 @@ async def get_abs_libraries(request: Request):
                             for lib in libs
                         ],
                     }
-    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
+    except (TimeoutError, aiohttp.ClientConnectionError) as e:
         log.warning(f"[abs/libraries] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/libraries] ABS error: {e}")
@@ -5187,7 +5190,7 @@ async def get_abs_last_played(request: Request):
                 detail = data.get("detail") or {}
                 if detail.get("books"):
                     return {"status": "SUCCESS", "books": detail["books"]}
-    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
+    except (TimeoutError, aiohttp.ClientConnectionError) as e:
         log.warning(f"[abs/last-played] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/last-played] ABS error: {e}")
@@ -5214,7 +5217,7 @@ async def get_abs_library_items(library_id: str, request: Request, limit: int = 
                 detail = data.get("detail") or {}
                 if detail.get("books"):
                     return {"status": "SUCCESS", "books": detail["books"]}
-    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
+    except (TimeoutError, aiohttp.ClientConnectionError) as e:
         log.warning(f"[abs/library] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/library] ABS error: {e}")
@@ -5250,7 +5253,7 @@ async def search_abs(q: str, request: Request, limit: int = 20):
                     "authors": authors,
                     "total": total,
                 }
-    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
+    except (TimeoutError, aiohttp.ClientConnectionError) as e:
         log.warning(f"[abs/search] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/search] ABS error: {e}")
@@ -5286,7 +5289,7 @@ async def get_abs_status():
                 if resp.status == 200:
                     return {"status": "AVAILABLE", "url": abs_url, "reachable": True}
                 return {"status": "ERROR", "url": abs_url, "reachable": False, "code": resp.status}
-    except asyncio.TimeoutError as e:
+    except TimeoutError as e:
         log.warning(f"[abs/status] ABS timeout: {e}")
         return {"status": "UNREACHABLE", "error": "Connection timed out", "reachable": False}
     except aiohttp.ClientConnectionError as e:
@@ -5304,7 +5307,7 @@ async def _resolve_user_context(request: Request, body: dict) -> Any:
     # If body already has user_context, use it
     if body.get("user_context"):
         return body["user_context"]
-    
+
     # Try to resolve from request
     try:
         creds_data = await _resolve_identity_from_request(request)
@@ -5312,7 +5315,7 @@ async def _resolve_user_context(request: Request, body: dict) -> Any:
             return creds_data
     except Exception:
         pass
-    
+
     # Fall back to first user
     try:
         first_user = await resolve_first_user()
@@ -5320,7 +5323,7 @@ async def _resolve_user_context(request: Request, body: dict) -> Any:
             return first_user
     except Exception:
         pass
-    
+
     return {"user": ""}
 
 
@@ -5341,7 +5344,7 @@ async def proxy_media_status(request: Request):
         return JSONResponse(content=await resp.json(), status_code=resp.status)
     try:
         return await retry_http_request(do_proxy, "Execution service (media status)", max_retries=2, base_delay=0.1)
-    except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+    except (TimeoutError, aiohttp.ClientError) as e:
         log.error(f"Execution service unreachable for media status: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
@@ -5546,7 +5549,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
 
             resp = await client.get(stream_url, headers=req_headers, allow_redirects=True)
             log.info(f"[stream/abs] ABS stream response status: {resp.status}, headers: {dict(resp.headers)}")
-            
+
             response_headers = {
                 "Accept-Ranges": "bytes",
                 "Cache-Control": "no-cache",
@@ -5555,9 +5558,9 @@ async def stream_audiobookshelf(book_id: str, request: Request):
                 val = resp.headers.get(key)
                 if val:
                     response_headers[key] = val
-                    
+
             status_code = resp.status
-            
+
             return StreamingResponse(
                 stream_generator(client, resp),
                 status_code=status_code,
@@ -5572,7 +5575,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         raise he
     except Exception as e:
         log.error(f"[stream/abs] Unhandled exception in stream_audiobookshelf: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal stream error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Internal stream error: {e!s}")
 
 
 def _fix_sendspin_client_hello(msg: dict) -> dict:
@@ -5722,7 +5725,7 @@ async def sendspin_proxy(websocket: WebSocket):
         try:
             auth_response = await asyncio.wait_for(ma_ws.recv(), timeout=10.0)
             log.info(f"[sendspin] STEP 7: MA auth response received: {auth_response[:500]}")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             log.error("[sendspin] STEP 6 FAILED: MA auth response timed out after 10s")
             await ma_ws.close()
             await websocket.close(code=1008, reason="MA auth timeout")
@@ -5756,7 +5759,7 @@ async def sendspin_proxy(websocket: WebSocket):
             try:
                 hello_response = await asyncio.wait_for(ma_ws.recv(), timeout=10.0)
                 log.info(f"[sendspin] STEP 10: MA server/hello received: {hello_response[:500]}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log.error("[sendspin] STEP 9 FAILED: MA server/hello timed out after 10s")
                 await ma_ws.close()
                 await websocket.send_text(json.dumps({"type": "error", "message": "MA did not respond to client/hello"}))
@@ -5908,14 +5911,14 @@ async def debug_list_players(request: Request):
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}")
-    
+
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
-    
+
     ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
-    
+
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
             ma_api,
@@ -5938,14 +5941,14 @@ async def debug_list_queues(request: Request):
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}")
-    
+
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
-    
+
     ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
-    
+
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
             ma_api,
@@ -5968,14 +5971,14 @@ async def debug_get_player(request: Request, player_id: str):
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}")
-    
+
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
-    
+
     ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
-    
+
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
         resp = await client.post(
             ma_api,
@@ -6061,7 +6064,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
             log.info("[ma-jsonrpc] STEP 4.6: Waiting for MA auth response...")
             try:
                 auth_response = await asyncio.wait_for(ma_ws.recv(), timeout=10.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log.error("[ma-jsonrpc] STEP 4.6 FAILED: MA auth response timed out after 10s")
                 await websocket.close(code=1008, reason="MA auth timeout")
                 return
@@ -6285,7 +6288,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
         target_player_id = str(target_player["player_id"])
 
         # ── Step 3: Connect to MA WebSocket and get stream URL ────────────────
-        log.info(f"[stream/ma] Connecting to MA WebSocket...")
+        log.info("[stream/ma] Connecting to MA WebSocket...")
         ma_client = MAWebSocketClient(
             mass_url=mass_url,
             mass_token=mass_token,

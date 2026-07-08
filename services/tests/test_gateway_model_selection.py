@@ -1,5 +1,5 @@
-import os
 import json
+import os
 import subprocess
 import sys
 from contextlib import asynccontextmanager
@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, patch
+
 import httpx
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
@@ -16,7 +17,9 @@ os.environ.setdefault("EXECUTION_SVC_URL", "http://execution")
 os.environ.setdefault("OLLAMA_URL", "http://ollama")
 
 from sqlmodel import Session, create_engine, select
+
 from services.identity.models import GlobalSetting
+
 
 def get_test_settings():
     db_path = "/data/identity.db"
@@ -94,10 +97,11 @@ for ep in LIVE_GATEWAY_ENDPOINTS:
 
 LIVE_GATEWAY_AVAILABLE = bool(LIVE_GATEWAY_URL)
 
+import pytest
+from dotenv import dotenv_values
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 from starlette.responses import Response as StarletteResponse
-import pytest
 
 import services.gateway.main as gateway_main
 import services.gateway.orchestrator as gateway_orchestrator
@@ -108,8 +112,6 @@ from services.gateway.prompts import (
     PROMPT_LIBRARIAN_SYSTEM_INSTRUCTION,
     PROMPT_RAVEN_AUTONOMOUS_PROTOCOL,
 )
-from dotenv import dotenv_values
-from pathlib import Path
 
 # Read .env directly for test values (runtime never reads .env)
 _env = dotenv_values(Path(__file__).resolve().parent.parent.parent / ".env")

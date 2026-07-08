@@ -1,41 +1,47 @@
+import asyncio
+import fnmatch
+import hashlib
 import json
 import logging
 import os
 import re
 import subprocess
-import hashlib
 import tempfile
 import time
-import fnmatch
-import asyncio
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Optional
-from urllib.parse import urlparse
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 import redis
-from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from services.config import (
-    INTERNAL_SECRET, IDENTITY_SVC_URL, STORAGE_SVC_URL, REDIS_URL,
-    WORKSPACE_REGISTRY_PATH as _WRP, WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS, WORKSPACE_RUNTIME_FILE_READ_LIMIT,
+    IDENTITY_SVC_URL,
+    INTERNAL_SECRET,
+    REDIS_URL,
+    STORAGE_SVC_URL,
+    WORKSPACE_RUNTIME_FILE_READ_LIMIT,
+    WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS,
 )
-
+from services.config import (
+    WORKSPACE_REGISTRY_PATH as _WRP,
+)
 from services.shared.info_endpoint import info_router
 
 try:
-    from .models import Workspace
+    from .crypto import decrypt, encrypt
     from .database import engine, init_db
-    from .crypto import encrypt, decrypt
+    from .models import Workspace
 except (ImportError, ValueError):
-    from models import Workspace
+    from crypto import decrypt, encrypt
     from database import engine, init_db
-    from crypto import encrypt, decrypt
+    from models import Workspace
 
 
 log = logging.getLogger("workspace_runtime")
@@ -60,7 +66,7 @@ async def _get_workspace_root_async() -> Path:
                     return Path(val).resolve()
     except Exception as e:
         log.debug(f"Failed to fetch workspace_runtime_root from identity: {e}")
-    
+
     return _DEFAULT_WORKSPACE_ROOT
 
 
@@ -100,7 +106,7 @@ def _safe_int_env(key: str, default: int) -> int:
 RAVEN_QUARANTINE_THRESHOLD = _safe_int_env("RAVEN_QUARANTINE_THRESHOLD", 3)
 RAVEN_QUARANTINE_WINDOW_SECONDS = _safe_int_env("RAVEN_QUARANTINE_WINDOW", 600)
 
-_redis_client: Optional[redis.Redis] = None
+_redis_client: redis.Redis | None = None
 
 def _get_redis() -> redis.Redis:
     global _redis_client
@@ -143,7 +149,7 @@ def _auto_quarantine_workspace(workspace_id: str, file_path: str, failure_count:
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    err_msg = f"Workspace Runtime Error: {type(exc).__name__}: {str(exc)}"
+    err_msg = f"Workspace Runtime Error: {type(exc).__name__}: {exc!s}"
     log.error(err_msg, exc_info=True)
     return JSONResponse(
         status_code=500,
@@ -152,12 +158,12 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 class WorkspaceRef(BaseModel):
-    workspace_id: Optional[str] = None
-    local_path: Optional[str] = None
-    rag_user: Optional[str] = None
-    voice_id: Optional[str] = None
-    device_id: Optional[str] = None
-    user_context: Optional[dict[str, Any]] = None
+    workspace_id: str | None = None
+    local_path: str | None = None
+    rag_user: str | None = None
+    voice_id: str | None = None
+    device_id: str | None = None
+    user_context: dict[str, Any] | None = None
 
     class Config:
         extra = "ignore"
@@ -178,9 +184,9 @@ class FileListRequest(WorkspaceRef):
 
 class FileWriteRequest(WorkspaceRef):
     relative_path: str
-    content: Optional[str] = None
-    patch: Optional[str] = None
-    expected_sha256: Optional[str] = None
+    content: str | None = None
+    patch: str | None = None
+    expected_sha256: str | None = None
     create_parents: bool = False
 
 
@@ -201,72 +207,72 @@ class GitAddRequest(WorkspaceRef):
 class GitCommitRequest(WorkspaceRef):
     message: str
     pathspecs: list[str] = Field(default_factory=list)
-    author_name: Optional[str] = None
-    author_email: Optional[str] = None
+    author_name: str | None = None
+    author_email: str | None = None
     allow_empty: bool = False
 
 
 class GitBranchCreateRequest(WorkspaceRef):
     branch_name: str
-    from_ref: Optional[str] = None
+    from_ref: str | None = None
     checkout: bool = True
 
 
 class GitPushRequest(WorkspaceRef):
-    remote: Optional[str] = None
-    branch: Optional[str] = None
+    remote: str | None = None
+    branch: str | None = None
     set_upstream: bool = False
 
 
 class GitFetchRequest(WorkspaceRef):
-    remote: Optional[str] = None
+    remote: str | None = None
     prune: bool = False
 
 
 class GitPullRequest(WorkspaceRef):
-    remote: Optional[str] = None
-    branch: Optional[str] = None
+    remote: str | None = None
+    branch: str | None = None
     rebase: bool = False
 
 
 class GitRevertRequest(WorkspaceRef):
-    commit: Optional[str] = None
+    commit: str | None = None
     hard: bool = False
 
 
 class GitRebaseRequest(WorkspaceRef):
     upstream: str
-    branch: Optional[str] = None
+    branch: str | None = None
 
 
 class GitLogRequest(WorkspaceRef):
     max_count: int = Field(default=20, ge=1, le=100)
-    ref: Optional[str] = None
-    file_path: Optional[str] = None
+    ref: str | None = None
+    file_path: str | None = None
     oneline: bool = False
 
 
 class GitCheckoutRequest(WorkspaceRef):
     branch: str
     create: bool = False
-    from_ref: Optional[str] = None
+    from_ref: str | None = None
 
 
 class GitStashRequest(WorkspaceRef):
     action: str = "save"  # save, pop, list, apply, drop
-    message: Optional[str] = None
+    message: str | None = None
     stash_index: int = 0
 
 
 class GitRemoteRequest(WorkspaceRef):
     action: str = "list"  # list, add, remove, set_url
-    name: Optional[str] = None
-    url: Optional[str] = None
+    name: str | None = None
+    url: str | None = None
 
 
 class GitShowRequest(WorkspaceRef):
     ref: str = "HEAD"
-    file_path: Optional[str] = None
+    file_path: str | None = None
 
 
 class FileSearchRequest(WorkspaceRef):
@@ -274,7 +280,7 @@ class FileSearchRequest(WorkspaceRef):
     relative_path: str = "."
     case_sensitive: bool = False
     max_results: int = Field(default=100, ge=1, le=500)
-    file_pattern: Optional[str] = None
+    file_pattern: str | None = None
 
 
 class ProviderScanRequest(WorkspaceRef):
@@ -296,7 +302,7 @@ class WorkflowWriteSyncCommitRequest(WorkspaceRef):
     relative_path: str
     content: str
     commit_message: str
-    expected_sha256: Optional[str] = None
+    expected_sha256: str | None = None
     create_parents: bool = False
     sync_to_provider: bool = True
     verify_provider_write: bool = True
@@ -306,23 +312,23 @@ class WorkflowWriteSyncCommitRequest(WorkspaceRef):
     pytest_targets: list[str] = Field(default_factory=list)
     pytest_timeout_seconds: int = Field(default=DEFAULT_PYTEST_TIMEOUT_SECONDS, ge=1, le=900)
     push: bool = False
-    remote: Optional[str] = None
-    branch: Optional[str] = None
+    remote: str | None = None
+    branch: str | None = None
     set_upstream: bool = False
-    author_name: Optional[str] = None
-    author_email: Optional[str] = None
+    author_name: str | None = None
+    author_email: str | None = None
     allow_empty_commit: bool = False
 
 
 class WorkspaceBootstrapRequest(WorkspaceRef):
-    repo_url: Optional[str] = None
-    branch: Optional[str] = None
-    remote: Optional[str] = None
-    display_name: Optional[str] = None
+    repo_url: str | None = None
+    branch: str | None = None
+    remote: str | None = None
+    display_name: str | None = None
     create_if_missing: bool = False
 
 
-def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
+def _require_internal_secret(x_internal_secret: str | None) -> None:
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Invalid internal secret")
 
@@ -337,7 +343,7 @@ def _workspace_to_dict(item: Workspace) -> dict[str, Any]:
     data = item.model_dump()
     data["webhook_token"] = decrypt(item.webhook_token_enc) if item.webhook_token_enc else item.webhook_token
     data.pop("webhook_token_enc", None)
-    
+
     # Ensure excludes is a parsed list of strings
     excludes = data.get("excludes")
     if isinstance(excludes, str):
@@ -351,7 +357,7 @@ def _workspace_to_dict(item: Workspace) -> dict[str, Any]:
             data["excludes"] = [excludes] if excludes else []
     elif excludes is None:
         data["excludes"] = []
-        
+
     # Ensure capabilities is a parsed list of strings
     capabilities = data.get("capabilities")
     if isinstance(capabilities, str):
@@ -365,7 +371,7 @@ def _workspace_to_dict(item: Workspace) -> dict[str, Any]:
             data["capabilities"] = [capabilities] if capabilities else []
     elif capabilities is None:
         data["capabilities"] = []
-        
+
     return data
 
 
@@ -409,10 +415,10 @@ async def lifespan(app: FastAPI):
     # Resolve runtime config from Identity service
     from services.config import resolve_runtime_config
     await resolve_runtime_config()
-    
+
     # Startup logic
     init_db()
-    
+
     # Handle dubious ownership in mounted volumes
     try:
         import subprocess
@@ -421,9 +427,9 @@ async def lifespan(app: FastAPI):
         log.info("Added '*' to git safe.directory")
     except Exception as e:
         log.warning(f"Failed to set git safe.directory: {e}")
-    
+
     _seed_db_from_json()
-    
+
     with Session(engine) as session:
         pending = session.exec(select(Workspace).where(Workspace.webhook_token != None)).all()
         migrated = 0
@@ -436,9 +442,9 @@ async def lifespan(app: FastAPI):
         if migrated:
             session.commit()
             log.info("Migrated %d workspace webhook secrets to encrypted storage", migrated)
-    
+
     log.info("Workspace Runtime service ready.")
-    
+
     yield
 
     # Shutdown logic
@@ -456,10 +462,10 @@ def _workspace_access_policy(entry: dict[str, Any]) -> str:
     return policy
 
 
-def _resolve_identity_context(ref: WorkspaceRef) -> Optional[dict[str, Any]]:
+def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
     if ref.user_context:
         return ref.user_context
-    
+
     payload = {}
     if ref.rag_user:
         payload["rag_user"] = ref.rag_user
@@ -517,21 +523,21 @@ def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Pat
             if must_exist and not target.exists():
                 raise HTTPException(status_code=404, detail=f"Path not found: {relative}")
             return target
-        
+
         # User workspace: join with base and check for path escapes
         target = (base / relative).resolve()
-        
+
         # Ensure the resolved path is within the base directory
         try:
             target.relative_to(base)
         except (ValueError, RuntimeError):
             log.warning(f"SECURITY ALERT: Path traversal attempt blocked! Base='{base}', Relative='{relative}'")
             raise HTTPException(status_code=403, detail="Forbidden: Path traversal detected")
-        
+
         # Existence check if required
         if must_exist and not target.exists():
             raise HTTPException(status_code=404, detail=f"Path not found: {relative}")
-            
+
         return target
     except HTTPException:
         raise
@@ -622,17 +628,17 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
         repo_url = str(ref.repo_url or "").strip()
         if not repo_url:
             raise HTTPException(status_code=400, detail="repo_url is required to create a workspace")
-        
+
         # Determine scope: system workspaces require admin
         scope = "system" if is_admin else "user"
-        
+
         workspace_id = _derive_workspace_id(ref.workspace_id, resolved_user, repo_url)
-        
+
         # Reserved name validation
         slug = _normalize_workspace_slug(workspace_id)
         if slug in RESERVED_WORKSPACE_NAMES:
             raise HTTPException(status_code=400, detail=f"Workspace ID '{workspace_id}' is reserved. Cannot use: {', '.join(sorted(RESERVED_WORKSPACE_NAMES))}")
-        
+
         owner_user = resolved_user if scope == "user" else "system"
         local_path = str(ref.local_path or _derive_workspace_container_path(workspace_id, scope, owner_user)).strip()
         match = {
@@ -703,13 +709,13 @@ def _derive_repo_name(repo_url: str) -> str:
     return _normalize_workspace_slug(candidate)
 
 
-def _derive_workspace_id(requested_id: Optional[str], resolved_user: str, repo_url: str) -> str:
+def _derive_workspace_id(requested_id: str | None, resolved_user: str, repo_url: str) -> str:
     if requested_id and requested_id.strip():
         return requested_id.strip()
     return f"{_normalize_workspace_slug(resolved_user)}-{_derive_repo_name(repo_url)}"
 
 
-def _derive_workspace_container_path(workspace_id: str, scope: str = "user", owner_user: Optional[str] = None) -> str:
+def _derive_workspace_container_path(workspace_id: str, scope: str = "user", owner_user: str | None = None) -> str:
     """Derive the container mount path based on scope.
     
     System workspaces: system/{workspace_id}
@@ -809,7 +815,7 @@ def _run_command(
     workspace_path: Path,
     args: list[str],
     timeout_seconds: int = 30,
-    env_overrides: Optional[dict[str, str]] = None,
+    env_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     env = os.environ.copy()
     if env_overrides:
@@ -891,7 +897,7 @@ def _sanitize_targets(targets: list[str]) -> list[str]:
     return cleaned
 
 
-def _derive_git_author(identity: dict[str, Any], author_name: Optional[str], author_email: Optional[str]) -> tuple[str, str]:
+def _derive_git_author(identity: dict[str, Any], author_name: str | None, author_email: str | None) -> tuple[str, str]:
     name = (author_name or identity.get("user") or "sharedllm").strip()
     email = (author_email or "").strip()
     if email:
@@ -962,7 +968,7 @@ def _create_review_branch(
     prefix_clean = _slugify_branch_component(prefix)
     user_fragment = _slugify_branch_component(identity.get("user") or "raven")
     file_fragment = _slugify_branch_component(Path(relative_path).stem or "change")
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     branch_name = _validate_branch_name(f"{prefix_clean}/{user_fragment}/{file_fragment}-{timestamp}")
 
     checkout_base = _run_command(workspace_path, ["git", "checkout", base_ref])
@@ -988,8 +994,8 @@ def _build_review_metadata(
     branch_name: str,
     commit_result: dict[str, Any],
     lint_results: list[dict[str, Any]],
-    pytest_result: Optional[dict[str, Any]],
-    push_result: Optional[dict[str, Any]],
+    pytest_result: dict[str, Any] | None,
+    push_result: dict[str, Any] | None,
 ) -> dict[str, Any]:
     base_branch = str(workspace.get("default_branch") or "main").strip() or "main"
     changed_files: list[str] = [relative_path] + [
@@ -1142,7 +1148,7 @@ async def _storage_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def _git_https_credentials(identity: dict[str, Any], remote_url: str) -> Optional[tuple[str, str]]:
+def _git_https_credentials(identity: dict[str, Any], remote_url: str) -> tuple[str, str] | None:
     parsed = urlparse(remote_url)
     if parsed.scheme not in {"http", "https"}:
         return None
@@ -1220,10 +1226,10 @@ def health():
 
 @app.get("/workspaces")
 def list_workspaces(
-    rag_user: Optional[str] = None,
-    voice_id: Optional[str] = None,
-    device_id: Optional[str] = None,
-    x_internal_secret: Optional[str] = Header(default=None),
+    rag_user: str | None = None,
+    voice_id: str | None = None,
+    device_id: str | None = None,
+    x_internal_secret: str | None = Header(default=None),
 ):
     _require_internal_secret(x_internal_secret)
     ref = WorkspaceRef(rag_user=rag_user, voice_id=voice_id, device_id=device_id)
@@ -1272,14 +1278,14 @@ def list_workspaces(
 
 
 @app.post("/workspace/resolve")
-def resolve_workspace(req: WorkspaceRef, x_internal_secret: Optional[str] = Header(default=None)):
+def resolve_workspace(req: WorkspaceRef, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     return {"status": "SUCCESS", "workspace": workspace}
 
 
 @app.post("/workspaces/bootstrap")
-def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace_for_bootstrap(req)
     _require_workspace_capability(workspace, "git_write")
@@ -1380,18 +1386,18 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: Optio
 
 
 @app.post("/workspaces")
-def create_workspace(ws: Workspace, x_internal_secret: Optional[str] = Header(default=None)):
+def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    
+
     # Reserved name validation
     slug = _normalize_workspace_slug(ws.id)
     if slug in RESERVED_WORKSPACE_NAMES:
         raise HTTPException(status_code=400, detail=f"Workspace ID '{ws.id}' is reserved. Cannot use: {', '.join(sorted(RESERVED_WORKSPACE_NAMES))}")
-    
+
     # Derive local_path if not provided
     if not ws.local_path and ws.repo_url:
         ws.local_path = _derive_workspace_container_path(ws.id, ws.scope, ws.owner_user)
-    
+
     with Session(engine) as session:
         existing = session.get(Workspace, ws.id)
         if existing:
@@ -1404,18 +1410,18 @@ def create_workspace(ws: Workspace, x_internal_secret: Optional[str] = Header(de
 
 
 @app.patch("/workspaces/{workspace_id}")
-def update_workspace(workspace_id: str, updates: dict, x_internal_secret: Optional[str] = Header(default=None)):
+def update_workspace(workspace_id: str, updates: dict, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     with Session(engine) as session:
         ws = session.get(Workspace, workspace_id)
         if not ws:
             raise HTTPException(status_code=404, detail="Workspace not found")
-        
+
         for key, value in updates.items():
             if hasattr(ws, key):
                 setattr(ws, key, value)
         _store_workspace_secret_fields(ws, updates)
-        
+
         session.add(ws)
         session.commit()
         session.refresh(ws)
@@ -1423,7 +1429,7 @@ def update_workspace(workspace_id: str, updates: dict, x_internal_secret: Option
 
 
 @app.delete("/workspaces/{workspace_id}")
-def delete_workspace(workspace_id: str, x_internal_secret: Optional[str] = Header(default=None)):
+def delete_workspace(workspace_id: str, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     with Session(engine) as session:
         ws = session.get(Workspace, workspace_id)
@@ -1435,7 +1441,7 @@ def delete_workspace(workspace_id: str, x_internal_secret: Optional[str] = Heade
 
 
 @app.post("/files/read")
-def read_file(req: FileReadRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def read_file(req: FileReadRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "read")
@@ -1454,7 +1460,7 @@ def read_file(req: FileReadRequest, x_internal_secret: Optional[str] = Header(de
 
 
 @app.post("/files/list")
-def list_files(req: FileListRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def list_files(req: FileListRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "read")
@@ -1478,7 +1484,7 @@ def list_files(req: FileListRequest, x_internal_secret: Optional[str] = Header(d
 
 
 @app.post("/files/write")
-def write_file(req: FileWriteRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
@@ -1536,7 +1542,7 @@ class FileDeleteRequest(WorkspaceRef):
     relative_path: str
 
 @app.post("/files/delete")
-def delete_file(req: FileDeleteRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def delete_file(req: FileDeleteRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
@@ -1545,13 +1551,13 @@ def delete_file(req: FileDeleteRequest, x_internal_secret: Optional[str] = Heade
 
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"File not found: {req.relative_path}")
-    
+
     if target.is_dir():
         import shutil
         shutil.rmtree(target)
     else:
         target.unlink()
-        
+
     return {
         "status": "SUCCESS",
         "workspace": workspace,
@@ -1561,7 +1567,7 @@ def delete_file(req: FileDeleteRequest, x_internal_secret: Optional[str] = Heade
 
 
 @app.post("/provider/scan")
-async def provider_scan(req: ProviderScanRequest, x_internal_secret: Optional[str] = Header(default=None)):
+async def provider_scan(req: ProviderScanRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "read")
@@ -1586,7 +1592,7 @@ async def provider_scan(req: ProviderScanRequest, x_internal_secret: Optional[st
 
 
 @app.post("/provider/sync/file")
-async def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Optional[str] = Header(default=None)):
+async def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
@@ -1597,7 +1603,7 @@ async def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Op
     identity = workspace.get("resolved_identity") or {}
     provider_kind, provider_settings, provider_root = _workspace_provider_binding(workspace, identity)
     provider_path = _provider_child_path(provider_root, req.relative_path)
-    
+
     # Try text first, fallback to base64 for binary
     try:
         content = local_file.read_text()
@@ -1632,31 +1638,31 @@ async def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: Op
 
 
 @app.post("/provider/sync/directory")
-async def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_secret: Optional[str] = Header(default=None)):
+async def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
     workspace_path = Path(workspace["resolved_path"])
-    
+
     target_dir = resolve_safe_path(workspace_path, req.relative_path)
     if not target_dir.exists() or not target_dir.is_dir():
         raise HTTPException(status_code=400, detail=f"Path is not a directory: {req.relative_path}")
-        
+
     identity = workspace.get("resolved_identity") or {}
     provider_kind, provider_settings, provider_root = _workspace_provider_binding(workspace, identity)
     provider_path = _provider_child_path(provider_root, req.relative_path)
-    
+
     # In this SOA, storage service might not have access to the same mount.
     # If storage and workspace_runtime share /workspace, we can use /providers/mirror.
     # Otherwise we'd have to stream files.
     # Assuming they share /workspace mount as per typical dev setups or we can use the absolute path.
-    
+
     payload = {
         "provider": {"kind": provider_kind, "settings": provider_settings},
         "remote_path": provider_path,
         "local_path": str(target_dir),
     }
-    
+
     data = await _storage_post(f"{STORAGE_SVC_URL}/providers/mirror", payload)
     return {
         "status": "SUCCESS",
@@ -1671,7 +1677,7 @@ async def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_
 
 
 @app.post("/workflow/write-sync-commit")
-def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_secret: Optional[str] = Header(default=None)) -> dict:
+def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_secret: str | None = Header(default=None)) -> dict:
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
@@ -1847,7 +1853,7 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
 
 
 @app.post("/git/status")
-def git_status(req: WorkspaceRef, x_internal_secret: Optional[str] = Header(default=None)):
+def git_status(req: WorkspaceRef, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_status")
@@ -1866,7 +1872,7 @@ def git_status(req: WorkspaceRef, x_internal_secret: Optional[str] = Header(defa
 
 
 @app.post("/git/diff")
-def git_diff(req: DiffRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_diff(req: DiffRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_diff")
@@ -1879,7 +1885,7 @@ def git_diff(req: DiffRequest, x_internal_secret: Optional[str] = Header(default
 
 
 @app.post("/git/add")
-def git_add(req: GitAddRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_add(req: GitAddRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_write")
@@ -1899,7 +1905,7 @@ def git_add(req: GitAddRequest, x_internal_secret: Optional[str] = Header(defaul
 
 
 @app.post("/git/commit")
-def git_commit(req: GitCommitRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_commit(req: GitCommitRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_write")
@@ -1946,7 +1952,7 @@ def git_commit(req: GitCommitRequest, x_internal_secret: Optional[str] = Header(
 
 
 @app.post("/git/branch/create")
-def git_branch_create(req: GitBranchCreateRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_branch_create(req: GitBranchCreateRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_write")
@@ -1976,7 +1982,7 @@ def git_branch_create(req: GitBranchCreateRequest, x_internal_secret: Optional[s
 
 
 @app.post("/git/push")
-def git_push(req: GitPushRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_push(req: GitPushRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_write")
@@ -2022,7 +2028,7 @@ def git_push(req: GitPushRequest, x_internal_secret: Optional[str] = Header(defa
 
 
 @app.post("/tests/pytest")
-def run_pytest(req: PytestRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def run_pytest(req: PytestRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "pytest")
@@ -2047,7 +2053,7 @@ def run_pytest(req: PytestRequest, x_internal_secret: Optional[str] = Header(def
 
 
 @app.post("/api/admin/tests/smoke")
-def run_smoke_test(x_internal_secret: Optional[str] = Header(default=None)):
+def run_smoke_test(x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     # Run soa_smoke_test.py from the root of the repo (which is /workspace in the container)
     workspace_path = get_workspace_root()
@@ -2060,7 +2066,7 @@ def run_smoke_test(x_internal_secret: Optional[str] = Header(default=None)):
 
 
 @app.post("/api/admin/tests/unit")
-def run_unit_tests(x_internal_secret: Optional[str] = Header(default=None)):
+def run_unit_tests(x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     # Run the CI unit test script from the root
     workspace_path = get_workspace_root()
@@ -2073,7 +2079,7 @@ def run_unit_tests(x_internal_secret: Optional[str] = Header(default=None)):
 
 
 @app.post("/git/fetch")
-def git_fetch(req: GitFetchRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_fetch(req: GitFetchRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_write")
@@ -2106,7 +2112,7 @@ def git_fetch(req: GitFetchRequest, x_internal_secret: Optional[str] = Header(de
 
 
 @app.post("/git/pull")
-def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_secret: Optional[str] = Header(default=None)):
+def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_write")
@@ -2160,7 +2166,7 @@ def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_
 
 
 @app.post("/git/revert")
-def git_revert(req: GitRevertRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_revert(req: GitRevertRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace_data = _resolve_workspace(req)
     _require_workspace_capability(workspace_data, "git_write")
@@ -2194,7 +2200,7 @@ def git_revert(req: GitRevertRequest, x_internal_secret: Optional[str] = Header(
 
 
 @app.post("/git/log")
-def git_log(req: GitLogRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_log(req: GitLogRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_status")
@@ -2240,7 +2246,7 @@ def git_log(req: GitLogRequest, x_internal_secret: Optional[str] = Header(defaul
 
 
 @app.post("/git/checkout")
-def git_checkout(req: GitCheckoutRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_checkout(req: GitCheckoutRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_write")
@@ -2270,7 +2276,7 @@ def git_checkout(req: GitCheckoutRequest, x_internal_secret: Optional[str] = Hea
 
 
 @app.post("/git/stash")
-def git_stash(req: GitStashRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_stash(req: GitStashRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_write")
@@ -2313,7 +2319,7 @@ def git_stash(req: GitStashRequest, x_internal_secret: Optional[str] = Header(de
 
 
 @app.post("/git/remote")
-def git_remote(req: GitRemoteRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_remote(req: GitRemoteRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_status")
@@ -2365,7 +2371,7 @@ def git_remote(req: GitRemoteRequest, x_internal_secret: Optional[str] = Header(
 
 
 @app.post("/git/show")
-def git_show(req: GitShowRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_show(req: GitShowRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_status")
@@ -2390,7 +2396,7 @@ def git_show(req: GitShowRequest, x_internal_secret: Optional[str] = Header(defa
 
 
 @app.post("/files/search")
-def file_search(req: FileSearchRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def file_search(req: FileSearchRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "file_read")
@@ -2432,7 +2438,7 @@ def file_search(req: FileSearchRequest, x_internal_secret: Optional[str] = Heade
 
 
 @app.post("/git/rebase")
-def git_rebase(req: GitRebaseRequest, x_internal_secret: Optional[str] = Header(default=None)):
+def git_rebase(req: GitRebaseRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "git_write")
@@ -2460,8 +2466,8 @@ def git_rebase(req: GitRebaseRequest, x_internal_secret: Optional[str] = Header(
 async def git_pull_webhook(
     workspace_id: str,
     background_tasks: BackgroundTasks,
-    x_webhook_secret: Optional[str] = Header(None, alias="X-Webhook-Secret"),
-    token: Optional[str] = None
+    x_webhook_secret: str | None = Header(None, alias="X-Webhook-Secret"),
+    token: str | None = None
 ):
     """
     Automated webhook endpoint for triggering a git pull.
@@ -2469,7 +2475,7 @@ async def git_pull_webhook(
     """
     from services.config import GIT_WEBHOOK_SECRET
     webhook_secret = GIT_WEBHOOK_SECRET
-    
+
     # Resolve workspace using admin context (since it's a system webhook)
     try:
         # We need to bypass the user context check since this is a system-level trigger
@@ -2477,7 +2483,7 @@ async def git_pull_webhook(
             match = session.get(Workspace, workspace_id)
             if not match:
                 raise HTTPException(status_code=404, detail="Workspace not found")
-            
+
             # Verify secret (either workspace-specific or global)
             expected_secret = decrypt(match.webhook_token_enc) if match.webhook_token_enc else match.webhook_token or webhook_secret
             if not expected_secret:
@@ -2496,17 +2502,17 @@ async def git_pull_webhook(
             resolved_path = resolve_safe_path(get_workspace_root(), str(match.local_path), must_exist=False)
             workspace_path = Path(resolved_path)
             workspace_path.mkdir(parents=True, exist_ok=True)
-            
+
             remote_name = (match.git_remote or "origin").strip()
             default_branch = (match.default_branch or "main").strip()
-            
+
             # Check if it's a git repo
             if not (workspace_path / ".git").is_dir():
                 log.info(f"Workspace {workspace_id} path {workspace_path} exists but is not a git repo. Checking for unsaved changes...")
                 repo_url = match.repo_url
                 if not repo_url:
                      raise HTTPException(status_code=400, detail="Cannot clone workspace: repo_url is missing")
-                
+
                 # Check for uncommitted changes if it's a git repo
                 git_status_result = _run_command(workspace_path, ["git", "status", "--porcelain"])
                 has_unsaved_changes = False
@@ -2524,7 +2530,7 @@ async def git_pull_webhook(
                             "total_uncommitted": len(untracked)
                         }
                     )
-                
+
                 # Directory exists but is not a git repo - check if it's empty or has content
                 dir_contents = list(workspace_path.iterdir())
                 if dir_contents:
@@ -2547,27 +2553,27 @@ async def git_pull_webhook(
                                 log.error(f"Fallback removal also failed for {workspace_id}: {fallback_err}")
                                 raise HTTPException(
                                     status_code=500,
-                                    detail=f"Failed to clear workspace directory: {str(fallback_err)}"
+                                    detail=f"Failed to clear workspace directory: {fallback_err!s}"
                                 )
                             break
-                
+
                 # Use the HTTPS redirector for the clone too if needed
                 clone_url = _git_webhook_pull_remote(repo_url, remote_name)
                 args = ["git", "clone", "-b", default_branch, clone_url, "."]
                 result = _run_command(workspace_path, args)
                 if result["returncode"] != 0:
                     raise HTTPException(status_code=500, detail=f"Initial clone failed: {result['stderr']}")
-                
+
                 return {"status": "SUCCESS", "message": f"Successfully cloned and initialized {workspace_id}", "branch": default_branch}
 
             log.info(f"Webhook git pull: resolved workspace_path={workspace_path}, remote_name={remote_name}")
             remote_url = _git_remote_url(workspace_path, remote_name)
-        
+
         log.info(f"Webhook triggered git pull for workspace {workspace_id} on {remote_name}/{default_branch}")
-        
+
         args = ["git", "pull", _git_webhook_pull_remote(remote_url, remote_name), default_branch]
         result = _run_command(workspace_path, args)
-        
+
         if result["returncode"] == 0 and match.auto_backup_enabled and match.nextcloud_path:
             log.info(f"Triggering automatic Nextcloud backup for {workspace_id} to {match.nextcloud_path}")
             background_tasks.add_task(_trigger_nextcloud_sync, workspace_id, match.owner_user or "default", str(workspace_path), match.nextcloud_path, match.excludes)
@@ -2592,7 +2598,7 @@ async def git_pull_webhook(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path: str, remote_path: str, excludes: Optional[list[str]] = None):
+async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path: str, remote_path: str, excludes: list[str] | None = None):
     """
     Background task to mirror a local workspace directory to Nextcloud.
     Resolves credentials via Identity service and calls Storage mirror endpoint.
@@ -2610,12 +2616,12 @@ async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path
                 text = await resp.text()
                 log.error(f"Failed to resolve identity for {owner_user}: {text}")
                 return
-            
+
             creds = await resp.json()
             nc_url = creds.get("nextcloud_url")
             nc_user = creds.get("nextcloud_user")
             nc_pass = creds.get("nextcloud_pass")
-            
+
             if not all([nc_url, nc_user, nc_pass]):
                 log.warning(f"Nextcloud credentials missing for {owner_user}. Skipping sync.")
                 return
@@ -2634,7 +2640,7 @@ async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path
                 "local_path": local_path,
                 "excludes": excludes or []
             }
-            
+
             resp = await client.post(
                 f"{STORAGE_SVC_URL}/providers/mirror",
                 json=mirror_req,

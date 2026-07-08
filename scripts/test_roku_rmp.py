@@ -1,6 +1,7 @@
-import requests
-import time
 import sys
+import time
+
+import requests
 
 # CONFIG
 ROKU_IP = "192.168.2.166"
@@ -9,7 +10,7 @@ SERVER_PORT = "11435"
 VIDEO_FILE = "1c504eb5640b.mp4"
 
 # Roku Media Player ID
-CHANNEL_ID = "2213" 
+CHANNEL_ID = "2213"
 
 VIDEO_URL = f"http://{SERVER_IP}:{SERVER_PORT}/cast_video/{VIDEO_FILE}"
 
@@ -38,7 +39,7 @@ print(f"   Params: {params}")
 try:
     resp = requests.post(url, params=params, timeout=5)
     print(f"   Response: {resp.status_code}")
-    
+
     if resp.status_code == 200:
         print("\n✅ Command sent successfully!")
         print("   Watch the TV...")

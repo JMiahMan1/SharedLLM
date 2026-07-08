@@ -3,9 +3,10 @@ SOA Smoke Test Script.
 Performs end-to-end health checks and basic functional verification across multiple microservices.
 Usage: python soa_smoke_test.py [BASE_URL] [INTERNAL_SECRET]
 """
-import requests
 import os
 import sys
+
+import requests
 
 # Configuration
 BASE_URL = sys.argv[1] if len(sys.argv) > 1 else os.getenv("GATEWAY_URL", "http://localhost:11435")

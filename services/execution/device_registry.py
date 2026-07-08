@@ -23,7 +23,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import aiosqlite
 
@@ -31,7 +31,7 @@ log = logging.getLogger("execution.device_registry")
 
 DB_PATH_ENV = "DEVICE_REGISTRY_PATH"
 DB_PATH_DEFAULT = "/data/device_registry.db"
-_db: Optional[aiosqlite.Connection] = None
+_db: aiosqlite.Connection | None = None
 
 
 async def _get_conn() -> aiosqlite.Connection:
@@ -63,7 +63,7 @@ async def _get_conn() -> aiosqlite.Connection:
     return _db
 
 
-def _row_to_dict(row: Any | None, keys: list) -> Optional[dict]:
+def _row_to_dict(row: Any | None, keys: list) -> dict | None:
     if row is None:
         return None
     d = dict(zip(keys, row))
@@ -83,7 +83,7 @@ COLUMNS = [
 ]
 
 
-async def get_device(entity_id: str) -> Optional[dict]:
+async def get_device(entity_id: str) -> dict | None:
     """Get stored device info for an entity (fast indexed lookup)."""
     db = await _get_conn()
     async with db.execute(
@@ -95,15 +95,15 @@ async def get_device(entity_id: str) -> Optional[dict]:
 
 async def set_device(
     entity_id: str,
-    ip: Optional[str] = None,
-    mac: Optional[str] = None,
-    hostname: Optional[str] = None,
-    integration: Optional[str] = None,
-    friendly_name: Optional[str] = None,
-    device_class: Optional[str] = None,
-    metadata: Optional[dict] = None,
-    discovery_method: Optional[str] = None,
-) -> Optional[dict]:
+    ip: str | None = None,
+    mac: str | None = None,
+    hostname: str | None = None,
+    integration: str | None = None,
+    friendly_name: str | None = None,
+    device_class: str | None = None,
+    metadata: dict | None = None,
+    discovery_method: str | None = None,
+) -> dict | None:
     """Store or update device info. Returns the updated device record."""
     db = await _get_conn()
     existing = await get_device(entity_id)
@@ -194,7 +194,7 @@ async def list_devices() -> dict:
     return {row[0]: _row_to_dict(row, COLUMNS) for row in rows}
 
 
-async def find_by_ip(ip: str) -> Optional[str]:
+async def find_by_ip(ip: str) -> str | None:
     """Find entity_id by IP address (indexed)."""
     db = await _get_conn()
     async with db.execute(
@@ -204,7 +204,7 @@ async def find_by_ip(ip: str) -> Optional[str]:
     return row[0] if row else None
 
 
-async def find_by_mac(mac: str) -> Optional[str]:
+async def find_by_mac(mac: str) -> str | None:
     """Find entity_id by MAC address (indexed)."""
     db = await _get_conn()
     async with db.execute(

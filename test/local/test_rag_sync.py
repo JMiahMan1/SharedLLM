@@ -1,8 +1,9 @@
 # test/local/test_rag_sync.py
 import os
+import time
+
 import httpx
 import pytest
-import time
 
 LIVE_TEST_URL = os.getenv("LIVE_TEST_URL")
 GATEWAY_URL = LIVE_TEST_URL if LIVE_TEST_URL else "http://localhost:11435"
@@ -25,7 +26,7 @@ def test_rag_sync_flow(client):
     payload = {"query": "list my devices", "voice_id": "default"}
     resp = client.post(f"{GATEWAY_URL}/api/chat", json=payload)
     assert resp.status_code == 200
-    
+
     # 2. Wait for background task to complete
     print("[Test] Waiting for RAG sync background task...")
     time.sleep(3)
@@ -37,16 +38,16 @@ def test_rag_sync_flow(client):
         "user_id": "Summers", # From .env HA_DEFAULT_USER
         "k": 1
     }
-    print(f"[Test] Querying RAG Service for 'piano lamp'...")
+    print("[Test] Querying RAG Service for 'piano lamp'...")
     search_resp = client.post(
-        f"{RAG_URL}/rag/search", 
+        f"{RAG_URL}/rag/search",
         json=search_payload,
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
-    
+
     assert search_resp.status_code == 200
     results = search_resp.json().get("results", [])
-    
+
     assert len(results) > 0, "No results found in RAG for 'piano lamp'"
     content = results[0].get("content", "").lower()
     assert "piano_lamp" in content or "piano lamp" in content

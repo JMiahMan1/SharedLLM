@@ -1,6 +1,7 @@
-import pytest
-import httpx
 import os
+
+import httpx
+import pytest
 
 GATEWAY_URL = os.getenv("GATEWAY_URL", "http://localhost:11435")
 IDENTITY_URL = os.getenv("IDENTITY_SVC_URL", "http://localhost:8001")

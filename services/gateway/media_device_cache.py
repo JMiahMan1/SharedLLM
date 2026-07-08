@@ -5,11 +5,11 @@ Redis-backed cache for last-used media devices.
 Tracks which media player was last used per user, so commands like "pause"
 or "play music" can target the correct device without explicit naming.
 """
-import logging
 import json
+import logging
+from datetime import UTC, datetime
+
 import redis
-from typing import Optional
-from datetime import datetime, timezone
 
 log = logging.getLogger("gateway.media_device_cache")
 
@@ -29,7 +29,7 @@ def _user_key(user_id: str) -> str:
     return f"media:last_used:{user_id}"
 
 
-def get_last_used_device(user_id: str) -> Optional[dict]:
+def get_last_used_device(user_id: str) -> dict | None:
     """Return cached last-used device info or None."""
     try:
         r = get_redis()
@@ -49,7 +49,7 @@ def set_last_used_device(user_id: str, entity_id: str, friendly_name: str = "", 
             "entity_id": entity_id,
             "friendly_name": friendly_name,
             "state": state,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
         }
         r.setex(_user_key(user_id), _TTL, json.dumps(data))
         log.info(f"[media_cache] Cached last-used device for {user_id}: {entity_id}")

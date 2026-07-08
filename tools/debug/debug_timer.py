@@ -1,13 +1,15 @@
 # test/debug_timer_parsing.py
 import re
-import dateparser
 from datetime import datetime, timedelta
+
+import dateparser
+
 
 def debug_parsing(query):
     print(f"\n{'='*40}")
     print(f"Testing Query: '{query}'")
     print(f"{'='*40}")
-    
+
     now = datetime.now()
     query_lower = query.lower()
 
@@ -16,7 +18,7 @@ def debug_parsing(query):
     clean_parse_input = re.sub(
         r'^\s*[\d\.\s]*(?:can you|please|i want to|start|set|create|add|a|an|\s+)+', '', query_lower, flags=re.IGNORECASE
     ).strip()
-    
+
     print(f"Cleaned Input: '{clean_parse_input}'")
 
     # --- 2. Robust Duration Extraction (Scan Anywhere) ---
@@ -24,21 +26,21 @@ def debug_parsing(query):
     minutes = 0
     seconds = 0
     found_duration = False
-    
+
     # Extract Hours
     h_match = re.search(r'(\d+)\s*(?:hours?|hrs?)', query_lower)
     if h_match:
         hours = int(h_match.group(1))
         found_duration = True
         print(f"  -> Found Hours: {hours}")
-        
+
     # Extract Minutes
     m_match = re.search(r'(\d+)\s*(?:minutes?|mins?)', query_lower)
     if m_match:
         minutes = int(m_match.group(1))
         found_duration = True
         print(f"  -> Found Minutes: {minutes}")
-        
+
     # Extract Seconds (handles "30-second" via -?)
     s_match = re.search(r'(\d+)\s*-?\s*(?:seconds?|secs?)', query_lower)
     if s_match:
@@ -51,11 +53,11 @@ def debug_parsing(query):
         print(f"SUCCESS (Regex): Calculated Expiry: {expires_at.strftime('%I:%M:%S %p')}")
     else:
         print("Regex Scan: NO DURATION FOUND. Trying Dateparser...")
-        
+
         # --- 3. Fallback to Dateparser ---
         # Remove confusing keywords
         dp_input = re.sub(r'\b(timer|alarm|wake me|remind me|set|start|create|add)\b', '', query_lower, flags=re.IGNORECASE)
-        
+
         dt = dateparser.parse(
             dp_input,
             settings={'PREFER_DATES_FROM': 'future', 'RELATIVE_BASE': now}

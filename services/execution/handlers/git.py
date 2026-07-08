@@ -23,13 +23,15 @@ import os
 import re
 import shlex
 import traceback
+
 from fastapi import HTTPException
-from services.config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
-from typing import Optional
+
+from services.config import INTERNAL_SECRET, WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL
+
 try:
-    from schemas import GitOperationRequest, GitExecutionResult
+    from schemas import GitExecutionResult, GitOperationRequest
 except ImportError:
-    from ..schemas import GitOperationRequest, GitExecutionResult
+    from ..schemas import GitExecutionResult, GitOperationRequest
 
 log = logging.getLogger("execution.git")
 
@@ -40,9 +42,9 @@ log.info(f"Marked {WORKSPACE_ROOT} and subdirectories as safe.directory")
 
 
 async def _resolve_workspace_path(
-    workspace_id: Optional[str] = None,
-    user_context: Optional[dict] = None,
-    required_capability: Optional[str] = None
+    workspace_id: str | None = None,
+    user_context: dict | None = None,
+    required_capability: str | None = None
 ) -> str:
     """Resolve workspace path from workspace_runtime service and check capability.
     
@@ -53,7 +55,7 @@ async def _resolve_workspace_path(
     4. Fallback to WORKSPACE_ROOT
     """
     import aiohttp
-    
+
     # Try to resolve specific workspace
     if workspace_id:
         try:
@@ -63,7 +65,7 @@ async def _resolve_workspace_path(
                     user_ctx = user_ctx.model_dump()
                 elif hasattr(user_ctx, "dict"):
                     user_ctx = user_ctx.dict()
-                    
+
                 async with client.post(
                     f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
                     json={"workspace_id": workspace_id, "user_context": user_ctx},
@@ -93,61 +95,60 @@ async def _resolve_workspace_path(
             raise
         except Exception as e:
             log.warning(f"Failed to resolve workspace {workspace_id}: {e}")
-    
+
     # Fallback: list workspaces and find default or first available
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-            async with client.get(
-                f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces",
-                params={"rag_user": "system"},
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    workspaces = data.get("workspaces", []) if isinstance(data, dict) else data
-                    
-                    # First try to find the default workspace
-                    for ws in workspaces:
-                        if ws.get("is_default") and ws.get("resolved_path"):
-                            log.info(f"Using default workspace: {ws.get('id')} -> {ws['resolved_path']}")
-                            return ws["resolved_path"]
-                    
-                    # Handle workspaces that require user context (resolved_path is null in list response)
-                    system_user_ctx = {"user": "system", "is_admin": True}
-                    for ws in workspaces:
-                        ws_id = ws.get("id")
-                        if ws_id and not ws.get("resolved_path") and ws.get("requires_user_context"):
-                            try:
-                                async with client.post(
-                                    f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
-                                    json={"workspace_id": ws_id, "user_context": system_user_ctx},
-                                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                                ) as resolve_resp:
-                                    if resolve_resp.status == 200:
-                                        resolve_data = await resolve_resp.json()
-                                        if resolve_data.get("status") == "SUCCESS":
-                                            resolved_path = resolve_data["workspace"].get("resolved_path")
-                                            if resolved_path:
-                                                log.info(f"Resolved workspace '{ws_id}' -> {resolved_path}")
-                                                return resolved_path
-                            except Exception as resolve_err:
-                                log.warning(f"Failed to resolve workspace {ws_id}: {resolve_err}")
-                
-                # Then try first workspace with git capabilities
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
+            f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces",
+            params={"rag_user": "system"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                workspaces = data.get("workspaces", []) if isinstance(data, dict) else data
+
+                # First try to find the default workspace
                 for ws in workspaces:
-                    if ws.get("resolved_path") and "git_status" in ws.get("capabilities", []):
-                        log.info(f"Using first git-capable workspace: {ws.get('id')} -> {ws['resolved_path']}")
+                    if ws.get("is_default") and ws.get("resolved_path"):
+                        log.info(f"Using default workspace: {ws.get('id')} -> {ws['resolved_path']}")
                         return ws["resolved_path"]
-                
-                # Last resort: first workspace with any resolved path
+
+                # Handle workspaces that require user context (resolved_path is null in list response)
+                system_user_ctx = {"user": "system", "is_admin": True}
                 for ws in workspaces:
-                    if ws.get("resolved_path"):
-                        log.info(f"Using first available workspace: {ws.get('id')} -> {ws['resolved_path']}")
-                        return ws["resolved_path"]
-    except Exception as e:
+                    ws_id = ws.get("id")
+                    if ws_id and not ws.get("resolved_path") and ws.get("requires_user_context"):
+                        try:
+                            async with client.post(
+                                f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
+                                json={"workspace_id": ws_id, "user_context": system_user_ctx},
+                                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                            ) as resolve_resp:
+                                if resolve_resp.status == 200:
+                                    resolve_data = await resolve_resp.json()
+                                    if resolve_data.get("status") == "SUCCESS":
+                                        resolved_path = resolve_data["workspace"].get("resolved_path")
+                                        if resolved_path:
+                                            log.info(f"Resolved workspace '{ws_id}' -> {resolved_path}")
+                                            return resolved_path
+                        except Exception as resolve_err:
+                            log.warning(f"Failed to resolve workspace {ws_id}: {resolve_err}")
+
+            # Then try first workspace with git capabilities
+            for ws in workspaces:
+                if ws.get("resolved_path") and "git_status" in ws.get("capabilities", []):
+                    log.info(f"Using first git-capable workspace: {ws.get('id')} -> {ws['resolved_path']}")
+                    return ws["resolved_path"]
+
+            # Last resort: first workspace with any resolved path
+            for ws in workspaces:
+                if ws.get("resolved_path"):
+                    log.info(f"Using first available workspace: {ws.get('id')} -> {ws['resolved_path']}")
+                    return ws["resolved_path"]
+    except Exception:
         tb_str = traceback.format_exc()
         log.error(f"[GIT RESOLVE WORKSPACE FAILED] workspace_id={workspace_id}\n{tb_str}")
-    
+
     log.warning(f"No workspace found, falling back to WORKSPACE_ROOT: {WORKSPACE_ROOT}")
     return WORKSPACE_ROOT
 
@@ -158,7 +159,7 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
     args — list of git sub-command + arguments (NOT including 'git' itself).
     """
     cmd = ["git"] + args
-    
+
     # Redact tokens from log output
     safe_cmd = []
     for arg in cmd:
@@ -168,7 +169,7 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
             safe_cmd.append(redacted)
         else:
             safe_cmd.append(arg)
-    
+
     log.info(f"[Git] Running: {' '.join(shlex.quote(a) for a in safe_cmd)} in {cwd}")
     try:
         env = os.environ.copy()
@@ -176,7 +177,7 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
         env["GIT_SSH_COMMAND"] = "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -F /dev/null"
         if env_override:
             env.update(env_override)
-        
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             cwd=cwd,
@@ -190,7 +191,7 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
             "stdout": stdout.decode("utf-8", errors="replace").strip(),
             "stderr": stderr.decode("utf-8", errors="replace").strip(),
         }
-    except asyncio.TimeoutError:
+    except TimeoutError:
         tb_str = traceback.format_exc()
         log.error(f"[GIT TIMEOUT] cmd={' '.join(cmd)} cwd={cwd}\n{tb_str}")
         return {"returncode": -1, "stdout": "", "stderr": "Git command timed out after 60s."}
@@ -221,7 +222,7 @@ def _fail(action: str, detail: dict) -> GitExecutionResult:
             suggestion = _get_discovery_suggestion(match.group(1))
             if suggestion:
                 msg += f" | {suggestion}"
-                
+
     return GitExecutionResult(status="FAILURE", message=msg, service="git", detail=detail)
 
 
@@ -253,15 +254,15 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     user_context = getattr(req, "user_context", None)
     workspace_path = await _resolve_workspace_path(workspace_id, user_context, required_capability)
     log.info(f"[Git] Resolved workspace path: {workspace_path} (workspace_id={workspace_id})")
-    
+
     path: str = getattr(req, "path", ".") or "."
     # Support both 'message' and 'commit_message' to align with varying schemas
-    commit_message: Optional[str] = getattr(req, "message", None) or getattr(req, "commit_message", None)
-    
+    commit_message: str | None = getattr(req, "message", None) or getattr(req, "commit_message", None)
+
     # Dynamic Branch Detection: Default to current branch if not explicitly set or if 'main' hallucination on 'microservices' repo
     current_branch = await _get_current_branch(cwd=workspace_path)
     branch: str = getattr(req, "branch", None) or current_branch
-    
+
     # Hardened Pivot: If we are on microservices but agent says main, it is likely a hallucination
     if current_branch == "microservices" and branch == "main":
         log.info("[Git] Pivoting hallucinated branch 'main' to active branch 'microservices'")
@@ -294,7 +295,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             diff_args.append(path) # e.g. --cached
         elif path and path != ".":
             diff_args.append(path)
-            
+
         r = await _run_git(diff_args, cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("diff", r)
@@ -345,7 +346,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             "feat:", "fix:", "chore:", "docs:", "refactor:", "test:", "perf:", "ci:"
         )):
             commit_message = f"fix: {commit_message}"
-            
+
         # Ensure we have an author identity for the commit
         env_override = {
             "GIT_AUTHOR_NAME": getattr(user_context, "user", "Raven"),
@@ -353,7 +354,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             "GIT_COMMITTER_NAME": getattr(user_context, "user", "Raven"),
             "GIT_COMMITTER_EMAIL": f"{getattr(user_context, 'user', 'raven')}@local.host",
         }
-        
+
         r = await _run_git(["commit", "-m", commit_message], cwd=workspace_path, env_override=env_override)
         if r["returncode"] != 0:
             return _fail("commit", r)
@@ -362,27 +363,27 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     elif action == "push" or action == "pull":
         if action == "push" and not is_admin:
             return GitExecutionResult(status="FAILURE", message="Push requires admin privileges.", service="git", detail={"error": "insufficient_permissions"})
-        
+
         # Resolve remote URL for token injection
         remote_url = await _get_remote_url("origin", cwd=workspace_path)
-        
+
         # Determine the appropriate token for this host
         token = None
         log.info(f"[Git] Resolving token for {remote_url} | user={getattr(user_context, 'user', 'unknown')}")
-        
+
         if "github.com" in remote_url:
             token = getattr(user_context, "github_token", None)
             log.info(f"[Git] Selected GitHub token: {'[PRESENT]' if token else '[MISSING]'}")
         elif "gitlab" in remote_url:
             token = getattr(user_context, "gitlab_token", None)
             log.info(f"[Git] Selected GitLab token: {'[PRESENT]' if token else '[MISSING]'}")
-        
+
         # Fallback to generic git_token
         if not token:
             token = getattr(user_context, "git_token", None)
             if token:
                 log.info("[Git] Using generic git_token fallback.")
-        
+
         if token and remote_url.startswith("https://"):
             # Inject token for HTTPS auth: https://<token>@host/...
             from urllib.parse import urlparse
@@ -391,7 +392,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             r = await _run_git([action, auth_url, branch], cwd=workspace_path)
         else:
             r = await _run_git([action, "origin", branch], cwd=workspace_path)
-            
+
         if r["returncode"] != 0:
             return _fail(action, r)
         return _ok(action, {"branch": branch, **r})
@@ -400,7 +401,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         # Fetch supports token injection too
         remote_url = await _get_remote_url("origin", cwd=workspace_path)
         token = getattr(user_context, "github_token", None) or getattr(user_context, "git_token", None)
-        
+
         if token and remote_url.startswith("https://"):
             from urllib.parse import urlparse
             parsed = urlparse(remote_url)
@@ -408,7 +409,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             r = await _run_git(["fetch", auth_url, branch], cwd=workspace_path)
         else:
             r = await _run_git(["fetch", "origin", branch], cwd=workspace_path)
-            
+
         if r["returncode"] != 0:
             return _fail("fetch", r)
         return _ok("fetch", r)

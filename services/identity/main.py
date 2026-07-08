@@ -3,31 +3,40 @@
 Microservice 1: Identity & Profile Service
 Manages user profiles, device assignments, and secure credential resolution.
 """
-import os
 import json
 import logging
-from datetime import datetime
+import os
 from contextlib import asynccontextmanager
-from typing import List, Optional, Dict
+from datetime import datetime
 
-from fastapi import FastAPI, Depends, HTTPException, Header, File, UploadFile
+import aiohttp
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from services.identity.models import User, DeviceAssignment, GlobalSetting, APIKey, DEFAULT_GLOBAL_SETTINGS, UserWidget, DnsRecord
+from services.identity.crypto import decrypt, digest_secret, encrypt
+from services.identity.models import DEFAULT_GLOBAL_SETTINGS, APIKey, DeviceAssignment, DnsRecord, GlobalSetting, User, UserWidget
 from services.identity.schemas import (
-    ResolveRequest, ResolvedCredentials, 
-    UserCreate, UserRead, UserUpdate,
-    DeviceAssignmentRead, DeviceAssignmentCreate,
-    LoginRequest, LoginResponse, DiscoverUser, DiscoverResponse, ImportResponse,
-    GlobalSettingRead, GlobalSettingUpdate,
-    UserWidgetRead, UserWidgetUpdate, WidgetSettingsRead
+    DeviceAssignmentCreate,
+    DeviceAssignmentRead,
+    DiscoverResponse,
+    DiscoverUser,
+    GlobalSettingRead,
+    GlobalSettingUpdate,
+    ImportResponse,
+    LoginRequest,
+    LoginResponse,
+    ResolvedCredentials,
+    ResolveRequest,
+    UserCreate,
+    UserRead,
+    UserUpdate,
+    UserWidgetRead,
+    UserWidgetUpdate,
+    WidgetSettingsRead,
 )
-from services.identity.crypto import encrypt, decrypt, digest_secret
-from services.identity.seed import seed_from_env, hash_password, verify_password
-
-import aiohttp
+from services.identity.seed import hash_password, seed_from_env, verify_password
 from services.shared.info_endpoint import info_router
 
 # ─── Config ────────────────────────────────────────────────────────────────────
@@ -35,9 +44,10 @@ from services.shared.info_endpoint import info_router
 log = logging.getLogger("identity")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-from services.config import INTERNAL_SECRET, IDENTITY_DATABASE_URL
+from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
 
-def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
+
+def _require_internal_secret(x_internal_secret: str | None) -> None:
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -128,7 +138,7 @@ def _ensure_schema_upgrades() -> None:
             if "key_prefix" not in key_columns:
                 conn.execute(text("ALTER TABLE apikey ADD COLUMN key_prefix VARCHAR"))
             conn.commit()
-    
+
     if "ravenmission" in inspector.get_table_names():
         raven_columns = {column["name"] for column in inspector.get_columns("ravenmission")}
         with engine.connect() as conn:
@@ -193,21 +203,21 @@ async def lifespan(app: FastAPI):
         log.info(f"[lifespan] DB file: path={db_path}, exists={db_exists}, size={db_size} bytes")
     except Exception as e:
         log.warning(f"[lifespan] Could not check DB file state: {e}")
-    
+
     # Ensure tables exist
     log.info("[lifespan] Creating tables via SQLModel.metadata.create_all()...")
     SQLModel.metadata.create_all(engine)
     log.info("[lifespan] Tables creation complete")
-    
+
     _ensure_schema_upgrades()
     log.info("[lifespan] Schema upgrades applied")
-    
+
     # Run initial seed if needed
     with Session(engine) as session:
         # Check actual DB state before seeding
         user_count = session.exec(select(User)).count() if hasattr(session.exec(select(User)), "count") else len(session.exec(select(User)).all())
         log.info(f"[lifespan] User count before seed: {user_count}")
-        
+
         force_reseed = os.getenv("FORCE_RESEED", "false").lower() == "true"
         if force_reseed:
             log.info("[lifespan] FORCE_RESEED=true — re-seeding all data")
@@ -219,6 +229,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Jarvis OS Identity Service", lifespan=lifespan)
 
 from fastapi.middleware.cors import CORSMiddleware
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -303,7 +314,7 @@ def _find_user_for_api_key(session: Session, key_value: str) -> User | None:
         log.info(f"[auth] API key lookup: matched by value in User table (user={user.username})")
         return user
 
-    log.warning(f"[auth] API key lookup: no match for provided key")
+    log.warning("[auth] API key lookup: no match for provided key")
     return None
 
 
@@ -332,24 +343,24 @@ def require_internal(authorization: str = Header(None), x_internal_secret: str =
         raise HTTPException(status_code=403, detail="Invalid internal token")
 
 def require_admin_or_internal(
-    authorization: str = Header(None), 
+    authorization: str = Header(None),
     x_internal_secret: str = Header(None, alias="X-Internal-Secret"),
     session: Session = Depends(get_session)
 ):
     # Trust internal services
     if x_internal_secret == INTERNAL_SECRET:
         return True
-    
+
     # Trust bearer tokens matching internal secret
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
         if token == INTERNAL_SECRET:
             return True
-    
+
     # Check if user is admin via API key
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing authorization")
-    
+
     token = authorization.split(" ")[1]
     user = _find_user_for_api_key(session, token)
     if not user:
@@ -367,7 +378,7 @@ def admin_set_password(username: str, req: dict, session: Session = Depends(get_
     user = session.exec(select(User).where(User.username == username)).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     user.password_hash = hash_password(new_password)
     session.add(user)
     session.commit()
@@ -392,7 +403,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     """
     user = None
     log.debug(f"[resolve] Input: user_id={req.user_id}, api_key={'***' + req.api_key[-4:] if req.api_key and len(req.api_key) > 4 else req.api_key}, rag_user={req.rag_user}, voice_id={req.voice_id}, device_id={req.device_id}")
-    
+
     # Resolve by user ID (integer primary key)
     if req.user_id is not None:
         user = session.exec(select(User).where(User.id == req.user_id)).first()
@@ -411,7 +422,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             log.info(f"[resolve] Resolved by rag_user={req.rag_user}: user={user.username}")
         else:
             log.warning(f"[resolve] No user found for rag_user={req.rag_user}")
-            
+
     if not user and req.voice_id:
         # Search for user by voice_id (username or biometric match)
         user = session.exec(select(User).where(User.username == req.voice_id.lower())).first()
@@ -419,7 +430,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             log.info(f"[resolve] Resolved by voice_id={req.voice_id}: user={user.username}")
         else:
             log.warning(f"[resolve] No user found for voice_id={req.voice_id}")
-            
+
     if not user and req.device_id:
         assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == req.device_id)).first()
         if assignment and not assignment.revoked:
@@ -431,7 +442,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             log.warning(f"[resolve] No device assignment found for device_id={req.device_id}")
 
     if not user:
-        log.warning(f"[resolve] No resolution path matched, falling back to system default")
+        log.warning("[resolve] No resolution path matched, falling back to system default")
         # Fallback to system account (ID 1)
         user = session.exec(select(User).where(User.id == 1)).first()
         if user:
@@ -442,7 +453,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
             if user:
                 log.info(f"[resolve] Fallback resolved to system default (username='default'): user={user.username}")
             else:
-                log.error(f"[resolve] No system default user found in database!")
+                log.error("[resolve] No system default user found in database!")
                 raise HTTPException(status_code=404, detail="No valid identity found")
 
     # Fetch system user for shared skylight credentials and MA fallback
@@ -455,9 +466,9 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     use_admin_mass_token = (
         decrypt(sys_user.mass_token_enc) if (sys_user and sys_user.mass_token_enc) else None
     ) if (not user.mass_token_enc) else (decrypt(user.mass_token_enc) if user.mass_token_enc else None)
-    
+
     log.info(f"[resolve] Returning credentials for user={user.username}, mass_token={'set' if (user.mass_token_enc or use_admin_mass_token) else 'NOT SET'}, using_admin_mass={'YES' if use_admin_mass_url != user.mass_url else 'NO'}")
-    
+
     return ResolvedCredentials(
         user=user.username,
         is_admin=user.is_admin,
@@ -491,6 +502,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
     )
 
 import time
+
 START_TIME = time.time()
 
 @app.get("/health")
@@ -510,7 +522,7 @@ def get_me(user: User = Depends(require_api_key)):
 
 @app.post("/api/users/me/enroll")
 async def enroll_voice(
-    file: UploadFile = File(...), 
+    file: UploadFile = File(...),
     user: User = Depends(require_api_key),
     session: Session = Depends(get_session)
 ):
@@ -524,11 +536,11 @@ async def enroll_voice(
         # Simulation: In a real system, we'd run a model here.
         # For now, we'll store a mock fingerprint based on the file content.
         fingerprint = hashlib.sha256(content).hexdigest()
-        
+
         user.voice_fingerprint = f"v1:{fingerprint[:16]}"
         session.add(user)
         session.commit()
-        
+
         log.info(f"User {user.username} enrolled with voice fingerprint {user.voice_fingerprint}")
         return {"status": "SUCCESS", "message": "Voice profile successfully enrolled."}
     except Exception as e:
@@ -539,7 +551,7 @@ async def enroll_voice(
 def update_me(body: UserUpdate, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     log.info(f"[update_me] Received update for {user.username}: {body.model_dump(exclude_unset=True)}")
     update_data = body.model_dump(exclude_unset=True)
-    
+
     # Prevent non-default users from changing system skylight integration credentials
     if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]):
         if user.id != 1 and user.username != "default":
@@ -557,7 +569,7 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
         "huggingface_token": "huggingface_token_enc",
         "skylight_pass": "skylight_pass_enc"
     }
-    
+
     for plain, enc in crypto_map.items():
         if plain in update_data:
             val = update_data.pop(plain)
@@ -571,7 +583,7 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
             value = value.strip()
         value = value if value else None
         setattr(user, key, value)
-        
+
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -581,13 +593,13 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
 def update_user(username: str, body: UserUpdate, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
-        
+
     user = session.exec(select(User).where(User.username == username.lower())).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     update_data = body.model_dump(exclude_unset=True)
-    
+
 # Prevent non-default users from changing system skylight integration credentials
     if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]):
         if user.id != 1 and user.username != "default":
@@ -606,7 +618,7 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         "huggingface_token": "huggingface_token_enc",
         "skylight_pass": "skylight_pass_enc"
     }
-    
+
     for plain, enc in crypto_map.items():
         if plain in update_data:
             val = update_data.pop(plain)
@@ -620,7 +632,7 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
             value = value.strip()
         value = value if value else None
         setattr(user, key, value)
-        
+
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -630,19 +642,19 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
 def delete_user(username: str, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
-        
+
     user = session.exec(select(User).where(User.username == username.lower())).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     if user.is_system_default:
         raise HTTPException(status_code=400, detail="Cannot delete system default user")
-        
+
     session.delete(user)
     session.commit()
     return {"status": "SUCCESS"}
 
-@app.get("/api/users", response_model=List[UserRead])
+@app.get("/api/users", response_model=list[UserRead])
 def list_users(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     if not user.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
@@ -652,7 +664,7 @@ def list_users(session: Session = Depends(get_session), user: User = Depends(req
 def create_user(body: UserCreate, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
-        
+
     def _coerce(val):
         if isinstance(val, str):
             val = val.strip()
@@ -697,14 +709,14 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
     session.refresh(user)
     return user
 
-@app.get("/api/devices", response_model=List[DeviceAssignmentRead])
+@app.get("/api/devices", response_model=list[DeviceAssignmentRead])
 def list_devices(session: Session = Depends(get_session), _: User = Depends(require_api_key)):
     results = session.exec(select(DeviceAssignment)).all()
     return [
         DeviceAssignmentRead(
-            id=d.id or 0, 
-            device_id=d.device_id, 
-            user_id=d.user_id or 0, 
+            id=d.id or 0,
+            device_id=d.device_id,
+            user_id=d.user_id or 0,
             username=d.user.username if d.user else "",
             revoked=d.revoked
         ) for d in results
@@ -715,15 +727,15 @@ def add_device(body: DeviceAssignmentCreate, session: Session = Depends(get_sess
     user = session.exec(select(User).where(User.username == body.username.lower())).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     assignment = DeviceAssignment(device_id=body.device_id, user_id=user.id or 0, revoked=body.revoked)
     session.add(assignment)
     session.commit()
     session.refresh(assignment)
     return DeviceAssignmentRead(
-        id=assignment.id or 0, 
-        device_id=assignment.device_id, 
-        user_id=assignment.user_id or 0, 
+        id=assignment.id or 0,
+        device_id=assignment.device_id,
+        user_id=assignment.user_id or 0,
         username=user.username,
         revoked=assignment.revoked
     )
@@ -750,22 +762,22 @@ def revoke_device(device_id: str, session: Session = Depends(get_session), _: Us
     return {"status": "SUCCESS", "message": f"Device '{device_id}' revoked (was assigned to '{username}')."}
 
 # --- Device Matrix (UI Contract) ---
-@app.get("/api/users/devices", response_model=List[DeviceAssignmentRead])
+@app.get("/api/users/devices", response_model=list[DeviceAssignmentRead])
 def list_devices_ui(session: Session = Depends(get_session), _: User = Depends(require_api_key)):
     results = session.exec(select(DeviceAssignment)).all()
     return [
         DeviceAssignmentRead(
-            id=d.id or 0, 
-            device_id=d.device_id, 
-            user_id=d.user_id or 0, 
+            id=d.id or 0,
+            device_id=d.device_id,
+            user_id=d.user_id or 0,
             username=d.user.username if d.user else ""
         ) for d in results
     ]
 
 @app.post("/api/users/devices", response_model=DeviceAssignmentRead)
 def add_device_ui(
-    body: DeviceAssignmentCreate, 
-    session: Session = Depends(get_session), 
+    body: DeviceAssignmentCreate,
+    session: Session = Depends(get_session),
     authorization: str = Header(None),
     x_internal_secret: str = Header(None, alias="X-Internal-Secret")
 ):
@@ -777,12 +789,12 @@ def add_device_ui(
         user = require_api_key(authorization, session)
         if not user:
             raise HTTPException(status_code=401, detail="Unauthorized")
-    
+
     # Internal calls (like auto-discovery from Gateway) bypass user auth
     target_user = session.exec(select(User).where(User.username == body.username.lower())).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
-        
+
     # Upsert logic: if device already assigned, reassign it
     existing = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == body.device_id)).first()
     if existing:
@@ -798,9 +810,9 @@ def add_device_ui(
     session.commit()
     session.refresh(assignment)
     return DeviceAssignmentRead(
-        id=assignment.id or 0, 
-        device_id=assignment.device_id, 
-        user_id=assignment.user_id or 0, 
+        id=assignment.id or 0,
+        device_id=assignment.device_id,
+        user_id=assignment.user_id or 0,
         username=target_user.username,
         revoked=assignment.revoked
     )
@@ -812,10 +824,10 @@ def login(req: LoginRequest, session: Session = Depends(get_session)):
     user = session.exec(select(User).where(User.username == req.username)).first()
     if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    
+
     if not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    
+
     session_key = _get_user_api_key(user)
     if not session_key:
         session_key = _store_user_api_key(user, os.urandom(24).hex())
@@ -842,7 +854,7 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
     service = req.get("service")
     config = req.get("config", {})
     log.info(f"[test_connection] Testing {service} with config: { {k: '***' if 'token' in k.lower() or 'pass' in k.lower() else v for k, v in config.items()} }")
-    
+
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0), connector=aiohttp.TCPConnector(ssl=False)) as client:
             if service == "Home Assistant":
@@ -850,7 +862,7 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                 token = config.get("ha_token")
                 if not url or not token:
                     return {"status": "ERROR", "message": "URL and Token are required"}
-                
+
                 resp = await client.get(
                     f"{url.rstrip('/')}/api/config",
                     headers={"Authorization": f"Bearer {token}"}
@@ -860,14 +872,14 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                     return {"status": "SUCCESS", "message": "Connected to Home Assistant"}
                 else:
                     return {"status": "ERROR", "message": f"HA returned {resp.status}: {(await resp.text())[:100]}"}
-            
+
             elif service == "Nextcloud":
                 url = config.get("nextcloud_url")
                 user = config.get("nextcloud_user")
                 password = config.get("nextcloud_pass")
                 if not url or not user or not password:
                     return {"status": "ERROR", "message": "URL, User, and Password are required"}
-                
+
                 resp = await client.get(
                     f"{url.rstrip('/')}/ocs/v1.php/cloud/users?format=json",
                     headers={"OCS-APIRequest": "true"},
@@ -877,13 +889,13 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                     return {"status": "SUCCESS", "message": "Connected to Nextcloud"}
                 else:
                     return {"status": "ERROR", "message": f"Nextcloud returned {resp.status}"}
-            
+
             elif service == "GitHub":
                 url = config.get("github_url") or "https://api.github.com"
                 token = config.get("github_token")
                 if not token:
                     return {"status": "ERROR", "message": "Personal Token is required"}
-                
+
                 resp = await client.get(
                     f"{url.rstrip('/')}/user",
                     auth=aiohttp.BasicAuth(user, password)
@@ -899,7 +911,7 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                 token = config.get("gitlab_token")
                 if not token:
                     return {"status": "ERROR", "message": "Access Token is required"}
-                
+
                 resp = await client.get(
                     f"{url.rstrip('/')}/api/v4/user",
                     headers={"PRIVATE-TOKEN": token}
@@ -931,7 +943,7 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                     return {"status": "ERROR", "message": f"Audiobookshelf returned {resp.status}: {(await resp.text())[:100]}"}
 
             return {"status": "ERROR", "message": f"Service {service} not testable yet"}
-            
+
     except Exception as e:
         return {"status": "ERROR", "message": str(e)}
 
@@ -960,31 +972,31 @@ def seed_credential(body: dict, session: Session = Depends(get_session), admin: 
     """
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
-    
+
     field = body.get("field")
     value = body.get("value")
-    
+
     if not field:
         raise HTTPException(status_code=400, detail="field is required")
     if field not in SEEDABLE_CREDENTIALS:
         raise HTTPException(
-            status_code=400, 
+            status_code=400,
             detail=f"Invalid field. Valid fields: {', '.join(SEEDABLE_CREDENTIALS.keys())}"
         )
     if value is None:
         raise HTTPException(status_code=400, detail="value is required")
-    
+
     enc_field, plain_field = SEEDABLE_CREDENTIALS[field]
-    
+
     # Get the default user
     user = session.exec(select(User).where(User.id == 1)).first()
     if not user:
         # Fall back to 'default' username
         user = session.exec(select(User).where(User.username == "default")).first()
-    
+
     if not user:
         raise HTTPException(status_code=404, detail="Default user (ID 1) not found in database. Run full seed first.")
-    
+
     # Encrypt and store
     if value:
         setattr(user, enc_field, encrypt(value))
@@ -992,11 +1004,11 @@ def seed_credential(body: dict, session: Session = Depends(get_session), admin: 
     else:
         setattr(user, enc_field, None)
         log.info(f"[seed-credential] Cleared {field} for user {user.username}")
-    
+
     session.add(user)
     session.commit()
     session.refresh(user)
-    
+
     return {
         "status": "SUCCESS",
         "message": f"Seeded {field} for user {user.username}",
@@ -1014,7 +1026,7 @@ def get_my_keys(session: Session = Depends(get_session), user: User = Depends(re
     Non-admin users see only their own keys.
     """
     from sqlmodel import select
-    
+
     if user.is_admin:
         # Admin sees all keys with associated usernames
         all_keys = session.exec(select(APIKey, User).join(User, APIKey.user_id == User.id)).all()  # type: ignore[arg-type]
@@ -1033,8 +1045,8 @@ def get_my_keys(session: Session = Depends(get_session), user: User = Depends(re
         # Non-admin users see only their own keys
         return [
             {
-                "id": k.id, 
-                "label": k.label, 
+                "id": k.id,
+                "label": k.label,
                 "prefix": k.key_prefix or _api_key_prefix(k.key_value) or "unavailable",
                 "created_at": k.created_at,
                 "owner_username": user.username,
@@ -1070,16 +1082,16 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
     Merges users found in both sources into a single entry with combined data."""
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
-    
+
     warnings: list[str] = []
     errors: list[str] = []
-    
+
     # Resolve credentials to use (prefer admin's, fallback to default)
     default_user = session.exec(select(User).where(User.username == "default")).first()
-    
+
     ha_url = admin.ha_url or (default_user.ha_url if default_user else None)
     ha_token_enc = admin.ha_token_enc or (default_user.ha_token_enc if default_user else None)
-    
+
     nc_url = admin.nextcloud_url or (default_user.nextcloud_url if default_user else None)
     nc_user = admin.nextcloud_user or (default_user.nextcloud_user if default_user else None)
     nc_pass_enc = admin.nextcloud_pass_enc or (default_user.nextcloud_pass_enc if default_user else None)
@@ -1108,7 +1120,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                                 "entity_id": state['entity_id'],
                             }
         except Exception as e:
-            log.error(f"[discovery] HA Error: {str(e)}")
+            log.error(f"[discovery] HA Error: {e!s}")
 
     # 2. Scan Nextcloud (Provisioning API)
     if nc_url and nc_user and nc_pass_enc:
@@ -1149,7 +1161,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                             except Exception:
                                 pass
         except Exception as e:
-            log.error(f"[discovery] Nextcloud Error: {str(e)}")
+            log.error(f"[discovery] Nextcloud Error: {e!s}")
 
     # 3. Merge users — combine HA and NC data when usernames match
     all_usernames = set(ha_users.keys()) | set(nc_users.keys())
@@ -1158,12 +1170,12 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
         existing = session.exec(select(User).where(User.username == username)).first()
         if existing:
             continue
-        
+
         in_ha = username in ha_users
         in_nc = username in nc_users
         ha_data = ha_users.get(username, {})
         nc_data = nc_users.get(username, {})
-        
+
         # Determine source label
         if in_ha and in_nc:
             source = "Home Assistant + Nextcloud"
@@ -1171,11 +1183,11 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
             source = "Home Assistant"
         else:
             source = "Nextcloud"
-        
+
         # Prefer NC display_name (usually more accurate), fall back to HA
         display_name = nc_data.get("display_name") or ha_data.get("display_name") or username.capitalize()
         email = nc_data.get("email")
-        
+
         discovered.append(DiscoverUser(
             username=username,
             source=source,
@@ -1184,7 +1196,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
             ha_person_id=ha_data.get("entity_id"),
             nc_username=nc_data.get("nc_username"),
         ))
-            
+
     log.info(f"[discovery] Discovery complete. Found {len(discovered)} users.")
     return DiscoverResponse(users=discovered, warnings=warnings, errors=errors)
 
@@ -1192,7 +1204,7 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
 
 @app.get("/api/settings", response_model=list[GlobalSettingRead])
 def get_settings(
-    session: Session = Depends(get_session), 
+    session: Session = Depends(get_session),
     x_internal_secret: str = Header(None, alias="X-Internal-Secret"),
     auth: bool = Depends(require_admin_or_internal)
 ):
@@ -1213,8 +1225,8 @@ _MODEL_KEYS = {
 
 @app.post("/api/settings")
 def update_settings_bulk(
-    body: Dict[str, str], 
-    session: Session = Depends(get_session), 
+    body: dict[str, str],
+    session: Session = Depends(get_session),
     auth: bool = Depends(require_admin_or_internal)
 ):
     """
@@ -1232,24 +1244,24 @@ def update_settings_bulk(
         else:
             setting.value = value
         session.add(setting)
-    
+
     session.commit()
     return {"status": "SUCCESS"}
 
 @app.get("/api/settings/{key}", response_model=GlobalSettingRead)
 def get_setting(
-    key: str, 
+    key: str,
     session: Session = Depends(get_session),
     x_internal_secret: str = Header(None, alias="X-Internal-Secret")
 ):
     setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
     if not setting:
         raise HTTPException(status_code=404, detail="Setting not found")
-    
+
     # Mask sensitive keys for non-internal (UI) requests
     if x_internal_secret != INTERNAL_SECRET and key == "llm_cloud_api_key" and setting.value:
         setting.value = "sk-***"
-        
+
     return setting
 
 @app.patch("/api/settings/{key}", response_model=GlobalSettingRead)
@@ -1265,7 +1277,7 @@ def update_setting(key: str, body: GlobalSettingUpdate, session: Session = Depen
         setting = GlobalSetting(key=key, value=body.value)
     else:
         setting.value = body.value
-        
+
     session.add(setting)
     session.commit()
     session.refresh(setting)
@@ -1275,7 +1287,7 @@ class _SeedRequest(BaseModel):
     force: bool = False
 
 @app.post("/api/admin/seed", dependencies=[Depends(require_internal)])
-def manual_seed(body: Optional[_SeedRequest] = None, force: bool = False, session: Session = Depends(get_session)):
+def manual_seed(body: _SeedRequest | None = None, force: bool = False, session: Session = Depends(get_session)):
     # Accept force from either JSON body or query param
     should_force = (body.force if body else False) or force
     count = seed_from_env(session, force=should_force)
@@ -1283,9 +1295,12 @@ def manual_seed(body: Optional[_SeedRequest] = None, force: bool = False, sessio
 
 # ─── DNS Management ─────────────────────────────────────────────────────────────
 
-from pydantic import BaseModel
 import re
+from datetime import UTC
 from datetime import datetime as dt
+
+from pydantic import BaseModel
+
 
 def validate_ip(value: str) -> bool:
     """Validate IPv4 address."""
@@ -1325,11 +1340,11 @@ class DnsRecordRead(BaseModel):
     updated_at: str
 
 class DnsRecordUpdate(BaseModel):
-    domain: Optional[str] = None
-    record_type: Optional[str] = None
-    values: Optional[list[str]] = None
-    ttl: Optional[int] = None
-    is_active: Optional[bool] = None
+    domain: str | None = None
+    record_type: str | None = None
+    values: list[str] | None = None
+    ttl: int | None = None
+    is_active: bool | None = None
 
 @app.get("/api/dns", response_model=list[DnsRecordRead])
 def list_dns_records(session: Session = Depends(get_session), auth: bool = Depends(require_admin_or_internal)):
@@ -1358,10 +1373,10 @@ def create_dns_record(body: DnsRecordCreate, session: Session = Depends(get_sess
     """Create a new DNS record."""
     if not body.domain:
         raise HTTPException(status_code=400, detail="Domain is required")
-    
+
     if body.record_type not in ["A", "CNAME"]:
         raise HTTPException(status_code=400, detail="Record type must be A or CNAME")
-    
+
     # Validate values
     if body.record_type == "A":
         if not body.values or body.values == [""]:
@@ -1374,12 +1389,12 @@ def create_dns_record(body: DnsRecordCreate, session: Session = Depends(get_sess
             raise HTTPException(status_code=400, detail="CNAME records require exactly one hostname")
         if not validate_value(body.values[0], "CNAME"):
             raise HTTPException(status_code=400, detail=f"Invalid hostname: {body.values[0]}")
-    
+
     # Check for duplicate domain
     existing = session.exec(select(DnsRecord).where(DnsRecord.domain_name == body.domain)).first()
     if existing:
         raise HTTPException(status_code=409, detail=f"DNS record for '{body.domain}' already exists")
-    
+
     record = DnsRecord(
         domain_name=body.domain,
         record_type=body.record_type,
@@ -1392,7 +1407,7 @@ def create_dns_record(body: DnsRecordCreate, session: Session = Depends(get_sess
     session.add(record)
     session.commit()
     session.refresh(record)
-    
+
     return DnsRecordRead(
         id=record.id,
         domain=record.domain_name,
@@ -1410,19 +1425,19 @@ def update_dns_record(record_id: int, body: DnsRecordUpdate, session: Session = 
     record = session.exec(select(DnsRecord).where(DnsRecord.id == record_id)).first()
     if not record:
         raise HTTPException(status_code=404, detail="DNS record not found")
-    
+
     if body.domain is not None:
         if body.domain != record.domain_name:
             existing = session.exec(select(DnsRecord).where(DnsRecord.domain_name == body.domain)).first()
             if existing:
                 raise HTTPException(status_code=409, detail=f"DNS record for '{body.domain}' already exists")
         record.domain_name = body.domain
-    
+
     if body.record_type is not None:
         if body.record_type not in ["A", "CNAME"]:
             raise HTTPException(status_code=400, detail="Record type must be A or CNAME")
         record.record_type = body.record_type
-    
+
     if body.values is not None:
         if body.record_type == "A":
             if not body.values or body.values == [""]:
@@ -1436,18 +1451,18 @@ def update_dns_record(record_id: int, body: DnsRecordUpdate, session: Session = 
             if not validate_value(body.values[0], "CNAME"):
                 raise HTTPException(status_code=400, detail=f"Invalid hostname: {body.values[0]}")
         record.values = json.dumps(body.values)
-    
+
     if body.ttl is not None:
         record.ttl = body.ttl
-    
+
     if body.is_active is not None:
         record.is_active = body.is_active
-    
+
     record.updated_at = dt.now().isoformat()
     session.add(record)
     session.commit()
     session.refresh(record)
-    
+
     values = json.loads(record.values) if record.values else []
     return DnsRecordRead(
         id=record.id,
@@ -1466,7 +1481,7 @@ def delete_dns_record(record_id: int, session: Session = Depends(get_session), a
     record = session.exec(select(DnsRecord).where(DnsRecord.id == record_id)).first()
     if not record:
         raise HTTPException(status_code=404, detail="DNS record not found")
-    
+
     session.delete(record)
     session.commit()
     return {"status": "SUCCESS", "message": f"DNS record for '{record.domain_name}' deleted"}
@@ -1475,7 +1490,7 @@ def delete_dns_record(record_id: int, session: Session = Depends(get_session), a
 def get_widget_settings(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     """Get all widget settings for the current user."""
     widgets = session.exec(select(UserWidget).where(UserWidget.username == user.username)).all()
-    
+
     # Build settings dict keyed by widget_key
     settings_map = {}
     for w in widgets:
@@ -1487,7 +1502,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
                     parsed_pinned = []
             except (json.JSONDecodeError, TypeError):
                 parsed_pinned = []
-        
+
         parsed_config = {}
         if w.config:
             try:
@@ -1496,7 +1511,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
                     parsed_config = {}
             except (json.JSONDecodeError, TypeError):
                 parsed_config = {}
-        
+
         settings_map[w.widget_key] = UserWidgetRead(
             widget_key=w.widget_key,
             visibility=w.visibility,
@@ -1508,7 +1523,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
             config=parsed_config,
             updated_at=w.updated_at,
         )
-    
+
     # Return as list, ensure every known widget key has an entry
     known_keys = [
         'energy_insights', 'ambient_timer', 'quick_notes', 'active_media',
@@ -1530,18 +1545,18 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
                 config={},
                 updated_at=0,
             ))
-    
+
     # Check if quick_assistant is enabled
     quick_assistant_enabled = any(
         w.widget_key == 'quick_assistant' and w.visibility == 'visible' for w in widgets
     )
-    
+
     return {"widgets": result, "quick_assistant_enabled": quick_assistant_enabled}
 
 @app.put("/api/widgets/settings/{widget_key}")
 def update_widget_settings(
-    widget_key: str, 
-    body: UserWidgetUpdate, 
+    widget_key: str,
+    body: UserWidgetUpdate,
     session: Session = Depends(get_session),
     user: User = Depends(require_api_key)
 ):
@@ -1572,25 +1587,25 @@ def update_widget_settings(
         session.add(setting)
         session.commit()
         return {"status": "SUCCESS"}
-    
+
     existing = session.exec(
         select(UserWidget).where(
             UserWidget.username == user.username,
             UserWidget.widget_key == widget_key
         )
     ).first()
-    
+
     update_data = body.model_dump(exclude_unset=True)
-    
+
     if not update_data:
         return {"status": "SUCCESS"}
-    
+
     # Serialize JSON fields
     if 'pinned_devices' in update_data:
         update_data['pinned_devices'] = json.dumps(update_data['pinned_devices'])
     if 'config' in update_data:
         update_data['config'] = json.dumps(update_data['config'])
-    
+
     if existing:
         for key, value in update_data.items():
             setattr(existing, key, value)
@@ -1603,19 +1618,18 @@ def update_widget_settings(
             **update_data,
         )
         session.add(new_widget)
-    
+
     session.commit()
     return {"status": "SUCCESS"}
 
 # ─── Raven Missions (Autonomous Ops & User Tasks) ───────────────────────────────
 try:
     from .models import RavenMission
-    from .schemas import RavenMissionRead, RavenMissionCreate, RavenMissionUpdate
+    from .schemas import RavenMissionCreate, RavenMissionRead, RavenMissionUpdate
 except ImportError:
     # type: ignore
     from models import RavenMission
-    from schemas import RavenMissionRead, RavenMissionCreate, RavenMissionUpdate
-from typing import List
+    from schemas import RavenMissionCreate, RavenMissionRead, RavenMissionUpdate
 
 def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:
     try:
@@ -1623,12 +1637,12 @@ def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:
         mission = session.exec(select(RavenMission).where(RavenMission.id == mid)).first()
     except ValueError:
         mission = session.exec(select(RavenMission).where(RavenMission.slug == mission_id_or_slug)).first()
-    
+
     if not mission:
         raise HTTPException(status_code=404, detail="Mission not found")
     return mission
 
-@app.get("/api/raven/missions", response_model=List[RavenMissionRead])
+@app.get("/api/raven/missions", response_model=list[RavenMissionRead])
 def get_missions(session: Session = Depends(get_session)):
     missions = session.exec(select(RavenMission).order_by(text("created_at DESC"))).all()
     return missions
@@ -1647,7 +1661,7 @@ def create_mission(
         existing = session.exec(select(RavenMission).where(RavenMission.slug == body.slug)).first()
         if existing:
             raise HTTPException(status_code=400, detail=f"Mission slug '{body.slug}' already exists")
-            
+
     mission = RavenMission(**body.model_dump())
     session.add(mission)
     session.commit()
@@ -1661,7 +1675,7 @@ def update_mission(
     session: Session = Depends(get_session)
 ):
     mission = _resolve_mission(mission_id_or_slug, session)
-    
+
     update_data = body.model_dump(exclude_unset=True)
     # Prevent slug collision on update
     if "slug" in update_data and update_data["slug"] and update_data["slug"] != mission.slug:
@@ -1671,7 +1685,7 @@ def update_mission(
 
     for k, v in update_data.items():
         setattr(mission, k, v)
-        
+
     session.add(mission)
     session.commit()
     session.refresh(mission)
@@ -1697,24 +1711,24 @@ def delete_mission_by_id(mission_id: int, session: Session = Depends(get_session
 
 
 @app.post("/api/auth/import/nextcloud", response_model=ImportResponse)
-async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(default=None)):
+async def import_nextcloud_users(x_internal_secret: str | None = Header(default=None)):
     """Import users from Nextcloud and Home Assistant, merging by username.
     Generates temp passwords and pre-fills all available user data."""
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
-    
+
     warnings: list[str] = []
-    
+
     with Session(engine) as session:
         admin = session.exec(select(User).where(User.is_admin)).first()
         default_user = session.exec(select(User).where(User.username == "default")).first()
-        
+
         # Resolve Nextcloud credentials
         if not admin or not admin.nextcloud_url:
             nc_url_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_URL")).first()
             nc_user_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_USER")).first()
             nc_pass_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "NEXTCLOUD_PASS")).first()
-            from services.config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
+            from services.config import NEXTCLOUD_PASS, NEXTCLOUD_URL, NEXTCLOUD_USER
             nc_url = nc_url_setting.value if nc_url_setting else NEXTCLOUD_URL
             nc_admin_user = nc_user_setting.value if nc_user_setting else NEXTCLOUD_USER
             nc_admin_pass = nc_pass_setting.value if nc_pass_setting else NEXTCLOUD_PASS
@@ -1763,7 +1777,7 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
                                     "device_trackers": attrs.get('device_trackers', []),
                                 }
             except Exception as e:
-                log.error(f"[import] HA Error: {str(e)}")
+                log.error(f"[import] HA Error: {e!s}")
 
         # Fetch Nextcloud users with detailed info
         try:
@@ -1776,7 +1790,7 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
                 )
                 if resp.status != 200:
                     raise HTTPException(status_code=resp.status, detail=f"Nextcloud API error: {await resp.text()}")
-                
+
                 nc_resp = await resp.json()
                 # Handle Nextcloud API error responses (e.g., 403 for non-admin users)
                 meta = nc_resp.get("ocs", {}).get("meta", {})
@@ -1788,7 +1802,7 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
                     usernames = []
                 else:
                     usernames = nc_resp.get("ocs", {}).get("data", {}).get("users", [])
-                
+
                 for nc_username in usernames:
                     nc_data = {"nc_username": nc_username}
                     try:
@@ -1815,7 +1829,7 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
                         pass
                     nc_users[nc_username.lower()] = nc_data
         except Exception as e:
-            log.error(f"[import] Nextcloud Error: {str(e)}")
+            log.error(f"[import] Nextcloud Error: {e!s}")
             raise HTTPException(status_code=500, detail=str(e))
 
         # Merge and import users
@@ -1825,22 +1839,22 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
             existing = session.exec(select(User).where(User.username == username)).first()
             if existing:
                 continue
-            
+
             in_ha = username in ha_users
             in_nc = username in nc_users
             ha_data = ha_users.get(username, {})
             nc_data = nc_users.get(username, {})
-            
+
             # Determine source label
             source = "Home Assistant + Nextcloud" if (in_ha and in_nc) else ("Home Assistant" if in_ha else "Nextcloud")
-            
+
             # Prefer NC display_name (usually more accurate), fall back to HA
             display_name = nc_data.get("display_name") or ha_data.get("display_name") or username.capitalize()
             email = nc_data.get("email")
-            
+
             # Generate a secure random password for the imported user
             temp_password = os.urandom(16).hex()
-            
+
             new_user = User(
                 username=username,
                 display_name=display_name,
@@ -1861,10 +1875,10 @@ async def import_nextcloud_users(x_internal_secret: Optional[str] = Header(defau
                 "ha_entity_id": ha_data.get("entity_id"),
                 "ha_device_trackers": ha_data.get("device_trackers", []),
             })
-        
+
         session.commit()
         return {
-            "status": "SUCCESS", 
+            "status": "SUCCESS",
             "message": f"Imported {len(imported)} users",
             "imported_users": imported,
         }
@@ -2139,7 +2153,7 @@ def enroll_telemetry(enroll_data: dict, x_internal_secret: str = Header(...)):
         raise HTTPException(status_code=400, detail="entity_id is required")
     key = f"telemetry_enroll:{entity_id}"
     with Session(engine) as session:
-        from datetime import datetime, timezone
+        from datetime import datetime
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if existing:
             raise HTTPException(status_code=409, detail=f"'{entity_id}' already enrolled")
@@ -2148,7 +2162,7 @@ def enroll_telemetry(enroll_data: dict, x_internal_secret: str = Header(...)):
         record = dict(enroll_data)
         record["entity_id"] = entity_id
         record["enrolled_by"] = "system"
-        record["enrolled_at"] = datetime.now(timezone.utc).isoformat()
+        record["enrolled_at"] = datetime.now(UTC).isoformat()
         enrollment = GlobalSetting(
             key=key,
             value=json.dumps(record),
@@ -2293,7 +2307,7 @@ def list_intercom_sessions(x_internal_secret: str = Header(...)):
 def start_intercom_session(session_data: dict, x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
     import uuid
-    from datetime import datetime, timezone
+    from datetime import datetime
     session_id = str(uuid.uuid4())[:8]
     key = f"intercom_session:{session_id}"
     with Session(engine) as session:
@@ -2306,7 +2320,7 @@ def start_intercom_session(session_data: dict, x_internal_secret: str = Header(.
                 "target_entity_ids": session_data.get("target_entity_ids", []),
                 "session_type": session_data.get("session_type", "twoway"),
                 "status": "active",
-                "started_at": datetime.now(timezone.utc).isoformat(),
+                "started_at": datetime.now(UTC).isoformat(),
                 "ended_at": None,
                 "room_name": session_data.get("target_room"),
             }),
@@ -2325,7 +2339,7 @@ def start_intercom_session(session_data: dict, x_internal_secret: str = Header(.
 @app.delete("/api/intercom/sessions/{session_id}")
 def end_intercom_session(session_id: str, x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)
-    from datetime import datetime, timezone
+    from datetime import datetime
     key = f"intercom_session:{session_id}"
     with Session(engine) as session:
         intercom_session = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
@@ -2333,7 +2347,7 @@ def end_intercom_session(session_id: str, x_internal_secret: str = Header(...)):
             raise HTTPException(status_code=404, detail=f"Intercom session '{session_id}' not found")
         data = json.loads(intercom_session.value)
         data["status"] = "ended"
-        data["ended_at"] = datetime.now(tz=timezone.utc).isoformat()
+        data["ended_at"] = datetime.now(tz=UTC).isoformat()
         intercom_session.value = json.dumps(data)
         session.commit()
         return {"status": "SUCCESS", "message": f"Intercom session '{session_id}' ended"}
@@ -2413,10 +2427,10 @@ class LocationUpdate(BaseModel):
     """GPS location update from mobile app."""
     latitude: float
     longitude: float
-    accuracy: Optional[float] = None
-    speed: Optional[float] = None
-    bearing: Optional[float] = None
-    timestamp: Optional[float] = None
+    accuracy: float | None = None
+    speed: float | None = None
+    bearing: float | None = None
+    timestamp: float | None = None
 
 
 @app.post("/api/users/{user_id}/location")

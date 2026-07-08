@@ -1,21 +1,29 @@
-import logging
-import json
 import asyncio
-import aiohttp
+import json
+import logging
 import re
-import redis.asyncio as redis
+from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Optional, Any, Dict, List, Callable, Awaitable
+from typing import Any
+
+import aiohttp
+import redis.asyncio as redis
 
 from services.gateway.config import (
-    IDENTITY_SVC, EXECUTION_SVC, WORKSPACE_RUNTIME_SVC, 
-    STORAGE_SVC, RAG_SVC, INTERNAL_SECRET, REDIS_URL,
+    EXECUTION_SVC,
+    IDENTITY_SVC,
+    INTERNAL_SECRET,
+    RAG_SVC,
+    RAVEN_HEARTBEAT_INTERVAL,
+    RAVEN_HUNG_THRESHOLD,
     RAVEN_MAX_TOTAL_SECONDS,
-    RAVEN_HEARTBEAT_INTERVAL, RAVEN_HUNG_THRESHOLD
+    REDIS_URL,
+    STORAGE_SVC,
+    WORKSPACE_RUNTIME_SVC,
 )
-from services.gateway.prompts import load_prompt, PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION
-from services.gateway.schemas import ResolvedCredentials
 from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider
+from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION, load_prompt
+from services.gateway.schemas import ResolvedCredentials
 
 CREDENTIAL_PATTERNS = [
     re.compile(r'(?:api[_-]?key|apikey)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{8,})["\']?', re.IGNORECASE),
@@ -92,13 +100,13 @@ class OllamaProvider(BaseLLMProvider):
     async def generate(
         self,
         model: str,
-        messages: List[Dict[str, str]],
-        options: Optional[Dict[str, Any]] = None,
-        chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None
+        messages: list[dict[str, str]],
+        options: dict[str, Any] | None = None,
+        chunk_callback: Callable[[str], Awaitable[None]] | None = None
     ) -> str:
         opts = options or {}
         show_thinking = opts.get("show_thinking", False)
-        
+
         payload = {
             "model": model,
             "messages": messages,
@@ -115,7 +123,7 @@ class OllamaProvider(BaseLLMProvider):
                 raw_text = resp.text.strip()
                 if not raw_text:
                     return ""
-                
+
                 if "\n" in raw_text:
                     lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
                     content = ""
@@ -145,7 +153,7 @@ class OllamaProvider(BaseLLMProvider):
                     if not show_thinking:
                         content = strip_thinking_blocks(content)
                     return content
-                
+
                 try:
                     data = json.loads(raw_text)
                     if "error" in data:
@@ -298,9 +306,9 @@ def extract_action_json(text: str) -> dict | None:
     """Extracts the first JSON object found in the text, with MoE-safe fallback and log-stripping."""
     if not text:
         return None
-    
+
     text = re.sub(r"^INFO:.*?\n", "", text, flags=re.MULTILINE)
-    
+
     # Priority 1: Properly fenced JSON block (allow optional closing fence)
     match = re.search(r"```json\s*(\{.*?\})(?:\s*```|$)", text, re.DOTALL)
     if match:
@@ -371,7 +379,7 @@ def extract_action_json(text: str) -> dict | None:
                 return json.loads(cleaned)
             except Exception:
                 pass
-    
+
     return None
 
 async def get_dynamic_llm_settings() -> dict:
@@ -379,7 +387,7 @@ async def get_dynamic_llm_settings() -> dict:
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
             resp = await client.get(
-                f"{IDENTITY_SVC}/api/settings", 
+                f"{IDENTITY_SVC}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status == 200:
@@ -420,7 +428,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
                 raw_text = resp.text.strip()
                 if not raw_text:
                     return params
-                
+
                 try:
                     data = json.loads(raw_text)
                     models = data.get("models", [])
@@ -460,14 +468,14 @@ async def get_provider(settings: dict) -> BaseLLMProvider:
             timeout=timeout
         )
 
-async def execute_inference(provider: BaseLLMProvider, model: str, messages: list, options: dict, chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None) -> dict:
+async def execute_inference(provider: BaseLLMProvider, model: str, messages: list, options: dict, chunk_callback: Callable[[str], Awaitable[None]] | None = None) -> dict:
     """Delegates inference to the specified provider."""
     content = await provider.generate(model, messages, options=options, chunk_callback=chunk_callback)
     return {"message": {"role": "assistant", "content": content}}
 
 _original_async_client = aiohttp.ClientSession
-_global_http_client: Optional[aiohttp.ClientSession] = None
-_global_http_client_loop: Optional[asyncio.AbstractEventLoop] = None
+_global_http_client: aiohttp.ClientSession | None = None
+_global_http_client_loop: asyncio.AbstractEventLoop | None = None
 
 def get_http_client() -> aiohttp.ClientSession:
     global _global_http_client, _global_http_client_loop
@@ -495,16 +503,16 @@ def should_persist_learning(result: str) -> bool:
     if not result or result.strip() in ("None", "", "null"):
         return False
     result_lower = result.lower().strip()
-    
+
     # Reject if the result is empty or just whitespace after stripping
     if len(result_lower) < 3:
         return False
-    
+
     # Lint results with "issues found" are meaningful — the LLM found real problems.
     # Only reject if it's a tool execution error, not a diagnostic finding.
     if "lint issues found" in result_lower or "lint passed" in result_lower:
         return True
-    
+
     # Reject pure error/exception strings that indicate infrastructure failures
     # rather than actual mission output from the LLM
     failure_indicators = [
@@ -514,20 +522,20 @@ def should_persist_learning(result: str) -> bool:
     for indicator in failure_indicators:
         if indicator in result_lower:
             return False
-    
+
     # Reject messages that start with "Error:" or "Failed:" — these are
     # infrastructure/tool error messages, not meaningful LLM summaries
     if re.match(r'^\s*(error|exception|failed)\s*:', result_lower):
         return False
-    
+
     # Reject HTTP status codes standing alone (not embedded in natural language)
     if result_lower in ("400", "422", "500", "502", "503", "504"):
         return False
-    
+
     # Reject pure schema/validation error wrappers
     if "schema error (422)" in result_lower:
         return False
-    
+
     read_only_patterns = ["read ", "lines from"]
     if all(p in result_lower for p in read_only_patterns):
         return False
@@ -540,9 +548,9 @@ def should_persist_learning(result: str) -> bool:
     return True
 
 
-async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: Optional[int] = None, rag_context: str = "", show_thinking: bool = False) -> Any:
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False) -> Any:
     full_audit_log = []
-    
+
     async def stream_event(event_type: str, data: str):
         if not mission_id:
             return
@@ -564,18 +572,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     settings = await get_dynamic_llm_settings()
     provider = await get_provider(settings)
     active_provider_name = settings.get("active_llm_provider", "ollama")
-    
+
     # Log relevant model settings for debugging
     log.info(f"[AgentLoop] Settings: active_provider={active_provider_name}, "
              f"assistant_model={settings.get('assistant_model')}, "
              f"coding_model={settings.get('coding_model')}")
- 
+
     # 2. Resolve Role-Based Model (Coder/Assistant) if selected_model is generic or "auto"
     original_model = selected_model
     if selected_model in ["auto", "assistant", "coder"]:
         tech_keywords = ["coder", "fix", "repair", "audit", "mission", "raven", "development", "git", "workspace"]
         is_technical = any(word in query.lower() for word in tech_keywords) or "coder" in selected_model
-        
+
         if is_technical:
             selected_model = settings.get("coding_model") or ""
         else:
@@ -583,7 +591,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         log.info(f"[AgentLoop] Model resolved from '{original_model}' to '{selected_model}' (is_technical={is_technical})")
     else:
         log.info(f"[AgentLoop] Using explicit model: '{selected_model}' (not auto/assistant/coder)")
-                
+
     # Fail fast if config is missing or invalid
     if not selected_model or selected_model == "auto":
         error_msg = f"No valid model configured for {active_provider_name}. Please configure it in the UI."
@@ -595,11 +603,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # 3. Detect model capabilities (thinking/reasoning support) and configure accordingly
     model_name_lower = selected_model.lower()
     is_thinking_capable = any(kw in model_name_lower for kw in ["qwen3", "qwen2.5", "deepseek-r1", "qwq"])
-    
+
     # 4. Enhance system prompt with current date/time and RAG context
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
     enhanced_system = f"{full_system}\n\nCurrent Date/Time: {now}\n\nRetrieved Context:\n{rag_context}"
-    
+
     ollama_payload = {
         "model": selected_model,
         "messages": [
@@ -669,15 +677,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         """
         COMPRESS_THRESHOLD = 3000  # chars before triggering compression
         KEEP_RECENT = 6  # number of recent entries to keep in full
-        
+
         full_log = "\n".join(action_log)
         if len(full_log) <= COMPRESS_THRESHOLD:
             return "", full_log
-        
+
         # Summarize older entries
         older = action_log[:-KEEP_RECENT]
         recent = action_log[-KEEP_RECENT:]
-        
+
         # Build compact summary of older entries
         actions_seen = {}
         for entry in older:
@@ -685,14 +693,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if ": " in entry:
                 action_part = entry.split(": ", 1)[1].split(" ->")[0].strip()
                 actions_seen[action_part] = actions_seen.get(action_part, 0) + 1
-        
+
         summary_parts = [f"Earlier steps ({len(older)} iterations completed):"]
         for action, count in sorted(actions_seen.items(), key=lambda x: -x[1]):
             summary_parts.append(f"  - {action}: {count}x")
-        
+
         summary = "\n".join(summary_parts)
         recent_joined = "\n".join(recent)
-        
+
         log.info(f"[AgentLoop] Context compressed: {len(older)} older entries summarized, {len(recent)} recent kept")
         return summary, recent_joined
 
@@ -730,7 +738,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     for agent_iter in range(start_iteration, MAX_TOOL_ITERATIONS):
         iter_num = agent_iter + 1
         iter_start = asyncio.get_event_loop().time()
-        
+
         # --- HARD TIMEOUT CHECK ---
         elapsed_total = iter_start - loop_start
         if elapsed_total > RAVEN_MAX_TOTAL_SECONDS:
@@ -738,7 +746,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ans = f"ERROR: Raven job exceeded time limit of {RAVEN_MAX_TOTAL_SECONDS}s. Partial result: {ans or 'No output yet'}"
             await _clear_checkpoint()
             break
-        
+
         # --- HARD KILL SWITCH (Redis polling) ---
         if mission_id:
             try:
@@ -771,7 +779,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 await r_pause.close()
             except Exception as e:
                 log.error(f"[AgentLoop] Error checking mission pause flag: {e}")
-        
+
         await stream_event("system", f"Agent loop iteration {iter_num}/{MAX_TOOL_ITERATIONS} started.")
         log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | total elapsed {elapsed_total:.0f}s")
 
@@ -793,13 +801,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         try:
             # Compress context to prevent token bloat and llama.cpp cache thrashing
             ctx_summary, ctx_recent = await _compress_context()
-            
+
             mission_header = f"MISSION LOCK: {query}"
             if generated_plan:
                 mission_header += f"\n\nEXECUTION PLAN:\n{generated_plan}"
             if ctx_summary:
                 mission_header += f"\n\n{ctx_summary}"
-            
+
             ollama_payload["messages"] = [
                 {"role": "system", "content": enhanced_system},
                 {"role": "user", "content": f"{mission_header}\n\nRECENT ACTIONS:\n{ctx_recent}"}
@@ -811,17 +819,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     for key in ["content", "stdout", "stderr"]:
                         if key in safe_exec_data["detail"] and safe_exec_data["detail"][key] and len(str(safe_exec_data["detail"][key])) > 500:
                             safe_exec_data["detail"][key] = str(safe_exec_data["detail"][key])[:500] + "\n...[TRUNCATED]..."
-                
+
                 # Sanitize credentials from execution results before feeding to LLM
                 safe_exec_data = sanitize_for_llm(safe_exec_data)
-                
+
                 # Hard limit on total exec_data size
                 exec_json = json.dumps(safe_exec_data)
                 if len(exec_json) > 2000:
                     exec_json = exec_json[:2000] + "\n...[TRUNCATED FOR CONTEXT WINDOW]..."
-                        
+
                 ollama_payload["messages"].append({
-                    "role": "user", 
+                    "role": "user",
                     "content": f"LAST TOOL RESULT:\n{exec_json}"
                 })
             ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
@@ -839,7 +847,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             # --- RETRY LOGIC ---
             MAX_INFERENCE_RETRIES = 3
-            
+
             for retry_count in range(MAX_INFERENCE_RETRIES):
                 try:
                     # Stick to the requested model for all attempts
@@ -849,7 +857,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     ollama_payload["options"] = vram_params
                     log.info(f"[AgentLoop] Inference options: {vram_params}")
                     log.info(f"[AgentLoop] Executing inference (Attempt {retry_count + 1}/{MAX_INFERENCE_RETRIES}) for {model_to_use}")
-                    
+
                     async def chunk_logger(chunk: str):
                         await stream_event("reasoning", chunk)
 
@@ -863,7 +871,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         inference_options,
                         chunk_callback=chunk_logger
                     )
-                    
+
                     # Handle thinking-capable models: some models put their entire response
                     # in the thinking/reasoning block when content is empty.
                     msg = data.get("message", {})
@@ -894,7 +902,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             return f"SYSTEM ERROR: Inference failed after multiple retries. Detail: {e}. Please check the LLM provider status."
 
         tool_data = extract_action_json(ans)
-        
+
         # Normalize alternative schemas: { "name": "...", "parameters": {...} } → { "action": "...", "payload": {...} }
         if tool_data:
             # Handle "tool", "operation", or "command" keys used as "action"
@@ -904,24 +912,24 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 tool_data["action"] = tool_data.pop("operation")
             if "command" in tool_data and "action" not in tool_data:
                 tool_data["action"] = tool_data.pop("command")
-            
+
             # Handle standard "name" (OpenAI/Ollama format)
             if "name" in tool_data and "action" not in tool_data:
                 tool_data["action"] = tool_data.pop("name")
-            
+
             # Handle "arguments" or "parameters" keys used as "payload"
             if "arguments" in tool_data and "payload" not in tool_data:
                 tool_data["payload"] = tool_data.pop("arguments")
             if "parameters" in tool_data and "payload" not in tool_data:
                 tool_data["payload"] = tool_data.pop("parameters")
-            
+
             # Handle "function" nesting (Legacy OpenAI format)
             if "function" in tool_data and "action" not in tool_data:
                 tool_data["action"] = tool_data["function"].get("name", "")
                 tool_data["payload"] = tool_data["function"].get("arguments", {})
 
             log.info(f"[AgentLoop] Normalized Tool Data: {tool_data}")
-        
+
         # Validation: If we don't have a valid action at this point, we MUST re-prompt.
         if not tool_data or not tool_data.get("action"):
             # Blank/whitespace-only response is a failure — re-prompt
@@ -938,17 +946,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             # If it's just yapping without a JSON block
             log.warning(f"[AgentLoop] No valid tool call found in textual response (iter {iter_num})")
-            
+
             if agent_iter > 0 and successful_tool_calls > 0:
                 log.info(f"[AgentLoop] Agent provided textual answer after {successful_tool_calls} successful tool call(s). Terminating loop.")
                 break
-             
+
             if agent_iter >= 3:
                 log.error(f"[AgentLoop] No valid tool calls after {agent_iter + 1} iterations. Terminating to prevent runaway.")
                 ans = "ERROR: Agent failed to produce valid tool calls after multiple attempts. Last response: " + (ans[:200] if ans else "empty")
                 await _clear_checkpoint()
                 break
-                
+
             log.info(f"[AgentLoop] Re-prompting for autonomous tool execution (iter {agent_iter + 1})...")
             action_log.append(f"ITERATION {iter_num}: Your response did not contain a valid JSON tool call. Every mission step MUST be a tool call.")
             continue
@@ -1147,7 +1155,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
-                
+
                 # RECOVERY: If the LLM sent a nested payload for a GitOperationRequest but forgot the inner 'action',
                 # we inject it here using the original action name (e.g. 'status', 'add', etc.)
                 if lookup_action == "gitoperationrequest" and isinstance(payload, dict) and "action" not in payload:
@@ -1187,12 +1195,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             for item in d:
                                 redact(item)
                     redact(log_payload)
-                    
+
                     await stream_event("action_payload", json.dumps(log_payload, indent=2))
                     log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
                     resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                     log.info(f"[AgentLoop] Tool response: {resp.status}")
-                    
+
                     if resp.status == 422:
                         try:
                             error_detail = (await resp.json()).get("detail", "Validation failed")
@@ -1222,7 +1230,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             raw = detail["raw_stdout"].strip()
                             if raw:
                                 detail_parts.append(raw[:500])
-                        if "porcelain" in detail and detail["porcelain"]:
+                        if detail.get("porcelain"):
                             for p in detail["porcelain"][:10]:
                                 detail_parts.append(p.strip())
                         if detail_parts:
@@ -1364,7 +1372,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     return ans
 
 
-async def run_post_write_lint(file_path: str, execution_svc: str, internal_secret: str, logger, user_context: Optional[dict] = None) -> Optional[str]:
+async def run_post_write_lint(file_path: str, execution_svc: str, internal_secret: str, logger, user_context: dict | None = None) -> str | None:
     """
     Shared post-write lint hook. Returns lint feedback string on failure, None on success.
     """

@@ -1,6 +1,7 @@
 # services/execution/handlers/diagnostics.py
 import logging
 import subprocess
+
 try:
     from schemas import ExecutionResult
 except ImportError:
@@ -31,7 +32,7 @@ async def handle_get_system_logs(req_data: dict) -> ExecutionResult:
     """
     service = req_data.get("service", "execution")
     lines = req_data.get("lines", 50)
-    
+
     try:
         if req_data.get("action") == "ls":
             path = req_data.get("path", "/app")
@@ -39,14 +40,14 @@ async def handle_get_system_logs(req_data: dict) -> ExecutionResult:
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 return ExecutionResult(
-                    status="SUCCESS", 
-                    message=f"Listed {path}", 
+                    status="SUCCESS",
+                    message=f"Listed {path}",
                     service="diagnostics",
                     detail={"output": result.stdout}
                 )
             return ExecutionResult(
-                status="FAILURE", 
-                message=f"Failed to list {path}: {result.stderr}", 
+                status="FAILURE",
+                message=f"Failed to list {path}: {result.stderr}",
                 service="diagnostics"
             )
         else:
@@ -54,14 +55,14 @@ async def handle_get_system_logs(req_data: dict) -> ExecutionResult:
             success, stdout, stderr = get_docker_logs(container_name, lines)
             if success:
                 return ExecutionResult(
-                    status="SUCCESS", 
-                    message=f"Retrieved {lines} lines for {service}", 
+                    status="SUCCESS",
+                    message=f"Retrieved {lines} lines for {service}",
                     service="diagnostics",
                     detail={"logs": stdout}
                 )
             return ExecutionResult(
-                status="FAILURE", 
-                message=f"Failed to get logs for {service}: {stderr}", 
+                status="FAILURE",
+                message=f"Failed to get logs for {service}: {stderr}",
                 service="diagnostics"
             )
     except Exception as e:
@@ -76,11 +77,11 @@ async def handle_execution_logs(req_data: dict) -> ExecutionResult:
     lines = req_data.get("lines", 100)
     service_filter = req_data.get("service")
     keyword = req_data.get("keyword")
-    
+
     # Ignore hallucinated catch-all values
     if service_filter and service_filter.lower() in ("all", "any", "*", "none", ""):
         service_filter = None
-    
+
     try:
         success, stdout, stderr = get_docker_logs("sharedllm_execution", lines)
         if not success:
@@ -89,17 +90,17 @@ async def handle_execution_logs(req_data: dict) -> ExecutionResult:
                 message=f"Failed to retrieve execution logs: {stderr}",
                 service="execution_logs"
             )
-        
+
         log_lines = stdout.strip().split("\n") if stdout.strip() else []
-        
+
         # Filter by service/handler if specified
         if service_filter:
             log_lines = [line for line in log_lines if service_filter.lower() in line.lower()]
-        
+
         # Filter by keyword if specified
         if keyword:
             log_lines = [line for line in log_lines if keyword.lower() in line.lower()]
-        
+
         if not log_lines:
             filter_desc = []
             if service_filter: filter_desc.append(f"service='{service_filter}'")
@@ -111,14 +112,14 @@ async def handle_execution_logs(req_data: dict) -> ExecutionResult:
                 message=msg,
                 service="execution_logs"
             )
-        
+
         # Build a summary for quick LLM comprehension
         summary_lines = []
         for line in log_lines[-50:]:  # Cap at 50 lines for response size
             summary_lines.append(line)
-        
+
         log_text = "\n".join(summary_lines)
-        
+
         return ExecutionResult(
             status="SUCCESS",
             message=f"Retrieved {len(log_lines)} execution log lines",

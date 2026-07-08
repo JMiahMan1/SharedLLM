@@ -12,9 +12,10 @@ Required environment variables:
 """
 import json
 import os
-import time
-import httpx
 import sys
+import time
+
+import httpx
 
 PROD_HOST = os.getenv("PROD_HOST", "192.168.2.205")
 SECRET = os.environ["INTERNAL_SECRET"]
@@ -86,7 +87,7 @@ def ha_get_state(entity_id):
 def ha_get_logbook(entity_id, minutes=5):
     """Get logbook entries from HA directly."""
     import datetime
-    start = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=minutes)).isoformat()
+    start = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=minutes)).isoformat()
     try:
         resp = httpx.get(
             f"{HA_URL}/api/logbook/{start}",

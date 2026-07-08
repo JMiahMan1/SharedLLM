@@ -1,4 +1,5 @@
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
 
 def _aio_resp(status=200, json_data=None, text=""):
     """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
@@ -9,7 +10,7 @@ def _aio_resp(status=200, json_data=None, text=""):
     return m
 
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+
 from services.gateway.background_worker import RavenWorker
 
 
@@ -78,14 +79,13 @@ class TestDynamicModelSelection:
 
         mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
 
-        with patch("services.gateway.orchestrator.get_all_settings", mock_settings):
-            with patch("aiohttp.ClientSession") as mock_client:
-                mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
-                mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
-                mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+        with patch("services.gateway.orchestrator.get_all_settings", mock_settings), patch("aiohttp.ClientSession") as mock_client:
+            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
+            mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.return_value.get = AsyncMock(return_value=mock_resp)
 
-                result = await self.worker._get_upgrade_model("qwen3:8b")
-                assert result == "qwen3.6-35b-a3b:q4_k_m"
+            result = await self.worker._get_upgrade_model("qwen3:8b")
+            assert result == "qwen3.6-35b-a3b:q4_k_m"
 
     @pytest.mark.asyncio
     async def test_excludes_current_model(self):
@@ -98,14 +98,13 @@ class TestDynamicModelSelection:
 
         mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
 
-        with patch("services.gateway.orchestrator.get_all_settings", mock_settings):
-            with patch("aiohttp.ClientSession") as mock_client:
-                mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
-                mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
-                mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+        with patch("services.gateway.orchestrator.get_all_settings", mock_settings), patch("aiohttp.ClientSession") as mock_client:
+            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
+            mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_client.return_value.get = AsyncMock(return_value=mock_resp)
 
-                result = await self.worker._get_upgrade_model("qwen3.6-35b-a3b:q4_k_m")
-                assert result == "qwen3:8b"
+            result = await self.worker._get_upgrade_model("qwen3.6-35b-a3b:q4_k_m")
+            assert result == "qwen3:8b"
 
     @pytest.mark.asyncio
     async def test_returns_current_on_api_failure(self):
