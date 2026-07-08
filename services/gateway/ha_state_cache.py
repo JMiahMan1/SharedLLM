@@ -82,7 +82,7 @@ async def fetch_live_states(execution_url: str, ha_url: str, ha_token: str, inte
         log.error(f"Failed to fetch live HA states: {e}")
     return []
 
-def get_live_state(entity_id: str, execution_url: str, ha_url: str, ha_token: str, internal_secret: str) -> str | None:
+async def get_live_state(entity_id: str, execution_url: str, ha_url: str, ha_token: str, internal_secret: str) -> str | None:
     """Get state from cache, or fetch live and cache it."""
     cached = get_cached_state(entity_id)
     if cached is not None:
@@ -90,20 +90,21 @@ def get_live_state(entity_id: str, execution_url: str, ha_url: str, ha_token: st
     
     # Cache miss — fetch live
     try:
-        import requests
-        resp = requests.get(
-            f"{execution_url}/discovery/entities",
-            params={"ha_url": ha_url, "ha_token": ha_token},
-            headers={"X-Internal-Secret": internal_secret},
-            timeout=10
-        )
-        if resp.status == 200:
-            data = resp.json()
-            entities = data.get("entities", []) if isinstance(data, dict) else []
-            cache_all_states(entities)
-            for e in entities:
-                if e.get("entity_id") == entity_id:
-                    return e.get("state")
+        import aiohttp
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"{execution_url}/discovery/entities",
+                params={"ha_url": ha_url, "ha_token": ha_token},
+                headers={"X-Internal-Secret": internal_secret},
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    entities = data.get("entities", []) if isinstance(data, dict) else []
+                    cache_all_states(entities)
+                    for e in entities:
+                        if e.get("entity_id") == entity_id:
+                            return e.get("state")
     except Exception as e:
         log.error(f"Failed to fetch live state for {entity_id}: {e}")
     return None

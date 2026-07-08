@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Any, Optional, Protocol
 
 import caldav
-import requests
 
 try:
     from nextcloud_client import ensure_webdav_dir, ocs_request, resolve_credentials, safe_filename, webdav_url
@@ -17,10 +16,10 @@ class PersonalDataProvider(Protocol):
     password: str
 
     def calendar_client(self) -> caldav.DAVClient: ...
-    def ensure_directory(self, path: str) -> None: ...
+    async def ensure_directory(self, path: str) -> None: ...
     def file_url(self, path: str) -> str: ...
-    def upload_file(self, path: str, data: bytes, content_type: str) -> requests.Response: ...
-    def request(
+    async def upload_file(self, path: str, data: bytes, content_type: str) -> bool: ...
+    async def request(
         self,
         method: str,
         endpoint: str,
@@ -40,25 +39,23 @@ class NextcloudPersonalDataProvider:
     kind: str = "nextcloud"
 
     def calendar_client(self) -> caldav.DAVClient:
-        client = caldav.DAVClient(
+        return caldav.DAVClient(
             url=f"{self.base_url.rstrip('/')}/remote.php/dav",
             username=self.username,
             password=self.password,
             timeout=60,
         )
-        # Disable HTTP/3 - Nextcloud advertises it via Alt-Svc but can't handle it
-        if hasattr(client, "session") and hasattr(client.session, "_disable_http3"):
-            client.session._disable_http3 = True  # type: ignore[assignment]
-        return client
 
-    def ensure_directory(self, path: str) -> None:
-        ensure_webdav_dir(self.base_url, self.username, self.password, path)
+    async def ensure_directory(self, path: str) -> None:
+        await ensure_webdav_dir(self.base_url, self.username, self.password, path)
 
     def file_url(self, path: str) -> str:
         return webdav_url(self.base_url, self.username, path)
 
-    def upload_file(self, path: str, data: bytes, content_type: str) -> requests.Response:
-        return requests.put(
+    async def upload_file(self, path: str, data: bytes, content_type: str) -> bool:
+        from .http_client import request
+        resp = await request(
+            "PUT",
             self.file_url(path),
             data=data,
             auth=(self.username, self.password),
@@ -66,8 +63,9 @@ class NextcloudPersonalDataProvider:
             timeout=60,
             verify=False,
         )
+        return resp["ok"]
 
-    def request(
+    async def request(
         self,
         method: str,
         endpoint: str,
@@ -76,7 +74,7 @@ class NextcloudPersonalDataProvider:
         data: dict[str, Any] | None = None,
         timeout: int = 30,
     ) -> tuple[bool, Any, str]:
-        return ocs_request(
+        return await ocs_request(
             method,
             self.base_url,
             self.username,

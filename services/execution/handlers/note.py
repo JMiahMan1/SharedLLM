@@ -1,12 +1,12 @@
 # services/execution/handlers/note.py
 import logging
 import os
-import requests
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from services.config import LOCAL_NOTES_ROOT as _LOCAL_NOTES_ROOT
 from services.execution.schemas import NoteRequest, ExecutionResult
 from ..personal_data import resolve_personal_data_provider
+from ..http_client import request as http_request
 
 log = logging.getLogger("execution.note")
 
@@ -91,6 +91,7 @@ async def _handle_local_note(req: NoteRequest) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=f"Local Note error: {str(e)}", service="note_local")
 
 async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
+    from ..http_client import request as http_request
     provider = resolve_personal_data_provider(req.user_context)
     if not provider:
         return ExecutionResult(status="FAILURE", message="Nextcloud credentials missing.", service="note")
@@ -99,13 +100,13 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
     
     try:
         if action == "create":
-            provider.ensure_directory(req.category or "Notes")
+            await provider.ensure_directory(req.category or "Notes")
             file_title = provider.sanitize_filename(req.title or "untitled", "note")
             filename = f"{file_title}.md"
             url = provider.file_url(f"{req.category or 'Notes'}/{filename}")
             content = f"# {req.title}\nCategory: {req.category}\n\n{req.content or ''}"
-            resp = requests.put(url, data=content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
-            if resp.status_code in [200, 201, 204]:
+            resp = await http_request("PUT", url, data=content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
+            if resp["status_code"] in [200, 201, 204]:
                 return ExecutionResult(status="SUCCESS", message=f"Note '{req.title}' created.", service="note_create")
             
         elif action == "read":
@@ -114,10 +115,10 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             else:
                 file_title = provider.sanitize_filename(req.title or "", "note")
                 url = provider.file_url(f"Notes/{file_title}.md")
-            resp = requests.get(url, auth=(provider.username, provider.password), verify=False)
-            if resp.status_code == 200:
-                return ExecutionResult(status="SUCCESS", message=resp.text, service="note_read")
-            elif resp.status_code == 404:
+            resp = await http_request("GET", url, auth=(provider.username, provider.password), verify=False)
+            if resp["status_code"] == 200:
+                return ExecutionResult(status="SUCCESS", message=resp["text"], service="note_read")
+            elif resp["status_code"] == 404:
                 return ExecutionResult(status="FAILURE", message=f"Note '{req.title}' not found.", service="note_read")
         
         elif action == "append":
@@ -126,11 +127,11 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             else:
                 file_title = provider.sanitize_filename(req.title or "", "note")
                 url = provider.file_url(f"Notes/{file_title}.md")
-            r_resp = requests.get(url, auth=(provider.username, provider.password), verify=False)
-            existing = r_resp.text if r_resp.status_code == 200 else ""
+            r_resp = await http_request("GET", url, auth=(provider.username, provider.password), verify=False)
+            existing = r_resp["text"] if r_resp["status_code"] == 200 else ""
             new_content = f"{existing}\n\n- [ ] {req.content}"
-            resp = requests.put(url, data=new_content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
-            if resp.status_code in [200, 201, 204]:
+            resp = await http_request("PUT", url, data=new_content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
+            if resp["status_code"] in [200, 201, 204]:
                 return ExecutionResult(status="SUCCESS", message=f"Appended to '{req.title}'.", service="note_append")
 
         elif action == "delete":
@@ -139,15 +140,15 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             else:
                 file_title = provider.sanitize_filename(req.title or "", "note")
                 url = provider.file_url(f"Notes/{file_title}.md")
-            resp = requests.delete(url, auth=(provider.username, provider.password), verify=False)
-            if resp.status_code in [200, 204]:
+            resp = await http_request("DELETE", url, auth=(provider.username, provider.password), verify=False)
+            if resp["status_code"] in [200, 204]:
                 return ExecutionResult(status="SUCCESS", message=f"Note '{req.title}' deleted.", service="note_delete")
 
         elif action == "list":
             directories = req.directories or DEFAULT_NOTES_DIRS
             all_notes = []
             for base_dir in directories:
-                provider.ensure_directory(base_dir)
+                await provider.ensure_directory(base_dir)
                 notes = await _walk_webdav_dir(provider, base_dir)
                 all_notes.extend(notes)
             all_notes.sort(key=lambda x: x.get("modified", ""), reverse=True)
@@ -162,17 +163,17 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             directories = req.directories or DEFAULT_NOTES_DIRS
             synced = []
             for base_dir in directories:
-                provider.ensure_directory(base_dir)
+                await provider.ensure_directory(base_dir)
                 notes = await _walk_webdav_dir(provider, base_dir)
                 for note in notes:
                     note_path = note["path"]
                     url = provider.file_url(note_path.lstrip("/"))
-                    resp = requests.get(url, auth=(provider.username, provider.password), verify=False)
-                    if resp.status_code == 200:
+                    resp = await http_request("GET", url, auth=(provider.username, provider.password), verify=False)
+                    if resp["status_code"] == 200:
                         synced.append({
                             "path": note_path,
-                            "content": resp.text,
-                            "size": len(resp.text),
+                            "content": resp["text"],
+                            "size": len(resp["text"]),
                         })
             return ExecutionResult(
                 status="SUCCESS",
@@ -193,7 +194,7 @@ async def _walk_webdav_dir(provider, base_dir: str, current_path: str = "") -> l
     dir_url = provider.file_url(dir_path)
     
     try:
-        resp = requests.request(
+        resp = await http_request(
             "PROPFIND",
             dir_url,
             auth=(provider.username, provider.password),
@@ -202,11 +203,11 @@ async def _walk_webdav_dir(provider, base_dir: str, current_path: str = "") -> l
             timeout=30,
         )
         
-        if resp.status_code != 207:
+        if resp["status_code"] != 207:
             return []
         
         notes = []
-        root = ET.fromstring(resp.text)
+        root = ET.fromstring(resp["text"])
         ns = {"DAV": "DAV:"}
         
         for response in root.findall(".//DAV:response", ns):
