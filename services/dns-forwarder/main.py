@@ -1,7 +1,7 @@
+import logging
 import os
 import socket
 import time
-import logging
 
 import dns.message
 import dns.query
@@ -34,7 +34,7 @@ def forward(query_bytes: bytes, src_addr: tuple) -> bytes:
     msg = dns.message.from_wire(query_bytes)
     retries = 2
     last_exception = None
-    
+
     for attempt in range(retries + 1):
         try:
             response = dns.query.udp(msg, (UPSTREAM_HOST, UPSTREAM_PORT), timeout=5)
@@ -48,7 +48,7 @@ def forward(query_bytes: bytes, src_addr: tuple) -> bytes:
             if attempt < retries:
                 log.debug(f"Upstream query attempt {attempt + 1} failed, retrying: {e}")
                 time.sleep(0.1)  # Brief delay before retry
-    
+
     # All retries exhausted
     log.warning(f"Upstream query failed after {retries + 1} attempts: {last_exception}")
     response = dns.message.make_response(msg)

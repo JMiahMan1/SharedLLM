@@ -8,14 +8,14 @@ services. Discovers network configuration dynamically.
 Integration Points:
 - REST API for service discovery
 """
-import os
 import json
-import time
+import os
 import signal
 import socket
 import struct
 import threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import time
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
 
 # Try to import docker library for container discovery
@@ -77,13 +77,13 @@ def get_host_ip():
             if gateway:
                 print(f"[dns-sync] Using sharedllm gateway: {gateway}", flush=True)
                 return gateway
-    
+
     # Fallback: return first available gateway
     for net_config in DISCOVERED_NETWORKS.values():
         gateway = net_config.get('gateway') if net_config else None
         if gateway:
             return gateway
-    
+
     # Fallback: try to get IP via socket (works for non-Docker)
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -93,7 +93,7 @@ def get_host_ip():
         return ip
     except Exception:
         pass
-    
+
     return None
 
 
@@ -102,14 +102,14 @@ def discover_networks():
     global DISCOVERED_NETWORKS
     if not DOCKER_AVAILABLE:
         return
-    
+
     DISCOVERED_NETWORKS = {}
-    
+
     try:
         networks = DOCKER_CLIENT.networks.list()
         if not networks:
             return
-        
+
         for network in networks:
             try:
                 net_config = network.attrs.get('IPAM', {}).get('Config') or []
@@ -120,7 +120,7 @@ def discover_networks():
                         gateway = config['Gateway']
                     if config and config.get('Subnet'):
                         subnet = config['Subnet']
-                
+
                 if gateway:
                     DISCOVERED_NETWORKS[network.name] = {
                         'gateway': gateway,
@@ -141,19 +141,19 @@ def discover_containers_via_docker():
     """
     if not DOCKER_AVAILABLE:
         return {}
-    
+
     containers = {}
-    print(f"[dns-sync] DISCOVER: Starting container discovery via Docker API", flush=True)
-    
+    print("[dns-sync] DISCOVER: Starting container discovery via Docker API", flush=True)
+
     try:
         all_containers = DOCKER_CLIENT.containers.list(all=True)
         print(f"[dns-sync] DISCOVER: Found {len(all_containers)} containers total", flush=True)
-        
+
         for container in all_containers:
             name = container.name.replace('sharedllm_', '')
             if not name:
                 continue
-            
+
             # Get container IP from any network
             networks = container.attrs['NetworkSettings']['Networks']
             ip = None
@@ -161,24 +161,24 @@ def discover_containers_via_docker():
                 if net_config.get('IPAddress'):
                     ip = net_config['IPAddress']
                     break
-            
+
             # Check if host-networked
             network_mode = container.attrs['HostConfig'].get('NetworkMode', '')
             host_networked = (network_mode == 'host')
-            
+
             containers[name] = {
                 'ip': ip,
                 'host_networked': host_networked,
                 'status': container.status
             }
-            
+
             if ip:
                 print(f"[dns-sync] DISCOVER: {name} -> {ip} (networked)", flush=True)
             else:
                 print(f"[dns-sync] DISCOVER: {name} -> no IP (host_networked={host_networked})", flush=True)
     except Exception as e:
         print(f"[dns-sync] Error discovering containers: {e}", flush=True)
-    
+
     print(f"[dns-sync] DISCOVER: Discovered {len(containers)} containers", flush=True)
     return containers
 
@@ -191,11 +191,11 @@ def build_dns_records(containers, host_ip):
     """
     records = {}
     print(f"[dns-sync] BUILD: Building DNS records for {len(containers)} containers", flush=True)
-    
+
     for name, info in containers.items():
         hostname = f"{name}.local" if not name.endswith('.local') else name
         hostname = hostname.lower()
-        
+
         if info['host_networked'] or not info['ip']:
             # Use host IP for host-networked services or if no container IP
             if host_ip:
@@ -205,7 +205,7 @@ def build_dns_records(containers, host_ip):
             # Use container IP
             records[hostname] = [info['ip']]
             print(f"[dns-sync] BUILD: {hostname} -> {info['ip']} (container IP)", flush=True)
-    
+
     print(f"[dns-sync] BUILD: Total {len(records)} DNS records built", flush=True)
     return records
 
@@ -218,7 +218,7 @@ def get_service_discovery_data():
         records = dict(dns_records)
     with health_lock:
         status = dict(health_status)
-    
+
     services = {}
     for hostname, ips in records.items():
         alive_ips = [ip for ip in ips if status.get((hostname, ip), False)]
@@ -227,7 +227,7 @@ def get_service_discovery_data():
             "alive_ips": alive_ips,
             "healthy": len(alive_ips) > 0
         }
-    
+
     return {
         "services": services,
         "networks": DISCOVERED_NETWORKS,
@@ -239,16 +239,16 @@ def get_service_discovery_data():
 
 class DiscoveryAPIHandler(BaseHTTPRequestHandler):
     """HTTP handler for service discovery API."""
-    
+
     def log_message(self, format, *args):
         """Suppress default logging."""
         pass
-    
+
     def do_GET(self):
         """Handle GET requests."""
         parsed = urlparse(self.path)
         path = parsed.path
-        
+
         # Check authentication
         secret = self.headers.get("X-Internal-Secret", "")
         if secret != INTERNAL_SECRET:
@@ -257,7 +257,7 @@ class DiscoveryAPIHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"error": "Unauthorized"}).encode())
             return
-        
+
         if path == "/health":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -267,21 +267,21 @@ class DiscoveryAPIHandler(BaseHTTPRequestHandler):
                 "service": "dns_sync",
                 "container_count": len(dns_records)
             }).encode())
-        
+
         elif path == "/api/discovery":
             data = get_service_discovery_data()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(data).encode())
-        
+
         elif path == "/api/discovery/services":
             services = get_service_discovery_data()["services"]
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(services).encode())
-        
+
         elif path == "/api/discovery/alive":
             services = get_service_discovery_data()["services"]
             alive = {k: v for k, v in services.items() if v["healthy"]}
@@ -289,7 +289,7 @@ class DiscoveryAPIHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(alive).encode())
-        
+
         elif path.startswith("/api/discovery/"):
             # Get specific service: /api/discovery/identity.local
             service_name = path.split("/")[-1]
@@ -304,7 +304,7 @@ class DiscoveryAPIHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": "Service not found"}).encode())
-        
+
         else:
             self.send_response(404)
             self.send_header("Content-Type", "application/json")
@@ -347,24 +347,24 @@ def check_ip_alive_http(ip, port, path="/health"):
     """HTTP health check as fallback for more reliable status detection."""
     try:
         import urllib.request
-        
+
         url = f"http://{ip}:{port}{path}"
         req = urllib.request.Request(url, method="GET")
         req.add_header("X-Internal-Secret", INTERNAL_SECRET)
-        
+
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(HEALTH_CHECK_TIMEOUT)
-        
+
         # Try to establish connection first
         result = sock.connect_ex((ip, port))
         if result != 0:
             sock.close()
             return False
-        
+
         # Send HTTP request over socket
         http_request = f"GET {path} HTTP/1.0\r\nHost: {ip}:{port}\r\nX-Internal-Secret: {INTERNAL_SECRET}\r\n\r\n"
         sock.send(http_request.encode())
-        
+
         # Read response
         response = b""
         while True:
@@ -373,11 +373,11 @@ def check_ip_alive_http(ip, port, path="/health"):
                 break
             response += chunk
         sock.close()
-        
+
         # Check for 200 OK
         if response.startswith(b"HTTP/1.0 200") or response.startswith(b"HTTP/1.1 200"):
             return True
-        
+
         return False
     except Exception:
         return False
@@ -387,24 +387,24 @@ def health_checker():
     """Background thread that health-checks all configured IPs."""
     global health_status
     print(f"[dns-sync] Health checker started (interval={HEALTH_CHECK_INTERVAL}s, timeout={HEALTH_CHECK_TIMEOUT}s)", flush=True)
-    
+
     while running:
         with dns_lock:
             current_records = dict(dns_records)
-        
+
         new_health = {}
         changed = False
-        
+
         for hostname, ips in current_records.items():
             port = get_health_port(hostname)
             for ip in ips:
                 # Try TCP connect first, then HTTP health check as fallback
                 alive = check_ip_alive(ip, port)
-                
+
                 # If TCP fails but HTTP health endpoint might exist, try HTTP
                 if not alive and port != 80:  # Skip if already on default HTTP port
                     alive = check_ip_alive_http(ip, port)
-                
+
                 key = (hostname, ip)
                 with health_lock:
                     old = health_status.get(key)
@@ -414,10 +414,10 @@ def health_checker():
                         print(f"[dns-sync] HEALTH: {ip}:{port} {hostname} -> {status_str}", flush=True)
                 health_status[key] = alive
                 new_health[key] = alive
-        
+
         if changed:
             _print_health_summary()
-        
+
         for _ in range(HEALTH_CHECK_INTERVAL):
             if not running:
                 break
@@ -430,7 +430,7 @@ def _print_health_summary():
         records = dict(dns_records)
     with health_lock:
         status = dict(health_status)
-    
+
     for hostname, ips in records.items():
         alive_ips = [ip for ip in ips if status.get((hostname, ip), False)]
         dead_ips = [ip for ip in ips if not status.get((hostname, ip), False)]
@@ -442,15 +442,15 @@ def get_alive_ips(hostname):
     """Get list of alive IPs for a hostname. Only returns alive IPs."""
     with dns_lock:
         all_ips = list(dns_records.get(hostname, []))
-    
+
     print(f"[dns-sync] LOOKUP: hostname={hostname}, found {len(all_ips)} IPs in records: {all_ips}", flush=True)
-    
+
     if not all_ips:
         return []
-    
+
     with health_lock:
         alive = [ip for ip in all_ips if health_status.get((hostname, ip), False)]
-    
+
     # Only return alive IPs. If all dead, return all as last resort.
     result = alive if alive else all_ips
     print(f"[dns-sync] LOOKUP: returning {len(result)} alive IPs: {result}", flush=True)
@@ -508,9 +508,9 @@ def forward_query(hostname, qtype):
     if DISCOVERED_NETWORKS.get('gateway'):
         upstreams.append(DISCOVERED_NETWORKS['gateway'])
     upstreams.append("8.8.8.8")
-    
+
     print(f"[dns-sync] FORWARD: trying upstream servers for {hostname}: {upstreams}", flush=True)
-    
+
     for upstream in upstreams:
         try:
             query = bytearray()
@@ -521,7 +521,7 @@ def forward_query(hostname, qtype):
                 query += bytes([len(label)]) + label.encode()
             query += b'\x00'
             query += struct.pack('!HH', qtype, 1)
-            
+
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(2)
             sock.sendto(bytes(query), (upstream, 53))
@@ -542,7 +542,7 @@ def dns_server():
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(('0.0.0.0', DNS_LISTEN_PORT))
     print(f"[dns-sync] DNS server listening on 0.0.0.0:{DNS_LISTEN_PORT}", flush=True)
-    
+
     while running:
         try:
             sock.settimeout(1)
@@ -551,7 +551,7 @@ def dns_server():
             txid, hostname, qtype = parse_dns_query(data)
             if hostname is None:
                 continue
-            
+
             if qtype == 1:  # A record
                 answers = get_alive_ips(hostname)
                 if answers:
@@ -571,11 +571,11 @@ def dns_server():
                 resp = build_dns_response(txid, hostname, [], rcode=3)
                 sock.sendto(resp, addr)
                 print(f"[dns-sync] DNS: forwarding failed for {hostname}, sending NXDOMAIN", flush=True)
-        except socket.timeout:
+        except TimeoutError:
             continue
         except Exception as e:
             print(f"[dns-sync] DNS error: {e}", flush=True)
-    
+
     sock.close()
     print("[dns-sync] DNS server stopped", flush=True)
 
@@ -584,13 +584,13 @@ def main():
     global running
     print(f"[dns-sync] Starting DNS sync sidecar (poll every {POLL_INTERVAL}s)", flush=True)
     print(f"[dns-sync] Docker API available: {DOCKER_AVAILABLE}", flush=True)
-    
+
     # Discover network configuration
     discover_networks()
-    
+
     if not DISCOVERED_NETWORKS.get('gateway'):
         print("[dns-sync] Warning: No network gateway discovered, using default upstream DNS", flush=True)
-    
+
     # Get our own container IP
     own_ip = None
     try:
@@ -609,19 +609,19 @@ def main():
                 print(f"[dns-sync] Warning: Could not get own IP: {e}", flush=True)
     except Exception as e:
         print(f"[dns-sync] Warning: Could not get hostname: {e}", flush=True)
-    
+
     # Start health checker
     health_thread = threading.Thread(target=health_checker, daemon=True)
     health_thread.start()
-    
+
     # Start DNS server
     dns_thread = threading.Thread(target=dns_server, daemon=True)
     dns_thread.start()
-    
+
     last_records = {}
     last_discovery = time.time()
     discovery_interval = 10  # Discover containers every 10 seconds
-    
+
     while running:
         # Discover networks and containers periodically
         if time.time() - last_discovery > discovery_interval:
@@ -629,27 +629,27 @@ def main():
             host_ip = get_host_ip()
             containers = discover_containers_via_docker()
             records = build_dns_records(containers, host_ip)
-            
+
             # Add ourselves to the DNS records
             if own_ip:
-                own_hostname = f"dns-sync.local"
+                own_hostname = "dns-sync.local"
                 records[own_hostname] = [own_ip]
                 print(f"[dns-sync] Registered self: {own_hostname} -> {own_ip}", flush=True)
-            
+
             if records != last_records:
                 with dns_lock:
                     global dns_records
                     dns_records = records
                 last_records = records
                 print(f"[dns-sync] Discovered {len(containers)} containers, {len(records)} DNS records", flush=True)
-            
+
             last_discovery = time.time()
-        
+
         for _ in range(POLL_INTERVAL):
             if not running:
                 break
             time.sleep(1)
-    
+
     print("[dns-sync] Shutting down", flush=True)
 
 

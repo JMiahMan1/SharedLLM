@@ -1,10 +1,11 @@
 
-import requests
-import time
 import sys
+import time
+
+import requests
 
 # Configuration
-SERVER_URL = "http://ai.local:11435" 
+SERVER_URL = "http://ai.local:11435"
 CHAT_ENDPOINT = f"{SERVER_URL}/api/chat"
 HEALTH_ENDPOINT = f"{SERVER_URL}/health"
 HA_STATE_ENDPOINT = f"{SERVER_URL}/api/ha/state" # /{entity_id}
@@ -27,7 +28,7 @@ def wait_for_state(entity_id, expected_states, timeout=15):
     """Waits for entity to read one of the expected states."""
     if isinstance(expected_states, str):
         expected_states = [expected_states]
-        
+
     print(f"  > Waiting for {entity_id} to be {expected_states}...", end="", flush=True)
     start = time.time()
     while time.time() - start < timeout:
@@ -37,7 +38,7 @@ def wait_for_state(entity_id, expected_states, timeout=15):
             return True
         time.sleep(1)
         print(".", end="", flush=True)
-    
+
     print(f" Timeout! Current: {get_entity_state(entity_id)}")
     return False
 
@@ -57,7 +58,7 @@ def send_chat(query, user="admin"):
                 resp_text = data["choices"][0]["message"]["content"]
             else:
                 resp_text = str(data)
-                
+
             print(f"  [Resp] {resp_text}")
             return data
         else:
@@ -73,14 +74,14 @@ def ensure_off(entity_id):
     if state in ["off", "standby"]:
         print(" Already OFF.")
         return True
-    
+
     # Send turn off command
-    send_chat(f"Turn off {entity_id}") 
+    send_chat(f"Turn off {entity_id}")
     return wait_for_state(entity_id, ["off", "standby"])
 
 def run_scenario(name, steps):
     print(f"\n=== Scenario: {name} ===")
-    
+
     for step in steps:
         if step.get("action") == "ensure_off":
             if not ensure_off(step["entity"]):
@@ -91,13 +92,13 @@ def run_scenario(name, steps):
         cmd = step["cmd"]
         entity = step.get("entity")
         expect_state = step.get("expect_state")
-        
+
         # Send Command
         data = send_chat(cmd)
         if not data:
             print("  [FAIL] Command failed.")
             return False
-            
+
         # Verify Response Text (Optional keywords)
         if "verify_text" in step:
             if step["verify_text"] not in str(data):
@@ -109,9 +110,9 @@ def run_scenario(name, steps):
             if not wait_for_state(entity, expect_state):
                 print("  [FAIL] State verification failed.")
                 return False
-                
+
         time.sleep(2) # Stability pause
-        
+
     print(f"=== {name} PASSED ===")
     return True
 
@@ -122,21 +123,21 @@ SCENARIO_ROKU_MUSIC = [
     {
         "cmd": "Play Brandon Lake on Gracie's TV",
         "entity": ROKU_ID,
-        "expect_state": ["playing", "buffering", "on"], 
+        "expect_state": ["playing", "buffering", "on"],
     },
     { "cmd": "Pause", "entity": ROKU_ID, "expect_state": "paused" },
     { "cmd": "Resume", "entity": ROKU_ID, "expect_state": "playing" },
     { "cmd": "Next", "entity": ROKU_ID, "expect_state": ["playing", "buffering"] },
-    { "cmd": "Stop", "entity": ROKU_ID, "expect_state": ["idle", "standby", "off", "home", "paused"] }, 
+    { "cmd": "Stop", "entity": ROKU_ID, "expect_state": ["idle", "standby", "off", "home", "paused"] },
     { "cmd": "Turn off Gracie's TV", "entity": ROKU_ID, "expect_state": ["off", "standby"] }
 ]
 
 SCENARIO_ROKU_VIDEO = [
     { "action": "ensure_off", "entity": ROKU_ID },
-    { 
+    {
         "cmd": "Watch Brandon Lake on Gracie's TV",
         "entity": ROKU_ID,
-        "expect_state": ["playing", "buffering"] 
+        "expect_state": ["playing", "buffering"]
     },
     { "cmd": "Pause", "entity": ROKU_ID, "expect_state": "paused" },
     { "cmd": "Resume", "entity": ROKU_ID, "expect_state": "playing" },
@@ -146,15 +147,15 @@ SCENARIO_ROKU_VIDEO = [
 
 SCENARIO_ANDROID_CONTEXT = [
     # { "action": "ensure_off", "entity": ANDROID_ID },
-    { 
-        "cmd": "Play music on Office TV", 
+    {
+        "cmd": "Play music on Office TV",
         "entity": ANDROID_ID,
         "expect_state": ["playing", "buffering"]
     },
-    { 
-        "cmd": "Skip", 
+    {
+        "cmd": "Skip",
         "entity": ANDROID_ID,
-        "expect_state": ["playing", "buffering"] 
+        "expect_state": ["playing", "buffering"]
     },
     { "cmd": "Stop", "entity": ANDROID_ID, "expect_state": ["idle", "off", "paused", "standby", "on"] },
     { "cmd": "Turn off Office TV", "entity": ANDROID_ID, "expect_state": ["off", "standby", "idle"] }
@@ -178,9 +179,9 @@ def wait_for_server():
 if __name__ == "__main__":
     if not wait_for_server():
         sys.exit(1)
-        
+
     results = []
-    
+
     # if run_scenario("Roku Music Cycle", SCENARIO_ROKU_MUSIC):
     #     results.append("Roku Music: PASS")
     # else:
@@ -189,24 +190,24 @@ if __name__ == "__main__":
     #     results.append("Roku Music: PASS")
     # else:
     #     results.append("Roku Music: FAIL")
-        
-    # time.sleep(5) 
-        
+
+    # time.sleep(5)
+
     # if run_scenario("Roku Video Cycle", SCENARIO_ROKU_VIDEO):
     #     results.append("Roku Video: PASS")
     # else:
     #     results.append("Roku Video: FAIL")
-        
-    # time.sleep(5) 
-         
+
+    # time.sleep(5)
+
     if run_scenario("Android Context", SCENARIO_ANDROID_CONTEXT):
         results.append("Android Context: PASS")
     else:
         results.append("Android Context: FAIL")
-        
+
     print("\nSUMMARY:")
     for r in results: print(r)
-    
+
     if any("FAIL" in r for r in results):
         sys.exit(1)
     sys.exit(0)

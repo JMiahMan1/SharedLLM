@@ -10,14 +10,15 @@ Run with: pytest services/execution/tests/test_ha_integration.py -v
 """
 import asyncio
 import os
-import pytest
 import time
+
+import pytest
 from fastapi.testclient import TestClient
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
-from services.execution.main import app
-import services.execution.main as main
 import services.execution.ha_client as ha_client_module
+import services.execution.main as main
+from services.execution.main import app
 
 client = TestClient(app)
 

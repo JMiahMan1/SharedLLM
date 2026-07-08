@@ -7,12 +7,12 @@ Validates:
 """
 import os
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from services.execution.announce_handlers import detect_tv_type
 from services.execution.handlers.media import detect_media_type
 from services.execution.handlers.video import handle_video_play
-from services.execution.schemas import VideoPlayRequest, UserContext
+from services.execution.schemas import UserContext, VideoPlayRequest
 
 
 class TestDeviceDetection(unittest.TestCase):

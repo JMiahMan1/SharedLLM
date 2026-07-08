@@ -2,8 +2,9 @@
 """
 Test Android TV with valid video URL for Watch intent
 """
-import requests
 import time
+
+import requests
 
 BASE_URL = "http://ai.local:11435"
 ANDROID_TV_ENTITY = "media_player.office_tv_chrome_2"
@@ -36,7 +37,7 @@ if state != "off":
     print("  Proceeding anyway...")
 
 # Test Watch with YouTube URL
-print(f"\n[TEST] Watch YouTube video while TV is off...")
+print("\n[TEST] Watch YouTube video while TV is off...")
 print(f"  Command: 'Watch {VIDEO_URL} on Office TV'")
 response = chat(f"Watch {VIDEO_URL} on Office TV")
 print(f"  Response: {response}")

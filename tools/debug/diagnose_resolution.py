@@ -33,14 +33,14 @@ def search_logs_for_query(logs, search_term):
 def main():
     print("Fetching logs...")
     logs = fetch_logs(1000)
-    
+
     print(f"\nFetched {len(logs)} log lines\n")
-    
+
     # Search for Gracies TV query
     print("=" * 80)
     print("SEARCHING FOR: 'gracies'")
     print("=" * 80)
-    
+
     gracies_results = search_logs_for_query(logs, "gracies")
     if gracies_results:
         for result in gracies_results[:3]:  # Show first 3 matches
@@ -49,7 +49,7 @@ def main():
                 print(line.strip())
     else:
         print("No matches found for 'gracies'")
-    
+
     # Search for resolution logs
     print("\n" + "=" * 80)
     print("SEARCHING FOR: 'smart_resolve_entity'")
@@ -61,7 +61,7 @@ def main():
             for line in result['context']:
                 if "smart_resolve" in line.lower() or "selected" in line.lower() or "match" in line.lower():
                     print(line.strip())
-    
+
     # Search for video playback
     print("\n" + "=" * 80)
     print("SEARCHING FOR: 'watch' or 'video'")

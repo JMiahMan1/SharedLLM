@@ -1,5 +1,6 @@
-import httpx
 import json
+
+import httpx
 
 GATEWAY_URL = "http://ai.local:8080/api/chat"
 INTERNAL_SECRET = "change-me-in-production"
@@ -46,7 +47,7 @@ def run_tests():
         except Exception as e:
             print(f"[EXCEPTION]: {e}")
             report += f"- **EXCEPTION**: {e}\n\n"
-    
+
     with open("docs/capability_test_report.md", "w") as f:
         f.write(report)
     print("\nReport generated at docs/capability_test_report.md")

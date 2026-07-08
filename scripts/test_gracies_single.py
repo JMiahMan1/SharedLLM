@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Test single query to see entity resolution"""
-import requests
 import json
+
+import requests
 
 REMOTE_URL = "http://ai.local:11435/api/chat"
 
@@ -11,7 +12,7 @@ print(f"Testing query: '{query}'")
 print("=" * 80)
 
 response = requests.post(
-    REMOTE_URL, 
+    REMOTE_URL,
     json={"query": query},
     timeout=120
 )

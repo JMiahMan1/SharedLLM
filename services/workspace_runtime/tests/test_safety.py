@@ -1,14 +1,18 @@
 import os
+
 os.environ["INTERNAL_SECRET"] = "test-secret"
 
-import pytest
 import subprocess
-from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine, StaticPool
 from pathlib import Path
 from unittest.mock import patch
-from services.workspace_runtime.models import Workspace
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlmodel import Session, SQLModel, StaticPool, create_engine
+
 import services.workspace_runtime.main as main
+from services.workspace_runtime.models import Workspace
+
 
 @pytest.fixture(name="session")
 def session_fixture():
@@ -33,21 +37,21 @@ def test_git_revert_logic(client: TestClient, session: Session, tmp_path: Path):
     ws_id = "test_revert_ws"
     ws_dir = tmp_path / ws_id
     ws_dir.mkdir(parents=True)
-    
+
     subprocess.run(["git", "init"], cwd=ws_dir, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=ws_dir, check=True)
     subprocess.run(["git", "config", "user.name", "Test User"], cwd=ws_dir, check=True)
-    
+
     file_path = ws_dir / "test.txt"
     file_path.write_text("v1")
     subprocess.run(["git", "add", "test.txt"], cwd=ws_dir, check=True)
     subprocess.run(["git", "commit", "-m", "v1"], cwd=ws_dir, check=True)
-    subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ws_dir).decode().strip()  # noqa: F841
-    
+    subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ws_dir).decode().strip()
+
     file_path.write_text("v2")
     subprocess.run(["git", "add", "test.txt"], cwd=ws_dir, check=True)
     subprocess.run(["git", "commit", "-m", "v2"], cwd=ws_dir, check=True)
-    
+
     # 2. Register workspace
     ws = Workspace(
         id=ws_id,
@@ -58,23 +62,23 @@ def test_git_revert_logic(client: TestClient, session: Session, tmp_path: Path):
     )
     session.add(ws)
     session.commit()
-    
+
     # 3. Call revert
     # We patch resolve_safe_path to return our REAL temp directory path
     with patch("services.workspace_runtime.main.resolve_safe_path", return_value=ws_dir), \
          patch("services.workspace_runtime.main._resolve_identity_context", return_value={"user": "admin", "is_admin": True}):
-        
+
         resp = client.post(
-            "/git/revert", 
+            "/git/revert",
             json={"workspace_id": ws_id, "hard": True},
             headers={"X-Internal-Secret": "test-secret"}
         )
-        
+
         assert resp.status_code == 200
-        
+
     # 4. Verify result - file reverted to v1 content
     assert file_path.read_text() == "v1"
-    
+
     session.expire_all()
     assert session.get(Workspace, ws_id).quarantined is False
 
@@ -82,21 +86,21 @@ def test_git_revert_failure_state(client: TestClient, session: Session, tmp_path
     ws_id = "fail_ws"
     ws_dir = tmp_path / ws_id
     ws_dir.mkdir() # Not a git repo
-    
+
     ws = Workspace(id=ws_id, display_name="Fail WS", local_path=ws_id, quarantined=True)
     session.add(ws)
     session.commit()
-    
+
     with patch("services.workspace_runtime.main.resolve_safe_path", return_value=ws_dir), \
          patch("services.workspace_runtime.main._resolve_identity_context", return_value={"user": "admin", "is_admin": True}):
-        
+
         resp = client.post(
-            "/git/revert", 
+            "/git/revert",
             json={"workspace_id": ws_id},
             headers={"X-Internal-Secret": "test-secret"}
         )
-        
+
         assert resp.status_code == 400
-        
+
     session.expire_all()
     assert session.get(Workspace, ws_id).quarantined is True

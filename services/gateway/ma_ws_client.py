@@ -25,8 +25,9 @@ import json
 import logging
 import os.path
 import time
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlparse
-from typing import Any, Callable, Dict, Optional
 
 import websockets
 
@@ -54,7 +55,7 @@ HEARTBEAT_INTERVAL = 15.0
 COMMAND_PREFIX = "player_queues/"
 PLAY_MEDIA_COMMAND = f"{COMMAND_PREFIX}play_media"
 
-EventCallback = Callable[[str, Dict[str, Any]], None]
+EventCallback = Callable[[str, dict[str, Any]], None]
 
 
 class MAWebSocketClient:
@@ -113,26 +114,26 @@ class MAWebSocketClient:
         self._ws: Any = None
         self._connected = False
         self._authenticated = False
-        self._server_info: Optional[Dict[str, Any]] = None
+        self._server_info: dict[str, Any] | None = None
         self._auth_event = asyncio.Event()
-        self._last_error: Optional[Exception] = None
-        self._ma_error_code: Optional[str] = None
-        self._ma_error_details: Optional[str] = None
+        self._last_error: Exception | None = None
+        self._ma_error_code: str | None = None
+        self._ma_error_details: str | None = None
         self._reconnect_count = 0
-        self._reconnect_task: Optional[asyncio.Task] = None
-        self._message_handler_task: Optional[asyncio.Task] = None
+        self._reconnect_task: asyncio.Task | None = None
+        self._message_handler_task: asyncio.Task | None = None
         self._shutdown_event = asyncio.Event()
 
         # Queue state tracking
-        self._queue_state: Dict[str, Any] = {}
-        self._stream_url: Optional[str] = None
+        self._queue_state: dict[str, Any] = {}
+        self._stream_url: str | None = None
 
         # Event callbacks
-        self._event_callbacks: Dict[str, list] = {}
+        self._event_callbacks: dict[str, list] = {}
 
         # Message ID counter for request/response correlation
         self._msg_id = 0
-        self._pending_responses: Dict[str, asyncio.Future] = {}
+        self._pending_responses: dict[str, asyncio.Future] = {}
 
     # ------------------------------------------------------------------
     # Properties
@@ -149,7 +150,7 @@ class MAWebSocketClient:
         return self._authenticated
 
     @property
-    def server_info(self) -> Optional[Dict[str, Any]]:
+    def server_info(self) -> dict[str, Any] | None:
         """The server info received from MA after authentication."""
         return self._server_info
 
@@ -164,7 +165,7 @@ class MAWebSocketClient:
         return self._ws_url
 
     @property
-    def last_error(self) -> Optional[Exception]:
+    def last_error(self) -> Exception | None:
         """The last error that occurred on the connection."""
         return self._last_error
 
@@ -174,7 +175,7 @@ class MAWebSocketClient:
         return self._reconnect_count
 
     @property
-    def queue_state(self) -> Dict[str, Any]:
+    def queue_state(self) -> dict[str, Any]:
         """The latest queue state from MA."""
         return self._queue_state
 
@@ -213,7 +214,7 @@ class MAWebSocketClient:
         self._connected = False
         log.info("[MA-WS] Disconnected")
 
-    async def send_command(self, command: str, args: Optional[Dict[str, Any]] = None, timeout: float = 10.0) -> Optional[Any]:
+    async def send_command(self, command: str, args: dict[str, Any] | None = None, timeout: float = 10.0) -> Any | None:
         """
         Send a command to MA via WebSocket and wait for the response.
 
@@ -232,7 +233,7 @@ class MAWebSocketClient:
             raise ConnectionError("MA WebSocket client is not connected")
 
         msg_id = self._next_msg_id()
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "message_id": msg_id,
             "command": command,
         }
@@ -251,7 +252,7 @@ class MAWebSocketClient:
                 result = await asyncio.wait_for(future, timeout=timeout)
                 log.info(f"[MA-WS] Received response for '{command}' (msg_id={msg_id}): {str(result)[:200]}")
                 return result
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log.warning(f"[MA-WS] Timeout waiting for response to '{command}' (msg_id={msg_id})")
                 return None
         except Exception as e:
@@ -260,7 +261,7 @@ class MAWebSocketClient:
         finally:
             self._pending_responses.pop(msg_id, None)
 
-    async def send_command_no_wait(self, command: str, args: Optional[Dict[str, Any]] = None) -> None:
+    async def send_command_no_wait(self, command: str, args: dict[str, Any] | None = None) -> None:
         """
         Send a command without waiting for a response (fire-and-forget).
 
@@ -272,7 +273,7 @@ class MAWebSocketClient:
             raise ConnectionError("MA WebSocket client is not connected")
 
         msg_id = self._next_msg_id()
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "message_id": msg_id,
             "command": command,
         }
@@ -314,7 +315,7 @@ class MAWebSocketClient:
                 callbacks.remove(callback)
                 log.debug(f"[MA-WS] Unregistered callback for '{event_type}'")
 
-    def get_stream_url(self) -> Optional[str]:
+    def get_stream_url(self) -> str | None:
         """
         Get the latest resolved stream URL from the most recent QUEUE_UPDATED event.
 
@@ -323,7 +324,7 @@ class MAWebSocketClient:
         """
         return self._stream_url
 
-    def get_queue_state(self) -> Dict[str, Any]:
+    def get_queue_state(self) -> dict[str, Any]:
         """
         Get the current queue state snapshot.
 
@@ -332,7 +333,7 @@ class MAWebSocketClient:
         """
         return dict(self._queue_state)
 
-    def get_current_item(self) -> Optional[Dict[str, Any]]:
+    def get_current_item(self) -> dict[str, Any] | None:
         """
         Get the currently playing media item from queue state.
 
@@ -348,7 +349,7 @@ class MAWebSocketClient:
         """Whether an MA error response was received."""
         return self._ma_error_code is not None
 
-    def get_ma_error(self) -> Optional[Dict[str, str]]:
+    def get_ma_error(self) -> dict[str, str] | None:
         """Get the last MA error if one was received."""
         if self._ma_error_code:
             return {"code": self._ma_error_code, "details": self._ma_error_details or ""}
@@ -412,7 +413,7 @@ class MAWebSocketClient:
                     log.info("[MA-WS] Sent auth command with token")
                 except Exception as e:
                     log.warning(f"[MA-WS] Auth command failed: {e}")
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 log.warning("[MA-WS] Timeout waiting for server_info, proceeding anyway")
 
         except asyncio.CancelledError:
@@ -536,7 +537,7 @@ class MAWebSocketClient:
         else:
             log.warning(f"[MA-WS] Unknown message type: msg_type={msg_type!r}, event={event_type!r}, all_keys={list(data.keys())}")
 
-    async def _dispatch_event(self, event_type: str, data: Dict[str, Any]) -> None:
+    async def _dispatch_event(self, event_type: str, data: dict[str, Any]) -> None:
         """
         Dispatch an event to all registered callbacks.
 
@@ -568,7 +569,7 @@ class MAWebSocketClient:
                 except Exception as e:
                     log.error(f"[MA-WS] Callback error for '{event_type}': {e}", exc_info=True)
 
-    def _extract_stream_url(self, data: Dict[str, Any]) -> None:
+    def _extract_stream_url(self, data: dict[str, Any]) -> None:
         """
         Extract the resolved stream URL from queue state data.
 
@@ -662,7 +663,7 @@ class MAWebSocketClient:
         # Clear stream URL if not found (may indicate stopped state)
         if data.get("state") == "idle":
             self._stream_url = None
-            log.info(f"[MA-WS] Stream URL cleared (state=idle)")
+            log.info("[MA-WS] Stream URL cleared (state=idle)")
 
     # ------------------------------------------------------------------
     # Internal - Reconnect Logic

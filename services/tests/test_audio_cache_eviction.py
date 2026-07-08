@@ -1,6 +1,7 @@
 """Tests for TEMP_AUDIO_CACHE bounded eviction logic."""
-import pytest
 from collections import OrderedDict
+
+import pytest
 
 TEMP_AUDIO_CACHE_MAX = 50
 

@@ -3,8 +3,9 @@
 Test multiple ECP launch configurations to find one that works for video playback.
 Roku is picky about parameter names (case-sensitive) and endpoints.
 """
-import requests
 import time
+
+import requests
 
 ROKU_IP = "192.168.2.166"
 # Using the cached video we know exists
@@ -15,12 +16,12 @@ def test_variant(name, channel_id, endpoint, params):
     url = f"http://{ROKU_IP}:8060/{endpoint}/{channel_id}"
     print(f"  URL: {url}")
     print(f"  Params: {params}")
-    
+
     try:
         # Go home first to reset state
         requests.post(f"http://{ROKU_IP}:8060/keypress/Home")
         time.sleep(2)
-        
+
         resp = requests.post(url, params=params, timeout=10)
         print(f"  Response: {resp.status_code}")
         if resp.status_code == 200:
@@ -29,7 +30,7 @@ def test_variant(name, channel_id, endpoint, params):
             # Check what's running
             r_app = requests.get(f"http://{ROKU_IP}:8060/query/active-app")
             print(f"  Active App Data: {r_app.text.replace(chr(10), ' ')}")
-            
+
             return True
     except Exception as e:
         print(f"  ❌ Error: {e}")

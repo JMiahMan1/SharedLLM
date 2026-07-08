@@ -1,5 +1,6 @@
 import os
 import time
+
 import requests
 from dotenv import load_dotenv
 
@@ -43,14 +44,14 @@ def test_hardware_routing():
     # This should target androidtv/cast, NOT music_assistant
     resp = send_chat("Turn off the Office TV")
     msg = _safe_msg(resp) or str(resp)
-    
+
     if SILENT_TOKEN in msg:
         log("   [PASS] Silent Success token received.")
     else:
         log(f"   [INFO] Response: {msg}")
 
     # Verify state (Android TV should be off/standby)
-    # Note: We can't check 'media_player.office_tv_mass' state here reliably as it mirrors, 
+    # Note: We can't check 'media_player.office_tv_mass' state here reliably as it mirrors,
     # but we can check the known android entity if we know it.
     # Assuming 'media_player.office_tv_android' exists based on previous logs.
     state = get_state("media_player.office_tv_android")
@@ -64,15 +65,15 @@ def test_audio_routing():
     log("\n--- TEST: Audio Routing (Play Music) ---")
     resp = send_chat("Play Brandon Lake on the Office TV")
     log(f"   [INFO] Command Sent. Response: {_safe_msg(resp)}")
-    
+
     # Wait for state update
     time.sleep(2)
-    
+
     # Check if Music Assistant entity is playing
     # We guess the ID 'media_player.office_tv_mass' or similar
     mass_state = get_state("media_player.office_tv_mass")
     log(f"   [VERIFY] Music Assistant State: {mass_state}")
-    
+
     if mass_state in ["playing", "buffering"]:
         log("   [PASS] Music Assistant is active.")
     else:
@@ -86,7 +87,7 @@ def test_silent_success():
     # Turn on a light (Piano Lamp)
     resp = send_chat("Turn on the Piano Lamp")
     msg = _safe_msg(resp)
-    
+
     if SILENT_TOKEN in msg:
         log("   [PASS] Silent Success validated on Light.")
     else:
@@ -97,7 +98,7 @@ def test_silent_success():
 if __name__ == "__main__":
     # Clear previous log
     with open("live_test_results.txt", "w") as f: f.write(f"Test Run: {time.ctime()}\n")
-    
+
     log(f"Targeting API: {API_URL}")
     test_hardware_routing()
     time.sleep(2)

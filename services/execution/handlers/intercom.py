@@ -5,7 +5,6 @@ Manages intercom sessions, broadcasts, and announcements.
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional
 
 import aiohttp
 
@@ -23,14 +22,13 @@ async def _get_identity_session() -> aiohttp.ClientSession:
     )
 
 
-async def _call_identity(method: str, path: str, json_data: Optional[Dict] = None) -> Dict:
-    async with await _get_identity_session() as client:
-        async with client.request(method, path, json=json_data) as resp:
-            resp.raise_for_status()
-            return await resp.json()
+async def _call_identity(method: str, path: str, json_data: dict | None = None) -> dict:
+    async with await _get_identity_session() as client, client.request(method, path, json=json_data) as resp:
+        resp.raise_for_status()
+        return await resp.json()
 
 
-async def _resolve_user_room(user_id: str) -> Optional[str]:
+async def _resolve_user_room(user_id: str) -> str | None:
     """Resolve user's current room via ESPresense presence data."""
     try:
         from services.execution.presence import get_presence_tracker

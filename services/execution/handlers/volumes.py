@@ -3,7 +3,8 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
-from services.config import VOLUME_MANIFEST_PATH, VOLUME_BACKUP_ROOT
+
+from services.config import VOLUME_BACKUP_ROOT, VOLUME_MANIFEST_PATH
 
 log = logging.getLogger("execution.volumes")
 

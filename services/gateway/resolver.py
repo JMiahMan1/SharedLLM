@@ -7,12 +7,11 @@ this utility tries each IP in order until one succeeds.
 import asyncio
 import logging
 import socket
-from typing import Optional
 
 log = logging.getLogger("gateway.resolver")
 
 
-async def resolve_hostname_with_fallback(hostname: str, port: int = 0, timeout: float = 3.0) -> Optional[str]:
+async def resolve_hostname_with_fallback(hostname: str, port: int = 0, timeout: float = 3.0) -> str | None:
     """
     Resolve a hostname and return the first reachable IP.
     Tries each resolved IP in order with a TCP connect test.
@@ -42,7 +41,7 @@ async def resolve_hostname_with_fallback(hostname: str, port: int = 0, timeout: 
             await writer.wait_closed()
             log.info(f"[resolver] {hostname} -> {ip} (reachable)")
             return ip
-        except (ConnectionRefusedError, asyncio.TimeoutError, OSError):
+        except (TimeoutError, ConnectionRefusedError, OSError):
             log.debug(f"[resolver] {hostname} -> {ip} (unreachable, trying next)")
             continue
 

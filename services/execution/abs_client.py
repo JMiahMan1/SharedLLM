@@ -4,15 +4,16 @@ Audiobookshelf (ABS) REST API client.
 Handles authentication, library search, playback progress, and streaming.
 """
 import logging
+from typing import Any
+
 import aiohttp
-from typing import Optional, Any
 
 log = logging.getLogger("execution.abs_client")
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30.0, connect=5.0)
 
 
-def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+def resolve_abs_credentials(user_context: Any) -> tuple[str | None, str | None, str | None, str | None]:
     """Extract ABS URL and auth from user context.
     Returns (abs_url, abs_api_key, username, password).
     User context comes from ResolvedCredentials with fields:
@@ -29,11 +30,11 @@ def resolve_abs_credentials(user_context: Any) -> tuple[Optional[str], Optional[
     abs_key = get_val(user_context, "abs_api_key", "audiobookshelf_api_key")
     username = get_val(user_context, "audiobookshelf_user", "abs_username")
     password = get_val(user_context, "audiobookshelf_pass", "abs_password")
-    
+
     return abs_url, abs_key, username, password
 
 
-async def abs_login(abs_url: str, username: str, password: str) -> Optional[str]:
+async def abs_login(abs_url: str, username: str, password: str) -> str | None:
     """Login to ABS with username/password and return API token."""
     url = f"{abs_url.rstrip('/')}/login"
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
@@ -48,7 +49,7 @@ async def abs_login(abs_url: str, username: str, password: str) -> Optional[str]
 
 
 async def abs_get(
-    abs_url: str, abs_api_key: str, path: str, params: Optional[dict] = None
+    abs_url: str, abs_api_key: str, path: str, params: dict | None = None
 ) -> dict:
     """GET request to ABS API."""
     url = f"{abs_url.rstrip('/')}{path}"
@@ -67,7 +68,7 @@ async def abs_get(
 
 
 async def abs_post(
-    abs_url: str, abs_api_key: str, path: str, json: Optional[dict] = None
+    abs_url: str, abs_api_key: str, path: str, json: dict | None = None
 ) -> dict:
     """POST request to ABS API."""
     url = f"{abs_url.rstrip('/')}{path}"
@@ -97,16 +98,16 @@ async def search_library(
     libs = await abs_get(abs_url, abs_api_key, "/api/libraries")
     if "error" in libs:
         return libs
-    
+
     book_lib_id = None
     for lib in libs.get("libraries", []):
         if lib.get("mediaType") == "book":
             book_lib_id = lib.get("id")
             break
-    
+
     if not book_lib_id:
         return {"error": "No book library found"}
-    
+
     # Search within the book library
     return await abs_get(abs_url, abs_api_key, f"/api/libraries/{book_lib_id}/items", params={"query": query, "limit": limit})
 
@@ -271,7 +272,7 @@ async def sync_session_position(
 
 async def close_session(
     abs_url: str, abs_api_key: str, session_id: str,
-    current_time: Optional[float] = None, duration: Optional[float] = None
+    current_time: float | None = None, duration: float | None = None
 ) -> dict:
     """Close a playback session, optionally with final position."""
     payload = {}

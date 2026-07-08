@@ -5,14 +5,15 @@ import logging
 import os
 import shlex
 import traceback
-from typing import Optional
+
 from fastapi import HTTPException
-from services.config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
+
+from services.config import INTERNAL_SECRET, WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL
 from services.execution.schemas import (
     ExecutionResult,
+    WorkspaceFilePatchRequest,
     WorkspaceFileReadRequest,
     WorkspaceFileWriteRequest,
-    WorkspaceFilePatchRequest,
     WorkspaceSearchRequest,
     WorkspaceShellRequest,
 )
@@ -65,13 +66,13 @@ def _ok(message: str, detail: dict | None = None) -> ExecutionResult:
 def _fail(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="FAILURE", message=message, service="workspace", detail=detail)
 
-async def _resolve_workspace_info(workspace_id: Optional[str], user_context: Optional[dict] = None) -> tuple[str, dict]:
+async def _resolve_workspace_info(workspace_id: str | None, user_context: dict | None = None) -> tuple[str, dict]:
     """Resolves workspace path and details from workspace_runtime service, and checks capability."""
     import aiohttp
     # Defaults
     resolved_path = WORKSPACE_ROOT
     workspace_details = {}
-    
+
     if workspace_id:
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
@@ -100,7 +101,7 @@ async def _resolve_workspace_info(workspace_id: Optional[str], user_context: Opt
             raise
         except Exception as e:
             log.warning(f"Failed to resolve workspace {workspace_id}: {e}")
-            
+
     return resolved_path, workspace_details
 
 def _require_capability(workspace: dict, capability: str):
@@ -127,7 +128,7 @@ def resolve_safe_path(path: str, workspace_root: str = WORKSPACE_ROOT) -> str:
 
 async def _run_command_async(
     cmd: list[str] | str,
-    cwd: Optional[str] = None,
+    cwd: str | None = None,
     timeout: float = 30.0,
     shell: bool = False
 ) -> tuple[int, str, str]:
@@ -147,7 +148,7 @@ async def _run_command_async(
                 stderr=asyncio.subprocess.PIPE,
                 cwd=cwd
             )
-        
+
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             return proc.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
@@ -174,10 +175,10 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
             return _fail_with_discovery(req.path, f"File not found: {req.path}")
         if not os.path.isfile(abs_path):
             return _fail(f"Path is not a file: {req.path}")
-        
-        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+
+        with open(abs_path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
-        
+
         # Strategy 3: Semantic Extraction (Signatures Only)
         if req.summary_only and req.path.endswith(".py"):
             import ast
@@ -189,7 +190,7 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
                         summary.append(f"Class: {node.name} (line {node.lineno})")
                     elif isinstance(node, ast.FunctionDef):
                         summary.append(f"Function: {node.name}({[a.arg for a in node.args.args]}) (line {node.lineno})")
-                
+
                 content = "\n".join(summary)
                 return _ok(f"Semantic map for {req.path} ({len(summary)} symbols found)", {"content": content, "path": req.path})
             except Exception as e:
@@ -197,18 +198,18 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
 
         # Chunked Reading (Windowing)
         start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
-        
+
         # Hardware Protection for 8GB VRAM constraints
         safe_limit = min(req.limit_lines if req.limit_lines and req.limit_lines > 0 else 300, 300)
         end = start + safe_limit
-        
+
         chunk = lines[start:end]
         content = "".join(chunk)
-        
+
         msg = f"Read {len(chunk)} lines from {req.path} (offset={req.offset_lines})"
         if end < len(lines):
             msg += f" | TRUNCATED for context safety: file has {len(lines)} lines total."
-            
+
         return _ok(msg, {"content": content, "path": req.path, "total_lines": len(lines), "start_line": start + 1})
     except HTTPException:
         raise
@@ -216,13 +217,13 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
         log.error(f"Workspace read failed: {e}")
         return _fail(str(e))
 
-def _get_discovery_suggestion(path: str) -> Optional[str]:
+def _get_discovery_suggestion(path: str) -> str | None:
     """Dynamically discovers similar files in the workspace to help agents self-correct."""
     try:
         filename = os.path.basename(path)
         if not filename:
             return None
-        
+
         matches = []
         for root, _, files in os.walk(WORKSPACE_ROOT):
             # Skip hidden directories like .git
@@ -232,7 +233,7 @@ def _get_discovery_suggestion(path: str) -> Optional[str]:
                 if f.lower() == filename.lower():
                     rel_path = os.path.relpath(os.path.join(root, f), WORKSPACE_ROOT)
                     matches.append(rel_path)
-        
+
         if matches:
             # Filter out the exact path if it somehow matched
             matches = [m for m in matches if m != path]
@@ -258,20 +259,20 @@ async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionRes
 
         abs_path = resolve_safe_path(req.path, ws_root)
         exists = os.path.exists(abs_path)
-        
+
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-        
+
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(req.content)
-            
+
         message = f"Successfully wrote to {req.path}."
-        
+
         # Collision Detection: If creating a NEW file, check if it exists elsewhere
         if not exists:
             suggestion = _get_discovery_suggestion(req.path)
             if suggestion:
                 message += f" | WARNING: {suggestion} You may have created a duplicate file in the wrong location."
-            
+
         return _ok(message, {"path": req.path, "bytes": len(req.content), "created_new": not exists})
     except HTTPException:
         raise
@@ -289,14 +290,14 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
             _require_capability(ws_details, "read")
 
         abs_search_path = resolve_safe_path(req.path, ws_root)
-        
+
         # Build rg command
         cmd = ["rg", "--json", "-i", "--max-count", "100", req.query, abs_search_path]
         if req.include:
             cmd.extend(["-g", req.include])
         if req.exclude:
             cmd.extend(["-g", f"!{req.exclude}"])
-            
+
         log.info(f"Running search: {' '.join(cmd)}")
         try:
             rc, stdout, stderr = await _run_command_async(cmd, timeout=30.0)
@@ -314,7 +315,7 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
         # Ripgrep returns 1 if no matches found, which isn't a failure in our case
         if rc not in (0, 1):
             return _fail(f"Search failed: {stderr}")
-            
+
         matches = []
         import json
         for line in stdout.splitlines():
@@ -337,10 +338,10 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
                         "line": parts[1],
                         "text": parts[2].strip()
                     })
-                
+
         if not matches:
             return _ok(f"No matches found for '{req.query}' in {req.path}", {"matches": []})
-            
+
         return _ok(f"Found {len(matches)} matches for '{req.query}'", {"matches": matches})
     except HTTPException:
         raise
@@ -358,7 +359,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # Resolve safe CWD
         safe_cwd = req.cwd if hasattr(req, 'cwd') and req.cwd else "."
         abs_cwd = resolve_safe_path(safe_cwd, ws_root)
-        
+
         # Determine the final command string
         final_cmd = ""
         if req.commands:
@@ -415,7 +416,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         log.info(f"Executing shell command: {final_cmd} in {abs_cwd}")
         # Enforce a max timeout of 300s
         safe_timeout = min(req.timeout, 300)
-        
+
         try:
             rc, stdout, stderr = await _run_command_async(final_cmd, cwd=abs_cwd, timeout=safe_timeout, shell=True)
         except TimeoutError:
@@ -431,7 +432,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                 "stderr": f"Command timed out after {safe_timeout}s",
             }
             return _fail(f"Command timed out after {safe_timeout}s", detail)
-        
+
         detail = {
             "command": final_cmd,
             "cwd": abs_cwd,
@@ -439,14 +440,14 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
             "stderr": stderr,
             "returncode": rc
         }
-        
+
         if rc == 0:
             cmd_prefix = req.command[:50] if req.command else "<unknown>"
             return _ok(f"Command executed successfully: {cmd_prefix}...", detail)
         else:
             log.error(f"[WORKSPACE SHELL FAIL] command='{final_cmd}' rc={rc} cwd={abs_cwd}\nstdout: {stdout}\nstderr: {stderr}")
             return _fail(f"Command failed with exit code {rc}", detail)
-            
+
     except HTTPException:
         raise
     except Exception as e:
@@ -472,33 +473,33 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
         abs_path = resolve_safe_path(req.path, ws_root)
         if not os.path.exists(abs_path):
             return _fail_with_discovery(req.path, f"File not found for patching: {req.path}")
-        
-        with open(abs_path, "r", encoding="utf-8", errors="replace") as f:
+
+        with open(abs_path, encoding="utf-8", errors="replace") as f:
             content = f.read()
-        
+
         applied_count = 0
         failed_chunks = []
-        
+
         for chunk in req.chunks:
             lines = content.splitlines(keepends=True)
             old_lines = chunk.old_text.splitlines(keepends=True)
-            
+
             # Normalize for matching
             old_norm = [line.strip() for line in old_lines if line.strip()]
-            
+
             best_match = None
             highest_ratio = 0.0
-            
+
             # Scan file for best matching block of code
             for i in range(len(lines) - len(old_norm) + 1):
                 candidate = [line.strip() for line in lines[i:i+len(old_lines)] if line.strip()]
                 ratio = difflib.SequenceMatcher(None, old_norm, candidate[:len(old_norm)]).ratio()
-                
+
                 if ratio > highest_ratio:
                     highest_ratio = ratio
                     best_match = (i, i + len(old_lines))
 
-            if highest_ratio > 0.85 and best_match: 
+            if highest_ratio > 0.85 and best_match:
                 start, end = best_match
                 log.info(f"Fuzzy patch match found with ratio {highest_ratio:.2f} at lines {start}-{end}")
                 # Reconstruct file with new chunk swapped in
@@ -506,26 +507,26 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
                 if not new_lines[-1].endswith("\n"):
                     new_lines[-1] += "\n"
                 new_lines += lines[end:]
-                
+
                 content = "".join(new_lines)
                 applied_count += 1
             else:
                 failed_chunks.append(chunk.old_text)
-        
+
         if applied_count == 0:
             return _fail(f"Patch failed: No chunks matched the target file {req.path}")
-        
+
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(content)
-            
+
         message = f"Applied {applied_count}/{len(req.chunks)} patches to {req.path}."
-            
+
         if failed_chunks:
             message += f" Failed to match {len(failed_chunks)} chunks."
-            
+
         if req.commit_after:
             message += " (Commit pending)"
-            
+
         return _ok(message, {"path": req.path, "applied": applied_count, "failed": len(failed_chunks)})
     except HTTPException:
         raise

@@ -1,10 +1,12 @@
 # services/execution/tests/test_timer.py
-import pytest
 import json
 from datetime import datetime, timedelta
 
-from services.execution.schemas import TimerRequest, UserContext
+import pytest
+
 from services.execution.handlers.timer import handle_timer
+from services.execution.schemas import TimerRequest, UserContext
+
 
 class MockRedis:
     def __init__(self):
@@ -48,17 +50,17 @@ async def test_timer_add_and_list(mock_redis_conn):
         duration_str="10m",
         title="Kitchen Timer"
     )
-    
+
     res = await handle_timer(add_req)
     assert res.status == "SUCCESS"
     assert "Set timer" in res.message
-    
+
     # List timers
     list_req = TimerRequest(
         user_context=mock_context,
         action="list"
     )
-    
+
     list_res = await handle_timer(list_req)
     assert list_res.status == "SUCCESS"
     assert "Kitchen Timer" in list_res.message
@@ -74,18 +76,18 @@ async def test_timer_delete(mock_redis_conn):
         title="Delete Me Timer"
     )
     await handle_timer(add_req)
-    
+
     # Delete the timer
     del_req = TimerRequest(
         user_context=mock_context,
         action="delete",
         title="Delete Me"
     )
-    
+
     res = await handle_timer(del_req)
     assert res.status == "SUCCESS"
     assert "Deleted" in res.message
-    
+
     # Verify it is deleted
     list_req = TimerRequest(
         user_context=mock_context,
@@ -107,7 +109,7 @@ async def test_timer_pause_and_resume(mock_redis_conn, mocker):
     add_res = await handle_timer(add_req)
     assert add_res.detail is not None
     timer_id = add_res.detail["timer_id"]
-    
+
     # Pause it
     pause_req = TimerRequest(
         user_context=mock_context,
@@ -116,23 +118,23 @@ async def test_timer_pause_and_resume(mock_redis_conn, mocker):
     )
     pause_res = await handle_timer(pause_req)
     assert pause_res.status == "SUCCESS"
-    
+
     # Verify in DB that it is paused
     db_val = await mock_redis_conn.get(f"timer:test_user:{timer_id}")
     t = json.loads(db_val)
     assert t["active"] is False
     assert "paused_at" in t
-    
+
     # Mock system time for resume to be 5 minutes later
     original_expiry = datetime.fromisoformat(t["expires_at"])
     paused_at_time = datetime.fromisoformat(t["paused_at"])
     resume_time = paused_at_time + timedelta(minutes=5)
-    
+
     mocker.patch("services.execution.handlers.timer.datetime", mocker.Mock(
         now=lambda *args, **kwargs: resume_time,
         fromisoformat=datetime.fromisoformat
     ))
-    
+
     # Resume it
     resume_req = TimerRequest(
         user_context=mock_context,
@@ -141,13 +143,13 @@ async def test_timer_pause_and_resume(mock_redis_conn, mocker):
     )
     resume_res = await handle_timer(resume_req)
     assert resume_res.status == "SUCCESS"
-    
+
     # Verify in DB that it is active and expires_at was pushed by 5 minutes
     db_val_res = await mock_redis_conn.get(f"timer:test_user:{timer_id}")
     t_res = json.loads(db_val_res)
     assert t_res["active"] is True
     assert "paused_at" not in t_res
-    
+
     new_expiry = datetime.fromisoformat(t_res["expires_at"])
     if new_expiry.tzinfo:
         new_expiry = new_expiry.replace(tzinfo=None)

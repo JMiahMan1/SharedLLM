@@ -2,8 +2,8 @@
 Patches socket.getaddrinfo to resolve .local domains via dns-sync,
 enabling live failover without restarts when using network_mode: host.
 """
-import socket
 import logging
+import socket
 
 log = logging.getLogger("execution.dns_resolver")
 
@@ -20,7 +20,7 @@ def _resolve_via_dns_sync(hostname: str, family: int = socket.AF_INET):
         resolver.port = _DNS_SYNC_PORT
         resolver.timeout = 2.0
         resolver.lifetime = 2.0
-        
+
         answers = resolver.resolve(hostname, 'A')
         for rdata in answers:
             ip = str(rdata)
@@ -40,7 +40,7 @@ def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
         if ip:
             return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ip, port))]
         log.warning(f"[dns-sync] Failed to resolve {host}, falling back to system DNS")
-    
+
     return _original_getaddrinfo(host, port, family, type, proto, flags)
 
 def patch_dns_resolver():

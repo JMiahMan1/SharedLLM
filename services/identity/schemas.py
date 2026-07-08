@@ -2,19 +2,18 @@
 """
 Pydantic schemas for the Identity Service API.
 """
-from typing import Optional
-from pydantic import BaseModel
 
+from pydantic import BaseModel
 
 # ─── Internal inter-service schema ────────────────────────────────────────────
 
 class ResolveRequest(BaseModel):
     """Sent by the Gateway to resolve a caller's identity."""
-    user_id: Optional[int] = None
-    rag_user: Optional[str] = None
-    voice_id: Optional[str] = None
-    device_id: Optional[str] = None
-    api_key: Optional[str] = None
+    user_id: int | None = None
+    rag_user: str | None = None
+    voice_id: str | None = None
+    device_id: str | None = None
+    api_key: str | None = None
 
 
 class ResolvedCredentials(BaseModel):
@@ -25,33 +24,33 @@ class ResolvedCredentials(BaseModel):
     """
     user: str
     is_admin: bool = False
-    api_key: Optional[str] = None         # decrypted at resolution time for tool usage
-    nextcloud_url: Optional[str] = None
-    nextcloud_user: Optional[str] = None
-    nextcloud_pass: Optional[str] = None   # decrypted at resolution time
-    ha_url: Optional[str] = None
-    ha_token: Optional[str] = None         # decrypted at resolution time
-    github_url: Optional[str] = None
-    github_user: Optional[str] = None
-    github_token: Optional[str] = None
-    gitlab_url: Optional[str] = None
-    gitlab_user: Optional[str] = None
-    gitlab_token: Optional[str] = None
-    audiobookshelf_url: Optional[str] = None
-    audiobookshelf_user: Optional[str] = None
-    audiobookshelf_pass: Optional[str] = None  # decrypted at resolution time
-    audiobookshelf_api_key: Optional[str] = None  # decrypted at resolution time
-    mass_url: Optional[str] = None
-    mass_token: Optional[str] = None           # decrypted at resolution time
-    git_url: Optional[str] = None
-    git_user: Optional[str] = None
-    git_token: Optional[str] = None
-    huggingface_token: Optional[str] = None
-    skylight_url: Optional[str] = None
-    skylight_email: Optional[str] = None
-    skylight_pass: Optional[str] = None
+    api_key: str | None = None         # decrypted at resolution time for tool usage
+    nextcloud_url: str | None = None
+    nextcloud_user: str | None = None
+    nextcloud_pass: str | None = None   # decrypted at resolution time
+    ha_url: str | None = None
+    ha_token: str | None = None         # decrypted at resolution time
+    github_url: str | None = None
+    github_user: str | None = None
+    github_token: str | None = None
+    gitlab_url: str | None = None
+    gitlab_user: str | None = None
+    gitlab_token: str | None = None
+    audiobookshelf_url: str | None = None
+    audiobookshelf_user: str | None = None
+    audiobookshelf_pass: str | None = None  # decrypted at resolution time
+    audiobookshelf_api_key: str | None = None  # decrypted at resolution time
+    mass_url: str | None = None
+    mass_token: str | None = None           # decrypted at resolution time
+    git_url: str | None = None
+    git_user: str | None = None
+    git_token: str | None = None
+    huggingface_token: str | None = None
+    skylight_url: str | None = None
+    skylight_email: str | None = None
+    skylight_pass: str | None = None
     skylight_enabled: bool = True
-    preferred_tts_voice: Optional[str] = "af_heart"
+    preferred_tts_voice: str | None = "af_heart"
 
 
 # ─── External CRUD schemas ─────────────────────────────────────────────────────
@@ -61,64 +60,64 @@ class UserCreate(BaseModel):
     display_name: str = ""
     is_admin: bool = False
     is_system_default: bool = False
-    api_key: Optional[str] = None
-    password: Optional[str] = None
-    nextcloud_url: Optional[str] = None
-    nextcloud_user: Optional[str] = None
-    nextcloud_pass: Optional[str] = None
-    ha_url: Optional[str] = None
-    ha_token: Optional[str] = None
-    github_url: Optional[str] = None
-    github_user: Optional[str] = None
-    github_token: Optional[str] = None
-    gitlab_url: Optional[str] = None
-    gitlab_user: Optional[str] = None
-    gitlab_token: Optional[str] = None
-    audiobookshelf_url: Optional[str] = None
-    audiobookshelf_user: Optional[str] = None
-    audiobookshelf_pass: Optional[str] = None
-    audiobookshelf_api_key: Optional[str] = None
-    mass_url: Optional[str] = None
-    mass_token: Optional[str] = None
-    huggingface_token: Optional[str] = None
-    skylight_url: Optional[str] = None
-    skylight_email: Optional[str] = None
-    skylight_pass: Optional[str] = None
+    api_key: str | None = None
+    password: str | None = None
+    nextcloud_url: str | None = None
+    nextcloud_user: str | None = None
+    nextcloud_pass: str | None = None
+    ha_url: str | None = None
+    ha_token: str | None = None
+    github_url: str | None = None
+    github_user: str | None = None
+    github_token: str | None = None
+    gitlab_url: str | None = None
+    gitlab_user: str | None = None
+    gitlab_token: str | None = None
+    audiobookshelf_url: str | None = None
+    audiobookshelf_user: str | None = None
+    audiobookshelf_pass: str | None = None
+    audiobookshelf_api_key: str | None = None
+    mass_url: str | None = None
+    mass_token: str | None = None
+    huggingface_token: str | None = None
+    skylight_url: str | None = None
+    skylight_email: str | None = None
+    skylight_pass: str | None = None
     skylight_enabled: bool = True
-    preferred_tts_voice: Optional[str] = "af_heart"
+    preferred_tts_voice: str | None = "af_heart"
 
 
 class UserUpdate(BaseModel):
-    display_name: Optional[str] = None
-    nextcloud_url: Optional[str] = None
-    nextcloud_user: Optional[str] = None
-    nextcloud_pass: Optional[str] = None
-    ha_url: Optional[str] = None
-    ha_token: Optional[str] = None
-    github_url: Optional[str] = None
-    github_user: Optional[str] = None
-    github_token: Optional[str] = None
-    gitlab_url: Optional[str] = None
-    gitlab_user: Optional[str] = None
-    gitlab_token: Optional[str] = None
-    audiobookshelf_url: Optional[str] = None
-    audiobookshelf_user: Optional[str] = None
-    audiobookshelf_pass: Optional[str] = None
-    audiobookshelf_api_key: Optional[str] = None
-    mass_url: Optional[str] = None
-    mass_token: Optional[str] = None
-    git_url: Optional[str] = None
-    git_user: Optional[str] = None
-    git_token: Optional[str] = None
-    huggingface_token: Optional[str] = None
-    skylight_url: Optional[str] = None
-    skylight_email: Optional[str] = None
-    skylight_pass: Optional[str] = None
-    skylight_enabled: Optional[bool] = None
-    preferred_tts_voice: Optional[str] = None
-    voice_fingerprint: Optional[str] = None
-    is_admin: Optional[bool] = None
-    is_system_default: Optional[bool] = None
+    display_name: str | None = None
+    nextcloud_url: str | None = None
+    nextcloud_user: str | None = None
+    nextcloud_pass: str | None = None
+    ha_url: str | None = None
+    ha_token: str | None = None
+    github_url: str | None = None
+    github_user: str | None = None
+    github_token: str | None = None
+    gitlab_url: str | None = None
+    gitlab_user: str | None = None
+    gitlab_token: str | None = None
+    audiobookshelf_url: str | None = None
+    audiobookshelf_user: str | None = None
+    audiobookshelf_pass: str | None = None
+    audiobookshelf_api_key: str | None = None
+    mass_url: str | None = None
+    mass_token: str | None = None
+    git_url: str | None = None
+    git_user: str | None = None
+    git_token: str | None = None
+    huggingface_token: str | None = None
+    skylight_url: str | None = None
+    skylight_email: str | None = None
+    skylight_pass: str | None = None
+    skylight_enabled: bool | None = None
+    preferred_tts_voice: str | None = None
+    voice_fingerprint: str | None = None
+    is_admin: bool | None = None
+    is_system_default: bool | None = None
 
 
 class UserRead(BaseModel):
@@ -127,25 +126,25 @@ class UserRead(BaseModel):
     display_name: str
     is_admin: bool
     is_system_default: bool
-    nextcloud_url: Optional[str] = None
-    nextcloud_user: Optional[str] = None
-    ha_url: Optional[str] = None
-    github_url: Optional[str] = None
-    github_user: Optional[str] = None
-    gitlab_url: Optional[str] = None
-    gitlab_user: Optional[str] = None
-    audiobookshelf_url: Optional[str] = None
-    audiobookshelf_user: Optional[str] = None
-    audiobookshelf_api_key: Optional[str] = None
-    mass_url: Optional[str] = None
-    git_url: Optional[str] = None
-    git_user: Optional[str] = None
-    skylight_url: Optional[str] = None
-    skylight_email: Optional[str] = None
+    nextcloud_url: str | None = None
+    nextcloud_user: str | None = None
+    ha_url: str | None = None
+    github_url: str | None = None
+    github_user: str | None = None
+    gitlab_url: str | None = None
+    gitlab_user: str | None = None
+    audiobookshelf_url: str | None = None
+    audiobookshelf_user: str | None = None
+    audiobookshelf_api_key: str | None = None
+    mass_url: str | None = None
+    git_url: str | None = None
+    git_user: str | None = None
+    skylight_url: str | None = None
+    skylight_email: str | None = None
     skylight_enabled: bool = True
-    voice_fingerprint: Optional[str] = None
-    preferred_tts_voice: Optional[str] = "af_heart"
-    api_key: Optional[str] = None
+    voice_fingerprint: str | None = None
+    preferred_tts_voice: str | None = "af_heart"
+    api_key: str | None = None
     # NOTE: Encrypted fields (pass/token) are intentionally omitted from read responses
 
 
@@ -174,10 +173,10 @@ class LoginResponse(BaseModel):
 class DiscoverUser(BaseModel):
     username: str
     source: str  # e.g. "Home Assistant", "Nextcloud", "Home Assistant + Nextcloud"
-    display_name: Optional[str] = None
-    email: Optional[str] = None
-    ha_person_id: Optional[str] = None
-    nc_username: Optional[str] = None
+    display_name: str | None = None
+    email: str | None = None
+    ha_person_id: str | None = None
+    nc_username: str | None = None
 
 class DiscoverResponse(BaseModel):
     users: list[DiscoverUser]
@@ -186,12 +185,12 @@ class DiscoverResponse(BaseModel):
 
 class ImportUserResult(BaseModel):
     username: str
-    display_name: Optional[str] = None
-    email: Optional[str] = None
+    display_name: str | None = None
+    email: str | None = None
     source: str
-    temp_password: Optional[str] = None
+    temp_password: str | None = None
     nextcloud_groups: list[str] = []
-    ha_entity_id: Optional[str] = None
+    ha_entity_id: str | None = None
     ha_device_trackers: list[str] = []
 
 class ImportResponse(BaseModel):
@@ -204,44 +203,44 @@ class ImportResponse(BaseModel):
 class GlobalSettingRead(BaseModel):
     key: str
     value: str
-    description: Optional[str] = None
+    description: str | None = None
 
 class GlobalSettingUpdate(BaseModel):
     value: str
 
 class RavenMissionCreate(BaseModel):
-    slug: Optional[str] = None
+    slug: str | None = None
     mission_type: str = "admin_fix"
     priority: int = 1
-    target_container: Optional[str] = None
-    error_summary: Optional[str] = None
+    target_container: str | None = None
+    error_summary: str | None = None
     proposed_mission: str
     coding_model: str = "Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M"
-    user_id: Optional[int] = None
+    user_id: int | None = None
 
 class RavenMissionUpdate(BaseModel):
-    slug: Optional[str] = None
-    status: Optional[str] = None
-    progress: Optional[int] = None
-    scheduled_for: Optional[str] = None
-    output_log: Optional[str] = None
-    result: Optional[str] = None
+    slug: str | None = None
+    status: str | None = None
+    progress: int | None = None
+    scheduled_for: str | None = None
+    output_log: str | None = None
+    result: str | None = None
 
 class RavenMissionRead(BaseModel):
     id: int
-    slug: Optional[str] = None
+    slug: str | None = None
     mission_type: str
     priority: int
-    target_container: Optional[str] = None
-    error_summary: Optional[str] = None
+    target_container: str | None = None
+    error_summary: str | None = None
     proposed_mission: str
-    coding_model: Optional[str] = None
+    coding_model: str | None = None
     status: str
     progress: int
-    scheduled_for: Optional[str] = None
+    scheduled_for: str | None = None
     created_at: str
-    output_log: Optional[str] = None
-    result: Optional[str] = None
+    output_log: str | None = None
+    result: str | None = None
 
 class UserWidgetRead(BaseModel):
     widget_key: str
@@ -249,7 +248,7 @@ class UserWidgetRead(BaseModel):
     order_index: int
     size: str
     is_pinned: bool
-    sort_mode: Optional[str] = None
+    sort_mode: str | None = None
     pinned_devices: list[str] = []
     config: dict = {}
     updated_at: int
@@ -260,12 +259,12 @@ class WidgetSettingsRead(BaseModel):
     quick_assistant_enabled: bool
 
 class UserWidgetUpdate(BaseModel):
-    visibility: Optional[str] = None
-    order_index: Optional[int] = None
-    size: Optional[str] = None
-    is_pinned: Optional[bool] = None
-    sort_mode: Optional[str] = None
-    pinned_devices: Optional[list[str]] = None
-    config: Optional[dict] = None
-    quick_assistant_enabled: Optional[bool] = None
-    user_id: Optional[int] = None
+    visibility: str | None = None
+    order_index: int | None = None
+    size: str | None = None
+    is_pinned: bool | None = None
+    sort_mode: str | None = None
+    pinned_devices: list[str] | None = None
+    config: dict | None = None
+    quick_assistant_enabled: bool | None = None
+    user_id: int | None = None

@@ -13,16 +13,16 @@ Samsung Tizen TVs support:
   - Remote key codes via remote.send_command for transport controls
   - ~15 second boot time from off state
 """
-import logging
 import asyncio
+import logging
+
 try:
+    import device_discovery
     import ha_client
     from schemas import ExecutionResult
-    import device_discovery
 except ImportError:
-    from .. import ha_client
+    from .. import device_discovery, ha_client
     from ..schemas import ExecutionResult
-    from .. import device_discovery
 
 log = logging.getLogger("execution.samsung")
 

@@ -1,9 +1,10 @@
 """
 Tests for LLM Settings UI component and model availability API.
 """
-import pytest
-import httpx
 import os
+
+import httpx
+import pytest
 
 SERVER_IP = os.getenv("SERVER_IP", "192.168.2.205")
 GATEWAY_URL = os.getenv("GATEWAY_URL", f"http://{SERVER_IP}:8080")

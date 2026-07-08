@@ -5,12 +5,12 @@ Provides IntentClassifier for categorizing user queries into intents.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 log = logging.getLogger("app.logic.intents.classifier")
 
 # Default intent patterns (keyword-based fallback when LLM is unavailable)
-_INTENT_PATTERNS: Dict[str, List[str]] = {
+_INTENT_PATTERNS: dict[str, list[str]] = {
     "media_play": ["play", "watch", "start", "launch"],
     "media_pause": ["pause", "stop", "hold"],
     "media_volume": ["volume", "louder", "quieter", "mute"],
@@ -33,10 +33,10 @@ class IntentClassifier:
     Falls back to pattern matching when the LLM is unavailable.
     """
 
-    def __init__(self, llm_client: Optional[Any] = None) -> None:
+    def __init__(self, llm_client: Any | None = None) -> None:
         self._llm = llm_client
 
-    def classify(self, query: str, top_k: int = 1) -> Tuple[str, float]:
+    def classify(self, query: str, top_k: int = 1) -> tuple[str, float]:
         """
         Classify a query into an intent.
 
@@ -48,10 +48,10 @@ class IntentClassifier:
 
         return self._classify_patterns(query)
 
-    def _classify_patterns(self, query: str) -> Tuple[str, float]:
+    def _classify_patterns(self, query: str) -> tuple[str, float]:
         """Pattern-based classification using keyword matching."""
         query_lower = query.lower()
-        scores: List[Tuple[str, float]] = []
+        scores: list[tuple[str, float]] = []
 
         for intent, keywords in _INTENT_PATTERNS.items():
             if not keywords:
@@ -67,7 +67,7 @@ class IntentClassifier:
         scores.sort(key=lambda x: x[1], reverse=True)
         return scores[0]
 
-    def _classify_with_llm(self, query: str, top_k: int = 1) -> Tuple[str, float]:
+    def _classify_with_llm(self, query: str, top_k: int = 1) -> tuple[str, float]:
         """LLM-based classification."""
         try:
             if self._llm is None:

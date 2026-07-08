@@ -62,9 +62,9 @@ and generates a profile for each device detailing:
 | DLNA/UPnP | 9197/8200 | SOAP/HTTP | ❌ | ❌ | ✅ SetAVTransportURI | ✅ Play/Pause/Stop |
 | HA dlna_dmr domain | - | REST API | ❌ | ❌ | ✅ media_player.play_media | ✅ media_player.media_play/pause |
 """
+import asyncio
 import logging
 import socket
-import asyncio
 
 from services.execution import ha_client
 

@@ -1,5 +1,6 @@
-import requests
 import os
+
+import requests
 
 url = os.getenv("JARVIS_BASE_URL", "http://localhost:8080/api/chat")
 payload = {

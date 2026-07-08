@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
-
 
 ProviderKind = Literal["nextcloud"]
 
@@ -51,15 +50,15 @@ class IndexScanRequest(BaseModel):
     provider: ProviderConfig
     path: str = "/"
     recursive: bool = True
-    user_id: Optional[str] = None
+    user_id: str | None = None
     force: bool = False
 
 
 class ProviderWriteRequest(BaseModel):
     provider: ProviderConfig
     path: str
-    content: Optional[str] = None
-    content_b64: Optional[str] = None
+    content: str | None = None
+    content_b64: str | None = None
     create_parents: bool = True
     verify: bool = True
 

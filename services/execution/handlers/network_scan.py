@@ -10,7 +10,6 @@ import asyncio
 import ipaddress
 import logging
 import socket
-from typing import Optional
 
 import aiohttp
 
@@ -97,8 +96,8 @@ ALL_TV_PORTS = sorted(set(
 
 
 async def scan_network(
-    subnet: Optional[str] = None,
-    device_type: Optional[str] = None,
+    subnet: str | None = None,
+    device_type: str | None = None,
     include_mac: bool = True,
     timeout: float = 2.0,
 ) -> list[dict]:
@@ -165,7 +164,7 @@ async def _fast_port_scan(
     timeout: float,
 ) -> list[tuple[str, int]]:
     """Fast concurrent port scan returning (ip, port) pairs."""
-    async def _check(ip: str, port: int) -> Optional[tuple[str, int]]:
+    async def _check(ip: str, port: int) -> tuple[str, int] | None:
         try:
             _, writer = await asyncio.wait_for(
                 asyncio.open_connection(ip, port),
@@ -248,7 +247,7 @@ async def _enrich_devices(
     return devices
 
 
-async def _probe_roku(client: aiohttp.ClientSession, ip: str, timeout: float) -> Optional[dict]:
+async def _probe_roku(client: aiohttp.ClientSession, ip: str, timeout: float) -> dict | None:
     """Probe Roku device via ECP API."""
     try:
         async with client.get(f"http://{ip}:8060/query/device-info", timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
@@ -278,7 +277,7 @@ async def _probe_roku(client: aiohttp.ClientSession, ip: str, timeout: float) ->
         return None
 
 
-async def _probe_webos(client: aiohttp.ClientSession, ip: str, timeout: float) -> Optional[dict]:
+async def _probe_webos(client: aiohttp.ClientSession, ip: str, timeout: float) -> dict | None:
     """Probe webOS TV via status endpoint and WebSocket."""
     try:
         # Try port 9080 first (Netflix chip status)
@@ -316,7 +315,7 @@ async def _probe_webos(client: aiohttp.ClientSession, ip: str, timeout: float) -
     return None
 
 
-async def _probe_samsung(client: aiohttp.ClientSession, ip: str, timeout: float) -> Optional[dict]:
+async def _probe_samsung(client: aiohttp.ClientSession, ip: str, timeout: float) -> dict | None:
     """Probe Samsung TV via REST API."""
     for port in (8001, 8002):
         try:
@@ -342,7 +341,7 @@ async def _probe_samsung(client: aiohttp.ClientSession, ip: str, timeout: float)
     return None
 
 
-async def _probe_sony_bravia(client: aiohttp.ClientSession, ip: str, timeout: float) -> Optional[dict]:
+async def _probe_sony_bravia(client: aiohttp.ClientSession, ip: str, timeout: float) -> dict | None:
     """Probe Sony Bravia TV via UPnP/IRCC API."""
     try:
         # Try the Sony ScalarWeb API descriptor
@@ -377,7 +376,7 @@ async def _probe_sony_bravia(client: aiohttp.ClientSession, ip: str, timeout: fl
     return None
 
 
-async def _probe_chromecast(ip: str, timeout: float) -> Optional[dict]:
+async def _probe_chromecast(ip: str, timeout: float) -> dict | None:
     """Probe Chromecast device."""
     try:
         from pychromecast import get_chromecasts  # pyright: ignore[reportMissingImports]
@@ -400,7 +399,7 @@ async def _probe_chromecast(ip: str, timeout: float) -> Optional[dict]:
     return None
 
 
-async def _probe_dlna(client: aiohttp.ClientSession, ip: str, timeout: float) -> Optional[dict]:
+async def _probe_dlna(client: aiohttp.ClientSession, ip: str, timeout: float) -> dict | None:
     """Probe DLNA device."""
     try:
         async with client.get(f"http://{ip}:9197/dmr", timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
@@ -420,7 +419,7 @@ async def _probe_dlna(client: aiohttp.ClientSession, ip: str, timeout: float) ->
     return None
 
 
-async def _probe_esphome(ip: str, timeout: float) -> Optional[dict]:
+async def _probe_esphome(ip: str, timeout: float) -> dict | None:
     """Probe ESPHome device via native API."""
     try:
         import aioesphomeapi  # pyright: ignore[reportMissingImports]

@@ -1,9 +1,10 @@
+import json
 import os
 import sys
-import json
-import redis
 from datetime import datetime
 from typing import Any
+
+import redis
 from dotenv import load_dotenv
 
 # Load Env
@@ -32,30 +33,30 @@ if not keys:
 else:
     now = datetime.now()
     print(f"Current System Time: {now} (iso: {now.isoformat()})")
-    
+
     for k in keys:
         val = r.get(k)  # type: ignore[misc]
         print(f"\n--- Key: {k} ---")
         print(f"Raw Value: {val}")
-        
+
         try:
             data = json.loads(val) if val is not None else {}  # type: ignore[arg-type]
             expires_at_str = data.get("expires_at")
-            
+
             if expires_at_str:
                 expires_at = datetime.fromisoformat(expires_at_str)
                 remaining = (expires_at - now).total_seconds()
-                
+
                 print(f"   Parsed Expiry: {expires_at}")
                 print(f"   Remaining Seconds: {remaining}")
-                
+
                 if remaining < 0:
                     print("   [STATUS] EXPIRED (List function will hide this)")
                 else:
                     print("   [STATUS] ACTIVE (List function should show this)")
             else:
                 print("   [ERROR] Missing 'expires_at' field")
-                
+
         except Exception as e:
             print(f"   [ERROR] JSON Decode/Parse Error: {e}")
 

@@ -1,10 +1,11 @@
 import asyncio
 import json
-import uuid
 import logging
 import time
-from typing import Any, Dict, Optional, List
-import redis.asyncio as redis  # noqa: E402
+import uuid
+from typing import Any
+
+import redis.asyncio as redis
 
 log = logging.getLogger("gateway.messaging")
 
@@ -27,7 +28,7 @@ class InferenceJobQueue:
     """
     def __init__(self, redis_url: str):
         self.redis_url = redis_url
-        self._redis: Optional[redis.Redis] = None
+        self._redis: redis.Redis | None = None
         self.QUEUE_KEY = "raven:inference_queue"
         self.PROCESSING_KEY = "raven:inference_processing"
         self.DEAD_LETTER_KEY = "raven:inference_dead_letter"
@@ -42,7 +43,7 @@ class InferenceJobQueue:
             self._redis = redis.from_url(self.redis_url, decode_responses=True)
             log.info(f"Connected to Redis at {self.redis_url} for job queuing.")
 
-    async def enqueue_job(self, user_id: str, payload: Dict[str, Any]) -> str:
+    async def enqueue_job(self, user_id: str, payload: dict[str, Any]) -> str:
         """Adds a job to the FIFO queue."""
         if not self._redis:
             await self.connect()
@@ -67,14 +68,14 @@ class InferenceJobQueue:
             json.dumps(job_data),
             ex=self.DEFAULT_TTL_SECONDS,
         )
-        
+
         # Push to FIFO queue (Right push) - rpush returns int but we await for consistency
         rpush_result = await self._redis.rpush(self.QUEUE_KEY, job_id)  # type: ignore[misc]
-        
+
         log.info(f"Job {job_id} enqueued for user {user_id}")
         return job_id
 
-    async def claim_job(self) -> Optional[Dict[str, Any]]:
+    async def claim_job(self) -> dict[str, Any] | None:
         """
         Atomically claims the next queued job and places it into the processing list.
         The lease must be renewed while work is in progress.
@@ -106,7 +107,7 @@ class InferenceJobQueue:
         await self.heartbeat_job(job_id)
         return job
 
-    async def pop_job(self) -> Optional[Dict[str, Any]]:
+    async def pop_job(self) -> dict[str, Any] | None:
         """Backward-compatible alias for older callers."""
         return await self.claim_job()
 
@@ -160,7 +161,7 @@ class InferenceJobQueue:
         await self._finalize_job(job_id)
         log.error(f"Job {job_id} failed: {error}")
 
-    async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
+    async def get_job_status(self, job_id: str) -> dict[str, Any] | None:
         """Retrieves the current status and result of a job."""
         if not self._redis:
             await self.connect()
@@ -192,7 +193,7 @@ class InferenceJobQueue:
         await self._redis.rpush(key, chunk)  # type: ignore[misc]
         await self._redis.expire(key, 600) # 10 minute TTL for chunks  # type: ignore[misc]
 
-    async def get_chunks(self, job_id: str) -> List[str]:
+    async def get_chunks(self, job_id: str) -> list[str]:
         """Pops all available chunks for a job."""
         if not self._redis:
             await self.connect()

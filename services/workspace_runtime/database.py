@@ -1,11 +1,11 @@
-from services.config import WORKSPACE_DATABASE_URL
-from sqlmodel import Session, SQLModel, create_engine
 from sqlalchemy import inspect, text
-from services.workspace_runtime.models import Workspace  # pyright: ignore[reportUnusedImport]
+from sqlmodel import Session, SQLModel, create_engine
+
+from services.config import WORKSPACE_DATABASE_URL
 
 DATABASE_URL = WORKSPACE_DATABASE_URL
 engine = create_engine(
-    DATABASE_URL, 
+    DATABASE_URL,
     connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in DATABASE_URL else {}
 )
 

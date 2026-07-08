@@ -1,6 +1,7 @@
 
 
 import logging
+
 import requests
 
 # Configure basic logging
@@ -13,15 +14,15 @@ REMOTE_URL = "http://ai.local:11435/api/rag/search"
 def dump_metadata():
     query = "Gracies TV"
     log.info(f"Querying Remote API for '{query}'...")
-    
+
     try:
         # The /api/rag/search endpoint returns vector search results
         response = requests.get(REMOTE_URL, params={"q": query, "k": 5, "source": "ha"}, timeout=10)
-        
+
         if response.status_code == 200:
             data = response.json()
             results = data.get("results", [])
-            
+
             print("\n--- METADATA DUMP (REMOTE) ---")
             for doc in results:
                 meta = doc.get("metadata", {})

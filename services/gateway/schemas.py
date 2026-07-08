@@ -1,55 +1,57 @@
 # services/gateway/schemas.py
-from typing import Optional, Dict, Any, Literal, List
+from typing import Any, Literal
+
 from pydantic import BaseModel, Field, field_validator
+
 
 class ChatRequest(BaseModel):
     query: str
-    voice_id: Optional[str] = None
-    device_id: Optional[str] = None
-    rag_user: Optional[str] = None
-    model: Optional[str] = None
+    voice_id: str | None = None
+    device_id: str | None = None
+    rag_user: str | None = None
+    model: str | None = None
     stream: bool = False
-    api_key: Optional[str] = None
-    client: Optional[str] = "chat" # chat, voice, home_assistant
-    source: Optional[str] = None
+    api_key: str | None = None
+    client: str | None = "chat" # chat, voice, home_assistant
+    source: str | None = None
 
 class ChatResponse(BaseModel):
     status: Literal["SUCCESS", "FAILURE"]
     message: str
-    intent: Optional[str] = None
-    confidence: Optional[float] = None
+    intent: str | None = None
+    confidence: float | None = None
     llm_bypassed: bool = False
-    execution_result: Optional[Dict[str, Any]] = None
+    execution_result: dict[str, Any] | None = None
 
 class SemanticRoute(BaseModel):
     name: str
     description: str
-    examples: List[str]
+    examples: list[str]
     confidence_threshold: float = 0.85
 
 class IntentClassificationResponse(BaseModel):
     intent: str
     confidence: float
     llm_bypassed: bool
-    route_name: Optional[str] = None
+    route_name: str | None = None
 
 class ResolvedCredentials(BaseModel):
     user: str
-    github_token: Optional[str] = None
-    gitlab_token: Optional[str] = None
-    git_token: Optional[str] = None
-    nextcloud_url: Optional[str] = None
-    nextcloud_user: Optional[str] = None
-    nextcloud_pass: Optional[str] = None
-    ha_url: Optional[str] = None
-    ha_token: Optional[str] = None
-    audiobookshelf_url: Optional[str] = None
-    audiobookshelf_user: Optional[str] = None
-    audiobookshelf_pass: Optional[str] = None
-    openai_key: Optional[str] = None
-    api_key: Optional[str] = None
-    mass_url: Optional[str] = None
-    mass_token: Optional[str] = None
+    github_token: str | None = None
+    gitlab_token: str | None = None
+    git_token: str | None = None
+    nextcloud_url: str | None = None
+    nextcloud_user: str | None = None
+    nextcloud_pass: str | None = None
+    ha_url: str | None = None
+    ha_token: str | None = None
+    audiobookshelf_url: str | None = None
+    audiobookshelf_user: str | None = None
+    audiobookshelf_pass: str | None = None
+    openai_key: str | None = None
+    api_key: str | None = None
+    mass_url: str | None = None
+    mass_token: str | None = None
     is_admin: bool = False
 
     @field_validator(
@@ -58,14 +60,14 @@ class ResolvedCredentials(BaseModel):
         "openai_key", "mass_url", "mass_token", mode="before"
     )
     @classmethod
-    def coerce_empty_to_none(cls, v: Any) -> Optional[str]:
+    def coerce_empty_to_none(cls, v: Any) -> str | None:
         if isinstance(v, str) and not v.strip():
             return None
         return v
 
 class OllamaPullRequest(BaseModel):
-    model: Optional[str] = None
-    name: Optional[str] = None
+    model: str | None = None
+    name: str | None = None
     stream: bool = False
     insecure: bool = False
 
@@ -73,10 +75,10 @@ class OllamaGenerateRequest(BaseModel):
     model: str
     prompt: str
     stream: bool = False
-    system: Optional[str] = None
-    template: Optional[str] = None
-    context: Optional[List[int]] = None
-    options: Optional[Dict[str, Any]] = None
+    system: str | None = None
+    template: str | None = None
+    context: list[int] | None = None
+    options: dict[str, Any] | None = None
 
 class StorageListRequest(BaseModel):
     path: str = "/"
@@ -109,9 +111,9 @@ class PatchChunk(BaseModel):
 
 class WorkspaceFilePatchRequest(BaseModel):
     path: str = Field(..., alias="file_path")
-    chunks: List[PatchChunk] = Field(..., alias="patch")
+    chunks: list[PatchChunk] = Field(..., alias="patch")
     commit_after: bool = False
-    commit_message: Optional[str] = None
+    commit_message: str | None = None
 
     model_config = {"populate_by_name": True}
 
@@ -119,12 +121,12 @@ class WorkspaceShellRequest(BaseModel):
     command: str
 
 class GitOperationRequest(BaseModel):
-    workspace_id: Optional[str] = Field(None, description="Workspace ID (uses default if not specified)")
+    workspace_id: str | None = Field(None, description="Workspace ID (uses default if not specified)")
     action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show"]
-    path: Optional[str] = "."
-    message: Optional[str] = None
-    branch: Optional[str] = "microservices"
-    log_count: Optional[int] = 10
+    path: str | None = "."
+    message: str | None = None
+    branch: str | None = "microservices"
+    log_count: int | None = 10
 
 class ControlPlaneRequest(BaseModel):
     service_name: str
@@ -138,22 +140,22 @@ class SystemLearningRequest(BaseModel):
 class AnnouncementRequest(BaseModel):
     entity_id: str
     message: str
-    volume: Optional[float] = 0.6
-    tts_engine: Optional[Literal["kokoro", "piper"]] = "kokoro"
+    volume: float | None = 0.6
+    tts_engine: Literal["kokoro", "piper"] | None = "kokoro"
     storybook: bool = False
-    save_path: Optional[str] = None
+    save_path: str | None = None
 
 class HAServiceRequest(BaseModel):
     domain: str
     service: str
     entity_id: str
-    service_data: Optional[Dict[str, Any]] = {}
+    service_data: dict[str, Any] | None = {}
 
 class WorkspaceBootstrapRequest(BaseModel):
-    workspace_id: Optional[str] = None
-    local_path: Optional[str] = None
-    repo_url: Optional[str] = None
-    branch: Optional[str] = None
+    workspace_id: str | None = None
+    local_path: str | None = None
+    repo_url: str | None = None
+    branch: str | None = None
     create_if_missing: bool = True
 
 class ContextSearchRequest(BaseModel):
@@ -165,6 +167,6 @@ class ContextSearchRequest(BaseModel):
 class HAConfigRequest(BaseModel):
     """Inspect Home Assistant integration configurations via WebSocket API."""
     action: str = Field("list_integrations", description="Action: list_integrations, get_integration, get_entities, get_config")
-    domain: Optional[str] = Field(None, description="Integration domain (e.g. 'ollama', 'webostv')")
-    entity_domain: Optional[str] = Field(None, description="Entity domain filter (e.g. 'light', 'media_player')")
-    keyword: Optional[str] = Field(None, description="Search keyword to filter results")
+    domain: str | None = Field(None, description="Integration domain (e.g. 'ollama', 'webostv')")
+    entity_domain: str | None = Field(None, description="Entity domain filter (e.g. 'light', 'media_player')")
+    keyword: str | None = Field(None, description="Search keyword to filter results")

@@ -1,5 +1,6 @@
 """Tests for gateway code orchestration storage search integration."""
 import os
+
 import pytest
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")

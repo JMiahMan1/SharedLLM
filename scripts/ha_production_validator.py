@@ -1,8 +1,9 @@
-import os
-import requests
-import json
-import time
 import datetime
+import json
+import os
+import time
+
+import requests
 from dotenv import load_dotenv
 
 # Load credentials from .env
@@ -15,7 +16,7 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
 # Dynamically discover production IP from docker-compose if available
 def discover_prod_ip():
     try:
-        with open("docker-compose.yml", "r") as f:
+        with open("docker-compose.yml") as f:
             for line in f:
                 if "ai-server:" in line:
                     return line.split(":")[1].strip().strip('"').strip("'")
@@ -116,13 +117,13 @@ def test_discovery():
 
 def test_light_interaction(entity_id="light.piano_lamp"):
     print_header(f"SCENARIO: Light Interaction ({entity_id})")
-    
+
     # 1. Get Initial State
     initial = get_current_state(entity_id)
     if not initial:
         log_step("Pre-test State Check", False, f"Device {entity_id} not found in HA.")
         return False
-    
+
     initial_state = initial.get("state")
     target_state = "on" if initial_state == "off" else "off"
     print(f"      Current State: {Colors.BOLD}{initial_state}{Colors.ENDC} -> Target: {Colors.BOLD}{target_state}{Colors.ENDC}")
@@ -159,10 +160,10 @@ def test_light_interaction(entity_id="light.piano_lamp"):
 
 def test_announcement_logic(entity_id="media_player.office_speaker"):
     print_header("SCENARIO: Announcement Stability (Roku/MASS)")
-    
-    # We won't check audio output (hard to do remotely), but we can check if the 
+
+    # We won't check audio output (hard to do remotely), but we can check if the
     # Media Assistant app was launched on Roku or if MASS service was called.
-    
+
     payload = {
         "user_context": USER_CONTEXT,
         "message": "Raven Production Validation: All systems nominal.",
@@ -173,14 +174,14 @@ def test_announcement_logic(entity_id="media_player.office_speaker"):
     data = resp.json()
     success = data.get("status") == "SUCCESS"
     log_step("Announcement Dispatch", success, data.get("message"), detail=data)
-    
+
     if success:
         # Check Logbook for 'play_media' or 'mass' events
         time.sleep(2)
         logs = verify_logbook(entity_id)
         found_event = any("media_player" in str(l) for l in logs)
         log_step("Verify Announcement Event in HA", found_event, "Found service call event in Logbook.")
-    
+
     return success
 
 def get_system_logs(service="execution", lines=20):
@@ -208,7 +209,7 @@ def get_system_logs(service="execution", lines=20):
 def test_music_assistant(entity_id="media_player.office_speaker"):
     print_header("SCENARIO: Music Assistant (MASS) Play")
     print(f"[RUN] Testing Music Assistant on {entity_id}...")
-    
+
     payload = {
         "user_context": USER_CONTEXT,
         "entity_id": entity_id,
@@ -224,7 +225,7 @@ def test_music_assistant(entity_id="media_player.office_speaker"):
 def test_video_playback(entity_id="media_player.office_tv_chrome"):
     print_header("SCENARIO: Video Interaction (Cast)")
     print(f"[RUN] Testing YouTube Video on {entity_id}...")
-    
+
     payload = {
         "user_context": USER_CONTEXT,
         "entity_id": entity_id,
@@ -241,7 +242,7 @@ def run_suite():
     os.system('clear')
     print(f"{Colors.BOLD}{Colors.OKBLUE}RAVEN LIVE TEST SUITE v2.0{Colors.ENDC}")
     print(f"Targeting: {Colors.UNDERLINE}{EXECUTION_URL}{Colors.ENDC}")
-    
+
     # 1. Health
     try:
         r = requests.get(f"{EXECUTION_URL}/health", timeout=5)
@@ -256,7 +257,7 @@ def run_suite():
     test_announcement_logic()
     test_music_assistant()
     test_video_playback()
-    
+
     print_header("VALIDATION COMPLETE")
     print(f"{Colors.BOLD}Summary: Verified State Pulling, Logbook Events, and Multi-Service Dispatch.{Colors.ENDC}\n")
 

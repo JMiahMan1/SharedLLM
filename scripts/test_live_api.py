@@ -1,5 +1,6 @@
 import os
 import sys
+
 import httpx
 
 BASE_URL = os.getenv("LIVE_TEST_URL", "http://localhost:8080")
@@ -23,10 +24,10 @@ ENDPOINTS = [
 
 def run_live_tests():
     print(f"=== Starting Live API Verification for {BASE_URL} ===\n")
-    
+
     with httpx.Client(base_url=BASE_URL, headers=HEADERS, timeout=10.0) as client:
         success = True
-        
+
         for method, path, description in ENDPOINTS:
             print(f"Testing {description} ({method} {path})...")
             try:
@@ -50,12 +51,12 @@ def run_live_tests():
                 print(f"  [ERROR] {e}")
                 success = False
             print("")
-            
+
         if success:
-            print(f"=== All Live API Tests Passed! ===")
+            print("=== All Live API Tests Passed! ===")
             sys.exit(0)
         else:
-            print(f"=== Some Live API Tests Failed! ===")
+            print("=== Some Live API Tests Failed! ===")
             sys.exit(1)
 
 if __name__ == "__main__":

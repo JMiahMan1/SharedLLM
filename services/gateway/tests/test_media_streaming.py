@@ -8,11 +8,13 @@ resp.release) is used correctly after the httpx -> aiohttp migration.
 import os
 import sys
 from contextlib import asynccontextmanager
+
 os.environ["INTERNAL_SECRET"] = "test-secret"
+
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, AsyncMock, patch
 
 
 class MockAioResp:
@@ -94,8 +96,8 @@ def client_fixture(monkeypatch):
     sys.modules["intent_engine"] = mock_engine
     sys.modules["background_worker"] = MagicMock()
 
-    from services.gateway.main import app
     from services.gateway import main
+    from services.gateway.main import app
 
     @asynccontextmanager
     async def noop_lifespan(_app):
@@ -237,8 +239,9 @@ async def test_stream_ma_no_players_returns_404(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_stream_abs_identity_failure_returns_401(monkeypatch, client):
     """Test that ABS streaming returns 401 when identity resolution fails."""
-    from services.gateway import main as gateway_main
     from fastapi import HTTPException
+
+    from services.gateway import main as gateway_main
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(
         side_effect=HTTPException(status_code=401, detail="Unauthorized")
@@ -252,8 +255,9 @@ async def test_stream_abs_identity_failure_returns_401(monkeypatch, client):
 @pytest.mark.asyncio
 async def test_stream_ma_identity_failure_returns_401(monkeypatch, client):
     """Test that MA streaming returns 401 when identity resolution fails."""
-    from services.gateway import main as gateway_main
     from fastapi import HTTPException
+
+    from services.gateway import main as gateway_main
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(
         side_effect=HTTPException(status_code=401, detail="Unauthorized")

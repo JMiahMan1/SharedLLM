@@ -1,10 +1,10 @@
 import asyncio
+import logging
 import os
 import sys
-import logging
+
 import requests
 from dotenv import load_dotenv
-
 
 # settings import might fail if dependencies aren't perfect, let's mock credits
 load_dotenv()
@@ -63,7 +63,7 @@ async def run_test():
     async def chat(q):
         print(f"\nUser: {q}")
         try:
-            print(f"   [INFO] Sending request (timeout: 120s)...")
+            print("   [INFO] Sending request (timeout: 120s)...")
             r = requests.post(
                 rag_api_url, json={"query": q, "user_id": "test_user"}, timeout=120
             )
@@ -75,8 +75,8 @@ async def run_test():
                 print(f"[FAIL] API returned status {r.status_code}: {r.text[:200]}")
                 return {}
         except requests.exceptions.Timeout:
-            print(f"[FAIL] API Timeout: Request took longer than 120s")
-            print(f"   This suggests Ollama connectivity or model loading issues")
+            print("[FAIL] API Timeout: Request took longer than 120s")
+            print("   This suggests Ollama connectivity or model loading issues")
             return {}
         except Exception as e:
             print(f"[FAIL] API Error: {type(e).__name__}: {e}")
@@ -86,7 +86,7 @@ async def run_test():
         print(f"\nUser: {prompt}")
         await chat(prompt)
         await asyncio.sleep(3)
-        
+
         curr_vol = await get_volume(entity_id)
         if curr_vol is None:
              print(f"[WARN] Could not read volume for {entity_id}")
@@ -100,10 +100,10 @@ async def run_test():
 
     # Test both devices as requested
     targets = [
-        ("media_player.office_tv_chrome_2", "Office TV"),  
+        ("media_player.office_tv_chrome_2", "Office TV"),
         ("media_player.office_speaker", "Office Speaker")
     ]
-    
+
     for entity_id, name in targets:
         print(f"\n--- Starting Volume Lifecycle Test on {entity_id} ({name}) ---")
 
@@ -112,7 +112,7 @@ async def run_test():
         # User requested local library test (Artist)
         song = "Brandon Lake"
         await chat(f"Play {song} on {name}")
-        
+
         # VERIFY STATE CHANGE (Strict)
         print("   Verifying playback state...", end="", flush=True)
         is_playing = False
@@ -127,31 +127,31 @@ async def run_test():
                     break
                 print(".", end="", flush=True)
             except: pass
-        
+
         if not is_playing:
             print(f" [FAIL] Device failed to start playing {song}. Proceeding to Volume Test anyway (to verify control).")
             # continue  <-- Commented out to force volume verification
-            
+
         await asyncio.sleep(2)
-        
+
         # Get Initial Volume
         init_vol = await get_volume(entity_id)
         print(f"Initial Volume: {init_vol}")
         if init_vol is None:
              print(f"[WARN] Device {name} appears off or not reporting volume.")
              init_vol = 0.5
-        
+
     # 1. Set Volume Low
         await test_step(
-            f"Set the volume on {name} to 30%", 
-            entity_id, 
+            f"Set the volume on {name} to 30%",
+            entity_id,
             0.3
         )
-        
+
         # 2. Set Volume High
         await test_step(
-            f"Turn the volume up to 60% on {name}", 
-            entity_id, 
+            f"Turn the volume up to 60% on {name}",
+            entity_id,
             0.6
         )
 

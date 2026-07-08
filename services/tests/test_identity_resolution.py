@@ -1,4 +1,5 @@
 import os
+
 # Set environment variables BEFORE any imports (must be first lines)
 if "DEFAULT_ADMIN_PASSWORD" not in os.environ:
     os.environ["DEFAULT_ADMIN_PASSWORD"] = "test-admin-password"
@@ -10,14 +11,14 @@ if "INIT_DB" not in os.environ:
     os.environ["INIT_DB"] = "false"
 
 import pytest
-from sqlmodel import SQLModel, Session, create_engine, select
-from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine, select
 
 import services.identity.main as identity_main
-from services.identity.main import app, get_session, _store_user_api_key
-from services.identity.models import User, APIKey
 from services.identity.crypto import digest_secret
+from services.identity.main import _store_user_api_key, app, get_session
+from services.identity.models import APIKey, User
 
 # Use an in-memory SQLite database for testing
 test_engine = create_engine(
@@ -55,62 +56,62 @@ def test_api_key_generation_and_resolution(client, session):
     if not dad:
         dad = User(username="dad", is_admin=True)
         session.add(dad)
-    
+
     # Also find or update the 'default' user for fallback
     default_user = session.exec(select(User).where(User.username == "default")).first()
     if not default_user:
         default_user = User(username="default", is_system_default=True)
         session.add(default_user)
-    
+
     default_user.ha_url = "http://default-ha"
     session.add(default_user)
     session.commit()
-    
+
     # Headers for admin requests (using internal secret for some, or just login normally)
     # The generate key endpoint uses require_api_key, so we need a way to call it.
     # For testing, we'll manually set an api_key for Dad first.
     _store_user_api_key(dad, "dad-session-token")
     session.add(dad)
     session.commit()
-    
+
     auth_headers = {"Authorization": "Bearer dad-session-token"}
-    
+
     # 2. Call the generate API key endpoint
     resp = client.post("/api/users/me/keys", json={"label": "OpenWebUI Key"}, headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     generated_key = data["key"]
     assert generated_key.startswith("sk-")
-    
+
     # Verify it's in the DB
     db_key = session.exec(select(APIKey).where(APIKey.key_hash == digest_secret(generated_key))).first()
     assert db_key is not None
     assert db_key.user_id == dad.id
     assert db_key.key_value == digest_secret(generated_key)
-    
+
     # 3. Test Resolution Routing
-    
+
     # A. Resolve by rag_user (UI context)
     resolve_resp = client.post(
-        "/api/resolve", 
+        "/api/resolve",
         json={"rag_user": "dad"},
         headers={"Authorization": f"Bearer {os.environ['INTERNAL_SECRET']}"}
     )
     assert resolve_resp.status_code == 200
     assert resolve_resp.json()["user"] == "dad"
-    
+
     # B. Resolve by api_key (OpenWebUI context)
     resolve_resp = client.post(
-        "/api/resolve", 
+        "/api/resolve",
         json={"api_key": generated_key},
         headers={"Authorization": f"Bearer {os.environ['INTERNAL_SECRET']}"}
     )
     assert resolve_resp.status_code == 200
     assert resolve_resp.json()["user"] == "dad"
-    
+
     # C. Resolve with no identifiers (Fallback to default)
     resolve_resp = client.post(
-        "/api/resolve", 
+        "/api/resolve",
         json={},
         headers={"Authorization": f"Bearer {os.environ['INTERNAL_SECRET']}"}
     )

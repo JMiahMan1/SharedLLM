@@ -1,5 +1,5 @@
-import json
 import importlib
+import json
 from collections import defaultdict
 from unittest.mock import AsyncMock
 
@@ -10,6 +10,8 @@ from services.execution.handlers import git as git_handler
 from services.execution.handlers import workspace as workspace_handler
 from services.execution.schemas import GitOperationRequest, UserContext, WorkspaceShellRequest
 from services.gateway.messaging import InferenceJobQueue, JobStatus
+
+
 class FakeRedis:
     def __init__(self):
         self.kv = {}
@@ -69,7 +71,7 @@ class FakeRedis:
 async def test_inference_queue_reclaims_expired_job():
     queue = InferenceJobQueue("redis://fake")
     fake_redis = FakeRedis()
-    setattr(queue, "_redis", fake_redis)
+    queue._redis = fake_redis
 
     job_id = await queue.enqueue_job("raven", {"query": "fix something"})
     claimed = await queue.claim_job()
@@ -91,7 +93,7 @@ async def test_inference_queue_reclaims_expired_job():
 async def test_inference_queue_dead_letters_after_max_attempts():
     queue = InferenceJobQueue("redis://fake")
     fake_redis = FakeRedis()
-    setattr(queue, "_redis", fake_redis)
+    queue._redis = fake_redis
 
     job_id = await queue.enqueue_job("raven", {"query": "fix something"})
     job_data = await fake_redis.get(f"{queue.JOB_PREFIX}{job_id}")
@@ -134,23 +136,23 @@ async def test_logging_service_sanitizes_secrets_and_requires_auth(monkeypatch):
             },
         }
     )
-    
+
     mock_redis = AsyncMock()
     mock_redis.pubsub.return_value = AsyncMock()
-    
+
     async def mock_get_redis():
         return mock_redis
-    
+
     monkeypatch.setattr(logging_main, "get_redis", mock_get_redis)
-    
+
     response = await logging_main.log_event(entry, "test-secret")
     assert response["status"] == "success"
-    
+
     # Verify zadd was called with sanitized data
     zadd_call = mock_redis.zadd.call_args
     stored_json = list(zadd_call[0][1].keys())[0]
     stored_data = json.loads(stored_json)
-    
+
     assert "[REDACTED]" in stored_data["message"]
     assert stored_data["context"]["token"] == "[REDACTED]"
     assert stored_data["context"]["nested"]["nextcloud_pass"] == "[REDACTED]"

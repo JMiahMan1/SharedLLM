@@ -1,7 +1,8 @@
-import requests
 import logging
 import sys
 import time
+
+import requests
 
 # Configure Logging
 logging.basicConfig(
@@ -33,32 +34,32 @@ def remote_query(query: str):
 
 def main():
     log.info("--- Starting Natural Search & Play Test ---")
-    
+
     try:
         # Step 1: Search for Content (Mimicking human browsing)
         search_query = "Search for songs by Pink"
         response_text = remote_query(search_query)
-        
+
         if not response_text:
             log.error("Search failed or timed out. Aborting.")
             return
 
         # Step 2: Extract a song/artist from response to Play
-        target_song = "Pink" 
-        
+        target_song = "Pink"
+
         # Step 3: Send Play Command
         play_query = f"Play {target_song} on Office TV"
         log.info(f"--- Decided to play: '{play_query}' ---")
-        
+
         play_response = remote_query(play_query)
-        
+
         if play_response and "Sent command to play" in play_response:
             log.info("SUCCESS: Playback command accepted.")
         elif play_response:
              log.info(f"RESULT: {play_response}")
         else:
             log.error("FAILURE: Playback command failed.")
-            
+
         # Wait for a few seconds to let it play/buffer
         time.sleep(10)
 

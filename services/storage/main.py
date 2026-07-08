@@ -1,21 +1,16 @@
 # services/storage/main.py
 import logging
-import aiohttp
 import re
 
-from services.config import RAG_SVC_URL, INTERNAL_SECRET
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Body, Query
+import aiohttp
+from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query
 from pydantic import BaseModel
-from typing import Optional
 
-from services.storage.indexer import (
-    build_content_index, extract_and_chunk_contents,
-    set_indexer_pause, is_indexer_paused, CheckpointManager
-)
-from services.storage.providers import build_provider, ProviderConfig
-from services.storage.models import ProviderWriteRequest, ProviderMirrorRequest
-
+from services.config import INTERNAL_SECRET, RAG_SVC_URL
 from services.shared.info_endpoint import info_router
+from services.storage.indexer import CheckpointManager, build_content_index, extract_and_chunk_contents, is_indexer_paused, set_indexer_pause
+from services.storage.models import ProviderMirrorRequest, ProviderWriteRequest
+from services.storage.providers import ProviderConfig, build_provider
 
 log = logging.getLogger("storage")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
@@ -30,11 +25,12 @@ class IndexScanRequest(BaseModel):
     provider: ProviderConfig
     path: str = "/"
     recursive: bool = True
-    user_id: Optional[str] = None
+    user_id: str | None = None
     force: bool = False
 
-import time
 import os
+import time
+
 START_TIME = time.time()
 
 @app.get("/health")
@@ -108,18 +104,18 @@ async def _run_full_index_task(req: IndexScanRequest):
         entries = await provider.list_entries(path=req.path, recursive=req.recursive)
         log.info(f"Scan complete. Found {len(entries)} raw entries.")
         items = build_content_index(entries)
-        
+
         # 2. Extract and chunk with checkpointing
         checkpoint = None if req.force else CheckpointManager()
         chunks = await extract_and_chunk_contents(provider, items, checkpoint=checkpoint)
         log.info(f"Extracted {len(chunks)} total chunks from {len(items)} files.")
-        
+
         # 3. Sync to RAG in batches to avoid timeout on large payloads
         user_id = (req.user_id or req.provider.settings.get("username") or "admin").lower()
         import time
         session_id = str(int(time.time()))
         indexed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        
+
         for c in chunks:
             c["metadata"]["session_id"] = session_id
             c["metadata"]["indexed_at"] = indexed_at
@@ -127,7 +123,7 @@ async def _run_full_index_task(req: IndexScanRequest):
         collection_name = f"{req.provider.kind}_files"
         BATCH_SIZE = 25
         total_synced = 0
-        
+
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0, connect=5.0)) as client:
             try:
                 # 3.5. Cleanup old entries BEFORE syncing new ones
@@ -140,19 +136,19 @@ async def _run_full_index_task(req: IndexScanRequest):
                     log.warning(f"Purge failed (non-fatal): {purge_resp.status} {await purge_resp.text()}")
                 else:
                     log.info(f"Cleaned old {collection_name} entries for user {user_id}")
-                
+
                 # 3.6. Sync to RAG in batches to avoid timeout on large payloads
                 for i in range(0, len(chunks), BATCH_SIZE):
                     batch = chunks[i:i+BATCH_SIZE]
                     batch_num = (i // BATCH_SIZE) + 1
                     total_batches = (len(chunks) + BATCH_SIZE - 1) // BATCH_SIZE
-                    
+
                     sync_payload = {
                         "chunks": batch,
                         "user_id": user_id,
                         "collection_name": collection_name
                     }
-                    
+
                     resp = await client.post(
                         f"{RAG_SVC}/rag/sync/files",
                         json=sync_payload,
@@ -164,7 +160,7 @@ async def _run_full_index_task(req: IndexScanRequest):
                         )
                     total_synced += len(batch)
                     log.info(f"RAG batch {batch_num}/{total_batches} synced: {len(batch)} chunks")
-                
+
                 log.info(f"Background index complete for {user_id}. Synced {total_synced}/{len(chunks)} chunks.")
             except aiohttp.ClientResponseError as e:
                 log.error(f"Failed to sync background index to RAG: HTTP {e.status} - {e.message}")
@@ -191,11 +187,11 @@ async def list_provider_entries(req: IndexScanRequest):
     try:
         provider = build_provider(req.provider)
         entries = await provider.list_entries(path=req.path, recursive=req.recursive)
-        
+
         # Cross-reference with RAG to set indexed status
         user_id = req.provider.settings.get("username", "admin")
         indexed_paths = set()
-        
+
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             try:
                 # Query RAG for all indexed paths for this user
@@ -226,19 +222,19 @@ async def search_provider(query: str = Query(...), req: IndexScanRequest = Body(
         provider = build_provider(req.provider)
         # Scan root for shallow search (could be optimized)
         entries = await provider.list_entries(path=req.path, recursive=req.recursive)
-        
+
         q_lower = query.lower()
         q_words = set(re.findall(r'\b\w+\b', q_lower))
         matches = []
-        
+
         for e in entries:
             name_lower = e.name.lower()
             name_words = set(re.findall(r'\b\w+\b', name_lower))
-            
+
             if q_lower in name_lower or (q_words & name_words):
                 matches.append(e)
                 if len(matches) >= 20: break # Limit
-                
+
         return {"status": "SUCCESS", "matches": [e.model_dump() for e in matches]}
     except Exception as e:
         log.error(f"Provider search failed: {e}")
@@ -250,13 +246,13 @@ async def write_provider_content(req: ProviderWriteRequest):
     try:
         import base64
         provider = build_provider(req.provider)
-        
+
         content: str | bytes | None = req.content
         is_binary = False
         if req.content_b64:
             content = base64.b64decode(req.content_b64)
             is_binary = True
-            
+
         if content is None:
             raise HTTPException(status_code=400, detail="Either content or content_b64 must be provided")
 

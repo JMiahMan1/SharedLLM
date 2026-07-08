@@ -1,25 +1,24 @@
 # services/logging/main.py
+import asyncio
 import json
+import logging as py_logging
+import os
 import re
 import time
-import os
-import asyncio
-
-from services.config import INTERNAL_SECRET, REDIS_URL, LOG_RETENTION_DAYS, LOG_MAX_ENTRIES
+import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any
 
 import redis.asyncio as redis
-from fastapi import FastAPI, Request, HTTPException, Header, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import logging as py_logging
-import traceback
 
+from services.config import INTERNAL_SECRET, LOG_MAX_ENTRIES, LOG_RETENTION_DAYS, REDIS_URL
 from services.shared.info_endpoint import info_router
 
-_redis_client: Optional[redis.Redis] = None
+_redis_client: redis.Redis | None = None
 
 async def retention_cleanup_task():
     """Periodically remove logs older than LOG_RETENTION_DAYS."""
@@ -39,7 +38,7 @@ async def lifespan(app: FastAPI):
     # Resolve runtime config from Identity service
     from services.config import resolve_runtime_config
     await resolve_runtime_config()
-    
+
     py_logging.info(f"[Logging] Redis backend initialized (retention={LOG_RETENTION_DAYS}d, max_entries={LOG_MAX_ENTRIES})")
     task = asyncio.create_task(retention_cleanup_task())
     yield
@@ -51,7 +50,7 @@ app.include_router(info_router)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    err_msg = f"Logging Service Error: {type(exc).__name__}: {str(exc)}"
+    err_msg = f"Logging Service Error: {type(exc).__name__}: {exc!s}"
     py_logging.error(f"{err_msg}\n{traceback.format_exc()}")
     return JSONResponse(
         status_code=500,
@@ -71,7 +70,7 @@ SECRET_PATTERNS = [
 ]
 
 # Redis client (initialized in lifespan)
-_redis_client: Optional[redis.Redis] = None
+_redis_client: redis.Redis | None = None
 
 async def get_redis() -> redis.Redis:
     global _redis_client
@@ -89,7 +88,7 @@ def _sanitize_scalar(value: Any) -> Any:
         return sanitized[:MAX_LOG_FIELD_LENGTH] + "...[TRUNCATED]"
     return sanitized
 
-def sanitize_log_payload(value: Any, parent_key: Optional[str] = None) -> Any:
+def sanitize_log_payload(value: Any, parent_key: str | None = None) -> Any:
     if isinstance(value, dict):
         sanitized = {}
         for key, inner_value in value.items():
@@ -105,11 +104,11 @@ def sanitize_log_payload(value: Any, parent_key: Optional[str] = None) -> Any:
         return [sanitize_log_payload(item, parent_key=parent_key) for item in value]
     return _sanitize_scalar(value)
 
-def _require_internal_secret(x_internal_secret: Optional[str]) -> None:
+def _require_internal_secret(x_internal_secret: str | None) -> None:
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-def _resolve_limit(limit: Optional[int], lines: Optional[int], default: int = 100) -> int:
+def _resolve_limit(limit: int | None, lines: int | None, default: int = 100) -> int:
     value = lines if lines is not None else limit
     if value is None:
         return default
@@ -120,19 +119,19 @@ class LogEntry(BaseModel):
     service: str
     level: str = "INFO"
     message: str
-    context: Optional[dict] = None
+    context: dict | None = None
 
 async def _fetch_logs(
-    service: Optional[str] = None,
-    user_id: Optional[str] = None,
+    service: str | None = None,
+    user_id: str | None = None,
     limit: int = 100,
 ):
     r = await get_redis()
     cutoff = time.time() - (LOG_RETENTION_DAYS * 86400)
-    
+
     # Fetch all entries within retention window (sorted by timestamp desc)
     entries = await r.zrevrangebyscore("logs:entries", "+inf", cutoff, start=0, num=limit * 10)
-    
+
     results = []
     for entry_json in entries:
         try:
@@ -147,30 +146,30 @@ async def _fetch_logs(
                 break
         except json.JSONDecodeError:
             continue
-    
+
     return results
 
 @app.get("/logs")
-async def get_logs(user_id: Optional[str] = None, service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
+async def get_logs(user_id: str | None = None, service: str | None = None, limit: int | None = None, lines: int | None = None):
     return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
 
 @app.get("/api/logs")
-async def get_logs_api(user_id: Optional[str] = None, service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
+async def get_logs_api(user_id: str | None = None, service: str | None = None, limit: int | None = None, lines: int | None = None):
     return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
 
 @app.get("/api/admin/logs")
-async def get_logs_admin_api(service: Optional[str] = None, limit: Optional[int] = None, lines: Optional[int] = None):
+async def get_logs_admin_api(service: str | None = None, limit: int | None = None, lines: int | None = None):
     return await _fetch_logs(service=service, user_id="admin", limit=_resolve_limit(limit, lines))
 
 @app.delete("/api/logs")
-async def clear_logs_api(x_internal_secret: Optional[str] = Header(default=None)):
+async def clear_logs_api(x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     r = await get_redis()
     await r.delete("logs:entries")
     return {"status": "success", "message": "Logs cleared"}
 
 @app.delete("/api/admin/logs")
-async def clear_logs_admin_api(x_internal_secret: Optional[str] = Header(default=None)):
+async def clear_logs_admin_api(x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     r = await get_redis()
     await r.delete("logs:entries")
@@ -179,11 +178,11 @@ async def clear_logs_admin_api(x_internal_secret: Optional[str] = Header(default
 @app.post("/log")
 @app.post("/logs")
 @app.post("/api/logs")
-async def log_event(entry: LogEntry, x_internal_secret: Optional[str] = Header(default=None)):
+async def log_event(entry: LogEntry, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     sanitized_message = sanitize_log_payload(entry.message)
     sanitized_context = sanitize_log_payload(entry.context or {})
-    
+
     now = time.time()
     log_dict = {
         "user_id": entry.user_id,
@@ -194,23 +193,23 @@ async def log_event(entry: LogEntry, x_internal_secret: Optional[str] = Header(d
         "context": sanitized_context,
         "_ts": now,
     }
-    
+
     r = await get_redis()
-    
+
     # Store in sorted set (score = timestamp for range queries and retention)
     await r.zadd("logs:entries", {json.dumps(log_dict): now})
-    
+
     # Enforce max entries (trim oldest)
     await r.zremrangebyrank("logs:entries", 0, -LOG_MAX_ENTRIES - 1)
-    
+
     # Broadcast via PubSub for WebSocket streaming
     broadcast_payload = {k: v for k, v in log_dict.items() if k != "_ts"}
     await r.publish("logs:stream", json.dumps(broadcast_payload))
-    
+
     return {"status": "success"}
 
 # --- WebSocket Streaming via Redis PubSub ---
-active_ws: List[WebSocket] = []
+active_ws: list[WebSocket] = []
 
 async def _ws_handler(websocket: WebSocket):
     await websocket.accept()
@@ -218,7 +217,7 @@ async def _ws_handler(websocket: WebSocket):
     r = await get_redis()
     pubsub = r.pubsub()
     await pubsub.subscribe("logs:stream")
-    
+
     try:
         async for message in pubsub.listen():
             if message["type"] == "message":

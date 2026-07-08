@@ -6,17 +6,18 @@ Uses aiosqlite for async database access to /data/device_registry.db.
 import json
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional, Dict
+from typing import Any
+
 import aiosqlite
 import pytz
-from datetime import datetime
 
 log = logging.getLogger("execution.media_playback_registry")
 
 DB_PATH_ENV = "DEVICE_REGISTRY_PATH"
 DB_PATH_DEFAULT = "/data/device_registry.db"
-_db: Optional[aiosqlite.Connection] = None
+_db: aiosqlite.Connection | None = None
 AZ_TZ = pytz.timezone("America/Phoenix")
 
 async def _get_conn() -> aiosqlite.Connection:
@@ -28,7 +29,7 @@ async def _get_conn() -> aiosqlite.Connection:
         _db = await aiosqlite.connect(str(path))
         await _db.execute("PRAGMA journal_mode=WAL")
         await _db.execute("PRAGMA synchronous=NORMAL")
-        
+
         # Initialize tables
         await _db.execute("""
             CREATE TABLE IF NOT EXISTS media_playback_states (
@@ -56,7 +57,7 @@ def get_az_timestamp_str() -> str:
     """Get ISO format timestamp in America/Phoenix timezone."""
     return datetime.now(AZ_TZ).isoformat()
 
-async def get_playback_state(username: str) -> Optional[Dict[str, Any]]:
+async def get_playback_state(username: str) -> dict[str, Any] | None:
     """Retrieve the persisted media playback state for a user."""
     db = await _get_conn()
     try:
@@ -66,7 +67,7 @@ async def get_playback_state(username: str) -> Optional[Dict[str, Any]]:
             row = await cursor.fetchone()
             if not row:
                 return None
-            
+
             # Map columns to dictionary
             cols = [
                 "username", "entity_id", "state", "media_type", "query",
@@ -82,21 +83,21 @@ async def get_playback_state(username: str) -> Optional[Dict[str, Any]]:
                     data["queue"] = []
             else:
                 data["queue"] = []
-            
+
             data["is_volume_muted"] = bool(data["is_volume_muted"])
             return data
     except Exception as e:
         log.error(f"[media_playback_registry] Failed to get playback state: {e}", exc_info=True)
         return None
 
-async def save_playback_state(username: str, data: Dict[str, Any]) -> bool:
+async def save_playback_state(username: str, data: dict[str, Any]) -> bool:
     """Save/update the media playback state for a user."""
     db = await _get_conn()
     try:
         now_str = get_az_timestamp_str()
         queue_json = json.dumps(data.get("queue", [])) if "queue" in data else None
         is_muted_val = 1 if data.get("is_volume_muted") else 0
-        
+
         # Check if row exists
         existing = await get_playback_state(username)
         if existing:
@@ -117,11 +118,11 @@ async def save_playback_state(username: str, data: Dict[str, Any]) -> bool:
                         params.append(is_muted_val)
                     else:
                         params.append(data[key])
-            
+
             fields_to_update.append("updated_at=?")
             params.append(now_str)
             params.append(username)
-            
+
             query = f"UPDATE media_playback_states SET {', '.join(fields_to_update)} WHERE username=?"
             await db.execute(query, tuple(params))
         else:
@@ -149,7 +150,7 @@ async def save_playback_state(username: str, data: Dict[str, Any]) -> bool:
                 queue_json or "[]",
                 now_str
             ))
-        
+
         await db.commit()
         log.info(f"[media_playback_registry] Saved state for {username} (America/Phoenix timestamp: {now_str})")
         return True

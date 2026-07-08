@@ -1,6 +1,7 @@
-import httpx
-import os
 import asyncio
+import os
+
+import httpx
 
 # Configuration
 SERVER_IP = "ai.local"
@@ -34,7 +35,7 @@ async def test_gateway_config():
         if resp.status_code == 200:
             config = resp.json().get("config", {})
             print(f"Current Coding Model: {config.get('coding_model')}")
-            
+
             # 2. Update Config (to current value to avoid breaking things)
             new_val = config.get("coding_model", "qwen2.5-coder:7b")
             resp = await client.post(

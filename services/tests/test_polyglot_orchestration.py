@@ -1,6 +1,7 @@
 import os
-import httpx
 import time
+
+import httpx
 import pytest
 
 GATEWAY_URL = "http://ai.local:11435"
@@ -15,16 +16,16 @@ def run_coding_task(description, expected_markers, workspace_id="SharedLLM", rel
         "stream": False
     }
     headers = {"X-Internal-Secret": INTERNAL_SECRET, "X-User-ID": "jeremiah"}
-    
+
     start_time = time.time()
     resp = httpx.post(f"{GATEWAY_URL}/api/chat", json=payload, headers=headers, timeout=120.0)
     duration = time.time() - start_time
-    
+
     print(f"Status: {resp.status_code} ({duration:.2f}s)")
     if resp.status_code == 200:
         data = resp.json()
         content = data.get("message", {}).get("content", "") if "message" in data else data.get("choices", [{}])[0].get("message", {}).get("content", "")
-        
+
         # Verify LLM response quality
         print(f"Response (truncated): {content[:150]}...")
         missing = [m for m in expected_markers if m not in content]
@@ -46,7 +47,7 @@ def run_coding_task(description, expected_markers, workspace_id="SharedLLM", rel
                 actual_content = file_data.get("content", "")
                 file_size = len(actual_content)
                 print(f"VERIFICATION: File '{relative_path}' exists ({file_size} bytes)")
-                
+
                 if file_size > 10:
                     print(f"VERIFICATION SUCCESS: File verified on disk. Size: {file_size} bytes.")
                 else:
@@ -87,12 +88,12 @@ def test_polyglot():
             "path": f"polyglot/hello_{ts}.js"
         }
     ]
-    
+
     overall_success = True
     for t in tasks:
         if not run_coding_task(t["desc"], t["markers"], relative_path=t["path"]):
             overall_success = False
-            
+
     if overall_success:
         print("\nALL POLYGLOT TESTS PASSED!")
     else:

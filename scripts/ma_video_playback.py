@@ -5,14 +5,14 @@ or if it results in audio-only/failure.
 """
 import asyncio
 import logging
-import sys
 import os
+import sys
 
 # Add project root to path
 sys.path.append(os.getcwd())
 
-from app.settings import SERVER_URL
 from app.domains.shared import execute_ha_service
+from app.settings import SERVER_URL
 from app.utils.video_cache import download_video_progressive, get_video_id
 
 # Setup logging
@@ -23,8 +23,8 @@ os.environ["CAST_CACHE_DIR"] = "/data/temp_videos"
 # Create it if not exists (handled by video_cache but good to ensure parent)
 # os.makedirs("/data/temp_videos", exist_ok=True)
 
-MA_ENTITY: str = "media_player.music_assistant"  # noqa: F821
-TEST_VIDEO_URL: str = "https://www.youtube.com/watch?v=jNQXAC9IVRw"  # noqa: F821
+MA_ENTITY: str = "media_player.music_assistant"
+TEST_VIDEO_URL: str = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
 
 
 async def test_ma_video_target() -> None:

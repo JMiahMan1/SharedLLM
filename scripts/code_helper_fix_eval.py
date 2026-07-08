@@ -8,7 +8,6 @@ from pathlib import Path
 
 import requests
 
-
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = ROOT / "test" / "fixtures" / "code_helper_bug_example"
 API_URL = os.getenv("API_URL", "http://localhost:11435")

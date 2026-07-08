@@ -1,23 +1,25 @@
-import requests
-import time
-import sys
-import os
 import argparse
-from typing import Dict, Any, Optional
+import os
+import sys
+import time
+from typing import Any
+
+import requests
 
 # Constants
 API_URL = os.getenv("SERVER_URL", "http://ai.local:11435")
 HA_URL = os.getenv("HA_URL") # Must be provided or read from env if available
-HA_TOKEN = os.getenv("HA_TOKEN") 
+HA_TOKEN = os.getenv("HA_TOKEN")
 DEVICE_NAME = "TCL Roku TV" # Default target
 ENTITY_ID = "media_player.28_tcl_roku_tv" # Target entity for state verification
 
 # Setup Logging
 import logging
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 log = logging.getLogger("test_chat_lifecycle")
 
-def chat_query(query: str, history: list = []) -> Dict[str, Any]:
+def chat_query(query: str, history: list = []) -> dict[str, Any]:
     """Send a query to the Chat API."""
     url = f"{API_URL}/api/chat"
     payload = {
@@ -25,7 +27,7 @@ def chat_query(query: str, history: list = []) -> Dict[str, Any]:
         "history": history,
         "user_id": "test_user"
     }
-    
+
     log.info(f"User: {query}")
     try:
         start_time = time.time()
@@ -39,15 +41,15 @@ def chat_query(query: str, history: list = []) -> Dict[str, Any]:
         log.error(f"Chat Request Failed: {e}")
         return {}
 
-def get_ha_state() -> Optional[str]:
+def get_ha_state() -> str | None:
     """Get current state of the entity from HA."""
     if not HA_URL or not HA_TOKEN:
         log.warning("HA_URL or HA_TOKEN not set. Cannot verify state.")
         return None
-        
+
     url = f"{HA_URL}/api/states/{ENTITY_ID}"
     headers = {"Authorization": f"Bearer {HA_TOKEN}"}
-    
+
     try:
         resp = requests.get(url, headers=headers, timeout=5)
         resp.raise_for_status()
@@ -74,10 +76,10 @@ def wait_for_state(target_states: list, timeout: int = 30) -> bool:
 
 def test_lifecycle():
     log.info("=== Starting End-to-End Lifecycle Test ===")
-    
+
     # 0. Initial State
     initial_state = get_ha_state()
-    
+
     # 1. Turn On if Off
     if initial_state == "off":
         chat_query(f"Turn on the {DEVICE_NAME}")
@@ -89,7 +91,7 @@ def test_lifecycle():
     # 2. Watch Video (Triggers Download + Cast)
     # Using a known safe query that should find a video quickly
     chat_query(f"Watch Brandon Lake on the {DEVICE_NAME}")
-    
+
     # Wait for 'playing' or 'buffering'
     # Download might take time, so give it generous timeout
     if wait_for_state(["playing", "buffering"], timeout=60):
@@ -97,42 +99,42 @@ def test_lifecycle():
     else:
         log.error("FAILURE: Playback did not start within timeout.")
         return False
-        
+
     # Let it play for a bit
     time.sleep(10)
-    
+
     # 3. Pause
     chat_query(f"Pause the {DEVICE_NAME}")
     if wait_for_state(["paused"], timeout=15):
         log.info("SUCCESS: Paused.")
     else:
         log.warning("FAILURE: Could not pause (or state not updated).")
-        
+
     time.sleep(3)
-    
+
     # 4. Resume
     chat_query(f"Resume the {DEVICE_NAME}")
     if wait_for_state(["playing", "buffering"], timeout=15):
          log.info("SUCCESS: Resumed.")
     else:
          log.warning("FAILURE: Could not resume.")
-         
+
     time.sleep(5)
-    
+
     # 5. Stop
     chat_query(f"Stop the {DEVICE_NAME}")
     if wait_for_state(["idle", "home", "on"], timeout=15):
         log.info("SUCCESS: Stopped.")
     else:
         log.warning("FAILURE: Could not stop.")
-        
+
     # 6. Turn Off
     chat_query(f"Turn off the {DEVICE_NAME}")
     if wait_for_state(["off", "standby"], timeout=20):
         log.info("SUCCESS: Turned Off.")
     else:
         log.warning("FAILURE: Could not turn off.")
-        
+
     log.info("=== Test Complete ===")
     return True
 
@@ -141,7 +143,7 @@ if __name__ == "__main__":
     parser.add_argument("--ha-url", default=os.getenv("HA_URL"), help="Home Assistant URL")
     parser.add_argument("--ha-token", default=os.getenv("HA_TOKEN"), help="Home Assistant Token")
     args = parser.parse_args()
-    
+
     ha_url_override = None
     ha_token_override = None
     if args.ha_url:
@@ -154,7 +156,7 @@ if __name__ == "__main__":
     if not ha_url_val or not ha_token_val:
         log.error("Missing HA_URL or HA_TOKEN. Please set env vars or pass args.")
         sys.exit(1)
-        
+
     try:
         test_lifecycle()
     except KeyboardInterrupt:

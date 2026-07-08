@@ -3,8 +3,9 @@
 Home Assistant configuration inspection via WebSocket API.
 Allows diagnosing misconfigured integrations without treating HA as a black box.
 """
-import logging
 import json
+import logging
+
 try:
     from schemas import ExecutionResult
 except ImportError:
@@ -17,26 +18,26 @@ log = logging.getLogger("execution.ha_config")
 
 async def _get_ha_credentials(user_context: dict) -> tuple:
     """Resolve HA URL and token from identity service."""
-    from services.config import INTERNAL_SECRET, IDENTITY_SVC_URL
+    from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
 
     rag_user = user_context.get("user", "default")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-        async with client.post(
-            f"{IDENTITY_SVC_URL}/api/resolve",
-            json={"rag_user": rag_user},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        ) as resp:
-            if resp.status == 200:
-                creds = await resp.json()
-                return creds.get("ha_url"), creds.get("ha_token")
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.post(
+        f"{IDENTITY_SVC_URL}/api/resolve",
+        json={"rag_user": rag_user},
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    ) as resp:
+        if resp.status == 200:
+            creds = await resp.json()
+            return creds.get("ha_url"), creds.get("ha_token")
     return None, None
 
 
 async def _ws_request(ha_url: str, token: str, message: dict) -> dict:
     """Send a single request via HA WebSocket and return the result."""
     try:
-        import websockets
         import ssl
+
+        import websockets
     except ImportError:
         return {"error": "websockets package not available"}
 

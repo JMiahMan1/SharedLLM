@@ -1,9 +1,10 @@
 # services/gateway/history.py
 import json
-import redis
 import logging
 import time
+
 import aiohttp
+import redis
 
 log = logging.getLogger("gateway.history")
 
@@ -26,7 +27,7 @@ def _get_history_key(user: str) -> str:
 
 async def fetch_librarian_model() -> str:
     """Fetches the designated Librarian model from Identity Service GlobalSettings."""
-    from services.gateway.orchestrator import get_all_settings, _get
+    from services.gateway.orchestrator import _get, get_all_settings
     settings = await get_all_settings()
     return _get(settings, "ollama_librarian_model", "")
 
@@ -37,7 +38,7 @@ async def get_history(user_id: str) -> list:
         r = get_redis()
         raw_msgs: list = await r.lrange(key, 0, -1)  # type: ignore[misc]
         if not raw_msgs: return []
-        
+
         msgs = []
         for m in raw_msgs:
             try:
@@ -68,7 +69,7 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
     """
     Retrieves relevant 'User Facts' from the RAG service to provide semantic memory.
     """
-    from services.gateway.orchestrator import get_all_settings, _get
+    from services.gateway.orchestrator import _get, get_all_settings
     settings = await get_all_settings()
     rag_svc = _get(settings, "rag_svc_url")
     secret = _get(settings, "internal_secret", INTERNAL_SECRET)
@@ -80,7 +81,7 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
             "user_id": user_id,
             "k": 5
         }
-        
+
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
             resp = await client.post(
                 f"{rag_svc}/rag/search",
@@ -109,7 +110,7 @@ async def extract_and_store_user_facts(user_id: str, history: list):
         return
 
     try:
-        from services.gateway.orchestrator import get_all_settings, _get
+        from services.gateway.orchestrator import _get, get_all_settings
         settings = await get_all_settings()
         LIBRARIAN_MODEL = _get(settings, "ollama_librarian_model") or _get(settings, "librarian_model") or _get(settings, "assistant_model")
         if not LIBRARIAN_MODEL:
@@ -139,7 +140,7 @@ Return ONLY a bulleted list of facts, or 'NONE'.
                 json={"model": LIBRARIAN_MODEL, "prompt": prompt, "stream": False},
             )
             if resp.status != 200: return
-            
+
             data = await resp.json()
             text = data.get("response", "").strip()
             if "NONE" in text.upper() or not text:

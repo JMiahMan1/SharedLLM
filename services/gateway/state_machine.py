@@ -8,7 +8,7 @@ This provides enhanced state management with checkpointing and resumability.
 
 import logging
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Any
 
 from services.gateway.agent_loop import AgentLoop
 from services.gateway.schemas import ResolvedCredentials
@@ -24,13 +24,13 @@ class StateMachine:
     - Enhanced error handling
     - Backward compatibility with existing workflows
     """
-    
+
     def __init__(self, mission_id: int):
         """Initialize with mission ID for tracking and checkpointing."""
         self.mission_id = mission_id
         self.state = self._create_initial_state()
-        
-    def _create_initial_state(self) -> Dict[str, Any]:
+
+    def _create_initial_state(self) -> dict[str, Any]:
         """Initialize the mission state with default values."""
         return {
             "mission_id": self.mission_id,
@@ -51,17 +51,17 @@ class StateMachine:
             "start_time": datetime.now().timestamp(),
             "agent_type": None,
         }
-    
-    async def run(self, 
+
+    async def run(self,
                   query: str,
                   selected_model: str,
                   full_system: str,
                   short_term: list,
                   rag_user: str,
-                  creds: Dict[str, Any],
+                  creds: dict[str, Any],
                   rag_context: str = "",
                   show_thinking: bool = False,
-                  agent_type: Optional[str] = None) -> Dict[str, Any]:
+                  agent_type: str | None = None) -> dict[str, Any]:
         """
         Execute the mission using the state machine.
         
@@ -80,9 +80,9 @@ class StateMachine:
             Dict containing mission results and metrics
         """
         log.info(f"[StateMachine] Starting mission {self.mission_id}")
-        
+
         resolved_creds = ResolvedCredentials(**creds) if isinstance(creds, dict) else creds
-        
+
         self.state.update({
             "query": query,
             "selected_model": selected_model,
@@ -94,27 +94,27 @@ class StateMachine:
             "show_thinking": show_thinking,
             "agent_type": agent_type,
         })
-        
+
         await self._load_checkpoint()
-        
+
         result = await self._execute_workflow(agent_type)
-        
+
         return self._generate_results(result)
-    
+
     async def _load_checkpoint(self) -> None:
         """Load mission state from checkpoint."""
         pass
-    
-    async def _execute_workflow(self, agent_type: Optional[str]) -> Dict[str, Any]:
+
+    async def _execute_workflow(self, agent_type: str | None) -> dict[str, Any]:
         """Execute workflow based on agent type."""
         if agent_type:
             return await self._execute_specialized_agent(agent_type)
         return await self._execute_default_raven()
-    
-    async def _execute_specialized_agent(self, agent_type: str) -> Dict[str, Any]:
+
+    async def _execute_specialized_agent(self, agent_type: str) -> dict[str, Any]:
         """Execute specialized agent workflow."""
         log.info(f"[StateMachine] Executing specialized agent: {agent_type}")
-        
+
         try:
             result = await AgentLoop(
                 query=self.state["query"],
@@ -127,21 +127,21 @@ class StateMachine:
                 rag_context=self.state["rag_context"],
                 show_thinking=self.state["show_thinking"],
             )
-            
+
             self.state["ans"] = result
             self.state["iteration"] += 1
             self.state["successful_tool_calls"] += 1
-            
+
             return {"ans": result, "success": True, "agent": agent_type}
-            
+
         except Exception as e:
             log.error(f"[StateMachine] Specialized agent {agent_type} failed: {e}")
             return {"ans": f"Agent {agent_type} execution failed: {e}", "success": False}
-    
-    async def _execute_default_raven(self) -> Dict[str, Any]:
+
+    async def _execute_default_raven(self) -> dict[str, Any]:
         """Execute default Raven workflow for backward compatibility."""
         log.info(f"[StateMachine] Executing default Raven workflow for mission {self.mission_id}")
-        
+
         try:
             result = await AgentLoop(
                 query=self.state["query"],
@@ -154,17 +154,17 @@ class StateMachine:
                 rag_context=self.state["rag_context"],
                 show_thinking=self.state["show_thinking"],
             )
-            
+
             self.state["ans"] = result
             self.state["iteration"] += 1
-            
+
             return {"ans": result, "success": True}
-            
+
         except Exception as e:
             log.error(f"[StateMachine] Default Raven workflow failed: {e}")
             return {"ans": f"Default Raven workflow failed: {e}", "success": False}
-    
-    def _generate_results(self, workflow_result: Dict[str, Any]) -> Dict[str, Any]:
+
+    def _generate_results(self, workflow_result: dict[str, Any]) -> dict[str, Any]:
         """Generate comprehensive mission results."""
         return {
             "mission_id": self.mission_id,
@@ -180,11 +180,11 @@ async def run_state_machine_agent(query: str,
                                  full_system: str,
                                  short_term: list,
                                  rag_user: str,
-                                 creds: Dict[str, Any],
-                                 mission_id: Optional[int] = None,
+                                 creds: dict[str, Any],
+                                 mission_id: int | None = None,
                                  rag_context: str = "",
                                  show_thinking: bool = False,
-                                 agent_type: Optional[str] = None) -> Dict[str, Any]:
+                                 agent_type: str | None = None) -> dict[str, Any]:
     """
     Entry point for Raven 2.0's enhanced autonomous execution.
     

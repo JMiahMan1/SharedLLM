@@ -1,12 +1,14 @@
 """Tests for ABS graceful degradation when server is unreachable."""
 import os
 import sys
+
 os.environ["INTERNAL_SECRET"] = "test-secret"
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import aiohttp
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, AsyncMock, patch
-import aiohttp
 
 
 @pytest.fixture(name="client")
@@ -20,8 +22,8 @@ def client_fixture(monkeypatch):
     sys.modules["intent_engine"] = mock_engine
     sys.modules["background_worker"] = MagicMock()
 
-    from services.gateway.main import app
     from services.gateway import main
+    from services.gateway.main import app
     main.background_tasks = None  # pyright: ignore[reportAttributeAccessIssue]
 
     return TestClient(app)
@@ -226,8 +228,9 @@ async def test_abs_libraries_normalizes_media_type(client):
 @pytest.mark.asyncio
 async def test_abs_libraries_identity_failure(client):
     """ABS libraries returns empty when identity resolution fails."""
-    from services.gateway import main as gateway_main
     from fastapi import HTTPException
+
+    from services.gateway import main as gateway_main
 
     with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(side_effect=HTTPException(401, "unauthorized"))):
         resp = client.get("/api/media/audiobookshelf/libraries")

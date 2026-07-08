@@ -9,10 +9,11 @@ Issues covered:
 - Group endpoints must accept flexible field names (name or group_id/cluster_id/pattern_id)
 - All internal endpoints must require X-Internal-Secret header
 """
-import pytest
-import httpx
 import os
 import time
+
+import httpx
+import pytest
 
 SERVER_IP = os.getenv("SERVER_IP", "192.168.2.205")
 GATEWAY_URL = os.getenv("GATEWAY_URL", f"http://{SERVER_IP}:8080")
@@ -174,21 +175,21 @@ class TestTelemetryEndpoints:
     def test_telemetry_enroll_and_unenroll(self, internal_client):
         """Full lifecycle: enroll, verify, unenroll."""
         entity_id = f"sensor.regression_test_{int(time.time())}"
-        
+
         # Enroll
         resp = internal_client.post(
             f"{IDENTITY_URL}/api/telemetry/enroll",
             json={"entity_id": entity_id, "offline_alert_threshold_minutes": 20},
         )
         assert resp.status_code == 200, f"Enroll failed: {resp.text}"
-        
+
         # Verify enrollment
         resp = internal_client.get(f"{IDENTITY_URL}/api/telemetry/enroll")
         assert resp.status_code == 200
         enrollments = resp.json().get("enrollments", [])
         enrolled_ids = [e["entity_id"] for e in enrollments]
         assert entity_id in enrolled_ids, f"Entity {entity_id} should be enrolled"
-        
+
         # Unenroll
         resp = internal_client.delete(f"{IDENTITY_URL}/api/telemetry/enroll/{entity_id}")
         assert resp.status_code == 200, f"Unenroll failed: {resp.text}"
@@ -196,27 +197,27 @@ class TestTelemetryEndpoints:
     def test_telemetry_snapshot_and_summary(self, internal_client):
         """Snapshot ingestion and summary retrieval."""
         entity_id = f"sensor.regression_test_{int(time.time())}"
-        
+
         # Enroll
         internal_client.post(
             f"{IDENTITY_URL}/api/telemetry/enroll",
             json={"entity_id": entity_id},
         )
-        
+
         # Ingest snapshot
         resp = internal_client.post(
             f"{IDENTITY_URL}/api/telemetry/snapshot",
             json={"entity_id": entity_id, "power_w": 50.5, "is_available": True, "state": "on"},
         )
         assert resp.status_code == 200, f"Snapshot failed: {resp.text}"
-        
+
         # Get summary
         resp = internal_client.get(f"{IDENTITY_URL}/api/telemetry/summary/{entity_id}")
         assert resp.status_code == 200
         data = resp.json()
         assert data.get("summary") is not None, "Summary should not be None after snapshot"
         assert data["summary"]["current_power_w"] == 50.5
-        
+
         # Clean up
         internal_client.delete(f"{IDENTITY_URL}/api/telemetry/enroll/{entity_id}")
 
@@ -237,14 +238,14 @@ class TestIntercomEndpoints:
         assert resp.status_code == 200, f"Start session failed: {resp.text}"
         session_id = resp.json().get("session_id")
         assert session_id, "Response must include session_id"
-        
+
         # Verify session exists
         resp = internal_client.get(f"{IDENTITY_URL}/api/intercom/sessions")
         assert resp.status_code == 200
         sessions = resp.json()
         session_ids = [s.get("session_id") for s in sessions]
         assert session_id in session_ids, f"Session {session_id} should exist"
-        
+
         # End session
         resp = internal_client.delete(f"{IDENTITY_URL}/api/intercom/sessions/{session_id}")
         assert resp.status_code == 200, f"End session failed: {resp.text}"
@@ -274,14 +275,14 @@ class TestIntercomEndpoints:
         assert resp.status_code == 200, f"Get config failed: {resp.text}"
         config = resp.json()
         assert isinstance(config, dict), "Config must be a dict"
-        
+
         # Update config
         resp = internal_client.patch(
             f"{IDENTITY_URL}/api/intercom/config",
             json={"default_volume": 0.75},
         )
         assert resp.status_code == 200, f"Update config failed: {resp.text}"
-        
+
         # Verify update
         resp = internal_client.get(f"{IDENTITY_URL}/api/intercom/config")
         assert resp.status_code == 200

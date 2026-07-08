@@ -1,8 +1,9 @@
 
-import requests
-import sys
-import subprocess
 import os
+import subprocess
+import sys
+
+import requests
 
 LOG_FILE = "diagnose.txt"
 
@@ -14,7 +15,7 @@ def log(msg):
 def main():
     if os.path.exists(LOG_FILE):
         os.remove(LOG_FILE)
-    
+
     url = "http://ai.local:11435/health"
     log(f"Checking {url}...")
     try:
@@ -27,10 +28,10 @@ def main():
 
     log("-" * 20)
     log("Running live_test.py...")
-    
+
     env = os.environ.copy()
     env["API_URL"] = "http://ai.local:11435"
-    
+
     try:
         # Run live_test.py and capture output
         proc = subprocess.run(

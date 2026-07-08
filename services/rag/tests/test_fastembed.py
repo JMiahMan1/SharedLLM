@@ -72,5 +72,5 @@ def test_chromadb_collection():  # pyright: ignore[reportUnknownVariableType]
     coll.add(documents=["test doc"], ids=["test-id"])
     results = coll.query(query_texts=["test"], n_results=1)
     assert len(results["documents"][0]) == 1
-    print(f"✓ ChromaDB collection with fastembed works")
+    print("✓ ChromaDB collection with fastembed works")
     client.delete_collection("test")

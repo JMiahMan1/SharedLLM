@@ -3,9 +3,10 @@
 Focused Roku Power Control Test
 Tests multiple methods to turn on the TV and verifies actual state changes
 """
-import requests
 import os
 import time
+
+import requests
 
 HA_URL = os.getenv("HA_URL", "http://localhost:8123")
 HA_TOKEN = os.getenv("HA_TOKEN")
@@ -35,7 +36,7 @@ def call_service(domain, service, entity_id, data=None):
     payload = {"entity_id": entity_id}
     if data:
         payload.update(data)
-    
+
     try:
         print(f"  → Calling {domain}.{service} on {entity_id}")
         if data:
@@ -70,7 +71,7 @@ if new_state in ["on", "idle", "home", "playing"]:
     print("  ✅ SUCCESS! TV appears to be ON")
 else:
     print("  ❌ TV still appears OFF, trying Method 2...")
-    
+
     # Method 2: remote.send_command Home
     print("\n🎮 Method 2: remote.send_command (Home)")
     call_service("remote", "send_command", REMOTE, {"command": "Home"})
@@ -78,12 +79,12 @@ else:
     time.sleep(10)
     new_state, _ = get_state(MEDIA_PLAYER)
     print(f"  New State: {mp_state} → {new_state}")
-    
+
     if new_state in ["on", "idle", "home", "playing"]:
         print("  ✅ SUCCESS! TV appears to be ON")
     else:
         print("  ❌ Still OFF, trying Method 3...")
-        
+
         # Method 3: remote.send_command PowerOn
         print("\n⚡ Method 3: remote.send_command (PowerOn)")
         call_service("remote", "send_command", REMOTE, {"command": "PowerOn"})
@@ -91,7 +92,7 @@ else:
         time.sleep(10)
         new_state, _ = get_state(MEDIA_PLAYER)
         print(f"  New State: {mp_state} → {new_state}")
-        
+
         if new_state in ["on", "idle", "home", "playing"]:
             print("  ✅ SUCCESS! TV appears to be ON")
         else:

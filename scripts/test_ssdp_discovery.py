@@ -27,7 +27,7 @@ try:
     sock.sendto(ssdp_request.encode('utf-8'), (SSDP_ADDR, SSDP_PORT))
     print(f"\nSent to {SSDP_ADDR}:{SSDP_PORT}")
     print("Waiting for responses (5s timeout)...\n")
-    
+
     found = 0
     while True:
         try:
@@ -37,10 +37,10 @@ try:
             print(f"=== Response #{found} from {addr} ===")
             print(response)
             print()
-            
-        except socket.timeout:
+
+        except TimeoutError:
             break
-            
+
 except Exception as e:
     print(f"Error: {e}")
 finally:

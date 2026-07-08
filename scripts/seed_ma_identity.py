@@ -14,11 +14,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # Load .env (gitignored - credentials come from here, never hardcoded)
 from dotenv import load_dotenv
+
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-from sqlmodel import Session, select, create_engine
-from services.identity.models import User
+from sqlmodel import Session, create_engine, select
+
 from services.identity.crypto import encrypt
+from services.identity.models import User
 
 # MA credentials from .env only
 MA_URL = os.getenv("MA_URL")
@@ -53,13 +55,13 @@ def run_migration():
         user = session.exec(select(User).where(User.is_system_default == True)).first()
         if not user:
             user = session.exec(select(User)).first()
-        
+
         if not user:
             print("[ERROR] No user found in database. Seed the database first.")
             sys.exit(1)
-        
+
         print(f"[INFO] Updating MA credentials for user: {user.username} (id={user.id})")
-        
+
         # Check if already set
         if user.mass_url == MA_URL and user.mass_token_enc:
             print("[INFO] MA credentials already set. Nothing to do.")
@@ -69,7 +71,7 @@ def run_migration():
             session.add(user)
             session.commit()
             print(f"[OK] MA credentials updated: url={MA_URL}")
-            print(f"[OK] MA token encrypted and stored.")
+            print("[OK] MA token encrypted and stored.")
 
 if __name__ == "__main__":
     run_migration()

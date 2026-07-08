@@ -1,5 +1,4 @@
 import pytest
-
 from math_utils import normalize_username, parse_port
 
 

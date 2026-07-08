@@ -1,7 +1,9 @@
 import os
+
 os.environ["INTERNAL_SECRET"] = "test-secret"
 
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -28,10 +30,10 @@ async def test_execution_search_ma_library_only_default_not_found(client):
         mock_ha_call = AsyncMock(return_value={"results": []})
         with patch("services.execution.handlers.mass_ha_client._call_ha_ma_service", mock_ha_call):
             resp = client.get("/execute/media/music-assistant/search?query=Miles+Davis", headers={"X-Internal-Secret": "test-secret"})
-            
+
             assert resp.status_code == 200
             assert resp.json() == {"status": "SUCCESS", "results": [], "query": "Miles Davis"}
-            
+
             # Verify the service call to HA included library_only=True
             called_ha_url, called_ha_token, called_action, called_data = mock_ha_call.call_args[0]
             assert called_action == "search"
@@ -57,12 +59,12 @@ async def test_execution_search_ma_not_library_only_found(client):
         mock_ha_call = AsyncMock(return_value={"results": mock_results})
         with patch("services.execution.handlers.mass_ha_client._call_ha_ma_service", mock_ha_call):
             resp = client.get("/execute/media/music-assistant/search?query=Miles+Davis&library_only=false", headers={"X-Internal-Secret": "test-secret"})
-            
+
             assert resp.status_code == 200
             assert resp.json()["status"] == "SUCCESS"
             assert len(resp.json()["results"]) == 1
             assert resp.json()["results"][0]["name"] == "Miles Davis - So What"
-            
+
             # Verify the service call to HA included library_only=False
             called_ha_url, called_ha_token, called_action, called_data = mock_ha_call.call_args[0]
             assert called_data["library_only"] is False
@@ -82,7 +84,7 @@ async def test_execution_search_ma_failure_propagation(client):
         mock_ha_call = AsyncMock(return_value=None)
         with patch("services.execution.handlers.mass_ha_client._call_ha_ma_service", mock_ha_call):
             resp = client.get("/execute/media/music-assistant/search?query=Miles+Davis", headers={"X-Internal-Secret": "test-secret"})
-            
+
             assert resp.status_code == 200
             data = resp.json()
             assert data["status"] == "FAILURE"

@@ -5,7 +5,7 @@ Provides ChromaDBClient for interacting with the Chroma vector database.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     pass
@@ -18,11 +18,11 @@ class ChromaDBClient:
     Client for interacting with ChromaDB vector database.
     """
 
-    def __init__(self, collection_name: str = "capabilities", persist_path: Optional[str] = None) -> None:
+    def __init__(self, collection_name: str = "capabilities", persist_path: str | None = None) -> None:
         self.collection_name = collection_name
         self.persist_path = persist_path
-        self._client: Optional[Any] = None
-        self._collection: Optional[Any] = None
+        self._client: Any | None = None
+        self._collection: Any | None = None
 
     def connect(self) -> bool:
         """Connect to the ChromaDB instance."""
@@ -41,9 +41,9 @@ class ChromaDBClient:
 
     def add_documents(
         self,
-        documents: List[str],
-        ids: Optional[List[str]] = None,
-        metadatas: Optional[List[Dict[str, Any]]] = None,
+        documents: list[str],
+        ids: list[str] | None = None,
+        metadatas: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Add documents to the collection."""
         if self._collection is None:
@@ -69,8 +69,8 @@ class ChromaDBClient:
         self,
         query: str,
         top_k: int = 5,
-        filters: Optional[Dict[str, Any]] = None,
-    ) -> List[Dict[str, Any]]:
+        filters: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         """Search the collection for similar documents."""
         if self._collection is None:
             if not self.connect():

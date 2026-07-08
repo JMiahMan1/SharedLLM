@@ -1,5 +1,6 @@
-import httpx
 import os
+
+import httpx
 
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET") or ""
 BASE_URL = "http://localhost:8007"

@@ -42,10 +42,12 @@ os.environ.setdefault("CONTROL_PLANE_URL", "http://control_plane:8008")
 os.environ.setdefault("SEARXNG_URL", "http://searxng:8080")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
+from pathlib import Path
+
+from dotenv import dotenv_values
+
 from services.gateway.agent_loop import extract_action_json
 from services.gateway.prompts import PROMPT_RAVEN_AUTONOMOUS_PROTOCOL, PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION
-from dotenv import dotenv_values
-from pathlib import Path
 
 # Read .env directly for test values (runtime never reads .env)
 _env = dotenv_values(Path(__file__).resolve().parent.parent.parent / ".env")

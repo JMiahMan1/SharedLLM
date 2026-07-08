@@ -7,6 +7,7 @@ Services:
   - media_player.*: Standard media controls (play, pause, stop, etc.)
 """
 import logging
+
 try:
     import ha_client
     from schemas import ExecutionResult
@@ -34,20 +35,20 @@ async def is_android_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     if not state:
         return False
     attrs = state.get("attributes", {})
-    
+
     # Signal 1: app_id contains Android indicators (when device is on)
     app_id = (attrs.get("app_id") or "").lower()
     android_indicators = ("com.google.android.", "com.google.tv.", "com.android.",
                           "mediashell", "backdrop", "tvlauncher", "android.tv")
     if any(ind in app_id for ind in android_indicators):
         return True
-    
+
     # Signal 2: device_class == "tv" without Cast/MA attributes
     # (Cast devices don't have device_class=tv, MA wrappers have device_class=speaker)
     if attrs.get("device_class") == "tv":
         if not attrs.get("mass_player_type") and "cast" not in entity_id.lower():
             return True
-    
+
     # Signal 3: corresponding remote entity exists (androidtv_remote creates both)
     remote_entity = entity_id.replace("media_player.", "remote.")
     try:
@@ -56,7 +57,7 @@ async def is_android_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
             return True
     except Exception:
         pass
-    
+
     return False
 
 
@@ -101,7 +102,7 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
     all_states = await ha_client.get_states(ha_url, ha_token)
     if not all_states:
         return None
-    
+
     atv_exists = False
     atv_friendly = ""
     for s in all_states:
@@ -109,7 +110,7 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
             atv_friendly = s.get("attributes", {}).get("friendly_name", "")
             atv_exists = True
             break
-    
+
     if not atv_exists:
         log.debug(f"[android_tv] ATV entity {atv_entity_id} not found in HA states")
         return None
@@ -128,7 +129,7 @@ async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> 
         s_mass_type = s_attrs.get("mass_player_type")
         s_active_queue = s_attrs.get("active_queue")
         s_device_class = str(s_attrs.get("device_class", "")).lower()
-        
+
         if s_app_id == "music_assistant" or s_mass_type:
             continue
         if s_device_class == "speaker" and s_active_queue:

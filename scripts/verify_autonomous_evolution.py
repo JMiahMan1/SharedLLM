@@ -1,5 +1,6 @@
-import httpx
 import json
+
+import httpx
 
 GATEWAY_URL = "http://ai.local:8080/api/chat"
 RAG_URL = "http://ai.local:8080/api/storage" # Or internal if possible, but let's hit gateway
@@ -35,7 +36,7 @@ tests = [
 def run_verification():
     print("Starting Autonomous Evolution Verification Suite...")
     report = "# Autonomous Evolution Verification Report\n\n"
-    
+
     # 1. Clear and Re-index (Optional but recommended for clean test)
     # print("Purging old capabilities...")
     # ... (skipping purge for speed unless needed)
@@ -45,7 +46,7 @@ def run_verification():
         query = test["query"]
         print(f"\n[TEST]: {name}")
         print(f"  Query: {query}")
-        
+
         try:
             resp = httpx.post(
                 GATEWAY_URL,
@@ -53,14 +54,14 @@ def run_verification():
                 headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
                 timeout=120.0
             )
-            
+
             if resp.status_code == 200:
                 data = resp.json()
                 passed = test["validate"](data)
                 status_str = "PASS" if passed else "FAIL"
                 print(f"  Status: {status_str}")
                 print(f"  Detected Action: {data.get('intent')}")
-                
+
                 report += f"## {name}: {status_str}\n"
                 report += f"- **Query**: {query}\n"
                 report += f"- **Intent**: {data.get('intent')}\n"

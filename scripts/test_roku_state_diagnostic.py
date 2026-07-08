@@ -3,9 +3,10 @@
 Roku State Change Diagnostic
 Tests if we can detect ANY state changes on the Roku
 """
-import requests
 import os
 import time
+
+import requests
 
 HA_URL = os.getenv("HA_URL", "http://localhost:8123")
 HA_TOKEN = os.getenv("HA_TOKEN")

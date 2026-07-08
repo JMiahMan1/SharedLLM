@@ -9,6 +9,7 @@ Each service should mount this on their FastAPI app:
 
 import os
 import subprocess
+
 from fastapi import APIRouter
 
 info_router = APIRouter(tags=["info"])

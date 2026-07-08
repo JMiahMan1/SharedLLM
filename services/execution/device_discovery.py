@@ -19,12 +19,11 @@ import ipaddress
 import logging
 import os
 import socket
-from typing import Optional, cast
+from typing import cast
 
 try:
-    from . import device_registry as _device_registry_mod  # noqa: F401
-
-    from . import ha_client as _ha_client_mod  # noqa: F401
+    from . import device_registry as _device_registry_mod
+    from . import ha_client as _ha_client_mod
 except ImportError:
     _device_registry_mod = None  # type: ignore[no-redef, assignment]
     _ha_client_mod = None  # type: ignore[no-redef, assignment]
@@ -94,10 +93,10 @@ async def discover_device(
     entity_id: str,
     ha_url: str,
     ha_token: str,
-    device_type: Optional[str] = None,
+    device_type: str | None = None,
     subnet: str = DEFAULT_SUBNET,
     use_cache: bool = True,
-) -> Optional[dict]:
+) -> dict | None:
     """Full discovery pipeline. Returns device info dict or None."""
     if use_cache:
         cached = await device_registry.get_device(entity_id)
@@ -146,8 +145,8 @@ async def discover_device(
 
 
 async def _discover_via_ha_registry(
-    entity_id: str, ha_url: str, ha_token: str, device_type: Optional[str] = None
-) -> Optional[dict]:
+    entity_id: str, ha_url: str, ha_token: str, device_type: str | None = None
+) -> dict | None:
     """Look up IP/MAC via HA device registry REST API."""
     import aiohttp
     try:
@@ -265,7 +264,7 @@ async def _discover_via_ha_registry(
 
 async def _discover_via_homekit_diagnostics(
     entity_id: str, ha_url: str, ha_token: str
-) -> Optional[dict]:
+) -> dict | None:
     """Get IP from HomeKit controller diagnostics for WebOS TVs.
 
     WebOS config entries have host/IP redacted in REST API, but HomeKit
@@ -372,7 +371,7 @@ async def _discover_via_homekit_diagnostics(
 
 async def _discover_via_entity_attrs(
     entity_id: str, ha_url: str, ha_token: str
-) -> Optional[dict]:
+) -> dict | None:
     """Extract IP/MAC from entity attributes."""
     try:
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -402,10 +401,11 @@ async def _discover_via_entity_attrs(
 
 async def _discover_via_arp(
     entity_id: str, ha_url: str, ha_token: str
-) -> Optional[dict]:
+) -> dict | None:
     """Get IPs from ARP table, probe for device ports, match by device info."""
     try:
         import subprocess
+
         import aiohttp
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
         if not state:
@@ -417,7 +417,7 @@ async def _discover_via_arp(
         # Get IPs from ARP table
         arp_ips = []
         try:
-            with open("/proc/net/arp", "r") as f:
+            with open("/proc/net/arp") as f:
                 lines = f.read().splitlines()[1:]  # skip header
             for line in lines:
                 parts = line.split()
@@ -472,10 +472,11 @@ async def _discover_via_arp(
 
 async def _discover_via_arp_scan(
     entity_id: str, ha_url: str, ha_token: str
-) -> Optional[dict]:
+) -> dict | None:
     """Scan subnets with arp-scan, probe for device ports, match by device info."""
     try:
         import subprocess
+
         import aiohttp
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
         if not state:
@@ -552,7 +553,7 @@ async def _discover_via_arp_scan(
 
 async def _discover_via_snmp(
     entity_id: str, ha_url: str, ha_token: str, router_ip: str = "192.168.2.1", community: str = "public"
-) -> Optional[dict]:
+) -> dict | None:
     """Get MAC/IP from router ARP table via SNMP walk."""
     try:
         import subprocess
@@ -620,7 +621,7 @@ async def _discover_via_snmp(
 
 async def _discover_via_mdns(
     entity_id: str, ha_url: str, ha_token: str
-) -> Optional[dict]:
+) -> dict | None:
     """Resolve hostname via mDNS (.local domain)."""
     try:
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -654,8 +655,8 @@ async def _discover_via_mdns(
 
 
 async def _discover_via_ssdp(
-    entity_id: str, device_type: Optional[str] = None
-) -> Optional[dict]:
+    entity_id: str, device_type: str | None = None
+) -> dict | None:
     """Discover device via SSDP broadcast."""
     try:
         import socket as sock_module
@@ -693,7 +694,7 @@ async def _discover_via_ssdp(
                             )
                             log.info(f"[discovery] Found {entity_id} via SSDP (Roku): {addr[0]}")
                             return await device_registry.get_device(entity_id)
-                    except sock_module.timeout:
+                    except TimeoutError:
                         break
                 sock.close()
             except Exception:
@@ -704,16 +705,17 @@ async def _discover_via_ssdp(
 
 
 async def _discover_via_network_scan(
-    entity_id: str, ha_url: str, ha_token: str, device_type: Optional[str] = None, subnet: str = DEFAULT_SUBNET
-) -> Optional[dict]:
+    entity_id: str, ha_url: str, ha_token: str, device_type: str | None = None, subnet: str = DEFAULT_SUBNET
+) -> dict | None:
     """Scan subnet for device by probing known ports.
 
     Only returns a match if the probed device info correlates with the entity
     (friendly name, model, or serial match). Prevents all entities mapping to
     the first responding IP on the subnet.
     """
-    import aiohttp
     import ipaddress
+
+    import aiohttp
 
     try:
         state = await ha_client.get_state(ha_url, ha_token, entity_id)
@@ -885,21 +887,22 @@ async def bulk_scan(
 
     # Step 1: Scan subnet once to build IP -> device map
     log.info(f"[discovery] Scanning subnet {subnet} for devices...")
-    import aiohttp
     import ipaddress
+
+    import aiohttp
     device_map = {}  # ip -> {type, metadata}
-    
+
     all_ports = set()
     for ports in DEVICE_PORTS.values():
         for port, _ in ports:
             all_ports.add(port)
     port_list = sorted(all_ports)
-    
+
     candidates = [
         str(ip) for ip in ipaddress.IPv4Network(subnet)
         if not str(ip).endswith(".0") and not str(ip).endswith(".255")
     ]
-    
+
     batch_size = 30
     async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as client:
         for i in range(0, len(candidates), batch_size):
@@ -918,12 +921,12 @@ async def bulk_scan(
                         "type": metadata.get("type", "unknown"),
                         "metadata": metadata,
                     }
-    
+
     log.info(f"[discovery] Found {len(device_map)} devices on network: {list(device_map.keys())}")
-    
+
     # Step 2: Match entities to discovered devices
     semaphore = asyncio.Semaphore(5)
-    
+
     async def _scan_one(state: dict):
         async with semaphore:
             entity_id = state["entity_id"]
@@ -931,7 +934,7 @@ async def bulk_scan(
             integration = attrs.get("integration", "")
             entity_lower = entity_id.lower()
             (attrs.get("friendly_name") or "").lower()
-            
+
             # Try HA registry and entity attrs first
             result = await _discover_via_ha_registry(entity_id, ha_url, ha_token, None)
             if result:
@@ -939,7 +942,7 @@ async def bulk_scan(
             result = await _discover_via_entity_attrs(entity_id, ha_url, ha_token)
             if result:
                 return result
-            
+
             # Match to discovered device by type
             for ip, dev_info in device_map.items():
                 dev_type = dev_info["type"]
@@ -959,7 +962,7 @@ async def bulk_scan(
                     )
                     log.info(f"[discovery] Matched {entity_id} to {ip} (type={dev_type})")
                     return await device_registry.get_device(entity_id)
-            
+
             log.warning(f"[discovery] All strategies failed for {entity_id}")
             return None
 

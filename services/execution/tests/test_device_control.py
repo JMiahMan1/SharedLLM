@@ -4,6 +4,7 @@ os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["EXECUTION_EXTERNAL_HOST"] = "localhost"
 
 from fastapi.testclient import TestClient
+
 from services.execution.main import app
 
 
@@ -305,9 +306,9 @@ def test_discovery_entities_with_credentials():
     async def mock_resolve():
         return mock_creds
 
-    import services.execution.main as exec_main
-    import services.execution.ha_client as ha_client_mod
     import services.execution.device_registry as device_reg_mod
+    import services.execution.ha_client as ha_client_mod
+    import services.execution.main as exec_main
 
     original_resolve = exec_main.resolve_first_user
     original_get_states = ha_client_mod.get_states
@@ -343,9 +344,9 @@ def test_discovery_entities_with_areas():
     async def mock_resolve():
         return mock_creds
 
-    import services.execution.main as exec_main
-    import services.execution.ha_client as ha_client_mod
     import services.execution.device_registry as device_reg_mod
+    import services.execution.ha_client as ha_client_mod
+    import services.execution.main as exec_main
 
     original_resolve = exec_main.resolve_first_user
     original_get_states = ha_client_mod.get_states

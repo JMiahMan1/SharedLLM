@@ -12,17 +12,18 @@ import os
 
 # Import runtime-resolved values from services.config (updated by resolve_runtime_config)
 from services.config import (
-    IDENTITY_SVC_URL,
-    EXECUTION_SVC_URL,
-    RAG_SVC_URL,
-    STORAGE_SVC_URL,
-    LOGGING_SVC_URL,
-    WORKSPACE_RUNTIME_SVC_URL,
     CONTROL_PLANE_URL,
+    EXECUTION_SVC_URL,
+    IDENTITY_SVC_URL,
+    LOGGING_SVC_URL,
     OLLAMA_URL,
+    RAG_SVC_URL,
     REDIS_URL,
     SEARXNG_URL,
+    STORAGE_SVC_URL,
+    WORKSPACE_RUNTIME_SVC_URL,
 )
+
 LLAMA_SERVER_PROXY_URL = os.getenv("LLAMA_SERVER_PROXY_URL")
 
 # Use runtime-resolved values (or fallback to env vars)

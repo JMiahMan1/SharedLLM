@@ -5,16 +5,16 @@ Provides pipeline-level functions for command execution flow.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 log = logging.getLogger("app.logic.pipeline")
 
 
 async def _handle_single_command(  # pyright: ignore[reportUnusedFunction]
     command: str,
-    user_creds: Optional[Dict[str, str]] = None,
+    user_creds: dict[str, str] | None = None,
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Handle a single command through the execution pipeline.
 

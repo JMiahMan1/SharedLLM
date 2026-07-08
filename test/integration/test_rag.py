@@ -1,5 +1,5 @@
-import pytest
 import httpx
+import pytest
 
 # RAG Service URL
 RAG_URL = "http://localhost:11438"
@@ -15,7 +15,7 @@ async def test_hybrid_rag_fusion_precision():
     user_id = "test_hybrid_user"
     specific_id = "ERROR_CODE_409X_CRITICAL"
     content = f"The resolution for {specific_id} is to restart the Gateway service and purge the Redis cache."
-    
+
     # 1. Ingest specific knowledge
     async with httpx.AsyncClient() as client:
         await client.post(
@@ -27,9 +27,9 @@ async def test_hybrid_rag_fusion_precision():
                 "metadata": {"source": "manual", "code": specific_id}
             }
         )
-        
+
         # 2. Query with the specific ID
-        # Vector search might rank other "error" docs higher, 
+        # Vector search might rank other "error" docs higher,
         # but BM25 should nail this specific string.
         resp = await client.post(
             f"{RAG_URL}/rag/search",
@@ -41,10 +41,10 @@ async def test_hybrid_rag_fusion_precision():
                 "use_rrf": True
             }
         )
-        
+
         assert resp.status_code == 200
         results = resp.json().get("results", [])
-        
+
         # 3. Assert top result is the correct one
         assert len(results) > 0
         top_hit = results[0]["content"]

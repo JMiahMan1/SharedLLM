@@ -1,11 +1,14 @@
 # services/execution/handlers/calendar.py
 import asyncio
 import logging
-import pytz
+from datetime import UTC, date, datetime, timedelta
+
 import dateparser
-from datetime import date, datetime, timedelta, timezone
+import pytz
+
 from services.config import TIMEZONE
 from services.execution.schemas import CalendarRequest, ExecutionResult
+
 from ..personal_data import resolve_personal_data_provider
 
 log = logging.getLogger("execution.calendar")
@@ -20,7 +23,7 @@ def _normalize_event_time(dt_value):
     local_tz = _get_local_tz()
     if isinstance(dt_value, datetime):
         if dt_value.tzinfo is None:
-            return dt_value.replace(tzinfo=timezone.utc).astimezone(local_tz)
+            return dt_value.replace(tzinfo=UTC).astimezone(local_tz)
         return dt_value.astimezone(local_tz)
     elif isinstance(dt_value, date):
         target = datetime.combine(dt_value, datetime.min.time())
@@ -37,7 +40,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
 
     # Use a thread pool for blocking caldav calls
     loop = asyncio.get_running_loop()
-    
+
     try:
         if action == "list":
             def _list():
@@ -50,7 +53,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                         "color": getattr(c, 'calendar_color', None)
                     } for c in calendars if "birthday" not in (c.name or "").lower()
                 ]
-            
+
             res_data = await loop.run_in_executor(None, _list)
             return ExecutionResult(
                 status="SUCCESS",
@@ -66,7 +69,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 calendars = client.principal().calendars()
                 local_tz = _get_local_tz()
                 now_aware = datetime.now(local_tz)
-                
+
                 for cal in calendars:
                     if any(x in (cal.name or "").lower() for x in ["birthday", "contact", "holiday"]): continue
                     try:
@@ -97,8 +100,8 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
             local_tz = _get_local_tz()
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=local_tz)
-            dt_utc = dt.astimezone(timezone.utc)
-            
+            dt_utc = dt.astimezone(UTC)
+
             def _add():
                 client = provider.calendar_client()
                 calendars = client.principal().calendars()
@@ -116,7 +119,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                             selected = c
                             break
                 if not selected: selected = calendars[0]
-                
+
                 selected.save_event(dtstart=dt_utc, dtend=dt_utc + timedelta(hours=1), summary=req.summary)
                 return f"Added '{req.summary}' to {selected.name} for {dt.strftime('%Y-%m-%d %I:%M %p %Z')}."
 
@@ -126,7 +129,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
         elif action == "delete":
             if not req.query:
                 return ExecutionResult(status="FAILURE", message="Query parameter is required for delete.", service="calendar_delete")
-            
+
             def _delete():
                 client = provider.calendar_client()
                 calendars = client.principal().calendars()
@@ -151,7 +154,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
         elif action == "update":
             if not req.query or not req.summary:
                 return ExecutionResult(status="FAILURE", message="Query and summary are required for update.", service="calendar_update")
-            
+
             def _update():
                 client = provider.calendar_client()
                 calendars = client.principal().calendars()
@@ -185,4 +188,4 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
 
     except Exception as e:
         log.error(f"Calendar error: {e}")
-        return ExecutionResult(status="FAILURE", message=f"Calendar error: {str(e)}", service="calendar")
+        return ExecutionResult(status="FAILURE", message=f"Calendar error: {e!s}", service="calendar")

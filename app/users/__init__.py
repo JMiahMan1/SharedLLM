@@ -6,8 +6,8 @@ When running standalone, returns default credentials from config.
 """
 from __future__ import annotations
 
-import os
 import logging
+import os
 from typing import Dict, Optional
 
 log = logging.getLogger("app.users")
@@ -16,7 +16,7 @@ _IDENTITY_SVC_URL = os.environ.get("IDENTITY_SVC_URL", "http://localhost:8001")
 _INTERNAL_SECRET = os.environ.get("INTERNAL_SECRET", "change-me-in-production")
 
 
-def get_user_creds(username: str = "default") -> Dict[str, Optional[str]]:
+def get_user_creds(username: str = "default") -> dict[str, str | None]:
     """
     Resolve user credentials from the Identity Service or fallback to defaults.
     Returns a dict with keys: user, ha_url, ha_token, nextcloud_url, nextcloud_user,
@@ -54,12 +54,12 @@ def get_user_creds(username: str = "default") -> Dict[str, Optional[str]]:
         }
 
 
-def get_all_users() -> Dict[str, Dict]:
+def get_all_users() -> dict[str, dict]:
     """Return a dict of known users. Currently returns only the default."""
     default_creds = get_user_creds("default")
     return {"default": default_creds}
 
 
-def get_user_config(username: str) -> Dict:
+def get_user_config(username: str) -> dict:
     """Alias for get_user_creds for backwards compatibility."""
     return get_user_creds(username)

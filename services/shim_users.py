@@ -3,19 +3,19 @@ Monolith Shim: Drop-in replacement for app/users.py.
 Makes a rapid requests.post() to the new Identity Service instead of reading .env.
 Ensures downstream monolith files do not break while refactoring.
 """
-import aiohttp
 import logging
 
+import aiohttp
+from fastapi import HTTPException, Security, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-from typing import Dict, Optional
-from fastapi import Security, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 log = logging.getLogger("shim_users")
 
 security = HTTPBearer(auto_error=False)
 
-async def get_user_creds(username: str = "default") -> Dict[str, Optional[str]]:
+async def get_user_creds(username: str = "default") -> dict[str, str | None]:
     """
     Replaces the legacy get_user_creds().
     Calls the Identity Service /api/resolve with rag_user=username.
@@ -23,7 +23,7 @@ async def get_user_creds(username: str = "default") -> Dict[str, Optional[str]]:
     url = f"{IDENTITY_SVC_URL.rstrip('/')}/api/resolve"
     headers = {"X-Internal-Secret": INTERNAL_SECRET, "Content-Type": "application/json"}
     payload = {"rag_user": username}
-    
+
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5.0)) as resp:
@@ -33,7 +33,7 @@ async def get_user_creds(username: str = "default") -> Dict[str, Optional[str]]:
                     if username != "default":
                         return await get_user_creds("default")
                     raise Exception("No default user found in Identity Service")
-                
+
                 resp.raise_for_status()
                 return await resp.json()  # This perfectly matches the old schema
     except Exception as e:
@@ -53,7 +53,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
     """
     if not credentials:
         return await get_user_creds("default")
-        
+
     token = credentials.credentials
     # In the SOA architecture, we treat the token as a username for simplicity in the shim
     creds = await get_user_creds(token)
@@ -65,11 +65,11 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
     return creds
 
 # Stubs for other legacy functions that might be called
-async def get_all_users() -> Dict[str, Dict]:
+async def get_all_users() -> dict[str, dict]:
     # In a full migration, this would call GET /api/users
     # For the shim, we return a mock dict to prevent crashes
     default_creds = await get_user_creds("default")
     return {"default": default_creds}
 
-async def get_user_config(username: str) -> Dict:
+async def get_user_config(username: str) -> dict:
     return await get_user_creds(username)

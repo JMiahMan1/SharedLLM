@@ -3,8 +3,6 @@ Schemas for Device Telemetry Monitoring (Section 3.15).
 """
 from __future__ import annotations
 
-from typing import List, Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -14,25 +12,25 @@ class TelemetryEnrollmentRequest(BaseModel):
     availability_tracking: bool = True
     usage_tracking: bool = True
     offline_alert_threshold_minutes: int = 30
-    group_id: Optional[str] = None
+    group_id: str | None = None
 
 
 class TelemetrySnapshot(BaseModel):
     entity_id: str
-    power_w: Optional[float] = None
+    power_w: float | None = None
     is_available: bool = True
-    state: Optional[str] = None
+    state: str | None = None
     source: str = "poll"
 
 
 class TelemetryQueryRequest(BaseModel):
     entity_id: str
     hours: int = 24
-    dimension: Optional[str] = None  # "power", "availability", "usage", or None for all
+    dimension: str | None = None  # "power", "availability", "usage", or None for all
 
 
 class TelemetryInsightRequest(BaseModel):
-    entity_id: Optional[str] = None
+    entity_id: str | None = None
     hours: int = 168  # 7 days default
     force_analysis: bool = False
 
@@ -43,27 +41,27 @@ class TelemetryEnrollment(BaseModel):
     availability_tracking: bool
     usage_tracking: bool
     offline_alert_threshold_minutes: int
-    group_id: Optional[str] = None
+    group_id: str | None = None
     enrolled_at: str
 
 
 class TelemetryDataPoint(BaseModel):
     recorded_at: float
-    power_w: Optional[float] = None
+    power_w: float | None = None
     is_available: bool
-    state: Optional[str] = None
+    state: str | None = None
 
 
 class TelemetrySummary(BaseModel):
     entity_id: str
-    current_power_w: Optional[float] = None
-    peak_power_w: Optional[float] = None
-    avg_power_w: Optional[float] = None
+    current_power_w: float | None = None
+    peak_power_w: float | None = None
+    avg_power_w: float | None = None
     availability_pct: float = 100.0
     total_activations: int = 0
-    last_outage_at: Optional[str] = None
-    last_outage_duration_minutes: Optional[float] = None
-    data_points: List[TelemetryDataPoint] = Field(default_factory=list)
+    last_outage_at: str | None = None
+    last_outage_duration_minutes: float | None = None
+    data_points: list[TelemetryDataPoint] = Field(default_factory=list)
 
 
 class LLMInsight(BaseModel):

@@ -1,13 +1,15 @@
-import pytest
-from unittest.mock import AsyncMock, patch
 import json
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 
 @pytest.mark.server_only
 @pytest.mark.asyncio
 async def test_get_dns_config_returns_mappings():
-    from services.gateway.main import get_dns_config
     from starlette.requests import Request
+
+    from services.gateway.main import get_dns_config
 
     mock_request = Request({
         "type": "http",
@@ -36,8 +38,9 @@ async def test_get_dns_config_returns_mappings():
 @pytest.mark.server_only
 @pytest.mark.asyncio
 async def test_register_dns_entry_adds_mapping():
-    from services.gateway.main import register_dns_entry
     from starlette.requests import Request
+
+    from services.gateway.main import register_dns_entry
 
     body = json.dumps({"hostname": "new-host", "ip": "192.168.4.179"}).encode()
 
@@ -71,8 +74,9 @@ async def test_register_dns_entry_adds_mapping():
 @pytest.mark.server_only
 @pytest.mark.asyncio
 async def test_remove_dns_entry_deletes_mapping():
-    from services.gateway.main import remove_dns_entry
     from starlette.requests import Request
+
+    from services.gateway.main import remove_dns_entry
 
     async def receive():
         return {"type": "http.request", "body": b"", "more_body": False}

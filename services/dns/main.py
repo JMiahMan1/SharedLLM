@@ -12,7 +12,6 @@ import logging
 import os
 import socket
 import struct
-from typing import Dict, Optional, Tuple
 
 import docker
 
@@ -24,10 +23,10 @@ class ContainerRegistry:
     """Manages container-to-IP mappings"""
 
     def __init__(self):
-        self.containers: Dict[str, dict] = {}
+        self.containers: dict[str, dict] = {}
         self.lock = asyncio.Lock()
 
-    def update_container(self, name: str, ip: str, hostname: Optional[str] = None):
+    def update_container(self, name: str, ip: str, hostname: str | None = None):
         """Add or update a container in the registry"""
         self.containers[name] = {
             'ip': ip,
@@ -42,7 +41,7 @@ class ContainerRegistry:
             del self.containers[name]
             logger.info(f"Removed container: {name}")
 
-    def get_ip(self, name: str) -> Optional[str]:
+    def get_ip(self, name: str) -> str | None:
         """Get IP for a container name"""
         return self.containers.get(name, {}).get('ip')
 
@@ -127,7 +126,7 @@ class DockerWatcher:
         """Watch Docker events without blocking the event loop"""
         logger.info("Watcher: starting event loop")
         event_queue = asyncio.Queue()
-        
+
         def watch_sync():
             """Sync event watcher that puts events in queue"""
             import threading
@@ -143,7 +142,7 @@ class DockerWatcher:
                 logger.error(f"Error watching Docker events: {e}")
                 import traceback
                 traceback.print_exc()
-        
+
         logger.info("Watcher: creating thread task")
         try:
             watcher_task = asyncio.create_task(asyncio.to_thread(watch_sync))
@@ -152,17 +151,17 @@ class DockerWatcher:
         except Exception as e:
             logger.error(f"Failed to create watcher thread task: {e}")
             raise
-        
+
         while self._running:
             try:
                 event = await asyncio.wait_for(event_queue.get(), timeout=1.0)
                 await self._handle_event(event)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except Exception as e:
                 logger.error(f"Error processing Docker event: {e}")
                 await asyncio.sleep(1)
-        
+
         watcher_task.cancel()
 
     def stop(self):
@@ -173,31 +172,31 @@ class DockerWatcher:
 class DNSResolver:
     """DNS query resolver"""
 
-    def __init__(self, registry: ContainerRegistry, upstream_dns: str = '8.8.8.8', static_mappings: Optional[Dict[str, str]] = None):
+    def __init__(self, registry: ContainerRegistry, upstream_dns: str = '8.8.8.8', static_mappings: dict[str, str] | None = None):
         self.registry = registry
         self.upstream_dns = upstream_dns
         self.upstream_client = _DNSClient(upstream_dns)
         self.static_mappings = static_mappings or {}
 
-    async def resolve(self, query: 'DNSQuery') -> Optional[list]:
+    async def resolve(self, query: 'DNSQuery') -> list | None:
         """Resolve a DNS query"""
         print(f"DEBUG: Resolver called for: {query.question_name}", flush=True)
         logger.debug(f"Resolver called for: {query.question_name}")
-        print(f"DEBUG: Entering try block", flush=True)
-        logger.debug(f"Entering try block")
+        print("DEBUG: Entering try block", flush=True)
+        logger.debug("Entering try block")
         name = query.question_name.rstrip('.')
         print(f"DEBUG: After rstrip, name={name}", flush=True)
 
         try:
             print(f"DEBUG: Inside try block, name={name}", flush=True)
             logger.debug(f"After try block, name={name}")
-            
+
             # Check static mappings first (for external hosts like ollama-server.local)
             if name in self.static_mappings:
                 ip = self.static_mappings[name]
                 logger.debug(f"Found static mapping: {name} -> {ip}")
                 return [self._make_a_record(name, ip, 300)]
-            
+
             # Check if it's a .docker suffix query
             if name.endswith('.docker'):
                 container_name = name[:-6]  # Remove .docker
@@ -222,7 +221,7 @@ class DNSResolver:
 
             # Handle host.docker.internal
             if name == 'host.docker.internal':
-                logger.debug(f"Found host.docker.internal match")
+                logger.debug("Found host.docker.internal match")
                 return [self._make_a_record(name, '172.26.0.1', 300)]
 
             # Forward to upstream DNS
@@ -267,7 +266,7 @@ class _DNSClient:
         self.server = server
         self.port = port
 
-    async def resolve(self, name: str, qtype: int = 1) -> Optional[list]:
+    async def resolve(self, name: str, qtype: int = 1) -> list | None:
         """Resolve a name via upstream DNS"""
         try:
             logger.debug(f"Sending DNS query for {name} to {self.server}")
@@ -303,7 +302,7 @@ class _DNSClient:
 
         return header + question
 
-    def _send_query(self, packet: bytes) -> Optional[list]:
+    def _send_query(self, packet: bytes) -> list | None:
         """Send DNS query and parse response"""
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             sock.settimeout(2)
@@ -373,7 +372,7 @@ class _DNSClient:
             offset += length + 1
         return offset
 
-    def _parse_name(self, data: bytes, offset: int) -> Tuple[str, int]:
+    def _parse_name(self, data: bytes, offset: int) -> tuple[str, int]:
         """Parse a DNS name from the packet"""
         names = []
         visited = set()
@@ -423,7 +422,7 @@ class UDPServer(asyncio.DatagramProtocol):
         logger.debug(f"DNS query received from {addr}, {len(data)} bytes")
         asyncio.ensure_future(self._handle_query(data, addr))
 
-    async def _handle_query(self, data: bytes, addr: Tuple[str, int]):
+    async def _handle_query(self, data: bytes, addr: tuple[str, int]):
         """Handle a DNS query"""
         try:
             logger.debug(f"Processing DNS query from {addr}")
@@ -441,7 +440,7 @@ class UDPServer(asyncio.DatagramProtocol):
         except Exception as e:
             logger.error(f"Error handling DNS query: {e}")
 
-    def _parse_query(self, data: bytes) -> Optional[DNSQuery]:
+    def _parse_query(self, data: bytes) -> DNSQuery | None:
         """Parse a DNS query from data"""
         if len(data) < 12:
             return None
@@ -493,7 +492,7 @@ class UDPServer(asyncio.DatagramProtocol):
         result += b'\x00'
         return result
 
-    def _parse_name(self, data: bytes, offset: int) -> Tuple[str, int]:
+    def _parse_name(self, data: bytes, offset: int) -> tuple[str, int]:
         """Parse a DNS name"""
         names = []
         visited = set()
@@ -551,12 +550,12 @@ async def main():
     # Configuration
     port = int(os.environ.get('DNS_PORT', 5353))
     upstream_dns = os.environ.get('UPSTREAM_DNS', '8.8.8.8')
-    
+
     # Initialize components
     client = docker.from_env()
     registry = ContainerRegistry()
     resolver = DNSResolver(registry, upstream_dns)
-    
+
     # Parse static DNS mappings from DNS_MAPPINGS env var (fallback)
     mappings_str = os.environ.get('DNS_MAPPINGS', '')
     flat_mappings = {}
@@ -572,7 +571,7 @@ async def main():
             logger.info(f"Loaded {len(flat_mappings)} static DNS mappings from DNS_MAPPINGS env var")
         except json.JSONDecodeError as e:
             logger.warning(f"Invalid DNS_MAPPINGS JSON: {e}")
-    
+
     resolver.static_mappings = flat_mappings
 
     # Fetch DNS records from Identity service and update periodically
@@ -581,11 +580,11 @@ async def main():
         import aiohttp
         identity_url = os.environ.get('IDENTITY_SVC_URL')
         internal_secret = os.environ.get('INTERNAL_SECRET')
-        
+
         if not identity_url or not internal_secret:
             logger.warning("IDENTITY_SVC_URL or INTERNAL_SECRET not set, using env var mappings only")
             return
-        
+
         while True:
             try:
                 async with aiohttp.ClientSession() as http_session:
@@ -608,14 +607,14 @@ async def main():
                                     # For multiple IPs, use first one (round-robin handled by resolver)
                                     new_mappings[domain] = values[0]
                                     logger.debug(f"DNS record with multiple values: {domain} -> {values}")
-                        
+
                         resolver.static_mappings = new_mappings
                         logger.info(f"Updated {len(new_mappings)} DNS mappings from Identity service")
             except Exception as e:
                 logger.warning(f"Failed to fetch DNS records from Identity service: {e}")
-            
+
             await asyncio.sleep(30)  # Refresh every 30 seconds
-    
+
     # Start refresh task if Identity service URL is configured
     if os.environ.get('IDENTITY_SVC_URL'):
         asyncio.create_task(refresh_dns_mappings())
@@ -636,7 +635,7 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', 8009)
     await site.start()
-    logger.info(f"HTTP API listening on port 8009")
+    logger.info("HTTP API listening on port 8009")
 
     # Run DNS server
     logger.info("Starting UDP DNS server...")

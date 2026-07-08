@@ -4,7 +4,8 @@ import json
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import aiohttp
 
@@ -31,9 +32,9 @@ class BaseLLMProvider(ABC):
     async def generate(
         self,
         model: str,
-        messages: List[Dict[str, str]],
-        options: Optional[Dict[str, Any]] = None,
-        chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None
+        messages: list[dict[str, str]],
+        options: dict[str, Any] | None = None,
+        chunk_callback: Callable[[str], Awaitable[None]] | None = None
     ) -> str:
         """Standard interface for LLM generation."""
         pass
@@ -45,7 +46,7 @@ class OllamaProvider(BaseLLMProvider):
         self.timeout = timeout
         self.slot_wait_timeout = slot_wait_timeout
 
-    async def _check_slots(self, client: aiohttp.ClientSession) -> Optional[dict]:
+    async def _check_slots(self, client: aiohttp.ClientSession) -> dict | None:
         """Check slot availability via /api/ps. Returns slot info dict or None."""
         try:
             resp = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
@@ -67,7 +68,7 @@ class OllamaProvider(BaseLLMProvider):
                 return True
             data = await resp.json()
             if "slots" not in data:
-                log.debug(f"[OllamaProvider] No slot info in /api/ps, proceeding without wait")
+                log.debug("[OllamaProvider] No slot info in /api/ps, proceeding without wait")
                 return True
             slots = data.get("slots", {})
             if slots.get("available", 0) > 0:
@@ -82,7 +83,7 @@ class OllamaProvider(BaseLLMProvider):
                     d2 = await resp2.json()
                     s2 = d2.get("slots", {})
                     if s2.get("available", 0) > 0:
-                        log.info(f"[OllamaProvider] Slot available after waiting")
+                        log.info("[OllamaProvider] Slot available after waiting")
                         return True
             log.warning(f"[OllamaProvider] Timed out waiting for slot after {self.slot_wait_timeout}s")
             return False
@@ -93,9 +94,9 @@ class OllamaProvider(BaseLLMProvider):
     async def generate(
         self,
         model: str,
-        messages: List[Dict[str, str]],
-        options: Optional[Dict[str, Any]] = None,
-        chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None
+        messages: list[dict[str, str]],
+        options: dict[str, Any] | None = None,
+        chunk_callback: Callable[[str], Awaitable[None]] | None = None
     ) -> str:
         # Queue-and-wait: check if Ollama has available slots before submitting
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as slot_client:
@@ -104,7 +105,7 @@ class OllamaProvider(BaseLLMProvider):
 
         opts = options or {}
         show_thinking = opts.get("show_thinking", False)
-        
+
         payload = {
             "model": model,
             "messages": messages,
@@ -121,12 +122,12 @@ class OllamaProvider(BaseLLMProvider):
                     raw_text = await resp.text()
                     raise RuntimeError(f"Ollama HTTP {resp.status}: {raw_text}")
                 resp.raise_for_status()
-                
+
                 # Harden: Strip keep-alive spaces and handle potential multi-line/streamed JSON
                 raw_text = (await resp.text()).strip()
                 if not raw_text:
                     return ""
-                
+
                 # If the response contains multiple JSON objects (NDJSON), take the last one or merge
                 if "\n" in raw_text:
                     lines = [line.strip() for line in raw_text.split("\n") if line.strip()]
@@ -157,7 +158,7 @@ class OllamaProvider(BaseLLMProvider):
                     if not show_thinking:
                         content = strip_thinking_blocks(content)
                     return content
-                
+
                 try:
                     data = json.loads(raw_text)
                     if "error" in data:
@@ -220,9 +221,9 @@ class OpenRouterProvider(BaseLLMProvider):
     async def generate(
         self,
         model: str,
-        messages: List[Dict[str, str]],
-        options: Optional[Dict[str, Any]] = None,
-        chunk_callback: Optional[Callable[[str], Awaitable[None]]] = None
+        messages: list[dict[str, str]],
+        options: dict[str, Any] | None = None,
+        chunk_callback: Callable[[str], Awaitable[None]] | None = None
     ) -> str:
         headers = {
             "Authorization": f"Bearer {self.api_key}",

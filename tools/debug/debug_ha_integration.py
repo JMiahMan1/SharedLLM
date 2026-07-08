@@ -1,4 +1,5 @@
 import os
+
 import requests
 from dotenv import load_dotenv
 
@@ -56,13 +57,13 @@ if not players:
 else:
     print(f"\n[OK] Found {len(players)} potential target(s).")
     target = players[4] # Pick first one for test
-    
+
     # 3. Test TTS Playback
     print_step(f"Testing TTS on {target}...")
     payload = {
         "entity_id": target,
         "media_content_id": "This is a test of the alarm system audio.",
-        "media_content_type": "text" 
+        "media_content_type": "text"
     }
     try:
         url = f"{HA_URL.rstrip('/')}/api/services/media_player/play_media"

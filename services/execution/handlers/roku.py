@@ -11,18 +11,17 @@ For transport:
   - roku.press: Send a key press (HOME, BACK, PLAY, etc.)
   - remote.send_command: Alternative transport via remote entity
 """
-import logging
 import asyncio
+import logging
+
 try:
+    import device_discovery
+    import device_registry
     import ha_client
     from schemas import ExecutionResult
-    import device_registry
-    import device_discovery
 except ImportError:
-    from .. import ha_client
+    from .. import device_discovery, device_registry, ha_client
     from ..schemas import ExecutionResult
-    from .. import device_registry
-    from .. import device_discovery
 
 log = logging.getLogger("execution.roku")
 
@@ -229,12 +228,12 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
         await device_registry.invalidate_device(roku_entity)
 
     log.info(f"[roku.music] Delegating audio to MA: {ma_entity} media_id={ma_media_id} type={ma_media_type}")
-    
+
     # MA 2.7+ natively supports Roku Media Assistant as a player provider.
     # MA handles transcoding and streaming to the Roku automatically.
     # Use music_assistant.play_media with the full library:// URI (MA translates it internally)
     play_media_id = full_library_uri if full_library_uri else ma_media_id
-    
+
     # Primary: use music_assistant.play_media service with library:// URI
     result = await ha_client.call_service(
         ha_url, ha_token, "music_assistant", "play_media", ma_entity,
@@ -242,7 +241,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     )
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Playing '{song_name}' on {roku_entity}.", service="roku_music")
-    
+
     # Fallback: try core media_player.play_media
     result = await ha_client.call_service(
         ha_url, ha_token, "media_player", "play_media", ma_entity,
@@ -250,7 +249,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     )
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Playing '{song_name}' on {roku_entity}.", service="roku_music")
-    
+
     return ExecutionResult(status="FAILURE", message=f"Failed to play music on {roku_entity}: {result.get('error')}", service="roku_music", detail=result)
 
 
@@ -293,8 +292,9 @@ async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_ur
             await ha_client.call_service(ha_url, ha_token, "remote", "send_command", remote_entity, {"command": "Home"})
             await asyncio.sleep(2)
 
-    import aiohttp
     import re
+
+    import aiohttp
     clean_title = re.sub(r'[^\w\s\-\.\(\)\[\]]', '', title)[:100]
     params = {"t": "v", "u": video_url, "videoName": clean_title or "Video", "videoFormat": "mp4"}
 

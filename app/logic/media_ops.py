@@ -5,16 +5,16 @@ Handles media command routing and execution for the SharedLLM monolith.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any
 
 log = logging.getLogger("app.logic.media_ops")
 
 
 async def handle_media_command(
     command: str,
-    user_creds: Optional[Dict[str, str]] = None,
+    user_creds: dict[str, str] | None = None,
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Route and execute a media command.
 

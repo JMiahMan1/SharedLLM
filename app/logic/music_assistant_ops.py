@@ -6,7 +6,7 @@ with the Music Assistant integration.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 log = logging.getLogger("app.logic.music_assistant_ops")
 
@@ -17,7 +17,7 @@ async def play_media(
     media_content_type: str = "music",
     enqueue: str = "replace",
     **kwargs: Any,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Play media via a Music Assistant player.
     Delegates to the Home Assistant play_media service.
@@ -37,7 +37,7 @@ async def play_media(
     )
 
 
-async def get_media_player_info(entity_id: str) -> Dict[str, Any]:
+async def get_media_player_info(entity_id: str) -> dict[str, Any]:
     """Get information about a Music Assistant media player."""
     from app.domains.shared import execute_ha_service
 

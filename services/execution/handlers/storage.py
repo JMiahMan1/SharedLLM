@@ -1,9 +1,11 @@
 # services/execution/handlers/storage.py
 import logging
-from services.execution.schemas import StorageFileReadRequest, StorageFileWriteRequest, StorageTextToAudioRequest, ExecutionResult
-from ..tts import text_to_speech
-from ..nextcloud_client import resolve_credentials, webdav_url
+
+from services.execution.schemas import ExecutionResult, StorageFileReadRequest, StorageFileWriteRequest, StorageTextToAudioRequest
+
 from ..http_client import request as http_request
+from ..nextcloud_client import resolve_credentials, webdav_url
+from ..tts import text_to_speech
 
 log = logging.getLogger("execution.storage")
 
@@ -22,7 +24,7 @@ async def handle_storage_read(req: StorageFileReadRequest) -> ExecutionResult:
 
         file_url = webdav_url(url, user, req.path)
         resp = await http_request("GET", file_url, auth=(user, pw), timeout=30, verify=False)
-        
+
         if resp["status_code"] == 200:
             content = resp["text"]
             return _ok(f"Read {len(content)} bytes from storage:{req.path}", {"content": content, "path": req.path})
@@ -30,7 +32,7 @@ async def handle_storage_read(req: StorageFileReadRequest) -> ExecutionResult:
             return _fail(f"File not found in storage: {req.path}")
         else:
             return _fail(f"Nextcloud error {resp['status_code']}: {resp['text'][:200]}")
-            
+
     except Exception as e:
         log.error(f"Storage read failed: {e}")
         return _fail(str(e))
@@ -46,12 +48,12 @@ async def handle_storage_write(req: StorageFileWriteRequest) -> ExecutionResult:
         # Ensure parent directories exist (Nextcloud WebDAV doesn't do this automatically with PUT)
         # For simplicity in this handler, we'll just try the PUT
         resp = await http_request("PUT", file_url, auth=(user, pw), data=req.content, timeout=30, verify=False)
-        
+
         if resp["status_code"] in (200, 201, 204):
             return _ok(f"Successfully wrote to storage:{req.path}")
         else:
             return _fail(f"Nextcloud error {resp['status_code']}: {resp['text'][:200]}")
-            
+
     except Exception as e:
         log.error(f"Storage write failed: {e}")
         return _fail(str(e))
@@ -69,7 +71,7 @@ async def handle_storage_tts(req: StorageTextToAudioRequest) -> ExecutionResult:
         resp = await http_request("GET", input_url, auth=(user, pw), timeout=30, verify=False)
         if resp["status_code"] != 200:
             return _fail(f"Failed to read input file ({resp['status_code']})")
-        
+
         text = resp["text"]
         if not text.strip():
             return _fail("Input file is empty.")
@@ -86,16 +88,16 @@ async def handle_storage_tts(req: StorageTextToAudioRequest) -> ExecutionResult:
             # Default to same name with .wav
             base_path = req.input_path.rsplit(".", 1)[0]
             out_path = f"{base_path}.wav"
-            
+
         output_url = webdav_url(url, user, out_path)
         log.info(f"[storage_tts] Writing output: {out_path}")
         put_resp = await http_request("PUT", output_url, auth=(user, pw), data=audio_bytes, timeout=60, verify=False)
-        
+
         if put_resp["status_code"] in (200, 201, 204):
             return _ok(f"Successfully converted {req.input_path} to audio at {out_path}", {"path": out_path, "size": len(audio_bytes)})
         else:
             return _fail(f"Failed to write output audio ({put_resp['status_code']}): {put_resp['text'][:200]}")
-            
+
     except Exception as e:
         log.error(f"Storage TTS failed: {e}")
         return _fail(str(e))

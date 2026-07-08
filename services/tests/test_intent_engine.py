@@ -1,4 +1,5 @@
 import pytest
+
 from services.gateway.intent_engine import IntentEngine
 
 

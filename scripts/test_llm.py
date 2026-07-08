@@ -1,5 +1,7 @@
 import asyncio
+
 import httpx
+
 
 async def main():
     prompt = "The user asked 'Execute the StorageIndexRequest tool for the path /Notes' but lacks ['nextcloud_url', 'nextcloud_user', 'nextcloud_pass']. Explain that they must visit the Identity page."

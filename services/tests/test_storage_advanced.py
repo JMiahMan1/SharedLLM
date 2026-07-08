@@ -1,11 +1,13 @@
-import pytest
 import asyncio
 from unittest.mock import MagicMock
+
+import pytest
 from fastapi import BackgroundTasks
 
-from services.storage.indexer import chunk_text, CheckpointManager, extract_and_chunk_contents
-from services.storage.models import ContentIndexItem
+from services.storage.indexer import CheckpointManager, chunk_text, extract_and_chunk_contents
 from services.storage.main import IndexScanRequest
+from services.storage.models import ContentIndexItem
+
 
 @pytest.mark.server_only
 def test_storage_main_functions():
@@ -20,17 +22,17 @@ def test_advanced_chunk_text():
     chunks = chunk_text(text, chunk_size=1000, overlap=200)
     assert len(chunks) == 2
     assert len(chunks[0]) == 1000
-    assert len(chunks[1]) == 700 
+    assert len(chunks[1]) == 700
 
 def test_advanced_checkpoint_manager(tmp_path):
     checkpoint_file = tmp_path / "checkpoint.json"
     mgr = CheckpointManager(checkpoint_file=str(checkpoint_file))
-    
+
     assert not mgr.is_indexed("/file1.txt", "123")
-    
+
     mgr.mark_indexed("/file1.txt", "123")
     mgr.save()
-    
+
     # Reload
     mgr2 = CheckpointManager(checkpoint_file=str(checkpoint_file))
     assert mgr2.is_indexed("/file1.txt", "123")
@@ -40,16 +42,16 @@ def test_extract_and_chunk_contents_logic():
     # Mock provider
     mock_provider = MagicMock()
     mock_provider.get_content.return_value = "Hello world knowledge"
-    
+
     items = [
         ContentIndexItem(
-            path="/test.txt", name="test.txt", is_dir=False, 
+            path="/test.txt", name="test.txt", is_dir=False,
             item_type="text", subtype="plain", role="general",
             extractable_capabilities=["full_text"], mtime="123",
             signals=[], recommended_tools=[], restrictions=[], related_items=[], usage_hints=""
         )
     ]
-    
+
     chunks = asyncio.run(extract_and_chunk_contents(mock_provider, items))
     assert len(chunks) == 2
     assert chunks[0]["metadata"]["path"] == "/test.txt"
@@ -68,8 +70,8 @@ def test_storage_api_control_endpoints():
 
 @pytest.mark.server_only
 def test_full_index_endpoint_mocks(monkeypatch):
-    from services.storage.models import ProviderConfig
     from services.storage.main import full_content_index
+    from services.storage.models import ProviderConfig
     request = IndexScanRequest(
         provider=ProviderConfig(kind="nextcloud", settings={"url": "http://x", "username": "u", "password": "p"}),
         path="/",

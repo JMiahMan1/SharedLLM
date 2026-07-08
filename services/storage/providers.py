@@ -1,5 +1,6 @@
 # services/storage/providers.py
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from typing import Any
 
@@ -26,7 +27,7 @@ class StorageProvider(ABC):
 def _resolve_nextcloud_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """Merge request settings with defaults from config.py."""
     merged = dict(settings)
-    from services.config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
+    from services.config import NEXTCLOUD_PASS, NEXTCLOUD_URL, NEXTCLOUD_USER
     if "url" not in merged:
         merged["url"] = NEXTCLOUD_URL
     if "username" not in merged:
@@ -47,10 +48,10 @@ def build_provider(config: ProviderConfig) -> StorageProvider:
         except ImportError:
             from providers_impl.nextcloud import NextcloudStorageProvider
         return NextcloudStorageProvider(settings)
-    
+
     # Example for future local provider:
     # if config.kind == "local":
     #     from .providers_impl.local import LocalStorageProvider
     #     return LocalStorageProvider(config.settings)
-        
+
     raise ValueError(f"Unsupported storage provider: {config.kind}")

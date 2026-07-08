@@ -1,6 +1,6 @@
+import aiohttp
 import pytest
 import respx
-import aiohttp
 from fastapi import status
 
 # This test suite simulates production failure scenarios using respx
@@ -11,13 +11,13 @@ from fastapi import status
 async def test_identity_401_expired_token():
     """Scenario: Identity Service returns 401 (e.g. JWT expired internally)"""
     from services.gateway.main import app
-    
+
     # Mock the identity resolution to fail with 401
     respx.post("http://127.0.0.1:8001/api/resolve").return_value = MagicMock(
-        status.HTTP_401_UNAUTHORIZED, 
+        status.HTTP_401_UNAUTHORIZED,
         json={"detail": "Token expired"}
     )
-    
+
     async with aiohttp.ClientSession(app=app, base_url="http://test") as ac:
         # Chat request should fail with 401 and clean message
         resp = await ac.post("/api/chat", json={"message": "hello", "token": "expired-token"})
@@ -29,10 +29,10 @@ async def test_identity_401_expired_token():
 async def test_identity_503_partition():
     """Scenario: Identity Service is unreachable (Network Partition)"""
     from services.gateway.main import app
-    
+
     # Mock connection error
     respx.post("http://127.0.0.1:8001/api/resolve").side_effect = aiohttp.ClientConnectorError("Connection refused")
-    
+
     async with aiohttp.ClientSession(app=app, base_url="http://test") as ac:
         resp = await ac.post("/api/chat", json={"message": "hello"})
         assert resp.status_code == 503
@@ -43,13 +43,13 @@ async def test_identity_503_partition():
 async def test_rag_500_timeout():
     """Scenario: RAG Service times out or returns 500"""
     from services.gateway.main import app
-    
+
     # Mock RAG failure
     respx.post("http://127.0.0.1:8004/rag/search").return_value = MagicMock(
         status.HTTP_500_INTERNAL_SERVER_ERROR,
         text="Vector database timeout"
     )
-    
+
     # Mock identity success
     respx.post("http://127.0.0.1:8001/api/resolve").return_value = MagicMock(
         200, json={"user": "jeremiah", "is_admin": True}
@@ -61,4 +61,4 @@ async def test_rag_500_timeout():
         # The system should ideally log the error and continue without RAG context
         # but current implementation might propagate the 500 if it's a hard dependency.
         # In a hardened system, we want it to be resilient.
-        assert resp.status_code in (200, 500) 
+        assert resp.status_code in (200, 500)
