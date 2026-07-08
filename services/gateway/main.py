@@ -5144,7 +5144,7 @@ async def get_abs_libraries(request: Request):
         log.error(f"[abs/libraries] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "libraries": []}
     try:
-        async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "libraries", "user_id": creds.get("user") or ""},
@@ -5179,7 +5179,7 @@ async def get_abs_last_played(request: Request):
         log.error(f"[abs/last-played] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": []}
     try:
-        async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "last_played", "user_id": creds.get("user") or ""},
@@ -5206,7 +5206,7 @@ async def get_abs_library_items(library_id: str, request: Request, limit: int = 
         log.error(f"[abs/library] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": []}
     try:
-        async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "list", "library_id": library_id, "limit": limit, "user_id": creds.get("user") or ""},
@@ -5233,7 +5233,7 @@ async def search_abs(q: str, request: Request, limit: int = 20):
         log.error(f"[abs/search] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": [], "podcasts": [], "authors": [], "total": 0}
     try:
-        async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "search", "query": q, "limit": limit, "user_id": creds.get("user") or ""},
@@ -5267,7 +5267,7 @@ async def get_abs_status():
     """Check ABS server connectivity by pinging the login endpoint."""
     try:
         from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-        async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as client:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as client:
             # Resolve ABS URL from identity settings
             settings_resp = await client.get(
                 f"{IDENTITY_SVC_URL}/api/settings",
@@ -5284,7 +5284,7 @@ async def get_abs_status():
                     return {"status": "UNAVAILABLE", "error": "ABS URL not configured", "reachable": False}
 
             # Ping ABS with a lightweight HEAD request
-            async with aiohttp.ClientSession(timeout=ABS_TIMEOUT) as ping_client:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as ping_client:
                 resp = await ping_client.get(f"{abs_url}/api/books?limit=1")
                 if resp.status == 200:
                     return {"status": "AVAILABLE", "url": abs_url, "reachable": True}
