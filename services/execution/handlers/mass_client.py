@@ -98,3 +98,42 @@ async def get_recent(mass_url: str, mass_token: str) -> list[dict[str, Any]]:
         log.error(f"[mass] Failed to get recent: {e}")
         return []
 
+
+async def search(mass_url: str, mass_token: str, query: str, limit: int = 20, media_types: list[str] | None = None) -> list[dict[str, Any]]:
+    """Search Music Assistant (library + providers) via REST API using the MA token."""
+    try:
+        args: dict[str, Any] = {"name": query, "limit": limit}
+        if media_types:
+            args["media_type"] = [mt.lower() for mt in media_types]
+        raw = await _ma_api(mass_url, mass_token, "music/search", args)
+        items: list[dict[str, Any]] = []
+        if isinstance(raw, dict):
+            for v in raw.values():
+                if isinstance(v, list):
+                    items.extend(v)
+        elif isinstance(raw, list):
+            items = raw
+        results: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            artists = item.get("artists") or []
+            artist = artists[0].get("name", "") if artists and isinstance(artists[0], dict) else (item.get("artist", "") or "")
+            album = item.get("album")
+            album_name = album.get("name", "") if isinstance(album, dict) else (album or "")
+            image = item.get("image")
+            image_path = image.get("path", "") if isinstance(image, dict) else (image or "")
+            results.append({
+                "name": item.get("name", ""),
+                "uri": item.get("uri", ""),
+                "type": item.get("media_type", "track"),
+                "artist": artist,
+                "album": album_name,
+                "duration": item.get("duration", 0),
+                "image": image_path,
+            })
+        return results[:limit]
+    except Exception as e:
+        log.error(f"[mass] Failed to search: {e}")
+        return []
+

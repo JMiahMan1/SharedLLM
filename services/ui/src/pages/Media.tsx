@@ -543,7 +543,7 @@ const MediaExplorerModal = ({
 
   const { data: maSearchResults, isLoading: maSearchLoading, error: maSearchError } = useQuery({
     queryKey: ['ma-search', search],
-    queryFn: () => api.searchMusicAssistant(search),
+    queryFn: () => api.searchMusicAssistant(search, undefined, 30, false),
     enabled: show && tab === 'ma' && search.length >= 2,
     retry: 2,
     staleTime: 60000,
