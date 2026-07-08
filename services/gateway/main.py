@@ -3558,16 +3558,15 @@ async def proxy_generate(request: Request):
         if not ollama_url:
             raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
         async with aiohttp.ClientSession(timeout=None) as client:
-            req = client.build_request("POST", f"{ollama_url}/api/generate", json=body)
-            resp = await client.send(req, stream=True)
+            resp = await client.post(f"{ollama_url}/api/generate", json=body)
             if resp.status != 200:
-                await resp.aread()
-                return JSONResponse({"status": "ERROR", "message": await resp.text()}, status_code=resp.status)
-            
+                error_text = await resp.text()
+                return JSONResponse({"status": "ERROR", "message": error_text}, status_code=resp.status)
+
             async def generate():
-                async for chunk in resp.aiter_raw():
+                async for chunk in resp.content.iter_any():
                     yield chunk
-            
+
             from fastapi.responses import StreamingResponse
             return StreamingResponse(generate(), media_type="application/x-ndjson")
     except Exception as e:
@@ -5495,7 +5494,8 @@ async def stream_audiobookshelf(book_id: str, request: Request):
                     )
                     log.info(f"[stream/abs] Login response code: {login_resp.status}")
                     if login_resp.status == 200:
-                        abs_key = await login_resp.json().get("user", {}).get("token")
+                        login_data = await login_resp.json()
+                        abs_key = login_data.get("user", {}).get("token")
                         log.info("[stream/abs] Successfully obtained token from ABS login")
                     else:
                         log.error(f"[stream/abs] Login failed with status {login_resp.status}: {await login_resp.text()}")
@@ -5512,9 +5512,9 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         async def stream_generator(cli, r):
             try:
                 bytes_sent = 0
-                async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                async for chunk in r.content.iter_chunked(64 * 1024):
                     try:
-                        if request.client and await request.client.disconnect():
+                        if await request.is_disconnected():
                             log.info(f"[stream/abs/generator] Client disconnected after {bytes_sent} bytes for book {book_id}")
                             break
                     except Exception:
@@ -5526,14 +5526,13 @@ async def stream_audiobookshelf(book_id: str, request: Request):
                 log.error(f"[stream/abs/generator] Error streaming chunks for book {book_id}: {e}", exc_info=True)
                 raise
             finally:
-                await r.close()
+                await r.release()
                 await cli.close()
 
         range_header = request.headers.get("range")
         log.info(f"[stream/abs] Client requested range: {range_header} for book {book_id}")
         client = aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(300.0, connect=15.0),
-            follow_redirects=True,
         )
         try:
             req_headers: dict[str, str] = {
@@ -5544,11 +5543,8 @@ async def stream_audiobookshelf(book_id: str, request: Request):
             }
             if range_header:
                 req_headers["Range"] = range_header
-            
-            resp = await client.send(
-                client.build_request("GET", stream_url, headers=req_headers),
-                stream=True
-            )
+
+            resp = await client.get(stream_url, headers=req_headers, allow_redirects=True)
             log.info(f"[stream/abs] ABS stream response status: {resp.status}, headers: {dict(resp.headers)}")
             
             response_headers = {
@@ -6389,9 +6385,9 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             async def stream_generator_ma(cli, r):
                 try:
                     bytes_sent = 0
-                    async for chunk in r.aiter_bytes(chunk_size=64 * 1024):
+                    async for chunk in r.content.iter_chunked(64 * 1024):
                         try:
-                            if request.client and await request.client.disconnect():
+                            if await request.is_disconnected():
                                 log.info(f"[stream/ma/generator] Client disconnected after {bytes_sent} bytes")
                                 break
                         except Exception:
@@ -6403,14 +6399,13 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                     log.error(f"[stream/ma/generator] Error streaming chunks: {e}", exc_info=True)
                     raise
                 finally:
-                    await r.close()
+                    await r.release()
                     await cli.close()
 
             range_header = request.headers.get("range")
             log.info(f"[stream/ma] Client requested range: {range_header}")
             proxy_client = aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(300.0, connect=15.0),
-                follow_redirects=False,
             )
             try:
                 proxy_headers: dict[str, str] = {
@@ -6423,15 +6418,14 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                 proxy_resp: aiohttp.ClientResponse | None = None
                 last_status_code: int | None = None
                 for attempt in range(1, 11):
-                    proxy_resp = await proxy_client.send(
-                        proxy_client.build_request("GET", stream_url, headers=proxy_headers),
-                        stream=True,
+                    proxy_resp = await proxy_client.get(
+                        stream_url, headers=proxy_headers, allow_redirects=False
                     )
                     last_status_code = proxy_resp.status
                     log.info(f"[stream/ma] MA stream response status: {proxy_resp.status} (attempt {attempt}/10)")
                     if proxy_resp.status != 404:
                         break
-                    await proxy_resp.close()
+                    await proxy_resp.release()
                     proxy_resp = None
                     if attempt < 10:
                         await asyncio.sleep(0.5)
@@ -6445,10 +6439,10 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                 if proxy_resp.status >= 400:
                     body = ""
                     try:
-                        body = (await proxy_resp.aread()).decode("utf-8", errors="ignore").strip()
+                        body = (await proxy_resp.read()).decode("utf-8", errors="ignore").strip()
                     except Exception:
                         pass
-                    await proxy_resp.close()
+                    await proxy_resp.release()
                     raise HTTPException(
                         status_code=502,
                         detail=f"MA stream endpoint returned HTTP {proxy_resp.status}{f': {body[:200]}' if body else ''}",
@@ -6525,7 +6519,7 @@ async def media_imageproxy(path: str, request: Request):
             resp = await client.get(target_url, headers=headers)
             if resp.status == 200:
                 content_type = resp.headers.get("Content-Type", "image/jpeg")
-                return Response(content=await resp.content(), media_type=content_type)
+                return Response(content=await resp.read(), media_type=content_type)
             else:
                 log.error(f"[imageproxy] Upstream returned status {resp.status}")
                 raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
