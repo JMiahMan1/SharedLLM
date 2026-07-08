@@ -76,12 +76,14 @@ const DeviceSelector = ({
   onDeviceSelect,
   localMode,
   onLocalToggle,
+  maPlayers,
 }: {
   selectedTarget: string;
   entities: MediaEntity[];
   onDeviceSelect?: (entityId: string) => void;
   localMode: boolean;
   onLocalToggle?: (mode: boolean) => void;
+  maPlayers?: Array<{ player_id: string; name: string; available: boolean; state: string; powered: boolean }>;
 }) => {
   const { trigger } = useHaptics();
 
@@ -144,6 +146,38 @@ const DeviceSelector = ({
             )}
           </div>
         </button>
+        {/* Music Assistant Players */}
+        {maPlayers && maPlayers.length > 0 && (
+          <>
+            {maPlayers.map((p) => {
+              const pid = `ma:${p.player_id}`;
+              const active = selectedTarget === pid;
+              return (
+                <button
+                  key={pid}
+                  onClick={() => onDeviceSelect?.(pid)}
+                  className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] relative overflow-hidden ${
+                    active
+                      ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
+                      : p.available
+                        ? 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                        : 'bg-white/3 border-white/5 opacity-40'
+                  }`}
+                >
+                  {active && <div className="absolute inset-0 bg-cyan-500/5 pointer-events-none" />}
+                  <div className="relative flex items-center gap-2.5">
+                    <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${p.available ? 'bg-green-400' : 'bg-slate-600'}`} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-white text-sm font-medium truncate">{p.name}</p>
+                      <p className="text-[10px] text-slate-500 truncate">Music Assistant</p>
+                    </div>
+                    {active && <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 shadow-sm shadow-cyan-400/50" />}
+                  </div>
+                </button>
+              );
+            })}
+          </>
+        )}
         {/* HA Devices */}
         {hasHaDevices && (
           <>
@@ -176,7 +210,7 @@ const DeviceSelector = ({
             ))}
           </>
         )}
-        {!localMode && !hasHaDevices && (
+        {!localMode && !hasHaDevices && (!maPlayers || maPlayers.length === 0) && (
           <div className="flex items-center justify-center px-4 py-2.5 rounded-xl border border-dashed border-white/5 text-slate-600 text-xs shrink-0">
             Tap a device to start
           </div>
@@ -906,6 +940,7 @@ const Media = () => {
   const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
   const [localMode, setLocalMode] = useState(true);
   const isWebPlayer = selectedTarget === 'web_player';
+  const [maPlayers, setMaPlayers] = useState<Array<{ player_id: string; name: string; available: boolean; state: string; powered: boolean }>>([]);
 
   // Local player states
   const [localIsPlaying, setLocalIsPlaying] = useState(false);
@@ -959,6 +994,20 @@ const Media = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localMode]);
+
+  // Fetch Music Assistant players for the device picker. Uses the browser's
+  // ma-jsonrpc WebSocket, which reaches MA directly and avoids the gateway's
+  // server-side hostname loop (ha.sumemail.com resolves to the host internally).
+  useEffect(() => {
+    let cancelled = false;
+    if (maPlayer.isConnected) {
+      maPlayer.listMaPlayers()
+        .then((players) => { if (!cancelled) setMaPlayers(players); })
+        .catch(() => { if (!cancelled) setMaPlayers([]); });
+    }
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [maPlayer.isConnected, maPlayer.listMaPlayers]);
 
   // Music Assistant metadata & favorites state
   const [detailedMetadata, setDetailedMetadata] = useState<TrackDetail | null>(null);
@@ -1339,6 +1388,25 @@ const Media = () => {
 
   const sendTransport = useCallback(async (command: string) => {
     if (!selectedTarget) { setError('No media player selected'); return; }
+    if (selectedTarget.startsWith('ma:')) {
+      const pid = selectedTarget.slice(3);
+      const cmdMap: Record<string, string> = {
+        play: 'players/cmd_play', resume: 'players/cmd_play', pause: 'players/cmd_pause',
+        next: 'players/cmd_next', previous: 'players/cmd_previous', stop: 'players/cmd_stop',
+      };
+      const maCmd = cmdMap[command];
+      if (!maCmd) { setError(`Unsupported command: ${command}`); return; }
+      trigger('light');
+      setLoading(command);
+      setError(null);
+      try {
+        if (!maPlayer.isConnected) await maPlayer.connect();
+        await maPlayer.maCommand(maCmd, { player_id: pid });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Command failed');
+      } finally { setLoading(null); }
+      return;
+    }
     trigger('light');
     setLoading(command);
     setError(null);
@@ -1368,6 +1436,23 @@ const Media = () => {
         await maPlayer.playMedia(query);
       } catch (err) {
         console.error('[Media] WebPlayer play failed:', err);
+        setError(err instanceof Error ? err.message : 'Playback failed');
+        return;
+      } finally {
+        setLoading(null);
+      }
+      return;
+    }
+    if (selectedTarget.startsWith('ma:')) {
+      const pid = selectedTarget.slice(3);
+      trigger('heavy');
+      setLoading('play');
+      setError(null);
+      try {
+        if (!maPlayer.isConnected) await maPlayer.connect();
+        await maPlayer.maCommand('players/play_media', { player_id: pid, media: query });
+      } catch (err) {
+        console.error('[Media] MA player play failed:', err);
         setError(err instanceof Error ? err.message : 'Playback failed');
         return;
       } finally {
@@ -1415,6 +1500,25 @@ const Media = () => {
       }
       return;
     }
+    if (selectedTarget.startsWith('ma:')) {
+      const pid = selectedTarget.slice(3);
+      const idClean = bookId.replace('abs-', '').replace('ma-', '');
+      const mediaUri = `audiobookshelf://${idClean}`;
+      trigger('heavy');
+      setLoading('play');
+      setError(null);
+      try {
+        if (!maPlayer.isConnected) await maPlayer.connect();
+        await maPlayer.maCommand('players/play_media', { player_id: pid, media: mediaUri });
+      } catch (err) {
+        console.error('[Media] MA player audiobook play failed:', err);
+        setError(err instanceof Error ? err.message : 'Playback failed');
+        return;
+      } finally {
+        setLoading(null);
+      }
+      return;
+    }
     trigger('heavy');
     setLoading('play');
     setError(null);
@@ -1446,6 +1550,23 @@ const Media = () => {
         await maPlayer.playMedia(uri);
       } catch (err) {
         console.error('[Media] WebPlayer play failed:', err);
+        setError(err instanceof Error ? err.message : 'Playback failed');
+        return;
+      } finally {
+        setLoading(null);
+      }
+      return;
+    }
+    if (selectedTarget.startsWith('ma:')) {
+      const pid = selectedTarget.slice(3);
+      trigger('heavy');
+      setLoading('play');
+      setError(null);
+      try {
+        if (!maPlayer.isConnected) await maPlayer.connect();
+        await maPlayer.maCommand('players/play_media', { player_id: pid, media: uri });
+      } catch (err) {
+        console.error('[Media] MA player playlist play failed:', err);
         setError(err instanceof Error ? err.message : 'Playback failed');
         return;
       } finally {
@@ -1705,17 +1826,33 @@ const Media = () => {
   const handleVolume = useCallback(async (v: number) => {
     if (!selectedTarget) return;
     setVolume(v);
+    if (selectedTarget.startsWith('ma:')) {
+      const pid = selectedTarget.slice(3);
+      try {
+        if (!maPlayer.isConnected) await maPlayer.connect();
+        await maPlayer.maCommand('players/cmd_volume_set', { player_id: pid, volume_level: v / 100 });
+      } catch { /* ignore */ }
+      return;
+    }
     try { await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_set', volume_level: v / 100 }); }
     catch { /* ignore */ }
-  }, [selectedTarget]);
+  }, [selectedTarget, maPlayer]);
 
   const toggleMute = useCallback(async () => {
     if (!selectedTarget) return;
     const newMuted = !muted;
     setMuted(newMuted);
+    if (selectedTarget.startsWith('ma:')) {
+      const pid = selectedTarget.slice(3);
+      try {
+        if (!maPlayer.isConnected) await maPlayer.connect();
+        await maPlayer.maCommand('players/cmd_volume_mute', { player_id: pid, muted: newMuted });
+      } catch { /* ignore */ }
+      return;
+    }
     try { await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_mute', volume_level: newMuted ? 0 : volume / 100 }); }
     catch { /* ignore */ }
-  }, [selectedTarget, muted, volume]);
+  }, [selectedTarget, muted, volume, maPlayer]);
 
   /* ── render ───────────────────────────────────────────────────── */
 
@@ -1737,6 +1874,7 @@ const Media = () => {
         onDeviceSelect={handleDeviceSelect}
         localMode={localMode}
         onLocalToggle={handleLocalToggle}
+        maPlayers={maPlayers}
       />
 
       {/* 2. Active Player Header */}
