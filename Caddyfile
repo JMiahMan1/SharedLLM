@@ -96,6 +96,9 @@
     handle /api/media* {
         reverse_proxy gateway:11435
     }
+    handle /api/entities* {
+        reverse_proxy gateway:11435
+    }
     handle /api/sendspin {
         reverse_proxy gateway:11435 {
             header_up X-Real-IP {remote_host}
@@ -206,6 +209,12 @@
     }
 
     handle /health/* {
+        reverse_proxy gateway:11435
+    }
+
+    # Safety net: any /api/* not matched above → gateway (prevents falling
+    # through to the UI container, whose nginx proxies /api back to Caddy → loop)
+    handle /api/* {
         reverse_proxy gateway:11435
     }
 
