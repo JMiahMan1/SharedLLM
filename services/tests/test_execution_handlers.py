@@ -163,7 +163,8 @@ def test_personal_data_provider_resolves_from_user_context():
 @pytest.mark.asyncio
 async def test_talk_send_message_uses_provider_request():
     provider = Mock()
-    provider.request.return_value = (
+    provider.ensure_directory = AsyncMock(return_value=None)
+    provider.request = AsyncMock(return_value=(
         True,
         {
             "id": 9,
@@ -176,7 +177,7 @@ async def test_talk_send_message_uses_provider_request():
             "isReplyable": True,
         },
         "",
-    )
+    ))
 
     with patch("services.execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
         result = await talk.handle_talk(
@@ -196,9 +197,10 @@ async def test_talk_send_message_uses_provider_request():
 @pytest.mark.asyncio
 async def test_talk_send_voice_uploads_and_shares():
     provider = Mock()
-    provider.sanitize_filename.return_value = "voice.webm"
-    provider.upload_file.return_value = Mock(status_code=201)
-    provider.request.return_value = (True, {"id": 44}, "")
+    provider.sanitize_filename = Mock(return_value="voice.webm")
+    provider.upload_file = AsyncMock(return_value=Mock(status_code=201))
+    provider.ensure_directory = AsyncMock(return_value=None)
+    provider.request = AsyncMock(return_value=(True, {"id": 44}, ""))
 
     with patch("services.execution.handlers.talk.resolve_personal_data_provider", return_value=provider):
         result = await talk.handle_talk(
