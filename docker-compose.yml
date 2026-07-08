@@ -30,7 +30,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - DNS_PORT=53
-      - UPSTREAM_DNS=8.8.8.8
+      - UPSTREAM_DNS=192.168.1.1
       - IDENTITY_SVC_URL=${IDENTITY_SVC_URL:-http://identity:8001}
       - INTERNAL_SECRET=${INTERNAL_SECRET}
 
