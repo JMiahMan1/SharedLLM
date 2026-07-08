@@ -1,76 +1,36 @@
-# AGENTS.md
+# SharedLLM Context & Repository Rules
 
-## CRITICAL RULES
+## 1. CRITICAL INFRASTRUCTURE RULES
+Violating these rules will crash the development environment.
 
-### NO LOCAL DOCKER
-- **NEVER EVER** run Docker commands locally on your machine
-- **ONLY** run Docker commands on the remote server: `192.168.2.205`
-- Use `ssh jeremiah@192.168.2.205 "docker compose ..."` for Docker operations
-- This includes: `docker build`, `docker run`, `docker compose up`, `docker compose stop`, etc.
-- Violating this will crash everything - Docker does not run locally
+* **NO LOCAL DOCKER:** **NEVER** run Docker commands locally. All Docker operations (`build`, `run`, `compose up/stop`) must be executed on the remote server: `192.168.2.205`. 
+    * *Usage:* `ssh jeremiah@192.168.2.205 "docker compose ..."`
+* **NO HARDCODED IPs:** Do not hardcode IPs (e.g., `192.168.1.1`, `192.168.2.205`). Use network discovery (DNS sync service via Docker API) so services connect via hostnames or discovered gateways.
+* **BRANCH DISCIPLINE:** All work goes to the `microservices` branch. Never push to `main` unless explicitly requested.
 
-### NO HARDCODED IPs
-- **NEVER** hardcode IP addresses like `192.168.1.1`, `192.168.2.205`, etc.
-- Use network discovery to find IPs dynamically
-- DNS sync service discovers network configuration via Docker API
-- Services should use hostnames or discovered gateway IPs
+## 2. CI/CD & Deployment Workflow
+1.  **Push:** `git push origin microservices` triggers the GitHub Actions CI (`.github/workflows/build-images.yml`).
+2.  **Verify Build:** Execute `gh run list --branch=microservices --limit=5`. **DO NOT** proceed until the status is exactly `"completed"`.
+3.  **Deploy:** Execute `./scripts/deploy_remote.sh jeremiah@192.168.2.205`. This pulls the latest GHCR `latest` tags and runs `docker compose up -d`.
 
-## Deployment Workflow
+## 3. Architecture & Key Services
+* **Identity Service:** Port 8001 (Resolves user credentials, manages `mass_token_enc` fallback to admin/ID 1).
+* **Gateway:** Port 11435 (Proxies requests to MA/ABS, handles sendspin protocol).
+* **UI:** Port 8080 (Web player interface).
+* **MA Server:** `https://ha.sumemail.com:8095`
+* **Caddy:** Reverse proxy in front of services.
 
-### Build and Deploy Process
-1. **Push**: `git push origin microservices` triggers CI
-2. **Build**: Use `gh run list --branch=microservices --limit=5` to check build status and wait for the "completed" state
-3. **Deploy**: Execute `./scripts/deploy_remote.sh jeremiah@192.168.2.205`
-   - Pulls latest images from GHCR
-   - Runs `docker compose up -d` to recreate containers
-   - All services restart with new images
+## 4. Testing Protocols
+* **Pytest Markers:** Strictly adhere to test markers. 
+    * Use `@pytest.mark.local_only` for tests requiring hardware/heavy setup.
+    * Use `@pytest.mark.integration` for inter-service communication tests.
+    * Integration tests require services to be running to avoid "Connection refused" errors.
+* **Playwright E2E Tests:** Located in `services/ui/e2e/`. 
+    * Use `loginAsDefault(page)` for testing.
+    * *Critical:* Always use `page.on('websocket')` listeners instead of `waitForEvent('websocket')`, as events often fire before listeners attach.
 
-### Critical Rules for Deployment
-- **NEVER** run deploy before build completes
-- **ALWAYS** verify `gh run list` shows "completed" status before deploying
-- **ALWAYS** read AGENTS.md after every compaction to stay updated on current workflows
-- All work goes to `microservices` branch only (never push `main` unless explicitly requested)
-
-### Build Workflow Details
-- Workflow file: `.github/workflows/build-images.yml`
-- Triggered on: push to `main`, `master`, or `microservices` branches
-- Detects changed services and builds only those (plus base if changed)
-- Uses `latest` tag for GitHub Container Registry (GHCR)
-
-### Deploy Script Details
-- Script: `scripts/deploy_remote.sh`
-- Usage: `./scripts/deploy_remote.sh [user@machine_ip]`
-- Default path: `/home/jeremiah/SharedLLM`
-- Actions: git fetch -> pull -> docker compose pull -> docker compose up
-
-## Testing Workflow
-
-### Playwright E2E Tests
-- Test file: `services/ui/e2e/web-player-sendspin.spec.ts`
-- Login function: `loginAsDefault(page)` - handles biometric auth fallback
-- Test user: `testuser` with credentials from environment variables
-- **IMPORTANT**: Always use `page.on('websocket')` listener instead of `waitForEvent('websocket')` - events may fire before listener is attached
-
-### MA Credentials Fallback
-- Users without MA credentials fall back to admin (ID 1) credentials
-- Fallback logic in: `services/identity/main.py`
-- Admin credentials are decrypted from `mass_token_enc` field
-- Logs show: `[resolve] Returning credentials for user={username}, mass_token={set|NOT SET}`
-
-## Key Services
-- **Identity Service**: Resolves user credentials (port 8001)
-- **Gateway**: Proxies requests to MA/ABS, handles sendspin protocol (port 11435)
-- **UI**: Web player interface (port 8080)
-- **Caddy**: Reverse proxy in front of services
-- **MA Server**: Music Assistant at `https://ha.sumemail.com:8095`
-
-## Common Issues
-- WebSocket events may fire before `waitForEvent` listener is attached -> use `page.on('websocket')` instead
-- Identity service logs show `mass_token=NOT SET` when fallback fails -> check if `sys_user.mass_token_enc` exists
-- Deploy script may pull old images if build hasn't completed -> always verify build status first
-
-## Debugging and Troubleshooting Access
-- The user `jeremiah` has passwordless sudo access strictly for predefined troubleshooting commands.
-- Use `sudo lsof` (with flags `-i`, `-n`, `-P`), `sudo netstat` (`-ulnp`, `-tlnp`), and `sudo tcpdump` (`-i any`) to inspect port bindings and network routing.
-- Use `sudo docker` read-only commands (`ps`, `logs`, `inspect`, `top`, `network ls`, `network inspect`) directly on the server to diagnose container states.
-- Do not attempt to run `docker run`, `docker compose`, or interactive shells via sudo, as these execution contexts are strictly prohibited for agent access.
+## 5. Server Diagnostics & Access
+* **Sudo Usage:** You have passwordless sudo access strictly for predefined, read-only diagnostic commands.
+* **Approved Commands:** * Network: `sudo lsof -i -n -P`, `sudo netstat -ulnp`, `sudo netstat -tlnp`, `sudo tcpdump -i any`.
+    * Docker Diagnostics: `sudo docker ps`, `logs`, `inspect`, `top`, `network ls`, `network inspect`.
+* **Prohibited Contexts:** Do not use sudo for interactive shells, `docker run`, or `docker compose`.

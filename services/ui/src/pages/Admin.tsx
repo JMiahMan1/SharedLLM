@@ -51,6 +51,7 @@ import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 import DnsManagementPanel from '../components/settings/DnsManagementPanel';
+import TelemetryAdminPanel from '../components/settings/TelemetryAdminPanel';
 
 type AdminTab = 'users' | 'groups' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database' | 'services';
 
@@ -1124,89 +1125,7 @@ const Admin = () => {
         </div>
       )}
 
-      {activeTab === 'telemetry' && (
-        <div className="space-y-6">
-          <section className="glass-panel p-6">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h3 className="flex items-center gap-3 text-xl font-bold text-white">
-                  <Activity size={20} className="text-cyan-400" />
-                  Device Telemetry Monitoring
-                </h3>
-                <p className="mt-1 text-sm text-slate-400">Enroll devices for power, availability, and usage tracking.</p>
-              </div>
-              <button
-                onClick={() => analyzeTelemetryMutation.mutate()}
-                disabled={analyzeTelemetryMutation.isPending}
-                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
-              >
-                <TrendingUp size={14} />
-                Run LLM Analysis
-              </button>
-            </div>
-
-            <div className="mb-4 grid gap-3 grid-cols-1 sm:grid-cols-[1fr_160px_auto]">
-              <EntitySearchDropdown
-                value={telemetryEntityId}
-                onChange={setTelemetryEntityId}
-                placeholder="Search HA entities for telemetry..."
-              />
-              <input
-                type="number"
-                value={telemetryOfflineThreshold}
-                onChange={(e) => setTelemetryOfflineThreshold(Number(e.target.value))}
-                placeholder="Offline threshold (min)"
-                className="glass-input"
-              />
-              <button
-                onClick={() => {
-                  if (!telemetryEntityId.trim()) {
-                    toast.error('Enter an entity ID');
-                    return;
-                  }
-                  enrollTelemetryMutation.mutate({
-                    entity_id: telemetryEntityId.trim(),
-                    offline_alert_threshold_minutes: telemetryOfflineThreshold,
-                    power_tracking: true,
-                  });
-                }}
-                disabled={enrollTelemetryMutation.isPending}
-                className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
-              >
-                <Plus size={14} />
-                Enroll
-              </button>
-            </div>
-          </section>
-
-          <section className="glass-panel p-6">
-            <h3 className="mb-4 flex items-center gap-3 text-xl font-bold text-white">
-              <TrendingUp size={20} className="text-emerald-400" />
-              Enrolled Devices
-            </h3>
-            <div className="space-y-3">
-              {telemetryEnrollments.map((enrollment) => (
-                <div key={enrollment.entity_id} className="glass-card flex items-center justify-between p-4">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-white truncate">{enrollment.entity_id}</p>
-                    <p className="mt-1 text-xs text-slate-400">
-                      Power: {enrollment.power_tracking ? 'Yes' : 'No'} | Availability: {enrollment.availability_tracking ? 'Yes' : 'No'} | Alert after: {enrollment.offline_alert_threshold_minutes}min
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => unenrollTelemetryMutation.mutate(enrollment.entity_id)}
-                    className="rounded-xl p-2 text-slate-400 transition hover:bg-red-500/10 hover:text-red-300"
-                    aria-label={`Unenroll ${enrollment.entity_id}`}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              ))}
-              {!telemetryEnrollments.length && (
-                <p className="rounded-2xl border border-white/5 bg-white/5 px-4 py-6 text-center text-sm text-slate-500">
-                  No devices enrolled in telemetry monitoring.
-                </p>
-              )}
+      {activeTab === 'telemetry' && <TelemetryAdminPanel />}
             </div>
           </section>
         </div>
