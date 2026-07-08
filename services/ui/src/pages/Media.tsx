@@ -225,9 +225,10 @@ const NowPlayingCard = ({
   onFavoriteToggle?: () => void;
   onSeek?: (time: number) => void;
   onStopPlayback?: () => void;
-  maPlayer?: { isConnected: boolean; connectionState: string; reconnect: () => void };
+  maPlayer?: { isConnected: boolean; connectionState: string; reconnect: () => void; mediaTitle?: string | null; mediaArtist?: string | null; mediaImage?: string | null };
 }) => {
   const nowPlaying = mediaStatus?.state === 'playing' || mediaStatus?.state === 'paused';
+  const isWebPlayer = selectedTarget === 'web_player';
 
   const formatTime = (seconds: number) => {
     if (!seconds || isNaN(seconds)) return '0:00';
@@ -236,12 +237,15 @@ const NowPlayingCard = ({
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const coverRaw = isWebPlayer ? maPlayer?.mediaImage : mediaStatus?.entity_picture;
   const coverUrl = useMemo(() => {
-    if (!mediaStatus?.entity_picture) return null;
-    const path = mediaStatus.entity_picture;
+    if (!coverRaw) return null;
     const apiToken = storageGetSync('jarvis_api_key') ?? '';
-    return `/api/media/imageproxy?path=${encodeURIComponent(path)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
-  }, [mediaStatus?.entity_picture]);
+    return `/api/media/imageproxy?path=${encodeURIComponent(coverRaw)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
+  }, [coverRaw]);
+
+  const displayTitle = isWebPlayer ? (maPlayer?.mediaTitle ?? undefined) : mediaStatus?.media_title;
+  const displayArtist = isWebPlayer ? (maPlayer?.mediaArtist ?? undefined) : mediaStatus?.media_artist;
 
   return (
     <div className="glass-panel rounded-2xl p-5 border border-cyan-500/20 relative overflow-visible">
@@ -267,8 +271,8 @@ const NowPlayingCard = ({
           {nowPlaying ? (
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="text-white font-medium text-lg truncate">{mediaStatus.media_title || 'Unknown Title'}</p>
-                <p className="text-sm text-slate-400 truncate">{mediaStatus.media_artist || 'Unknown Artist'}</p>
+                <p className="text-white font-medium text-lg truncate">{displayTitle || 'Unknown Title'}</p>
+                <p className="text-sm text-slate-400 truncate">{displayArtist || 'Unknown Artist'}</p>
               </div>
               {onFavoriteToggle && (
                 <button
@@ -403,7 +407,7 @@ const NowPlayingCard = ({
 const QuickResumeItem = ({
   item, onPlay, isDisabled, isLoading,
 }: {
-  item: { id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; progress?: number };
+  item: { id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; progress?: number; lastPlayed?: number };
   onPlay: () => void;
   isDisabled: boolean;
   isLoading: boolean;
@@ -429,6 +433,9 @@ const QuickResumeItem = ({
           </div>
           <span className="text-[10px] text-slate-500 shrink-0 tabular-nums">{Math.min(100, Math.round(item.progress * 100))}%</span>
         </div>
+      )}
+      {item.lastPlayed !== undefined && (
+        <p className="text-[10px] text-slate-500 mt-1">{formatTimeAgo(item.lastPlayed)}</p>
       )}
     </div>
     <Play size={16} className="text-slate-500 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
@@ -853,6 +860,39 @@ const MediaExplorerModal = ({
 
 /* ── main page ──────────────────────────────────────────────────────── */
 
+// Normalize the various `last_played` shapes (epoch seconds, epoch ms, or ISO
+// string) returned by Music Assistant / Audiobookshelf into epoch-ms numbers.
+// Returns undefined when the value is missing or unparseable.
+const normalizePlayedAt = (value: unknown): number | undefined => {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'number') {
+    if (value <= 0) return undefined;
+    return value > 1e12 ? value : value * 1000;
+  }
+  if (typeof value === 'string') {
+    const n = Number(value);
+    if (!Number.isNaN(n)) {
+      if (n <= 0) return undefined;
+      return n > 1e12 ? n : n * 1000;
+    }
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+};
+
+const formatTimeAgo = (ts: number): string => {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
 const Media = () => {
   const { trigger } = useHaptics();
   const queryClient = useQueryClient();
@@ -865,6 +905,7 @@ const Media = () => {
   const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
   const [localMode, setLocalMode] = useState(true);
+  const isWebPlayer = selectedTarget === 'web_player';
 
   // Local player states
   const [localIsPlaying, setLocalIsPlaying] = useState(false);
@@ -1140,11 +1181,11 @@ const Media = () => {
 
   const quickResumeItems = useMemo(() => {
     const items: Array<{
-      id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; progress?: number;
+      id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; progress?: number; lastPlayed?: number;
     }> = [];
 
     if (absLastPlayed?.books) {
-      for (const book of absLastPlayed.books.slice(0, 3)) {
+      for (const book of absLastPlayed.books) {
         // Backend returns progress as 0-100 percentage, normalize to 0-1 ratio for UI
         let progress: number | undefined;
         if (book.progress !== undefined && book.progress !== null) {
@@ -1154,18 +1195,23 @@ const Media = () => {
         items.push({
           id: `abs-${book.id}`, title: book.title, subtitle: book.author,
           type: 'audiobook', progress,
+          lastPlayed: normalizePlayedAt(book.last_played),
         });
       }
     }
     if (maRecent?.recent) {
-      for (const item of maRecent.recent.slice(0, 3)) {
+      for (const item of maRecent.recent) {
         items.push({
           id: `ma-${item.uri}`, title: item.name, subtitle: item.artist,
           type: 'music',
+          lastPlayed: normalizePlayedAt(item.last_played),
         });
       }
     }
-    return items.slice(0, 6);
+    // Merge both services and show the 3 most-recently-played items across them.
+    return items
+      .sort((a, b) => (b.lastPlayed ?? 0) - (a.lastPlayed ?? 0))
+      .slice(0, 3);
   }, [absLastPlayed, maRecent]);
 
   /* ── media status polling ───────────────────────────────────── */
@@ -1724,13 +1770,15 @@ const Media = () => {
         currentTime={localMode ? localCurrentTime : remoteCurrentTime}
         duration={localMode ? localDuration : remoteDuration}
         isFavorite={Boolean(detailedMetadata?.favorite)}
-        onPrevious={localMode ? skipLocalBack : () => sendTransport('previous')}
+        onPrevious={localMode ? skipLocalBack : isWebPlayer ? () => maPlayer.previous() : () => sendTransport('previous')}
         onTogglePlay={
           localMode
             ? toggleLocalPlay
-            : () => sendTransport(mediaStatus?.state === 'playing' ? 'pause' : 'resume')
+            : isWebPlayer
+              ? () => (maPlayer.isPlaying ? maPlayer.pause() : maPlayer.play())
+              : () => sendTransport(mediaStatus?.state === 'playing' ? 'pause' : 'resume')
         }
-        onNext={localMode ? skipLocalForward : () => sendTransport('next')}
+        onNext={localMode ? skipLocalForward : isWebPlayer ? () => maPlayer.next() : () => sendTransport('next')}
         onVolumeChange={localMode ? handleLocalVolume : handleVolume}
         onMuteToggle={localMode ? toggleLocalMute : toggleMute}
         onFavoriteToggle={activeUri ? handleFavoriteToggle : undefined}

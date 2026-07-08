@@ -6493,9 +6493,17 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
 
 
 @app.get("/api/media/imageproxy")
-async def media_imageproxy(path: str, request: Request):
-    """Proxy image requests (e.g., entity pictures/covers) from Home Assistant or external sources."""
-    log.info(f"[imageproxy] Proxying image request for path={path}")
+async def media_imageproxy(path: str, request: Request, service: str = ""):
+    """Proxy image requests (entity pictures/covers) from Home Assistant, Music Assistant, or Audiobookshelf.
+
+    The `path` may be a relative path (e.g. HA entity_picture, ABS /api/items/<id>/cover) or a full URL
+    (e.g. MA returns http://<host>:8095/imageproxy?path=...). MA's public image endpoint needs no auth,
+    while HA and ABS require a Bearer token from the resolved identity. Use `service=ma|abs|ha` to force
+    the upstream when it cannot be inferred from the path.
+    """
+    log.info(f"[imageproxy] Proxy request path={path[:160]} service={service}")
+    if not path:
+        raise HTTPException(status_code=400, detail="path required")
     try:
         creds = await _resolve_identity_from_request(request)
         if not isinstance(creds, dict):
@@ -6504,30 +6512,87 @@ async def media_imageproxy(path: str, request: Request):
         log.error(f"[imageproxy] Identity resolution failed: {e}")
         raise HTTPException(status_code=401, detail="Authentication required")
 
-    ha_url = creds.get("ha_url") or ""
-    ha_token = creds.get("ha_token") or ""
+    parsed = urlparse(path)
+    is_full = bool(parsed.scheme and parsed.netloc)
 
-    if not ha_url or not ha_token:
-        log.error("[imageproxy] Home Assistant URL/token not configured")
-        raise HTTPException(status_code=400, detail="Home Assistant not configured")
+    # Infer which upstream hosts the image.
+    svc = (service or "").lower()
+    if not svc:
+        if is_full:
+            host = (parsed.hostname or "").lower()
+            mhost = (urlparse(creds.get("mass_url", "") or "").hostname or "").lower()
+            ahost = (urlparse(creds.get("abs_url", "") or "").hostname or "").lower()
+            hhost = (urlparse(creds.get("ha_url", "") or "").hostname or "").lower()
+            if mhost and host == mhost:
+                svc = "ma"
+            elif ahost and host == ahost:
+                svc = "abs"
+            elif hhost and host == hhost:
+                svc = "ha"
+        if not svc:
+            p = parsed.path
+            if "/api/items/" in p:
+                svc = "abs"
+            elif p.startswith("/imageproxy") or "/api/image" in p:
+                svc = "ma"
+            else:
+                svc = "ha"
 
-    if path.startswith("/"):
-        target_url = f"{ha_url.rstrip('/')}{path}"
+    target_url = None
+    headers: dict[str, str] = {}
+
+    if svc == "ma":
+        # MA imageproxy is publicly reachable (no auth) and may embed an internal IP the
+        # browser cannot reach, so fetch the supplied URL server-side as-is when possible.
+        if is_full and (parsed.path.startswith("/imageproxy") or "/api/image" in parsed.path):
+            target_url = path
+        else:
+            base = creds.get("mass_url") or ""
+            token = creds.get("mass_token") or ""
+            if not base:
+                raise HTTPException(status_code=400, detail="Music Assistant not configured")
+            rel = parsed.path or (path if path.startswith("/") else "/" + path)
+            target_url = f"{base.rstrip('/')}{rel}"
+            if parsed.query:
+                target_url += "?" + parsed.query
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+    elif svc == "abs":
+        base = creds.get("abs_url") or ""
+        token = creds.get("abs_api_key") or ""
+        if not base:
+            raise HTTPException(status_code=400, detail="Audiobookshelf not configured")
+        rel = parsed.path if is_full else (path if path.startswith("/") else "/" + path)
+        target_url = f"{base.rstrip('/')}{rel}"
+        if parsed.query:
+            target_url += "?" + parsed.query
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
     else:
-        target_url = path
+        base = creds.get("ha_url") or ""
+        token = creds.get("ha_token") or ""
+        if not base:
+            raise HTTPException(status_code=400, detail="Home Assistant not configured")
+        rel = parsed.path if is_full else (path if path.startswith("/") else "/" + path)
+        target_url = f"{base.rstrip('/')}{rel}"
+        if parsed.query:
+            target_url += "?" + parsed.query
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
 
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
-            headers = {"Authorization": f"Bearer {ha_token}"}
-            resp = await client.get(target_url, headers=headers)
-            if resp.status == 200:
-                content_type = resp.headers.get("Content-Type", "image/jpeg")
-                return Response(content=await resp.read(), media_type=content_type)
-            else:
-                log.error(f"[imageproxy] Upstream returned status {resp.status}")
+            async with client.get(target_url, headers=headers) as resp:
+                if resp.status == 200:
+                    content_type = resp.headers.get("Content-Type", "image/jpeg")
+                    data = await resp.read()
+                    return Response(content=data, media_type=content_type)
+                log.error(f"[imageproxy] upstream {svc} status {resp.status} for {target_url}")
                 raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
+    except HTTPException:
+        raise
     except Exception as e:
-        log.error(f"[imageproxy] Exception proxying image: {e}")
+        log.error(f"[imageproxy] Exception proxying image ({svc}) {target_url}: {e}")
         raise HTTPException(status_code=500, detail="Error fetching image")
 
 
