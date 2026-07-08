@@ -563,39 +563,37 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
   }, [sendJsonRpc, setError]);
 
-  // Send players/cmd_next to skip to the next track
-  const cmdNext = useCallback(async (player_id?: string) => {
-    const pid = player_id || playerIdRef.current;
-    if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmd_next');
+  // Skip to the next track via the SendspinPlayer (client/command over the sendspin socket)
+  const cmdNext = useCallback(async (_player_id?: string) => {
+    if (!playerRef.current) {
+      console.error('[MAWebPlayer] No player for cmd_next');
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd_next:', pid);
-      await sendJsonRpc('players/cmd_next', { player_id: pid });
+      console.log('[MAWebPlayer] cmd_next');
+      playerRef.current.sendCommand('next');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] cmd_next failed:', msg);
       setError('cmd_next failed: ' + msg);
     }
-  }, [sendJsonRpc, setError]);
+  }, [setError]);
 
-  // Send players/cmd_previous to skip to the previous track
-  const cmdPrevious = useCallback(async (player_id?: string) => {
-    const pid = player_id || playerIdRef.current;
-    if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmd_previous');
+  // Skip to the previous track via the SendspinPlayer (client/command over the sendspin socket)
+  const cmdPrevious = useCallback(async (_player_id?: string) => {
+    if (!playerRef.current) {
+      console.error('[MAWebPlayer] No player for cmd_previous');
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd_previous:', pid);
-      await sendJsonRpc('players/cmd_previous', { player_id: pid });
+      console.log('[MAWebPlayer] cmd_previous');
+      playerRef.current.sendCommand('previous');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] cmd_previous failed:', msg);
       setError('cmd_previous failed: ' + msg);
     }
-  }, [sendJsonRpc, setError]);
+  }, [setError]);
 
   /* ── Convenience Methods ───────────────────────────────────────────── */
 
