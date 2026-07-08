@@ -1,4 +1,5 @@
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
 
 def _aio_resp(status=200, json_data=None, text=""):
     """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
@@ -8,21 +9,22 @@ def _aio_resp(status=200, json_data=None, text=""):
     m.text = AsyncMock(return_value=text)
     return m
 
-import pytest
 import os
+
 import aiohttp
-from unittest.mock import MagicMock, patch, AsyncMock
+import pytest
+
 
 def test_kill_switch_logic():
     """Verify that the Raven kill switch logic correctly identifies an aborted mission."""
     mock_redis = MagicMock()
     mission_id = "test-mission-123"
     kill_key = f"raven:mission:kill:{mission_id}"
-    
+
     mock_redis.get.return_value = b"1"
-    
+
     is_killed = bool(mock_redis.get(kill_key))
-    
+
     assert is_killed is True
     mock_redis.get.assert_called_with(kill_key)
 

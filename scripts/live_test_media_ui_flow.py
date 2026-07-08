@@ -2,11 +2,12 @@
 # scripts/live_test_media_ui_flow.py
 import os
 import sys
+
 import httpx
 
 BASE_URL = os.getenv("BASE_URL")
 if BASE_URL is None:
-    raise EnvironmentError(
+    raise OSError(
         "Environment variable BASE_URL is not set.\n"
         "Set BASE_URL to the target server URL (e.g., http://192.168.2.205:8080)."
     )
@@ -19,17 +20,17 @@ def log_test(name, success, info=""):
 
 def run_tests():
     print(f"=== Starting Media & UI API Flow Verification on {BASE_URL} ===")
-    
+
     # 1. Login to retrieve Token
     TEST_USER = os.getenv("TEST_USER")
     if TEST_USER is None:
-        raise EnvironmentError(
+        raise OSError(
             "Environment variable TEST_USER is not set.\n"
             "Set TEST_USER to the username for authentication."
         )
     TEST_PASSWORD = os.getenv("TEST_PASSWORD")
     if TEST_PASSWORD is None:
-        raise EnvironmentError(
+        raise OSError(
             "Environment variable TEST_PASSWORD is not set.\n"
             "Set TEST_PASSWORD to the password for authentication."
         )

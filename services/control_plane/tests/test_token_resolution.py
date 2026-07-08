@@ -8,6 +8,7 @@ Verifies that control_plane resolves tokens in the correct order:
 """
 
 import os
+
 import pytest
 
 
@@ -16,7 +17,6 @@ def control_plane_code():
     """Load the control_plane main.py code."""
     with open(
         os.path.join(os.path.dirname(__file__), "..", "main.py"),
-        "r",
     ) as f:
         return f.read()
 
@@ -68,7 +68,6 @@ class TestEnvironmentVariableConfiguration:
         """GHCR_TOKEN should be in docker-compose.yml."""
         with open(
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "docker-compose.yml"),
-            "r",
         ) as f:
             compose_content = f.read()
         assert "GHCR_TOKEN" in compose_content
@@ -77,7 +76,6 @@ class TestEnvironmentVariableConfiguration:
         """GITHUB_TOKEN should be in docker-compose.yml."""
         with open(
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "docker-compose.yml"),
-            "r",
         ) as f:
             compose_content = f.read()
         assert "GITHUB_TOKEN" in compose_content
@@ -86,7 +84,6 @@ class TestEnvironmentVariableConfiguration:
         """GHCR_TOKEN should be in .env file."""
         with open(
             os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"),
-            "r",
         ) as f:
             env_content = f.read()
         assert "GHCR_TOKEN" in env_content
@@ -95,7 +92,6 @@ class TestEnvironmentVariableConfiguration:
         """GITHUB_TOKEN should be in .env file."""
         with open(
             os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"),
-            "r",
         ) as f:
             env_content = f.read()
         assert "GITHUB_TOKEN" in env_content
@@ -108,7 +104,6 @@ class TestDocumentation:
         """Documentation should mention GHCR_TOKEN fallback to GITHUB_TOKEN."""
         with open(
             os.path.join(os.path.dirname(__file__), "..", "..", "..", "docs", "CONTROL_PLANE_SERVICE.md"),
-            "r",
         ) as f:
             docs_content = f.read()
         assert "GHCR_TOKEN" in docs_content

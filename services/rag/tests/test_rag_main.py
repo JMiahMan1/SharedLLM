@@ -1,6 +1,7 @@
 import os
 import sys
 from unittest.mock import MagicMock
+
 from fastapi.testclient import TestClient
 
 # Mock heavy ML dependencies before importing the app
@@ -32,11 +33,11 @@ def test_ingest_and_search(mocker):
         "documents": [["Test doc content"]],
         "metadatas": [[{"user_id": "alice", "source": "test"}]]
     }
-    
+
     mocker.patch("main.get_collection", return_value=mock_collection)
-    
+
     # Test Ingest
-    ingest_resp = client.post("/rag/ingest", 
+    ingest_resp = client.post("/rag/ingest",
         headers={"X-Internal-Secret": "test-secret"},
         json={
             "user_id": "alice",
@@ -46,9 +47,9 @@ def test_ingest_and_search(mocker):
     )
     assert ingest_resp.status_code == 200
     assert ingest_resp.json()["status"] == "SUCCESS"
-    
+
     # Test Search
-    search_resp = client.post("/rag/search", 
+    search_resp = client.post("/rag/search",
         headers={"X-Internal-Secret": "test-secret"},
         json={
             "query": "Test doc",

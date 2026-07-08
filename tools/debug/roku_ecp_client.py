@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 import argparse
-import requests
 import xml.etree.ElementTree as ET
+
+import requests
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Diagnostics for Roku ECP Interface")
@@ -58,7 +60,7 @@ def get_active_app(ip, port):
             print(f"    FAIL: Status {resp.status_code}")
     except Exception as e:
         print(f"    FAIL: {e}")
-        
+
 def check_media_assistant_channel(ip, port):
     app_id = "782875"
     url = f"http://{ip}:{port}/query/apps"

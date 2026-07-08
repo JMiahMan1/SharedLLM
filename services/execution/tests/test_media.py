@@ -1,5 +1,6 @@
 from services.execution.handlers.media import detect_media_type
 
+
 def test_detect_music_default():
     assert detect_media_type("The Beatles") == "music"
     assert detect_media_type("play some jazz") == "music"

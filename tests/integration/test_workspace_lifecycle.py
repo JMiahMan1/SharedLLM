@@ -1,7 +1,8 @@
-import httpx
-import pytest
 import os
 import time
+
+import httpx
+import pytest
 
 # Configuration from environment or defaults
 SERVER_IP = os.getenv("SERVER_IP", "localhost")
@@ -36,7 +37,7 @@ def test_workspace_lifecycle(api_client):
     Test the full lifecycle of a workspace: Create -> Pull -> Sync.
     """
     workspace_id = f"test_audit_{int(time.time())}"
-    
+
     # 1. Create Workspace
     print(f"\n[1/3] Creating workspace: {workspace_id}")
     ws_data = {
@@ -49,7 +50,7 @@ def test_workspace_lifecycle(api_client):
         "auto_backup_enabled": True,
         "nextcloud_path": f"/Tests/{workspace_id}"
     }
-    
+
     resp = api_client.post(f"{WORKSPACE_RUNTIME_URL}/workspaces", json=ws_data)
     assert resp.status_code == 200, f"Failed to create workspace: {resp.text}"
     print("   - Created successfully.")

@@ -12,7 +12,7 @@ def test_rag():
         "user_id": "default",
         "k": 5
     }
-    
+
     try:
         resp = requests.post(f"{RAG_URL}/rag/search", json=payload, headers=headers, timeout=5)
         if resp.status_code == 200:

@@ -1,15 +1,16 @@
+import logging
 import re
 import urllib.parse
-import logging
-from typing import Any, Optional
+from typing import Any
 
-from services.config import NEXTCLOUD_URL, NEXTCLOUD_USER, NEXTCLOUD_PASS
+from services.config import NEXTCLOUD_PASS, NEXTCLOUD_URL, NEXTCLOUD_USER
+
 from .http_client import request
 
 log = logging.getLogger("execution.nextcloud")
 
 
-def resolve_credentials(user_context: Any) -> tuple[Optional[str], Optional[str], Optional[str]]:
+def resolve_credentials(user_context: Any) -> tuple[str | None, str | None, str | None]:
     return (
         getattr(user_context, "nextcloud_url", None) or NEXTCLOUD_URL,
         getattr(user_context, "nextcloud_user", None) or NEXTCLOUD_USER,

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 import caldav
 
@@ -89,7 +89,7 @@ class NextcloudPersonalDataProvider:
         return safe_filename(value, fallback)
 
 
-def resolve_personal_data_provider(user_context: Any) -> Optional[PersonalDataProvider]:
+def resolve_personal_data_provider(user_context: Any) -> PersonalDataProvider | None:
     base_url, username, password = resolve_credentials(user_context)
     if not (base_url and username and password):
         return None

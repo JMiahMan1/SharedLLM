@@ -9,6 +9,7 @@ These tests mock the LLM provider and tool execution to verify:
 """
 
 import asyncio
+
 import pytest
 
 # We'll test the timeout logic in isolation by extracting it into a testable function
@@ -56,18 +57,18 @@ def test_timeout_clean_termination_flow():
         loop_start = loop.time() - 601  # 601s ago
         iter_start = loop.time()
         max_seconds = 600
-        
+
         elapsed = iter_start - loop_start
         timed_out = elapsed > max_seconds
         assert timed_out is True
-        
+
         # Simulated ans before timeout
         partial_result = "Step 5: GitOperationRequest -> files pulled"
         ans = f"ERROR: Raven job exceeded time limit of {max_seconds}s. Partial result: {partial_result}"
-        
+
         assert "ERROR: Raven job exceeded time limit" in ans
         assert "Step 5" in ans
-    
+
     asyncio.run(simulate())
 
 
@@ -82,7 +83,7 @@ def test_heartbeat_scheduling_logic():
     # The heartbeat runs in a loop sleeping HEARTBEAT_INTERVAL, checking stop flag
     # We just verify the stop flag pattern is correct
     heartbeat_stop = asyncio.Event()
-    
+
     async def mock_heartbeat(interval: int, stop_event: asyncio.Event):
         iterations = 0
         while not stop_event.is_set():
@@ -91,7 +92,7 @@ def test_heartbeat_scheduling_logic():
             if stop_event.is_set():
                 break
         return iterations
-    
+
     # Schedule heartbeat and stop after 2 sleeps
     async def test():
         task = asyncio.create_task(mock_heartbeat(1, heartbeat_stop))
@@ -99,7 +100,7 @@ def test_heartbeat_scheduling_logic():
         heartbeat_stop.set()
         result = await task
         assert result >= 2
-    
+
     asyncio.run(test())
 
 

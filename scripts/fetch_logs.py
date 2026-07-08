@@ -1,8 +1,8 @@
 
-import requests
 import os
 import sys
 
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -29,7 +29,7 @@ def fetch_logs():
         url = f"{api_url}/api/logs?limit=200"
         print(f"Fetching logs from {url}...")
         resp = requests.get(url, headers=HEADERS, timeout=10)
-        
+
         if resp.status_code == 200:
             data = resp.json()
             print("Logs retrieved successfully.")
@@ -42,7 +42,7 @@ def fetch_logs():
         else:
             print(f"Failed to fetch logs. Status: {resp.status_code}")
             print(resp.text)
-            
+
     except Exception as e:
         print(f"Error fetching logs: {e}")
 

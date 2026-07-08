@@ -1,11 +1,12 @@
 # services/execution/handlers/media_status.py
 import logging
+
 try:
     import ha_client
-    from schemas import MediaStatusRequest, ExecutionResult
+    from schemas import ExecutionResult, MediaStatusRequest
 except ImportError:
     from .. import ha_client
-    from ..schemas import MediaStatusRequest, ExecutionResult
+    from ..schemas import ExecutionResult, MediaStatusRequest
 
 log = logging.getLogger("execution.media_status")
 
@@ -47,7 +48,7 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
             or "music assistant" in source.lower()
             or active_queue is not None
         )
-        
+
         if not is_ma_compatible:
             continue
 

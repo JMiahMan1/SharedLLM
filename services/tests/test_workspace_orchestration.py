@@ -11,12 +11,11 @@ from services.workspace_runtime.main import (
     FileWriteRequest,
     GitPushRequest,
     WorkflowWriteSyncCommitRequest,
+    git_push,
     read_file,
     workflow_write_sync_commit,
     write_file,
-    git_push,
 )
-
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
 
@@ -55,10 +54,11 @@ def workspace_env(monkeypatch, tmp_path):
         )
     )
 
-    from sqlmodel import SQLModel, create_engine, StaticPool, Session
-    from services.workspace_runtime.models import Workspace
+    from sqlmodel import Session, SQLModel, StaticPool, create_engine
+
     import services.workspace_runtime.database as db
     import services.workspace_runtime.main as main
+    from services.workspace_runtime.models import Workspace
 
     test_engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool

@@ -1,4 +1,5 @@
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
 
 def _aio_resp(status=200, json_data=None, text=""):
     """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
@@ -10,7 +11,7 @@ def _aio_resp(status=200, json_data=None, text=""):
 
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import patch, AsyncMock, MagicMock
+
 from services.gateway.main import app
 
 client = TestClient(app)

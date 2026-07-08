@@ -1,5 +1,6 @@
 from services.execution.announce_handlers import detect_tv_type
 
+
 def test_detect_cast_by_entity_id():
     assert detect_tv_type("media_player.office_tv_chrome", "idle", {}) == "cast"
     assert detect_tv_type("media_player.living_room_cast", "idle", {}) == "cast"

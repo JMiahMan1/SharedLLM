@@ -1,8 +1,9 @@
 # services/tests/test_logging_service.py
 import json
 import time
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 # Test the logging service logic without requiring a real Redis instance
 
@@ -78,12 +79,13 @@ class TestLimitResolution:
 
 class TestAuth:
     def test_require_internal_secret_passes(self):
-        from services.logging.main import _require_internal_secret, INTERNAL_SECRET
+        from services.logging.main import INTERNAL_SECRET, _require_internal_secret
         _require_internal_secret(INTERNAL_SECRET)
 
     def test_require_internal_secret_fails(self):
-        from services.logging.main import _require_internal_secret
         from fastapi import HTTPException
+
+        from services.logging.main import _require_internal_secret
         with pytest.raises(HTTPException) as exc:
             _require_internal_secret("wrong-secret")
         assert exc.value.status_code == 403
@@ -92,17 +94,17 @@ class TestAuth:
 @pytest.mark.asyncio
 async def test_fetch_logs_filters_by_service():
     from services.logging.main import _fetch_logs
-    
+
     mock_redis = AsyncMock()
     mock_redis.zrevrangebyscore.return_value = [
         json.dumps({"service": "gateway", "message": "msg1", "_ts": time.time()}),
         json.dumps({"service": "execution", "message": "msg2", "_ts": time.time()}),
         json.dumps({"service": "gateway", "message": "msg3", "_ts": time.time()}),
     ]
-    
+
     with patch("services.logging.main.get_redis", return_value=mock_redis):
         results = await _fetch_logs(service="gateway", limit=10)
-    
+
     assert len(results) == 2
     assert all(r["service"] == "gateway" for r in results)
 
@@ -110,16 +112,16 @@ async def test_fetch_logs_filters_by_service():
 @pytest.mark.asyncio
 async def test_fetch_logs_filters_by_user_id():
     from services.logging.main import _fetch_logs
-    
+
     mock_redis = AsyncMock()
     mock_redis.zrevrangebyscore.return_value = [
         json.dumps({"user_id": "alice", "message": "msg1", "_ts": time.time()}),
         json.dumps({"user_id": "bob", "message": "msg2", "_ts": time.time()}),
     ]
-    
+
     with patch("services.logging.main.get_redis", return_value=mock_redis):
         results = await _fetch_logs(user_id="alice", limit=10)
-    
+
     assert len(results) == 1
     assert results[0]["user_id"] == "alice"
 
@@ -127,36 +129,36 @@ async def test_fetch_logs_filters_by_user_id():
 @pytest.mark.asyncio
 async def test_fetch_logs_admin_sees_all():
     from services.logging.main import _fetch_logs
-    
+
     mock_redis = AsyncMock()
     mock_redis.zrevrangebyscore.return_value = [
         json.dumps({"user_id": "alice", "message": "msg1", "_ts": time.time()}),
         json.dumps({"user_id": "bob", "message": "msg2", "_ts": time.time()}),
     ]
-    
+
     with patch("services.logging.main.get_redis", return_value=mock_redis):
         results = await _fetch_logs(user_id="admin", limit=10)
-    
+
     assert len(results) == 2
 
 
 @pytest.mark.asyncio
 async def test_log_event_stores_in_redis_and_publishes():
-    from services.logging.main import log_event, LogEntry
-    
+    from services.logging.main import LogEntry, log_event
+
     mock_redis = AsyncMock()
     mock_redis.pubsub.return_value = AsyncMock()
-    
+
     entry = LogEntry(user_id="test", service="gateway", level="INFO", message="test log")
-    
+
     with patch("services.logging.main.get_redis", return_value=mock_redis), \
          patch("services.logging.main._require_internal_secret"):
         response = await log_event(entry, x_internal_secret="test-secret")
-    
+
     assert response["status"] == "success"
     mock_redis.zadd.assert_called_once()
     mock_redis.publish.assert_called_once()
-    
+
     # Verify published data contains expected fields
     call_args = mock_redis.publish.call_args
     published_data = json.loads(call_args[0][1])

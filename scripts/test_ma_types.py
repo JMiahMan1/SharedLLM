@@ -1,4 +1,5 @@
 import os
+
 import requests
 from dotenv import load_dotenv
 
@@ -17,7 +18,7 @@ def test_play(media_id, media_type):
         "media_type": media_type,
         "enqueue": "play"
     }
-    
+
     try:
         r = requests.post(url, json=payload, headers=headers)
         print(f"Status: {r.status_code}")
@@ -26,15 +27,15 @@ def test_play(media_id, media_type):
         print(f"Error: {e}")
 
 if __name__ == "__main__":
-    if not HA_URL: 
+    if not HA_URL:
         print("No HA_URL")
         exit(1)
-        
+
     # Test 1: The configuration likely failing (Generic Music type)
     test_play("Brandon Lake", "music")
-    
+
     # Test 2: The configuration known to work
     test_play("Brandon Lake", "artist")
-    
+
     # Test 3: Search fallback?
     test_play("Brandon Lake", "search")

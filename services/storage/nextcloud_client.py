@@ -1,10 +1,11 @@
 # services/storage/nextcloud_client.py
 import logging
-import aiohttp
 import xml.etree.ElementTree as ET
 from pathlib import PurePosixPath
+from typing import Any
 from urllib.parse import quote, urlparse
-from typing import Optional, List, Dict, Any
+
+import aiohttp
 
 try:
     from .models import StorageEntry
@@ -20,7 +21,7 @@ class NextCloudClient:
         self.protocol = parsed.scheme
         self.username = username
         self.password = password
-        
+
         # The base DAV path for this user
         self.dav_prefix = f"/remote.php/dav/files/{username}"
         # If the URL has a path, it might be a subfolder within NextCloud
@@ -30,9 +31,9 @@ class NextCloudClient:
         if not self.base_path.startswith(self.dav_prefix):
             # If the user provided just the server URL, we append the DAV prefix
             self.base_path = self.dav_prefix + self.base_path
-            
+
         self.base_url = f"{self.protocol}://{self.host}"
-        
+
         self.client = aiohttp.ClientSession(
             auth=aiohttp.BasicAuth(self.username, self.password),
             timeout=aiohttp.ClientTimeout(total=15.0, sock_read=60.0),
@@ -46,7 +47,7 @@ class NextCloudClient:
             relative_path = clean_path[len(self.base_path):]
         else:
             relative_path = clean_path
-            
+
         quoted_path = quote(relative_path.lstrip("/"), safe="/")
         url = f"{self.base_url}{self.base_path}/{quoted_path}"
         log.info(f"[Nextcloud] Full URL construction: host={self.host}, base={self.base_path}, relative={relative_path} -> {url}")
@@ -58,20 +59,20 @@ class NextCloudClient:
             return f"{self.base_url}{self.base_path}/"
         return url
 
-    def _parse_dav_response(self, xml_content: bytes) -> List[Dict[str, Any]]:
+    def _parse_dav_response(self, xml_content: bytes) -> list[dict[str, Any]]:
         """Parse WebDAV PROPFIND XML response."""
         items = []
         try:
             root = ET.fromstring(xml_content)
             ns = {"d": "DAV:"}
-            
+
             for response in root.findall(".//d:response", ns):
                 href_node = response.find("d:href", ns)
                 if href_node is None or href_node.text is None:
                     continue
                 href = href_node.text
                 propstats = response.findall("d:propstat", ns)
-                
+
                 # We usually want the one with 200 OK
                 props = {}
                 for propstat in propstats:
@@ -86,27 +87,27 @@ class NextCloudClient:
                             props["mtime"] = getattr(prop_node.find("d:getlastmodified", ns), "text", None)
                             props["size"] = getattr(prop_node.find("d:getcontentlength", ns), "text", None)
                             props["contenttype"] = getattr(prop_node.find("d:getcontenttype", ns), "text", None)
-                            
+
                             resourcetype = prop_node.find("d:resourcetype", ns)
                             if resourcetype is not None and resourcetype.find("d:collection", ns) is not None:
                                 props["is_dir"] = True
                             else:
                                 props["is_dir"] = False
-                
+
                 items.append({
                     "href": href,
                     "props": props
                 })
         except Exception as e:
             log.error(f"Failed to parse WebDAV XML: {e}")
-            
+
         return items
 
-    async def list_files(self, remote_path: str = "/") -> List[Dict[str, Any]]:
+    async def list_files(self, remote_path: str = "/") -> list[dict[str, Any]]:
         """List files using PROPFIND."""
         url = await self._full_url(remote_path)
         log.info(f"DAV PROPFIND: {url}")
-        
+
         headers = {"Depth": "1"}
         try:
             resp = await self.client.request("PROPFIND", url, headers=headers)
@@ -118,14 +119,14 @@ class NextCloudClient:
             log.error(f"Failed to list files in {remote_path}: {e}")
             return []
 
-    async def list_entries(self, path: str = "/", recursive: bool = False) -> List[StorageEntry]:
-        entries: List[StorageEntry] = []
+    async def list_entries(self, path: str = "/", recursive: bool = False) -> list[StorageEntry]:
+        entries: list[StorageEntry] = []
         seen_paths = set()
 
         async def _walk(current_path: str):
             target = "/" + current_path.strip("/")
             items = await self.list_files(target)
-            
+
             # The first item in PROPFIND Depth 1 is usually the directory itself
             # We need to find the base href to calculate relative paths correctly
             base_href = None
@@ -136,32 +137,32 @@ class NextCloudClient:
             for item in items:
                 href = item["href"]
                 props = item["props"]
-                
+
                 # Normalize path: remove base_path and trailing slash
                 from urllib.parse import unquote
                 clean_path = unquote(href)
                 if clean_path.startswith(self.base_path):
                     clean_path = clean_path[len(self.base_path):]
-                
+
                 norm_path = "/" + clean_path.strip("/")
-                
+
                 # Skip the current directory itself
                 if norm_path == unquote(target) or not clean_path or (base_href and href == base_href):
                     continue
-                
+
                 if norm_path in seen_paths:
                     continue
-                
+
                 # Proactive skip of noise directories
                 if any(skip in norm_path.split("/") for skip in [
-                    "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", 
+                    "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache",
                     ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox",
                     "site-packages", "bin", "include", "lib", "lib64"
                 ]):
                     continue
-                
+
                 is_dir = props.get("is_dir", False)
-                
+
                 entry = StorageEntry(
                     path=norm_path,
                     name=norm_path.split("/")[-1],
@@ -170,21 +171,21 @@ class NextCloudClient:
                     mtime=props.get("mtime"),
                     content_type=props.get("contenttype"),
                 )
-                
+
                 entries.append(entry)
                 seen_paths.add(norm_path)
-                
+
                 if recursive and is_dir:
                     await _walk(norm_path)
 
         await _walk(path)
         return entries
 
-    async def get_file_content(self, remote_path: str) -> Optional[str]:
+    async def get_file_content(self, remote_path: str) -> str | None:
         """Fetch content of a text file."""
         url = await self._full_url(remote_path)
         log.info(f"NextCloud GET: {url}")
-        
+
         try:
             resp = await self.client.get(url)
             if resp.status >= 400:
@@ -221,7 +222,7 @@ class NextCloudClient:
         create_parents: bool = True,
         verify: bool = True,
         is_binary: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         normalized = "/" + str(remote_path).strip("/")
         if create_parents:
             parent = str(PurePosixPath(normalized).parent)
@@ -261,7 +262,7 @@ class NextCloudClient:
             log.error(f"Failed to download {remote_path}: {e}")
             return False
 
-    async def upload_directory(self, remote_path: str, local_path: str, excludes: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def upload_directory(self, remote_path: str, local_path: str, excludes: list[str] | None = None) -> dict[str, Any]:
         """Recursively upload a local directory to a remote Nextcloud path."""
         import os
         from pathlib import Path
@@ -269,36 +270,36 @@ class NextCloudClient:
         # Default excludes if none provided
         if excludes is None:
             excludes = [
-                "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache", 
+                "node_modules", ".venv", "venv", ".git", "__pycache__", ".pytest_cache",
                 ".cache", ".local", ".vscode", ".idea", "dist", "build", ".tox", ".nox"
             ]
-        
+
         exclude_set = set(excludes)
-        
+
         local_root = Path(local_path).resolve()
         if not local_root.is_dir():
             raise ValueError(f"Local path {local_path} is not a directory or does not exist.")
-            
+
         remote_root = "/" + str(remote_path).strip("/")
         log.info(f"Uploading directory {local_root} to {remote_root}")
-        
+
         uploaded_files = 0
         total_bytes = 0
-        
+
         for root, dirs, files in os.walk(local_root):
             # Skip noise directories
             dirs[:] = [d for d in dirs if d not in exclude_set]
-            
+
             rel_path = Path(root).relative_to(local_root)
             remote_dir = str(PurePosixPath(remote_root) / rel_path)
-            
+
             # Ensure the directory exists on Nextcloud
             await self.ensure_directory(remote_dir)
-            
+
             for file in files:
                 local_file = Path(root) / file
                 remote_file = str(PurePosixPath(remote_dir) / file)
-                
+
                 try:
                     with open(local_file, "rb") as f:
                         content = f.read()
@@ -307,7 +308,7 @@ class NextCloudClient:
                         total_bytes += len(content)
                 except Exception as e:
                     log.error(f"Failed to upload {local_file} to {remote_file}: {e}")
-                    
+
         return {
             "status": "SUCCESS",
             "remote_root": remote_root,

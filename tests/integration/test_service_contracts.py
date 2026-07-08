@@ -1,6 +1,7 @@
-import pytest
 import os
+
 import httpx
+import pytest
 
 
 @pytest.mark.contract

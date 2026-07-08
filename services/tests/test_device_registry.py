@@ -1,8 +1,9 @@
 # services/tests/test_device_registry.py
 """Tests for device_registry.py (aiosqlite backend)."""
 import os
-import pytest
 import tempfile
+
+import pytest
 
 from services.execution import device_registry
 

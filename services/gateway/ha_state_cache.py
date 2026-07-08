@@ -7,6 +7,7 @@ Redis caches live state with a short TTL.
 entity_id is the stable join key between the two.
 """
 import logging
+
 import aiohttp
 import redis
 
@@ -87,24 +88,23 @@ async def get_live_state(entity_id: str, execution_url: str, ha_url: str, ha_tok
     cached = get_cached_state(entity_id)
     if cached is not None:
         return cached
-    
+
     # Cache miss — fetch live
     try:
         import aiohttp
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"{execution_url}/discovery/entities",
-                params={"ha_url": ha_url, "ha_token": ha_token},
-                headers={"X-Internal-Secret": internal_secret},
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    entities = data.get("entities", []) if isinstance(data, dict) else []
-                    cache_all_states(entities)
-                    for e in entities:
-                        if e.get("entity_id") == entity_id:
-                            return e.get("state")
+        async with aiohttp.ClientSession() as session, session.get(
+            f"{execution_url}/discovery/entities",
+            params={"ha_url": ha_url, "ha_token": ha_token},
+            headers={"X-Internal-Secret": internal_secret},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                entities = data.get("entities", []) if isinstance(data, dict) else []
+                cache_all_states(entities)
+                for e in entities:
+                    if e.get("entity_id") == entity_id:
+                        return e.get("state")
     except Exception as e:
         log.error(f"Failed to fetch live state for {entity_id}: {e}")
     return None

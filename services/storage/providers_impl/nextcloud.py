@@ -1,9 +1,10 @@
 # services/storage/providers_impl/nextcloud.py
-from typing import Any, Optional
+from typing import Any
 
-from services.storage.providers import StorageProvider
 from services.storage.models import StorageEntry
 from services.storage.nextcloud_client import NextCloudClient
+from services.storage.providers import StorageProvider
+
 
 class NextcloudStorageProvider(StorageProvider):
     def __init__(self, settings: dict):
@@ -31,5 +32,5 @@ class NextcloudStorageProvider(StorageProvider):
             path, content, create_parents=create_parents, verify=verify, is_binary=is_binary
         )
 
-    async def upload_directory(self, remote_path: str, local_path: str, excludes: Optional[list[str]] = None) -> dict[str, Any]:
+    async def upload_directory(self, remote_path: str, local_path: str, excludes: list[str] | None = None) -> dict[str, Any]:
         return await self.client.upload_directory(remote_path, local_path, excludes=excludes)

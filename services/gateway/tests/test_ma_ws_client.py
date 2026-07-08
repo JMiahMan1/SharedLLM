@@ -10,23 +10,21 @@ Tests cover:
 - Error handling for various failure modes
 - Context manager support
 """
-import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from services.gateway.ma_ws_client import (
-    MAWebSocketClient,
-    EVENT_QUEUE_UPDATED,
+    COMMAND_PREFIX,
     EVENT_PLAYER_UPDATED,
     EVENT_QUEUE_ENDED,
     EVENT_QUEUE_STARTED,
-    COMMAND_PREFIX,
-    PLAY_MEDIA_COMMAND,
+    EVENT_QUEUE_UPDATED,
     HEARTBEAT_INTERVAL,
+    PLAY_MEDIA_COMMAND,
+    MAWebSocketClient,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -672,11 +670,10 @@ class TestReconnectLogic:
         client._reconnect_count = 3
         client._last_error = Exception("test")
 
-        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)):
-            with patch("asyncio.sleep", AsyncMock()):
-                await client._establish_connection()
-                # After successful connection, count should reset to 0
-                assert client._reconnect_count == 0
+        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)), patch("asyncio.sleep", AsyncMock()):
+            await client._establish_connection()
+            # After successful connection, count should reset to 0
+            assert client._reconnect_count == 0
 
     @pytest.mark.asyncio
     async def test_reconnect_exponential_backoff_calculation(self):
@@ -713,20 +710,18 @@ class TestReconnectLogic:
         client._last_error = Exception("test")
         client._reconnect_count = 1
 
-        with patch.object(client, "_establish_connection", fail_connect):
-            with patch("asyncio.sleep", AsyncMock()):
-                await client._reconnect()
-                # After failure, should have scheduled another reconnect
-                assert client._reconnect_task is not None
+        with patch.object(client, "_establish_connection", fail_connect), patch("asyncio.sleep", AsyncMock()):
+            await client._reconnect()
+            # After failure, should have scheduled another reconnect
+            assert client._reconnect_task is not None
 
     @pytest.mark.asyncio
     async def test_reconnect_skipped_when_shutdown(self, client):
         client._shutdown_event.set()
 
-        with patch("asyncio.sleep", AsyncMock()) as mock_sleep:
-            with patch.object(client, "_establish_connection", side_effect=Exception("fail")):
-                await client._reconnect()
-                assert client._reconnect_task is None
+        with patch("asyncio.sleep", AsyncMock()) as mock_sleep, patch.object(client, "_establish_connection", side_effect=Exception("fail")):
+            await client._reconnect()
+            assert client._reconnect_task is None
 
 
 # ---------------------------------------------------------------------------
@@ -840,24 +835,22 @@ class TestErrorHandling:
 class TestContextManager:
     @pytest.mark.asyncio
     async def test_context_manager_enter(self, client, mock_websocket):
-        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)):
-            with patch.object(MAWebSocketClient, "_establish_connection"):
-                client._connected = True
-                async with client as c:
-                    assert c is client
+        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)), patch.object(MAWebSocketClient, "_establish_connection"):
+            client._connected = True
+            async with client as c:
+                assert c is client
 
     @pytest.mark.asyncio
     async def test_context_manager_exit(self, client, mock_websocket):
-        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)):
-            with patch.object(client, "_establish_connection"):
-                client._connected = True
-                client._authenticated = True
-                mock_ws = AsyncMock()
-                client._ws = mock_ws
-                async with client:
-                    assert client.connected is True
-                assert client.connected is False
-                assert mock_ws.close.called
+        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)), patch.object(client, "_establish_connection"):
+            client._connected = True
+            client._authenticated = True
+            mock_ws = AsyncMock()
+            client._ws = mock_ws
+            async with client:
+                assert client.connected is True
+            assert client.connected is False
+            assert mock_ws.close.called
 
 
 # ---------------------------------------------------------------------------

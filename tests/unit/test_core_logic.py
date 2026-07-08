@@ -5,7 +5,7 @@ from cryptography.fernet import Fernet
 @pytest.mark.unit
 class TestCryptoFunctions:
     def test_encrypt_decrypt_roundtrip(self):
-        from services.identity.crypto import encrypt, decrypt
+        from services.identity.crypto import decrypt, encrypt
 
         plaintext = "secret_token_value"
 
@@ -144,6 +144,7 @@ class TestResolver:
 
     def test_resolver_returns_ip_for_localhost(self):
         import asyncio
+
         from services.gateway.resolver import resolve_hostname_with_fallback
 
         result = asyncio.run(resolve_hostname_with_fallback("localhost", port=0))
@@ -162,6 +163,7 @@ class TestConfigModule:
         os.environ["FERNET_KEY"] = Fernet.generate_key().decode()
 
         from importlib import reload
+
         import services.config
         reload(services.config)
 

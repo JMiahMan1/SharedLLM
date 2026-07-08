@@ -1,6 +1,8 @@
 # services/rag/schemas.py
-from typing import Optional, List, Dict, Any
+from typing import Any
+
 from pydantic import BaseModel, Field
+
 
 class SearchRequest(BaseModel):
     query: str
@@ -12,20 +14,20 @@ class SearchRequest(BaseModel):
 
 class SearchResultItem(BaseModel):
     content: str
-    metadata: Dict[str, Any]
-    score: Optional[float] = None
+    metadata: dict[str, Any]
+    score: float | None = None
 
 class SearchResponse(BaseModel):
-    results: List[SearchResultItem]
+    results: list[SearchResultItem]
 
 class IngestRequest(BaseModel):
     user_id: str
     content: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     collection_name: str = "nextcloud"
 
 class UserFact(BaseModel):
-    id: Optional[str] = None
+    id: str | None = None
     content: str
     user_id: str
     category: str = "preference" # e.g., 'preference', 'routine', 'entity_mapping'

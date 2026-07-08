@@ -5,12 +5,13 @@ Provides ActionDispatcher for routing actions to their handlers.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 log = logging.getLogger("app.logic.execution.registry")
 
 # Registry of action handlers: maps action names to async callables
-_REGISTRY: Dict[str, Callable] = {}
+_REGISTRY: dict[str, Callable] = {}
 
 
 def register(action: str) -> Callable:
@@ -22,12 +23,12 @@ def register(action: str) -> Callable:
     return decorator
 
 
-def get_handler(action: str) -> Optional[Callable]:
+def get_handler(action: str) -> Callable | None:
     """Get the handler for an action, or None if not registered."""
     return _REGISTRY.get(action)
 
 
-def list_actions() -> List[str]:
+def list_actions() -> list[str]:
     """List all registered action names."""
     return list(_REGISTRY.keys())
 
@@ -37,14 +38,14 @@ class ActionDispatcher:
     Dispatches actions to their registered handlers.
     """
 
-    def __init__(self, handlers: Optional[Dict[str, Callable]] = None) -> None:
+    def __init__(self, handlers: dict[str, Callable] | None = None) -> None:
         self._handlers = handlers or dict(_REGISTRY)
 
     def add_handler(self, action: str, handler: Callable) -> None:
         """Register a handler for an action."""
         self._handlers[action] = handler
 
-    async def dispatch(self, action: str, **kwargs: Any) -> Dict[str, Any]:
+    async def dispatch(self, action: str, **kwargs: Any) -> dict[str, Any]:
         """
         Dispatch an action to its handler.
 

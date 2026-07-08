@@ -1,7 +1,7 @@
 """TV-specific announcement handlers for different smart TV platforms."""
 import asyncio
 import logging
-from typing import Dict, Any, Optional, Set
+from typing import Any
 
 log = logging.getLogger("execution.announce")
 
@@ -49,7 +49,7 @@ MANUFACTURER_PATTERNS = {
     "toshiba": "generic_tv",
 }
 
-def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_components: Optional[Set[str]] = None) -> str:
+def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_components: set[str] | None = None) -> str:
     """Detect TV platform type using multiple context clues in priority order.
     
     Uses:
@@ -65,26 +65,26 @@ def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_componen
     device_class = (attributes.get("device_class") or "").lower()
     supported_features = attributes.get("supported_features", 0)
     source_list = [s.lower().strip() for s in (attributes.get("source_list") or [])]
-    
+
     # 1. Cast devices: entity contains 'chrome'/'cast', or app_id matches known Cast receivers
     if "chrome" in eid or "_cast" in eid or app_id in CAST_APP_IDS:
         return "cast"
-    
+
     # 2. Samsung Tizen: entity contains 'samsung' or 'tizen', OR source_list has Samsung-specific entries
     has_samsung_sources = bool(SAMSUNG_SOURCES & set(source_list))
     if "samsung" in eid or "tizen" in eid or has_samsung_sources:
         return "samsung"
-    
+
     # 3. webOS (LG): entity contains 'lg' or 'webos'
     if "lg_" in eid or "webos" in eid or "web_os" in eid:
         return "webos"
-    
+
     # 4. Android TV: app_id is Android package name, or contains Android indicators
     is_android_app = any(app_id.startswith(pkg) for pkg in ANDROID_PACKAGE_PREFIXES)
     is_android_indicator = any(ind in app_id for ind in ANDROID_INDICATORS)
     if is_android_app or is_android_indicator:
         return "android_tv"
-    
+
     # 5. Roku: entity contains 'roku', OR source_list has Roku-specific entries
     #    OR MA player with Roku active_queue (MA wraps Roku as mass_player_type=player)
     has_roku_sources = bool(ROKU_SOURCES & set(source_list))
@@ -93,33 +93,33 @@ def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_componen
     is_ma_roku = app_id == "music_assistant" and ("roku" in active_queue or "roku" in eid)
     if "roku" in eid or has_roku_sources or has_many_streaming or is_ma_roku:
         return "roku"
-    
+
     # 6. Sony Bravia: entity contains 'bravia' or 'sony'
     if "bravia" in eid or "sony" in eid:
         return "bravia"
-    
+
     # 7. ESPHome: entity contains 'esphome'
     if "esphome" in eid:
         return "esphome"
-    
+
     # 8. DLNA: entity contains 'dlna'
     if "dlna" in eid:
         return "dlna"
-    
+
     # 9. Music Assistant: app_id is 'music_assistant'
     if app_id == "music_assistant":
         return "music_assistant"
-    
+
     # 10. Generic TV: device_class=tv with TV inputs in source_list
     tv_inputs = {"live tv", "tv", "hdmi", "hdmi 1", "hdmi 2", "hdmi 3", "av", "component"}
     has_tv_inputs = bool(tv_inputs & set(source_list))
     if device_class == "tv" or has_tv_inputs:
         return "generic_tv"
-    
+
     # 11. Speaker: device_class=speaker
     if device_class == "speaker":
         return "speaker"
-    
+
     # 12. Use loaded components as additional signal
     if loaded_components:
         if "cast.media_player" in loaded_components and supported_features & SUPPORT_PLAY_MEDIA:
@@ -134,52 +134,52 @@ def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_componen
             return "roku"
         if "dlna_dmr.media_player" in loaded_components:
             return "dlna"
-    
+
     # 12. Fallback: unknown device
     return "unknown"
 
-async def search_device_type(entity_id: str, attributes: dict, loaded_components: Optional[Set[str]] = None) -> Optional[str]:
+async def search_device_type(entity_id: str, attributes: dict, loaded_components: set[str] | None = None) -> str | None:
     """Search the web to identify an unknown device type using available clues.
     
     Uses entity_id patterns, app_id, supported_features, and loaded components
     to construct a search query and determine the device platform.
     """
     clues = []
-    
+
     # Extract clues from entity_id
     eid_parts = entity_id.lower().replace("media_player.", "").replace("_", " ").split()
     clues.extend(eid_parts)
-    
+
     # Extract clues from app_id
     app_id = attributes.get("app_id", "")
     if app_id:
         clues.append(app_id)
-    
+
     # Extract clues from supported_features
     features = attributes.get("supported_features", 0)
     if features & SUPPORT_BROWSE_MEDIA:
         clues.append("browse media")
     if features & SUPPORT_SELECT_SOURCE:
         clues.append("source select")
-    
+
     # Extract clues from loaded components
     if loaded_components:
         related = [c for c in loaded_components if "media_player" in c or "tv" in c or "cast" in c or "roku" in c]
         clues.extend(related)
-    
+
     if not clues:
         return None
-    
+
     # Construct search query
     query = f"home assistant media_player {' '.join(clues[:5])} integration type"
-    
+
     try:
         from websearch import web_search
         results = await web_search(query, num_results=3)
-        
+
         # Analyze results for platform indicators
         combined = " ".join([r.get("snippet", "") + " " + r.get("title", "") for r in results]).lower()
-        
+
         platform_keywords = {
             "cast": ["google cast", "chromecast", "cast integration"],
             "roku": ["roku integration", "roku media player"],
@@ -189,17 +189,17 @@ async def search_device_type(entity_id: str, attributes: dict, loaded_components
             "bravia": ["sony bravia"],
             "dlna": ["dlna", "dlna_dmr"],
         }
-        
+
         for platform, keywords in platform_keywords.items():
             if any(kw in combined for kw in keywords):
                 log.info(f"[announce.search] Web search suggests {platform} for {entity_id}")
                 return platform
     except Exception as e:
         log.warning(f"[announce.search] Web search failed: {e}")
-    
+
     return None
 
-async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """Cast devices support direct URL playback."""
     from ha_client import call_service
     log.info(f"[announce.cast] Playing URL on {entity_id}: {media_url[:60]}")
@@ -208,22 +208,22 @@ async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: s
         "media_content_type": "url"
     })
 
-async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """Roku: wake display via ECP, launch Media Assistant with audio URL.
     
     Based on Media Assistant docs and main branch flow:
     1. Wake display via ECP Home key
     2. Launch Media Assistant via ECP with t=a, u=[Media URL]
     """
-    from ha_client import call_service
     import device_discovery
-    
+    from ha_client import call_service
+
     # 1. Wake display via ECP Home key
     log.info(f"[announce.roku] Waking display for {entity_id}...")
-    
+
     roku_result = await device_discovery.discover_device(entity_id, ha_url, ha_token, device_type="roku")
     roku_ip = roku_result.get("ip") if roku_result else None
-    
+
     if roku_ip:
         import aiohttp
         try:
@@ -233,10 +233,10 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
                 log.info(f"[announce.roku] ECP Home key response: {resp.status}")
         except Exception as e:
             log.warning(f"[announce.roku] ECP Home key failed: {e}")
-    
+
     await call_service(ha_url, ha_token, "media_player", "turn_on", entity_id, {})
     await asyncio.sleep(3)
-    
+
     # 2. Launch Media Assistant with audio URL via ECP (matching main branch video flow)
     if roku_ip:
         import aiohttp
@@ -257,7 +257,7 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
                     return {"ok": True}
         except Exception as e:
             log.warning(f"[announce.roku] ECP launch failed: {e}")
-    
+
     # Fallback: try media_player.play_media
     log.info("[announce.roku] Fallback: play_media with URL")
     return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
@@ -265,75 +265,75 @@ async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: s
         "media_content_type": "url"
     })
 
-async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_webos(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """webOS TV: try webostv.notify, then media_player as fallback."""
     from ha_client import call_service
     log.info(f"[announce.webos] Trying webostv.notify on {entity_id}")
-    
+
     result = await call_service(ha_url, ha_token, "webostv", "notify", entity_id, {
         "message": media_url,
         "icon": f"{ha_url}/local/kokoro-icon.png"
     })
-    
+
     if result.get("ok"):
         return result
-    
+
     log.info("[announce.webos] Falling back to media_player.play_media")
     return await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
         "media_content_id": media_url,
         "media_content_type": "url"
     })
 
-async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_android_tv(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """Android TV: try media_player, then ADB commands."""
     from ha_client import call_service
     log.info(f"[announce.android_tv] Trying play_media on {entity_id}")
-    
+
     result = await call_service(ha_url, ha_token, "media_player", "play_media", entity_id, {
         "media_content_id": media_url,
         "media_content_type": "url"
     })
-    
+
     if result.get("ok"):
         return result
-    
+
     # Try ADB to launch media player
     log.info("[announce.android_tv] Trying ADB command to launch media")
     await call_service(ha_url, ha_token, "androidtv", "adb_command", entity_id, {"command": "HOME"})
     await asyncio.sleep(1)
-    
+
     return await call_service(ha_url, ha_token, "androidtv", "adb_command", entity_id, {
         "command": f"am start -d '{media_url}' -a android.intent.action.VIEW"
     })
 
-async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """Samsung Tizen TV: wake, set volume, play TTS via MA player over DLNA, then restore state."""
-    from ha_client import call_service, get_state, get_all_states
+    from ha_client import call_service, get_all_states, get_state
     log.info(f"[announce.samsung] Waking {entity_id} for announcement")
-    
+
     # Capture initial state for restoration
     initial_state = state
     was_off = initial_state in ("off", "unavailable", "standby")
-    
+
     # Power on if needed
     if was_off:
         log.info(f"[announce.samsung] TV is {initial_state}, turning on...")
         await call_service(ha_url, ha_token, "media_player", "turn_on", entity_id, {})
         await asyncio.sleep(15)  # Samsung boot time
-    
+
     # Set volume for announcement
     if volume > 0:
         log.info(f"[announce.samsung] Setting volume to {volume}")
         await call_service(ha_url, ha_token, "media_player", "volume_set", entity_id, {"volume_level": volume})
         await asyncio.sleep(0.5)
-    
+
     # Unmute if needed
     attrs = attributes or {}
     if attrs.get("is_volume_muted"):
         log.info("[announce.samsung] Unmuting TV")
         await call_service(ha_url, ha_token, "media_player", "volume_mute", entity_id, {"is_volume_muted": False})
         await asyncio.sleep(0.5)
-    
+
     # Find MA player linked to DLNA renderer or Samsung TV entity
     ma_entity = None
     dlna_entity = None
@@ -344,7 +344,7 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
             s_attrs = s.get("attributes", {})
             active_q = s_attrs.get("active_queue", "")
             # Match MA players where active_queue matches the TV entity
-            if (s_attrs.get("app_id") == "music_assistant" and 
+            if (s_attrs.get("app_id") == "music_assistant" and
                 s_attrs.get("mass_player_type") == "player" and
                 active_q == entity_id and
                 eid != entity_id):
@@ -355,18 +355,18 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
                 dlna_entity = eid
     except Exception as e:
         log.warning(f"[announce.samsung] Failed to find MA/DLNA entity: {e}")
-    
+
     play_target = ma_entity or entity_id
     if ma_entity:
         log.info(f"[announce.samsung] Using MA player for playback: {ma_entity}")
     else:
         log.warning(f"[announce.samsung] No MA player found, falling back to {entity_id}")
-    
+
     log.info(f"[announce.samsung] Playing announcement on {play_target}")
     result = await call_service(ha_url, ha_token, "music_assistant", "play_media", play_target, {
         "media_id": media_url
     })
-    
+
     playback_ok = False
     if result.get("ok"):
         # Verify playback started or completed
@@ -381,7 +381,7 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
                 playback_ok = True
             else:
                 log.warning(f"[announce.samsung] play_media accepted but state={v_state}, media={v_media}")
-    
+
     # Fallback: try DLNA renderer directly
     if not playback_ok and ma_entity and dlna_entity:
         log.info(f"[announce.samsung] MA failed, trying DLNA renderer {dlna_entity}")
@@ -391,17 +391,17 @@ async def announce_samsung(ha_url: str, ha_token: str, entity_id: str, media_url
         })
         if result.get("ok"):
             playback_ok = True
-    
+
     # Wait for announcement to finish (estimate ~3-5s for TTS) before restoring state
     if was_off and playback_ok:
         log.info("[announce.samsung] Waiting for announcement to complete before restoring TV to off...")
         await asyncio.sleep(5)
         log.info(f"[announce.samsung] Restoring TV to off state (was {initial_state})")
         await call_service(ha_url, ha_token, "media_player", "turn_off", entity_id, {})
-    
+
     return result
 
-async def announce_bravia(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_bravia(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """Sony Bravia TV."""
     from ha_client import call_service
     log.info(f"[announce.bravia] Trying play_media on {entity_id}")
@@ -410,7 +410,7 @@ async def announce_bravia(ha_url: str, ha_token: str, entity_id: str, media_url:
         "media_content_type": "url"
     })
 
-async def announce_music_assistant(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_music_assistant(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """Music Assistant integration."""
     from ha_client import call_service
     log.info(f"[announce.mass] Using media_player.play_media on {entity_id}")
@@ -419,7 +419,7 @@ async def announce_music_assistant(ha_url: str, ha_token: str, entity_id: str, m
         "media_content_type": "url"
     })
 
-async def announce_esphome(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_esphome(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """ESPHome media player."""
     from ha_client import call_service
     log.info(f"[announce.esphome] Trying play_media on {entity_id}")
@@ -428,7 +428,7 @@ async def announce_esphome(ha_url: str, ha_token: str, entity_id: str, media_url
         "media_content_type": "url"
     })
 
-async def announce_dlna(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_dlna(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """DLNA renderer."""
     from ha_client import call_service
     log.info(f"[announce.dlna] Trying play_media on {entity_id}")
@@ -437,7 +437,7 @@ async def announce_dlna(ha_url: str, ha_token: str, entity_id: str, media_url: s
         "media_content_type": "url"
     })
 
-async def announce_generic_tv(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_generic_tv(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """Generic TV fallback."""
     from ha_client import call_service
     log.info(f"[announce.generic_tv] Trying play_media on {entity_id}")
@@ -446,7 +446,7 @@ async def announce_generic_tv(ha_url: str, ha_token: str, entity_id: str, media_
         "media_content_type": "url"
     })
 
-async def announce_speaker(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_speaker(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """Generic speaker."""
     from ha_client import call_service
     log.info(f"[announce.speaker] Trying play_media on {entity_id}")
@@ -455,7 +455,7 @@ async def announce_speaker(ha_url: str, ha_token: str, entity_id: str, media_url
         "media_content_type": "url"
     })
 
-async def announce_unknown(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> Dict[str, Any]:
+async def announce_unknown(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """Unknown device: try generic play_media, log all attributes for later identification."""
     from ha_client import call_service
     log.info(f"[announce.unknown] Unknown device type for {entity_id}, trying generic play_media")
@@ -480,10 +480,10 @@ TV_HANDLER_MAP = {
     "unknown": announce_unknown,
 }
 
-async def dispatch_announce(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str, attributes: dict, loaded_components: Optional[Set[str]] = None, message: str = "") -> Dict[str, Any]:
+async def dispatch_announce(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str, attributes: dict, loaded_components: set[str] | None = None, message: str = "") -> dict[str, Any]:
     """Dispatch announcement to the appropriate TV handler based on device detection."""
     tv_type = detect_tv_type(entity_id, state, attributes, loaded_components)
-    
+
     # If unknown, try web search fallback
     if tv_type == "unknown":
         log.info(f"[announce] Unknown device type for {entity_id}, attempting web search...")
@@ -493,8 +493,8 @@ async def dispatch_announce(ha_url: str, ha_token: str, entity_id: str, media_ur
             log.info(f"[announce] Web search identified type as: {tv_type}")
         else:
             log.warning(f"[announce] Could not identify device type for {entity_id}, using unknown handler")
-    
+
     handler = TV_HANDLER_MAP.get(tv_type, announce_unknown)
-    
+
     log.info(f"[announce] Detected type: {tv_type} for {entity_id} (app_id={attributes.get('app_id', '?')}, device_class={attributes.get('device_class', '?')}, features={attributes.get('supported_features', '?')})")
     return await handler(ha_url, ha_token, entity_id, media_url, volume, state, attributes, message=message)

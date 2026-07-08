@@ -10,11 +10,12 @@ Requires:
   - MA integration configured in HA
 """
 
-import httpx
 import asyncio
 import json
 import os
 import sys
+
+import httpx
 
 # Resolve credentials from identity service
 IDENTITY_URL = os.environ.get("IDENTITY_URL", "http://172.26.0.3:8001")
@@ -43,7 +44,7 @@ async def test_ma_get_queue(ha_token):
     print("\n=== music_assistant.get_queue ===")
     async with httpx.AsyncClient(verify=False) as client:
         headers = {"Authorization": f"Bearer {ha_token}"}
-        
+
         # Get MA player entities
         resp = await client.get(
             "https://ha.sumemail.com/api/states?domain=media_player",
@@ -51,22 +52,22 @@ async def test_ma_get_queue(ha_token):
             timeout=10
         )
         players = resp.json()
-        
+
         ma_players = []
         for p in players:
             app_id = p["attributes"].get("app_id", "")
             if "music_assistant" in str(app_id):
                 ma_players.append(p["entity_id"])
-        
+
         if not ma_players:
             print("No MA players found")
             return
-        
+
         print(f"MA players: {ma_players}")
-        
+
         for player_id in ma_players:
             resp = await client.post(
-                f"https://ha.sumemail.com/api/services/music_assistant/get_queue?return_response=1",
+                "https://ha.sumemail.com/api/services/music_assistant/get_queue?return_response=1",
                 headers=headers,
                 json={"entity_id": player_id},
                 timeout=10
@@ -81,14 +82,14 @@ async def test_ma_player_states(ha_token):
     print("\n=== MA Player States ===")
     async with httpx.AsyncClient(verify=False) as client:
         headers = {"Authorization": f"Bearer {ha_token}"}
-        
+
         resp = await client.get(
             "https://ha.sumemail.com/api/states?domain=media_player",
             headers=headers,
             timeout=10
         )
         players = resp.json()
-        
+
         for p in players:
             app_id = p["attributes"].get("app_id", "")
             if "music_assistant" in str(app_id):
@@ -107,14 +108,14 @@ async def test_ha_services(ha_token):
     print("\n=== Available HA Services ===")
     async with httpx.AsyncClient(verify=False) as client:
         headers = {"Authorization": f"Bearer {ha_token}"}
-        
+
         resp = await client.get(
             "https://ha.sumemail.com/api/services",
             headers=headers,
             timeout=10
         )
         services = resp.json()
-        
+
         for svc in services:
             domain = svc["domain"]
             if "media" in domain.lower() or "assist" in domain.lower() or "music_assistant" in domain.lower():
@@ -128,10 +129,10 @@ async def main():
     if not ha_token:
         print("No HA token found")
         sys.exit(1)
-    
+
     print(f"HA URL: {all_data.get('ha_url', 'N/A')}")
     print(f"MA URL: {all_data.get('mass_url', 'N/A')}")
-    
+
     await test_ha_services(ha_token)
     await test_ma_player_states(ha_token)
     await test_ma_get_queue(ha_token)

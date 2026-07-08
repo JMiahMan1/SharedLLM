@@ -3,8 +3,9 @@
 End-to-end test: Big Buck Bunny → Fireplace Video
 Tests the full application flow through the chat API
 """
-import requests
 import time
+
+import requests
 
 API_URL = "http://ai.local:11435/api/chat"
 
@@ -13,13 +14,13 @@ def send_chat(message):
     print(f"\n{'='*60}")
     print(f"USER: {message}")
     print('='*60)
-    
+
     response = requests.post(
         API_URL,
         json={"query": message},
         timeout=30
     )
-    
+
     if response.status_code == 200:
         data = response.json()
         assistant_response = data.get("response", "No response")

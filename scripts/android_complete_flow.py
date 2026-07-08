@@ -3,8 +3,9 @@
 Test Android TV Watch flow with Phil Wickham video
 Tests: Watch -> Pause -> Resume -> Stop -> Turn Off
 """
-import requests
 import time
+
+import requests
 
 BASE_URL = "http://ai.local:11435"
 # Use specific entity ID to check state
@@ -85,7 +86,7 @@ if state in ["idle", "off"]:
     print("  ✅ Stopped successfully!")
 else:
     print(f"  Current state: {state}")
-    
+
 # Test 5: Turn Off
 print("\n[5] Turn Off TV...")
 response = chat("Turn Off")

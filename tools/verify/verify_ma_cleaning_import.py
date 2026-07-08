@@ -1,24 +1,25 @@
 
-import sys
 import os
+import sys
 
-sys.path.append(os.getcwd()) 
+sys.path.append(os.getcwd())
 
 from app.domains.media.integrations.music_assistant import MusicAssistantIntegration  # pyright: ignore[reportMissingImports]
+
 
 def test_cleaning():
     print("Testing MusicAssistantIntegration._clean_query logic...")
     integration = MusicAssistantIntegration()
-    
+
     # Case 1: The User's Failure Case
     query = "Play Reliant Kay on Gracie's TV"
     device = "Gracies TV"
     cleaned = integration._clean_query(query, device)
-    
+
     print(f"Original: '{query}'")
     print(f"Device:   '{device}'")
     print(f"Cleaned:  '{cleaned}'")
-    
+
     expected = "reliant kay"
     if cleaned == expected:
         print("PASS: Apostrophe handled correctly.")
@@ -55,7 +56,7 @@ def test_cleaning():
     print(f"Original: '{query_fuzzy}'")
     print(f"Device:   '{device_fuzzy}'")
     print(f"Cleaned:  '{c4}'")
-    
+
     expected_fuzzy = "reliant k"
     if c4 == expected_fuzzy:
         print("PASS: Fuzzy device name stripped.")

@@ -1,5 +1,6 @@
 import os
 import time
+
 import requests
 from dotenv import load_dotenv
 
@@ -20,13 +21,13 @@ def send_query(query, history=None):
     payload = {"messages": history if history else [{"role":"user","content":query}], "stream":False}
     if history:
         history.append({"role":"user", "content":query})
-    
+
     try:
         r = requests.post(f"{API_URL}/api/chat", json=payload, headers=HEADERS, timeout=60)
         if r.status_code != 200:
             log(f"   [ERROR] HTTP {r.status_code}: {r.text}")
             return None, {}
-        
+
         data = r.json()
         msg = data.get("message", {}).get("content", "")
         log(f"   [AI] {msg}")
@@ -72,17 +73,17 @@ def test_crud_tools():
 
 def test_context_and_search():
     log("\n=== TEST: Context, History & Search ===")
-    
+
     # 1. Chat History
     log(">> Step 1: Contextual Query (President)")
     # We must manually maintain history for this stateless API test unless the server tracks it by user.
     # The server *does* have a 'state' via history manager but for the test script let's simulate a session if needed.
     # Actually, the API is stateful per user (X-RAG-User), so consecutive calls should work.
-    
+
     resp1, _ = send_query("Who is the president of France?")
     if resp1 and "Macron" in resp1:
         log("   [PASS] Identified President.")
-    
+
     resp2, _ = send_query("Who is his wife?")
     if resp2 and "Brigitte" in resp2:
         log("   [PASS] Context maintained (Brigitte identified).")
@@ -99,17 +100,17 @@ def test_context_and_search():
 
     # 3. RAG (Knowledge)
     log(">> Step 3: RAG Retrieval")
-    resp4, _ = send_query("What devices are in the Office?") 
+    resp4, _ = send_query("What devices are in the Office?")
     if resp4 and "Office" in resp4:
         log("   [PASS] RAG context usage plausible.")
 
 if __name__ == "__main__":
     with open("rigorous_verify_results.txt", "w") as f:
         f.write(f"Rigorous Verification Run 2: {time.ctime()}\n")
-    
+
     test_media_lifecycle()
     test_compound_patterns()
-    test_crud_tools() # Timer implicitly tested via manual check request, skipping here to save time? 
+    test_crud_tools() # Timer implicitly tested via manual check request, skipping here to save time?
                       # User said "also with the set timer...". I'll add it back briefly.
     send_query("Set a timer for 10 seconds on the Office TV")
     time.sleep(11) # Wait for it

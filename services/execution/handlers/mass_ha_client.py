@@ -8,8 +8,9 @@ The HA integration exposes domain-level services:
 These use HA's existing MA connection, avoiding direct MA REST API auth issues.
 """
 import logging
+from typing import Any
+
 import aiohttp
-from typing import List, Dict, Any
 
 log = logging.getLogger("execution.mass_ha")
 
@@ -30,7 +31,7 @@ async def _call_ha_ma_service(
 
     headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
     url = f"{ha_url.rstrip('/')}/api/services/music_assistant/{service}?return_response"
-    
+
     payload = {}
     if entity_id:
         payload["entity_id"] = entity_id
@@ -38,13 +39,12 @@ async def _call_ha_ma_service(
         payload.update(service_data)
 
     try:
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
-            async with client.post(url, headers=headers, json=payload) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                text = await resp.text()
-                log.error(f"[mass_ha] Service {service} returned {resp.status}: {text[:300]}")
-                return None
+        async with aiohttp.ClientSession(timeout=_TIMEOUT) as client, client.post(url, headers=headers, json=payload) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            text = await resp.text()
+            log.error(f"[mass_ha] Service {service} returned {resp.status}: {text[:300]}")
+            return None
     except Exception as e:
         log.error(f"[mass_ha] Service {service} failed: {e}")
         return None
@@ -55,12 +55,12 @@ async def search(
     ha_token: str,
     query: str,
     mass_entry_id: str = "",
-    media_types: List[str] | None = None,
+    media_types: list[str] | None = None,
     limit: int = 10,
     artist: str = "",
     album: str = "",
     library_only: bool = True,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Search MA for media items via HA proxy.
     
     Args:
@@ -83,16 +83,16 @@ async def search(
         "limit": limit,
         "library_only": library_only,
     }
-    
+
     if mass_entry_id:
         service_data["config_entry_id"] = mass_entry_id
-    
+
     if media_types:
         # MA HA integration expects lowercase media type strings as a list
         service_data["media_type"] = [mt.lower() for mt in media_types] if len(media_types) > 1 else [media_types[0].lower()]
     else:
         service_data["media_type"] = ["track", "artist", "album", "playlist", "radio"]
-    
+
     if artist:
         service_data["artist"] = artist
     if album:
@@ -111,9 +111,7 @@ async def search(
     if result:
         # Case 1: {"results": [...]} at top level
         top_results = result.get("results", [])
-        if isinstance(top_results, list) and top_results:
-            results = top_results
-        elif isinstance(top_results, dict):
+        if (isinstance(top_results, list) and top_results) or isinstance(top_results, dict):
             results = top_results
         else:
             # Case 2: {"service_response": {artists: [...], albums: [...], ...}}
@@ -143,7 +141,7 @@ async def search(
                 "artist": item.get("artists", [{}])[0].get("name", "") if item.get("artists") else item.get("artist", ""),
                 "duration": item.get("duration", 0),
             })
-    
+
     return items[:limit]
 
 
@@ -156,7 +154,7 @@ async def get_library(
     favorite: bool = False,
     search: str = "",
     order_by: str = "",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Get library content from MA via HA proxy.
     
     Args:
@@ -178,7 +176,7 @@ async def get_library(
         "limit": limit,
         "offset": offset,
     }
-    
+
     if favorite:
         service_data["favorite"] = favorite
     if search:
@@ -216,7 +214,7 @@ async def get_library(
                 "duration": item.get("duration", 0),
                 "num_tracks": item.get("num_tracks", item.get("track_count", 0)),
             })
-    
+
     return items
 
 
@@ -224,7 +222,7 @@ async def get_queue(
     ha_url: str,
     ha_token: str,
     entity_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Get active queue for an MA player entity.
     
     Args:
@@ -322,7 +320,7 @@ async def play_media(
         return {"ok": False, "error": str(e)}
 
 
-async def get_ma_players(ha_url: str, ha_token: str) -> List[Dict[str, Any]]:
+async def get_ma_players(ha_url: str, ha_token: str) -> list[dict[str, Any]]:
     """Get all MA player entities from HA.
     
     Returns:
@@ -337,7 +335,7 @@ async def get_ma_players(ha_url: str, ha_token: str) -> List[Dict[str, Any]]:
             async with client.get(f"{ha_url.rstrip('/')}/api/states", headers=headers) as resp:
                 if resp.status != 200:
                     return []
-                
+
                 players = []
                 for state in await resp.json():
                     eid = state.get("entity_id", "")
@@ -366,7 +364,7 @@ async def get_recently_played(
     ha_url: str,
     ha_token: str,
     limit: int = 10,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Get recently played items from MA via HA proxy.
     
     Uses get_library with TRACK type and library_only=False to get recently played.

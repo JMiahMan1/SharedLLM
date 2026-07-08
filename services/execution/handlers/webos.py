@@ -7,9 +7,10 @@ Services:
   - webostv.select_sound_output: Change audio output
   - webostv.button: Simulate remote button press
 """
+import json
 import logging
 import socket
-import json
+
 try:
     import ha_client
     from schemas import ExecutionResult
@@ -67,7 +68,7 @@ async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
 
 async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> dict:  # pyright: ignore[reportUnusedFunction]
     """Get WebOS device info (IP, MAC) via HomeKit diagnostics or device registry."""
-    # noqa: F811 - kept for potential use
+
     import aiohttp
     import websockets
     headers = {"Authorization": f"Bearer {ha_token}"}
@@ -97,7 +98,7 @@ async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> 
                             dev_name = (dev.get("name") or "").lower()
                             dev_name_by_user = (dev.get("name_by_user") or "").lower()
                             dev_model = (dev.get("model") or "").lower()
-                            
+
                             # Check if this is our webostv device
                             for identifier in dev.get("identifiers", []):
                                 if identifier and identifier[0] == "webostv":
@@ -106,7 +107,7 @@ async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> 
                                         any(part in dev_name for part in entity_lower.split(".") if len(part) > 2)):
                                         webos_model = dev_model
                                     break
-                            
+
                             # Collect homekit_controller device entry IDs that share the same model
                             for identifier in dev.get("identifiers", []):
                                 if identifier and identifier[0].startswith("homekit_controller"):

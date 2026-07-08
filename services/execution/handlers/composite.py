@@ -4,9 +4,10 @@ Composite workflows that chain multiple handlers together.
 These are "macro-actions" that combine existing capabilities.
 """
 import logging
+
 from services.execution import ha_client
-from services.execution.schemas import ExecutionResult
 from services.execution.handlers import storage
+from services.execution.schemas import ExecutionResult
 from services.execution.tts import text_to_speech
 
 log = logging.getLogger("execution.composite")
@@ -67,14 +68,15 @@ async def handle_document_broadcast(req) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message="Kokoro TTS returned empty audio.", service="composite_broadcast")
 
     # Cache audio in memory and serve via local media server (port 8888)
-    from uuid import uuid4
     import time
+    from uuid import uuid4
     audio_cache_key = f"tts-{uuid4().hex[:8]}-{int(time.time())}"
-    
-    from services.execution.main import TEMP_AUDIO_CACHE, TEMP_AUDIO_DIR
+
     import os
+
+    from services.execution.main import TEMP_AUDIO_CACHE, TEMP_AUDIO_DIR
     TEMP_AUDIO_CACHE[audio_cache_key] = audio_bytes
-    
+
     # Save to disk for media server FileResponse
     wav_path = os.path.join(TEMP_AUDIO_DIR, f"{audio_cache_key}.wav")
     try:

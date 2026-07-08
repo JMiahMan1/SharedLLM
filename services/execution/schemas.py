@@ -3,12 +3,13 @@
 Pydantic schemas for all Execution Bridge endpoints.
 Strict validation is the primary defense against malformed gateway payloads.
 """
-from typing import Optional, Literal, Any, Dict, List
-from pydantic import BaseModel, Field, model_validator, ConfigDict
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class BaseRequest(BaseModel):
-    workspace_id: Optional[str] = None
+    workspace_id: str | None = None
     model_config = {"extra": "ignore"}
 
     @model_validator(mode='before')
@@ -28,9 +29,7 @@ class BaseRequest(BaseModel):
                     data["action"] = data["command"]
                 elif "operation" in data:
                     data["action"] = data["operation"]
-                elif "message" in data:
-                    data["action"] = "send"
-                elif "text_to_voice" in data:
+                elif "message" in data or "text_to_voice" in data:
                     data["action"] = "send"
                 elif "token" in data:
                     data["action"] = "messages"
@@ -114,22 +113,22 @@ class UserContext(BaseModel):
     model_config = {"extra": "ignore"}
     user: str
     is_admin: bool = False
-    ha_url: Optional[str] = None
-    ha_token: Optional[str] = None
-    nextcloud_url: Optional[str] = None
-    nextcloud_user: Optional[str] = None
-    nextcloud_pass: Optional[str] = None
-    github_token: Optional[str] = None
-    gitlab_token: Optional[str] = None
-    git_token: Optional[str] = None
-    git_url: Optional[str] = None
-    git_user: Optional[str] = None
-    api_key: Optional[str] = None
-    audiobookshelf_url: Optional[str] = None
-    audiobookshelf_user: Optional[str] = None
-    audiobookshelf_pass: Optional[str] = None
-    audiobookshelf_api_key: Optional[str] = None
-    preferred_tts_voice: Optional[str] = None
+    ha_url: str | None = None
+    ha_token: str | None = None
+    nextcloud_url: str | None = None
+    nextcloud_user: str | None = None
+    nextcloud_pass: str | None = None
+    github_token: str | None = None
+    gitlab_token: str | None = None
+    git_token: str | None = None
+    git_url: str | None = None
+    git_user: str | None = None
+    api_key: str | None = None
+    audiobookshelf_url: str | None = None
+    audiobookshelf_user: str | None = None
+    audiobookshelf_pass: str | None = None
+    audiobookshelf_api_key: str | None = None
+    preferred_tts_voice: str | None = None
 
 
 
@@ -138,9 +137,9 @@ class UserContext(BaseModel):
 class IdentityRequest(BaseRequest):
     user_context: UserContext
     action: Literal["list", "import_nextcloud", "discover", "create", "delete"]
-    username: Optional[str] = None
-    display_name: Optional[str] = None
-    role: Optional[str] = None
+    username: str | None = None
+    display_name: str | None = None
+    role: str | None = None
     is_admin: bool = False
 
 class IdentityManageRequest(BaseRequest):
@@ -150,17 +149,17 @@ class IdentityManageRequest(BaseRequest):
     """
     user_context: UserContext
     action: Literal["update_password", "update_user", "assign_device", "list_devices", "generate_key", "revoke_key", "list_keys", "get_profile"]
-    username: Optional[str] = None
-    display_name: Optional[str] = None
-    category: Optional[str] = None
-    is_admin: Optional[bool] = None
+    username: str | None = None
+    display_name: str | None = None
+    category: str | None = None
+    is_admin: bool | None = None
 
 class ExecutionResult(BaseModel):
     model_config = {"extra": "ignore"}
     status: Literal["SUCCESS", "FAILURE", "PARTIAL"]
     message: str
     service: str
-    detail: Optional[Dict[str, Any]] = None
+    detail: dict[str, Any] | None = None
 
 class GitExecutionResult(ExecutionResult):
     """Specific result for Git operations."""
@@ -176,7 +175,7 @@ class LLMInfoRequest(BaseRequest):
     """Query Alpaca/Ollama for model and system information."""
     user_context: UserContext
     action: str = Field("list", description="Action: 'list' (available models), 'ps' (loaded models), 'version' (server version), 'show' (model details)")
-    model: Optional[str] = Field(None, description="Model name for 'show' action (e.g., 'qwen3.6-35b-a3b:q4_k_m')")
+    model: str | None = Field(None, description="Model name for 'show' action (e.g., 'qwen3.6-35b-a3b:q4_k_m')")
 
 
 # ─── Media / Music ──────────────────────────────────────────────────────────────
@@ -184,21 +183,21 @@ class LLMInfoRequest(BaseRequest):
 class MediaPlayRequest(BaseRequest):
     """Unified media play request supporting all content types and devices."""
     user_context: UserContext
-    entity_id: Optional[str] = Field(None, description="HA media_player entity ID (optional if device_name provided)")
-    device_name: Optional[str] = Field(None, description="Human-readable device name (e.g., 'Office TV', 'Master Bedroom speaker')")
-    query: Optional[str] = Field(None, description="Search query: song/album/artist name, video title, podcast name, audiobook title, or URL")
-    media_type: Optional[str] = Field(None, description="Content type: 'music', 'video', 'podcast', 'audiobook', 'radio', 'url', 'announcement'")
-    media_content_id: Optional[str] = Field(None, description="Direct URL or media ID (bypasses search)")
-    media_content_type: Optional[str] = Field(None, description="HA media_content_type hint (e.g., 'music', 'video', 'url', 'audio/wav')")
-    enqueue: Optional[Literal["add", "next", "replace"]] = Field("replace", description="Queue behavior for Music Assistant")
-    volume: Optional[float] = Field(None, ge=0.0, le=1.0, description="Set volume before playback")
+    entity_id: str | None = Field(None, description="HA media_player entity ID (optional if device_name provided)")
+    device_name: str | None = Field(None, description="Human-readable device name (e.g., 'Office TV', 'Master Bedroom speaker')")
+    query: str | None = Field(None, description="Search query: song/album/artist name, video title, podcast name, audiobook title, or URL")
+    media_type: str | None = Field(None, description="Content type: 'music', 'video', 'podcast', 'audiobook', 'radio', 'url', 'announcement'")
+    media_content_id: str | None = Field(None, description="Direct URL or media ID (bypasses search)")
+    media_content_type: str | None = Field(None, description="HA media_content_type hint (e.g., 'music', 'video', 'url', 'audio/wav')")
+    enqueue: Literal["add", "next", "replace"] | None = Field("replace", description="Queue behavior for Music Assistant")
+    volume: float | None = Field(None, ge=0.0, le=1.0, description="Set volume before playback")
 
 
 class MediaTransportRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
     command: Literal["pause", "resume", "stop", "next", "previous", "volume_up", "volume_down", "home", "power_off", "back", "play", "volume_set"]
-    volume_level: Optional[float] = Field(None, ge=0.0, le=1.0)
+    volume_level: float | None = Field(None, ge=0.0, le=1.0)
 
 
 class MediaStateSyncRequest(BaseRequest):
@@ -206,17 +205,17 @@ class MediaStateSyncRequest(BaseRequest):
     user_context: UserContext
     entity_id: str = Field("local", description="Playback target (e.g. 'local' or HA entity_id)")
     state: str = Field("idle", description="Playback state (playing, paused, idle)")
-    media_type: Optional[str] = None
-    query: Optional[str] = None
-    media_content_id: Optional[str] = None
-    position: Optional[float] = 0.0
-    duration: Optional[float] = 0.0
-    volume_level: Optional[float] = None
-    is_volume_muted: Optional[bool] = None
-    media_title: Optional[str] = None
-    media_artist: Optional[str] = None
-    media_album: Optional[str] = None
-    queue: Optional[list] = None
+    media_type: str | None = None
+    query: str | None = None
+    media_content_id: str | None = None
+    position: float | None = 0.0
+    duration: float | None = 0.0
+    volume_level: float | None = None
+    is_volume_muted: bool | None = None
+    media_title: str | None = None
+    media_artist: str | None = None
+    media_album: str | None = None
+    queue: list | None = None
 
 
 
@@ -226,9 +225,9 @@ class LightControlRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
     action: Literal["turn_on", "turn_off", "toggle"]
-    brightness_pct: Optional[int] = Field(None, ge=0, le=100)
-    color_temp: Optional[int] = None
-    rgb_color: Optional[tuple[int, int, int]] = None
+    brightness_pct: int | None = Field(None, ge=0, le=100)
+    color_temp: int | None = None
+    rgb_color: tuple[int, int, int] | None = None
 
 
 # ─── Generic HA Service Call ────────────────────────────────────────────────────
@@ -238,7 +237,7 @@ class HAServiceRequest(BaseRequest):
     domain: str          # e.g. "light", "switch", "media_player"
     service: str         # e.g. "turn_on", "play_media"
     entity_id: str
-    service_data: Optional[Dict[str, Any]] = None
+    service_data: dict[str, Any] | None = None
 
 class ClimateRequest(BaseRequest):
     user_context: UserContext
@@ -260,13 +259,13 @@ class LogbookRequest(BaseRequest):
 
 class AnnouncementRequest(BaseRequest):
     user_context: UserContext
-    entity_id: Optional[str] = Field(None, description="Exact HA entity ID (e.g., media_player.office_tv_chrome). If omitted, resolved from device_name.")
-    device_name: Optional[str] = Field(None, description="Human-readable device name for entity resolution (e.g., 'Office TV')")
+    entity_id: str | None = Field(None, description="Exact HA entity ID (e.g., media_player.office_tv_chrome). If omitted, resolved from device_name.")
+    device_name: str | None = Field(None, description="Human-readable device name for entity resolution (e.g., 'Office TV')")
     message: str
-    volume: Optional[float] = Field(0.6, ge=0.0, le=1.0)
-    tts_engine: Optional[Literal["kokoro", "piper"]] = "kokoro"
+    volume: float | None = Field(0.6, ge=0.0, le=1.0)
+    tts_engine: Literal["kokoro", "piper"] | None = "kokoro"
     storybook: bool = False
-    save_path: Optional[str] = Field(None, description="Optional path in Nextcloud to save the announcement audio")
+    save_path: str | None = Field(None, description="Optional path in Nextcloud to save the announcement audio")
 
 
 
@@ -304,17 +303,17 @@ class VideoPlayRequest(BaseRequest):
 class MediaStatusRequest(BaseRequest):
     """Query what is currently playing across media devices."""
     user_context: UserContext
-    area: Optional[str] = Field(None, description="Filter by area (e.g., 'Office', 'Living Room')")
-    entity_id: Optional[str] = Field(None, description="Specific entity to query")
+    area: str | None = Field(None, description="Filter by area (e.g., 'Office', 'Living Room')")
+    entity_id: str | None = Field(None, description="Specific entity to query")
 
 
 class EntitySearchRequest(BaseRequest):
     """Search for Home Assistant entities by name, type, or area when entity_id is unknown."""
     user_context: UserContext
     query: str = Field(..., description="Search term (e.g., 'office tv', 'kitchen light', 'bedroom speaker')")
-    domain: Optional[str] = Field(None, description="Filter by domain (e.g., 'media_player', 'light', 'switch')")
-    area: Optional[str] = Field(None, description="Filter by area (e.g., 'Office', 'Kitchen', 'Master Bedroom')")
-    state: Optional[str] = Field(None, description="Filter by state (e.g., 'on', 'off', 'playing', 'idle')")
+    domain: str | None = Field(None, description="Filter by domain (e.g., 'media_player', 'light', 'switch')")
+    area: str | None = Field(None, description="Filter by area (e.g., 'Office', 'Kitchen', 'Master Bedroom')")
+    state: str | None = Field(None, description="Filter by state (e.g., 'on', 'off', 'playing', 'idle')")
 
 
 # ─── Personal Data (Calendar / Notes) ──────────────────────────────────────────
@@ -322,22 +321,22 @@ class EntitySearchRequest(BaseRequest):
 class CalendarRequest(BaseRequest):
     user_context: UserContext
     action: Literal["list", "read", "add", "delete", "update"]
-    query: Optional[str] = None
-    summary: Optional[str] = None
-    start_time: Optional[str] = None
-    calendar_name: Optional[str] = None
+    query: str | None = None
+    summary: str | None = None
+    start_time: str | None = None
+    calendar_name: str | None = None
 
 
 class NoteRequest(BaseRequest):
     user_context: UserContext
     action: Literal["create", "append", "read", "delete", "check_off", "list", "sync_rag"]
-    title: Optional[str] = None
-    content: Optional[str] = None
-    category: Optional[str] = "General"
-    item: Optional[str] = None # For check_off
-    storage: Optional[Literal["nextcloud", "local"]] = "nextcloud"
-    directories: Optional[list[str]] = None # Custom Nextcloud directories to scan (recursive)
-    path: Optional[str] = None # Specific file path for read/write operations
+    title: str | None = None
+    content: str | None = None
+    category: str | None = "General"
+    item: str | None = None # For check_off
+    storage: Literal["nextcloud", "local"] | None = "nextcloud"
+    directories: list[str] | None = None # Custom Nextcloud directories to scan (recursive)
+    path: str | None = None # Specific file path for read/write operations
 
 
 # ─── Timers / Alarms ────────────────────────────────────────────────────────────
@@ -346,26 +345,26 @@ class TimerRequest(BaseRequest):
     user_context: UserContext
     action: Literal["add", "list", "delete", "pause", "resume"]
     type: Literal["timer", "alarm"] = "timer"
-    query: Optional[str] = None
-    title: Optional[str] = None
-    duration_str: Optional[str] = None
-    time_str: Optional[str] = None
-    recurrence: Optional[str] = None
-    target_device: Optional[str] = None
+    query: str | None = None
+    title: str | None = None
+    duration_str: str | None = None
+    time_str: str | None = None
+    recurrence: str | None = None
+    target_device: str | None = None
 
 
 class TalkRequest(BaseRequest):
     user_context: UserContext
     action: Literal["list", "open", "messages", "send", "send_voice"]
-    token: Optional[str] = None
-    target_user: Optional[str] = None
-    message: Optional[str] = None
+    token: str | None = None
+    target_user: str | None = None
+    message: str | None = None
     limit: int = Field(50, ge=1, le=200)
-    audio_base64: Optional[str] = None
-    text_to_voice: Optional[str] = Field(None, description="If provided, converts this text to a voice message (TTS).")
-    mime_type: Optional[str] = None
-    file_name: Optional[str] = None
-    caption: Optional[str] = None
+    audio_base64: str | None = None
+    text_to_voice: str | None = Field(None, description="If provided, converts this text to a voice message (TTS).")
+    mime_type: str | None = None
+    file_name: str | None = None
+    caption: str | None = None
 
 # ─── File Operations (Workspace vs Storage) ───────────────────────────────────
 
@@ -399,7 +398,7 @@ class WorkspaceFileWriteRequest(BaseRequest):
     path: str = Field(..., alias="file_path", description="Path relative to workspace root")
     content: str
     commit_after: bool = False
-    commit_message: Optional[str] = None
+    commit_message: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -425,7 +424,7 @@ class ReplacementChunk(BaseModel):
                 data["new_text"] = data.pop("patch")
             if "content" in data and "new_text" not in data:
                 data["new_text"] = data.pop("content")
-            
+
             # Pivot 'target_content' or 'original' to 'old_text'
             if "target_content" in data and "old_text" not in data:
                 data["old_text"] = data.pop("target_content")
@@ -452,9 +451,9 @@ class WorkspaceFilePatchRequest(BaseRequest):
     """
     user_context: UserContext
     path: str = Field(..., alias="file_path", description="Path relative to workspace root")
-    chunks: List[ReplacementChunk] = Field(..., alias="patch")
+    chunks: list[ReplacementChunk] = Field(..., alias="patch")
     commit_after: bool = False
-    commit_message: Optional[str] = None
+    commit_message: str | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -463,7 +462,7 @@ class WorkspaceFilePatchRequest(BaseRequest):
             # Pivot 'file_path' to 'path'
             if "file_path" in data and "path" not in data:
                 data["path"] = data.pop("file_path")
-            
+
             # Pivot 'patch' or 'patches' to 'chunks'
             patch_data = data.get("patch") or data.get("patches")
             if patch_data and "chunks" not in data:
@@ -483,7 +482,7 @@ class WorkspaceFilePatchRequest(BaseRequest):
                             clean_line = line[1:] if line.startswith(" ") else line
                             old_lines.append(clean_line)
                             new_lines.append(clean_line)
-                    
+
                     if old_lines or new_lines:
                         # Join and clean
                         old_text = "\n".join(old_lines).strip()
@@ -500,7 +499,7 @@ class WorkspaceFilePatchRequest(BaseRequest):
                     data["chunks"] = new_chunks
                 elif isinstance(patch_data, list):
                     data["chunks"] = patch_data
-                
+
                 # Cleanup to avoid alias confusion
                 data.pop("patch", None)
                 data.pop("patches", None)
@@ -514,9 +513,9 @@ class WorkspaceShellRequest(BaseRequest):
     Use this for advanced operations not covered by other tools.
     """
     user_context: UserContext
-    command: Optional[str] = Field(None, description="The shell command to execute")
-    commands: Optional[List[str]] = Field(None, description="A list of shell commands to execute (joined with &&)")
-    cwd: Optional[str] = Field(".", description="Working directory relative to root")
+    command: str | None = Field(None, description="The shell command to execute")
+    commands: list[str] | None = Field(None, description="A list of shell commands to execute (joined with &&)")
+    cwd: str | None = Field(".", description="Working directory relative to root")
     timeout: int = Field(60, ge=1, le=300, description="Command timeout in seconds")
 
 class WorkspaceSearchRequest(BaseRequest):
@@ -527,8 +526,8 @@ class WorkspaceSearchRequest(BaseRequest):
     user_context: UserContext
     query: str = Field(..., description="The search pattern (regex supported)")
     path: str = Field(".", description="Search directory relative to root")
-    include: Optional[str] = Field(None, description="Glob pattern to include (e.g. '*.py')")
-    exclude: Optional[str] = Field(None, description="Glob pattern to exclude (e.g. '**/tests/**')")
+    include: str | None = Field(None, description="Glob pattern to include (e.g. '*.py')")
+    exclude: str | None = Field(None, description="Glob pattern to exclude (e.g. '**/tests/**')")
 
 class WorkspaceLintRequest(BaseRequest):
     """
@@ -542,7 +541,7 @@ class WorkspaceLintRequest(BaseRequest):
     """
     user_context: UserContext
     path: str = Field(..., description="Path relative to workspace root")
-    linter: Optional[str] = Field(None, description="Force a specific linter (black, flake8, eslint, yamllint)")
+    linter: str | None = Field(None, description="Force a specific linter (black, flake8, eslint, yamllint)")
     fix: bool = Field(False, description="If true, apply auto-fixes where possible (e.g. black --write)")
 
     @model_validator(mode="before")
@@ -587,21 +586,21 @@ class WorkspaceFileAction(BaseRequest):
     content: str
     is_patch: bool = False
     commit_after: bool = False
-    commit_message: Optional[str] = None
+    commit_message: str | None = None
 
 class WorkspaceGitAction(BaseRequest):
     """Performs Git lifecycle operations (pull, commit, branch, status)."""
     user_context: UserContext
     workspace_name: str
     action: Literal["status", "pull", "commit", "branch", "push", "checkout"]
-    branch_name: Optional[str] = None
-    commit_message: Optional[str] = None
+    branch_name: str | None = None
+    commit_message: str | None = None
 
 class WorkspaceSyncAction(BaseRequest):
     """Synchronizes workspace files with Nextcloud or other storage providers."""
     user_context: UserContext
     workspace_name: str
-    path: Optional[str] = None  # None means sync full workspace
+    path: str | None = None  # None means sync full workspace
     direction: Literal["upload", "download"] = "upload"
 
 # ─── Browser / Web Agent ────────────────────────────────────────────────────────
@@ -610,13 +609,13 @@ class WebSearchRequest(BaseRequest):
     """Performs a web search via SearXNG JSON API."""
     user_context: UserContext
     query: str
-    category: Optional[str] = Field(None, description="Search category: general, images, videos, news, music, files, it, science, social_media")
-    engines: Optional[str] = Field(None, description="Comma-separated engine list (e.g. 'google,bing,duckduckgo')")
-    time_range: Optional[str] = Field(None, description="Time filter: day, week, month, year")
-    safesearch: Optional[int] = Field(None, ge=0, le=2, description="Safe search level: 0=off, 1=moderate, 2=strict")
-    language: Optional[str] = Field("en", description="Locale code for results (e.g. 'en', 'de', 'fr')")
-    pageno: Optional[int] = Field(None, ge=1, description="Page number for pagination")
-    max_results: Optional[int] = Field(None, description="Maximum number of results to return")
+    category: str | None = Field(None, description="Search category: general, images, videos, news, music, files, it, science, social_media")
+    engines: str | None = Field(None, description="Comma-separated engine list (e.g. 'google,bing,duckduckgo')")
+    time_range: str | None = Field(None, description="Time filter: day, week, month, year")
+    safesearch: int | None = Field(None, ge=0, le=2, description="Safe search level: 0=off, 1=moderate, 2=strict")
+    language: str | None = Field("en", description="Locale code for results (e.g. 'en', 'de', 'fr')")
+    pageno: int | None = Field(None, ge=1, description="Page number for pagination")
+    max_results: int | None = Field(None, description="Maximum number of results to return")
 
 class WebReadRequest(BaseRequest):
     """Fetches a URL and returns the content as markdown."""
@@ -633,10 +632,10 @@ class DockerLogsRequest(BaseRequest):
     If 'services' is provided, it fetches logs for each (prepending 'sharedllm_' if needed).
     """
     user_context: UserContext
-    container_name: Optional[str] = Field(None, description="Exact Docker container name")
-    services: Optional[List[str]] = Field(None, description="List of services to fetch logs for (e.g. ['gateway', 'rag'])")
+    container_name: str | None = Field(None, description="Exact Docker container name")
+    services: list[str] | None = Field(None, description="List of services to fetch logs for (e.g. ['gateway', 'rag'])")
     tail_lines: int = Field(200, ge=1, le=2000, description="Number of log lines to retrieve")
-    grep_filter: Optional[str] = Field(None, description="Filter to lines containing this keyword")
+    grep_filter: str | None = Field(None, description="Filter to lines containing this keyword")
 
 
 class GitOperationRequest(BaseRequest):
@@ -645,12 +644,12 @@ class GitOperationRequest(BaseRequest):
     push requires is_admin=True in user_context.
     """
     user_context: UserContext
-    workspace_id: Optional[str] = Field(None, description="Workspace ID (uses default if not specified)")
+    workspace_id: str | None = Field(None, description="Workspace ID (uses default if not specified)")
     action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show"]
-    path: Optional[str] = Field(".", description="File path for 'add' action")
-    commit_message: Optional[str] = Field(None, description="Required for 'commit' action")
-    branch: Optional[str] = Field("microservices", description="Branch for pull/push")
-    log_count: Optional[int] = Field(10, ge=1, le=50, description="Number of commits for 'log'")
+    path: str | None = Field(".", description="File path for 'add' action")
+    commit_message: str | None = Field(None, description="Required for 'commit' action")
+    branch: str | None = Field("microservices", description="Branch for pull/push")
+    log_count: int | None = Field(10, ge=1, le=50, description="Number of commits for 'log'")
 
     model_config = ConfigDict(extra='ignore')
 
@@ -690,8 +689,8 @@ class DockerComposeRequest(BaseRequest):
     """
     user_context: UserContext
     action: Literal["up", "down", "restart", "logs"]
-    services: Optional[List[str]] = Field(None, description="List of services to act upon (e.g. ['gateway', 'rag'])")
-    containers: Optional[List[str]] = Field(None, description="Alias for services")
+    services: list[str] | None = Field(None, description="List of services to act upon (e.g. ['gateway', 'rag'])")
+    containers: list[str] | None = Field(None, description="Alias for services")
 
 
 class VolumeInventoryRequest(BaseRequest):
@@ -717,7 +716,7 @@ class SystemLearningRequest(BaseRequest):
     user_context: UserContext
     topic: str = Field(..., description="Subject of the learning (e.g. 'Fixing 502 error in Gateway')")
     content: str = Field(..., description="Detailed description of the root cause and the fix applied.")
-    tags: List[str] = Field(default_factory=list, description="Keywords for retrieval (e.g. ['gateway', 'bugfix'])")
+    tags: list[str] = Field(default_factory=list, description="Keywords for retrieval (e.g. ['gateway', 'bugfix'])")
 
 class TTSRequest(BaseRequest):
     """
@@ -726,7 +725,7 @@ class TTSRequest(BaseRequest):
     """
     user_context: UserContext
     text: str = Field(..., description="The text to convert to speech")
-    voice: Optional[str] = Field("af_heart", description="Voice ID (e.g. af_heart, am_adam, en-US-GuyNeural)")
+    voice: str | None = Field("af_heart", description="Voice ID (e.g. af_heart, am_adam, en-US-GuyNeural)")
     storybook: bool = Field(False, description="Enable multi-speaker narration for stories/dialogue")
 
 class StorageTextToAudioRequest(BaseRequest):
@@ -736,8 +735,8 @@ class StorageTextToAudioRequest(BaseRequest):
     """
     user_context: UserContext
     input_path: str = Field(..., description="Path to the source text file in Nextcloud")
-    output_path: Optional[str] = Field(None, description="Path where the audio file should be saved (default: same name with .wav)")
-    voice: Optional[str] = Field("af_heart", description="Voice ID")
+    output_path: str | None = Field(None, description="Path where the audio file should be saved (default: same name with .wav)")
+    voice: str | None = Field("af_heart", description="Voice ID")
     storybook: bool = Field(True, description="Enable Storybook mode for better narration")
 
 
@@ -747,9 +746,9 @@ class ExecutionLogRequest(BaseRequest):
     Use this to verify that a task was performed or troubleshoot failures.
     """
     user_context: UserContext
-    service: Optional[str] = Field(None, description="Filter by handler (e.g., 'announce', 'media', 'light', 'ha_client')")
+    service: str | None = Field(None, description="Filter by handler (e.g., 'announce', 'media', 'light', 'ha_client')")
     lines: int = Field(50, ge=1, le=500, description="Number of recent log lines to retrieve")
-    keyword: Optional[str] = Field(None, description="Filter logs containing this keyword (e.g., 'FAILED', 'OK', 'announce')")
+    keyword: str | None = Field(None, description="Filter logs containing this keyword (e.g., 'FAILED', 'OK', 'announce')")
 
 
 class AudiobookshelfRequest(BaseRequest):
@@ -758,10 +757,10 @@ class AudiobookshelfRequest(BaseRequest):
     """
     user_context: UserContext
     action: Literal["search", "play", "resume", "progress", "libraries", "list", "get_book", "last_played"]
-    query: Optional[str] = Field(None, description="Search query or book title")
-    book_id: Optional[str] = Field(None, description="ABS item ID for play/resume/progress")
-    entity_id: Optional[str] = Field(None, description="Home Assistant media_player entity to play on")
-    library_id: Optional[str] = Field(None, description="ABS library ID to browse")
+    query: str | None = Field(None, description="Search query or book title")
+    book_id: str | None = Field(None, description="ABS item ID for play/resume/progress")
+    entity_id: str | None = Field(None, description="Home Assistant media_player entity to play on")
+    library_id: str | None = Field(None, description="ABS library ID to browse")
     limit: int = Field(10, ge=1, le=50, description="Max results to return")
 
 
@@ -773,8 +772,8 @@ class DocumentBroadcastRequest(BaseRequest):
     user_context: UserContext
     input_path: str = Field(..., description="Nextcloud path to the text file")
     entity_id: str = Field(..., description="HA media_player entity to broadcast to")
-    summary: Optional[str] = Field(None, description="Pre-written summary (uses first 500 chars if omitted)")
-    voice: Optional[str] = Field(None, description="TTS voice ID")
+    summary: str | None = Field(None, description="Pre-written summary (uses first 500 chars if omitted)")
+    voice: str | None = Field(None, description="TTS voice ID")
 
 
 class NightModeRequest(BaseRequest):
@@ -783,11 +782,11 @@ class NightModeRequest(BaseRequest):
     and optionally starts sleep sounds or an audiobook.
     """
     user_context: UserContext
-    lights: Optional[Any] = Field("all", description="List of light entity_ids or 'all'")
-    climate_entity: Optional[str] = Field(None, description="Climate entity to adjust")
+    lights: Any | None = Field("all", description="List of light entity_ids or 'all'")
+    climate_entity: str | None = Field(None, description="Climate entity to adjust")
     sleep_temp: float = Field(68.0, description="Target sleep temperature (F)")
-    media_entity: Optional[str] = Field(None, description="Optional media_player for sleep sounds")
-    media_query: Optional[str] = Field(None, description="Search query for sleep sounds/audiobook")
+    media_entity: str | None = Field(None, description="Optional media_player for sleep sounds")
+    media_query: str | None = Field(None, description="Search query for sleep sounds/audiobook")
 
 
 class NetworkDeviceScanRequest(BaseRequest):
@@ -800,9 +799,9 @@ class NetworkDeviceScanRequest(BaseRequest):
     Use this to find devices when you don't know their IP or entity_id.
     """
     user_context: UserContext
-    subnet: Optional[str] = Field(None, description="Subnet to scan (e.g. '192.168.2.0/24'). Auto-detected from host network if omitted.")
-    device_type: Optional[str] = Field(None, description="Filter by device type: 'roku', 'webos', 'samsung', 'cast', 'androidtv', 'esphome', 'all'")
-    include_mac: Optional[bool] = Field(True, description="Include MAC address lookup from ARP cache")
+    subnet: str | None = Field(None, description="Subnet to scan (e.g. '192.168.2.0/24'). Auto-detected from host network if omitted.")
+    device_type: str | None = Field(None, description="Filter by device type: 'roku', 'webos', 'samsung', 'cast', 'androidtv', 'esphome', 'all'")
+    include_mac: bool | None = Field(True, description="Include MAC address lookup from ARP cache")
 
 
 class HAConfigRequest(BaseRequest):
@@ -821,9 +820,9 @@ class HAConfigRequest(BaseRequest):
         "list_integrations",
         description="Action to perform: list all integration domains, get a specific integration's config entries, list entities by domain, or get full HA config"
     )
-    domain: Optional[str] = Field(None, description="Integration domain to inspect (e.g. 'ollama', 'webostv', 'roborock')")
-    entity_domain: Optional[str] = Field(None, description="Entity domain to filter by (e.g. 'light', 'media_player', 'weather')")
-    keyword: Optional[str] = Field(None, description="Search keyword to filter integrations or entities")
+    domain: str | None = Field(None, description="Integration domain to inspect (e.g. 'ollama', 'webostv', 'roborock')")
+    entity_domain: str | None = Field(None, description="Entity domain to filter by (e.g. 'light', 'media_player', 'weather')")
+    keyword: str | None = Field(None, description="Search keyword to filter integrations or entities")
 
 
 class ResolveStreamRequest(BaseRequest):

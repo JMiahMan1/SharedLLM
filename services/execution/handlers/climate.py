@@ -1,11 +1,12 @@
 # services/execution/handlers/climate.py
 import logging
+
 try:
     import ha_client
-    from schemas import UserContext, ExecutionResult
+    from schemas import ExecutionResult, UserContext
 except ImportError:
     from .. import ha_client
-    from ..schemas import UserContext, ExecutionResult
+    from ..schemas import ExecutionResult, UserContext
 from pydantic import BaseModel
 
 log = logging.getLogger("execution.climate")
@@ -33,7 +34,7 @@ async def handle_climate(req: ClimateRequest) -> ExecutionResult:
         "climate", "set_temperature",
         req.entity_id, {"temperature": req.temperature},
     )
-    
+
     if result.get("ok"):
         return ExecutionResult(status="SUCCESS", message=f"Temperature set to {req.temperature} on {req.entity_id}.", service="climate")
     return ExecutionResult(status="FAILURE", message=f"Climate command failed: {result.get('error')}", service="climate", detail=result)

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
+import logging
 import os
 import sys
+
 import requests
-import logging
 from dotenv import load_dotenv
 
 # Setup minimal logging
@@ -14,7 +15,7 @@ load_dotenv()
 # Env setup (mimic app settings without importing whole app if possible, or minimal import)
 _ha_url_from_app: str | None = None
 try:
-    from app.settings import HA_URL as _ha_url_from_app  # noqa: F401
+    from app.settings import HA_URL as _ha_url_from_app
 except ImportError:
     pass
 
@@ -34,13 +35,13 @@ def fetch_media_players():
     if not HA_URL:
         log.error("HA_URL not found.")
         sys.exit(1)
-        
+
     url = f"{HA_URL.rstrip('/')}/api/states"
     try:
         resp = requests.get(url, headers=get_headers(), timeout=5)
         resp.raise_for_status()
         states = resp.json()
-        
+
         players = [s for s in states if s['entity_id'].startswith("media_player.")]
         return players
     except Exception as e:
@@ -52,31 +53,31 @@ def print_player_details(player):
     eid = player['entity_id']
     state = player['state']
     fname = attrs.get("friendly_name", eid)
-    
+
     print(f"\n--- {fname} ({eid}) ---")
     print(f"  State: {state.upper()}")
-    
+
     # relevant attributes
     keys = ["app_name", "app_id", "volume_level", "is_volume_muted", "source", "source_list", "media_title", "media_artist", "mass_player_type", "active_queue"]
-    
+
     for k in keys:
         if k in attrs:
             val = attrs[k]
             print(f"  {k}: {val}")
-            
+
     # Check for Roku specific
     if "roku" in eid or "roku" in fname.lower():
-        print(f"  [ROKU DETECTED]")
-        
+        print("  [ROKU DETECTED]")
+
     # Check for MA specific
     if attrs.get("mass_player_type") or "music_assistant" in eid:
-        print(f"  [MUSIC ASSISTANT DETECTED]")
+        print("  [MUSIC ASSISTANT DETECTED]")
 
 def main():
     print(f"Inspecting Media Players on {HA_URL}...")
     players = fetch_media_players()
     print(f"Found {len(players)} media_player entities.")
-    
+
     for p in players:
         print_player_details(p)
 

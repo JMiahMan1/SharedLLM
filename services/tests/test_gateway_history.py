@@ -4,8 +4,10 @@ Verifies that multi-turn context (e.g. 'Can it be dimmed?') correctly resolves e
 Related code: services/gateway/main.py
 """
 from contextlib import asynccontextmanager
+
 import pytest
 from fastapi.testclient import TestClient
+
 from services.gateway.main import app
 
 pytestmark = pytest.mark.local_only
@@ -65,7 +67,7 @@ def test_history_aware_matching(client, mocker):
     # This should trigger the history-aware matching in the gateway
     response = client.post("/api/chat", json=payload)
     assert response.status_code == 200
-    
+
     # Verify that the Gateway injected the 'Piano Lamp' context
     # We can't easily see the injected prompt here without deeper mocking,
     # but the success of the test confirms the flow works.

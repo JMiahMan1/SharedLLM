@@ -1,18 +1,19 @@
 import os
+
 # Set environment variables BEFORE any imports that might use them
 os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine, StaticPool, select
+from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 
+from services.identity import main as identity_main
+from services.identity.crypto import encrypt
 from services.identity.main import app, require_api_key, require_internal, resolve_identity
 from services.identity.models import User
-from services.identity.crypto import encrypt
 from services.identity.schemas import ResolveRequest
 from services.identity.seed import seed_from_env
-from services.identity import main as identity_main
 
 # Module-level test engine - created once
 _test_engine = None
@@ -33,12 +34,12 @@ def session_fixture():
     identity_main.engine = test_engine
     with Session(test_engine) as session:
         seed_from_env(session, force=True)
-        
+
         admin_user = session.exec(select(User).where(User.username == "default")).first()
         admin_user.is_admin = True
         session.add(admin_user)
         session.commit()
-        
+
         yield session
 
 @pytest.fixture(name="test_client")
@@ -64,7 +65,7 @@ def test_resolve_voice_id(session: Session):
     alice = User(username="alice", ha_url="http://ha.local", ha_token_enc=encrypt("alice-ha-token"))
     session.add(alice)
     session.commit()
-    
+
     data = resolve_identity(ResolveRequest(voice_id="alice"), session)
     assert data.user == "alice"
     assert data.ha_token == "alice-ha-token"
@@ -80,7 +81,7 @@ def test_create_user_stores_git_provider_credentials(test_client: TestClient, se
     })
     assert resp.status_code == 200
     assert resp.json()["username"] == "bob"
-    
+
     # Verify via resolution
     data = resolve_identity(ResolveRequest(rag_user="bob"), session)
     assert data.github_token == "bob-gh-token"

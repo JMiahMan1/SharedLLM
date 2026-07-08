@@ -1,5 +1,6 @@
 import os
 import time
+
 import requests
 from dotenv import load_dotenv
 
@@ -33,7 +34,7 @@ def _safe_msg(resp):
 
 def test_media_extended():
     log("\n--- TEST: Media Extended (Volume/Transport) ---")
-    
+
     # 1. Volume
     log("   [ACTION] Set volume to 50% on Office TV")
     resp = send_chat("Set volume to 50% on Office TV")
@@ -54,14 +55,14 @@ def test_media_extended():
 
 def test_calendar_tools():
     log("\n--- TEST: Calendar Tools ---")
-    
+
     # 1. Add Event
     ts = int(time.time())
     evt_title = f"Test Meeting {ts}"
     log(f"   [ACTION] Schedule '{evt_title}' tomorrow at 2pm")
     resp = send_chat(f"Schedule {evt_title} tomorrow at 2pm")
     msg = _safe_msg(resp)
-    
+
     if "scheduled" in msg.lower() or "added" in msg.lower():
         log("   [PASS] Event creation reported success.")
     else:
@@ -78,17 +79,17 @@ def test_calendar_tools():
 
 def test_note_tools():
     log("\n--- TEST: Note Tools ---")
-    
+
     # 1. Create Note
     log("   [ACTION] Create a note called 'System Check' saying 'All systems go'")
     resp = send_chat("Create a note called 'System Check' saying 'All systems go'")
     msg = _safe_msg(resp)
-    
+
     if "created" in msg.lower() or "saved" in msg.lower():
         log("   [PASS] Note creation reported success.")
     else:
         log(f"   [FAIL] Note creation response unexpected: {msg}")
-        
+
     # 2. Read Note
     log("   [ACTION] Read my 'System Check' note")
     resp = send_chat("Read my 'System Check' note")
@@ -103,7 +104,7 @@ def test_web_search():
     log("   [ACTION] Search for 'current time in Tokyo'")
     resp = send_chat("Search for the current time in Tokyo")
     msg = _safe_msg(resp)
-    
+
     # Check for actual search results logic (assuming tool output is in response)
     if "Tokyo" in msg and any(char.isdigit() for char in msg):
          log("   [PASS] Search returned plausible result.")
@@ -119,7 +120,7 @@ def test_timer_extended():
         log("   [PASS] Timer set.")
     else:
         log(f"   [FAIL] Timer set response: {msg}")
-        
+
     log("   [ACTION] Pause the timer")
     resp = send_chat("Pause the timer")
     msg = _safe_msg(resp)
@@ -129,9 +130,9 @@ def test_timer_extended():
         log(f"   [FAIL] Timer pause response: {msg}")
 
 if __name__ == "__main__":
-    with open("full_system_test_results.txt", "w") as f: 
+    with open("full_system_test_results.txt", "w") as f:
         f.write(f"Full System Verification Run: {time.ctime()}\n")
-    
+
     log(f"Targeting API: {API_URL}")
     test_media_extended()
     test_calendar_tools()

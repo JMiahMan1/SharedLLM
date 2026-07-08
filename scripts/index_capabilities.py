@@ -1,19 +1,22 @@
 # scripts/index_capabilities.py
-import os
-import requests
-import logging
 import json
-from pydantic import BaseModel
-from typing import Type
+import logging
+import os
 
 # Import schemas from the services
 import sys
+
+import requests
+from pydantic import BaseModel
+
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from services.execution import schemas as exec_schemas
 from services.gateway import schemas as gateway_schemas
 
 try:
-    from services.workspace_runtime import schemas as _workspace_schemas  # pyright: ignore[reportUnusedImport, reportMissingImports, reportAttributeAccessIssue]
+    from services.workspace_runtime import (
+        schemas as _workspace_schemas,  # pyright: ignore[reportUnusedImport, reportMissingImports, reportAttributeAccessIssue]
+    )
 except ImportError:
     _workspace_schemas = None
 
@@ -24,7 +27,7 @@ log = logging.getLogger("indexer")
 RAG_SVC_URL = os.getenv("RAG_SVC_URL", "http://localhost:8004")
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 
-def get_json_schema(model: Type[BaseModel]):
+def get_json_schema(model: type[BaseModel]):
     """Returns a simplified string representation of the Pydantic model for RAG indexing."""
     return json.dumps(model.model_json_schema(), indent=2)
 
@@ -66,7 +69,7 @@ def index_capabilities():
         "StorageTextToAudioRequest": "Converts a text file in Nextcloud storage to an audio file using Kokoro narration."
     }
 
-    
+
     # Process Execution and Workspace Schemas
     # We prioritize execution schemas first, then check workspace_runtime
     sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'services', 'workspace_runtime'))
@@ -80,7 +83,7 @@ def index_capabilities():
         model = getattr(exec_schemas, class_name, None)
         if not model and _ws_main:
             model = getattr(_ws_main, class_name, None)
-            
+
         if model:
             capabilities.append({
                 "name": class_name,
@@ -96,7 +99,7 @@ def index_capabilities():
         "StorageListRequest": "Lists files and directories currently present in the configured storage provider.",
         "StorageStatusRequest": "Retrieves the current indexing status and file counts from the RAG and storage backends."
     }
-    
+
     for class_name, description in storage_map.items():
         model = getattr(gateway_schemas, class_name, None)
         if model:
@@ -104,7 +107,7 @@ def index_capabilities():
                 "name": class_name,
                 "description": description,
                 "schema": get_json_schema(model),
-                "type": "execution_schema" 
+                "type": "execution_schema"
             })
             log.info(f"Prepared storage schema: {class_name}")
 
@@ -116,7 +119,7 @@ def index_capabilities():
 
     try:
         log.info(f"Attempting to sync with RAG at {RAG_SVC_URL}...")
-        
+
         # ADDED: Wait for RAG to be ready with a loop
         max_retries = 10
         for i in range(max_retries):
@@ -128,11 +131,11 @@ def index_capabilities():
                     break
             except Exception:
                 pass
-            
+
             log.info(f"RAG not ready yet (attempt {i+1}/{max_retries}), waiting 5s...")
             import time
             time.sleep(5)
-            
+
         resp = requests.post(
             f"{RAG_SVC_URL}/rag/sync/capabilities",
             json={"capabilities": capabilities},

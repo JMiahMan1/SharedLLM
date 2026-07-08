@@ -5,18 +5,26 @@ Jarvis Background Worker — The "heartbeat" and "brain" of the autonomous Raven
 2. Singleton Inference: Processes the FIFO job queue for Tier 2 (Librarian) and Tier 3 (Raven) tasks.
 """
 import asyncio
-import logging
-import aiohttp
 import json
+import logging
 import os
-from typing import Any, Dict, Optional
-from services.gateway.orchestrator import process_full_orchestration
-from services.gateway.config import (
-    SYSTEM_IDENTITY, INTERNAL_SECRET, EXECUTION_SVC, IDENTITY_SVC, RAG_SVC,
-    RAVEN_CHECK_INTERVAL, RAVEN_ERROR_THRESHOLD, REDIS_URL,
-)
-from services.gateway.messaging import InferenceJobQueue, TIER2_SEMAPHORE, TIER3_LOCK
+from typing import Any
+
+import aiohttp
+
 from services.gateway.agent_loop import should_persist_learning
+from services.gateway.config import (
+    EXECUTION_SVC,
+    IDENTITY_SVC,
+    INTERNAL_SECRET,
+    RAG_SVC,
+    RAVEN_CHECK_INTERVAL,
+    RAVEN_ERROR_THRESHOLD,
+    REDIS_URL,
+    SYSTEM_IDENTITY,
+)
+from services.gateway.messaging import TIER2_SEMAPHORE, TIER3_LOCK, InferenceJobQueue
+from services.gateway.orchestrator import process_full_orchestration
 
 log = logging.getLogger("gateway.background_worker")
 
@@ -39,7 +47,7 @@ class RavenWorker:
             "review requirements", "check dependencies", "report any conflicts",
         ]
 
-    def _is_autonomous_job(self, payload: Dict[str, Any], user_id: str) -> bool:
+    def _is_autonomous_job(self, payload: dict[str, Any], user_id: str) -> bool:
         """Determine if a job requires Tier-3 (Raven) exclusive lock."""
         query = str(payload.get("query", "")).lower()
         if any(signal in query for signal in self._autonomy_signals):
@@ -138,11 +146,11 @@ class RavenWorker:
             try:
                 from services.gateway.agent_loop import get_dynamic_llm_settings
                 settings = await get_dynamic_llm_settings()
-                
+
                 is_suspended = settings.get("raven_suspended", "false").lower() == "true"
                 scan_interval = int(settings.get("raven_scan_interval", "300"))
                 error_threshold = int(settings.get("raven_error_threshold", "5"))
-                
+
                 if is_suspended:
                     log.info("Raven health checks are suspended. Standing by...")
                     await asyncio.sleep(scan_interval)
@@ -176,13 +184,13 @@ class RavenWorker:
     async def _talk_monitor_loop(self):
         """Polls Nextcloud Talk for @jarvis mentions."""
         log.info("Talk Monitor worker started.")
-        
+
         while self.is_running:
             # Create a fresh Redis connection each iteration so stale connections
             # from early startup or Redis restarts are always replaced.
             import redis.asyncio as redis
             r = redis.from_url(REDIS_URL, decode_responses=True)
-            
+
             # Retry with exponential backoff on startup / Redis restart
             connected = False
             for attempt in range(30):
@@ -200,12 +208,12 @@ class RavenWorker:
                         pass
                     import redis.asyncio as redis
                     r = redis.from_url(REDIS_URL, decode_responses=True)
-            
+
             if not connected:
                 log.error(f"Talk Monitor: Redis connection failed after 30 attempts ({REDIS_URL}). Will retry next cycle.")
                 await asyncio.sleep(60)
                 continue
-            
+
             try:
                 await self._check_talk_once(r)
                 await asyncio.sleep(10) # Poll every 10 seconds
@@ -232,13 +240,13 @@ class RavenWorker:
             )
             if list_resp.status != 200:
                 return
-            
+
             list_text = await list_resp.text()
             list_json = json.loads(list_text) if list_text else {}
             rooms = list_json.get("detail", {}).get("conversations", [])
             for room in rooms:
                 token = room["token"]
-                
+
                 msg_resp = await client.post(
                     url,
                     json={"user_context": creds, "action": "messages", "token": token, "limit": 5},
@@ -246,34 +254,34 @@ class RavenWorker:
                 )
                 if msg_resp.status != 200:
                     continue
-                    
+
                 msg_text = await msg_resp.text()
                 msg_json = json.loads(msg_text) if msg_text else {}
                 messages = msg_json.get("detail", {}).get("messages", [])
                 if not messages:
                     continue
-                    
+
                 messages.sort(key=lambda m: m.get("id") or 0)
-                
+
                 last_processed = await r.get(f"jarvis:talk:last_msg:{token}")
                 new_last = last_processed
-                
+
                 for msg in messages:
                     msg_id = str(msg.get("id"))
                     if last_processed and int(msg_id) <= int(last_processed):
                         continue
-                    
+
                     new_last = msg_id
                     content = msg.get("message", "")
                     actor_id = msg.get("actor_id", "")
-                    
+
                     if actor_id == creds.get("nextcloud_user"):
                         continue
 
                     if "@jarvis" in content.lower():
                         query = content.replace("@jarvis", "").strip()
                         log.info(f"[TalkMonitor] Detected @jarvis mention in room {token}: {query}")
-                        
+
                         model = await self._get_model_from_settings()
                         await self.job_queue.enqueue_job(
                             user_id=creds["user"],
@@ -285,11 +293,11 @@ class RavenWorker:
                                 "_talk_source": "nextcloud"
                             }
                         )
-                
+
                 if new_last != last_processed:
                     await r.set(f"jarvis:talk:last_msg:{token}", new_last)
 
-    async def _get_system_creds(self) -> Optional[Dict[str, Any]]:
+    async def _get_system_creds(self) -> dict[str, Any] | None:
         try:
             async with aiohttp.ClientSession() as client:
                 resp = await client.post(
@@ -304,22 +312,22 @@ class RavenWorker:
             log.error(f"Failed to resolve system credentials: {e}")
         return None
 
-    async def _process_inference_job(self, job: Dict[str, Any]):
+    async def _process_inference_job(self, job: dict[str, Any]):
         job_id = job["job_id"]
         payload = job["payload"]
         user_id = job.get("user_id", "")
         heartbeat_task = None
-        
+
         # Determine job tier (2 = Librarian, 3 = Raven) for concurrency control
         is_autonomous = self._is_autonomous_job(payload, user_id)
-        
+
         # Retry configuration for infrastructure failures (alpaca restarts, connection drops)
         INFRA_RETRIES = 3
         INFRA_RETRY_DELAY = 10  # seconds
-        
+
         try:
             heartbeat_task = asyncio.create_task(self._job_heartbeat(job_id))
-            
+
             # Acquire appropriate lock based on tier, then run orchestration
             if is_autonomous:
                 log.info(f"[Worker] Acquiring TIER3 (Raven) lock for job {job_id}")
@@ -335,18 +343,18 @@ class RavenWorker:
                                 )
                         except Exception as patch_e:
                             log.error(f"Failed to update mission {mission_id} to executing: {patch_e}")
-                            
+
                     async def chunk_callback(chunk: str):
                         await self.job_queue.push_chunk(job_id, chunk)
                     payload["_job_id"] = job_id  # traceability
-                    
+
                     # Retry orchestration on infrastructure failures
                     ans = None
                     for attempt in range(INFRA_RETRIES):
                         try:
                             # --- CANCELLABLE ORCHESTRATION ---
                             orchestration_task = asyncio.create_task(process_full_orchestration(payload, chunk_callback=chunk_callback))
-                            
+
                             # Monitor for kill signal
                             kill_monitor = None
                             if mission_id:
@@ -375,7 +383,7 @@ class RavenWorker:
                                 if kill_monitor:
                                     kill_monitor.cancel()
                             break  # Success, exit retry loop
-                        except (aiohttp.ClientConnectorError, aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, ConnectionResetError, BrokenPipeError) as e:
+                        except (aiohttp.ClientConnectorError, aiohttp.ClientConnectionError, ConnectionResetError, BrokenPipeError) as e:
                             log.warning(f"[Worker] Infrastructure error on attempt {attempt + 1}/{INFRA_RETRIES}: {e}")
                             if attempt < INFRA_RETRIES - 1:
                                 log.info(f"[Worker] Retrying orchestration in {INFRA_RETRY_DELAY}s...")
@@ -397,18 +405,18 @@ class RavenWorker:
                                 )
                         except Exception as patch_e:
                             log.error(f"Failed to update mission {mission_id} to executing: {patch_e}")
-                            
+
                     async def chunk_callback(chunk: str):
                         await self.job_queue.push_chunk(job_id, chunk)
                     payload["_job_id"] = job_id
-                    
+
                     # Retry orchestration on infrastructure failures
                     ans = None
                     for attempt in range(INFRA_RETRIES):
                         try:
                             ans = await process_full_orchestration(payload, chunk_callback=chunk_callback)
                             break  # Success, exit retry loop
-                        except (aiohttp.ClientConnectorError, aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, ConnectionResetError, BrokenPipeError) as e:
+                        except (aiohttp.ClientConnectorError, aiohttp.ClientConnectionError, ConnectionResetError, BrokenPipeError) as e:
                             log.warning(f"[Worker] Infrastructure error on attempt {attempt + 1}/{INFRA_RETRIES}: {e}")
                             if attempt < INFRA_RETRIES - 1:
                                 log.info(f"[Worker] Retrying orchestration in {INFRA_RETRY_DELAY}s...")
@@ -416,9 +424,9 @@ class RavenWorker:
                             else:
                                 log.error(f"[Worker] All {INFRA_RETRIES} infrastructure retries failed: {e}")
                                 raise
-            
+
             await self.job_queue.complete_job(job_id, ans)
-            
+
             # --- TALK CALLBACK ---
             talk_token = payload.get("_talk_token")
             if talk_token:
@@ -460,13 +468,13 @@ class RavenWorker:
                         )
                 except Exception as patch_e:
                     log.error(f"Failed to update mission {mission_id} status: {patch_e}")
-            
+
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             log.error(f"Failed to process job {job_id}: {e}\n{tb}")
             await self.job_queue.fail_job(job_id, str(e))
-            
+
             mission_id = payload.get("_mission_id")
             if mission_id:
                 try:
@@ -486,7 +494,7 @@ class RavenWorker:
                 except asyncio.CancelledError:
                     pass
 
-    def _should_upgrade_model(self, result: str, payload: Dict[str, Any]) -> bool:
+    def _should_upgrade_model(self, result: str, payload: dict[str, Any]) -> bool:
         """
         Detect if a mission failed due to schema/tool format errors that suggest
         the model was too small to understand the tool calling format.
@@ -494,7 +502,7 @@ class RavenWorker:
         retry_count = payload.get("_retry_count", 0)
         if retry_count >= 1:
             return False  # Only one retry allowed
-        
+
         result_lower = result.lower()
         schema_error_indicators = [
             "422",
@@ -510,12 +518,12 @@ class RavenWorker:
         if any(indicator in result_lower for indicator in schema_error_indicators):
             log.warning("[Worker] Schema error detected — candidate for model upgrade")
             return True
-        
+
         # Also detect when model just writes garbage instead of using tools
         if "successfully wrote" in result_lower and len(result) < 200:
             log.warning("[Worker] Suspicious short 'success' — candidate for model upgrade")
             return True
-        
+
         return False
 
     async def _get_upgrade_model(self, current_model: str) -> str:
@@ -523,7 +531,7 @@ class RavenWorker:
         Dynamically find the largest available model that isn't the current one.
         Queries Ollama's /api/tags and picks the model with the largest size.
         """
-        from services.gateway.orchestrator import get_all_settings, _get
+        from services.gateway.orchestrator import _get, get_all_settings
         try:
             settings = await get_all_settings()
             ollama_url = _get(settings, "llm_local_url")
@@ -550,33 +558,33 @@ class RavenWorker:
             log.warning(f"[Worker] Failed to discover upgrade model: {e}")
             return current_model
 
-    async def _retry_with_bigger_model(self, mission_id: int, payload: Dict[str, Any], result_str: str):
+    async def _retry_with_bigger_model(self, mission_id: int, payload: dict[str, Any], result_str: str):
         """Re-enqueue mission with a larger model after schema failure."""
         original_model = payload.get("model", "unknown")
         upgrade_model = await self._get_upgrade_model(original_model)
-        
+
         payload["_retry_count"] = payload.get("_retry_count", 0) + 1
         payload["model"] = upgrade_model
-        
+
         retry_count = payload["_retry_count"]
         log.warning(f"[Worker] Upgrading mission {mission_id} from {original_model} → {upgrade_model} (retry {retry_count})")
-        
+
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             await client.patch(
                 f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                 json={"status": "executing", "result": f"Retrying with larger model ({upgrade_model}). Previous attempt: {result_str[:200]}"},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-        
+
         await self.job_queue.enqueue_job("raven_resume", payload)
         log.info(f"[Worker] Mission {mission_id} re-enqueued with {upgrade_model} as retry {retry_count}")
 
-    async def _trigger_tts_callback(self, payload: Dict[str, Any], message: str):
+    async def _trigger_tts_callback(self, payload: dict[str, Any], message: str):
         """Proactively broadcast result via TTS."""
         try:
             creds = payload.get("creds", {})
             user_id = payload.get("user_id")
-            
+
             device_id = payload.get("device_id")
             if not device_id:
                 log.warning("Announcement requested without device_id — skipping")
@@ -589,7 +597,7 @@ class RavenWorker:
                 "entity_id": device_id,
                 "volume": 0.6
             }
-            
+
             async with aiohttp.ClientSession() as client:
                 await client.post(
                     f"{EXECUTION_SVC}/execute/announce",
@@ -600,21 +608,21 @@ class RavenWorker:
         except Exception as e:
             log.error(f"TTS Callback failed: {e}")
 
-    async def _trigger_talk_callback(self, payload: Dict[str, Any], message: str):
+    async def _trigger_talk_callback(self, payload: dict[str, Any], message: str):
         """Send response back to Nextcloud Talk."""
         try:
             creds = payload.get("creds", {})
             token = payload.get("_talk_token")
             if not token:
                 return
-            
+
             talk_payload = {
                 "user_context": creds,
                 "action": "send",
                 "token": token,
                 "message": message
             }
-            
+
             async with aiohttp.ClientSession() as client:
                 await client.post(
                     f"{EXECUTION_SVC}/execute/talk",
@@ -625,7 +633,7 @@ class RavenWorker:
         except Exception as e:
             log.error(f"Talk Callback failed: {e}")
 
-    async def perform_health_check(self, error_threshold: int, settings: Dict[str, Any]):
+    async def perform_health_check(self, error_threshold: int, settings: dict[str, Any]):
         log.info("Performing Raven health check...")
         containers = await self._get_containers()
         if not containers:
@@ -672,7 +680,7 @@ class RavenWorker:
         for c in problematic:
             summary = f"Detected {c['count']} errors."
             query = f"SYSTEM ALERT: Health check detected errors.\n\nServices:\n- {c['name']}: {c['count']} errors\n\nFix them."
-            
+
             mission_payload = {
                 "mission_type": "admin_fix",
                 "target_container": c["name"],
@@ -680,7 +688,7 @@ class RavenWorker:
                 "proposed_mission": query,
                 "coding_model": coding_model
             }
-            
+
             try:
                 # Push to Identity Triage Queue instead of executing immediately
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
@@ -705,25 +713,25 @@ class RavenWorker:
         """Periodic cleanup: HA entity sync, orphaned RAG entries, stale Redis cache keys."""
         CLEANUP_INTERVAL = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "300"))  # Default 5 min
         log.info(f"Cleanup loop started (interval={CLEANUP_INTERVAL}s).")
-        
+
         while self.is_running:
             try:
                 await self._run_cleanup()
             except Exception as e:
                 log.error(f"Cleanup loop error: {e}")
-            
+
             # Sleep in small increments to allow signal handling
             for _ in range(CLEANUP_INTERVAL):
                 if not self.is_running:
                     break
                 await asyncio.sleep(1)
-        
+
         log.info("Cleanup loop stopped.")
 
     async def _run_cleanup(self):
         """Single cleanup pass: sync HA entities, prune orphans, clean Redis cache."""
         from services.gateway.ha_state_cache import get_redis
-        
+
         # 1. Fetch all users from Identity to sync their HA entities
         try:
             async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
@@ -737,20 +745,20 @@ class RavenWorker:
         except Exception as e:
             log.error(f"Cleanup: failed to fetch users: {e}")
             return
-        
+
         r = get_redis()
         total_orphaned = 0
-        
+
         for user in users:
             username = user.get("username", "")
             if not username:
                 continue
-            
+
             ha_url = user.get("ha_url")
             ha_token = user.get("ha_token")
             if not ha_url or not ha_token:
                 continue
-            
+
             try:
                 # Fetch live entities from HA
                 async with aiohttp.ClientSession() as client:
@@ -763,10 +771,10 @@ class RavenWorker:
                     resp_text = await resp.text()
                     data = json.loads(resp_text) if resp_text else {}
                     entities = data.get("entities", []) if isinstance(data, dict) else []
-                
+
                 if not entities:
                     continue
-                
+
                 # Sync to RAG (triggers orphan cleanup in RAG collection)
                 async with aiohttp.ClientSession() as client:
                     sync_resp = await client.post(
@@ -779,21 +787,21 @@ class RavenWorker:
                         result = json.loads(sync_text) if sync_text else {}
                         orphaned = result.get("orphaned_entity_ids", [])
                         total_orphaned += len(orphaned)
-                        
+
                         # Clean up orphaned Redis cache keys
                         for eid in orphaned:
                             try:
                                 r.delete(f"ha:state:{eid}")
                             except Exception:
                                 pass
-                
+
                 # Update Redis cache with fresh states
                 from services.gateway.ha_state_cache import cache_all_states
                 cache_all_states(entities)
-                
+
             except Exception as e:
                 log.error(f"Cleanup: failed for user {username}: {e}")
-        
+
         if total_orphaned > 0:
             log.info(f"Cleanup pass complete: removed {total_orphaned} orphaned entity entries across all users")
 

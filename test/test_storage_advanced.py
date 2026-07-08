@@ -1,5 +1,5 @@
-import pytest
 import httpx
+import pytest
 
 # Phase 4.3: Test Storage Async Indexing
 # This test ensures that indexing requests return 202 Accepted immediately.
@@ -7,7 +7,7 @@ import httpx
 @pytest.mark.asyncio
 async def test_storage_indexing_is_async():
     from services.storage.main import app
-    
+
     payload = {
         "provider": {
             "kind": "nextcloud",
@@ -16,7 +16,7 @@ async def test_storage_indexing_is_async():
         "path": "/",
         "recursive": True
     }
-    
+
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
         resp = await ac.post("/index/full", json=payload)

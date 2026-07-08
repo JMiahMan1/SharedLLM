@@ -1,6 +1,7 @@
 import os
-import requests
+
 import pytest  # pyright: ignore[reportUnusedImport]
+import requests
 
 RAG_SVC_URL = os.getenv("RAG_SVC_URL", "http://127.0.0.1:8004")
 GATEWAY_SVC_URL = os.getenv("GATEWAY_SVC_URL", "http://127.0.0.1:11435")
@@ -24,7 +25,7 @@ def test_rag_capability_search():
     assert resp.status_code == 200
     results = resp.json().get("results", [])
     assert len(results) > 0
-    
+
     # Check if LightControlRequest or related schema is in results
     content_blob = "".join([r.get("content", "").lower() for r in results])
     assert "light" in content_blob
@@ -48,12 +49,12 @@ def test_gateway_self_awareness():
     )
     assert resp.status_code == 200
     data = resp.json()
-    
+
     # The debug_context should contain the capability info
     debug_context = data.get("debug_context", "")
     assert "System Capability Context" in debug_context
     assert "TVCastRequest" in debug_context
-    
+
     # The assistant response should mention the schema or how to use it
     content = data.get("message", {}).get("content", "").lower()
     assert "tvcastrequest" in content or "power_on_wait_ms" in content

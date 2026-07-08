@@ -1,7 +1,8 @@
 import os
 import sys
-import requests
 import time
+
+import requests
 
 # Add project root to path
 sys.path.append(os.getcwd())
@@ -85,7 +86,7 @@ else:
     time.sleep(10)
     mp_state, _ = get_state(MEDIA_PLAYER_ID)
     print(f"   State after 'home': {mp_state}")
-    
+
     if mp_state in ["on", "idle", "playing", "home"]:
         print("   🎉 SUCCESS! 'Home' key woke the device.")
     else:
@@ -101,7 +102,7 @@ else:
         time.sleep(10)
         mp_state, _ = get_state(MEDIA_PLAYER_ID)
         print(f"   State after 'poweron': {mp_state}")
-        
+
         if mp_state in ["on", "idle", "playing", "home"]:
             print("   🎉 SUCCESS! 'PowerOn' key woke the device.")
         else:

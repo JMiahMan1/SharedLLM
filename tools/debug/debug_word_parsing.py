@@ -18,7 +18,7 @@ def convert_words_to_numbers(text):
                 if re.search(pattern, text):
                     print(f"  -> Converting hyphenated '{w1}-{w2}' to {v1+v2}")
                     text = re.sub(pattern, str(v1 + v2), text)
-    
+
     # Single words
     for word, value in WORD_TO_NUM.items():
         pattern = f"\\b{word}\\b"
@@ -29,19 +29,19 @@ def convert_words_to_numbers(text):
 
 def test_query(query):
     print(f"\n--- Testing: '{query}' ---")
-    
+
     # 1. Convert Words
     normalized = convert_words_to_numbers(query)
     print(f"Normalized: '{normalized}'")
-    
+
     # 2. Regex Scan (The new logic)
     # Matches "30 seconds", "1 minute", "2 hours 5 minutes"
     duration_regex = r'(?:(\d+)\s*(?:hour|hr)s?)?\s*(?:(\d+)\s*(?:minute|min)s?)?\s*(?:(\d+)\s*(?:second|sec)s?)?'
-    
+
     # Clean prefix for regex
     clean_input = re.sub(r'^\s*[\d\.\s]*(?:can you|please|i want to|start|set|create|add|a|an|\s+)+', '', normalized).strip()
     print(f"Cleaned for Regex: '{clean_input}'")
-    
+
     match = re.match(duration_regex, clean_input)
     if match and any(match.groups()):
         h, m, s = match.groups()

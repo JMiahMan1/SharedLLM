@@ -1,7 +1,8 @@
 import os
+
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine, StaticPool
+from sqlmodel import Session, SQLModel, StaticPool, create_engine
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
 
@@ -17,8 +18,8 @@ def session_fixture():
 
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
-    from services.workspace_runtime.main import app
     import services.workspace_runtime.main as main
+    from services.workspace_runtime.main import app
     original_engine = main.engine
     main.engine = session.bind
     client = TestClient(app)
@@ -58,7 +59,7 @@ def test_workspace_crud(client: TestClient):
     # 4. Delete
     resp = client.delete("/workspaces/test_ws", headers={"X-Internal-Secret": "test-secret"})
     assert resp.status_code == 200
-    
+
     # 5. Verify Deleted
     resp = client.get("/workspaces", headers={"X-Internal-Secret": "test-secret"})
     data = resp.json()

@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # =============================================================================
 # Slice 2: Job Checkpoint/Resumability Tests
 # =============================================================================
@@ -199,6 +198,7 @@ def test_quarantine_config_defaults():
 async def test_storage_status_returns_real_data():
     """Verify /status endpoint returns structured data with real fields."""
     from fastapi.testclient import TestClient
+
     from services.storage.main import app
 
     with patch("httpx.AsyncClient") as mock_client_cls:
@@ -236,6 +236,7 @@ async def test_storage_status_returns_real_data():
 async def test_storage_status_paused_state():
     """Verify /status endpoint includes indexer state field."""
     from fastapi.testclient import TestClient
+
     from services.storage.main import app
 
     with patch("httpx.AsyncClient") as mock_client_cls:
@@ -263,6 +264,7 @@ async def test_storage_status_paused_state():
 async def test_storage_status_rag_unavailable():
     """Verify /status still works when RAG service is unreachable."""
     from fastapi.testclient import TestClient
+
     from services.storage.main import app
 
     with patch("httpx.AsyncClient") as mock_client_cls:

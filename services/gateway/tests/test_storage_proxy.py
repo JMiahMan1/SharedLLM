@@ -1,9 +1,10 @@
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-import aiohttp
 from fastapi.testclient import TestClient
-from unittest.mock import MagicMock, AsyncMock, patch
+
 from services.gateway import main as gateway_main
-from services.gateway.main import app, IDENTITY_SVC, STORAGE_SVC, RAG_SVC, INTERNAL_SECRET
+from services.gateway.main import app
 
 
 def _aio_resp(status=200, json_data=None, text=""):

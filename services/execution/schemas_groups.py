@@ -7,7 +7,7 @@ Light Patterns: Named color sequences applied across light cluster members.
 """
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -15,17 +15,17 @@ from pydantic import BaseModel, Field
 class MediaGroupRequest(BaseModel):
     action: Literal["create", "delete", "list", "add_member", "remove_member"]
     group_id: str
-    group_name: Optional[str] = None
-    member_entity_ids: Optional[list[str]] = None
+    group_name: str | None = None
+    member_entity_ids: list[str] | None = None
     scope: Literal["user", "system"] = "user"
 
 
 class LightClusterRequest(BaseModel):
     action: Literal["create", "delete", "list", "add_member", "remove_member"]
     cluster_id: str
-    cluster_name: Optional[str] = None
-    member_entity_ids: Optional[list[str]] = None
-    room: Optional[str] = None
+    cluster_name: str | None = None
+    member_entity_ids: list[str] | None = None
+    room: str | None = None
     scope: Literal["user", "system", "room"] = "room"
 
 
@@ -38,9 +38,9 @@ class LightPatternStep(BaseModel):
 class LightPatternRequest(BaseModel):
     action: Literal["create", "delete", "list", "update"]
     pattern_id: str
-    pattern_name: Optional[str] = None
-    cluster_id: Optional[str] = None
-    steps: Optional[list[LightPatternStep]] = None
+    pattern_name: str | None = None
+    cluster_id: str | None = None
+    steps: list[LightPatternStep] | None = None
     loop: bool = False
     transition_ms: int = Field(default=500, ge=0)
 

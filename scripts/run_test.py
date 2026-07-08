@@ -1,21 +1,22 @@
+import argparse
 import os
 import sys
-import argparse
 from datetime import datetime
+
 import requests
 
 # Add the project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 # pyright: ignore[reportMissingImports]
-from app.tests.test_media import MediaTests  # pyright: ignore[reportMissingImports]
-from app.tests.test_timers import TimerTests  # pyright: ignore[reportMissingImports]
-from app.tests.test_search import SearchTests  # pyright: ignore[reportMissingImports]
-from app.tests.test_productivity import ProductivityTests  # pyright: ignore[reportMissingImports]
-from app.tests.test_hardware import HardwareTests  # pyright: ignore[reportMissingImports]
-from app.tests.test_android_tv import AndroidTVTests  # pyright: ignore[reportMissingImports]
 from app.tests.test_advanced import AdvancedTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_android_tv import AndroidTVTests  # pyright: ignore[reportMissingImports]
 from app.tests.test_context import ContextTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_hardware import HardwareTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_media import MediaTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_productivity import ProductivityTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_search import SearchTests  # pyright: ignore[reportMissingImports]
+from app.tests.test_timers import TimerTests  # pyright: ignore[reportMissingImports]
 
 TEST_MAP = {
     "MediaTests": MediaTests,
@@ -33,7 +34,7 @@ class IsolatedRunner:
         self.api_url = api_url
         self.test_name = test_name
         self.results = []
-        
+
     def logger(self, name, status, message):
         self.results.append({
             "test": name,
@@ -44,7 +45,7 @@ class IsolatedRunner:
         print(f"[{status:5}] {name:30} | {message}")
 
     def run(self):
-        print(f"\n=== SharedLLM Isolated Test Runner ===")
+        print("\n=== SharedLLM Isolated Test Runner ===")
         print(f"Target API: {self.api_url}")
         print(f"Test Class: {self.test_name}")
         print("-" * 60)
@@ -56,7 +57,7 @@ class IsolatedRunner:
                 print(f"[FAIL ] Health check returned {r.status_code}")
                 return
             else:
-                print(f"[OK   ] Health check passed")
+                print("[OK   ] Health check passed")
         except Exception as e:
             print(f"[FAIL ] Health check failed: {e}")
             return
@@ -86,6 +87,6 @@ if __name__ == "__main__":
     parser.add_argument("--url", default="http://127.0.0.1:11435", help="API URL to test")
     parser.add_argument("--test", required=True, help="Test class name to run")
     args = parser.parse_args()
-    
+
     runner = IsolatedRunner(args.url, args.test)
     runner.run()

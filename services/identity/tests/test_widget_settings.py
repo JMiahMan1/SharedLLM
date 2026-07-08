@@ -1,17 +1,18 @@
 import os
+
 os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 os.environ["DEFAULT_ADMIN_PASSWORD"] = "changeme"
 
 import json
+
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, create_engine, StaticPool, select
-
-from services.identity.main import app, require_api_key, require_internal
-from services.identity.models import User, UserWidget
+from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 
 import services.identity.main as main
+from services.identity.main import app, require_api_key, require_internal
+from services.identity.models import User, UserWidget
 
 
 @pytest.fixture(name="session")

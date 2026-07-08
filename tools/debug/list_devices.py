@@ -10,19 +10,19 @@ HEADERS = {
 
 def list_devices():
     try:
-        # We try to get states. If there isn't a direct "list all" endpoint exposed publicly 
-        # (the logs showed /api/ha/state/{entity_id}), we might need to rely on the search endpoint 
+        # We try to get states. If there isn't a direct "list all" endpoint exposed publicly
+        # (the logs showed /api/ha/state/{entity_id}), we might need to rely on the search endpoint
         # or try a known HA proxy endpoint if it exists.
         # However, `app/routers/ha.py` likely exposes something.
         # Let's try to search for "media_player" which usually returns everything in the RAG context.
-        
+
         _payload = {
             "messages": [{"role": "user", "content": "List all media players"}],
             "tools": ["check_states"] # Hypothetical, or we just rely on the RAG retrieval logs if we can't hit a direct list.
         }
-        
+
         # Actually, let's look at the codebase to see how to list devices.
-        # View `app/domains/media/devices.py` or similar? 
+        # View `app/domains/media/devices.py` or similar?
         # Or just use the `/api/chat` and ask it to list devices, but that might list friendly names only.
         pass
 
@@ -36,7 +36,7 @@ def list_devices():
 # The user said "look for a device that has the integration".
 
 # Let's try to infer from the existing `StandardIntegration` search logs or just grep code for device loading.
-# Better yet, I'll use the existing `tools/fetch_logs.py` and search for "Device DB Refresh" or "Loaded device" 
+# Better yet, I'll use the existing `tools/fetch_logs.py` and search for "Device DB Refresh" or "Loaded device"
 # which usually prints the catalog on startup.
 
 if __name__ == "__main__":

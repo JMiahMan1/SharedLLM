@@ -4,7 +4,6 @@ Run from services/execution/ directory: python -m pytest tests/test_presence_stt
 """
 import pytest
 
-
 # ─── Presence Tests ───────────────────────────────────────────────────────────
 
 class TestPresenceTracker:
@@ -117,7 +116,8 @@ class TestIntercomPresenceRouting:
     @pytest.mark.asyncio
     async def test_resolve_user_room_with_mock_presence(self):
         """Test room resolution with mocked presence data."""
-        from unittest.mock import patch, AsyncMock
+        from unittest.mock import AsyncMock, patch
+
         from services.execution.handlers.intercom import _resolve_user_room
 
         mock_tracker = AsyncMock()

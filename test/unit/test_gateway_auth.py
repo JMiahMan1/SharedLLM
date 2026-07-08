@@ -14,12 +14,14 @@ os.environ["IDENTITY_SVC_URL"] = "http://identity"
 os.environ["REDIS_URL"] = "redis://localhost:6379/0"
 os.environ["RAG_SVC"] = "http://localhost:8004"
 
-import respx
-import httpx
 import json
+
+import httpx
+import respx
 from fastapi.testclient import TestClient
-from services.gateway.main import app, STORAGE_SVC
+
 from services.gateway.config import IDENTITY_SVC
+from services.gateway.main import STORAGE_SVC, app
 
 client = TestClient(app)
 
@@ -44,7 +46,7 @@ def test_gateway_extracts_bearer_token():
             {"key": "fast_path_threshold", "value": "0.8"},
         ])
     )
-    
+
     # Mock identity resolve - capture the call
     def capture_resolve(request):
         _capture["body"] = json.loads(request.content)
@@ -56,23 +58,23 @@ def test_gateway_extracts_bearer_token():
             "nextcloud_user": "ncuser",
             "nextcloud_pass": "ncpass"
         })
-    
+
     respx.post(f"{IDENTITY_SVC}/api/resolve").mock(side_effect=capture_resolve)
-    
+
     # Mock storage index (fast path for "index" query)
     respx.post(f"{STORAGE_SVC}/index/full").mock(
         return_value=httpx.Response(200, json={"message": "Indexing started"})
     )
-    
+
     # Query "index" triggers index_storage intent (confidence=1.0, fast path)
     resp = client.post(
         "/api/chat",
         json={"query": "index"},
         headers={"Authorization": "Bearer sk-test-123"}
     )
-    
+
     assert resp.status_code == 200
-    
+
     # Verify identity was called with the bearer token
     body = _capture["body"]
     assert body is not None

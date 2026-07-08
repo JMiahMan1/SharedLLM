@@ -1,22 +1,22 @@
-import logging
 import asyncio
+import logging
 import os
 import re
+from typing import TYPE_CHECKING, Protocol
 
-from services.config import DEFAULT_TTS_VOICE, MODELS_DIR
-from typing import Optional, Protocol, List, TYPE_CHECKING
 import numpy as np
 
+from services.config import DEFAULT_TTS_VOICE, MODELS_DIR
+
 if TYPE_CHECKING:
-    import kokoro_onnx  # pyright: ignore[reportMissingImports,reportUnusedImport]
-    import soundfile as sf  # pyright: ignore[reportMissingImports,reportUnusedImport]
+    pass  # pyright: ignore[reportMissingImports,reportUnusedImport]
 
 log = logging.getLogger("execution.tts")
 
 class TTSEngine(Protocol):
-    async def generate(self, text: str, voice: Optional[str] = None, storybook: bool = False) -> bytes:
+    async def generate(self, text: str, voice: str | None = None, storybook: bool = False) -> bytes:
         ...
-    def list_voices(self) -> List[str]:
+    def list_voices(self) -> list[str]:
         ...
 
 class KokoroTTSEngine:
@@ -39,22 +39,22 @@ class KokoroTTSEngine:
                 raise FileNotFoundError(f"Kokoro model missing: {self.model_path}")
             self._kokoro = Kokoro(self.model_path, self.voices_path)
 
-    def list_voices(self) -> List[str]:
+    def list_voices(self) -> list[str]:
         """Returns a list of available voice styles in the current model."""
         return [
             "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky",
             "am_adam", "am_michael", "bf_emma", "bf_isabella", "bm_george", "bm_lewis"
         ]
 
-    async def generate(self, text: str, voice: Optional[str] = None, storybook: bool = False) -> bytes:
+    async def generate(self, text: str, voice: str | None = None, storybook: bool = False) -> bytes:
         self._ensure_loaded()
-        
+
         if not voice:
             voice = DEFAULT_TTS_VOICE or "af_heart"
-        
+
         if storybook:
             return await self._generate_storybook(text, voice)
-        
+
         text = self._normalize_text(text)
         assert self._kokoro is not None
         samples, sample_rate = await asyncio.to_thread(
@@ -77,7 +77,7 @@ class KokoroTTSEngine:
                 context = text[:text.find(content)][-150:]
                 gender = self._infer_speaker_gender(context)
                 voice = "am_adam" if gender == "male" else "af_bella"
-            
+
             normalized = self._normalize_text(content)
             if not normalized.strip(): continue
 
@@ -86,12 +86,12 @@ class KokoroTTSEngine:
                 self._kokoro.create, normalized, voice=voice, speed=1.0, lang="en-us"
             )
             all_samples.append(samples)
-            
+
         if not all_samples: return b""
         combined = np.concatenate(all_samples)
         return self._samples_to_bytes(combined, last_sample_rate)
 
-    def _segment_text(self, text: str) -> List[tuple]:
+    def _segment_text(self, text: str) -> list[tuple]:
         """Splits text into (content, is_dialogue) tuples."""
         parts = re.split(r'("[^"]+")', text)
         result = []
@@ -106,10 +106,10 @@ class KokoroTTSEngine:
         context = context.lower()
         male_hints = ["he said", "he replied", "his voice", "the man", "himself"]
         female_hints = ["she said", "she replied", "her voice", "the woman", "herself"]
-        
+
         m_count = sum(1 for h in male_hints if h in context)
         f_count = sum(1 for h in female_hints if h in context)
-        
+
         return "male" if m_count > f_count else "female"
 
     def _normalize_text(self, text: str) -> str:
@@ -136,7 +136,7 @@ class KokoroTTSEngine:
             r"\betc\.\b": "et cetera",
             r"\bapprox\.\b": "approximately",
         }
-        
+
         # Roman Numerals (Simple cases for chapters)
         roman_map = {
             r"\bChapter I\b": "Chapter 1",
@@ -158,11 +158,12 @@ class KokoroTTSEngine:
             pattern = pattern.rstrip(r"\b")
             text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
 
-        
+
         return text
 
     def _samples_to_bytes(self, samples: np.ndarray, sample_rate: int) -> bytes:
         import io
+
         import soundfile as sf  # pyright: ignore[reportMissingImports]
         buffer = io.BytesIO()
         sf.write(buffer, samples, sample_rate, format='WAV')
@@ -175,7 +176,7 @@ def get_tts_engine() -> TTSEngine:
 
 
 
-async def text_to_speech(text: str, voice: Optional[str] = None, storybook: bool = False) -> bytes:
+async def text_to_speech(text: str, voice: str | None = None, storybook: bool = False) -> bytes:
     """Helper to generate audio bytes from text."""
     engine = get_tts_engine()
     return await engine.generate(text, voice, storybook=storybook)

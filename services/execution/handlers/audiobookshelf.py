@@ -5,7 +5,8 @@ Integrates with Home Assistant media_player for playback on any supported device
 """
 import logging
 from datetime import datetime
-from services.execution import ha_client, abs_client
+
+from services.execution import abs_client, ha_client
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult
 
 log = logging.getLogger("execution.audiobookshelf")
@@ -533,9 +534,11 @@ async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
 
 async def _roku_play_audiobook(roku_entity: str, stream_url: str, title: str, ha_url: str, ha_token: str) -> ExecutionResult:
     """Play audiobook on Roku: ECP launch Media Assistant app + delegate audio to MA sibling."""
-    from . import roku as roku_handler
     import asyncio
+
     import aiohttp
+
+    from . import roku as roku_handler
 
     ma_entity = await roku_handler.find_ma_player_sibling(ha_url, ha_token, roku_entity)
     if not ma_entity:

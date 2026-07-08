@@ -1,7 +1,6 @@
 # services/gateway/config_validator.py
 """Critical configuration validation for gateway startup and runtime."""
 import logging
-from typing import Dict, List
 
 log = logging.getLogger("gateway.config_validator")
 
@@ -38,11 +37,11 @@ GATEWAY_CONFIG_SCHEMA = {
 
 class ConfigValidationResult:
     def __init__(self):
-        self.critical_failures: List[str] = []
-        self.required_failures: List[str] = []
-        self.optional_failures: List[str] = []
-        self.warnings: List[str] = []
-        self.ok: List[str] = []
+        self.critical_failures: list[str] = []
+        self.required_failures: list[str] = []
+        self.optional_failures: list[str] = []
+        self.warnings: list[str] = []
+        self.ok: list[str] = []
 
     @property
     def is_functional(self) -> bool:
@@ -65,7 +64,7 @@ class ConfigValidationResult:
         return "; ".join(parts)
 
 
-def validate_config(settings: Dict[str, str]) -> ConfigValidationResult:
+def validate_config(settings: dict[str, str]) -> ConfigValidationResult:
     """Validate configuration against the gateway schema."""
     result = ConfigValidationResult()
     active_provider = settings.get("active_llm_provider", "ollama")

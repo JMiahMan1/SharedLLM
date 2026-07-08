@@ -1,7 +1,8 @@
-import httpx
-import os
 import json
+import os
 import time
+
+import httpx
 
 # Load secrets from environment
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET")
@@ -16,10 +17,10 @@ def log_result(model_name, task_name, success, latency):
     results = []
     if os.path.exists(RESULTS_FILE):
         try:
-            with open(RESULTS_FILE, "r") as f:
+            with open(RESULTS_FILE) as f:
                 results = json.load(f)
         except: pass
-    
+
     results.append({
         "model": model_name,
         "task": task_name,
@@ -27,7 +28,7 @@ def log_result(model_name, task_name, success, latency):
         "latency": latency,
         "timestamp": time.time()
     })
-    
+
     os.makedirs("data", exist_ok=True)
     with open(RESULTS_FILE, "w") as f:
         json.dump(results, f, indent=2)
@@ -44,7 +45,7 @@ async def run_benchmark():
             if m_resp.status_code == 200:
                 discovered = m_resp.json().get("models", [])
                 print(f"Discovered models: {discovered}")
-                
+
                 # Sort models: small first, large last
                 small_models = []
                 large_models = []
@@ -54,7 +55,7 @@ async def run_benchmark():
                         large_models.append(m)
                     elif any(x in m_lower for x in ["7b", "8b", "9b"]):
                         small_models.append(m)
-                
+
                 MODELS_TO_TEST.extend(small_models)
                 MODELS_TO_TEST.extend(large_models)
             else:
@@ -85,7 +86,7 @@ async def run_benchmark():
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
                     latency = time.time() - start_time
-                    
+
                     if resp.status_code == 200:
                         log_result(model_id, task["name"], True, latency)
                     else:
@@ -94,7 +95,7 @@ async def run_benchmark():
                 except Exception as e:
                     latency = time.time() - start_time
                     log_result(model_id, task["name"], False, latency)
-                    print(f"  Exception: {str(e)}")
+                    print(f"  Exception: {e!s}")
 
 if __name__ == "__main__":
     import asyncio

@@ -2,8 +2,9 @@
 """
 Test Android TV Play and Watch with auto-power-on
 """
-import requests
 import time
+
+import requests
 
 BASE_URL = "http://ai.local:11435"
 ANDROID_TV_ENTITY = "media_player.office_tv_chrome_2"

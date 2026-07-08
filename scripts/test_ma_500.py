@@ -1,8 +1,8 @@
 
-import sys
-import os
 import asyncio
-from unittest.mock import MagicMock, AsyncMock
+import os
+import sys
+from unittest.mock import AsyncMock, MagicMock
 
 sys.path.append(os.getcwd())
 
@@ -10,28 +10,30 @@ sys.path.append(os.getcwd())
 sys.modules["app.logic.music_assistant_ops"] = MagicMock()
 # pyright: ignore[reportMissingImports]
 from app.domains.media.integrations.music_assistant import MusicAssistantIntegration  # pyright: ignore[reportMissingImports]
+
 from app.logic import music_assistant_ops
+
 
 async def main():
     print("Testing MA 500 Error Transformation...")
-    
+
     # Setup Mock
     # Simulate a 500 error response from the ops layer
     error_response = {"status": "FAILURE", "message": "Failed to play media... Last error: HTTP 500: 500 Internal Server Error"}
     music_assistant_ops.play_media = AsyncMock(return_value=error_response)
-    
+
     integration = MusicAssistantIntegration()
-    
+
     # Test Query
     query = "playbrand at lake"
     device = "Office TV"
-    
+
     print(f"Executing Query: '{query}'")
     result = await integration.play_media("media.test", query, "music", {}, device_name=device)
-    
+
     print("\nResult:")
     print(result)
-    
+
     # Verification
     if result["status"] == "FAILURE" and "couldn't find any music" in result["message"]:
         print("\nPASS: 500 Error successfully transformed to 'Not Found' message.")

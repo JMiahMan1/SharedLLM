@@ -9,12 +9,12 @@ def check(endpoint, method="GET", payload=None):
             r = requests.get(f"{URL}{endpoint}", timeout=5)
         else:
             r = requests.post(f"{URL}{endpoint}", json=payload or {}, timeout=5)
-        
+
         print(f"Status: {r.status_code}")
         print("Headers:")
         for k, v in r.headers.items():
             print(f"  {k}: {v}")
-        
+
         print("\nBody Snippet:")
         print(r.text[:500])
     except Exception as e:

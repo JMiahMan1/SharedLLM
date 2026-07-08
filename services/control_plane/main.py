@@ -1,11 +1,12 @@
-import docker
-from docker.errors import NotFound, ImageNotFound
+import logging
 import re
 
-from services.config import INTERNAL_SECRET
-from fastapi import FastAPI, HTTPException, Header, Depends
+from docker.errors import NotFound
+from fastapi import Depends, FastAPI, Header, HTTPException
 
-import logging
+import docker
+from services.config import INTERNAL_SECRET
+
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
 
@@ -37,8 +38,9 @@ def verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Interna
 
 # ─── Health ────────────────────────────────────────────────────────────────────
 
-import time
 import os
+import time
+
 START_TIME = time.time()
 
 @app.get("/health")
@@ -269,15 +271,15 @@ def _recreate_container(container, new_image_id: str):
 
     old_name = container.name
     backup_name = f"{old_name}_backup_{int(time.time())}"
-    
+
     # 1. Stop the old container
     log.info(f"[recreate] Stopping old container {old_name}...")
     container.stop(timeout=10)
-    
+
     # 2. Rename old container to backup name
     log.info(f"[recreate] Renaming {old_name} to {backup_name}...")
     container.rename(backup_name)
-    
+
     new_container = None
     try:
         # 3. Extract old container configurations
@@ -285,9 +287,9 @@ def _recreate_container(container, new_image_id: str):
         config = old_config.get("Config", {})
         host_config = old_config.get("HostConfig", {})
         networks_dict = old_config.get("NetworkSettings", {}).get("Networks", {})
-        
+
         exposed_ports = config.get("ExposedPorts")
-        
+
         # 4. Create new container using the low-level API to preserve HostConfig exactly
         log.info(f"[recreate] Creating new container {old_name} with image {new_image_id}...")
         container_resp = client.api.create_container(
@@ -302,17 +304,17 @@ def _recreate_container(container, new_image_id: str):
             host_config=host_config,
             ports=exposed_ports if exposed_ports else None
         )
-        
+
         new_container_id = container_resp["Id"]
         new_container = client.containers.get(new_container_id)
-        
+
         # 5. Connect new container to custom networks with original aliases & IPs
         for net_name, net_config in networks_dict.items():
             if net_name == "bridge" and host_config.get("NetworkMode") == "default":
                 continue
             if net_name == "host" and host_config.get("NetworkMode") == "host":
                 continue
-                
+
             try:
                 network = client.networks.get(net_name)
                 # Disconnect first to avoid auto-connect conflicts and set aliases/IPs
@@ -320,14 +322,14 @@ def _recreate_container(container, new_image_id: str):
                     network.disconnect(new_container)
                 except Exception:
                     pass
-                
+
                 # Filter auto-generated aliases (like container IDs) to avoid conflicts
                 aliases = [
                     a for a in net_config.get("Aliases", [])
                     if a != container.id[:12] and a != backup_name and a != new_container.id[:12]
                 ]
                 ipv4 = net_config.get("IPAMConfig", {}).get("IPv4Address", "") or net_config.get("IPAddress", "")
-                
+
                 network.connect(
                     new_container,
                     aliases=aliases,
@@ -335,20 +337,20 @@ def _recreate_container(container, new_image_id: str):
                 )
             except Exception as ne:
                 log.warning(f"[recreate] Network connect warning for {net_name}: {ne}")
-                
+
         # 6. Start the new container
         log.info(f"[recreate] Starting new container {new_container.name}...")
         new_container.start()
-        
+
         # 7. Success: remove backup container
         log.info(f"[recreate] Recreate successful. Removing backup container {backup_name}...")
         try:
             container.remove(force=True)
         except Exception as re:
             log.warning(f"[recreate] Failed to remove backup container {backup_name}: {re}")
-            
+
         return {"recreated": True, "container": new_container}
-        
+
     except Exception as e:
         log.error(f"[recreate] Failed to recreate container {old_name}: {e}. Falling back to old container...")
         # Clean up new container if it was created
@@ -383,7 +385,7 @@ def restart_service(service_name: str, recreate: bool = False):
         # Determine if recreation is needed
         image_tags = container.image.tags if container.image else []
         image_tag = image_tags[0] if image_tags else None
-        
+
         should_recreate = recreate
         local_latest_image_id = None
         if image_tag:
@@ -452,8 +454,8 @@ def check_all_updates():
     For GHCR images, authentication uses the GHCR_TOKEN environment variable
     (a GitHub PAT with packages:read scope — the same token used by CI to push).
     """
-    import urllib.request
     import json as _json
+    import urllib.request
 
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
@@ -484,7 +486,7 @@ def check_all_updates():
     # Fallback to GHCR_TOKEN environment variable
     if not ghcr_token:
         ghcr_token = os.getenv("GHCR_TOKEN", "")
-    
+
     # Fallback to GITHUB_TOKEN environment variable
     if not ghcr_token:
         ghcr_token = os.getenv("GITHUB_TOKEN", "")
@@ -783,10 +785,10 @@ async def dns_sync_webhook(request: dict):
     event = request.get("event")
     data = request.get("data", {})
     log.info(f"[dns-sync webhook] Event: {event}, Data: {data}")
-    
+
     if event == "network_change":
         log.info(f"[dns-sync] Network change: added={data.get('added')}, removed={data.get('removed')}")
-    
+
     return {"status": "ok", "event": event}
 
 

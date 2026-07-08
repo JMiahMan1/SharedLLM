@@ -10,7 +10,6 @@ to the host socket at /var/run/docker.sock (mounted read-only in compose).
 """
 import logging
 import re
-from typing import Optional
 
 log = logging.getLogger("execution.docker_logs")
 
@@ -37,8 +36,8 @@ async def handle_docker_logs(req) -> dict:
     Fetch and optionally filter logs from one or more Docker containers.
     """
     tail: int = getattr(req, "tail_lines", 200)
-    filter_level: Optional[str] = getattr(req, "grep_filter", None)
-    
+    filter_level: str | None = getattr(req, "grep_filter", None)
+
     container_names = []
     if req.container_name:
         container_names.append(req.container_name)
@@ -68,14 +67,14 @@ async def handle_docker_logs(req) -> dict:
             container = client.containers.get(name)
             raw_logs: bytes = container.logs(tail=tail, stdout=True, stderr=True, timestamps=True)
             lines = raw_logs.decode("utf-8", errors="replace").splitlines()
-            
+
             if filter_level:
                 try:
                     pattern = re.compile(filter_level, re.IGNORECASE)
                     lines = [l for l in lines if pattern.search(l)]
                 except Exception:
                     lines = [l for l in lines if filter_level.lower() in l.lower()]
-            
+
             results[name] = {
                 "status": "SUCCESS",
                 "line_count": len(lines),
