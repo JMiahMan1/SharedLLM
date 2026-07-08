@@ -1,6 +1,0 @@
-target-version = "py311"
-line-length = 150
-exclude = [".git", "__pycache__", "docs/source/conf.py", "old", "build", "dist", ".venv", "venv"]
-
-[lint]
-ignore = ["E", "W", "F401", "F841", "F811", "F541", "F821", "F403"]

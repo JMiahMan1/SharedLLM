@@ -1,0 +1,19 @@
+[tool.ruff]
+# SharedLLM keeps 150 to match its existing code; the workspace default is 120
+# (see ../pyproject.shared.toml). Don't tighten this without a cleanup pass.
+line-length = 150
+target-version = "py311"
+exclude = ["scratch", ".venv", "venv", "__pycache__", "node_modules", "dist", "build", "test/manual"]
+
+[tool.ruff.lint]
+# Full dev standard. CI only enforces the critical subset (E9,F63,F7,F82);
+# everything else is reported non-blocking via `ruff check --exit-zero`.
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "services", "tools"]
+addopts = "-q"
