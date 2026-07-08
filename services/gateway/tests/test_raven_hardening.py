@@ -1,3 +1,13 @@
+from unittest.mock import MagicMock, AsyncMock, patch
+
+def _aio_resp(status=200, json_data=None, text=""):
+    """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
+    m = MagicMock()
+    m.status = status
+    m.json = AsyncMock(return_value=json_data if json_data is not None else {"status": "SUCCESS"})
+    m.text = AsyncMock(return_value=text)
+    return m
+
 import pytest
 import os
 import aiohttp
@@ -24,14 +34,12 @@ def test_non_root_permission_mock():
 @pytest.mark.asyncio
 async def test_identity_resolution_mock():
     """Verify that we can mock identity resolution for Raven."""
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {
+    mock_resp = _aio_resp(200, {
         "user": "raven_test",
         "is_admin": True,
         "ha_url": "http://ha.local"
-    }
-    
+    })
+
     with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)):
         async with aiohttp.ClientSession() as client:
             resp = await client.get("http://identity:8001/api/resolve")

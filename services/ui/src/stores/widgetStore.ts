@@ -43,7 +43,7 @@ function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSetting
   };
 }
 
-const defaultWidgetDefs: WidgetDef[] = [
+export const defaultWidgetDefs: WidgetDef[] = [
   { key: 'energy_insights', label: 'Energy Insights', icon: () => null, minSize: 'small', defaultSize: 'medium' },
   { key: 'ambient_timer', label: 'Ambient Timer', icon: () => null, minSize: 'small', defaultSize: 'small' },
   { key: 'quick_notes', label: 'Quick Notes', icon: () => null, minSize: 'small', defaultSize: 'medium' },

@@ -2141,7 +2141,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ans = resp.get("message", {}).get("content", "Error.")
             ollama_ms = (asyncio.get_event_loop().time() - iter_start) * 1000
             log.info(f"[AgentLoop] Ollama responded in {ollama_ms:.0f}ms — iter {agent_iter + 1}")
-        except (aiohttp.ClientTimeoutException, aiohttp.ClientConnectorError):
+        except (asyncio.TimeoutError, aiohttp.ClientConnectionError):
             heartbeat_stop.set()
             await hb_task
             ans = "Jarvis is currently operating in low-latency mode due to a downstream service timeout. I am available for core operations, but complex reasoning may be delayed."
@@ -4490,7 +4490,7 @@ async def kill_mission(request: Request, id_or_slug: str):
             raise HTTPException(status_code=resp.status, detail="Failed to update mission status")
         
         # 2. Publish kill signal to Redis
-        from services.gateway.history import REDIS_URL
+        from services.gateway.config import REDIS_URL
         
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
@@ -4513,7 +4513,7 @@ async def pause_mission(request: Request, id_or_slug: str):
         mission_data = await m_resp.json()
         real_id = mission_data["id"]
 
-        from services.gateway.history import REDIS_URL
+        from services.gateway.config import REDIS_URL
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
         await r.set(f"raven:mission:pause:{real_id}", "PAUSED", ex=3600)
@@ -4534,7 +4534,7 @@ async def resume_mission(request: Request, id_or_slug: str):
         mission_data = await m_resp.json()
         real_id = mission_data["id"]
 
-        from services.gateway.history import REDIS_URL
+        from services.gateway.config import REDIS_URL
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
         await r.delete(f"raven:mission:pause:{real_id}")
@@ -4630,7 +4630,7 @@ async def get_mission_logs(id_or_slug: str, request: Request):
         mission_data = await resp.json()
         real_id = mission_data["id"]
     
-    from services.gateway.history import REDIS_URL
+    from services.gateway.config import REDIS_URL
     import redis.asyncio as redis
     r = redis.from_url(REDIS_URL, decode_responses=True)
     history_key = f"raven:mission:history:{real_id}"
@@ -4687,7 +4687,7 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
             mission_data = await resp.json()
             real_id = mission_data["id"]
 
-        from services.gateway.history import REDIS_URL
+        from services.gateway.config import REDIS_URL
         import redis.asyncio as redis
         r = redis.from_url(REDIS_URL, decode_responses=True)
         
@@ -5160,7 +5160,7 @@ async def get_abs_libraries(request: Request):
                             for lib in libs
                         ],
                     }
-    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientTimeoutException) as e:
+    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
         log.warning(f"[abs/libraries] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/libraries] ABS error: {e}")
@@ -5187,7 +5187,7 @@ async def get_abs_last_played(request: Request):
                 detail = data.get("detail") or {}
                 if detail.get("books"):
                     return {"status": "SUCCESS", "books": detail["books"]}
-    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientTimeoutException) as e:
+    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
         log.warning(f"[abs/last-played] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/last-played] ABS error: {e}")
@@ -5214,7 +5214,7 @@ async def get_abs_library_items(library_id: str, request: Request, limit: int = 
                 detail = data.get("detail") or {}
                 if detail.get("books"):
                     return {"status": "SUCCESS", "books": detail["books"]}
-    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientTimeoutException) as e:
+    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
         log.warning(f"[abs/library] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/library] ABS error: {e}")
@@ -5250,7 +5250,7 @@ async def search_abs(q: str, request: Request, limit: int = 20):
                     "authors": authors,
                     "total": total,
                 }
-    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, aiohttp.ClientTimeoutException) as e:
+    except (aiohttp.ClientConnectionError, aiohttp.ClientConnectionError, asyncio.TimeoutError) as e:
         log.warning(f"[abs/search] ABS timeout: {e}")
     except Exception as e:
         log.warning(f"[abs/search] ABS error: {e}")
@@ -5286,10 +5286,10 @@ async def get_abs_status():
                 if resp.status == 200:
                     return {"status": "AVAILABLE", "url": abs_url, "reachable": True}
                 return {"status": "ERROR", "url": abs_url, "reachable": False, "code": resp.status}
-    except aiohttp.ClientTimeoutException as e:
+    except asyncio.TimeoutError as e:
         log.warning(f"[abs/status] ABS timeout: {e}")
         return {"status": "UNREACHABLE", "error": "Connection timed out", "reachable": False}
-    except aiohttp.ClientConnectorError as e:
+    except aiohttp.ClientConnectionError as e:
         log.warning(f"[abs/status] ABS connect error: {e}")
         return {"status": "UNREACHABLE", "error": str(e), "reachable": False}
     except Exception as e:

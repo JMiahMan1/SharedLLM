@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Settings2 } from 'lucide-react';
 import type { WidgetSize, WidgetContextMenuProps } from '../../types/widget';
 
@@ -75,30 +76,30 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
     };
   }, [menuOpen]);
 
-  if (!menuOpen) {
-    return (
-      <div
-        onContextMenu={handleRightClick}
-        onTouchStart={handleLongPressStart}
-        className={containerClassName}
+  const triggerButton = (
+    <div
+      onContextMenu={handleRightClick}
+      onTouchStart={handleLongPressStart}
+      className={containerClassName}
+    >
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          const rect = e.currentTarget.getBoundingClientRect();
+          setMenuPos({ x: rect.right, y: rect.bottom });
+          setMenuOpen(true);
+        }}
+        className="text-slate-500 hover:text-white transition-colors p-1 rounded hover:bg-white/5"
+        title="Widget options"
+        aria-label="Widget options"
       >
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            // Anchor the menu to the gear button so it always drops down
-            // from the control, instead of floating at raw click coords.
-            const rect = e.currentTarget.getBoundingClientRect();
-            setMenuPos({ x: rect.right, y: rect.bottom });
-            setMenuOpen(true);
-          }}
-          className="text-slate-500 hover:text-white transition-colors p-1 rounded hover:bg-white/5"
-          title="Widget options"
-          aria-label="Widget options"
-        >
-          <Settings2 size={14} />
-        </button>
-      </div>
-    );
+        <Settings2 size={14} />
+      </button>
+    </div>
+  );
+
+  if (!menuOpen) {
+    return triggerButton;
   }
 
   const clampPosition = (pos: ContextMenuPosition): ContextMenuPosition => ({
@@ -108,7 +109,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
 
   const displayPos = clampPosition(menuPos);
 
-  return (
+  const menuContent = (
     <>
       <div
         className="fixed inset-0 z-40"
@@ -191,6 +192,13 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
           </button>
         </div>
       </div>
+    </>
+  );
+
+  return (
+    <>
+      {triggerButton}
+      {createPortal(menuContent, document.body)}
     </>
   );
 };
