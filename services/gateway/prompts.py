@@ -64,56 +64,43 @@ def load_prompt_sync(prompt_key: str) -> str:
     Raises ValueError if the prompt key is not found in the DB.
     """
     import asyncio
+    import concurrent.futures
     import time
 
     # Refresh settings cache if expired
     global _settings_cache, _settings_cache_time
     now = time.time()
     if not _settings_cache or (now - _settings_cache_time) > _settings_ttl:
+
+        async def _fetch():
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
+                f"{IDENTITY_SVC}/api/settings",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+            return None
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             loop = None
 
-        if loop:
-
-            import aiohttp
-
-            async def _fetch():
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
-                    f"{IDENTITY_SVC}/api/settings",
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                ) as resp:
-                    if resp.status == 200:
-                        return await resp.json()
-                return None
-
-            _settings_cache = loop.run_until_complete(_fetch()) or {}
-        else:
-            try:
-                import aiohttp
-                import nest_asyncio
-                nest_asyncio.apply()
-
-                async def _fetch():
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
-                        f"{IDENTITY_SVC}/api/settings",
-                        headers={"X-Internal-Secret": INTERNAL_SECRET}
-                    ) as resp:
-                        if resp.status == 200:
-                            return await resp.json()
-                    return None
-
+        try:
+            if loop is None:
+                # No running loop (e.g. sync/test context) — run directly.
                 _settings_cache = asyncio.run(_fetch()) or {}
-            except Exception:
-                raise ValueError("Identity service unavailable and no cached prompts available")
+            else:
+                # A loop is already running (async endpoint). Run the fetch in a
+                # separate thread with its own event loop to avoid
+                # "this event loop is already running" and to avoid deadlocking
+                # the calling loop.
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    _settings_cache = pool.submit(lambda: asyncio.run(_fetch())).result(timeout=10) or {}
+        except Exception:
+            raise ValueError("Identity service unavailable and no cached prompts available")
 
         _settings_cache_time = now
-    if _settings_cache.get(prompt_key):
-        return _settings_cache[prompt_key]
-
-    raise ValueError(f"Prompt not found in settings DB: {prompt_key}")
-
     if _settings_cache.get(prompt_key):
         return _settings_cache[prompt_key]
 
