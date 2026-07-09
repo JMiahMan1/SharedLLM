@@ -2276,6 +2276,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 log.error(f"[AgentLoop] Error parsing pseudo-tag: {e}")
 
         # Strategy 6: Payload Normalization
+        # Strategy 6b: Top-level JSON array of tool calls (e.g. `[{...}]`)
+        if isinstance(tool_data, list) and tool_data:
+            first_item = tool_data[0]
+            if isinstance(first_item, dict):
+                log.info("[AgentLoop] Normalizing tool schema: extracting first item from top-level list")
+                tool_data = first_item
+            else:
+                log.warning("[AgentLoop] Tool call list contains non-dict item; discarding")
+                tool_data = None
+
         if tool_data and isinstance(tool_data, dict):
             # Handle array format (e.g. OpenAI or custom tool array)
             for array_key in ("tools", "tool_calls", "actions"):
