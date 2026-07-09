@@ -1262,6 +1262,9 @@ def list_workspaces(
             item["resolved_path"] = None
             item["requires_user_context"] = True
             item["access_policy"] = access_policy
+            item["is_new"] = not bool(item.get("repo_url"))
+            item["has_repo"] = bool(item.get("repo_url"))
+            item["needs_repo"] = item["is_new"]
             items.append(item)
             continue
         try:
