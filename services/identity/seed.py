@@ -267,6 +267,9 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         "HF_TOKEN": "huggingface_token",
         "HUGGING_FACE_TOKEN": "huggingface_token",
         "DNS_MAPPINGS": "dns_mappings",
+        "DNS_FAILOVER_ENABLED": "dns_failover_enabled",
+        "DNS_HEALTH_PORTS": "dns_health_ports",
+        "DNS_HEALTH_PATH": "dns_health_path",
     }
     for env_key, global_key in env_to_global.items():
         env_val = os.getenv(env_key)

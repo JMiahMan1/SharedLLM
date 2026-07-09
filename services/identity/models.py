@@ -204,6 +204,9 @@ DEFAULT_GLOBAL_SETTINGS = [
     # Format: {"hostname": ["primary_ip", "fallback_ip", ...]}
     # dnsmasq generates multiple A records; clients try in order
     # Configure via DNS_MAPPINGS env var or UI. Default: empty (no mappings)
-    {"key": "dns_mappings", "value": "{}", "description": "DNS hostname-to-IP mappings. Supports multiple IPs per host for fallback (JSON object). Configure via DNS_MAPPINGS env var or UI."}
+    {"key": "dns_mappings", "value": "{}", "description": "DNS hostname-to-IP mappings. Supports multiple IPs per host for fallback (JSON object). Configure via DNS_MAPPINGS env var or UI."},
+    {"key": "dns_failover_enabled", "value": "true", "description": "When a host maps to multiple IPs, the DNS service probes each IP and only returns the ones currently reachable, so resolution follows whichever device is powered on."},
+    {"key": "dns_health_ports", "value": "11434,80,443,8080,8000,9000", "description": "Comma-separated TCP ports the DNS service probes to determine if an IP is reachable. The first open port means the device is up."},
+    {"key": "dns_health_path", "value": "", "description": "Optional HTTP path (e.g. /api/health) probed instead of a raw TCP port to check device health. Empty = use TCP port probes only."},
 ]
 

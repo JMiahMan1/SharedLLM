@@ -12,11 +12,20 @@ import logging
 import os
 import socket
 import struct
+import time
 
 import docker
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Health-aware resolution for static mappings with multiple IPs (e.g. a LAN
+# Ollama host that moves between devices). Only currently-reachable IPs are
+# returned, and the answer flips automatically when the available device
+# changes. Ports/timeout are overridable via env for other services.
+DNS_HEALTH_PORTS = [int(p) for p in os.environ.get("DNS_HEALTH_PORTS", "11434,80,443,8080,8000,9000").split(",") if p.strip()]
+DNS_HEALTH_TIMEOUT = float(os.environ.get("DNS_HEALTH_TIMEOUT", "1.0"))
+DNS_HEALTH_TTL = float(os.environ.get("DNS_HEALTH_TTL", "15.0"))
 
 
 class ContainerRegistry:
@@ -177,6 +186,10 @@ class DNSResolver:
         self.upstream_dns = upstream_dns
         self.upstream_client = _DNSClient(upstream_dns)
         self.static_mappings = static_mappings or {}
+        self.health_aware = True  # toggled by the dns_failover_enabled setting
+        self.health_ports = DNS_HEALTH_PORTS
+        self.health_path = os.environ.get("DNS_HEALTH_PATH", "")
+        self._health: dict[str, tuple[bool, float]] = {}  # ip -> (is_up, checked_at)
 
     async def resolve(self, query: 'DNSQuery') -> list | None:
         """Resolve a DNS query"""
@@ -193,9 +206,16 @@ class DNSResolver:
 
             # Check static mappings first (for external LAN hosts, e.g. a local Ollama server)
             if name in self.static_mappings:
-                ip = self.static_mappings[name]
-                logger.debug(f"Found static mapping: {name} -> {ip}")
-                return [self._make_a_record(name, ip, 300)]
+                entry = self.static_mappings[name]
+                ips = entry if isinstance(entry, list) else [entry]
+                if self.health_aware and len(ips) > 1:
+                    # Only return IPs that are currently reachable; the answer
+                    # flips automatically when the available device changes.
+                    reachable = [ip for ip in ips if await self._is_reachable(ip)]
+                    ips = reachable or ips  # fall back to all if none answered (avoid NXDOMAIN)
+                records = [self._make_a_record(name, ip, 300) for ip in ips if ip]
+                logger.debug(f"Found static mapping: {name} -> {ips}")
+                return records
 
             # Check if it's a .docker suffix query
             if name.endswith('.docker'):
@@ -257,6 +277,48 @@ class DNSResolver:
             'ttl': ttl,
             'rdata': rdata
         }
+
+    async def _is_reachable(self, ip: str) -> bool:
+        """Return cached reachability for an IP, probing if stale."""
+        now = time.monotonic()
+        cached = self._health.get(ip)
+        if cached and now - cached[1] < DNS_HEALTH_TTL:
+            return cached[0]
+        up = await self._probe(ip)
+        self._health[ip] = (up, now)
+        return up
+
+    async def _probe(self, ip: str) -> bool:
+        """Probe an IP for liveness. If a health path is configured, do an HTTP
+        GET to it; otherwise just attempt a TCP connect to each health port.
+        All candidate ports are probed concurrently with a short timeout."""
+        ports = [int(p) for p in (self.health_ports or DNS_HEALTH_PORTS)]
+        path = (self.health_path or "").strip()
+
+        async def try_port(port: int) -> bool:
+            try:
+                if path:
+                    try:
+                        import aiohttp
+                        url = f"http://{ip}:{port}{path if path.startswith('/') else '/' + path}"
+                        async with aiohttp.ClientSession(
+                            timeout=aiohttp.ClientTimeout(total=DNS_HEALTH_TIMEOUT)
+                        ) as s, s.get(url) as r:
+                            return r.status < 500
+                    except ImportError:
+                        pass
+                _, writer = await asyncio.wait_for(
+                    asyncio.open_connection(ip, port), DNS_HEALTH_TIMEOUT
+                )
+                writer.close()
+                return True
+            except Exception:
+                return False
+
+        results = await asyncio.gather(
+            *(try_port(p) for p in ports), return_exceptions=True
+        )
+        return any(r is True for r in results)
 
 
 class _DNSClient:
@@ -575,8 +637,30 @@ async def main():
     resolver.static_mappings = flat_mappings
 
     # Fetch DNS records from Identity service and update periodically
+    def _normalize_dns_entry(entry) -> list[str]:
+        """Flatten a dns_mappings entry (str | list | dict) into a clean IP list."""
+        if isinstance(entry, str):
+            return [entry.strip()] if entry.strip() else []
+        if isinstance(entry, list):
+            return [str(v).strip() for v in entry if str(v).strip()]
+        if isinstance(entry, dict):
+            vals = entry.get("values")
+            if isinstance(vals, list):
+                return [str(v).strip() for v in vals if str(v).strip()]
+            ip = entry.get("ip")
+            if isinstance(ip, str):
+                return [ip.strip()] if ip.strip() else []
+            if isinstance(ip, list):
+                return [str(v).strip() for v in ip if str(v).strip()]
+        return []
+
     async def refresh_dns_mappings():
-        """Fetch DNS records from Identity service and update resolver."""
+        """Fetch DNS mappings + failover settings from Identity and update resolver.
+
+        The source of truth is the `dns_mappings` global setting — the same store
+        the UI (DnsManagementPanel via gateway /api/dns) edits. Each host may carry
+        several IPs; the resolver returns only the reachable ones when health-aware
+        failover is enabled."""
         import aiohttp
         identity_url = os.environ.get('IDENTITY_SVC_URL')
         internal_secret = os.environ.get('INTERNAL_SECRET')
@@ -588,28 +672,44 @@ async def main():
         while True:
             try:
                 async with aiohttp.ClientSession() as http_session:
+                    # DNS mappings (UI-backed store)
                     resp = await http_session.get(
-                        f"{identity_url}/api/dns",
+                        f"{identity_url}/api/settings/dns_mappings",
                         headers={"X-Internal-Secret": internal_secret}
                     )
                     if resp.status == 200:
-                        records = await resp.json()
+                        item = await resp.json()
+                        raw = item.get("value", "{}") if isinstance(item, dict) else "{}"
+                        try:
+                            mappings = json.loads(raw) if isinstance(raw, str) else raw
+                        except (json.JSONDecodeError, TypeError):
+                            mappings = {}
                         new_mappings = {}
-                        for record in records:
-                            if not record.get('is_active', True):
+                        for host, entry in (mappings or {}).items():
+                            if not isinstance(host, str) or host.startswith("__"):
                                 continue
-                            domain = record.get('domain')
-                            values = record.get('values', [])
-                            if domain and values:
-                                if len(values) == 1:
-                                    new_mappings[domain] = values[0]
-                                else:
-                                    # For multiple IPs, use first one (round-robin handled by resolver)
-                                    new_mappings[domain] = values[0]
-                                    logger.debug(f"DNS record with multiple values: {domain} -> {values}")
-
+                            values = _normalize_dns_entry(entry)
+                            if values:
+                                new_mappings[host] = values
+                                if len(values) > 1:
+                                    logger.debug(f"DNS mapping with multiple values: {host} -> {values}")
                         resolver.static_mappings = new_mappings
                         logger.info(f"Updated {len(new_mappings)} DNS mappings from Identity service")
+
+                    # Failover config (health-aware DNS)
+                    resp = await http_session.get(
+                        f"{identity_url}/api/settings",
+                        headers={"X-Internal-Secret": internal_secret}
+                    )
+                    if resp.status == 200:
+                        settings = {item["key"]: item["value"] for item in await resp.json()}
+                        resolver.health_aware = str(
+                            settings.get("dns_failover_enabled", "true")
+                        ).lower() in ("1", "true", "yes", "on")
+                        if ports := settings.get("dns_health_ports"):
+                            resolver.health_ports = [p.strip() for p in ports.split(",") if p.strip()]
+                        if path := settings.get("dns_health_path", "").strip():
+                            resolver.health_path = path
             except Exception as e:
                 logger.warning(f"Failed to fetch DNS records from Identity service: {e}")
 
