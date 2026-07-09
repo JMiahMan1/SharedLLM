@@ -513,6 +513,73 @@ def extract_action_json(text: str) -> dict | None:
 
     return None
 
+
+# --- HARNESS GUARDS (patterns borrowed from OpenCode-orchestrator / Hermes) ---
+# These are pure functions so the gating logic can be unit-tested without a live
+# model or any downstream service.
+
+def action_signature(action_name: str, payload: dict | None) -> str:
+    """Stable signature of a dispatched tool action for repetition detection.
+
+    Combines the canonical action name with the most identifying payload field
+    (file path or shell command) so the loop can tell apart 'wrote game.py' from
+    'wrote README.md' and from 'ran ruff' — which matters for stagnation checks.
+    """
+    action_name = (action_name or "").lower()
+    if not isinstance(payload, dict):
+        payload = {}
+    key = (
+        payload.get("file_path")
+        or payload.get("path")
+        or payload.get("relative_path")
+        or payload.get("command")
+        or payload.get("commands")
+        or payload.get("query")
+        or ""
+    )
+    if isinstance(key, (list, tuple)):
+        key = " ".join(str(k) for k in key)
+    return f"{action_name}::{key!r}"
+
+
+def detect_repetitive_failure(recent: list[tuple[str, bool]], window: int = 3) -> bool:
+    """True when the last ``window`` actions share one signature and ALL failed.
+
+    Mirrors OpenCode-orchestrator stagnation detection: stop blind retries once
+    the same step keeps failing and escalate instead of looping forever.
+    """
+    if len(recent) < window:
+        return False
+    last = recent[-window:]
+    sigs = {sig for sig, _ in last}
+    return len(sigs) == 1 and all(not ok for _, ok in last)
+
+
+_VERIFY_COMMAND_HINTS = (
+    "test", "lint", "pytest", "ruff", "mypy", "eslint", "prettier",
+    "npm test", "npm run", "go test", "cargo test", "tox", "flake8", "tsc",
+)
+
+
+def is_verification_action(action_name: str, payload: dict | None) -> bool:
+    """True when an action constitutes verification (lint/test) of produced code.
+
+    Language-agnostic: covers the WorkspaceLint tool and any shell command that
+    runs a project's linter/test runner (ruff, pytest, eslint, npm test, ...).
+    """
+    action_name = (action_name or "").lower()
+    if action_name == "workspacelintrequest":
+        return True
+    if action_name == "workspaceshellrequest" and isinstance(payload, dict):
+        cmd = str(payload.get("command") or payload.get("commands") or "").lower()
+        return any(hint in cmd for hint in _VERIFY_COMMAND_HINTS)
+    return False
+
+
+def pending_verification(written: set[str], verified: set[str]) -> list[str]:
+    """Files that were written but never linted/tested before finishing."""
+    return sorted(set(written) - set(verified))
+
 async def get_dynamic_llm_settings() -> dict:
     """Fetches elastic LLM routing configuration directly from the Identity DB."""
     try:
@@ -871,6 +938,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # --- VRAM-SAFE SCRATCHPAD ---
     action_log = []
 
+    # --- HARNESS GUARDS (OpenCode-orchestrator / Hermes patterns) ---
+    # These let the runtime — not the model — decide when work is truly done.
+    #  * _recent_actions: (signature, succeeded) for stagnation detection.
+    #  * _written_files / _verified_files: enforce lint/test before finishing.
+    _recent_actions: list[tuple[str, bool]] = []
+    _written_files: set[str] = set()
+    _verified_files: set[str] = set()
+    _verification_nudge_sent = False
+    _stagnation_nudge_sent = False
+
     # --- PLANNING PHASE ---
     try:
         raven_plan = await load_prompt(get_http_client(), PROMPT_RAVEN_PLAN)
@@ -1216,6 +1293,22 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.warning(f"[AgentLoop] No valid tool call found in textual response (iter {iter_num})")
 
             if agent_iter > 0 and successful_tool_calls > 0:
+                # OpenCode-orchestrator idle-boundary rule: the RUNTIME decides
+                # "done" — not the model. If files were written but never verified
+                # (linted/tested), force one verification step before finishing.
+                if not _verification_nudge_sent:
+                    unverified = pending_verification(_written_files, _verified_files)
+                    if unverified:
+                        _verification_nudge_sent = True
+                        log.warning(f"[AgentLoop] Unverified writes {unverified}; nudging for lint/test before finish.")
+                        action_log.append(
+                            f"ITERATION {iter_num}: You changed files ({', '.join(unverified)}) "
+                            f"but have NOT run lint/test on them. Before finishing, run the "
+                            f"language-appropriate linter/tests (e.g. ruff + pytest for Python, "
+                            f"eslint for JS/TS) and cite the results. Do not consider the mission "
+                            f"complete until verification passes."
+                        )
+                        continue
                 log.info(f"[AgentLoop] Agent provided textual answer after {successful_tool_calls} successful tool call(s). Terminating loop.")
                 break
 
@@ -1526,6 +1619,24 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     # Track successful tool executions (non-ERROR responses)
                     if isinstance(exec_data, dict) and exec_data.get("status") != "ERROR":
                         successful_tool_calls += 1
+                        sig = action_signature(action_name, payload)
+                        _recent_actions.append((sig, True))
+                        if len(_recent_actions) > 12:
+                            _recent_actions = _recent_actions[-12:]
+                        if lookup_action in ("workspacefilewriterequest", "workspacefilepatchrequest") \
+                                and isinstance(payload, dict):
+                            fp = payload.get("file_path") or payload.get("path", "")
+                            if fp:
+                                _written_files.add(fp)
+                        if is_verification_action(lookup_action, payload):
+                            # A verification run clears the "unverified" state for
+                            # every written file (language-agnostic lint/test).
+                            _verified_files.update(_written_files)
+                    else:
+                        sig = action_signature(action_name, payload)
+                        _recent_actions.append((sig, False))
+                        if len(_recent_actions) > 12:
+                            _recent_actions = _recent_actions[-12:]
 
                         # --- POST-WRITE LINT HOOK ---
                         lintable_actions = {"workspacefilewriterequest", "workspacefilepatchrequest"}
@@ -1551,6 +1662,24 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await stream_event("result_error", str(e))
             log.error(f"[AgentLoop] Tool execution failed: {e}")
             exec_data = {"status": "ERROR", "message": str(e)}
+
+        # --- STAGNATION ESCALATION (OpenCode: stop blind retries, re-plan/ASK) ---
+        # If the same step keeps failing, nudge once to change approach; if it
+        # keeps failing after the nudge, terminate instead of looping forever.
+        if detect_repetitive_failure(_recent_actions, window=3):
+            if not _stagnation_nudge_sent:
+                _stagnation_nudge_sent = True
+                log.warning("[AgentLoop] Stagnation detected: same action failed 3x. Forcing re-plan.")
+                action_log.append(
+                    f"ITERATION {iter_num}: The SAME step has FAILED 3 times in a row. "
+                    f"Stop repeating it. Re-plan: try a different approach or tool, or ask for "
+                    f"clarification. Do not issue the identical failing call again."
+                )
+            else:
+                log.error("[AgentLoop] Stagnation persists after re-plan nudge. Terminating.")
+                ans = "ERROR: Same step failed repeatedly after re-planning. Aborting to avoid an infinite loop."
+                await _clear_checkpoint()
+                break
 
 
     async def _persist_learning(summary: str) -> None:
