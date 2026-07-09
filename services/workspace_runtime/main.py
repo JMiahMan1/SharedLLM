@@ -1274,6 +1274,9 @@ def list_workspaces(
             item["available"] = False
         item["scope"] = str(item.get("scope") or "user")
         item["access_policy"] = access_policy
+        item["is_new"] = not bool(item.get("repo_url"))
+        item["has_repo"] = bool(item.get("repo_url"))
+        item["needs_repo"] = item["is_new"]
         # Default-shared workspaces get restricted capabilities for non-owners
         if is_default_shared and not is_admin and owner_user != resolved_user:
             item["capabilities"] = ["read", "git_status"]
