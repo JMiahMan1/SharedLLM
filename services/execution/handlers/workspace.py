@@ -433,6 +433,33 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                     {"error": "auth_required", "command": final_cmd},
                 )
 
+        # Guardrail: block pushes / remote setup that target a PROTECTED repository
+        # (e.g. the production SharedLLM repo). Only the designated SharedLLM dev
+        # workspace may push there; every other workspace (incl. all test
+        # workspaces) is hard-blocked so a flaky model can never push to SharedLLM
+        # by accident. Covers both `git push` and `git remote add/set-url <url>`.
+        from handlers.repo_guard import (
+            extract_remote_url_from_command,
+            push_to_protected_allowed,
+        )
+        _protected_url = extract_remote_url_from_command(final_cmd)
+        if _protected_url is None and base_command == "git" and len(parsed) > 1 and parsed[1] in ("push", "remote"):
+            try:
+                _rc, _out, _err = await _run_command_async(
+                    ["git", "remote", "get-url", "origin"], cwd=abs_cwd, timeout=10.0
+                )
+                if _rc == 0 and _out.strip():
+                    _protected_url = _out.strip()
+            except Exception:
+                _protected_url = None
+        if _protected_url is not None:
+            _allowed, _reason = push_to_protected_allowed(workspace_id, _protected_url)
+            if not _allowed:
+                return _fail(
+                    _reason,
+                    {"error": "protected_repo_push_blocked", "command": final_cmd},
+                )
+
         log.info(f"Executing shell command: {final_cmd} in {abs_cwd}")
         # Enforce a max timeout of 300s
         safe_timeout = min(req.timeout, 300)

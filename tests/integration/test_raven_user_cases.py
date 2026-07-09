@@ -160,7 +160,7 @@ def test_raven_creates_repo_and_writes_game_via_chat(internal_client):
     workspace_id = f"raven_e2e_{ts}"
     repo_name = f"raven-e2e-{ts}"
 
-    _create_workspace(internal_client, workspace_id, "Raven E2E Create")
+    _create_workspace(internal_client, workspace_id, "Raven E2E Create", repo_url=None)
     try:
         mission = (
             f"Raven, perform the following mission in workspace '{workspace_id}':\n"
@@ -220,7 +220,7 @@ def test_raven_fixes_bug_via_chat(internal_client):
     workspace_id = f"raven_e2e_fix_{ts}"
     repo_name = f"raven-e2e-fix-{ts}"
 
-    _create_workspace(internal_client, workspace_id, "Raven E2E Fix")
+    _create_workspace(internal_client, workspace_id, "Raven E2E Fix", repo_url=None)
     try:
         seed = (
             f"Raven, in workspace '{workspace_id}': create a private GitHub repo named "
@@ -254,25 +254,33 @@ LANGUAGE_MISSIONS = {
         "Raven, in workspace '{wid}': create a private GitHub repo named '{repo}', "
         "write 'game.py' with a number-guessing game, run `ruff check .` and `pytest` "
         "if available, then `git add -A && git commit -m 'init' && git push -u origin HEAD`. "
-        "Report the repository URL."
+        "Report the repository URL. IMPORTANT: you MUST only create and push to the repository "
+        "named exactly '{repo}'. Do NOT modify, commit to, or push any other repository "
+        "(for example the SharedLLM repo)."
     ),
     "javascript": (
         "Raven, in workspace '{wid}': create a private GitHub repo named '{repo}', "
         "write 'app.js' exporting a function `add(a, b)` that returns a + b, run "
         "`node --check app.js` and `eslint app.js` if available, then commit and push. "
-        "Report the repository URL."
+        "Report the repository URL. IMPORTANT: you MUST only create and push to the repository "
+        "named exactly '{repo}'. Do NOT modify, commit to, or push any other repository "
+        "(for example the SharedLLM repo)."
     ),
     "typescript": (
         "Raven, in workspace '{wid}': create a private GitHub repo named '{repo}', "
         "write 'index.ts' with a typed function `add(a: number, b: number): number` "
         "returning a + b, run `npx tsc --noEmit` if available, then commit and push. "
-        "Report the repository URL."
+        "Report the repository URL. IMPORTANT: you MUST only create and push to the repository "
+        "named exactly '{repo}'. Do NOT modify, commit to, or push any other repository "
+        "(for example the SharedLLM repo)."
     ),
     "go": (
         "Raven, in workspace '{wid}': create a private GitHub repo named '{repo}', "
         "write 'main.go' with package main and a function `Add(a, b int) int`, run "
         "`go vet ./...` and `go build ./...` if available, then commit and push. "
-        "Report the repository URL."
+        "Report the repository URL. IMPORTANT: you MUST only create and push to the repository "
+        "named exactly '{repo}'. Do NOT modify, commit to, or push any other repository "
+        "(for example the SharedLLM repo)."
     ),
     "rust": (
         "Raven, in workspace '{wid}': create a private GitHub repo named '{repo}', "
@@ -289,7 +297,7 @@ def test_raven_creates_project_in_language(internal_client, lang):
     workspace_id = f"raven_e2e_{lang}_{ts}"
     repo_name = f"raven-e2e-{lang}-{ts}"
 
-    _create_workspace(internal_client, workspace_id, f"Raven E2E {lang}")
+    _create_workspace(internal_client, workspace_id, f"Raven E2E {lang}", repo_url=None)
     try:
         mission = LANGUAGE_MISSIONS[lang].format(wid=workspace_id, repo=repo_name)
         data = _run_raven(internal_client, workspace_id, mission)
