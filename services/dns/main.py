@@ -191,7 +191,7 @@ class DNSResolver:
             print(f"DEBUG: Inside try block, name={name}", flush=True)
             logger.debug(f"After try block, name={name}")
 
-            # Check static mappings first (for external hosts like ollama-server.local)
+            # Check static mappings first (for external LAN hosts, e.g. a local Ollama server)
             if name in self.static_mappings:
                 ip = self.static_mappings[name]
                 logger.debug(f"Found static mapping: {name} -> {ip}")
