@@ -2333,7 +2333,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # Prioritize 'tool_name' if it was set during hoisting to avoid clobbering by payload parameters.
             action_key = None
             if isinstance(tool_data, dict):
-                action_key = tool_data.get("tool_name") or tool_data.get("type") or tool_data.get("action") or tool_data.get("tool_choice") or tool_data.get("tool")
+                action_key = tool_data.get("tool_name") or tool_data.get("type") or tool_data.get("action") or tool_data.get("@type") or tool_data.get("tool_choice") or tool_data.get("tool")
             dispatch_action = None
 
             if action_key:
