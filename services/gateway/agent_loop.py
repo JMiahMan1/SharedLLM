@@ -94,9 +94,9 @@ def sanitize_for_llm(obj: Any, depth: int = 0) -> Any:
 
 # --- HARDENED OLLAMA PROVIDER ---
 class OllamaProvider(BaseLLMProvider):
-    def __init__(self, base_url: str, timeout: float = 600.0):
+    def __init__(self, base_url: str, timeout: float | aiohttp.ClientTimeout = 600.0):
         self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
+        self.timeout = timeout if isinstance(timeout, aiohttp.ClientTimeout) else aiohttp.ClientTimeout(total=timeout)
 
     async def generate(
         self,

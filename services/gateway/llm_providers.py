@@ -213,10 +213,10 @@ class OllamaProvider(BaseLLMProvider):
 
 
 class OpenRouterProvider(BaseLLMProvider):
-    def __init__(self, api_key: str, base_url: str = "https://openrouter.ai/api/v1/chat/completions", timeout: float = 120.0):
+    def __init__(self, api_key: str, base_url: str = "https://openrouter.ai/api/v1/chat/completions", timeout: float | aiohttp.ClientTimeout = 120.0):
         self.api_key = api_key
         self.base_url = base_url
-        self.timeout = timeout
+        self.timeout = timeout if isinstance(timeout, aiohttp.ClientTimeout) else aiohttp.ClientTimeout(total=timeout)
 
     async def generate(
         self,
