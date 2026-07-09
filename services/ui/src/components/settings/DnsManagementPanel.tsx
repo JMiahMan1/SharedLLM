@@ -33,17 +33,7 @@ export default function DnsManagementPanel() {
   const queryClient = useQueryClient();
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<DnsRecord | null>(null);
-  const [form, setForm] = useState<DnsRecordForm>(() => {
-    if (editingRecord) {
-      return {
-        domain: editingRecord.domain,
-        record_type: editingRecord.record_type as 'A' | 'CNAME',
-        values: [...editingRecord.values],
-        ttl: editingRecord.ttl,
-      };
-    }
-    return emptyForm;
-  });
+  const [form, setForm] = useState<DnsRecordForm>(emptyForm);
 
   const { data: records = [], isLoading } = useQuery({
     queryKey: ['dns-records'],
@@ -129,6 +119,12 @@ export default function DnsManagementPanel() {
 
   const handleEdit = (record: DnsRecord) => {
     setEditingRecord(record);
+    setForm({
+      domain: record.domain,
+      record_type: record.record_type as 'A' | 'CNAME',
+      values: [...record.values],
+      ttl: record.ttl,
+    });
     setIsFormOpen(true);
   };
 
@@ -258,7 +254,7 @@ export default function DnsManagementPanel() {
       <div className="flex justify-end">
         {!isFormOpen && (
           <button
-            onClick={() => { setEditingRecord(null); setIsFormOpen(true); }}
+            onClick={() => { setEditingRecord(null); setForm(emptyForm); setIsFormOpen(true); }}
             className="glass-button px-4 py-2 text-sm flex items-center gap-2"
           >
             <Plus size={16} /> Add DNS Record
