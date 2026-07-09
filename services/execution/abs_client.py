@@ -124,31 +124,77 @@ async def abs_post(
             return {"error": f"Audiobookshelf is unreachable: {e}"}
 
 
+async def get_all_library_items(
+    abs_url: str, abs_api_key: str, library_id: str, page_size: int = 500
+) -> list | dict:
+    """Fetch ALL items in a library, paginating as needed.
+
+    Returns a list of raw library-item dicts, or a dict with an "error" key on
+    failure (so callers can detect/absorb ABS errors the same way as abs_get).
+    """
+    items: list[dict] = []
+    page = 0
+    while True:
+        res = await abs_get(
+            abs_url, abs_api_key, f"/api/libraries/{library_id}/items",
+            params={"limit": page_size, "page": page},
+        )
+        if "error" in res:
+            return res
+        results = res.get("results", [])
+        items.extend(results)
+        total = res.get("total", 0)
+        if not results or len(items) >= total:
+            break
+        page += 1
+        if page > 50:  # safety bound
+            break
+    return items
+
+
+def _item_matches_query(item: dict, query: str) -> bool:
+    meta = item.get("media", {}).get("metadata", {})
+    haystack = " ".join(
+        str(meta.get(k, "")) for k in ("title", "authorName", "narratorName", "seriesName")
+    ).lower()
+    return query.lower() in haystack
+
+
 async def search_library(
     abs_url: str, abs_api_key: str, query: str, limit: int = 10
 ) -> dict:
-    """Search the ABS book library for audiobooks matching the query.
+    """Search the book library for items matching the query.
 
-    Gets the book library ID and searches within it using the correct ABS API endpoint.
-    The book library ID is cached per ABS server to avoid re-listing libraries on
-    every search.
+    NOTE: Some ABS servers ignore the `query` param on the library-items
+    endpoint and simply return the entire library. To guarantee correct
+    results we fetch the full library once and filter client-side.
     """
-    # Resolve (and cache) the book library ID
+    # Resolve (and cache) the book/audiobook library ID. ABS (and MA's ABS
+    # integration) label these libraries in varying ways ("book", "audiobook",
+    # ...), so we skip podcast libraries and use the first non-podcast library
+    # rather than matching an exact mediaType string.
     book_lib_id = _cache_get(abs_url, "book_lib_id")
     if not book_lib_id:
         libs = await abs_get(abs_url, abs_api_key, "/api/libraries")
         if "error" in libs:
             return libs
         for lib in libs.get("libraries", []):
-            if lib.get("mediaType") == "book":
-                book_lib_id = lib.get("id")
+            mt = (lib.get("mediaType") or "").lower()
+            if "podcast" in mt:
+                continue
+            book_lib_id = lib.get("id")
+            if book_lib_id:
                 break
         if not book_lib_id:
             return {"error": "No book library found"}
         _cache_set(abs_url, "book_lib_id", book_lib_id)
 
-    # Search within the book library
-    return await abs_get(abs_url, abs_api_key, f"/api/libraries/{book_lib_id}/items", params={"query": query, "limit": limit})
+    items = await get_all_library_items(abs_url, abs_api_key, book_lib_id)
+    if isinstance(items, dict) and "error" in items:
+        return items
+
+    matches = [it for it in items if _item_matches_query(it, query or "")]
+    return {"results": matches[:limit]}
 
 
 async def search_books(
@@ -220,7 +266,7 @@ async def get_library_items(
     abs_url: str, abs_api_key: str, library_id: str = "", limit: int = 25, page: int = 0
 ) -> dict:
     """Get items from a specific ABS library."""
-    path = f"/api/v1/libraries/{library_id}/items" if library_id else "/api/v1/libraries/items"
+    path = f"/api/libraries/{library_id}/items" if library_id else "/api/libraries/items"
     return await abs_get(abs_url, abs_api_key, path, params={"limit": limit, "page": page})
 
 

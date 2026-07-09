@@ -5462,6 +5462,27 @@ async def proxy_audiobookshelf(request: Request):
         raise HTTPException(status_code=503, detail="Execution service unreachable")
 
 
+@app.post("/execute/ha_service")
+async def proxy_ha_service(request: Request):
+    """Proxy Home Assistant service calls from the device-control widget to execution."""
+    client = get_http_client()
+    async def do_proxy():
+        body = await request.json() if await request.body() else {}
+        user_ctx = await _resolve_user_context(request, body)
+        exec_body = {**body, "user_context": user_ctx}
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/ha_service",
+            json=exec_body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return JSONResponse(content=await resp.json(), status_code=resp.status)
+    try:
+        return await retry_http_request(do_proxy, "Execution service (ha_service)", max_retries=2, base_delay=0.1)
+    except aiohttp.ClientError as e:
+        log.error(f"Execution service unreachable for ha_service: {e}")
+        raise HTTPException(status_code=503, detail="Execution service unreachable")
+
+
 @app.get("/api/media/stream/audiobookshelf/{book_id}")
 async def stream_audiobookshelf(book_id: str, request: Request):
     """Stream audiobook audio directly from ABS to mobile device."""
