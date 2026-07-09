@@ -374,6 +374,19 @@ def extract_action_json(text: str) -> dict | None:
                 first["action"] = first["@type"]
             return first
 
+    # Priority 2b: XML-style tool call
+    #   <tool_call><function=NAME><parameter=KEY>VAL</parameter>...</tool_call>
+    m = re.search(r"<tool_call>(.*?)</tool_call>", text, re.DOTALL)
+    if m:
+        block = m.group(1)
+        func_m = re.search(r"<function=([^>]+)>", block)
+        if func_m:
+            func = func_m.group(1).strip()
+            params: dict = {}
+            for pm in re.finditer(r"<parameter=([^>]+)>(.*?)</parameter>", block, re.DOTALL):
+                params[pm.group(1).strip()] = pm.group(2).strip()
+            return {"@type": func, "action": func, **params}
+
     # Priority 3: Outer-most braces (legacy fallback)
     first_brace = text.find("{")
     last_brace = text.rfind("}")
