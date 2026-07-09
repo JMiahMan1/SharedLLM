@@ -80,108 +80,82 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
     if not req.query:
         return ExecutionResult(status="FAILURE", message="Search query is required.", service="audiobookshelf")
 
-    # Search ABS library
-    library_result = await abs_client.search_library(abs_url, abs_key, req.query, limit=req.limit)
-    if "error" in library_result:
-        log.warning(f"[abs] Library search failed, falling back to external: {library_result.get('error')}")
-        # Fall through to external metadata search
+    # ABS server-side search is unreliable on some servers (the items endpoint
+    # ignores the `query` param and the /search endpoints are often empty), so we
+    # enumerate the user's libraries and filter the items client-side. This also
+    # lets us surface both audiobooks (book libraries) and podcasts (podcast
+    # libraries) from a single query.
+    libs_res = await abs_client.get_libraries(abs_url, abs_key)
+    if "error" in libs_res:
+        return ExecutionResult(status="FAILURE", message=libs_res["error"], service="audiobookshelf")
 
-    books = library_result.get("results", [])
-    if books:
-        book_summaries = []
-        for b in books[:req.limit]:
-            library_item = b.get("libraryItem", b)
-            media = library_item.get("media", {})
-            meta = media.get("metadata", {})
-            book_id = library_item.get("id", "")
-            chapters = media.get("chapters", [])
+    q = (req.query or "").lower()
+    book_summaries: list[dict] = []
+    podcast_summaries: list[dict] = []
+    authors: dict[str, dict] = {}
+
+    for lib in libs_res.get("libraries", []):
+        lib_id = lib.get("id")
+        media_type = (lib.get("mediaType") or "").lower()
+        if not lib_id:
+            continue
+        # Treat anything describing a podcast as a podcast library; everything
+        # else (book, audiobook, etc.) as a book/audiobook library. This avoids
+        # hardcoding exact mediaType strings that vary across ABS/MA integrations.
+        is_podcast = "podcast" in media_type
+        items = await abs_client.get_all_library_items(abs_url, abs_key, lib_id)
+        if isinstance(items, dict) and "error" in items:
+            continue
+        for it in items:
+            meta = it.get("media", {}).get("metadata", {})
+            title = meta.get("title") or ""
+            author = meta.get("authorName") or ""
+            narrator = meta.get("narratorName") or ""
+            haystack = f"{title} {author} {narrator} {meta.get('seriesName', '')}".lower()
+            if q not in haystack:
+                continue
+            item_id = it.get("id", "")
+            media = it.get("media", {})
             cover = media.get("coverPath", "")
             if not cover and isinstance(media.get("cover"), dict):
                 cover = media.get("cover", {}).get("path", "")
-            book_summaries.append({
-                "id": book_id,
-                "title": meta.get("title", "Unknown"),
-                "author": meta.get("authorName", "Unknown"),
-                "narrator": meta.get("narratorName", ""),
-                "series": meta.get("seriesName", ""),
-                "publishedYear": meta.get("publishedYear", ""),
-                "genres": meta.get("genres", []),
-                "duration": media.get("duration", 0),
-                "duration_formatted": _format_time(media.get("duration", 0)) if media.get("duration") else "",
-                "progress": library_item.get("progress", {}),
-                "status": library_item.get("status", ""),
-                "chapter_count": len(chapters) if isinstance(chapters, list) else 0,
-                "play_url": await abs_client.get_stream_url(abs_url, abs_key, book_id) if book_id else "",
-                "cover": cover,
-            })
+            if is_podcast:
+                podcast_summaries.append({
+                    "id": item_id,
+                    "title": title,
+                    "author": author,
+                    "description": meta.get("description", ""),
+                    "cover": cover,
+                    "type": "podcast",
+                    "source": "library",
+                })
+            else:
+                book_summaries.append({
+                    "id": item_id,
+                    "title": title,
+                    "author": author,
+                    "narrator": narrator,
+                    "series": meta.get("seriesName", ""),
+                    "publishedYear": meta.get("publishedYear", ""),
+                    "genres": meta.get("genres", []),
+                    "duration": media.get("duration", 0),
+                    "duration_formatted": _format_time(media.get("duration", 0)) if media.get("duration") else "",
+                    "cover": cover,
+                    "type": "book",
+                    "source": "library",
+                })
+            if author and author.lower() not in authors:
+                authors[author.lower()] = {"id": author, "name": author, "type": "author", "source": "library"}
 
-        return ExecutionResult(
-            status="SUCCESS",
-            message=f"Found {len(book_summaries)} audiobook(s) in library for '{req.query}'.",
-            service="audiobookshelf",
-            detail={"books": book_summaries},
-        )
-
-    # Fallback: external metadata search
-    result = await abs_client.search_all(abs_url, abs_key, req.query, limit=req.limit)
-
-    book_summaries = []
-    for b in result.get("books", [])[:req.limit]:
-        if isinstance(b, dict):
-            book_summaries.append({
-                "id": b.get("id", b.get("key", "")),
-                "title": b.get("title", "Unknown"),
-                "author": b.get("author", b.get("authorName", "")),
-                "narrator": b.get("narrator", b.get("narratorName", "")),
-                "publisher": b.get("publisher", ""),
-                "description": b.get("description", ""),
-                "cover": b.get("cover", b.get("coverUrl", "")),
-                "genres": b.get("genres", []),
-                "publishedYear": b.get("publishedYear", ""),
-                "asin": b.get("asin", ""),
-                "type": "book",
-                "source": "external",
-            })
-
-    podcast_summaries = []
-    for p in result.get("podcasts", [])[:req.limit]:
-        if isinstance(p, dict):
-            podcast_summaries.append({
-                "id": p.get("id", ""),
-                "title": p.get("title", p.get("collectionName", "Unknown")),
-                "author": p.get("artistName", p.get("publisher", "")),
-                "description": p.get("descriptionPlain", p.get("description", "")),
-                "cover": p.get("cover", p.get("artworkUrl", "")),
-                "trackCount": p.get("trackCount", 0),
-                "genres": p.get("genres", []),
-                "feedUrl": p.get("feedUrl", p.get("podcastUrl", "")),
-                "explicit": p.get("explicit", False),
-                "type": "podcast",
-                "source": "itunes",
-            })
-
-    author_summaries = []
-    for a in result.get("authors", [])[:req.limit]:
-        if isinstance(a, dict):
-            author_summaries.append({
-                "id": a.get("id", ""),
-                "name": a.get("name", "Unknown"),
-                "description": a.get("description", ""),
-                "image": a.get("image", a.get("imageUrl", "")),
-                "asin": a.get("asin", ""),
-                "type": "author",
-                "source": "audnexus",
-            })
-
-    total = len(book_summaries) + len(podcast_summaries) + len(author_summaries)
+    total = len(book_summaries) + len(podcast_summaries) + len(authors)
     return ExecutionResult(
         status="SUCCESS",
         message=f"Found {total} result(s) for '{req.query}'.",
         service="audiobookshelf",
         detail={
-            "books": book_summaries,
-            "podcasts": podcast_summaries,
-            "authors": author_summaries,
+            "books": book_summaries[: req.limit],
+            "podcasts": podcast_summaries[: req.limit],
+            "authors": list(authors.values())[: req.limit],
             "total": total,
         },
     )
