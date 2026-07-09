@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Globe, Plus, Trash2, Save, Edit2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+import type { GlobalSetting } from '../../types/api';
 
 interface DnsRecord {
   id: number;
@@ -39,6 +40,12 @@ export default function DnsManagementPanel() {
     queryKey: ['dns-records'],
     queryFn: () => api.getDnsRecords(),
     refetchInterval: 10000,
+  });
+
+  const { data: settings = [] } = useQuery({
+    queryKey: ['global-settings'],
+    queryFn: () => api.getSettings(),
+    refetchInterval: 30000,
   });
 
   const createMutation = useMutation({
@@ -140,6 +147,8 @@ export default function DnsManagementPanel() {
 
   return (
     <div className="space-y-6">
+      {settings.length > 0 && <DnsFailoverSettings settings={settings} />}
+
       {isFormOpen && (
         <form onSubmit={handleSubmit} className="glass-card p-6 border border-white/10 space-y-4">
           <h4 className="text-sm font-bold text-white uppercase tracking-widest">
@@ -312,6 +321,92 @@ export default function DnsManagementPanel() {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function DnsFailoverSettings({ settings }: { settings: GlobalSetting[] }) {
+  const queryClient = useQueryClient();
+  const get = (k: string, d: string) => settings.find((s) => s.key === k)?.value ?? d;
+
+  const [failoverEnabled, setFailoverEnabled] = useState(
+    () => get('dns_failover_enabled', 'true') !== 'false'
+  );
+  const [healthPorts, setHealthPorts] = useState(
+    () => get('dns_health_ports', '11434,80,443,8080,8000,9000')
+  );
+  const [healthPath, setHealthPath] = useState(() => get('dns_health_path', ''));
+
+  const saveFailoverMutation = useMutation({
+    mutationFn: () =>
+      Promise.all([
+        api.updateSetting('dns_failover_enabled', failoverEnabled ? 'true' : 'false'),
+        api.updateSetting('dns_health_ports', healthPorts),
+        api.updateSetting('dns_health_path', healthPath),
+      ]),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['global-settings'] });
+      toast.success('Failover settings saved');
+    },
+    onError: (err: Error) => toast.error(err.message || 'Failed to save failover settings'),
+  });
+
+  return (
+    <div className="glass-card p-6 border border-white/10 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-bold text-white uppercase tracking-widest">Health-Aware Failover</h4>
+          <p className="text-xs text-slate-400 mt-1">
+            When a host maps to multiple IPs, only the IPs that are currently reachable are returned,
+            so DNS follows whichever device is powered on. Requires hosts to have more than one IP.
+          </p>
+        </div>
+        <label className="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
+          <input
+            type="checkbox"
+            checked={failoverEnabled}
+            onChange={(e) => setFailoverEnabled(e.target.checked)}
+            className="sr-only peer"
+          />
+          <div className="w-11 h-6 bg-slate-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+        </label>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Health Ports (comma-separated)</label>
+          <input
+            type="text"
+            value={healthPorts}
+            onChange={(e) => setHealthPorts(e.target.value)}
+            disabled={!failoverEnabled}
+            className="glass-input w-full text-sm disabled:opacity-50"
+            placeholder="11434,80,443,8080,8000,9000"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Health Path (optional)</label>
+          <input
+            type="text"
+            value={healthPath}
+            onChange={(e) => setHealthPath(e.target.value)}
+            disabled={!failoverEnabled}
+            className="glass-input w-full text-sm disabled:opacity-50"
+            placeholder="/api/health"
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => saveFailoverMutation.mutate()}
+          disabled={saveFailoverMutation.isPending}
+          className="glass-button px-4 py-2 text-sm bg-blue-600/20 border-blue-500/50"
+        >
+          <Save size={14} /> Save Failover Settings
+        </button>
       </div>
     </div>
   );
