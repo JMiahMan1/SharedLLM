@@ -491,60 +491,48 @@ def check_all_updates():
     if not ghcr_token:
         ghcr_token = os.getenv("GITHUB_TOKEN", "")
 
-    # Without a registry token, every remote digest check returns 401 and can
-    # never detect an update — yet the per-service network loop still blocks the
-    # control plane threadpool for a long time (and the browser times out with
-    # ECONNABORTED). Short-circuit instantly so this endpoint returns in <1s.
+    # Decide whether remote digest checks are viable BEFORE looping over every
+    # container. Without a usable GHCR token (or with GHCR unreachable), each
+    # _get_remote_digest call would block on a failing 401/TLS round-trip
+    # (~15s each) and this endpoint would hang ~60s, triggering the browser's
+    # ECONNABORTED. We still report the locally-running services (fast, no
+    # network) so the Admin Updates page stays populated — we just can't detect
+    # whether a newer image exists upstream.
+    remote_error = None
+    remote_available = False
     if not ghcr_token:
         log.warning(
             "[updates] No GHCR/GitHub token available — skipping remote digest "
             "checks (set GHCR_TOKEN to enable update detection)."
         )
-        return {
-            "checked": 0,
-            "updates_available": 0,
-            "services": [],
-            "check_error": "ghcr_auth_unavailable",
-        }
+        remote_error = "ghcr_auth_unavailable"
+    else:
+        def _ghcr_auth_ok(token: str) -> bool:
+            import base64
 
-    # Pre-flight GHCR authentication probe.
-    # A (possibly stale/invalid) ghcr_token may be resolved from identity, which
-    # defeats the no-token short-circuit above. Hitting the registry auth endpoint
-    # once tells us whether the token is actually usable BEFORE we loop over every
-    # container — otherwise each _get_remote_digest call blocks on a failing
-    # 401/TLS round-trip (~15s each) and this endpoint hangs ~60s, triggering the
-    # browser's ECONNABORTED.
-    def _ghcr_auth_ok(token: str) -> bool:
-        import base64
+            url = "https://ghcr.io/v2/"
+            req = urllib.request.Request(url, method="GET")
+            token_b64 = base64.b64encode(f":{token}".encode()).decode()
+            req.add_header("Authorization", f"Basic {token_b64}")
+            try:
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    # 200 = authenticated and usable; 401/403 = unusable token.
+                    return resp.status == 200
+            except urllib.error.HTTPError as e:
+                # 401/403 = token rejected -> skip; anything else is inconclusive.
+                return e.code in (200,)
+            except Exception:
+                # Registry unreachable (timeout/DNS/TLS): cannot verify digests.
+                return False
 
-        url = "https://ghcr.io/v2/"
-        req = urllib.request.Request(url, method="GET")
-        token_b64 = base64.b64encode(f":{token}".encode()).decode()
-        req.add_header("Authorization", f"Basic {token_b64}")
-        try:
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                # 200 = authenticated and usable; 401/403 = unusable token.
-                return resp.status == 200
-        except urllib.error.HTTPError as e:
-            # 401/403 = token rejected -> skip; anything else is inconclusive.
-            return e.code in (200,)
-        except Exception:
-            # Registry unreachable (timeout/DNS/TLS). We cannot verify digests,
-            # so bail NOW rather than letting the per-service loop hang ~60s and
-            # trigger the browser's ECONNABORTED.
-            return False
-
-    if not _ghcr_auth_ok(ghcr_token):
-        log.warning(
-            "[updates] GHCR token present but authentication failed (401/403) — "
-            "skipping remote digest checks."
-        )
-        return {
-            "checked": 0,
-            "updates_available": 0,
-            "services": [],
-            "check_error": "ghcr_auth_unavailable",
-        }
+        if _ghcr_auth_ok(ghcr_token):
+            remote_available = True
+        else:
+            log.warning(
+                "[updates] GHCR token present but authentication failed/unreachable "
+                "(401/403 or registry down) — skipping remote digest checks."
+            )
+            remote_error = "ghcr_auth_unavailable"
 
     def _get_remote_digest(image_ref: str) -> str | None:
         """
@@ -661,10 +649,15 @@ def check_all_updates():
                 # Local digest (from what was pulled when the container was last started)
                 current_digest = _get_local_digest(container.image)
 
-                # Remote digest (via OCI registry API — no pull)
-                remote_digest = _get_remote_digest(image_tag)
+                # Remote digest (via OCI registry API — no pull). Only attempted
+                # when GHCR is reachable + authenticated; otherwise skip the
+                # network call entirely so this endpoint stays fast.
+                remote_digest = _get_remote_digest(image_tag) if remote_available else None
 
-                if current_digest is None or remote_digest is None:
+                if not remote_available:
+                    has_update = False
+                    check_error = remote_error or "ghcr_unavailable"
+                elif current_digest is None or remote_digest is None:
                     has_update = False
                     check_error = "digest_unavailable"
                 else:
@@ -703,6 +696,7 @@ def check_all_updates():
             "checked": len(updates),
             "updates_available": sum(1 for u in updates if u["has_update"]),
             "services": updates,
+            "check_error": remote_error,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
