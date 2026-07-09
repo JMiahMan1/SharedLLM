@@ -233,23 +233,57 @@ def test_raven_new_workspace_server_creates_repo(internal_client):
 
         # 4. Raven writes the game and pushes to the server-created repo (no repo creation needed).
         mission = (
-            f"Raven, in workspace '{workspace_id}': the GitHub repository already exists and is "
-            f"cloned. Write a file 'game.py' containing a simple Python number-guessing game, "
-            f"commit game.py, and push to the default branch. Do not create a new repository. "
+            f"Raven, perform the following mission in workspace '{workspace_id}':\n"
+            f"1. Use your WorkspaceFileWriteRequest tool to write a file named 'game.py' into this "
+            f"workspace containing a simple Python number-guessing game.\n"
+            f"2. Use your WorkspaceShellRequest tool to run these git commands from the workspace "
+            f"directory: `git add game.py && git commit -m 'Add number-guessing game' && "
+            f"git push -u origin HEAD`.\n"
+            f"3. The GitHub repository already exists and is cloned — do NOT create a new repository.\n"
             f"Do not ask questions. Report the final repository URL when done."
         )
         print(f"\n[raven] submitting write+push mission (repo={repo_name})")
         data = _run_raven(internal_client, workspace_id, mission)
         print(f"   - Raven final status: {data.get('status')}")
 
+        # Diagnostics: list what Raven actually wrote into the workspace.
+        flist = internal_client.post(
+            f"{WORKSPACE_RUNTIME_URL}/files/list",
+            json={"workspace_id": workspace_id, "relative_path": ".", "recursive": True, "user_context": {"user": "default", "is_admin": True}},
+        )
+        print(f"   - workspace file list status={flist.status_code}")
+        if flist.status_code == 200:
+            for e in flist.json().get("entries", []):
+                print(f"       {e.get('path')} ({'dir' if e.get('is_dir') else 'file'})")
+
         assert _repo_exists(repo_name), f"GitHub repo {repo_name} was not created by the service"
         print("   - repo exists on GitHub")
 
         content = _read_workspace_file(internal_client, workspace_id, "game.py")
+        print(f"   - workspace game.py read: {'found' if content else 'NOT FOUND'}")
+        if not content:
+            # Diagnostics: list the remote repo tree so we can see what Raven pushed.
+            with tempfile.TemporaryDirectory(prefix="raven_e2e_srv_") as tmp:
+                clone_dir = os.path.join(tmp, repo_name)
+                env = os.environ.copy()
+                env["GH_TOKEN"] = GH_TOKEN
+                result = subprocess.run(
+                    ["gh", "repo", "clone", f"{GH_OWNER}/{repo_name}", clone_dir],
+                    capture_output=True, text=True, env=env, timeout=120,
+                )
+                if result.returncode == 0:
+                    printed = subprocess.run(
+                        ["bash", "-c", f"cd '{clone_dir}' && git ls-files && echo '--- tracked above ---' && ls -la"],
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    print(f"   - cloned repo contents:\n{printed.stdout}{printed.stderr}")
+                else:
+                    print(f"   - clone failed: {result.stderr[:200].strip()}")
+
         assert content and "guess" in content.lower(), "Raven did not write game.py to the workspace"
         print("   - game.py present in workspace")
 
-        with tempfile.TemporaryDirectory(prefix="raven_e2e_srv_") as tmp:
+        with tempfile.TemporaryDirectory(prefix="raven_e2e_srv2_") as tmp:
             clone_dir = os.path.join(tmp, repo_name)
             env = os.environ.copy()
             env["GH_TOKEN"] = GH_TOKEN

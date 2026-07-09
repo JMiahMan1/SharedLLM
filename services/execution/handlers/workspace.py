@@ -354,6 +354,7 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
 
 async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
     """Executes an arbitrary shell command in the workspace."""
+    log.warning(f"[DEBUG shell] received command={getattr(req, 'command', '<NONE>')!r} commands={getattr(req, 'commands', '<NONE>')!r} dump={req.model_dump()}")
     try:
         workspace_id = getattr(req, "workspace_id", None)
         user_ctx = getattr(req, "user_context", None)
