@@ -2483,7 +2483,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "user": creds.user,
                     "is_admin": creds.is_admin,
                     "ha_url": creds.ha_url,
-                    "ha_token": creds.ha_token
+                    "ha_token": creds.ha_token,
+                    "github_token": getattr(creds, "github_token", None),
                 }
 
                 if action.lower() == "storageindexrequest":

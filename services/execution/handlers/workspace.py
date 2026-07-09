@@ -130,7 +130,8 @@ async def _run_command_async(
     cmd: list[str] | str,
     cwd: str | None = None,
     timeout: float = 30.0,
-    shell: bool = False
+    shell: bool = False,
+    env: dict | None = None
 ) -> tuple[int, str, str]:
     """Runs a subprocess asynchronously using asyncio to prevent blocking the event loop."""
     try:
@@ -139,14 +140,16 @@ async def _run_command_async(
                 cmd if isinstance(cmd, str) else " ".join(cmd),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=cwd
+                cwd=cwd,
+                env=env,
             )
         else:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=cwd
+                cwd=cwd,
+                env=env,
             )
 
         try:
@@ -417,8 +420,29 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # Enforce a max timeout of 300s
         safe_timeout = min(req.timeout, 300)
 
+        # Inject GitHub auth for gh/git commands so Raven can manage repos without
+        # a pre-seeded credential store (mirrors services/execution/handlers/gh.py).
+        cmd_env = os.environ.copy()
+        if base_command in ("gh", "git"):
+            gh_tok = None
+            if isinstance(user_ctx, dict):
+                gh_tok = user_ctx.get("github_token")
+            elif user_ctx is not None:
+                gh_tok = getattr(user_ctx, "github_token", None)
+            if gh_tok:
+                cmd_env["GH_TOKEN"] = gh_tok
+                cmd_env["GH_ENTERPRISE_TOKEN"] = gh_tok
+                cmd_env["GH_PROMPT_DISABLED"] = "1"
+                if base_command == "git":
+                    cmd_env["GIT_TERMINAL_PROMPT"] = "0"
+                    cmd_env["GIT_CONFIG_COUNT"] = "1"
+                    cmd_env["GIT_CONFIG_KEY_0"] = "credential.helper"
+                    cmd_env["GIT_CONFIG_VALUE_0"] = (
+                        f"!f() {{ echo username=x-access-token; echo password={gh_tok}; }}; f"
+                    )
+
         try:
-            rc, stdout, stderr = await _run_command_async(final_cmd, cwd=abs_cwd, timeout=safe_timeout, shell=True)
+            rc, stdout, stderr = await _run_command_async(final_cmd, cwd=abs_cwd, timeout=safe_timeout, shell=True, env=cmd_env)
         except TimeoutError:
             tb_str = traceback.format_exc()
             log.error(f"[WORKSPACE SHELL TIMEOUT] Command: {final_cmd}\n{tb_str}")
