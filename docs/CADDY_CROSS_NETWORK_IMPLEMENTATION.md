@@ -179,7 +179,7 @@ Identity service (bridge network)
 5. **docker-compose.yml**: Removed DNS_SYNC_API_URL from Execution
 6. **build-images.yml**: Removed dns-sync and dns-forwarder from build filters
 
-### Verification
+### Verifying the Relay
 - ✅ All DNS-sync references removed from configuration
 - ✅ Health endpoints working via Caddy
 - ✅ Execution Service can reach bridge services via localhost
