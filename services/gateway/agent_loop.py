@@ -400,6 +400,7 @@ def extract_action_json(text: str) -> dict | None:
         except Exception:
             pass
 
+    log.warning(f"[DEBUG-EXTRACT] returning None for input tail={repr(text[-200:])}")
     return None
 
 async def get_dynamic_llm_settings() -> dict:
