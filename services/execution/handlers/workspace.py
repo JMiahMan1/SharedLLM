@@ -119,7 +119,17 @@ def _require_capability(workspace: dict, capability: str):
 
 def resolve_safe_path(path: str, workspace_root: str = WORKSPACE_ROOT) -> str:
     """Ensure the path stays within workspace_root."""
-    # Remove leading slash if present to make it relative to root
+    workspace_root_abs = os.path.abspath(workspace_root)
+
+    # If the path is already an absolute path inside the workspace root (agents often
+    # write to the exact resolved_path they were told), use it directly.
+    cand = os.path.abspath(path)
+    if cand == workspace_root_abs or cand.startswith(workspace_root_abs + os.sep):
+        if not cand.startswith(workspace_root_abs):
+            raise ValueError(f"Path traversal detected: {path}")
+        return cand
+
+    # Otherwise treat the path as relative to the workspace root.
     rel_path = path.lstrip("/")
     # Drop a redundant leading "workspace" (or workspace-root basename) segment that
     # agents sometimes prepend, e.g. "/workspace/game.py" when the real root is
@@ -128,8 +138,8 @@ def resolve_safe_path(path: str, workspace_root: str = WORKSPACE_ROOT) -> str:
     if len(parts) > 1 and parts[0] in ("workspace", os.path.basename(workspace_root.rstrip("/"))):
         parts = parts[1:]
         rel_path = "/".join(parts)
-    abs_path = os.path.abspath(os.path.join(workspace_root, rel_path))
-    if not abs_path.startswith(os.path.abspath(workspace_root)):
+    abs_path = os.path.join(workspace_root_abs, rel_path)
+    if not abs_path.startswith(workspace_root_abs):
         raise ValueError(f"Path traversal detected: {path}")
     return abs_path
 
