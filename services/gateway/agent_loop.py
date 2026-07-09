@@ -316,6 +316,15 @@ def _normalize_tool(obj: dict) -> dict | None:
         if isinstance(first, dict):
             obj = {**first}
 
+    # Unwrap CapabilityRequest-style wrappers {capability: X, request: {...}}
+    if "capability" in obj and isinstance(obj.get("request"), dict):
+        inner = dict(obj["request"])
+        cap = obj.get("capability")
+        if cap:
+            inner.setdefault("@type", cap)
+            inner.setdefault("action", cap)
+        obj = inner
+
     # OpenAI-style nested function call
     func = obj.get("function")
     if isinstance(func, dict) and obj.get("type") == "function":
@@ -336,9 +345,16 @@ def _normalize_tool(obj: dict) -> dict | None:
         obj.pop("id", None)
 
     # Hoist common nested payload keys
-    for nest_key in ("arguments", "payload", "args", "json", "tool_call", "parameters"):
+    for nest_key in ("arguments", "payload", "args", "json", "tool_call", "parameters", "request"):
         if nest_key in obj and isinstance(obj[nest_key], dict):
             obj.update(obj.pop(nest_key))
+
+    # Normalize path-like keys to file_path for write/read schemas
+    if "file_path" not in obj:
+        for pk in ("path", "relative_path", "filepath"):
+            if pk in obj:
+                obj["file_path"] = obj.pop(pk)
+                break
 
     # Set action from any known discriminator
     if "action" not in obj:

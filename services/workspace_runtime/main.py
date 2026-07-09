@@ -326,6 +326,10 @@ class WorkspaceBootstrapRequest(WorkspaceRef):
     remote: str | None = None
     display_name: str | None = None
     create_if_missing: bool = False
+    create_repo: bool = False
+    repo_name: str | None = None
+    repo_private: bool = True
+    repo_description: str | None = None
 
 
 def _require_internal_secret(x_internal_secret: str | None) -> None:
@@ -601,6 +605,9 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
         workspace["resolved_user"] = resolved_user
     if identity:
         workspace["resolved_identity"] = identity
+    workspace["is_new"] = not bool(workspace.get("repo_url"))
+    workspace["has_repo"] = bool(workspace.get("repo_url"))
+    workspace["needs_repo"] = workspace["is_new"]
     return workspace
 
 
@@ -689,6 +696,9 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
         workspace["resolved_user"] = resolved_user
     if identity:
         workspace["resolved_identity"] = identity
+    workspace["is_new"] = not bool(workspace.get("repo_url"))
+    workspace["has_repo"] = bool(workspace.get("repo_url"))
+    workspace["needs_repo"] = workspace["is_new"]
     return workspace
 
 
@@ -1284,6 +1294,49 @@ def resolve_workspace(req: WorkspaceRef, x_internal_secret: str | None = Header(
     return {"status": "SUCCESS", "workspace": workspace}
 
 
+async def _create_github_repo(
+    identity: dict[str, Any],
+    repo_name: str,
+    private: bool = True,
+    description: str | None = None,
+) -> str:
+    """Create a new GitHub repository via the REST API using the resolved user token.
+
+    Returns the HTTPS clone URL. Raises HTTPException with a clear message on any
+    auth/creation failure so callers can surface it to the agent/user.
+    """
+    token = str(identity.get("github_token") or "").strip()
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot create GitHub repository: no github_token present in the identity context.",
+        )
+    github_url = str(identity.get("github_url") or "https://github.com").rstrip("/")
+    api_base = "https://api.github.com" if "github.com" in github_url else f"{github_url}/api/v3"
+
+    payload: dict[str, Any] = {"name": repo_name, "private": bool(private)}
+    if description:
+        payload["description"] = description
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
+        async with client.post(f"{api_base}/user/repos", json=payload, headers=headers) as resp:
+            if resp.status not in (200, 201):
+                text = await resp.text()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"GitHub repository creation failed ({resp.status}): {text[:400]}",
+                )
+            data = await resp.json()
+    clone_url = data.get("clone_url") or data.get("ssh_url")
+    if not clone_url:
+        raise HTTPException(status_code=500, detail="GitHub repository created but no clone URL was returned")
+    return clone_url
+
+
 @app.post("/workspaces/bootstrap")
 def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
@@ -1340,12 +1393,37 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
             raise HTTPException(status_code=409, detail=f"Workspace path exists and is not an empty git checkout: {target_path}")
 
     repo_url = str(req.repo_url or workspace.get("repo_url") or "").strip()
-    if not repo_url:
-        raise HTTPException(status_code=400, detail="Workspace bootstrap requires a repo_url")
-
     branch_name = str(req.branch or workspace.get("default_branch") or "main").strip()
     remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
     identity = workspace.get("resolved_identity") or {}
+
+    created_repo = False
+    if not repo_url and req.create_repo:
+        repo_name = _normalize_workspace_slug(
+            req.repo_name or _derive_repo_name(workspace.get("id", "")) or str(workspace.get("id"))
+        )
+        if not repo_name:
+            raise HTTPException(status_code=400, detail="Workspace bootstrap requires a repo_url or a repo_name to create one")
+        try:
+            repo_url = asyncio.run(_create_github_repo(identity, repo_name, req.repo_private, req.repo_description))
+        except HTTPException:
+            raise
+        except Exception as e:  # pragma: no cover - network/parse edge cases
+            raise HTTPException(status_code=400, detail=f"GitHub repository creation failed: {e}")
+        created_repo = True
+        workspace["repo_url"] = repo_url
+        with Session(engine) as session:
+            ws = session.get(Workspace, workspace["id"])
+            if ws:
+                ws.repo_url = repo_url
+                session.add(ws)
+                session.commit()
+
+    if not repo_url:
+        raise HTTPException(status_code=400, detail="Workspace bootstrap requires a repo_url (or create_repo=true)")
+
+    workspace["created_repo"] = created_repo
+    workspace["is_new"] = not bool(workspace.get("repo_url"))
 
     clone_args = ["git", "clone", "--single-branch"]
     if branch_name:
@@ -1377,6 +1455,7 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
         "workspace": workspace,
         "bootstrapped": True,
         "already_present": False,
+        "created_repo": created_repo,
         "remote": remote_name,
         "repo_url": repo_url,
         "branch": branch_name,
