@@ -1431,9 +1431,13 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
     workspace["created_repo"] = created_repo
     workspace["is_new"] = not bool(workspace.get("repo_url"))
 
-    clone_args = ["git", "clone", "--single-branch"]
-    if branch_name:
-        clone_args.extend(["--branch", branch_name])
+    clone_args = ["git", "clone"]
+    if not created_repo:
+        # Existing repos: clone only the requested branch. A freshly created (empty)
+        # repo has no branches yet, so clone it plainly and let the agent push to create one.
+        clone_args.append("--single-branch")
+        if branch_name:
+            clone_args.extend(["--branch", branch_name])
     clone_args.extend([repo_url, str(target_path)])
 
     result = _run_git_with_optional_askpass(

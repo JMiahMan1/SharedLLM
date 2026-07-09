@@ -87,11 +87,11 @@ def _run_raven(client: httpx.Client, workspace_id: str, mission: str) -> dict:
     return resp.json()
 
 
-def _create_workspace(client: httpx.Client, workspace_id: str, display_name: str, repo_url: str | None = REPO_URL) -> dict:
+def _create_workspace(client: httpx.Client, workspace_id: str, display_name: str, repo_url: str | None = REPO_URL, default_branch: str = "microservices") -> dict:
     payload = {
         "id": workspace_id,
         "display_name": display_name,
-        "default_branch": "microservices",
+        "default_branch": default_branch,
         "auto_pull_enabled": False,
         "auto_backup_enabled": False,
     }
@@ -112,9 +112,11 @@ def _get_workspace_record(client: httpx.Client, workspace_id: str) -> dict:
 
 
 def _bootstrap_workspace(client: httpx.Client, workspace_id: str, **extra) -> dict:
+    # Resolve identity via rag_user so the service fetches the real credentials
+    # (github_token) from the identity service — mirroring how the gateway injects them.
     resp = client.post(
         f"{WORKSPACE_RUNTIME_URL}/workspaces/bootstrap",
-        json={"workspace_id": workspace_id, "user_context": {"user": "default", "is_admin": True}, **extra},
+        json={"workspace_id": workspace_id, "rag_user": "default", **extra},
     )
     return resp
 
@@ -211,8 +213,8 @@ def test_raven_new_workspace_server_creates_repo(internal_client):
     workspace_id = f"raven_e2e_new_{ts}"
     repo_name = f"raven-e2e-srv-{ts}"
 
-    # 1. Create a NEW workspace with NO repo_url.
-    _create_workspace(internal_client, workspace_id, "Raven E2E New", repo_url=None)
+    # 1. Create a NEW workspace with NO repo_url (default branch = main for fresh repos).
+    _create_workspace(internal_client, workspace_id, "Raven E2E New", repo_url=None, default_branch="main")
     try:
         # 2. The workspace record must report this as a brand-new workspace needing a repo.
         ws = _get_workspace_record(internal_client, workspace_id)
