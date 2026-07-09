@@ -809,7 +809,7 @@ async def emit_log(level: str, message: str, context: dict | None = None):
             f"{LOGGING_SVC}/log",
             json={"service": "gateway", "level": level, "message": safe_message, "context": safe_context},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=1.0
+            timeout=aiohttp.ClientTimeout(total=1.0)
           )
     except Exception:
       pass
@@ -1102,7 +1102,7 @@ async def workspace_runtime_request(method: str, path: str, *, json_payload: dic
       json=json_payload,
       params=params,
       headers={"X-Internal-Secret": INTERNAL_SECRET},
-      timeout=120.0,
+      timeout=aiohttp.ClientTimeout(total=120.0),
     )
     if resp.status != 200:
       raise HTTPException(status_code=resp.status, detail=f"Workspace runtime request failed: {await resp.text()}")
@@ -1867,7 +1867,7 @@ async def fetch_device_history(creds: dict, entity_id: str, days: int = 1) -> li
             "days": days
           },
           headers={"X-Internal-Secret": INTERNAL_SECRET},
-          timeout=5.0
+          timeout=aiohttp.ClientTimeout(total=5.0)
       )
       if resp.status != 200:
           return []
@@ -1895,7 +1895,7 @@ async def get_entities(request: Request):
         resp = await get_http_client().get(
             f"{EXECUTION_SVC}/discovery/entities",
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=15.0,
+            timeout=aiohttp.ClientTimeout(total=15.0),
         )
         if resp.status != 200:
             return {"entities": []}
@@ -1922,7 +1922,7 @@ async def execute_command(endpoint: str, payload: dict) -> Any:
           f"{EXECUTION_SVC}{endpoint}",
           json=payload,
           headers={"X-Internal-Secret": INTERNAL_SECRET},
-          timeout=120.0
+          timeout=aiohttp.ClientTimeout(total=120.0)
       )
       data = await resp.json()
       if not isinstance(data, dict):
@@ -2028,7 +2028,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
                 deadline = asyncio.get_running_loop().time() + 120.0
                 while asyncio.get_running_loop().time() < deadline:
                     try:
-                        ps_resp = await slot_client.get(f"{ollama_url}/api/ps", timeout=3.0)
+                        ps_resp = await slot_client.get(f"{ollama_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
                         if ps_resp.status == 200:
                             slots = await ps_resp.json().get("slots", {})
                             if slots.get("available", 0) > 0:
@@ -2491,7 +2491,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     f"{svc_base}{endpoint}",
                     json=payload,
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=120.0
+                    timeout=aiohttp.ClientTimeout(total=120.0)
                 )
 
                 exec_msg = ""
@@ -2766,7 +2766,7 @@ async def chat_handler(request: Request, background_tasks=None):
             else:
                 svc_base = EXECUTION_SVC
 
-            fast_timeout = 120.0 if intent == "play_media" else 30.0
+            fast_timeout=aiohttp.ClientTimeout(total=120.0) if intent == "play_media" else 30.0
             async with aiohttp.ClientSession(timeout=fast_timeout) as client:
                 exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                 ans = await exec_resp.json().get("message", "Action completed.")
@@ -2806,7 +2806,7 @@ async def chat_handler(request: Request, background_tasks=None):
                     f"{RAG_SVC}/rag/search",
                     json={"collection_name": coll, "query": query, "user_id": user_id, "k": 15},
                     headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
-                    timeout=10.0
+                    timeout=aiohttp.ClientTimeout(total=10.0)
                 )
                 resp.raise_for_status()
                 res = await resp.json()
@@ -3678,7 +3678,7 @@ async def global_search(q: str, request: Request):
             f"{RAG_SVC}/rag/search",
             json={"query": q, "user_id": user_id, "collection_name": "nextcloud_files", "k": 5},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=10.0
+            timeout=aiohttp.ClientTimeout(total=10.0)
         )
         if resp.status != 200:
             return JSONResponse({"status": "ERROR", "message": "Search failed"}, status_code=502)
@@ -3940,7 +3940,7 @@ async def proxy_smoke_test(request: Request):
     resp = await client.post(
         f"{WORKSPACE_RUNTIME_SVC}/api/admin/tests/smoke",
         headers={"X-Internal-Secret": INTERNAL_SECRET},
-        timeout=65.0
+        timeout=aiohttp.ClientTimeout(total=65.0)
     )
     return JSONResponse(status_code=resp.status, content=await resp.json())
 
@@ -3951,7 +3951,7 @@ async def proxy_unit_tests(request: Request):
     resp = await client.post(
         f"{WORKSPACE_RUNTIME_SVC}/api/admin/tests/unit",
         headers={"X-Internal-Secret": INTERNAL_SECRET},
-        timeout=130.0
+        timeout=aiohttp.ClientTimeout(total=130.0)
     )
     return JSONResponse(status_code=resp.status, content=await resp.json())
 
@@ -3967,7 +3967,7 @@ async def proxy_admin_volumes(request: Request):
             f"{EXECUTION_SVC}/execute/volumes",
             json={"user_context": creds_data},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=120.0,
+            timeout=aiohttp.ClientTimeout(total=120.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 # ---- Autonomous Ops (Raven) Endpoints ----
@@ -6599,7 +6599,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
 
             # Wait for queue_updated event and extract stream URL from MA's queue state
             stream_url: str | None = None
-            stream_timeout = 15.0
+            stream_timeout=aiohttp.ClientTimeout(total=15.0)
             start_time = asyncio.get_event_loop().time()
 
             while (asyncio.get_event_loop().time() - start_time) < stream_timeout:
