@@ -48,7 +48,7 @@ CODE_EDITING_SHELL_COMMANDS = {
     "ln", "xargs",
 }
 VERIFICATION_SHELL_COMMANDS = {
-    "black", "eslint", "flake8", "pytest", "python", "python3", "git"
+    "black", "eslint", "flake8", "pytest", "python", "python3", "git", "gh"
 }
 # Truly dangerous system-level commands — never allowed regardless of context
 SYSTEM_BLOCKLIST_COMMANDS = {
