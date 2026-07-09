@@ -2203,6 +2203,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     first_nl = block_content.find('\n')
                     if first_nl != -1:
                         code_text = block_content[first_nl+1:]
+                        path = "auto"  # bound for all branches below
                         # Simple detection for unified diff
                         if "--- " in code_text and "+++ " in code_text and "@@ " in code_text:
                             # It's a diff
@@ -2558,6 +2559,21 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     return _make_ollama_response(ans, selected_model, "autonomous_mission")
 
 
+# Signals indicating a mission needs GitHub/Git authentication (remote repo access).
+# Used for a pre-flight gate so we fail fast with an actionable message instead of
+# letting Raven run blindly into auth failures mid-mission.
+_GITHUB_AUTH_SIGNALS = [
+    "github", "create a repo", "create repo", "new repository", "repository named",
+    "git push", "push to", "pull request", "pr ", "open a pr", "deploy",
+    "git remote", "clone", "gh repo",
+]
+
+
+def _mission_requires_github_auth(query: str) -> bool:
+    q = (query or "").lower()
+    return any(sig in q for sig in _GITHUB_AUTH_SIGNALS)
+
+
 @app.post("/api/chat")
 @app.post("/v1/chat/completions")
 async def chat_handler(request: Request, background_tasks=None):
@@ -2881,6 +2897,20 @@ async def chat_handler(request: Request, background_tasks=None):
         coding_model = await get_coding_model()
         selected_model = coding_model
         log.info("[ShadowExecution] Routing to autonomous AgentLoop...")
+
+        # Auth pre-flight: only gate when the mission actually needs GitHub/Git access.
+        if _mission_requires_github_auth(final_query) and not (
+            creds.github_token or creds.gitlab_token or creds.git_token
+        ):
+            msg = (
+                f"This mission requires GitHub/Git access (create repository, push, etc.), "
+                f"but user '{user_id}' has no Git token configured. Connect your GitHub account "
+                f"in Settings, then resubmit the mission."
+            )
+            if is_openai:
+                return _make_openai_response(msg, selected_model, "auth_required")
+            return _make_ollama_response(msg, selected_model, "auth_required")
+
         return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user") or "", creds)
 
     settings = await get_all_settings()

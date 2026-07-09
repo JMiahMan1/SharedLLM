@@ -87,19 +87,36 @@ def _run_raven(client: httpx.Client, workspace_id: str, mission: str) -> dict:
     return resp.json()
 
 
-def _create_workspace(client: httpx.Client, workspace_id: str, display_name: str) -> None:
-    resp = client.post(
-        f"{WORKSPACE_RUNTIME_URL}/workspaces",
-        json={
-            "id": workspace_id,
-            "display_name": display_name,
-            "repo_url": REPO_URL,
-            "default_branch": "microservices",
-            "auto_pull_enabled": False,
-            "auto_backup_enabled": False,
-        },
-    )
+def _create_workspace(client: httpx.Client, workspace_id: str, display_name: str, repo_url: str | None = REPO_URL) -> dict:
+    payload = {
+        "id": workspace_id,
+        "display_name": display_name,
+        "default_branch": "microservices",
+        "auto_pull_enabled": False,
+        "auto_backup_enabled": False,
+    }
+    if repo_url:
+        payload["repo_url"] = repo_url
+    resp = client.post(f"{WORKSPACE_RUNTIME_URL}/workspaces", json=payload)
     assert resp.status_code == 200, f"workspace create failed: {resp.text}"
+    return resp.json()
+
+
+def _resolve_workspace(client: httpx.Client, workspace_id: str) -> dict:
+    resp = client.post(
+        f"{WORKSPACE_RUNTIME_URL}/workspace/resolve",
+        json={"workspace_id": workspace_id, "user_context": {"user": "default", "is_admin": True}},
+    )
+    assert resp.status_code == 200, f"workspace resolve failed: {resp.text}"
+    return resp.json()["workspace"]
+
+
+def _bootstrap_workspace(client: httpx.Client, workspace_id: str, **extra) -> dict:
+    resp = client.post(
+        f"{WORKSPACE_RUNTIME_URL}/workspaces/bootstrap",
+        json={"workspace_id": workspace_id, "user_context": {"user": "default", "is_admin": True}, **extra},
+    )
+    return resp
 
 
 def _read_workspace_file(client: httpx.Client, workspace_id: str, path: str) -> str | None:
@@ -167,6 +184,70 @@ def test_raven_creates_repo_and_writes_game_via_chat(internal_client):
 
         # Bonus: clone and confirm the pushed file matches.
         with tempfile.TemporaryDirectory(prefix="raven_e2e_") as tmp:
+            clone_dir = os.path.join(tmp, repo_name)
+            env = os.environ.copy()
+            env["GH_TOKEN"] = GH_TOKEN
+            result = subprocess.run(
+                ["gh", "repo", "clone", f"{GH_OWNER}/{repo_name}", clone_dir],
+                capture_output=True, text=True, env=env, timeout=120,
+            )
+            if result.returncode == 0:
+                assert os.path.exists(os.path.join(clone_dir, "game.py")), "pushed game.py missing"
+                print("   - pushed game.py verified via clone")
+            else:
+                print(f"   - clone skipped ({result.stderr[:120].strip()})")
+    finally:
+        _delete_repo(repo_name)
+        try:
+            internal_client.delete(f"{WORKSPACE_RUNTIME_URL}/workspaces/{workspace_id}")
+        except Exception as e:  # pragma: no cover
+            print(f"   - workspace cleanup error: {e}")
+
+
+def test_raven_new_workspace_server_creates_repo(internal_client):
+    """NEW workspace (no repo) is detected as is_new/needs_repo; the service creates the
+    GitHub repo server-side (create_repo), then Raven writes + pushes without making a repo."""
+    ts = int(time.time())
+    workspace_id = f"raven_e2e_new_{ts}"
+    repo_name = f"raven-e2e-srv-{ts}"
+
+    # 1. Create a NEW workspace with NO repo_url.
+    _create_workspace(internal_client, workspace_id, "Raven E2E New", repo_url=None)
+    try:
+        # 2. Resolve must report this as a brand-new workspace needing a repo.
+        ws = _resolve_workspace(internal_client, workspace_id)
+        assert ws.get("is_new") is True, f"expected is_new=True, got {ws.get('is_new')}"
+        assert ws.get("needs_repo") is True, f"expected needs_repo=True, got {ws.get('needs_repo')}"
+        print("   - workspace detected as new / needs_repo")
+
+        # 3. Bootstrap with create_repo so the service creates the GitHub repo for us.
+        boot = _bootstrap_workspace(
+            internal_client, workspace_id, create_repo=True, repo_name=repo_name, repo_private=True,
+        )
+        assert boot.status_code == 200, f"bootstrap failed: {boot.text}"
+        boot_data = boot.json()
+        assert boot_data.get("created_repo") is True, f"expected created_repo=True, got {boot_data}"
+        print(f"   - server created GitHub repo {repo_name}")
+
+        # 4. Raven writes the game and pushes to the server-created repo (no repo creation needed).
+        mission = (
+            f"Raven, in workspace '{workspace_id}': the GitHub repository already exists and is "
+            f"cloned. Write a file 'game.py' containing a simple Python number-guessing game, "
+            f"commit game.py, and push to the default branch. Do not create a new repository. "
+            f"Do not ask questions. Report the final repository URL when done."
+        )
+        print(f"\n[raven] submitting write+push mission (repo={repo_name})")
+        data = _run_raven(internal_client, workspace_id, mission)
+        print(f"   - Raven final status: {data.get('status')}")
+
+        assert _repo_exists(repo_name), f"GitHub repo {repo_name} was not created by the service"
+        print("   - repo exists on GitHub")
+
+        content = _read_workspace_file(internal_client, workspace_id, "game.py")
+        assert content and "guess" in content.lower(), "Raven did not write game.py to the workspace"
+        print("   - game.py present in workspace")
+
+        with tempfile.TemporaryDirectory(prefix="raven_e2e_srv_") as tmp:
             clone_dir = os.path.join(tmp, repo_name)
             env = os.environ.copy()
             env["GH_TOKEN"] = GH_TOKEN

@@ -416,6 +416,16 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                 required_cap = "read"
             _require_capability(ws_details, required_cap)
 
+        # Proactive auth check: git push requires an authenticated remote.
+        if base_command == "git" and len(parsed) > 1 and parsed[1] == "push":
+            gh_tok_check = user_ctx.get("github_token") if isinstance(user_ctx, dict) else getattr(user_ctx, "github_token", None)
+            if not gh_tok_check:
+                return _fail(
+                    "Git push requires authentication, but no GitHub/Git token is present in the user context. "
+                    "Connect a GitHub account (Settings) so Raven can push.",
+                    {"error": "auth_required", "command": final_cmd},
+                )
+
         log.info(f"Executing shell command: {final_cmd} in {abs_cwd}")
         # Enforce a max timeout of 300s
         safe_timeout = min(req.timeout, 300)
