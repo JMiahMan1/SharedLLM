@@ -102,13 +102,13 @@ def _create_workspace(client: httpx.Client, workspace_id: str, display_name: str
     return resp.json()
 
 
-def _resolve_workspace(client: httpx.Client, workspace_id: str) -> dict:
-    resp = client.post(
-        f"{WORKSPACE_RUNTIME_URL}/workspace/resolve",
-        json={"workspace_id": workspace_id, "user_context": {"user": "default", "is_admin": True}},
-    )
-    assert resp.status_code == 200, f"workspace resolve failed: {resp.text}"
-    return resp.json()["workspace"]
+def _get_workspace_record(client: httpx.Client, workspace_id: str) -> dict:
+    resp = client.get(f"{WORKSPACE_RUNTIME_URL}/workspaces")
+    assert resp.status_code == 200, f"workspace list failed: {resp.text}"
+    for entry in resp.json().get("workspaces", []):
+        if entry.get("id") == workspace_id:
+            return entry
+    raise AssertionError(f"workspace {workspace_id} not found in list")
 
 
 def _bootstrap_workspace(client: httpx.Client, workspace_id: str, **extra) -> dict:
@@ -214,8 +214,8 @@ def test_raven_new_workspace_server_creates_repo(internal_client):
     # 1. Create a NEW workspace with NO repo_url.
     _create_workspace(internal_client, workspace_id, "Raven E2E New", repo_url=None)
     try:
-        # 2. Resolve must report this as a brand-new workspace needing a repo.
-        ws = _resolve_workspace(internal_client, workspace_id)
+        # 2. The workspace record must report this as a brand-new workspace needing a repo.
+        ws = _get_workspace_record(internal_client, workspace_id)
         assert ws.get("is_new") is True, f"expected is_new=True, got {ws.get('is_new')}"
         assert ws.get("needs_repo") is True, f"expected needs_repo=True, got {ws.get('needs_repo')}"
         print("   - workspace detected as new / needs_repo")
