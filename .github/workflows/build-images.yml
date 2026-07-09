@@ -61,27 +61,38 @@ jobs:
               - '.github/workflows/build-images.yml'
             ui:
               - 'services/ui/**'
+              - 'services/config.py'
               - '.github/workflows/build-images.yml'
             identity:
               - 'services/identity/**'
+              - 'services/config.py'
             gateway:
               - 'services/gateway/**'
+              - 'services/config.py'
             rag:
               - 'services/rag/**'
+              - 'services/config.py'
             execution:
               - 'services/execution/**'
+              - 'services/config.py'
             storage:
               - 'services/storage/**'
+              - 'services/config.py'
             logging:
               - 'services/logging/**'
+              - 'services/config.py'
             automation:
               - 'services/automation/**'
+              - 'services/config.py'
             workspace_runtime:
               - 'services/workspace_runtime/**'
+              - 'services/config.py'
             control_plane:
               - 'services/control_plane/**'
+              - 'services/config.py'
             dns:
               - 'services/dns/**'
+              - 'services/config.py'
               - '.github/workflows/build-images.yml'
 
       - name: Set Outputs
