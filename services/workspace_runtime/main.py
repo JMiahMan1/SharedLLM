@@ -1473,8 +1473,8 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
     if slug in RESERVED_WORKSPACE_NAMES:
         raise HTTPException(status_code=400, detail=f"Workspace ID '{ws.id}' is reserved. Cannot use: {', '.join(sorted(RESERVED_WORKSPACE_NAMES))}")
 
-    # Derive local_path if not provided
-    if not ws.local_path and ws.repo_url:
+    # Derive local_path if not provided (required by the NOT NULL column)
+    if not ws.local_path:
         ws.local_path = _derive_workspace_container_path(ws.id, ws.scope, ws.owner_user)
 
     with Session(engine) as session:
