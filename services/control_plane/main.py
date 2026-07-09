@@ -491,6 +491,22 @@ def check_all_updates():
     if not ghcr_token:
         ghcr_token = os.getenv("GITHUB_TOKEN", "")
 
+    # Without a registry token, every remote digest check returns 401 and can
+    # never detect an update — yet the per-service network loop still blocks the
+    # control plane threadpool for a long time (and the browser times out with
+    # ECONNABORTED). Short-circuit instantly so this endpoint returns in <1s.
+    if not ghcr_token:
+        log.warning(
+            "[updates] No GHCR/GitHub token available — skipping remote digest "
+            "checks (set GHCR_TOKEN to enable update detection)."
+        )
+        return {
+            "checked": 0,
+            "updates_available": 0,
+            "services": [],
+            "check_error": "ghcr_auth_unavailable",
+        }
+
     def _get_remote_digest(image_ref: str) -> str | None:
         """
         Fetch the manifest digest for an image reference from its registry
