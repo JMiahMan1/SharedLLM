@@ -286,3 +286,265 @@ async def test_proxy_show_embed_embeddings(client: TestClient, monkeypatch):
     assert len(openai_data["data"]) == 1
     assert openai_data["data"][0]["object"] == "embedding"
     assert openai_data["data"][0]["embedding"] == [0.1, 0.2, 0.3]
+
+
+async def test_config_models_merges_tags_and_v1_endpoints(client, monkeypatch):
+    from services.gateway import main
+
+    monkeypatch.setattr(
+        main, "get_all_settings",
+        AsyncMock(return_value={"llm_local_url": "http://ollama:11434/"}),
+    )
+
+    class MockResponse:
+        def __init__(self, status_code=200, payload=None):
+            self.status = status_code
+            self._payload = payload or {}
+
+        async def json(self):
+            return self._payload
+
+    class MockAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, **kwargs):
+            if url.endswith("/api/tags"):
+                return MockResponse(payload={"models": [{"name": "qwen3:8b"}, {"name": "llama3:8b"}]})
+            if url.endswith("/v1/models"):
+                return MockResponse(payload={"data": [{"id": "qwen3:8b"}, {"id": "phi3:mini"}]})
+            return MockResponse(status_code=404, payload={})
+
+    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
+
+    resp = client.get("/api/config/models")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "SUCCESS"
+    # Merged + de-duplicated across both endpoints
+    assert set(data["models"]) == {"qwen3:8b", "llama3:8b", "phi3:mini"}
+
+
+async def test_config_models_falls_back_to_v1_when_tags_empty(client, monkeypatch):
+    from services.gateway import main
+
+    monkeypatch.setattr(
+        main, "get_all_settings",
+        AsyncMock(return_value={"llm_local_url": "http://ollama:11434"}),
+    )
+
+    class MockResponse:
+        def __init__(self, status_code=200, payload=None):
+            self.status = status_code
+            self._payload = payload or {}
+
+        async def json(self):
+            return self._payload
+
+    class MockAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, **kwargs):
+            if url.endswith("/api/tags"):
+                return MockResponse(payload={"models": []})
+            if url.endswith("/v1/models"):
+                return MockResponse(payload={"data": [{"id": "deepseek:7b"}]})
+            return MockResponse(status_code=404, payload={})
+
+    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
+
+    resp = client.get("/api/config/models")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "SUCCESS"
+    assert data["models"] == ["deepseek:7b"]
+
+
+async def test_config_models_errors_when_url_missing(client, monkeypatch):
+    from services.gateway import main
+
+    monkeypatch.setattr(main, "get_all_settings", AsyncMock(return_value={}))
+
+    resp = client.get("/api/config/models")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ERROR"
+    assert data["models"] == []
+
+
+# --- DNS management (UI /api/dns routes) ---
+
+def _patch_dns_storage(monkeypatch, initial_mappings="{}"):
+    """Patch fetch_global_setting + the identity PATCH used to persist dns_mappings."""
+    state = {"mappings": initial_mappings}
+    captured = {}
+
+    async def fake_fetch(key, default=None):
+        if key == "dns_mappings":
+            return state["mappings"]
+        return default
+
+    monkeypatch.setattr("services.gateway.main.fetch_global_setting", fake_fetch)
+
+    class MockResp:
+        def __init__(self):
+            self.status = 200
+
+        async def json(self):
+            return {"status": "SUCCESS"}
+
+    class MockAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def patch(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = json
+            # Mirror what Identity would persist so subsequent reads reflect it.
+            if url.endswith("/api/settings/dns_mappings"):
+                state["mappings"] = json["value"]
+            return MockResp()
+
+    monkeypatch.setattr("services.gateway.main.aiohttp.ClientSession",
+                        lambda timeout=None: MockAsyncClient())
+    return state, captured
+
+
+def test_dns_list_empty_when_no_mappings(client, monkeypatch):
+    _patch_dns_storage(monkeypatch)
+    resp = client.get("/api/dns")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_dns_crud_roundtrip(client, monkeypatch):
+    _patch_dns_storage(monkeypatch)
+
+    created = client.post("/api/dns", json={
+        "domain": "home.lan", "record_type": "A", "values": ["192.168.1.50"], "ttl": 300,
+    })
+    assert created.status_code == 200
+    rec = created.json()
+    assert rec["domain"] == "home.lan"
+    assert rec["values"] == ["192.168.1.50"]
+    record_id = rec["id"]
+
+    listed = client.get("/api/dns").json()
+    assert len(listed) == 1
+
+    updated = client.put(f"/api/dns/{record_id}", json={"values": ["192.168.1.99"], "ttl": 600})
+    assert updated.status_code == 200
+    assert updated.json()["values"] == ["192.168.1.99"]
+    assert updated.json()["ttl"] == 600
+
+    deleted = client.delete(f"/api/dns/{record_id}")
+    assert deleted.status_code == 200
+    assert client.get("/api/dns").json() == []
+
+
+def test_dns_legacy_string_mapping_listed(client, monkeypatch):
+    from services.gateway import main
+    _patch_dns_storage(monkeypatch, initial_mappings='{"old.lan": "10.0.0.1"}')
+    listed = client.get("/api/dns").json()
+    assert len(listed) == 1
+    assert listed[0]["domain"] == "old.lan"
+    assert listed[0]["values"] == ["10.0.0.1"]
+
+
+async def test_v1_tools_discovery(client):
+    resp = client.get("/v1/tools")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["object"] == "list"
+    names = {t["function"]["name"] for t in data["tools"]}
+    assert "sharedllm_gh" in names
+    assert "sharedllm_image_generate" in names
+    assert "sharedllm_list_image_models" in names
+
+
+async def test_run_sharedllm_tool_calls_execution_service(monkeypatch):
+    from services.gateway import main
+    from services.gateway.tool_registry import resolve_tool_call, TOOL_GH
+
+    resolved = resolve_tool_call(TOOL_GH, {"args": ["repo", "view", "x"], "workspace_id": "ws"})
+
+    captured = {}
+
+    class MockResp:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def json(self):
+            return {"status": "SUCCESS"}
+
+    class MockAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def post(self, url, json=None, headers=None):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return MockResp()
+
+    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
+
+    result = await main.run_sharedllm_tool(resolved)
+    assert result["status"] == 200
+    assert "execute/gh" in captured["url"]
+    assert captured["headers"]["X-Internal-Secret"]
+
+
+async def test_run_sharedllm_tool_gets_image_models(monkeypatch):
+    from services.gateway import main
+    from services.gateway.tool_registry import resolve_tool_call, TOOL_LIST_IMAGE_MODELS
+
+    resolved = resolve_tool_call(TOOL_LIST_IMAGE_MODELS, {})
+    captured = {}
+
+    class MockResp:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def json(self):
+            return {"models": ["sd-1.5"]}
+
+    class MockAsyncClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def get(self, url, headers=None):
+            captured["url"] = url
+            return MockResp()
+
+    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
+
+    result = await main.run_sharedllm_tool(resolved)
+    assert result["status"] == 200
+    assert "v1/images/models" in captured["url"]

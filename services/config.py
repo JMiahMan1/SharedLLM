@@ -98,7 +98,7 @@ LOCAL_NOTES_ROOT = os.getenv("LOCAL_NOTES_ROOT")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
 FAST_PATH_THRESHOLD = _safe_float("FAST_PATH_THRESHOLD", 0.85)
 MODELS_DIR = os.getenv("MODELS_DIR")
-TEMP_MEDIA_DIR = os.getenv("TEMP_MEDIA_DIR")
+TEMP_MEDIA_DIR = _required("TEMP_MEDIA_DIR")
 SCRIPTS_DIR = os.getenv("SCRIPTS_DIR")
 LEGACY_ENV_PATH = os.getenv("LEGACY_ENV_PATH")
 CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR")
@@ -180,6 +180,7 @@ async def resolve_runtime_config():
         "dns_poll_interval": "DNS_POLL_INTERVAL",
         "embedding_model": "EMBEDDING_MODEL",
         "fast_path_threshold": "FAST_PATH_THRESHOLD",
+        "temp_media_dir": "TEMP_MEDIA_DIR",
         "execution_external_host": "EXECUTION_EXTERNAL_HOST",
     }
 

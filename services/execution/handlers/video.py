@@ -8,15 +8,14 @@ import urllib.parse
 
 import aiohttp
 
-from services.config import TEMP_MEDIA_DIR as _TEMP_MEDIA_DIR
+from services.config import TEMP_MEDIA_DIR
 from services.execution import ha_client
 from services.execution.schemas import ExecutionResult, VideoPlayRequest
 
 log = logging.getLogger("execution.video")
 
-# Video files stored on disk (streamed for large files)
-TEMP_VIDEO_DIR = _TEMP_MEDIA_DIR
-os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
+# Temp media files stored on disk (streamed for large files)
+os.makedirs(TEMP_MEDIA_DIR, exist_ok=True)
 
 
 def extract_video_url(query: str) -> str | None:
@@ -188,7 +187,7 @@ async def extract_audio_stream_url(video_url: str) -> tuple[str | None, str | No
         return None, None
 
 
-YT_COOKIES_PATH = os.path.join(TEMP_VIDEO_DIR, "youtube_cookies.txt")
+YT_COOKIES_PATH = os.path.join(TEMP_MEDIA_DIR, "youtube_cookies.txt")
 
 async def _ensure_youtube_cookies() -> str | None:
     """Use Playwright to extract YouTube cookies and save to Netscape format."""
@@ -228,7 +227,7 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
     import uuid
 
     media_id = f"vid-{uuid.uuid4().hex[:8]}"
-    tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
+    tmp_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
 
     try:
         cookies_path = await _ensure_youtube_cookies()
@@ -295,7 +294,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
     import uuid
 
     media_id = f"vid-roku-{uuid.uuid4().hex[:8]}"
-    tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
+    tmp_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
 
     try:
         cookies_path = await _ensure_youtube_cookies()
@@ -384,7 +383,7 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
     import uuid
 
     media_id = f"vid-roku-{uuid.uuid4().hex[:8]}"
-    tmp_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
+    tmp_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
 
     try:
         cookies_path = await _ensure_youtube_cookies()

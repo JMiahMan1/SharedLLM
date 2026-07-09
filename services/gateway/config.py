@@ -26,6 +26,9 @@ from services.config import (
 
 LLAMA_SERVER_PROXY_URL = os.getenv("LLAMA_SERVER_PROXY_URL")
 
+# alpaca Stable Diffusion image backend (exposed to external clients as a tool).
+ALPACA_SD_URL = os.getenv("ALPACA_SD_URL", "http://alpaca:8081")
+
 # Use runtime-resolved values (or fallback to env vars)
 IDENTITY_SVC = IDENTITY_SVC_URL
 EXECUTION_SVC = EXECUTION_SVC_URL
