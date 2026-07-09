@@ -225,7 +225,7 @@ async def fetch_global_setting(key: str, default: str = "") -> str:
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status == 200:
-                val = await resp.json().get("value", default)
+                val = (await resp.json()).get("value", default)
                 return val if val != "auto" else default
     except Exception as e:
         log.warning(f"Failed to fetch global setting '{key}': {e}")
