@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type AxiosRequestConfig } from 'axios';
 import { storageGetSync } from '../lib/storage';
 import { Capacitor } from '@capacitor/core';
 import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry } from '../types/widget';
@@ -166,6 +166,25 @@ apiClient.interceptors.request.use((config) => {
 
 let isLoggingOut = false;
 let lastConnectivityToast = 0;
+let lastFailedTarget = 'Jarvis server';
+
+// Derive a human-friendly description of which service/endpoint failed so the
+// reconnect toast can tell the user what is actually unreachable.
+function describeFailedTarget(config: AxiosRequestConfig | undefined, status?: number, code?: string): string {
+  const method = (config?.method || 'GET').toString().toUpperCase();
+  const path: string = config?.url?.toString() || '(unknown endpoint)';
+  let service = 'Jarvis server';
+  if (path.startsWith('/api/execute')) service = 'Execution service';
+  else if (path.startsWith('/api/media')) service = 'Media service';
+  else if (path.startsWith('/api/auth') || path.startsWith('/api/users')) service = 'Identity service';
+  else if (path.includes('ma-jsonrpc') || path.includes('sendspin')) service = 'Music Assistant';
+  else if (path.startsWith('/api/')) service = 'Gateway';
+
+  const detail = status ? ` (HTTP ${status})` : code ? ` (${code})` : '';
+  const target = `${service}${detail} — ${method} ${path}`;
+  lastFailedTarget = target;
+  return target;
+}
 
 apiClient.interceptors.response.use(
   (response) => response,
@@ -188,7 +207,8 @@ apiClient.interceptors.response.use(
 
         const toastId = 'api-reconnecting';
         const { toast: t } = await import('react-hot-toast');
-        t.loading(`Reconnecting to Jarvis server (attempt ${currentRetry + 1}/3)...`, {
+        const target = describeFailedTarget(config, status, code);
+        t.loading(`Reconnecting to ${target} (attempt ${currentRetry + 1}/3)...`, {
           id: toastId,
           style: {
             background: 'rgba(59, 130, 246, 0.2)',
@@ -239,7 +259,7 @@ apiClient.interceptors.response.use(
       if (now - lastConnectivityToast > 15000) {
         lastConnectivityToast = now;
         const { toast: t } = await import('react-hot-toast');
-        t.error('Cannot connect to Jarvis API server. Check your network connection or that the Identity service is running.', {
+        t.error(`Cannot reach ${lastFailedTarget}. Check your network or that the service is running.`, {
           duration: 8000,
           style: {
             background: 'rgba(239, 68, 68, 0.2)',
