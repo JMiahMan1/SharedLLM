@@ -133,15 +133,22 @@ test('Web Player playlist Next/Previous uses maPlayer (sendspin client/command)'
   page.on('console', (msg) => logs.push(msg.text()));
 
   const sendspinFrames: string[] = [];
+  const jsonrpcFrames: string[] = [];
   const allFrames: string[] = [];
   page.on('websocket', (ws) => {
-    const tag = ws.url().includes('/api/sendspin') ? 'SENDSPIN' : ws.url().includes('sendspin') ? 'SENDSPIN' : 'OTHER';
+    const url = ws.url();
+    const tag = url.includes('/api/sendspin') || url.includes('sendspin')
+      ? 'SENDSPIN'
+      : url.includes('ma-jsonrpc') || url.includes('ma_jsonrpc')
+        ? 'JSONRPC'
+        : 'OTHER';
     ws.on('framesent', (frame) => {
       const p = frame.payload;
       const s = typeof p === 'string' ? p : p && typeof (p as Buffer).toString === 'function' ? (p as Buffer).toString() : '';
       if (!s) return;
       allFrames.push(`[${tag}] ${s.slice(0, 140)}`);
       if (tag === 'SENDSPIN') sendspinFrames.push(s);
+      if (tag === 'JSONRPC') jsonrpcFrames.push(s);
     });
   });
 
@@ -179,26 +186,26 @@ test('Web Player playlist Next/Previous uses maPlayer (sendspin client/command)'
   await expect(nextBtn).toBeVisible({ timeout: 8000 });
   await nextBtn.click();
 
-  // Deterministic hard check: the `next` command was sent over the sendspin socket.
-  // (This is the actual fix — before, next sent players/cmd_next over the JSON-RPC
-  // socket, which did not advance the browser-audio web player's track.)
+  // Deterministic hard check: `players/cmd_next` was sent over the MA JSON-RPC
+  // socket (the same call MA's own web player uses). This is the actual fix —
+  // a raw sendspin controller `client/command` "next" does NOT advance the MA
+  // queue, so the track stayed the same.
   await expect
-    .poll(() => allFrames.some((f) => f.includes('"command":"next"') || f.includes('cmd_next')), { timeout: 10000 })
+    .poll(() => jsonrpcFrames.some((f) => f.includes('players/cmd_next')), { timeout: 10000 })
     .toBeTruthy();
-  const nextSent = allFrames.some((f) => f.includes('"command":"next"') || f.includes('cmd_next'));
-  console.log(`[NP] 'next' command observed on sendspin: ${nextSent}`);
-  allFrames.filter((f) => f.includes('"command":"next"')).slice(0, 3).forEach((f) => console.log(`[NP]   ${f}`));
+  const nextSent = jsonrpcFrames.some((f) => f.includes('players/cmd_next'));
+  console.log(`[NP] 'players/cmd_next' observed on JSON-RPC: ${nextSent}`);
+  jsonrpcFrames.filter((f) => f.includes('players/cmd_next')).slice(0, 3).forEach((f) => console.log(`[NP]   ${f}`));
 
   // Functional check (soft): the track should advance within the playlist.
-  let titleAfter = titleBefore;
   try {
     await expect
       .poll(async () => (await cardText()) !== titleBefore, { timeout: 10000 })
       .toBeTruthy();
   } catch { /* MA may not have advanced within the window; the frame check above is authoritative */ }
-  titleAfter = await cardText();
+  const titleAfter = await cardText();
   console.log(`[NP] title after next:  ${titleAfter}`);
-  console.log(`[NP] PASS: next command sent over sendspin (${titleBefore} -> ${titleAfter})`);
+  console.log(`[NP] PASS: players/cmd_next sent over JSON-RPC (${titleBefore} -> ${titleAfter})`);
 
   // Let the current track play past MA's "previous restarts" threshold.
   await page.waitForTimeout(12000);
@@ -208,13 +215,13 @@ test('Web Player playlist Next/Previous uses maPlayer (sendspin client/command)'
   await expect(prevBtn).toBeVisible({ timeout: 8000 });
   await prevBtn.click();
 
-  // Deterministic hard check: the `previous` command was sent over the sendspin socket.
+  // Deterministic hard check: `players/cmd_previous` was sent over the JSON-RPC socket.
   await expect
-    .poll(() => allFrames.some((f) => f.includes('"command":"previous"') || f.includes('cmd_previous')), { timeout: 10000 })
+    .poll(() => jsonrpcFrames.some((f) => f.includes('players/cmd_previous')), { timeout: 10000 })
     .toBeTruthy();
-  const prevSent = allFrames.some((f) => f.includes('"command":"previous"') || f.includes('cmd_previous'));
-  console.log(`[NP] 'previous' command observed on sendspin: ${prevSent}`);
+  const prevSent = jsonrpcFrames.some((f) => f.includes('players/cmd_previous'));
+  console.log(`[NP] 'players/cmd_previous' observed on JSON-RPC: ${prevSent}`);
   const titlePrev = await cardText();
   console.log(`[NP] title after previous: ${titlePrev}`);
-  console.log(`[NP] PASS: previous command sent over sendspin (${titleAfter} -> ${titlePrev})`);
+  console.log(`[NP] PASS: players/cmd_previous sent over JSON-RPC (${titleAfter} -> ${titlePrev})`);
 });
