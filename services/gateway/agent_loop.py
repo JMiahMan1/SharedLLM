@@ -360,13 +360,19 @@ def extract_action_json(text: str) -> dict | None:
     if isinstance(result, dict):
         return result
     elif isinstance(result, list):
-        # If we got an array, return the first dict element if it has an action key
+        # If we got an array, normalize the first dict element (handle @type discriminator)
         for item in result:
-            if isinstance(item, dict) and item.get("action"):
-                return item
-        # Return the first element as a wrapper
+            if isinstance(item, dict):
+                norm = dict(item)
+                if "action" not in norm and "@type" in norm:
+                    norm["action"] = norm["@type"]
+                if norm.get("action"):
+                    return norm
         if result and isinstance(result[0], dict):
-            return {"action": "tool_call", "payload": result[0]}
+            first = dict(result[0])
+            if "action" not in first and "@type" in first:
+                first["action"] = first["@type"]
+            return first
 
     # Priority 3: Outer-most braces (legacy fallback)
     first_brace = text.find("{")
@@ -381,6 +387,18 @@ def extract_action_json(text: str) -> dict | None:
                 return json.loads(cleaned)
             except Exception:
                 pass
+
+    # Priority 4: Any JSON object carrying a tool discriminator (@type/action/tool),
+    # even when wrapped in conversational text or a JSON array.
+    m = re.search(r'\{\s*"(@type|action|tool|type)"\s*:\s*"[^"]+"[^}]*\}', text, re.DOTALL)
+    if m:
+        try:
+            obj = json.loads(m.group(0))
+            if "action" not in obj and "@type" in obj:
+                obj["action"] = obj["@type"]
+            return obj
+        except Exception:
+            pass
 
     return None
 
