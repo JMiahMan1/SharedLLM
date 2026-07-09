@@ -70,21 +70,45 @@ def _gh_headers() -> dict:
     return {"Authorization": f"Bearer {GH_TOKEN}", "Accept": "application/vnd.github+json"}
 
 
-def _run_raven(client: httpx.Client, workspace_id: str, mission: str) -> dict:
-    """Submit a mission to Raven through the chat interface and return the response."""
-    resp = client.post(
-        f"{GATEWAY_URL}/api/chat",
-        json={
-            "query": mission,
-            "rag_user": "default",
-            "workspace_id": workspace_id,
-            "model": "coder",
-            "stream": False,
-        },
-        timeout=CHAT_TIMEOUT,
-    )
-    assert resp.status_code == 200, f"chat failed ({resp.status_code}): {resp.text[:500]}"
-    return resp.json()
+def _create_mission(client: httpx.Client, workspace_id: str | None, mission: str) -> int:
+    """Create a Raven mission via the queue (shows up in the mission queue)."""
+    body = {"query": mission}
+    if workspace_id:
+        body["workspace_id"] = workspace_id
+    resp = client.post(f"{GATEWAY_URL}/api/raven/missions", json=body, timeout=60.0)
+    assert resp.status_code == 200, f"mission create failed ({resp.status_code}): {resp.text[:500]}"
+    return int(resp.json()["mission"]["id"])
+
+
+def _wait_mission(client: httpx.Client, mission_id: int, timeout: float | None = None) -> dict:
+    """Poll a mission until it reaches a terminal state; return the mission record."""
+    timeout = timeout or CHAT_TIMEOUT
+    deadline = time.time() + timeout
+    last = None
+    while time.time() < deadline:
+        resp = client.get(f"{GATEWAY_URL}/api/raven/missions/{mission_id}", timeout=30.0)
+        if resp.status_code == 200:
+            last = resp.json()
+            if last.get("status") in ("completed", "failed", "dismissed"):
+                return last
+        time.sleep(10)
+    return last or {}
+
+
+def _run_raven(client: httpx.Client, workspace_id: str | None, mission: str) -> dict:
+    """Submit a Raven mission through the mission queue and wait for completion."""
+    mission_id = _create_mission(client, workspace_id, mission)
+    print(f"\n[raven] mission {mission_id} queued")
+
+    # Verify the mission shows up in the mission queue.
+    q = client.get(f"{GATEWAY_URL}/api/raven/missions", timeout=30.0)
+    if q.status_code == 200:
+        queue_ids = [m.get("id") for m in q.json() if isinstance(m, dict)]
+        print(f"   - mission in queue: {mission_id in queue_ids}")
+
+    result = _wait_mission(client, mission_id)
+    print(f"   - mission final status: {result.get('status')}")
+    return result
 
 
 def _create_workspace(client: httpx.Client, workspace_id: str, display_name: str, repo_url: str | None = REPO_URL, default_branch: str = "microservices") -> dict:
