@@ -2054,7 +2054,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         log.warning(f"[ShadowExecution] Failed: {type(e).__name__}: {e}")
     return ""
 
-async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials) -> Any:
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, workspace_id: str | None = None) -> Any:
     """
     Raven Autonomous Loop (Strategy 7 & 8 implementation).
     Supports multi-turn tool execution: call Ollama, execute tool, feed result back, repeat.
@@ -2488,6 +2488,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "github_token": getattr(creds, "github_token", None),
                 }
 
+                # Inject the resolved workspace_id into workspace-scoped tool calls so the
+                # execution service operates on the correct repository directory.
+                if workspace_id and isinstance(payload, dict):
+                    _ws_actions = {
+                        "workspacefilereadrequest", "workspacefilewriterequest",
+                        "workspacefilepatchrequest", "workspaceshellrequest",
+                        "workspacesearchrequest", "workspacelintrequest",
+                        "gitoperationrequest", "workspacebootstraprequest",
+                    }
+                    if lookup_action in _ws_actions and "workspace_id" not in payload:
+                        payload["workspace_id"] = workspace_id
+
                 if action.lower() == "storageindexrequest":
                     # Specialized payload for storage indexing
                     payload = {
@@ -2911,7 +2923,17 @@ async def chat_handler(request: Request, background_tasks=None):
                 return _make_openai_response(msg, selected_model, "auth_required")
             return _make_ollama_response(msg, selected_model, "auth_required")
 
-        return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user") or "", creds)
+        # Resolve the workspace this agentic mission runs in (default if none assigned).
+        _ws_id = str(body.get("workspace_id") or "").strip() or None
+        try:
+            from services.gateway.agent_loop import resolve_mission_workspace
+            _ws = await resolve_mission_workspace(user_id, _ws_id)
+            if _ws:
+                _ws_id = _ws.get("id") or _ws_id
+        except Exception as e:
+            log.warning(f"[chat] workspace resolve failed: {e}")
+
+        return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user") or "", creds, workspace_id=_ws_id)
 
     settings = await get_all_settings()
     _vram_params = await get_vram_safe_params(selected_model, settings)
@@ -4447,6 +4469,7 @@ class UserMissionRequest(BaseModel):
     slug: str | None = None
     priority: int = 1
     coding_model: str | None = None
+    workspace_id: str | None = None
 
 @app.post("/api/raven/missions")
 async def create_user_mission(body: UserMissionRequest, request: Request):
@@ -4465,7 +4488,8 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         "priority": body.priority,
         "proposed_mission": body.query,
         "coding_model": (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or coding_model,
-        "user_id": creds.get("user_id")
+        "user_id": creds.get("user_id"),
+        "workspace_id": body.workspace_id,
     }
 
     async with borrow_http_client() as client:
@@ -4492,7 +4516,8 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
             "system": system_prompt,
             "stream": False,
             "creds": creds,
-            "_mission_id": mission_data["id"]
+            "_mission_id": mission_data["id"],
+            "workspace_id": body.workspace_id,
         })
 
         # Update status to queued

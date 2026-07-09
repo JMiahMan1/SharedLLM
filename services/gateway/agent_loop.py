@@ -653,7 +653,86 @@ def should_persist_learning(result: str) -> bool:
     return True
 
 
-async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False) -> Any:
+async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | None = None) -> dict | None:
+    """Resolve (or create) the workspace an agentic Raven mission should run in.
+
+    - If ``assigned_workspace_id`` is given, resolve/bootstrap and return it.
+    - Otherwise reuse an available user-scoped workspace, or create a new DEFAULT
+      workspace for the user if none exists.
+
+    Workspaces are just sandboxed directories for running commands; they do NOT
+    require a git repository unless one is explicitly requested (``create_repo``).
+    """
+    async def _resolve_one(wid: str) -> dict | None:
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+                res = await client.post(
+                    f"{WORKSPACE_RUNTIME_SVC}/workspace/resolve",
+                    json={"workspace_id": wid, "user_context": {"user": user_id, "is_admin": False}},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                )
+                if res.status == 200:
+                    return (await res.json()).get("workspace")
+        except Exception as e:
+            log.warning(f"[workspace] resolve {wid} failed: {e}")
+        return None
+
+    if assigned_workspace_id:
+        ws = await _resolve_one(assigned_workspace_id)
+        if ws:
+            return ws
+        # Not found — try to bootstrap it (creates the repo only if requested).
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20.0)) as client:
+                boot = await client.post(
+                    f"{WORKSPACE_RUNTIME_SVC}/workspaces/bootstrap",
+                    json={"workspace_id": assigned_workspace_id, "rag_user": user_id},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                )
+                if boot.status == 200:
+                    return (await boot.json()).get("workspace")
+        except Exception as e:
+            log.warning(f"[workspace] bootstrap {assigned_workspace_id} failed: {e}")
+        return None
+
+    # No assigned workspace: reuse an available one, else create a default (no git required).
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            lst = await client.get(
+                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+                params={"rag_user": user_id},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            workspaces = (await lst.json()).get("workspaces", []) if lst.status == 200 else []
+    except Exception as e:
+        log.warning(f"[workspace] list failed: {e}")
+        workspaces = []
+    for item in workspaces:
+        if isinstance(item, dict) and item.get("available") and str(item.get("scope") or "user") == "user":
+            return item
+
+    default_id = f"ws_{user_id}"
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20.0)) as client:
+            await client.post(
+                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+                json={
+                    "id": default_id,
+                    "display_name": f"{user_id} default workspace",
+                    "default_branch": "microservices",
+                    "scope": "user",
+                    "owner_user": user_id,
+                    "auto_pull_enabled": False,
+                    "auto_backup_enabled": False,
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+    except Exception:
+        pass
+    return await _resolve_one(default_id)
+
+
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None) -> Any:
     full_audit_log = []
 
     async def stream_event(event_type: str, data: str):
@@ -672,6 +751,30 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await _stream_redis.publish(f"raven:mission:stream:{mission_id}", msg_str)
         except Exception as e:
             log.warning(f"Failed to stream event: {e}")
+
+    # 0. Resolve the workspace this agentic mission runs in.
+    # Agentic tasks that run system commands MUST operate inside a workspace. If the
+    # caller assigned one we use it; otherwise we default to (or create) a workspace.
+    try:
+        if workspace_id:
+            _ws = await resolve_mission_workspace(rag_user, workspace_id)
+        else:
+            _ws = await resolve_mission_workspace(rag_user, None)
+    except Exception as e:
+        log.warning(f"[AgentLoop] workspace resolve failed: {e}")
+        _ws = None
+    if _ws:
+        workspace_id = _ws.get("id") or workspace_id
+        _ws_path = _ws.get("resolved_path") or ""
+        if _ws_path:
+            full_system += (
+                f"\n\n[WORKSPACE CONTEXT]\n"
+                f"You are operating inside workspace '{workspace_id}'.\n"
+                f"Absolute workspace path on disk: {_ws_path}\n"
+                f"Write files relative to this path (e.g. 'game.py' for the root) or use "
+                f"the absolute path above. Shell commands already run inside this workspace "
+                f"directory — do NOT prepend 'cd' to it."
+            )
 
     # 1. Fetch dynamic settings and resolve active provider/model
     settings = await get_dynamic_llm_settings()
@@ -1321,6 +1424,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "gitlab_token": creds.gitlab_token,
                     "git_token": creds.git_token,
                 }
+
+                # Inject the resolved workspace_id into workspace-scoped tool calls so the
+                # execution service operates on the correct repository directory.
+                if workspace_id and isinstance(payload, dict):
+                    _ws_actions = {
+                        "workspacefilereadrequest", "workspacefilewriterequest",
+                        "workspacefilepatchrequest", "workspaceshellrequest",
+                        "workspacesearchrequest", "workspacelintrequest",
+                        "gitoperationrequest", "workspacebootstraprequest",
+                    }
+                    if lookup_action in _ws_actions and "workspace_id" not in payload:
+                        payload["workspace_id"] = workspace_id
 
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120.0)) as client:
                     # Secure Log Redaction
