@@ -563,37 +563,44 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
   }, [sendJsonRpc, setError]);
 
-  // Skip to the next track via the SendspinPlayer (client/command over the sendspin socket)
+  // Skip to the next track. Use MA's canonical players/cmd_next (the same call
+  // MA's own web player uses — see music-assistant/frontend SendspinPlayer.vue)
+  // with the browser/sendspin player id. This advances the MA queue for the web
+  // player so the next item is streamed over sendspin. A raw sendspin controller
+  // `client/command` "next" does NOT reliably advance the MA queue, which left
+  // Next/Previous stuck on the same track.
   const cmdNext = useCallback(async (_player_id?: string) => {
-    if (!playerRef.current) {
-      console.error('[MAWebPlayer] No player for cmd_next');
+    const pid = _player_id || playerIdRef.current;
+    if (!pid) {
+      console.error('[MAWebPlayer] No player_id for cmd_next');
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd_next');
-      playerRef.current.sendCommand('next');
+      console.log('[MAWebPlayer] cmd_next (players/cmd_next):', pid);
+      await sendJsonRpc('players/cmd_next', { player_id: pid }, false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] cmd_next failed:', msg);
       setError('cmd_next failed: ' + msg);
     }
-  }, [setError]);
+  }, [sendJsonRpc, setError]);
 
-  // Skip to the previous track via the SendspinPlayer (client/command over the sendspin socket)
+  // Skip to the previous track via MA players/cmd_previous (see cmdNext).
   const cmdPrevious = useCallback(async (_player_id?: string) => {
-    if (!playerRef.current) {
-      console.error('[MAWebPlayer] No player for cmd_previous');
+    const pid = _player_id || playerIdRef.current;
+    if (!pid) {
+      console.error('[MAWebPlayer] No player_id for cmd_previous');
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd_previous');
-      playerRef.current.sendCommand('previous');
+      console.log('[MAWebPlayer] cmd_previous (players/cmd_previous):', pid);
+      await sendJsonRpc('players/cmd_previous', { player_id: pid }, false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] cmd_previous failed:', msg);
       setError('cmd_previous failed: ' + msg);
     }
-  }, [setError]);
+  }, [sendJsonRpc, setError]);
 
   /* ── Convenience Methods ───────────────────────────────────────────── */
 
