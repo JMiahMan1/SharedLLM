@@ -3,6 +3,7 @@ import asyncio
 import difflib
 import logging
 import os
+import re
 import shlex
 import traceback
 
@@ -58,7 +59,6 @@ SYSTEM_BLOCKLIST_COMMANDS = {
     "iptables", "ip6tables", "ufw", "firewall-cmd",
     "fdisk", "parted", "losetup",
 }
-SHELL_BLOCKLIST_TOKENS = {">", ">>", "<"}
 
 def _ok(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service="workspace", detail=detail)
@@ -121,6 +121,13 @@ def resolve_safe_path(path: str, workspace_root: str = WORKSPACE_ROOT) -> str:
     """Ensure the path stays within workspace_root."""
     # Remove leading slash if present to make it relative to root
     rel_path = path.lstrip("/")
+    # Drop a redundant leading "workspace" (or workspace-root basename) segment that
+    # agents sometimes prepend, e.g. "/workspace/game.py" when the real root is
+    # "/workspaces/<repo>". This keeps relative paths landing at the workspace root.
+    parts = rel_path.split("/")
+    if len(parts) > 1 and parts[0] in ("workspace", os.path.basename(workspace_root.rstrip("/"))):
+        parts = parts[1:]
+        rel_path = "/".join(parts)
     abs_path = os.path.abspath(os.path.join(workspace_root, rel_path))
     if not abs_path.startswith(os.path.abspath(workspace_root)):
         raise ValueError(f"Path traversal detected: {path}")
@@ -354,7 +361,6 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
 
 async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
     """Executes an arbitrary shell command in the workspace."""
-    log.warning(f"[DEBUG shell] received command={getattr(req, 'command', '<NONE>')!r} commands={getattr(req, 'commands', '<NONE>')!r} dump={req.model_dump()}")
     try:
         workspace_id = getattr(req, "workspace_id", None)
         user_ctx = getattr(req, "user_context", None)
@@ -373,10 +379,9 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         else:
             return _fail("Neither 'command' nor 'commands' provided")
 
-        # Check blocklist before parsing
-        if any(token in final_cmd for token in SHELL_BLOCKLIST_TOKENS):
-            return _fail("Shell operators are not allowed for autonomous workspace commands")
-
+        # The workspace runs inside an isolated Docker container, so every command is
+        # already sandboxed. There is intentionally NO command allow/block list here —
+        # Raven may run any shell command (git, build tools, redirects, etc.).
         parsed = shlex.split(final_cmd)
         if not parsed:
             return _fail("Shell command is empty")
@@ -384,23 +389,14 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         base_command = parsed[0]
         normalized_command = f"{base_command}-{parsed[1]}" if base_command == "git" and len(parsed) > 1 else base_command
 
-        if normalized_command in SYSTEM_BLOCKLIST_COMMANDS:
-            return _fail(
-                f"Shell command '{normalized_command}' is blocked: dangerous system-level operation not permitted."
-            )
-
-        allowed = (
-            normalized_command in READ_ONLY_SHELL_COMMANDS
-            or normalized_command in CODE_EDITING_SHELL_COMMANDS
-            or base_command in VERIFICATION_SHELL_COMMANDS
-        )
-        if not allowed:
-            return _fail(
-                f"Shell command '{normalized_command}' is not allowed. Allowed commands: read-only tools (cat, ls, grep, etc.), code editing tools (touch, mkdir, etc.), and verification tools (pytest). Use read/search/write/patch tools for complex operations."
-            )
-
-        if base_command in {"python", "python3"} and parsed[1:3] != ["-m", "pytest"]:
-            return _fail("Only pytest execution is allowed through python shell commands")
+        # Strip a redundant leading "cd <dir> &&" — the command already executes with
+        # its cwd at the workspace root, and agents often prepend "cd /workspace".
+        _cd = re.match(r"^\s*cd\s+(\S+)(?:\s*(?:&&|;)\s*)?", final_cmd)
+        if _cd and _cd.group(1) in ("/workspace", ws_root, os.path.dirname(ws_root)):
+            final_cmd = final_cmd[_cd.end():].lstrip()
+            parsed = shlex.split(final_cmd)
+            if parsed:
+                base_command = parsed[0]
 
         # Enforce capability constraints on the workspace
         if ws_details:
