@@ -5023,29 +5023,47 @@ async def _load_dns_mappings() -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _record_from(hostname: str, entry: Any) -> dict:
+def _normalize_dns_values(entry: Any) -> list[str]:
+    """Flatten a DNS mapping entry (str | list | dict) into a clean list of strings."""
+    if isinstance(entry, str):
+        return [entry] if entry.strip() else []
+    if isinstance(entry, list):
+        return [str(v).strip() for v in entry if str(v).strip()]
     if isinstance(entry, dict):
-        ip = entry.get("ip") or (entry.get("values") or [""])[0] or ""
-        return {
-            "id": _dns_id(hostname),
-            "domain": hostname,
-            "record_type": entry.get("record_type", "A"),
-            "values": [ip] if ip else (entry.get("values") or []),
-            "ttl": entry.get("ttl", 300),
-            "is_active": entry.get("is_active", True),
-            "created_at": entry.get("created_at", ""),
-            "updated_at": entry.get("updated_at", ""),
-        }
-    # Legacy plain-string mapping (hostname -> ip)
+        vals = entry.get("values")
+        if isinstance(vals, list):
+            return [str(v).strip() for v in vals if str(v).strip()]
+        ip = entry.get("ip")
+        if isinstance(ip, str):
+            return [ip.strip()] if ip.strip() else []
+        if isinstance(ip, list):
+            return [str(v).strip() for v in ip if str(v).strip()]
+    return []
+
+
+def _record_from(hostname: str, entry: Any) -> dict:
+    values = _normalize_dns_values(entry)
+    if isinstance(entry, dict):
+        record_type = entry.get("record_type", "A")
+        ttl = entry.get("ttl", 300)
+        is_active = entry.get("is_active", True)
+        created_at = entry.get("created_at", "")
+        updated_at = entry.get("updated_at", "")
+    else:
+        record_type = "A"
+        ttl = 300
+        is_active = True
+        created_at = ""
+        updated_at = ""
     return {
         "id": _dns_id(hostname),
         "domain": hostname,
-        "record_type": "A",
-        "values": [entry] if entry else [],
-        "ttl": 300,
-        "is_active": True,
-        "created_at": "",
-        "updated_at": "",
+        "record_type": record_type,
+        "values": values,
+        "ttl": ttl,
+        "is_active": is_active,
+        "created_at": created_at,
+        "updated_at": updated_at,
     }
 
 
@@ -5087,6 +5105,7 @@ async def ui_create_dns_record(request: Request):
     mappings[domain] = {
         "ip": ip,
         "record_type": body.get("record_type", "A"),
+        "values": values,
         "ttl": int(body.get("ttl", 300) or 300),
         "is_active": bool(body.get("is_active", True)),
         "created_at": now,
@@ -5117,8 +5136,10 @@ async def ui_update_dns_record(record_id: int, request: Request):
     if "record_type" in body:
         entry["record_type"] = body["record_type"]
     if body.get("values"):
-        entry["ip"] = body["values"][0]
-        entry["values"] = body["values"]
+        vals = [str(v).strip() for v in body["values"] if str(v).strip()]
+        if vals:
+            entry["ip"] = vals[0]
+            entry["values"] = vals
     if "ttl" in body:
         entry["ttl"] = int(body["ttl"] or 300)
     if "is_active" in body:
