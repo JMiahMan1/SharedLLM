@@ -2096,16 +2096,23 @@ async def search_ma(user_id: str = "", query: str = "", media_type: str = "", li
         mass_url = creds.get("mass_url") if creds else None
         mass_token = creds.get("mass_token") if creds else None
 
-        # Primary path: direct MA REST API using the MA token (no HA dependency)
+        # Primary path: direct MA search via the MA token (no HA dependency).
+        # This is authoritative: the MA token search uses config.providers=["library"]
+        # and is the only reliable path (the HA music_assistant.search service and the
+        # MA REST /api endpoint are unreliable in MA 2.9.x). Return its results directly,
+        # including an empty list when there are no matches — do NOT fall through to HA
+        # on an empty result, which previously produced spurious FAILURE responses.
         if mass_url and mass_token:
             from services.execution.handlers.mass_client import search as _direct_search
-            results = await _direct_search(
-                mass_url, mass_token, query,
-                limit=limit,
-                media_types=[media_type.lower()] if media_type else None,
-            )
-            if results:
+            try:
+                results = await _direct_search(
+                    mass_url, mass_token, query,
+                    limit=limit,
+                    media_types=[media_type.lower()] if media_type else None,
+                )
                 return {"status": "SUCCESS", "results": results, "query": query, "source": "music_assistant"}
+            except Exception as e:
+                log.warning(f"[ma/search] direct MA search failed, falling back to HA: {e}")
 
         # Fallback: HA music_assistant.search service
         ha_url = creds.get("ha_url") if creds else None
