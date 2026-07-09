@@ -507,6 +507,43 @@ def check_all_updates():
             "check_error": "ghcr_auth_unavailable",
         }
 
+    # Pre-flight GHCR authentication probe.
+    # A (possibly stale/invalid) ghcr_token may be resolved from identity, which
+    # defeats the no-token short-circuit above. Hitting the registry auth endpoint
+    # once tells us whether the token is actually usable BEFORE we loop over every
+    # container — otherwise each _get_remote_digest call blocks on a failing
+    # 401/TLS round-trip (~15s each) and this endpoint hangs ~60s, triggering the
+    # browser's ECONNABORTED.
+    def _ghcr_auth_ok(token: str) -> bool:
+        import base64
+
+        url = "https://ghcr.io/v2/"
+        req = urllib.request.Request(url, method="GET")
+        token_b64 = base64.b64encode(f":{token}".encode()).decode()
+        req.add_header("Authorization", f"Basic {token_b64}")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                # 200 = authenticated and usable; 401/403 = unusable token.
+                return resp.status == 200
+        except urllib.error.HTTPError as e:
+            return e.code == 200
+        except Exception:
+            # Registry unreachable (timeout/DNS) — don't pretend auth failed.
+            # Fall through to the per-service loop so it reports its own errors.
+            return True
+
+    if not _ghcr_auth_ok(ghcr_token):
+        log.warning(
+            "[updates] GHCR token present but authentication failed (401/403) — "
+            "skipping remote digest checks."
+        )
+        return {
+            "checked": 0,
+            "updates_available": 0,
+            "services": [],
+            "check_error": "ghcr_auth_unavailable",
+        }
+
     def _get_remote_digest(image_ref: str) -> str | None:
         """
         Fetch the manifest digest for an image reference from its registry
