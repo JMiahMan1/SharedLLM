@@ -222,6 +222,22 @@ const DeviceSelector = ({
 
 /* ── player header ──────────────────────────────────────────────────── */
 
+// Cover image that gracefully falls back to nothing (so the parent shows the
+// gradient + music-note icon) if the proxied URL fails to load. Keyed by `src`
+// at the call site, so changing the cover remounts this and clears `failed`.
+function CoverImage({ src, alt }: { src: string; alt: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <img
+      src={src}
+      alt={alt}
+      onError={() => setFailed(true)}
+      className="w-full h-full object-cover relative z-10"
+    />
+  );
+}
+
 const NowPlayingCard = ({
   mediaStatus,
   selectedTarget,
@@ -291,7 +307,7 @@ const NowPlayingCard = ({
           {coverUrl ? (
             <>
               <div className="absolute inset-0 bg-cyan-500/20 blur-xl opacity-50 group-hover:opacity-80 transition-opacity" />
-              <img src={coverUrl} alt="Cover art" className="w-full h-full object-cover relative z-10" />
+              <CoverImage key={coverUrl} src={coverUrl} alt="Cover art" />
             </>
           ) : nowPlaying ? (
             <Music size={28} className="text-cyan-400" />
@@ -1402,6 +1418,9 @@ const Media = () => {
       try {
         if (!maPlayer.isConnected) await maPlayer.connect();
         await maPlayer.maCommand(maCmd, { player_id: pid });
+        // Refresh now-playing state so the UI reflects the advanced track
+        // (the JSON-RPC event may lag or not update the HA media_status poll).
+        await fetchMediaStatus();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Command failed');
       } finally { setLoading(null); }
