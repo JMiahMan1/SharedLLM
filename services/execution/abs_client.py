@@ -4,6 +4,7 @@ Audiobookshelf (ABS) REST API client.
 Handles authentication, library search, playback progress, and streaming.
 """
 import logging
+import time
 from typing import Any
 
 import aiohttp
@@ -11,6 +12,27 @@ import aiohttp
 log = logging.getLogger("execution.abs_client")
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30.0, connect=5.0)
+
+# Per-ABS-server caches (in-memory, TTL-based) to avoid re-authenticating and
+# re-discovering the book library on every request. Keys are by abs_url so this
+# stays correct across multiple users sharing one ABS server.
+_CACHE: dict[str, dict[str, Any]] = {}
+_CACHE_TTL = 1800  # 30 minutes
+
+
+def _cache_get(abs_url: str, field: str) -> Any | None:
+    entry = _CACHE.get(abs_url.rstrip("/"))
+    if not entry or field not in entry:
+        return None
+    value, exp = entry[field]
+    if exp > time.time():
+        return value
+    return None
+
+
+def _cache_set(abs_url: str, field: str, value: Any, ttl: int = _CACHE_TTL) -> None:
+    _CACHE.setdefault(abs_url.rstrip("/"), {})
+    _CACHE[abs_url.rstrip("/")][field] = (value, time.time() + ttl)
 
 
 def resolve_abs_credentials(user_context: Any) -> tuple[str | None, str | None, str | None, str | None]:
@@ -34,18 +56,33 @@ def resolve_abs_credentials(user_context: Any) -> tuple[str | None, str | None, 
     return abs_url, abs_key, username, password
 
 
-async def abs_login(abs_url: str, username: str, password: str) -> str | None:
-    """Login to ABS with username/password and return API token."""
+async def abs_login(abs_url: str, username: str, password: str, force: bool = False) -> str | None:
+    """Login to ABS with username/password and return API token.
+
+    Caches the token per ABS server (TTL-based) so repeated searches do not
+    re-authenticate on every request. Falls back to a cached (possibly stale)
+    token if the live login fails.
+    """
+    cache_key = f"token:{username}"
+    if not force:
+        cached = _cache_get(abs_url, cache_key)
+        if cached:
+            return cached
     url = f"{abs_url.rstrip('/')}/login"
     async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
         try:
             async with client.post(url, json={"username": username, "password": password}) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
-                return data.get("user", {}).get("token")
+                token = data.get("user", {}).get("token")
+                if token:
+                    _cache_set(abs_url, cache_key, token)
+                return token
         except Exception as e:
             log.error(f"[abs_client] Login failed: {e}")
-            return None
+            # Fall back to a cached token if the live login failed
+            cached = _cache_get(abs_url, cache_key)
+            return cached
 
 
 async def abs_get(
@@ -77,7 +114,7 @@ async def abs_post(
         try:
             async with client.post(url, headers=headers, json=json) as resp:
                 resp.raise_for_status()
-                data = await resp.json() if resp.text else {}
+                data = await resp.json()
                 return data
         except aiohttp.ClientResponseError as e:
             log.error(f"[abs_client] HTTP error on POST {path}: {e}")
@@ -91,22 +128,24 @@ async def search_library(
     abs_url: str, abs_api_key: str, query: str, limit: int = 10
 ) -> dict:
     """Search the ABS book library for audiobooks matching the query.
-    
+
     Gets the book library ID and searches within it using the correct ABS API endpoint.
+    The book library ID is cached per ABS server to avoid re-listing libraries on
+    every search.
     """
-    # Get libraries to find the book library
-    libs = await abs_get(abs_url, abs_api_key, "/api/libraries")
-    if "error" in libs:
-        return libs
-
-    book_lib_id = None
-    for lib in libs.get("libraries", []):
-        if lib.get("mediaType") == "book":
-            book_lib_id = lib.get("id")
-            break
-
+    # Resolve (and cache) the book library ID
+    book_lib_id = _cache_get(abs_url, "book_lib_id")
     if not book_lib_id:
-        return {"error": "No book library found"}
+        libs = await abs_get(abs_url, abs_api_key, "/api/libraries")
+        if "error" in libs:
+            return libs
+        for lib in libs.get("libraries", []):
+            if lib.get("mediaType") == "book":
+                book_lib_id = lib.get("id")
+                break
+        if not book_lib_id:
+            return {"error": "No book library found"}
+        _cache_set(abs_url, "book_lib_id", book_lib_id)
 
     # Search within the book library
     return await abs_get(abs_url, abs_api_key, f"/api/libraries/{book_lib_id}/items", params={"query": query, "limit": limit})
