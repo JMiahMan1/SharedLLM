@@ -3,7 +3,9 @@ import time
 
 import httpx
 
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://jeremiah-home-desktop.local:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL")
+if not OLLAMA_URL:
+    raise RuntimeError("OLLAMA_URL is not set. Define it in .env (seeded to llm_local_url in the config DB).")
 
 PROMPT = """
 Write a Python class 'MultiTenantLock' that uses Redis (redis-py) to implement a distributed lock.

@@ -133,7 +133,7 @@ const LLMSettings: React.FC = () => {
                   value={getSetting('llm_local_url')} 
                   onChange={e => setDrafts({...drafts, llm_local_url: e.target.value})}
                   className="glass-input w-full text-xs"
-                  placeholder="http://ollama-server.local:11434"
+                  placeholder="Base URL for Ollama / llama.cpp / /api/chat-compatible endpoint"
                 />
                 <p className="text-[9px] text-slate-600 mt-1">Works with Ollama, llama.cpp server, or any /api/chat compatible endpoint.</p>
               </div>
