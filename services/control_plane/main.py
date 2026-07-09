@@ -522,15 +522,17 @@ def check_all_updates():
         token_b64 = base64.b64encode(f":{token}".encode()).decode()
         req.add_header("Authorization", f"Basic {token_b64}")
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 # 200 = authenticated and usable; 401/403 = unusable token.
                 return resp.status == 200
         except urllib.error.HTTPError as e:
-            return e.code == 200
+            # 401/403 = token rejected -> skip; anything else is inconclusive.
+            return e.code in (200,)
         except Exception:
-            # Registry unreachable (timeout/DNS) — don't pretend auth failed.
-            # Fall through to the per-service loop so it reports its own errors.
-            return True
+            # Registry unreachable (timeout/DNS/TLS). We cannot verify digests,
+            # so bail NOW rather than letting the per-service loop hang ~60s and
+            # trigger the browser's ECONNABORTED.
+            return False
 
     if not _ghcr_auth_ok(ghcr_token):
         log.warning(
