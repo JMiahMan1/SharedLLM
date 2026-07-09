@@ -44,15 +44,19 @@ function storageGetSync(key: string): string | null {
   }
 }
 
-// Extract a usable image URL from a Music Assistant image payload, which may be
-// a full URL string or an { uri, path, provider } object. Prefers the absolute
-// `uri` so the gateway can proxy it server-side (the browser often cannot reach
-// MA's internal IP directly).
+// Extract a usable image reference from a Music Assistant image payload.
+// MA sends a few shapes:
+//  - a full URL string
+//  - a QueueItem `image` object: { type, path, provider, proxy_id }
+//  - a PlayerMedia `image_url` string (current_media on player_updated)
+//  - a legacy { uri, path } object
+// We return whatever the gateway's /api/media/imageproxy can resolve.
 function extractMaImage(img: unknown): string | null {
   if (!img) return null;
   if (typeof img === 'string') return img;
   if (typeof img === 'object') {
     const i = img as Record<string, unknown>;
+    if (typeof i.image_url === 'string' && i.image_url) return i.image_url;
     if (typeof i.uri === 'string' && i.uri) return i.uri;
     if (typeof i.path === 'string' && i.path) return i.path;
   }
@@ -160,12 +164,16 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       const next = { ...prev };
 
       if (eventType === 'queue_updated') {
+        // current_item holds the active queue item. Use it only as a fallback
+        // for title/artist/cover — if the authoritative player_updated
+        // current_media has already populated them, don't let a playlist/source
+        // name in current_item override the real track.
         const current = data?.current_item;
         if (current) {
-          next.mediaTitle = current.name || null;
-          next.mediaArtist = current.artist || null;
-          next.mediaImage = extractMaImage(current.image) || next.mediaImage;
-          next.duration = current.duration || 0;
+          if (!next.mediaTitle) next.mediaTitle = current.name || null;
+          if (!next.mediaArtist) next.mediaArtist = current.artist || null;
+          if (!next.mediaImage) next.mediaImage = extractMaImage(current.image) || next.mediaImage;
+          if (current.duration) next.duration = current.duration;
         }
 
         // Update play state from queue state
@@ -178,7 +186,18 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       }
 
       if (eventType === 'player_updated') {
-        // Player state updates from MA (volume, muted, position, etc.)
+        // current_media is MA's authoritative "now playing" track and updates on
+        // every track change — this is what drives the title/artist/cover.
+        const media = data?.current_media;
+        if (media) {
+          if (media.title) next.mediaTitle = media.title;
+          if (media.artist) next.mediaArtist = media.artist;
+          const img = extractMaImage(media.image_url || media.image);
+          if (img) next.mediaImage = img;
+          if (media.duration) next.duration = media.duration;
+          if (typeof media.elapsed_time === 'number') next.position = media.elapsed_time;
+        }
+        // Player-level state (volume, muted, position)
         if (data?.volume_level !== undefined) {
           next.volume = Math.round(data.volume_level * 100);
         }

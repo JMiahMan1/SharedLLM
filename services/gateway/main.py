@@ -5831,6 +5831,8 @@ async def sendspin_proxy(websocket: WebSocket):
                     else:
                         log.info(f"[sendspin] Proxy: MA→browser ({len(message)} bytes binary)")
                         await websocket.send_bytes(message)
+            except WebSocketDisconnect:
+                log.info("[sendspin] Proxy: Browser disconnected from gateway (MA→browser)")
             except Exception as e:
                 log.error(f"[sendspin] Proxy: MA→Client forward error: {e}", exc_info=True)
             finally:
@@ -6128,6 +6130,9 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                         else:
                             log.info(f"[ma-jsonrpc] Proxy: MA→browser ({len(message)} bytes binary)")
                             await websocket.send_bytes(message)
+                except WebSocketDisconnect:
+                    # Browser closed the tab/moved on — expected, not an error.
+                    log.info("[ma-jsonrpc] Proxy: Browser disconnected from gateway (MA→browser)")
                 except Exception as e:
                     log.error(f"[ma-jsonrpc] Proxy: MA→Client forward error: {e}", exc_info=True)
                 finally:
