@@ -304,6 +304,23 @@ def _extract_json_with_brace_depth(text: str, start: int = 0) -> dict | list | N
     return None
 
 
+def _deep_find(node: object, key: str) -> object:
+    """Recursively search a (possibly nested) dict/list for the first ``key``."""
+    if isinstance(node, dict):
+        if key in node:
+            return node[key]
+        for v in node.values():
+            found = _deep_find(v, key)
+            if found is not None:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = _deep_find(item, key)
+            if found is not None:
+                return found
+    return None
+
+
 def _normalize_tool(obj: dict) -> dict | None:
     """Ensure a tool-call dict carries an 'action' discriminator, inferring it when absent."""
     if not isinstance(obj, dict):
@@ -325,9 +342,10 @@ def _normalize_tool(obj: dict) -> dict | None:
             inner.setdefault("action", cap)
         obj = inner
 
-    # OpenAI-style nested function call
+    # OpenAI-style nested function call (fire whenever a 'function' key is present,
+    # regardless of the surrounding 'type')
     func = obj.get("function")
-    if isinstance(func, dict) and obj.get("type") == "function":
+    if isinstance(func, dict):
         name = func.get("name") or func.get("action")
         args = func.get("arguments")
         if isinstance(args, str):
@@ -344,10 +362,18 @@ def _normalize_tool(obj: dict) -> dict | None:
         obj.pop("type", None)
         obj.pop("id", None)
 
-    # Hoist common nested payload keys
-    for nest_key in ("arguments", "payload", "args", "json", "tool_call", "parameters", "request"):
+    # Hoist common nested payload keys (incl. 'params', used by some clients)
+    for nest_key in ("arguments", "payload", "args", "json", "tool_call", "parameters", "request", "params"):
         if nest_key in obj and isinstance(obj[nest_key], dict):
             obj.update(obj.pop(nest_key))
+
+    # Last-resort: pull command/commands out of any deeper nesting so the shell
+    # handler never sees "Neither 'command' nor 'commands' provided".
+    for key in ("command", "commands"):
+        if key not in obj:
+            _found = _deep_find(obj, key)
+            if _found is not None:
+                obj[key] = _found
 
     # Normalize path-like keys to file_path for write/read schemas
     if "file_path" not in obj:
