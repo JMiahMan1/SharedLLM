@@ -154,6 +154,19 @@ async def handle_gh(req: GhRequest) -> dict:
 
     workspace_id = getattr(req, "workspace_id", None)
     user_context = getattr(req, "user_context", None)
+    github_token = getattr(user_context, "github_token", None) if user_context else None
+    if not github_token and isinstance(user_context, dict):
+        github_token = user_context.get("github_token")
+
+    # Auth pre-check: any write/remote GitHub action requires an authenticated token.
+    requires_auth = (sub, action) in WRITE_ACTIONS or sub in {"repo", "pr", "release", "workflow", "gist"}
+    if requires_auth and not github_token:
+        return _fail(
+            "GitHub authentication required: no github_token present in the user context. "
+            f"Cannot perform 'gh {' '.join(args[:2])}'. Connect a GitHub account in Settings.",
+            {"error": "auth_required", "subcommand": sub, "action": action},
+        )
+
     try:
         ws_root, ws_details = await _resolve_workspace_info(workspace_id, user_context)
     except HTTPException:
@@ -177,9 +190,6 @@ async def handle_gh(req: GhRequest) -> dict:
 
     # Auth injection: prefer the user's GitHub token via GH_TOKEN (no credential state touched)
     env_override: dict[str, str] = {}
-    github_token = getattr(user_context, "github_token", None) if user_context else None
-    if not github_token and isinstance(user_context, dict):
-        github_token = user_context.get("github_token")
     if github_token:
         env_override["GH_TOKEN"] = github_token
         # Use token auth and never prompt / write to a credential store
