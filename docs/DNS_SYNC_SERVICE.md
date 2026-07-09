@@ -115,7 +115,7 @@ dns:
 {
   "ai.local": ["host-gateway"],
   "execution.local": ["host-gateway"],
-  "ollama-server.local": ["192.168.2.200", "192.168.2.114", "192.168.4.179", "192.168.1.204"]
+  "jeremiah-home-desktop.local": ["192.168.2.200", "192.168.2.114", "192.168.4.179", "192.168.1.204"]
 }
 ```
 
@@ -140,10 +140,10 @@ dns:
 3. **Test DNS resolution:**
    ```bash
    # From any container on sharedllm network
-   dig @172.26.0.10 ollama-server.local +short
+   dig @172.26.0.10 jeremiah-home-desktop.local +short
    
    # From host
-   dig @127.0.0.1 -p 5354 ollama-server.local +short
+   dig @127.0.0.1 -p 5354 jeremiah-home-desktop.local +short
    ```
 
 4. **Restart DNS sync:**

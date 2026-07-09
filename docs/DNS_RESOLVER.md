@@ -49,7 +49,7 @@ patch_dns_resolver()
 
 | Hostname | Port | Purpose |
 |----------|------|---------|
-| `ollama-server.local` | 11434 | Ollama inference server |
+| `jeremiah-home-desktop.local` | 11434 | Ollama inference server |
 | `ai.local` | 8080 | AI service |
 | `execution.local` | 8003 | Execution service (self) |
 
