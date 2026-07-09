@@ -41,9 +41,9 @@ class BaseLLMProvider(ABC):
 
 
 class OllamaProvider(BaseLLMProvider):
-    def __init__(self, base_url: str, timeout: float = 180.0, slot_wait_timeout: float = 120.0):
+    def __init__(self, base_url: str, timeout: float | aiohttp.ClientTimeout = 180.0, slot_wait_timeout: float = 120.0):
         self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
+        self.timeout = timeout if isinstance(timeout, aiohttp.ClientTimeout) else aiohttp.ClientTimeout(total=timeout)
         self.slot_wait_timeout = slot_wait_timeout
 
     async def _check_slots(self, client: aiohttp.ClientSession) -> dict | None:

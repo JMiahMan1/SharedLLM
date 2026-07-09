@@ -2766,7 +2766,7 @@ async def chat_handler(request: Request, background_tasks=None):
             else:
                 svc_base = EXECUTION_SVC
 
-            fast_timeout=aiohttp.ClientTimeout(total=120.0) if intent == "play_media" else 30.0
+            fast_timeout=aiohttp.ClientTimeout(total=120.0) if intent == "play_media" else aiohttp.ClientTimeout(total=30.0)
             async with aiohttp.ClientSession(timeout=fast_timeout) as client:
                 exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
                 ans = await exec_resp.json().get("message", "Action completed.")
