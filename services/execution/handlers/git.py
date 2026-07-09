@@ -367,6 +367,20 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         # Resolve remote URL for token injection
         remote_url = await _get_remote_url("origin", cwd=workspace_path)
 
+        # Guardrail: block pushes to protected repositories (e.g. SharedLLM) unless
+        # this is the designated SharedLLM development workspace. This is the
+        # server-side backstop so a flaky model can never push to SharedLLM from a
+        # test/agentic workspace (covers both the git API and raw shell pushes).
+        from handlers.repo_guard import push_to_protected_allowed
+        _allowed, _reason = push_to_protected_allowed(workspace_id, remote_url)
+        if not _allowed:
+            return GitExecutionResult(
+                status="FAILURE",
+                message=_reason,
+                service="git",
+                detail={"error": "protected_repo_push_blocked"},
+            )
+
         # Determine the appropriate token for this host
         token = None
         log.info(f"[Git] Resolving token for {remote_url} | user={getattr(user_context, 'user', 'unknown')}")
