@@ -304,8 +304,125 @@ def _extract_json_with_brace_depth(text: str, start: int = 0) -> dict | list | N
     return None
 
 
+def _normalize_tool(obj: dict) -> dict | None:
+    """Ensure a tool-call dict carries an 'action' discriminator, inferring it when absent."""
+    if not isinstance(obj, dict):
+        return None
+    obj = dict(obj)
+
+    # Top-level OpenAI-style tool_calls array
+    if isinstance(obj.get("tool_calls"), list) and obj["tool_calls"]:
+        first = obj["tool_calls"][0]
+        if isinstance(first, dict):
+            obj = {**first}
+
+    # OpenAI-style nested function call
+    func = obj.get("function")
+    if isinstance(func, dict) and obj.get("type") == "function":
+        name = func.get("name") or func.get("action")
+        args = func.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                args = {"command": args}
+        if isinstance(args, dict):
+            obj.update(args)
+        if name:
+            obj["@type"] = name
+            obj["action"] = name
+        obj.pop("function", None)
+        obj.pop("type", None)
+        obj.pop("id", None)
+
+    # Hoist common nested payload keys
+    for nest_key in ("arguments", "payload", "args", "json", "tool_call", "parameters"):
+        if nest_key in obj and isinstance(obj[nest_key], dict):
+            obj.update(obj.pop(nest_key))
+
+    # Set action from any known discriminator
+    if "action" not in obj:
+        if "@type" in obj:
+            obj["action"] = obj["@type"]
+        elif "tool" in obj and isinstance(obj["tool"], str):
+            obj["action"] = obj["tool"]
+        elif "type" in obj and isinstance(obj["type"], str) and obj["type"] not in ("function",):
+            obj["action"] = obj["type"]
+
+    # Infer action from payload shape when no discriminator exists
+    if "action" not in obj:
+        if "command" in obj or "shell" in obj:
+            obj["action"] = "WorkspaceShellRequest"
+        elif "chunks" in obj or ("old_text" in obj and "new_text" in obj):
+            obj["action"] = "WorkspaceFilePatchRequest"
+        elif "content" in obj and ("path" in obj or "relative_path" in obj or "file_path" in obj):
+            obj["action"] = "WorkspaceFileWriteRequest"
+        elif "path" in obj or "relative_path" in obj or "file_path" in obj:
+            obj["action"] = "WorkspaceFileReadRequest"
+        elif "query" in obj and ("repo_url" in obj or "workspace_id" in obj):
+            obj["action"] = "GitOperationRequest"
+
+    return obj if obj.get("action") else None
+
+
+def _extract_tool_candidates(text: str) -> list:
+    """Collect all plausible tool-call dicts from arbitrary model output."""
+    candidates: list = []
+
+    # OpenAI-style {"tool_calls": [{"function": {"name":..., "arguments":...}}]}
+    tc = re.search(r'"tool_calls"\s*:\s*\[(.*?)\]', text, re.DOTALL)
+    if tc:
+        block = tc.group(1)
+        for fn in re.finditer(r'"function"\s*:\s*\{.*?\}', block, re.DOTALL):
+            try:
+                candidates.append(json.loads(fn.group(0)))
+            except Exception:
+                name = re.search(r'"name"\s*:\s*"([^"]+)"', fn.group(0))
+                args = re.search(r'"arguments"\s*:\s*(\{.*?\}|\"[^\"]*\")', fn.group(0), re.DOTALL)
+                d = {}
+                if name:
+                    d["function"] = {"name": name.group(1)}
+                if args:
+                    raw = args.group(1)
+                    if raw.startswith('"'):
+                        d["function"] = {**d.get("function", {}), "arguments": raw.strip('"')}
+                    else:
+                        try:
+                            d["function"] = {**d.get("function", {}), "arguments": json.loads(raw)}
+                        except Exception:
+                            pass
+                if d:
+                    candidates.append({"type": "function", **d})
+
+    # XML-style <tool_call><function=NAME><parameter=KEY>VAL</parameter></tool_call>
+    for m in re.finditer(r"<tool_call>(.*?)</tool_call>", text, re.DOTALL):
+        block = m.group(1)
+        func_m = re.search(r"<function=([^>]+)>", block)
+        if func_m:
+            params: dict = {}
+            for pm in re.finditer(r"<parameter=([^>]+)>(.*?)</parameter>", block, re.DOTALL):
+                params[pm.group(1).strip()] = pm.group(2).strip()
+            candidates.append({"@type": func_m.group(1).strip(), **params})
+
+    # Any JSON object carrying a tool discriminator (@type/action/tool/type)
+    for m in re.finditer(r'\{\s*"(@type|action|tool|type)"\s*:\s*"[^"]+"[^}]*\}', text, re.DOTALL):
+        try:
+            candidates.append(json.loads(m.group(0)))
+        except Exception:
+            pass
+
+    # Brace-depth tracking (handles bare dicts and arrays)
+    result = _extract_json_with_brace_depth(text)
+    if isinstance(result, dict):
+        candidates.append(result)
+    elif isinstance(result, list):
+        candidates.extend([i for i in result if isinstance(i, dict)])
+
+    return candidates
+
+
 def extract_action_json(text: str) -> dict | None:
-    """Extracts the first JSON object found in the text, with MoE-safe fallback and log-stripping."""
+    """Extract and normalize the first tool call from arbitrary model output."""
     if not text:
         return None
 
@@ -315,11 +432,10 @@ def extract_action_json(text: str) -> dict | None:
     match = re.search(r"```json\s*(\{.*?\})(?:\s*```|$)", text, re.DOTALL)
     if match:
         try:
-            return json.loads(match.group(1))
+            return _normalize_tool(json.loads(match.group(1)))
         except Exception:
             try:
-                cleaned = re.sub(r",\s*([\]}])", r"\1", match.group(1))
-                return json.loads(cleaned)
+                return _normalize_tool(json.loads(re.sub(r",\s*([\]}])", r"\1", match.group(1))))
             except Exception:
                 pass
 
@@ -327,93 +443,32 @@ def extract_action_json(text: str) -> dict | None:
     match = re.search(r"```\s*\n\s*(\{.*?\})", text, re.DOTALL)
     if match:
         try:
-            return json.loads(match.group(1))
+            return _normalize_tool(json.loads(match.group(1)))
         except Exception:
             try:
-                cleaned = re.sub(r",\s*([\]}])", r"\1", match.group(1))
-                return json.loads(cleaned)
+                return _normalize_tool(json.loads(re.sub(r",\s*([\]}])", r"\1", match.group(1))))
             except Exception:
                 pass
 
-    # Priority 1c: Thinking/reasoning block JSON (common with Qwen thinking models)
-    match = re.search(r"</thinking>.*?```(?:json)?\s*(\{.*?\})", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except Exception:
-            try:
-                cleaned = re.sub(r",\s*([\]}])", r"\1", match.group(1))
-                return json.loads(cleaned)
-            except Exception:
-                pass
-
-    # Priority 1d: Direct thinking block JSON
-    match = re.search(r"</thinking>(\{.*?\})\s*$", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except Exception:
-            pass
-
-    # Priority 2: Brace-depth tracking (robust nested JSON extraction)
-    result = _extract_json_with_brace_depth(text)
-    if isinstance(result, dict):
-        return result
-    elif isinstance(result, list):
-        # If we got an array, normalize the first dict element (handle @type discriminator)
-        for item in result:
-            if isinstance(item, dict):
-                norm = dict(item)
-                if "action" not in norm and "@type" in norm:
-                    norm["action"] = norm["@type"]
-                if norm.get("action"):
-                    return norm
-        if result and isinstance(result[0], dict):
-            first = dict(result[0])
-            if "action" not in first and "@type" in first:
-                first["action"] = first["@type"]
-            return first
-
-    # Priority 2b: XML-style tool call
-    #   <tool_call><function=NAME><parameter=KEY>VAL</parameter>...</tool_call>
-    m = re.search(r"<tool_call>(.*?)</tool_call>", text, re.DOTALL)
-    if m:
-        block = m.group(1)
-        func_m = re.search(r"<function=([^>]+)>", block)
-        if func_m:
-            func = func_m.group(1).strip()
-            params: dict = {}
-            for pm in re.finditer(r"<parameter=([^>]+)>(.*?)</parameter>", block, re.DOTALL):
-                params[pm.group(1).strip()] = pm.group(2).strip()
-            return {"@type": func, "action": func, **params}
+    # Priority 2: Collect all candidates (OpenAI tool_calls, XML, discriminator dicts, brace-depth)
+    for cand in _extract_tool_candidates(text):
+        norm = _normalize_tool(cand)
+        if norm:
+            return norm
 
     # Priority 3: Outer-most braces (legacy fallback)
     first_brace = text.find("{")
     last_brace = text.rfind("}")
     if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-        candidate = text[first_brace:last_brace+1]
+        candidate = text[first_brace:last_brace + 1]
         try:
-            return json.loads(candidate)
+            return _normalize_tool(json.loads(candidate))
         except Exception:
             try:
-                cleaned = re.sub(r",\s*([\]}])", r"\1", candidate)
-                return json.loads(cleaned)
+                return _normalize_tool(json.loads(re.sub(r",\s*([\]}])", r"\1", candidate)))
             except Exception:
                 pass
 
-    # Priority 4: Any JSON object carrying a tool discriminator (@type/action/tool),
-    # even when wrapped in conversational text or a JSON array.
-    m = re.search(r'\{\s*"(@type|action|tool|type)"\s*:\s*"[^"]+"[^}]*\}', text, re.DOTALL)
-    if m:
-        try:
-            obj = json.loads(m.group(0))
-            if "action" not in obj and "@type" in obj:
-                obj["action"] = obj["@type"]
-            return obj
-        except Exception:
-            pass
-
-    log.warning(f"[DEBUG-EXTRACT] returning None for input tail={repr(text[-200:])}")
     return None
 
 async def get_dynamic_llm_settings() -> dict:
