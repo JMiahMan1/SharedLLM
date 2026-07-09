@@ -144,16 +144,6 @@ export default function DnsManagementPanel() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="flex items-center gap-3 text-xl font-bold text-white">
-          <Globe size={20} className="text-blue-400" />
-          DNS Management
-        </h3>
-        <p className="mt-1 text-sm text-slate-400">
-          Manage custom DNS records. Changes propagate automatically to all containers.
-        </p>
-      </div>
-
       {isFormOpen && (
         <form onSubmit={handleSubmit} className="glass-card p-6 border border-white/10 space-y-4">
           <h4 className="text-sm font-bold text-white uppercase tracking-widest">
