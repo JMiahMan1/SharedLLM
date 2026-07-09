@@ -569,7 +569,7 @@ export const api = {
     return resp.data;
   },
 
-  async pullWorkspace(id: string, branch?: string): Promise<{ status: string; message: string; branch: string }> {
+  async pullWorkspace(id: string, branch?: string): Promise<{ status: string; message?: string; branch: string; recovered?: boolean; recovery_note?: string }> {
     const resp = await apiClient.post('/api/workspaces/git/pull', { workspace_id: id, branch });
     return resp.data;
   },

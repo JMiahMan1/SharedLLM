@@ -32,7 +32,7 @@ async def test_execution_search_ma_library_only_default_not_found(client):
             resp = client.get("/execute/media/music-assistant/search?query=Miles+Davis", headers={"X-Internal-Secret": "test-secret"})
 
             assert resp.status_code == 200
-            assert resp.json() == {"status": "SUCCESS", "results": [], "query": "Miles Davis"}
+            assert resp.json() == {"status": "SUCCESS", "results": [], "query": "Miles Davis", "source": "ha"}
 
             # Verify the service call to HA included library_only=True
             called_ha_url, called_ha_token, called_action, called_data = mock_ha_call.call_args[0]

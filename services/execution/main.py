@@ -51,6 +51,7 @@ from services.execution.handlers import (
 )
 from services.execution.handlers import deployment as deployment_handler
 from services.execution.handlers import docker_logs as docker_logs_handler
+from services.execution.handlers import gh as gh_handler
 from services.execution.handlers import git as git_handler
 from services.execution.handlers import ha_config as ha_config_handler
 from services.execution.handlers import volumes as volume_handler
@@ -67,6 +68,7 @@ from services.execution.schemas import (
     EntitySearchRequest,
     ExecutionLogRequest,
     ExecutionResult,
+    GhRequest,
     GitOperationRequest,
     HAConfigRequest,
     HAServiceRequest,
@@ -369,8 +371,7 @@ from services.config import TEMP_MEDIA_DIR
 
 TEMP_AUDIO_DIR = os.path.join(TEMP_MEDIA_DIR, "tts")
 os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
-TEMP_VIDEO_DIR = TEMP_MEDIA_DIR
-os.makedirs(TEMP_VIDEO_DIR, exist_ok=True)
+os.makedirs(TEMP_MEDIA_DIR, exist_ok=True)
 
 def get_public_host():
     """Resolve the public host for media URLs (for external device access)."""
@@ -457,7 +458,7 @@ async def get_temp_media(media_id: str):
         return Response(content=TEMP_AUDIO_CACHE[media_id], media_type="audio/wav")
 
     # Check video files on disk
-    video_path = os.path.join(TEMP_VIDEO_DIR, f"{media_id}.mp4")
+    video_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
     if os.path.exists(video_path):
         return FileResponse(
             video_path,
@@ -720,6 +721,15 @@ async def execute_git(req: GitOperationRequest):
     res = await git_handler.handle_git(req)
     if res.status == "FAILURE":
         raise HTTPException(status_code=400, detail=res.message)
+    return res
+
+
+@app.post("/execute/gh", response_model=ExecutionResult)
+async def execute_gh(req: GhRequest):
+    """Run a `gh` (GitHub CLI) command inside a workspace. Raven/tool surface."""
+    res = await gh_handler.handle_gh(req)
+    if res["status"] == "FAILURE":
+        raise HTTPException(status_code=400, detail=res["message"])
     return res
 
 

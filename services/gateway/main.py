@@ -1,5 +1,6 @@
 # services/gateway/main.py
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -60,6 +61,7 @@ INFERENCE_LOCK = asyncio.Lock()
 # Backward-compatible aliases — sourced from config.py, updated by _sync_main_constants from Identity settings
 from services.gateway.config import (
     ABS_TIMEOUT,
+    ALPACA_SD_URL,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
     IDENTITY_SVC,
@@ -69,6 +71,7 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
+from services.gateway.tool_registry import get_tool_schemas, resolve_tool_call, SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE
 
 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
@@ -2564,6 +2567,15 @@ async def chat_handler(request: Request, background_tasks=None):
     explicit_model = str(body.get("model") or "").strip()
     show_thinking = body.get("show_thinking", False)
 
+    # Expose SharedLLM's agent tool surface (gh, git, file write, Stable Diffusion
+    # image tools) to external OpenAI/Ollama/OpenWebUI clients that request tools.
+    # This is additive: it only augments a request that already includes `tools`.
+    if isinstance(body.get("tools"), list):
+        existing = {t.get("function", {}).get("name") for t in body["tools"] if isinstance(t, dict)}
+        for tool in get_tool_schemas():
+            if tool["function"]["name"] not in existing:
+                body["tools"].append(tool)
+
     try:
         selected_model = (explicit_model if explicit_model and explicit_model != "auto" else None) or await get_assistant_model()
         log.info(f"[ChatHandler] Model selection: explicit_model='{explicit_model}' selected_model='{selected_model}'")
@@ -4782,19 +4794,58 @@ async def get_config_status():
 
 @app.get("/api/config/models")
 async def get_ollama_models():
-    """Proxy to Ollama to list available tags."""
+    """List locally-available models from the configured Ollama/model server.
+
+    Tries both the native Ollama `/api/tags` endpoint and the OpenAI-compatible
+    `/v1/models` endpoint (used by newer Ollama releases and the alpaca proxy),
+    then merges and de-duplicates the results so the Local Model Mapping is never
+    empty simply because one endpoint shape was assumed.
+    """
     try:
         settings = await get_all_settings()
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return {"status": "ERROR", "message": "Ollama URL not configured in Identity settings", "models": []}
+
+        base = ollama_url.rstrip("/")
+        models: set[str] = set()
+        last_error: str | None = None
+
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
-            resp = await client.get(f"{ollama_url}/api/tags")
-            if resp.status == 200:
-                data = await resp.json()
-                models = sorted(list(set(m["name"] for m in data.get("models", []))))
-                return {"status": "SUCCESS", "models": models}
-            return {"status": "ERROR", "message": f"Ollama returned {resp.status}", "models": []}
+            # 1. Native Ollama tags endpoint: {"models": [{"name": ...}]}
+            try:
+                resp = await client.get(f"{base}/api/tags")
+                if resp.status == 200:
+                    data = await resp.json()
+                    for m in data.get("models", []):
+                        name = m.get("name") or m.get("model")
+                        if name:
+                            models.add(name)
+            except Exception as e:  # pragma: no cover - network dependent
+                last_error = str(e)
+
+            # 2. OpenAI-compatible models endpoint: {"data": [{"id": ...}]}
+            #    Queried in addition to (not only as a fallback for) /api/tags so the
+            #    Local Model Mapping is fully populated regardless of which endpoint
+            #    shape the model server exposes.
+            try:
+                resp = await client.get(f"{base}/v1/models")
+                if resp.status == 200:
+                    data = await resp.json()
+                    for m in data.get("data", []):
+                        name = m.get("id") or m.get("name")
+                        if name:
+                            models.add(name)
+            except Exception as e:  # pragma: no cover - network dependent
+                last_error = last_error or str(e)
+
+        if models:
+            return {"status": "SUCCESS", "models": sorted(models)}
+        return {
+            "status": "ERROR",
+            "message": last_error or "No models returned by Ollama",
+            "models": [],
+        }
     except Exception as e:
         return {"status": "ERROR", "message": str(e), "models": []}
 
@@ -4949,6 +5000,198 @@ async def update_dns_config(request: Request):
             )
 
     return {"status": "SUCCESS", "message": "DNS configuration updated"}
+
+
+# --- DNS Management (UI-facing /api/dns routes) ---
+# The UI's DnsManagementPanel calls /api/dns (GET/POST/PUT/DELETE) with a rich
+# record schema (id, domain, record_type, values[], ttl, is_active, timestamps).
+# The backing store is the `dns_mappings` global setting (a hostname -> ip dict).
+# These routes adapt between the two so the panel loads and mutates correctly
+# instead of 404-ing and endlessly re-polling (the "DNS reload loop").
+
+
+def _dns_id(hostname: str) -> int:
+    return int(hashlib.md5(hostname.encode()).hexdigest(), 16) % 1_000_000_000
+
+
+async def _load_dns_mappings() -> dict:
+    raw = await fetch_global_setting("dns_mappings", "{}")
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        data = {}
+    return data if isinstance(data, dict) else {}
+
+
+def _record_from(hostname: str, entry: Any) -> dict:
+    if isinstance(entry, dict):
+        ip = entry.get("ip") or (entry.get("values") or [""])[0] or ""
+        return {
+            "id": _dns_id(hostname),
+            "domain": hostname,
+            "record_type": entry.get("record_type", "A"),
+            "values": [ip] if ip else (entry.get("values") or []),
+            "ttl": entry.get("ttl", 300),
+            "is_active": entry.get("is_active", True),
+            "created_at": entry.get("created_at", ""),
+            "updated_at": entry.get("updated_at", ""),
+        }
+    # Legacy plain-string mapping (hostname -> ip)
+    return {
+        "id": _dns_id(hostname),
+        "domain": hostname,
+        "record_type": "A",
+        "values": [entry] if entry else [],
+        "ttl": 300,
+        "is_active": True,
+        "created_at": "",
+        "updated_at": "",
+    }
+
+
+async def _save_dns_mappings(mappings: dict) -> None:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+        await client.patch(
+            f"{IDENTITY_SVC}/api/settings/dns_mappings",
+            json={"value": json.dumps(mappings)},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+
+
+def _hostname_for_id(mappings: dict, record_id: int) -> str | None:
+    for hostname in mappings:
+        if _dns_id(hostname) == record_id:
+            return hostname
+    return None
+
+
+@app.get("/api/dns")
+async def ui_list_dns_records():
+    """List DNS records in the shape the UI's DnsManagementPanel expects."""
+    mappings = await _load_dns_mappings()
+    return [_record_from(h, mappings[h]) for h in sorted(mappings)]
+
+
+@app.post("/api/dns")
+async def ui_create_dns_record(request: Request):
+    """Create a DNS record from the UI's rich schema."""
+    body = await request.json()
+    domain = (body.get("domain") or "").strip()
+    values = body.get("values") or []
+    ip = (values[0] if values else "").strip()
+    if not domain or not ip:
+        raise HTTPException(status_code=400, detail="domain and at least one value are required")
+
+    mappings = await _load_dns_mappings()
+    now = datetime.now().isoformat() + "Z"
+    mappings[domain] = {
+        "ip": ip,
+        "record_type": body.get("record_type", "A"),
+        "ttl": int(body.get("ttl", 300) or 300),
+        "is_active": bool(body.get("is_active", True)),
+        "created_at": now,
+        "updated_at": now,
+    }
+    await _save_dns_mappings(mappings)
+    return _record_from(domain, mappings[domain])
+
+
+@app.put("/api/dns/{record_id:int}")
+async def ui_update_dns_record(record_id: int, request: Request):
+    """Update a DNS record identified by the UI's numeric id."""
+    mappings = await _load_dns_mappings()
+    hostname = _hostname_for_id(mappings, record_id)
+    if not hostname:
+        raise HTTPException(status_code=404, detail=f"DNS record {record_id} not found")
+
+    body = await request.json()
+    entry = mappings[hostname]
+    if not isinstance(entry, dict):
+        entry = {"ip": entry, "record_type": "A", "ttl": 300, "is_active": True,
+                 "created_at": "", "updated_at": ""}
+    if "domain" in body and body["domain"].strip():
+        new_hostname = body["domain"].strip()
+        if new_hostname != hostname:
+            del mappings[hostname]
+            hostname = new_hostname
+    if "record_type" in body:
+        entry["record_type"] = body["record_type"]
+    if body.get("values"):
+        entry["ip"] = body["values"][0]
+        entry["values"] = body["values"]
+    if "ttl" in body:
+        entry["ttl"] = int(body["ttl"] or 300)
+    if "is_active" in body:
+        entry["is_active"] = bool(body["is_active"])
+    entry["updated_at"] = datetime.now().isoformat() + "Z"
+    mappings[hostname] = entry
+    await _save_dns_mappings(mappings)
+    return _record_from(hostname, mappings[hostname])
+
+
+@app.delete("/api/dns/{record_id:int}")
+async def ui_delete_dns_record(record_id: int):
+    """Delete a DNS record identified by the UI's numeric id."""
+    mappings = await _load_dns_mappings()
+    hostname = _hostname_for_id(mappings, record_id)
+    if not hostname:
+        raise HTTPException(status_code=404, detail=f"DNS record {record_id} not found")
+    del mappings[hostname]
+    await _save_dns_mappings(mappings)
+    return {"status": "SUCCESS", "message": f"Removed {hostname}"}
+
+
+# --- Tool Registry (OpenAI/Ollama tool-calling) ---
+
+def resolve_service_base_url(service: str) -> str:
+    """Map a tool_registry service id to its base URL."""
+    if service == SVC_EXECUTION:
+        return EXECUTION_SVC
+    if service == SVC_WORKSPACE:
+        return WORKSPACE_RUNTIME_SVC
+    if service == SVC_ALPACA_SD:
+        return ALPACA_SD_URL
+    raise ValueError(f"Unknown tool service: {service}")
+
+
+async def run_sharedllm_tool(
+    resolved,
+    *,
+    creds: dict | None = None,
+) -> dict:
+    """Execute a ResolvedToolCall against the appropriate backend service.
+
+    Internal services (execution, workspace_runtime) are called with the
+    X-Internal-Secret handshake. The alpaca SD backend is treated as an external
+    image service and called without internal credentials.
+    """
+    base = resolve_service_base_url(resolved.service)
+    url = f"{base}{resolved.path}"
+    headers = {}
+    if resolved.service in (SVC_EXECUTION, SVC_WORKSPACE):
+        headers["X-Internal-Secret"] = INTERNAL_SECRET
+
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=180.0)) as client:
+        if resolved.method == "GET":
+            async with client.get(url, headers=headers) as resp:
+                return {"status": resp.status, "body": await _safe_json(resp)}
+        else:
+            async with client.post(url, json=resolved.json, headers=headers) as resp:
+                return {"status": resp.status, "body": await _safe_json(resp)}
+
+
+async def _safe_json(resp: aiohttp.ClientResponse) -> Any:
+    try:
+        return await resp.json()
+    except Exception:
+        text = await resp.text()
+        return {"raw": text}
+
+
+@app.get("/v1/tools")
+async def list_sharedllm_tools():
+    """OpenAI-compatible tool discovery for external clients (OpenAI SDK, Ollama, OpenWebUI)."""
+    return {"object": "list", "tools": get_tool_schemas()}
 
 
 # --- Presence & Location Endpoints ---
@@ -5128,7 +5371,7 @@ async def search_ma(request: Request, query: str = "", media_type: str = "", lim
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/media/music-assistant/search",
-                params={"user_id": creds.get("user") or "", "query": query, "media_type": media_type, "limit": limit, "artist": artist, "album": album, "library_only": str(library_only).lower()},
+                params={"user_id": creds.get("user") or "", "query": query, "media_type": media_type, "limit": limit, "artist": artist, "album": album, "library_only": library_only},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status == 200:

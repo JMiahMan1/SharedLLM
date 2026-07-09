@@ -80,7 +80,8 @@ const Workspaces = () => {
     mutationFn: (id: string) => api.pullWorkspace(id),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['workspaces'] });
-      toast.success(`Successfully pulled latest changes on ${data.branch}`);
+      const note = data.recovery_note ? ` (${data.recovery_note})` : '';
+      toast.success(`Successfully pulled latest changes on ${data.branch}${note}`);
     },
     onError: (err: Error) => toast.error(err.message || 'Git pull failed'),
   });

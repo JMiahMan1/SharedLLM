@@ -10,6 +10,7 @@ import aiohttp
 import redis.asyncio as redis
 
 from services.gateway.config import (
+    CONTROL_PLANE_URL,
     EXECUTION_SVC,
     IDENTITY_SVC,
     INTERNAL_SECRET,
@@ -221,6 +222,7 @@ ALLOWED_TOOLS = {
     "audiobookshelfrequest", "llminforequest", "contextsearchrequest", "haconfigrequest",
     "entitysearchrequest", "logbookrequest", "executionlogrequest",
     "documentbroadcastrequest", "nightmoderequest", "ttsrequest", "storagetexttorequest",
+    "ghrequest",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -580,17 +582,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     # 2. Resolve Role-Based Model (Coder/Assistant) if selected_model is generic or "auto"
     original_model = selected_model
-    if selected_model in ["auto", "assistant", "coder"]:
+    # Role aliases that should resolve to a configured model rather than being
+    # treated as an explicit model name. "coding" (the settings key) and synonyms
+    # all map to coding_model; assistant/chat map to assistant_model.
+    ROLE_ASSISTANT = {"auto", "assistant", "chat"}
+    ROLE_CODER = {"coder", "coding", "code", "repair", "raven", "dev", "developer", "technical"}
+    if selected_model in ROLE_ASSISTANT or selected_model in ROLE_CODER:
         tech_keywords = ["coder", "fix", "repair", "audit", "mission", "raven", "development", "git", "workspace"]
-        is_technical = any(word in query.lower() for word in tech_keywords) or "coder" in selected_model
+        is_technical = (selected_model in ROLE_CODER) or any(word in query.lower() for word in tech_keywords)
 
-        if is_technical:
-            selected_model = settings.get("coding_model") or ""
-        else:
-            selected_model = settings.get("assistant_model") or ""
+        selected_model = settings.get("coding_model") or "" if is_technical else settings.get("assistant_model") or ""
         log.info(f"[AgentLoop] Model resolved from '{original_model}' to '{selected_model}' (is_technical={is_technical})")
     else:
-        log.info(f"[AgentLoop] Using explicit model: '{selected_model}' (not auto/assistant/coder)")
+        log.info(f"[AgentLoop] Using explicit model: '{selected_model}' (not a role alias)")
 
     # Fail fast if config is missing or invalid
     if not selected_model or selected_model == "auto":
@@ -611,8 +615,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     ollama_payload = {
         "model": selected_model,
         "messages": [
-            {"role": "system", "content": enhanced_system}
-        ] + short_term + [{"role": "user", "content": query}],
+            {"role": "system", "content": enhanced_system},
+            *short_term,
+            {"role": "user", "content": query},
+        ],
         "stream": False,
         "options": {
             "enable_thinking": is_thinking_capable and show_thinking,
@@ -669,10 +675,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     async def _compress_context() -> tuple[str, str]:
         """Compress action_log into a summary + recent entries to prevent context bloat.
-        
+
         When action_log exceeds COMPRESS_THRESHOLD chars, older entries are summarized
         into a compact header. Only the most recent entries are kept in full.
-        
+
         Returns: (compressed_summary, recent_entries_joined)
         """
         COMPRESS_THRESHOLD = 3000  # chars before triggering compression
@@ -704,6 +710,36 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         log.info(f"[AgentLoop] Context compressed: {len(older)} older entries summarized, {len(recent)} recent kept")
         return summary, recent_joined
 
+    def _compact_conversation(conv: list[dict], keep_last: int = 6, threshold: int = 12000) -> list[dict]:
+        """Keep a running, compacted conversation so the model retains learned context
+        across a long mission instead of only seeing the last tool result each turn.
+
+        When the total context exceeds `threshold`, older turns are folded into the
+        system prompt (preserved learnings) while the most recent `keep_last` turns are
+        kept verbatim. This prevents the model from 'forgetting' earlier decisions while
+        bounding token usage / llama.cpp cache thrashing.
+        """
+        total = sum(len(m.get("content", "")) for m in conv)
+        if total <= threshold:
+            return conv
+        system_msgs = [m for m in conv if m.get("role") == "system"]
+        body = [m for m in conv if m.get("role") != "system"]
+        if len(body) <= keep_last:
+            return conv
+        older = body[:-keep_last]
+        recent = body[-keep_last:]
+        note_lines = []
+        for m in older:
+            c = m.get("content", "") or ""
+            note_lines.append(f"[{m.get('role', 'user')}] {c[:240]}{'…' if len(c) > 240 else ''}")
+        compact_note = (
+            "COMPACTED EARLIER CONTEXT (preserved learnings — do not re-derive):\n"
+            + "\n".join(note_lines)
+        )
+        base_system = system_msgs[0]["content"] if system_msgs else ""
+        new_system = {"role": "system", "content": base_system + "\n\n" + compact_note}
+        return [new_system, *recent]
+
     async def _save_checkpoint(iter_num: int) -> None:
         if not mission_id:
             return
@@ -734,6 +770,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await r_cp.close()
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to clear checkpoint for mission {mission_id}: {e}")
+
+    # Persistent, compacted conversation history. This lets the model retain learned
+    # context (decisions, constraints, prior tool results) across a long mission
+    # instead of only ever seeing the single most-recent tool result each turn.
+    conversation: list[dict] = [
+        {"role": "system", "content": enhanced_system},
+        {"role": "user", "content": (
+            f"MISSION LOCK: {query}"
+            + (f"\n\nEXECUTION PLAN:\n{generated_plan}" if generated_plan else "")
+        )},
+    ]
 
     for agent_iter in range(start_iteration, MAX_TOOL_ITERATIONS):
         iter_num = agent_iter + 1
@@ -785,7 +832,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         heartbeat_stop = asyncio.Event()
 
-        async def _heartbeat(iter_n: int, t0: float) -> None:
+        async def _heartbeat(iter_n: int, t0: float, heartbeat_stop: asyncio.Event = heartbeat_stop) -> None:
             while not heartbeat_stop.is_set():
                 await asyncio.sleep(RAVEN_HEARTBEAT_INTERVAL)
                 if heartbeat_stop.is_set():
@@ -799,19 +846,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         hb_task = asyncio.create_task(_heartbeat(agent_iter + 1, iter_start))
 
         try:
-            # Compress context to prevent token bloat and llama.cpp cache thrashing
+            # Compress action-log context to prevent token bloat
             ctx_summary, ctx_recent = await _compress_context()
 
-            mission_header = f"MISSION LOCK: {query}"
-            if generated_plan:
-                mission_header += f"\n\nEXECUTION PLAN:\n{generated_plan}"
+            user_content = ""
             if ctx_summary:
-                mission_header += f"\n\n{ctx_summary}"
-
-            ollama_payload["messages"] = [
-                {"role": "system", "content": enhanced_system},
-                {"role": "user", "content": f"{mission_header}\n\nRECENT ACTIONS:\n{ctx_recent}"}
-            ]
+                user_content += ctx_summary + "\n\n"
+            user_content += "RECENT ACTIONS:\n" + ctx_recent
             if exec_data:
                 # Truncate detail, stdout, and stderr to save VRAM if they are massive
                 safe_exec_data = exec_data.copy() if isinstance(exec_data, dict) else {"result": str(exec_data)}
@@ -828,22 +869,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 if len(exec_json) > 2000:
                     exec_json = exec_json[:2000] + "\n...[TRUNCATED FOR CONTEXT WINDOW]..."
 
-                ollama_payload["messages"].append({
-                    "role": "user",
-                    "content": f"LAST TOOL RESULT:\n{exec_json}"
-                })
-            ollama_payload["messages"].append({"role": "user", "content": "Execute the next step immediately using a JSON tool call block."})
+                user_content += f"\n\nLAST TOOL RESULT:\n{exec_json}"
+            user_content += "\n\nExecute the next step immediately using a JSON tool call block."
 
-            # Hard limit on total message size to prevent llama.cpp cache thrashing
-            total_chars = sum(len(m.get("content", "")) for m in ollama_payload["messages"])
-            if total_chars > 12000:
-                log.warning(f"[AgentLoop] Context too large ({total_chars} chars), forcing compression")
-                # Keep only system + mission header + last 3 recent entries
-                ollama_payload["messages"] = [
-                    ollama_payload["messages"][0],  # system
-                    ollama_payload["messages"][1],  # mission header
-                    {"role": "user", "content": "Continue with the next step."}
-                ]
+            # Maintain a running, compacted conversation so the model retains learned
+            # context across the mission instead of only seeing the last tool result.
+            conversation.append({"role": "user", "content": user_content})
+            conversation = _compact_conversation(conversation)
+            ollama_payload["messages"] = conversation
 
             # --- RETRY LOGIC ---
             MAX_INFERENCE_RETRIES = 3
@@ -894,6 +927,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await hb_task
             log.info(f"[AgentLoop] Inference completed in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms — iter {agent_iter + 1}")
             log.info(f"[AgentLoop] Response content: {ans[:200]}...")
+            # Record this turn so the model retains context in subsequent iterations.
+            if ans and ans.strip():
+                conversation.append({"role": "assistant", "content": ans})
         except Exception as e:
             heartbeat_stop.set()
             await hb_task
@@ -1149,6 +1185,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "ttsrequest": (EXECUTION_SVC, "/execute/tts"),
                 "storagetexttorequest": (STORAGE_SVC, "/text_to_audio"),
                 "networkdevicescanrequest": (EXECUTION_SVC, "/execute/network_scan"),
+                "ghrequest": (EXECUTION_SVC, "/execute/gh"),
+                "controlplanerequest": (CONTROL_PLANE_URL, "/api/restart/{service_name}"),
             }
 
             lookup_action = action.lower().strip() if action else ""
@@ -1303,22 +1341,23 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # Trigger if we have successful tool calls OR if the model output is purely JSON/messy
     is_messy = "was was was" in ans or "```json" in ans or (ans.strip().startswith("{") and ans.strip().endswith("}"))
     ans_is_empty = not ans or ans.strip() in ("", "None", "null", "{}", "[]", "}")
-    if successful_tool_calls > 0 or is_messy:
+    if (successful_tool_calls > 0 or is_messy) and (
+        extract_action_json(ans) or len(ans.strip()) < 30 or is_messy
+    ):
         # If the last response still looks like a tool call or is very short/messy, force a clean summary
-        if extract_action_json(ans) or len(ans.strip()) < 30 or is_messy:
-            log.info("[AgentLoop] Finalizing with clean summarization phase...")
-            if ans_is_empty:
-                # LLM response was empty — build summary from action log only
-                action_summary = "\n".join(action_log)
-                summary_prompt = [
-                    {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. State what was accomplished based on the actions taken."},
-                    {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{action_summary}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished."}
-                ]
-            else:
-                summary_prompt = [
-                    {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. Do NOT say the mission failed unless the tool execution itself reported an error."},
-                    {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nRaw output: {ans}\n\nPlease provide the final clean summary now:"}
-                ]
+        log.info("[AgentLoop] Finalizing with clean summarization phase...")
+        if ans_is_empty:
+            # LLM response was empty — build summary from action log only
+            action_summary = "\n".join(action_log)
+            summary_prompt = [
+                {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. State what was accomplished based on the actions taken."},
+                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{action_summary}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished."}
+            ]
+        else:
+            summary_prompt = [
+                {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. Do NOT say the mission failed unless the tool execution itself reported an error."},
+                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nRaw output: {ans}\n\nPlease provide the final clean summary now:"}
+            ]
             try:
                 data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.0})
                 ans = data.get("message", {}).get("content", ans)
