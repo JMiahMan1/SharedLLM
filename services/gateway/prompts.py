@@ -78,7 +78,10 @@ def load_prompt_sync(prompt_key: str) -> str:
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
             ) as resp:
                 if resp.status == 200:
-                    return await resp.json()
+                    data = await resp.json()
+                    if isinstance(data, list):
+                        return {item.get("key"): item.get("value") for item in data if isinstance(item, dict)}
+                    return data
             return None
 
         try:
