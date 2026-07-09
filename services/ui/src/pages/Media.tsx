@@ -1751,54 +1751,6 @@ const Media = () => {
     }
   }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer, setLocalCurrentTime]);
 
-  const skipLocalBack = useCallback(() => {
-    const currentTime = maPlayer.position || 0;
-    if (currentTime > 5) {
-      console.log('[Media] Skip back to 0');
-      maPlayer.seek(0);
-      setLocalCurrentTime(0);
-      if (localTrack) {
-        api.syncMediaState({
-          entity_id: 'web_player',
-          state: localIsPlaying ? 'playing' : 'paused',
-          media_type: localTrack.type,
-          media_content_id: localTrack.id,
-          media_title: localTrack.title,
-          media_artist: localTrack.subtitle,
-          position: 0,
-          duration: localDuration,
-          volume_level: localVolume / 100,
-          is_volume_muted: localMuted
-        }).catch(err => console.error('[Media] Failed to sync skip back:', err));
-      }
-    }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer, setLocalCurrentTime]);
-
-  const skipLocalForward = useCallback(() => {
-    const currentTime = maPlayer.position || 0;
-    const dur = localDuration || 0;
-    if (dur > 0) {
-      const newTime = Math.min(currentTime + 30, dur);
-      console.log('[Media] Skip forward to:', newTime);
-      maPlayer.seek(newTime);
-      setLocalCurrentTime(newTime);
-      if (localTrack) {
-        api.syncMediaState({
-          entity_id: 'web_player',
-          state: localIsPlaying ? 'playing' : 'paused',
-          media_type: localTrack.type,
-          media_content_id: localTrack.id,
-          media_title: localTrack.title,
-          media_artist: localTrack.subtitle,
-          position: newTime,
-          duration: localDuration,
-          volume_level: localVolume / 100,
-          is_volume_muted: localMuted
-        }).catch(err => console.error('[Media] Failed to sync skip forward:', err));
-      }
-    }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer, setLocalCurrentTime]);
-
   const handleStopPlayback = useCallback(() => {
     console.log('[Media] Stop playback');
     if (localTrack) {
@@ -1908,7 +1860,7 @@ const Media = () => {
         currentTime={localMode ? localCurrentTime : remoteCurrentTime}
         duration={localMode ? localDuration : remoteDuration}
         isFavorite={Boolean(detailedMetadata?.favorite)}
-        onPrevious={localMode ? skipLocalBack : isWebPlayer ? () => maPlayer.previous() : () => sendTransport('previous')}
+        onPrevious={localMode ? () => maPlayer.previous() : isWebPlayer ? () => maPlayer.previous() : () => sendTransport('previous')}
         onTogglePlay={
           localMode
             ? toggleLocalPlay
@@ -1916,7 +1868,7 @@ const Media = () => {
               ? () => (maPlayer.isPlaying ? maPlayer.pause() : maPlayer.play())
               : () => sendTransport(mediaStatus?.state === 'playing' ? 'pause' : 'resume')
         }
-        onNext={localMode ? skipLocalForward : isWebPlayer ? () => maPlayer.next() : () => sendTransport('next')}
+        onNext={localMode ? () => maPlayer.next() : isWebPlayer ? () => maPlayer.next() : () => sendTransport('next')}
         onVolumeChange={localMode ? handleLocalVolume : handleVolume}
         onMuteToggle={localMode ? toggleLocalMute : toggleMute}
         onFavoriteToggle={activeUri ? handleFavoriteToggle : undefined}
