@@ -18,6 +18,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tshark \
     snmp \
     arp-scan \
+    curl \
+    ca-certificates \
+    jq \
     && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI (gh) — used by the gh workspace tool (repo create, PRs, issues).
+# Authentication is injected at runtime via the GH_TOKEN env (no credential store).
+RUN set -eux; \
+    ARCH="$(uname -m)"; \
+    if [ "$ARCH" = "x86_64" ]; then GH_ARCH="amd64"; else GH_ARCH="$ARCH"; fi; \
+    GH_VERSION="$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | jq -r .tag_name)"; \
+    curl -fsSL "https://github.com/cli/cli/releases/download/${GH_VERSION}/gh_${GH_VERSION#v}_linux_${GH_ARCH}.tar.gz" -o /tmp/gh.tar.gz; \
+    tar -xzf /tmp/gh.tar.gz -C /tmp; \
+    mv "/tmp/gh_${GH_VERSION#v}_linux_${GH_ARCH}/bin/gh" /usr/local/bin/gh; \
+    rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION#v}_linux_${GH_ARCH}"; \
+    gh --version
 
 CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]

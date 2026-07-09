@@ -603,6 +603,18 @@ class WorkspaceSyncAction(BaseRequest):
     path: str | None = None  # None means sync full workspace
     direction: Literal["upload", "download"] = "upload"
 
+class GhRequest(BaseRequest):
+    """Runs a `gh` (GitHub CLI) command inside a workspace.
+
+    `args` is the list of GitHub CLI arguments WITHOUT the leading `gh`
+    (e.g. ["repo", "create", "my-game", "--public"]). This is the tool Raven
+    and external clients use to manage GitHub repositories from a workspace.
+    """
+    user_context: UserContext
+    args: list[str] = Field(default_factory=list, description="gh subcommand + arguments (without the leading 'gh')")
+    cwd: str | None = Field(".", description="Working directory relative to the workspace root")
+    timeout: int = Field(120, ge=1, le=300, description="Command timeout in seconds")
+
 # ─── Browser / Web Agent ────────────────────────────────────────────────────────
 
 class WebSearchRequest(BaseRequest):

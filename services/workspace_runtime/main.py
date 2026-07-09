@@ -2121,7 +2121,20 @@ def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_
     remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
 
     current_branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
-    branch_name = (req.branch or current_branch["stdout"].strip()).strip()
+    # Fall back to the configured default branch (then "main") so a detached HEAD
+    # or a headless checkout does not produce an empty `git pull origin ""` refspec.
+    branch_name = (
+        req.branch
+        or current_branch["stdout"].strip()
+        or workspace.get("default_branch")
+        or "main"
+    ).strip()
+
+    if not branch_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot determine which branch to pull (detached HEAD and no default_branch configured).",
+        )
 
     remote_url = _git_remote_url(workspace_path, remote_name)
 
@@ -2136,6 +2149,69 @@ def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_
         identity=identity,
         remote_url=remote_url,
     )
+
+    recovered = False
+    recovery_note = None
+
+    if result["returncode"] != 0:
+        stderr = (result["stderr"] or result["stdout"] or "").strip()
+        dirty_indicators = (
+            "would be overwritten",
+            "your local changes would be overwritten",
+            "local changes would be overwritten",
+            "would be overwritten by merge",
+            "commit your changes or stash them",
+            "not have locally. this is usually caused by another repository pushing",
+            "untracked working tree files",
+        )
+        if any(ind in stderr.lower() for ind in dirty_indicators):
+            # Local uncommitted (or untracked) changes are blocking the pull.
+            # Stash them, retry the pull, and leave the stash for the user to reapply.
+            stash_result = _run_git_with_optional_askpass(
+                workspace_path,
+                ["git", "stash", "push", "-u", "-m", "sharedllm-auto-pull"],
+                identity=identity,
+                remote_url=remote_url,
+            )
+            if stash_result["returncode"] == 0:
+                result = _run_git_with_optional_askpass(
+                    workspace_path,
+                    args,
+                    identity=identity,
+                    remote_url=remote_url,
+                )
+                if result["returncode"] == 0:
+                    recovered = True
+                    recovery_note = (
+                        "Local uncommitted changes were stashed to allow the pull. "
+                        "Reapply them with: git stash pop"
+                    )
+                else:
+                    # Pull still failed after stashing — restore the stash so no work is lost.
+                    _run_git_with_optional_askpass(
+                        workspace_path,
+                        ["git", "stash", "pop"],
+                        identity=identity,
+                        remote_url=remote_url,
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            (result["stderr"] or result["stdout"] or "").strip()
+                            or "git pull failed after stashing local changes"
+                        ),
+                    )
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=stderr or "git pull failed and automatic stash failed",
+                )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=stderr or "git pull failed",
+            )
+
     if result["returncode"] == 0:
         # Trigger automatic backup if enabled
         with Session(engine) as session:
@@ -2149,20 +2225,22 @@ def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_
                     match.nextcloud_path
                 )
 
-    if result["returncode"] != 0:
-        raise HTTPException(
-            status_code=400,
-            detail=result["stderr"].strip() or result["stdout"].strip() or "git pull failed"
-        )
+        return {
+            "status": "SUCCESS",
+            "workspace": workspace,
+            "command": args,
+            "stdout": result["stdout"],
+            "stderr": result["stderr"],
+            "branch": branch_name,
+            "recovered": recovered,
+            "recovery_note": recovery_note,
+        }
 
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "command": args,
-        "stdout": result["stdout"],
-        "stderr": result["stderr"],
-        "branch": branch_name
-    }
+    # Safety net: a non-zero result that escaped the branches above.
+    raise HTTPException(
+        status_code=400,
+        detail=(result["stderr"] or result["stdout"] or "").strip() or "git pull failed",
+    )
 
 
 @app.post("/git/revert")
