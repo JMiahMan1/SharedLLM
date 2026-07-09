@@ -174,10 +174,10 @@ class OllamaProvider(BaseLLMProvider):
                     return ""
 
             # Streaming path (used by AgentLoop)
-            async with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as response:
+            async with client.post(f"{self.base_url}/api/chat", json=payload) as response:
                 response.raise_for_status()
-                async for line in response.aiter_lines():
-                    clean_line = line.strip()
+                async for raw_line in response.content:
+                    clean_line = raw_line.decode("utf-8", errors="replace").strip()
                     if not clean_line:
                         continue
                     try:
@@ -197,7 +197,7 @@ class OllamaProvider(BaseLLMProvider):
                     except RuntimeError:
                         raise  # Let provider errors propagate to AgentLoop retry logic
                     except Exception as e:
-                        log.error(f"Error parsing streaming chunk: {e} | Raw line: {line!r}")
+                        log.error(f"Error parsing streaming chunk: {e} | Raw line: {clean_line!r}")
         # Strip thinking blocks from final content unless explicitly requested
         if not show_thinking:
             full_content = strip_thinking_blocks(full_content)
