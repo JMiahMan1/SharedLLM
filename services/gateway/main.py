@@ -2157,7 +2157,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         # 4. Extract Tool Call
         tool_data = extract_action_json(resp_content)
-        log.warning(f"[DEBUG-EXTRACT] type={type(tool_data).__name__} val={repr(tool_data)[:300]} | ans_has_backtick={'```' in ans} | resp_len={len(resp_content)}")
 
         tag = "```json" if "```json" in ans else "```"
         start = ans.find(tag)
@@ -2165,10 +2164,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             start += len(tag)
             end = ans.find("```", start)
             if end > start:
-                try:
-                    tool_data = json.loads(ans[start:end].strip())
-                except Exception:
-                    pass
+                fenced = ans[start:end].strip()
+                parsed = extract_action_json(fenced)
+                if parsed:
+                    tool_data = parsed
+                else:
+                    try:
+                        tool_data = json.loads(fenced)
+                    except Exception:
+                        pass
 
         # Strategy 2: First { to last }
         if tool_data is None:
