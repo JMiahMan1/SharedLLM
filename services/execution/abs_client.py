@@ -5,11 +5,21 @@ Handles authentication, library search, playback progress, and streaming.
 """
 import logging
 import time
+from contextlib import asynccontextmanager
 from typing import Any
 
 import aiohttp
 
 log = logging.getLogger("execution.abs_client")
+
+from services.execution.http_client import get_session, host_of
+
+
+@asynccontextmanager
+async def _abs_session(abs_url: str, verify: bool = False):
+    """Yield the pooled ABS session WITHOUT closing it (reused across calls)."""
+    yield await get_session(host_of(abs_url), verify=verify)
+
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30.0, connect=5.0)
 
@@ -69,9 +79,9 @@ async def abs_login(abs_url: str, username: str, password: str, force: bool = Fa
         if cached:
             return cached
     url = f"{abs_url.rstrip('/')}/login"
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _abs_session(abs_url) as client:
         try:
-            async with client.post(url, json={"username": username, "password": password}) as resp:
+            async with client.post(url, json={"username": username, "password": password}, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
                 token = data.get("user", {}).get("token")
@@ -91,9 +101,9 @@ async def abs_get(
     """GET request to ABS API."""
     url = f"{abs_url.rstrip('/')}{path}"
     headers = {"Authorization": f"Bearer {abs_api_key}"}
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _abs_session(abs_url) as client:
         try:
-            async with client.get(url, headers=headers, params=params) as resp:
+            async with client.get(url, headers=headers, params=params, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 return await resp.json()
         except aiohttp.ClientResponseError as e:
@@ -110,9 +120,9 @@ async def abs_post(
     """POST request to ABS API."""
     url = f"{abs_url.rstrip('/')}{path}"
     headers = {"Authorization": f"Bearer {abs_api_key}", "Content-Type": "application/json"}
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _abs_session(abs_url) as client:
         try:
-            async with client.post(url, headers=headers, json=json) as resp:
+            async with client.post(url, headers=headers, json=json, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
                 return data

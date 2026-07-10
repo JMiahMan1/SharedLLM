@@ -91,7 +91,7 @@ async def call_service(
     async with _ha_session(ha_url) as client:
         try:
             log.info(f"HA CALL: {domain}.{service} -> {entity_id or '(no target)'} | url={url} | payload={payload}")
-            async with client.post(url, headers=headers, json=payload) as resp:
+            async with client.post(url, headers=headers, json=payload, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 log.info(f"[ha_client] {domain}.{service} OK (HTTP {resp.status})")
                 if return_response:
@@ -102,7 +102,7 @@ async def call_service(
             log.error(f"[ha_client] HTTP error: {e}")
             detail = ""
             try:
-                resp_detail = await client.get(url, headers=headers, json=payload)
+                resp_detail = await client.get(url, headers=headers, json=payload, timeout=_TIMEOUT)
                 await resp_detail.release()
                 detail = str(e)
             except:
@@ -233,7 +233,7 @@ async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
     async with _ha_session(ha_url) as client:
         try:
             log.info(f"[ha_client] GET {url}")
-            async with client.get(url, headers=headers, params=params) as resp:
+            async with client.get(url, headers=headers, params=params, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 data = await resp.json()
                 # HA returns a list of lists (one per entity)
@@ -257,7 +257,7 @@ async def get_logbook(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
     async with _ha_session(ha_url) as client:
         try:
             log.info(f"[ha_client] GET {url} | entity={entity_id}")
-            async with client.get(url, headers=headers, params=params) as resp:
+            async with client.get(url, headers=headers, params=params, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 return await resp.json()
         except Exception as e:
@@ -286,7 +286,7 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
 
     async with _ha_session(ha_url) as client:
         try:
-            async with client.post(url, headers=headers, json={"template": template}) as resp:
+            async with client.post(url, headers=headers, json={"template": template}, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 raw_data = await resp.json()
                 # Convert list of dicts to a single mapping dict

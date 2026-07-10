@@ -5,7 +5,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 import redis.asyncio as redis
@@ -682,7 +682,7 @@ def get_http_client() -> aiohttp.ClientSession:
     if _global_http_client is None or _global_http_client_loop != current_loop:
         _global_http_client = _original_async_client(
             timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-            limits=aiohttp.TCPConnector(max_connections=100, max_keepalive_connections=20)
+            connector=aiohttp.TCPConnector(limit=100),
         )
         _global_http_client_loop = current_loop
     return _global_http_client
@@ -1034,7 +1034,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         recent = action_log[-KEEP_RECENT:]
 
         # Build compact summary of older entries
-        actions_seen = {}
+        actions_seen: dict[str, int] = {}
         for entry in older:
             # Extract action name from "Step N: action_name -> result" or "ITERATION N: ..."
             if ": " in entry:
@@ -1241,7 +1241,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     data = await execute_inference(
                         provider,
                         selected_model,
-                        ollama_payload["messages"],
+                        cast(list, ollama_payload["messages"]),
                         inference_options,
                         chunk_callback=chunk_logger
                     )
@@ -1868,10 +1868,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     return ans
 
 
-async def run_post_write_lint(file_path: str, execution_svc: str, internal_secret: str, logger, user_context: dict | None = None) -> str | None:
+async def run_post_write_lint(file_path: str, execution_svc: str | None, internal_secret: str, logger, user_context: dict | None = None) -> str | None:
     """
     Shared post-write lint hook. Returns lint feedback string on failure, None on success.
     """
+    if not execution_svc:
+        return None
     ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
     lintable_exts = {"py", "js", "ts", "tsx", "sh", "bash", "json", "yaml", "yml"}
     if ext not in lintable_exts:

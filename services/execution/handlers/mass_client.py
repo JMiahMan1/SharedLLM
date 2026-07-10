@@ -3,11 +3,20 @@ import asyncio
 import json
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any
 
 import aiohttp
 
 log = logging.getLogger(__name__)
+
+from services.execution.http_client import get_session, host_of
+
+
+@asynccontextmanager
+async def _mass_session(mass_url: str, verify: bool = False):
+    """Yield the pooled MA session WITHOUT closing it (reused across calls)."""
+    yield await get_session(host_of(mass_url), verify=verify)
 
 
 async def _ma_api(mass_url: str, mass_token: str, command: str, params: dict[str, Any] | None = None) -> Any:
@@ -34,33 +43,35 @@ async def _ma_api(mass_url: str, mass_token: str, command: str, params: dict[str
 
     for url in urls_to_try:
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as client, client.post(
-                url,
-                json=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {mass_token}",
-                }
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    # music/search returns a dict of media_type -> [items]
-                    if isinstance(data, dict) and command == "music/search":
-                        return data
-                    if isinstance(data, dict):
-                        result = data.get("result", data.get("items", []))
-                        if isinstance(result, list):
-                            return result
-                        # Some commands return data directly in a key
-                        for key in ("playlists", "items", "data"):
-                            if key in data and isinstance(data[key], list):
-                                return data[key]
-                    elif isinstance(data, list):
-                        return data
+            async with _mass_session(mass_url) as client:
+                async with client.post(
+                    url,
+                    json=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {mass_token}",
+                    },
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        # music/search returns a dict of media_type -> [items]
+                        if isinstance(data, dict) and command == "music/search":
+                            return data
+                        if isinstance(data, dict):
+                            result = data.get("result", data.get("items", []))
+                            if isinstance(result, list):
+                                return result
+                            # Some commands return data directly in a key
+                            for key in ("playlists", "items", "data"):
+                                if key in data and isinstance(data[key], list):
+                                    return data[key]
+                        elif isinstance(data, list):
+                            return data
+                        else:
+                            log.warning(f"[mass] MA API returned unexpected shape for {command} on {url}")
                     else:
-                        log.warning(f"[mass] MA API returned unexpected shape for {command} on {url}")
-                else:
-                    log.warning(f"[mass] MA API returned {resp.status} for {command} on {url}: {await resp.text()[:200]}")
+                        log.warning(f"[mass] MA API returned {resp.status} for {command} on {url}: {(await resp.text())[:200]}")
         except Exception as e:
             log.debug(f"[mass] MA API call to {url} failed: {e}")
             continue
@@ -133,8 +144,8 @@ async def search(mass_url: str, mass_token: str, query: str, limit: int = 20, me
             args["media_type"] = [mt.lower() for mt in media_types]
 
         results: list[dict[str, Any]] = []
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=25)) as session:
-            async with session.ws_connect(ws_url, heartbeat=15) as ws:
+        async with _mass_session(mass_url) as session:
+            async with session.ws_connect(ws_url, heartbeat=15, timeout=aiohttp.ClientTimeout(total=25)) as ws:
                 # server/hello
                 await ws.receive_str()
                 # authenticate
