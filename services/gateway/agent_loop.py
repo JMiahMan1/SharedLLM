@@ -1235,7 +1235,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     start_iteration = 0
     if mission_id:
         try:
-            r_cp = redis.from_url(REDIS_URL, decode_responses=True)
+            r_cp = await _get_redis_cmd()
             cp_raw = await r_cp.get(f"raven:checkpoint:{mission_id}")
             if cp_raw:
                 cp = json.loads(cp_raw)
@@ -1328,7 +1328,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         if not mission_id:
             return
         try:
-            r_cp = redis.from_url(REDIS_URL, decode_responses=True)
+            r_cp = await _get_redis_cmd()
             cp_data = {
                 "iteration": iter_num,
                 "action_log": action_log[-20:],
@@ -1349,9 +1349,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         if not mission_id:
             return
         try:
-            r_cp = redis.from_url(REDIS_URL, decode_responses=True)
+            r_cp = await _get_redis_cmd()
             await r_cp.delete(f"raven:checkpoint:{mission_id}")
-            await r_cp.close()
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to clear checkpoint for mission {mission_id}: {e}")
 
