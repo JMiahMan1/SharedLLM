@@ -70,6 +70,7 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
     Retrieves relevant 'User Facts' from the RAG service to provide semantic memory.
     """
     from services.gateway.orchestrator import _get, get_all_settings
+    from services.gateway.main import shared_http_client
     settings = await get_all_settings()
     rag_svc = _get(settings, "rag_svc_url")
     secret = _get(settings, "internal_secret", INTERNAL_SECRET)
@@ -82,11 +83,12 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
             "k": 5
         }
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+        async with shared_http_client() as client:
             resp = await client.post(
                 f"{rag_svc}/rag/search",
                 json=payload,
-                headers={"X-Internal-Secret": secret}
+                headers={"X-Internal-Secret": secret},
+                timeout=aiohttp.ClientTimeout(total=5.0),
             )
             if resp.status != 200:
                 return ""
@@ -111,6 +113,7 @@ async def extract_and_store_user_facts(user_id: str, history: list):
 
     try:
         from services.gateway.orchestrator import _get, get_all_settings
+        from services.gateway.main import shared_http_client
         settings = await get_all_settings()
         LIBRARIAN_MODEL = _get(settings, "ollama_librarian_model") or _get(settings, "librarian_model") or _get(settings, "assistant_model")
         if not LIBRARIAN_MODEL:
@@ -134,10 +137,11 @@ Conversation:
 
 Return ONLY a bulleted list of facts, or 'NONE'.
 """
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
+        async with shared_http_client() as client:
             resp = await client.post(
                 f"{ollama_url}/api/generate",
                 json={"model": LIBRARIAN_MODEL, "prompt": prompt, "stream": False},
+                timeout=aiohttp.ClientTimeout(total=60.0),
             )
             if resp.status != 200: return
 
@@ -157,7 +161,8 @@ Return ONLY a bulleted list of facts, or 'NONE'.
                         "metadata": {"type": "user_fact", "timestamp": time.time()},
                         "user_id": user_id
                     },
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=60.0),
                 )
                 log.info(f"[Mem0] Extracted fact for {user_id}: {f}")
     except Exception as e:

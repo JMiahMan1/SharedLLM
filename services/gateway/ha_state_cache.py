@@ -68,11 +68,13 @@ def cache_all_states(entities: list[dict]) -> int:
 async def fetch_live_states(execution_url: str, ha_url: str, ha_token: str, internal_secret: str) -> list[dict]:
     """Fetch all states from HA via execution service and cache them."""
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        from services.gateway.main import shared_http_client
+        async with shared_http_client() as client:
             resp = await client.get(
                 f"{execution_url}/discovery/entities",
                 params={"ha_url": ha_url, "ha_token": ha_token},
-                headers={"X-Internal-Secret": internal_secret}
+                headers={"X-Internal-Secret": internal_secret},
+                timeout=aiohttp.ClientTimeout(total=10.0),
             )
             if resp.status == 200:
                 data = await resp.json()

@@ -73,9 +73,11 @@ def load_prompt_sync(prompt_key: str) -> str:
     if not _settings_cache or (now - _settings_cache_time) > _settings_ttl:
 
         async def _fetch():
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
+            from services.gateway.main import shared_http_client
+            async with shared_http_client() as client, client.get(
                 f"{IDENTITY_SVC}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()

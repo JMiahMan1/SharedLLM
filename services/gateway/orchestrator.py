@@ -63,10 +63,12 @@ async def get_all_settings() -> dict[str, str]:
         return _settings_cache
 
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
+        from services.gateway.main import shared_http_client
+        async with shared_http_client() as client:
             resp = await client.get(
                 f"{IDENTITY_SVC}/api/settings",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=3.0),
             )
             if resp.status == 200:
                 fetched = {item["key"]: item["value"] for item in await resp.json()}
@@ -350,7 +352,8 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
         total_hits = 0
         total_chars = 0
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        from services.gateway.main import shared_http_client
+        async with shared_http_client() as client:
             for coll in collections:
                 if total_hits >= MAX_TOTAL_HITS or total_chars >= TOTAL_CHARS_LIMIT:
                     break
@@ -358,7 +361,8 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
                 resp = await client.post(
                     f"{rag_svc}/rag/search",
                     json={"collection_name": coll, "query": query, "user_id": user_id, "k": MAX_HITS_PER_COLL},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
                 )
                 if resp.status == 200:
                     hits = (await resp.json()).get("results", [])
@@ -411,11 +415,13 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
 
     try:
         # Fetch all entities to find weather domain
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        from services.gateway.main import shared_http_client
+        async with shared_http_client() as client:
             resp = await client.get(
                 f"{exec_svc}/discovery/entities",
                 params={"ha_url": ha_url, "ha_token": ha_token},
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
             )
             if resp.status != 200:
                 return ""
@@ -546,11 +552,12 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
         if not service_name:
             return "Error: service_name is required"
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
+            from services.gateway.main import shared_http_client
+            async with shared_http_client() as client:
                 if sub_action == "restart":
-                    resp = await client.post(f"{control_plane}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+                    resp = await client.post(f"{control_plane}/api/restart/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=30.0))
                 else:
-                    resp = await client.get(f"{control_plane}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+                    resp = await client.get(f"{control_plane}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=30.0))
 
                 if resp.status == 200:
                     return f"Control Plane '{sub_action}' succeeded on {service_name}: {resp.text}"
@@ -592,8 +599,9 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     payload["device_name"] = device_name
                     log.info(f"[_execute_single_tool] Auto-resolved device_name='{device_name}' from query")
 
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
-                resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
+            from services.gateway.main import shared_http_client
+            async with shared_http_client() as client:
+                resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=60.0))
                 if resp.status == 200:
                     result = await resp.json()
                     if action == "executionlogrequest":

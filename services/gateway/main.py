@@ -220,10 +220,11 @@ _DEFAULT_FAST_PATH_THRESHOLD = 0.85
 async def fetch_global_setting(key: str, default: str = "") -> str:
     """Fetch a global setting from the Identity Service."""
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+        async with shared_http_client() as client:
             resp = await client.get(
                 f"{IDENTITY_SVC}/api/settings/{key}",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=5.0),
             )
             if resp.status == 200:
                 val = (await resp.json()).get("value", default)
@@ -358,8 +359,8 @@ async def get_resident_model() -> str | None:
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=1.0)) as client:
-            resp = await client.get(f"{ollama_url}/api/ps")
+        async with shared_http_client() as client:
+            resp = await client.get(f"{ollama_url}/api/ps", timeout=aiohttp.ClientTimeout(total=1.0))
             if resp.status == 200:
                 models = await resp.json().get("models", [])
                 if models:
@@ -689,11 +690,11 @@ async def readiness():
     results: dict[str, Any] = {"status": "READY", "services": services_status, "service_details": service_details}
     all_ok = True
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.0)) as client:
+    async with shared_http_client() as client:
       for name, url in services.items():
           try:
             log.info(f"[health] Checking {name} at {url}")
-            resp = await client.get(url)
+            resp = await client.get(url, timeout=aiohttp.ClientTimeout(total=2.0))
             log.info(f"[health] {name} response: {resp.status}")
             if resp.status == 200:
                 services_status[name] = "OK"
@@ -2023,7 +2024,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         log.info(f"[ShadowExecution] Requesting proposal from {assistant} (Timeout: {OLLAMA_TIMEOUT}s)")
         # Wait for available slot if all are busy
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as slot_client:
+            async with shared_http_client() as slot_client:
                 deadline = asyncio.get_running_loop().time() + 120.0
                 while asyncio.get_running_loop().time() < deadline:
                     try:
@@ -2798,8 +2799,8 @@ async def chat_handler(request: Request, background_tasks=None):
                 svc_base = EXECUTION_SVC
 
             fast_timeout=aiohttp.ClientTimeout(total=120.0) if intent == "play_media" else aiohttp.ClientTimeout(total=30.0)
-            async with aiohttp.ClientSession(timeout=fast_timeout) as client:
-                exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
+            async with shared_http_client() as client:
+                exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=fast_timeout)
                 ans = await exec_resp.json().get("message", "Action completed.")
 
             if resolved_entity and intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
@@ -3127,19 +3128,20 @@ async def get_chat_job_status(job_id: str):
 @app.post("/api/auth/login")
 async def proxy_login(request: Request):
     body = await request.json()
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
-        resp = await client.post(f"{IDENTITY_SVC}/api/auth/login", json=body)
+    async with shared_http_client() as client:
+        resp = await client.post(f"{IDENTITY_SVC}/api/auth/login", json=body, timeout=aiohttp.ClientTimeout(total=10.0))
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.post("/api/auth/change-password")
 async def proxy_change_password(request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/auth/change-password",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
@@ -3170,21 +3172,23 @@ async def proxy_import_nextcloud_users(request: Request):
 async def proxy_test_connection(request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/auth/test-connection",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/auth/discover")
 async def proxy_discover(request: Request):
     auth_header = request.headers.get("Authorization")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/auth/discover",
             headers={"Authorization": auth_header} if auth_header else {}
+            , timeout=aiohttp.ClientTimeout(total=60.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
@@ -3192,11 +3196,12 @@ async def proxy_discover(request: Request):
 async def proxy_update_me(request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.patch(
             f"{IDENTITY_SVC}/api/users/me",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
@@ -3204,21 +3209,23 @@ async def proxy_update_me(request: Request):
 async def proxy_update_user(username: str, request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.patch(
             f"{IDENTITY_SVC}/api/users/{username}",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/settings")
 async def proxy_get_settings(request: Request):
     auth_header = request.headers.get("Authorization")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/settings",
             headers={"Authorization": auth_header} if auth_header else {}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
@@ -3226,11 +3233,12 @@ async def proxy_get_settings(request: Request):
 async def proxy_update_setting(key: str, request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.patch(
             f"{IDENTITY_SVC}/api/settings/{key}",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
@@ -3238,21 +3246,23 @@ async def proxy_update_setting(key: str, request: Request):
 async def proxy_update_settings_bulk(request: Request):
     body = await request.json()
     auth_header = request.headers.get("Authorization")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/settings",
             json=body,
             headers={"Authorization": auth_header} if auth_header else {}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/users")
 async def proxy_users(request: Request):
     auth_header = request.headers.get("Authorization")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/users",
             headers={"Authorization": auth_header} if auth_header else {}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
@@ -3375,10 +3385,11 @@ async def proxy_get_telemetry_insights(request: Request):
 @app.delete("/api/devices/{device_id:path}")
 async def proxy_delete_device(device_id: str, request: Request):
     auth_header = request.headers.get("Authorization")
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.delete(
             f"{IDENTITY_SVC}/api/devices/{device_id}",
             headers={"Authorization": auth_header} if auth_header else {}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
     return JSONResponse(status_code=resp.status, content=await resp.json())
 
@@ -3521,8 +3532,8 @@ async def proxy_get_skylight_chores(request: Request, user: str | None = None, d
 
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", ""), "date": date or ""}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
-        resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/chores", headers=headers, params=params)
+    async with shared_http_client() as client:
+        resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/chores", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
     return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
@@ -3534,8 +3545,8 @@ async def proxy_complete_skylight_chore(chore_id: str, request: Request):
 
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
-        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/complete", headers=headers, params=params)
+    async with shared_http_client() as client:
+        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/complete", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
     return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
@@ -3547,8 +3558,8 @@ async def proxy_uncomplete_skylight_chore(chore_id: str, request: Request):
 
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
-        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/uncomplete", headers=headers, params=params)
+    async with shared_http_client() as client:
+        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/uncomplete", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
     return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
@@ -3560,8 +3571,8 @@ async def proxy_get_skylight_rewards(request: Request):
 
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
-        resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/rewards", headers=headers, params=params)
+    async with shared_http_client() as client:
+        resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/rewards", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
     return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
@@ -3574,8 +3585,8 @@ async def proxy_redeem_skylight_reward(reward_id: str, request: Request):
     body = await request.json() if await request.body() else {}
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     params = {"user": creds.get("user", "")}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
-        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/rewards/{reward_id}/redeem", json=body, headers=headers, params=params)
+    async with shared_http_client() as client:
+        resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/rewards/{reward_id}/redeem", json=body, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
     return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
@@ -3653,8 +3664,8 @@ async def proxy_generate(request: Request):
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
-        async with aiohttp.ClientSession(timeout=None) as client:
-            resp = await client.post(f"{ollama_url}/api/generate", json=body)
+        async with shared_http_client() as client:
+            resp = await client.post(f"{ollama_url}/api/generate", json=body, timeout=None)
             if resp.status != 200:
                 error_text = await resp.text()
                 return JSONResponse({"status": "ERROR", "message": error_text}, status_code=resp.status)
@@ -3699,8 +3710,8 @@ async def proxy_show(request: Request):
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
-            resp = await client.post(f"{ollama_url}/api/show", json=body)
+        async with shared_http_client() as client:
+            resp = await client.post(f"{ollama_url}/api/show", json=body, timeout=aiohttp.ClientTimeout(total=30.0))
             if resp.status == 200:
                 return await resp.json()
             return JSONResponse(content=await resp.json(), status_code=resp.status)
@@ -3716,8 +3727,8 @@ async def proxy_embeddings(request: Request):
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
-            resp = await client.post(f"{ollama_url}/api/embeddings", json=body)
+        async with shared_http_client() as client:
+            resp = await client.post(f"{ollama_url}/api/embeddings", json=body, timeout=aiohttp.ClientTimeout(total=60.0))
             if resp.status == 200:
                 return await resp.json()
             return JSONResponse(content=await resp.json(), status_code=resp.status)
@@ -3733,8 +3744,8 @@ async def proxy_embed(request: Request):
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
-            resp = await client.post(f"{ollama_url}/api/embed", json=body)
+        async with shared_http_client() as client:
+            resp = await client.post(f"{ollama_url}/api/embed", json=body, timeout=aiohttp.ClientTimeout(total=60.0))
             if resp.status == 200:
                 return await resp.json()
             return JSONResponse(content=await resp.json(), status_code=resp.status)
@@ -4408,10 +4419,11 @@ async def openai_embeddings(request: Request):
         if not ollama_url:
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
+        async with shared_http_client() as client:
             resp = await client.post(
                 f"{ollama_url}/api/embed",
                 json={"model": model, "input": inputs}
+                , timeout=aiohttp.ClientTimeout(total=60.0),
             )
             if resp.status != 200:
                 return JSONResponse(content=await resp.json(), status_code=resp.status)
@@ -4950,10 +4962,10 @@ async def get_ollama_models():
         models: set[str] = set()
         last_error: str | None = None
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        async with shared_http_client() as client:
             # 1. Native Ollama tags endpoint: {"models": [{"name": ...}]}
             try:
-                resp = await client.get(f"{base}/api/tags")
+                resp = await client.get(f"{base}/api/tags", timeout=aiohttp.ClientTimeout(total=10.0))
                 if resp.status == 200:
                     data = await resp.json()
                     for m in data.get("models", []):
@@ -4968,7 +4980,7 @@ async def get_ollama_models():
             #    Local Model Mapping is fully populated regardless of which endpoint
             #    shape the model server exposes.
             try:
-                resp = await client.get(f"{base}/v1/models")
+                resp = await client.get(f"{base}/v1/models", timeout=aiohttp.ClientTimeout(total=10.0))
                 if resp.status == 200:
                     data = await resp.json()
                     for m in data.get("data", []):
@@ -5006,7 +5018,7 @@ async def get_gateway_config():
 @app.post("/api/config")
 async def update_gateway_config(new_config: dict):
     # Save the new configuration to the Identity Service GlobalSettings
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+    async with shared_http_client() as client:
         for key in ["assistant_model", "coding_model", "librarian_model"]:
             if key in new_config:
                 val = new_config[key]
@@ -5016,6 +5028,7 @@ async def update_gateway_config(new_config: dict):
                         f"{IDENTITY_SVC}/api/settings/{key}",
                         json={"value": val},
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
+                        , timeout=aiohttp.ClientTimeout(total=5.0),
                     )
                     if resp.status != 200:
                         log.error(f"Failed to sync global config {key}: Identity SVC returned {resp.status}")
@@ -5075,11 +5088,12 @@ async def register_dns_entry(request: Request):
 
     dns_mappings[hostname] = ip
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+    async with shared_http_client() as client:
         await client.patch(
             f"{IDENTITY_SVC}/api/settings/dns_mappings",
             json={"value": json.dumps(dns_mappings)},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=5.0),
         )
 
     return {"status": "SUCCESS", "message": f"Registered {hostname} -> {ip}"}
@@ -5099,11 +5113,12 @@ async def remove_dns_entry(hostname: str, request: Request):
 
     del dns_mappings[hostname]
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+    async with shared_http_client() as client:
         await client.patch(
             f"{IDENTITY_SVC}/api/settings/dns_mappings",
             json={"value": json.dumps(dns_mappings)},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=5.0),
         )
 
     return {"status": "SUCCESS", "message": f"Removed {hostname}"}
@@ -5115,27 +5130,30 @@ async def update_dns_config(request: Request):
     body = await request.json()
 
     if "dns_upstream" in body:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+        async with shared_http_client() as client:
             await client.patch(
                 f"{IDENTITY_SVC}/api/settings/dns_upstream",
                 json={"value": body["dns_upstream"]},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=5.0),
             )
 
     if "dns_poll_interval" in body:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+        async with shared_http_client() as client:
             await client.patch(
                 f"{IDENTITY_SVC}/api/settings/dns_poll_interval",
                 json={"value": str(body["dns_poll_interval"])},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=5.0),
             )
 
     if "dns_mappings" in body:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+        async with shared_http_client() as client:
             await client.patch(
                 f"{IDENTITY_SVC}/api/settings/dns_mappings",
                 json={"value": json.dumps(body["dns_mappings"])},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=5.0),
             )
 
     return {"status": "SUCCESS", "message": "DNS configuration updated"}
@@ -5207,11 +5225,12 @@ def _record_from(hostname: str, entry: Any) -> dict:
 
 
 async def _save_dns_mappings(mappings: dict) -> None:
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+    async with shared_http_client() as client:
         await client.patch(
             f"{IDENTITY_SVC}/api/settings/dns_mappings",
             json={"value": json.dumps(mappings)},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
+             timeout=aiohttp.ClientTimeout(total=5.0),
         )
 
 
@@ -5331,12 +5350,12 @@ async def run_sharedllm_tool(
     if resolved.service in (SVC_EXECUTION, SVC_WORKSPACE):
         headers["X-Internal-Secret"] = INTERNAL_SECRET
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=180.0)) as client:
+    async with shared_http_client() as client:
         if resolved.method == "GET":
-            async with client.get(url, headers=headers) as resp:
+            async with client.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=180.0)) as resp:
                 return {"status": resp.status, "body": await _safe_json(resp)}
         else:
-            async with client.post(url, json=resolved.json, headers=headers) as resp:
+            async with client.post(url, json=resolved.json, headers=headers, timeout=aiohttp.ClientTimeout(total=180.0)) as resp:
                 return {"status": resp.status, "body": await _safe_json(resp)}
 
 
@@ -5359,10 +5378,11 @@ async def list_sharedllm_tools():
 @app.get("/api/presence/{user_id}")
 async def get_user_presence(user_id: str):
     """Get presence data for a user."""
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/presence/{user_id}",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=5.0),
         )
         if resp.status == 200:
             return await resp.json()
@@ -5372,10 +5392,11 @@ async def get_user_presence(user_id: str):
 @app.get("/api/presence/all")
 async def get_all_presence():
     """Get presence data for all users."""
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/presence/all",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=5.0),
         )
         if resp.status == 200:
             return await resp.json()
@@ -5385,10 +5406,11 @@ async def get_all_presence():
 @app.get("/api/presence/rooms")
 async def get_presence_rooms():
     """Get list of all known rooms."""
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/presence/rooms",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=5.0),
         )
         if resp.status == 200:
             return await resp.json()
@@ -5399,11 +5421,12 @@ async def get_presence_rooms():
 async def update_user_location(user_id: str, request: Request):
     """Update user GPS location."""
     body = await request.json()
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/users/{user_id}/location",
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=5.0),
         )
         if resp.status == 200:
             return await resp.json()
@@ -5413,10 +5436,11 @@ async def update_user_location(user_id: str, request: Request):
 @app.get("/api/users/{user_id}/location")
 async def get_user_location(user_id: str):
     """Get user GPS location."""
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/users/{user_id}/location",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=5.0),
         )
         if resp.status == 200:
             return await resp.json()
@@ -5435,12 +5459,13 @@ async def transcribe_audio(request: Request):
     if not audio_file:
         raise HTTPException(status_code=400, detail="audio file required")
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/stt/transcribe",
             files={"file": (audio_file.filename, audio_file.file, "audio/wav")},
             data={"model": model, "language": language},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=30.0),
         )
         if resp.status == 200:
             return await resp.json()
@@ -5451,11 +5476,12 @@ async def transcribe_audio(request: Request):
 async def execute_voice_command(request: Request):
     """Route voice command to execution service."""
     body = await request.json()
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.post(
             f"{EXECUTION_SVC}/execute/voice/command",
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         if resp.status == 200:
             return await resp.json()
@@ -5470,11 +5496,12 @@ async def get_ma_playlists(request: Request):
     except HTTPException as e:
         log.error(f"[media/playlists] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "playlists": []}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/playlists",
             params={"user_id": creds.get("user") or ""},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         if resp.status == 200:
             return await resp.json()
@@ -5489,11 +5516,12 @@ async def get_ma_recent(request: Request):
     except HTTPException as e:
         log.error(f"[media/recent] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "recent": []}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/recent",
             params={"user_id": creds.get("user") or ""},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         if resp.status == 200:
             return await resp.json()
@@ -5508,11 +5536,12 @@ async def get_ma_browse(request: Request, media_type: str = "TRACKS", offset: in
     except HTTPException as e:
         log.error(f"[ma/browse] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "items": []}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.get(
             f"{EXECUTION_SVC}/execute/media/music-assistant/browse",
             params={"user_id": creds.get("user") or "", "media_type": media_type, "offset": offset, "limit": limit, "search": search, "order_by": order_by},
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+            , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         if resp.status == 200:
             return await resp.json()
@@ -5528,11 +5557,12 @@ async def search_ma(request: Request, query: str = "", media_type: str = "", lim
         log.error(f"[ma/search] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "results": []}
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
+        async with shared_http_client() as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/media/music-assistant/search",
                 params={"user_id": creds.get("user") or "", "query": query, "media_type": media_type, "limit": limit, "artist": artist, "album": album, "library_only": library_only},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=15.0),
             )
             if resp.status == 200:
                 return await resp.json()
@@ -5551,11 +5581,12 @@ async def get_abs_libraries(request: Request):
         log.error(f"[abs/libraries] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "libraries": []}
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as client:
+        async with shared_http_client() as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "libraries", "user_id": creds.get("user") or ""},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT),
             )
             if resp.status == 200:
                 data = await resp.json()
@@ -5586,11 +5617,12 @@ async def get_abs_last_played(request: Request):
         log.error(f"[abs/last-played] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": []}
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as client:
+        async with shared_http_client() as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "last_played", "user_id": creds.get("user") or ""},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT),
             )
             if resp.status == 200:
                 data = await resp.json()
@@ -5613,11 +5645,12 @@ async def get_abs_library_items(library_id: str, request: Request, limit: int = 
         log.error(f"[abs/library] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": []}
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as client:
+        async with shared_http_client() as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "list", "library_id": library_id, "limit": limit, "user_id": creds.get("user") or ""},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT),
             )
             if resp.status == 200:
                 data = await resp.json()
@@ -5640,11 +5673,12 @@ async def search_abs(q: str, request: Request, limit: int = 20):
         log.error(f"[abs/search] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "books": [], "podcasts": [], "authors": [], "total": 0}
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as client:
+        async with shared_http_client() as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/audiobookshelf",
                 params={"action": "search", "query": q, "limit": limit, "user_id": creds.get("user") or ""},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT),
             )
             if resp.status == 200:
                 data = await resp.json()
@@ -5674,11 +5708,12 @@ async def get_abs_status():
     """Check ABS server connectivity by pinging the login endpoint."""
     try:
         from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as client:
+        async with shared_http_client() as client:
             # Resolve ABS URL from identity settings
             settings_resp = await client.get(
                 f"{IDENTITY_SVC_URL}/api/settings",
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT),
             )
             if settings_resp.status == 200:
                 settings = await settings_resp.json()
@@ -5691,8 +5726,8 @@ async def get_abs_status():
                     return {"status": "UNAVAILABLE", "error": "ABS URL not configured", "reachable": False}
 
             # Ping ABS with a lightweight HEAD request
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT)) as ping_client:
-                resp = await ping_client.get(f"{abs_url}/api/books?limit=1")
+            async with shared_http_client() as ping_client:
+                resp = await ping_client.get(f"{abs_url}/api/books?limit=1", timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT))
                 if resp.status == 200:
                     return {"status": "AVAILABLE", "url": abs_url, "reachable": True}
                 return {"status": "ERROR", "url": abs_url, "reachable": False, "code": resp.status}
@@ -5918,10 +5953,11 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         if not abs_key and abs_user and abs_pass:
             log.info(f"[stream/abs] No API key present. Attempting username/password login for user '{abs_user}' to {abs_url}")
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+                async with shared_http_client() as client:
                     login_resp = await client.post(
                         f"{abs_url.rstrip('/')}/login",
                         json={"username": abs_user, "password": abs_pass}
+                        , timeout=aiohttp.ClientTimeout(total=10.0),
                     )
                     log.info(f"[stream/abs] Login response code: {login_resp.status}")
                     if login_resp.status == 200:
@@ -6337,11 +6373,12 @@ async def debug_list_players(request: Request):
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.post(
             ma_api,
             json={"message_id": "debug_players", "command": "players/all"},
             headers={"Content-Type": "application/json", **auth_headers},
+             timeout=aiohttp.ClientTimeout(total=10.0),
         )
     return {"status": resp.status, "result": await resp.json()} if resp.status == 200 else {"status": resp.status, "error": await resp.text()}
 
@@ -6367,11 +6404,12 @@ async def debug_list_queues(request: Request):
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.post(
             ma_api,
             json={"message_id": "debug_queues", "command": "player_queues/all"},
             headers={"Content-Type": "application/json", **auth_headers},
+             timeout=aiohttp.ClientTimeout(total=10.0),
         )
     return {"status": resp.status, "result": await resp.json()} if resp.status == 200 else {"status": resp.status, "error": await resp.text()}
 
@@ -6397,11 +6435,12 @@ async def debug_get_player(request: Request, player_id: str):
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"}
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         resp = await client.post(
             ma_api,
             json={"message_id": "debug_player", "command": "players/get", "args": {"player_id": player_id}},
             headers={"Content-Type": "application/json", **auth_headers},
+             timeout=aiohttp.ClientTimeout(total=10.0),
         )
     return {"status": resp.status, "result": await resp.json()} if resp.status == 200 else {"status": resp.status, "error": await resp.text()}
 
@@ -6620,12 +6659,13 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
         log.info("[stream/ma] Discovering MA players...")
         available_players: dict[str, dict[str, Any]] = {}
         import uuid as _uuid
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
+        async with shared_http_client() as client:
             try:
                 resp = await client.post(
                     ma_api,
                     json={"message_id": _uuid.uuid4().hex, "command": "players/all"},
                     headers={"Content-Type": "application/json", **auth_headers},
+                     timeout=aiohttp.ClientTimeout(total=15.0),
                 )
                 log.info(f"[stream/ma] players/all status: {resp.status}")
                 if resp.status == 200:
@@ -6994,8 +7034,8 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
             headers["Authorization"] = f"Bearer {token}"
 
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
-            async with client.get(target_url, headers=headers) as resp:
+        async with shared_http_client() as client:
+            async with client.get(target_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
                 if resp.status == 200:
                     content_type = resp.headers.get("Content-Type", "image/jpeg")
                     data = await resp.read()
@@ -7031,12 +7071,13 @@ async def get_media_detail(uri: str, request: Request):
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         try:
             resp = await client.post(
                 ma_api,
                 json={"command": "music/item_by_uri", "args": {"uri": uri}},
                 headers={"Content-Type": "application/json", **auth_headers},
+                 timeout=aiohttp.ClientTimeout(total=10.0),
             )
             if resp.status == 200:
                 return await resp.json()
@@ -7078,7 +7119,7 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
     ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
     auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+    async with shared_http_client() as client:
         try:
             if req.favorite:
                 # Add to favorites
@@ -7086,6 +7127,7 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
                     ma_api,
                     json={"command": "music/favorites/add_item", "args": {"item": req.uri}},
                     headers={"Content-Type": "application/json", **auth_headers},
+                     timeout=aiohttp.ClientTimeout(total=10.0),
                 )
                 if resp.status == 200:
                     return {"status": "SUCCESS", "favorite": True}
@@ -7098,6 +7140,7 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
                     ma_api,
                     json={"command": "music/item_by_uri", "args": {"uri": req.uri}},
                     headers={"Content-Type": "application/json", **auth_headers},
+                     timeout=aiohttp.ClientTimeout(total=10.0),
                 )
                 if resolve_resp.status != 200:
                     log.error(f"[media/favorite] Resolve failed: {resolve_resp.status} - {await resolve_resp.text()}")
@@ -7123,6 +7166,7 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
                         "args": {"library_item_id": item_id, "media_type": media_type}
                     },
                     headers={"Content-Type": "application/json", **auth_headers},
+                     timeout=aiohttp.ClientTimeout(total=10.0),
                 )
                 if resp.status == 200:
                     return {"status": "SUCCESS", "favorite": False}
