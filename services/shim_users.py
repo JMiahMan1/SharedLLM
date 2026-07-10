@@ -10,6 +10,7 @@ from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
+from services.common.http import get_client
 
 log = logging.getLogger("shim_users")
 
@@ -25,7 +26,7 @@ async def get_user_creds(username: str = "default") -> dict[str, str | None]:
     payload = {"rag_user": username}
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with get_client() as session:
             async with session.post(url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5.0)) as resp:
                 if resp.status == 404:
                     log.warning(f"[shim] User '{username}' not found. Attempting default fallback.")

@@ -3,6 +3,7 @@ import logging
 import re
 
 import aiohttp
+from services.common.http import get_client
 from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
@@ -49,10 +50,11 @@ async def get_storage_status():
 
     rag_stats = {}
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as client:
+        async with get_client() as client:
             resp = await client.get(
                 f"{RAG_SVC}/rag/stats",
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10),
             )
             if resp.status == 200:
                 rag_data = await resp.json()
@@ -124,13 +126,14 @@ async def _run_full_index_task(req: IndexScanRequest):
         BATCH_SIZE = 25
         total_synced = 0
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0, connect=5.0)) as client:
+        async with get_client() as client:
             try:
                 # 3.5. Cleanup old entries BEFORE syncing new ones
                 purge_resp = await client.post(
                     f"{RAG_SVC}/rag/purge/{req.provider.kind}_files",
                     params={"user_id": user_id},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=60.0, connect=5.0),
                 )
                 if purge_resp.status != 200:
                     log.warning(f"Purge failed (non-fatal): {purge_resp.status} {await purge_resp.text()}")
@@ -152,7 +155,8 @@ async def _run_full_index_task(req: IndexScanRequest):
                     resp = await client.post(
                         f"{RAG_SVC}/rag/sync/files",
                         json=sync_payload,
-                        headers={"X-Internal-Secret": INTERNAL_SECRET}
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                        timeout=aiohttp.ClientTimeout(total=60.0, connect=5.0),
                     )
                     if resp.status != 200:
                         raise RuntimeError(
@@ -192,12 +196,13 @@ async def list_provider_entries(req: IndexScanRequest):
         user_id = req.provider.settings.get("username", "admin")
         indexed_paths = set()
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        async with get_client() as client:
             try:
                 # Query RAG for all indexed paths for this user
                 rag_resp = await client.get(
                     f"{RAG_SVC}/rag/indexed-paths?user_id={user_id}",
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
                 )
                 if rag_resp.status == 200:
                     indexed_paths = set((await rag_resp.json()).get("paths", []))
@@ -206,8 +211,8 @@ async def list_provider_entries(req: IndexScanRequest):
 
         # Map indexed status to entries
         result_entries = []
-        for e in entries:
-            e_dict = e.model_dump()
+        for entry in entries:
+            e_dict = entry.model_dump()
             e_dict["indexed"] = e_dict["path"] in indexed_paths
             result_entries.append(e_dict)
 
