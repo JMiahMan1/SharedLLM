@@ -3,6 +3,7 @@ import contextlib
 import json
 import logging
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, cast
@@ -1573,20 +1574,47 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         svc_base = WORKSPACE_RUNTIME_SVC
                         endpoint = f"/workspaces/{_ws_id}"
 
+                # WorkspaceCreateRequest: the runtime's `Workspace` model rejects extra
+                # keys (e.g. user_context) and REQUIRES `id` + `display_name`. Build a
+                # clean payload so creation always succeeds and we can adopt the real id.
+                _skip_user_context = False
+                if lookup_action == "workspacecreaterequest" and isinstance(payload, dict):
+                    _wid = payload.get("id") or payload.get("workspace_id")
+                    if not _wid:
+                        _wid = uuid.uuid4().hex[:16]
+                    _display = (
+                        payload.get("display_name")
+                        or payload.get("name")
+                        or payload.get("displayName")
+                        or str(_wid)
+                    )
+                    payload = {
+                        "id": str(_wid),
+                        "display_name": str(_display),
+                        "scope": payload.get("scope") or "user",
+                        "owner_user": creds.user,
+                        "description": payload.get("description") or "",
+                        "is_default": False,
+                    }
+                    _skip_user_context = True
+
                 # ALWAYS inject user_context. Pydantic schemas require it for validation.
-                payload["user_context"] = {
-                    "user": creds.user,
-                    "is_admin": creds.is_admin,
-                    "api_key": creds.api_key,
-                    "ha_url": creds.ha_url,
-                    "ha_token": creds.ha_token,
-                    "nextcloud_url": creds.nextcloud_url,
-                    "nextcloud_user": creds.nextcloud_user,
-                    "nextcloud_pass": creds.nextcloud_pass,
-                    "github_token": creds.github_token,
-                    "gitlab_token": creds.gitlab_token,
-                    "git_token": creds.git_token,
-                }
+                # (Skipped for WorkspaceCreateRequest — the runtime's Workspace model
+                # rejects the extra key, which would 422 and break adoption.)
+                if not _skip_user_context:
+                    payload["user_context"] = {
+                        "user": creds.user,
+                        "is_admin": creds.is_admin,
+                        "api_key": creds.api_key,
+                        "ha_url": creds.ha_url,
+                        "ha_token": creds.ha_token,
+                        "nextcloud_url": creds.nextcloud_url,
+                        "nextcloud_user": creds.nextcloud_user,
+                        "nextcloud_pass": creds.nextcloud_pass,
+                        "github_token": creds.github_token,
+                        "gitlab_token": creds.gitlab_token,
+                        "git_token": creds.git_token,
+                    }
 
                 # Force workspace-scoped tool calls into the mission's CURRENT working
                 # workspace. Once Raven creates its own workspace (via
