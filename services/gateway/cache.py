@@ -16,7 +16,9 @@ from typing import Any, Awaitable, Callable
 import redis as _redis_lib
 
 from services.gateway.config import (
+    HA_STATE_CACHE_TTL,
     IDENTITY_CACHE_TTL,
+    MEDIA_DEVICE_CACHE_TTL,
     SETTINGS_CACHE_TTL,
 )
 
