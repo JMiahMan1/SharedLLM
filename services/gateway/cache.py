@@ -13,7 +13,12 @@ import logging
 import time
 from typing import Any, Awaitable, Callable
 
-from services.gateway.config import IDENTITY_CACHE_TTL, SETTINGS_CACHE_TTL
+import redis as _redis_lib
+
+from services.gateway.config import (
+    IDENTITY_CACHE_TTL,
+    SETTINGS_CACHE_TTL,
+)
 
 log = logging.getLogger("gateway.cache")
 
@@ -91,3 +96,63 @@ def invalidate_identity(api_key: str | None = None) -> None:
     else:
         _identity_cache.pop(api_key, None)
         _identity_cache_time.pop(api_key, None)
+
+
+# --- Shared Redis-backed cache (per-entity / per-user live state) ---
+# Consolidates the previously-duplicated per-module Redis connections in
+# ha_state_cache.py / media_device_cache.py into one connection + one helper
+# set. The backing store stays Redis (shared across instances, survives
+# restarts) — only the connection and TTL handling are centralized.
+_redis: "_redis_lib.Redis | None" = None
+
+
+def get_redis() -> "_redis_lib.Redis":
+    """Return a shared Redis connection (decode_responses=True)."""
+    global _redis
+    if _redis is None:
+        from services.gateway.config import REDIS_URL
+        _redis = _redis_lib.from_url(REDIS_URL, decode_responses=True)
+    return _redis
+
+
+def redis_cache_get(key: str) -> str | None:
+    """Return a cached string value or None on miss/error."""
+    try:
+        val = get_redis().get(key)
+        return str(val) if val is not None else None
+    except Exception as e:
+        log.warning(f"Redis cache read error: {e}")
+        return None
+
+
+def redis_cache_set(key: str, value: str, ttl: float) -> None:
+    """Cache a string value with the given TTL (seconds)."""
+    try:
+        get_redis().setex(key, int(ttl), value)
+    except Exception as e:
+        log.warning(f"Redis cache write error: {e}")
+
+
+def redis_cache_set_many(items: dict[str, str], ttl: float) -> int:
+    """Bulk-cache key/value pairs via a pipeline. Returns count cached."""
+    try:
+        r = get_redis()
+        pipe = r.pipeline()
+        count = 0
+        for k, v in items.items():
+            pipe.setex(k, int(ttl), v)
+            count += 1
+        if count:
+            pipe.execute()
+        return count
+    except Exception as e:
+        log.warning(f"Redis bulk cache error: {e}")
+        return 0
+
+
+def redis_cache_delete(key: str) -> None:
+    """Remove a cached key."""
+    try:
+        get_redis().delete(key)
+    except Exception as e:
+        log.warning(f"Redis cache delete error: {e}")
