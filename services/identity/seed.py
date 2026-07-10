@@ -283,6 +283,40 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 session.add(existing)
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
 
+    # ── Seed network-aware service URLs (BRIDGE_*/HOST_*) ──────────────────────
+    # Two explicit sets so the same variable is never reused for different
+    # network URLs. Each service detects its network at runtime and reads the
+    # correct set; these are the transparent source of truth in the Config DB.
+    env_to_global_svc = {
+        "BRIDGE_IDENTITY_SVC_URL": "bridge_identity_svc_url",
+        "HOST_IDENTITY_SVC_URL": "host_identity_svc_url",
+        "BRIDGE_EXECUTION_SVC_URL": "bridge_execution_svc_url",
+        "HOST_EXECUTION_SVC_URL": "host_execution_svc_url",
+        "BRIDGE_RAG_SVC_URL": "bridge_rag_svc_url",
+        "HOST_RAG_SVC_URL": "host_rag_svc_url",
+        "BRIDGE_STORAGE_SVC_URL": "bridge_storage_svc_url",
+        "HOST_STORAGE_SVC_URL": "host_storage_svc_url",
+        "BRIDGE_LOGGING_SVC_URL": "bridge_logging_svc_url",
+        "HOST_LOGGING_SVC_URL": "host_logging_svc_url",
+        "BRIDGE_WORKSPACE_RUNTIME_SVC_URL": "bridge_workspace_runtime_svc_url",
+        "HOST_WORKSPACE_RUNTIME_SVC_URL": "host_workspace_runtime_svc_url",
+        "BRIDGE_REDIS_URL": "bridge_redis_url",
+        "HOST_REDIS_URL": "host_redis_url",
+        "BRIDGE_SEARXNG_URL": "bridge_searxng_url",
+        "HOST_SEARXNG_URL": "host_searxng_url",
+    }
+    for env_key, global_key in env_to_global_svc.items():
+        env_val = os.getenv(env_key)
+        if env_val:
+            existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
+            if not existing:
+                session.add(GlobalSetting(key=global_key, value=env_val, description=f"Network-aware service URL ({env_key}). Seeded from .env on first startup."))
+                log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
+            elif not existing.value or force:
+                existing.value = env_val
+                session.add(existing)
+                log.info(f"[seed] Re-seeded {env_key} -> {global_key}: {env_val}")
+
     # ── Seed models from .env (seed-only, overrides DEFAULT_GLOBAL_SETTINGS) ──
     env_models = {
         "ASSISTANT_MODEL": "assistant_model",
