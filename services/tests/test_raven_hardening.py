@@ -150,7 +150,7 @@ async def test_logging_service_sanitizes_secrets_and_requires_auth(monkeypatch):
 
     # Verify zadd was called with sanitized data
     zadd_call = mock_redis.zadd.call_args
-    stored_json = list(zadd_call[0][1].keys())[0]
+    stored_json = next(iter(zadd_call[0][1].keys()))
     stored_data = json.loads(stored_json)
 
     assert "[REDACTED]" in stored_data["message"]
@@ -160,13 +160,18 @@ async def test_logging_service_sanitizes_secrets_and_requires_auth(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_workspace_shell_blocks_mutating_commands():
+async def test_workspace_shell_blocks_mutating_commands(monkeypatch, tmp_path):
+    async def fake_resolve(workspace_id, user_context):
+        return (str(tmp_path), {})
+
+    monkeypatch.setattr(workspace_handler, "_resolve_workspace_info", fake_resolve)
     req = WorkspaceShellRequest(
         user_context=UserContext(user="raven", is_admin=True),
         command="sudo reboot",
         commands=None,
         cwd=".",
         timeout=5,
+        workspace_id="test-workspace",
     )
 
     result = await workspace_handler.handle_workspace_shell(req)
@@ -178,12 +183,17 @@ async def test_workspace_shell_blocks_mutating_commands():
 @pytest.mark.asyncio
 async def test_workspace_shell_allows_safe_read_only_commands(monkeypatch, tmp_path):
     monkeypatch.setattr(workspace_handler, "WORKSPACE_ROOT", str(tmp_path))
+    async def fake_resolve(workspace_id, user_context):
+        return (str(tmp_path), {})
+
+    monkeypatch.setattr(workspace_handler, "_resolve_workspace_info", fake_resolve)
     req = WorkspaceShellRequest(
         user_context=UserContext(user="raven", is_admin=True),
         command="pwd",
         commands=None,
         cwd=".",
         timeout=5,
+        workspace_id="test-workspace",
     )
 
     result = await workspace_handler.handle_workspace_shell(req)
