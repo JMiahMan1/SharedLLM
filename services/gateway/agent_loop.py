@@ -826,6 +826,50 @@ async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | N
     return await _resolve_one(default_id)
 
 
+async def _create_dedicated_mission_workspace(rag_user: str, mission_id: int | None) -> dict | None:
+    """Create a dedicated, isolated workspace for a Raven mission and return it.
+
+    This is how Raven gives itself a clean sandbox per task (general — not tied to
+    any specific project). If a workspace already exists for this mission id it is
+    reused; otherwise a fresh one is created via the workspace-runtime API. Returns
+    ``None`` only if creation fails, in which case the caller falls back to a
+    default workspace.
+    """
+    ws_id = f"raven-mission-{mission_id}" if mission_id else f"raven-{rag_user}"
+    payload = {
+        "id": ws_id,
+        "display_name": f"Raven Mission {mission_id or rag_user}",
+        "scope": "user",
+        "owner_user": rag_user or "default",
+        "is_default": False,
+        "auto_pull_enabled": False,
+        "auto_backup_enabled": False,
+    }
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20.0)) as client:
+            # Reuse if it already exists.
+            existing = await client.get(
+                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+                params={"rag_user": rag_user or "default"},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            if existing.status == 200:
+                data = await existing.json()
+                for item in data.get("workspaces", []):
+                    if isinstance(item, dict) and item.get("id") == ws_id:
+                        return item
+            resp = await client.post(
+                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+                json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            if resp.status == 200:
+                return (await resp.json()).get("workspace")
+    except Exception as e:
+        log.warning(f"[AgentLoop] dedicated workspace create failed for {ws_id}: {e}")
+    return None
+
+
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None) -> Any:
     full_audit_log = []
 
@@ -847,13 +891,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.warning(f"Failed to stream event: {e}")
 
     # 0. Resolve the workspace this agentic mission runs in.
-    # Agentic tasks that run system commands MUST operate inside a workspace. If the
-    # caller assigned one we use it; otherwise we default to (or create) a workspace.
+    # Agentic tasks that run system commands MUST operate inside a workspace. Raven
+    # creates its OWN dedicated sandbox per mission (so it never collides with other
+    # work) unless the task explicitly references an existing workspace. The "means"
+    # (the workspace-create API + WorkspaceCreateRequest tool) are supplied; Raven
+    # performs the creation. When no workspace is assigned we create a dedicated one
+    # named after the mission so every task gets a clean, isolated sandbox.
     try:
         if workspace_id:
             _ws = await resolve_mission_workspace(rag_user, workspace_id)
         else:
-            _ws = await resolve_mission_workspace(rag_user, None)
+            _ws = await _create_dedicated_mission_workspace(rag_user, mission_id)
     except Exception as e:
         log.warning(f"[AgentLoop] workspace resolve failed: {e}")
         _ws = None
