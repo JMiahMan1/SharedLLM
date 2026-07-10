@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 DNS_HEALTH_PORTS = [int(p) for p in os.environ.get("DNS_HEALTH_PORTS", "11434,80,443,8080,8000,9000").split(",") if p.strip()]
 DNS_HEALTH_TIMEOUT = float(os.environ.get("DNS_HEALTH_TIMEOUT", "1.0"))
 DNS_HEALTH_TTL = float(os.environ.get("DNS_HEALTH_TTL", "15.0"))
+DNS_REFRESH_INTERVAL = float(os.environ.get("DNS_REFRESH_INTERVAL", "30.0"))
 
 
 class ContainerRegistry:
@@ -713,7 +714,7 @@ async def main():
             except Exception as e:
                 logger.warning(f"Failed to fetch DNS records from Identity service: {e}")
 
-            await asyncio.sleep(30)  # Refresh every 30 seconds
+            await asyncio.sleep(DNS_REFRESH_INTERVAL)  # Refresh interval (env-configurable)
 
     # Start refresh task if Identity service URL is configured
     if os.environ.get('IDENTITY_SVC_URL'):

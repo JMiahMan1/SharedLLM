@@ -104,6 +104,7 @@ class InferenceJobQueue:
             json.dumps(job),
             ex=self.DEFAULT_TTL_SECONDS,
         )
+        await self._publish_status(job_id, JobStatus.PROCESSING)
         await self.heartbeat_job(job_id)
         return job
 
@@ -136,6 +137,7 @@ class InferenceJobQueue:
             json.dumps(job),
             ex=self.DEFAULT_TTL_SECONDS,
         )
+        await self._publish_status(job_id, JobStatus.COMPLETED)
         await self._finalize_job(job_id)
         log.info(f"Job {job_id} completed.")
 
@@ -158,6 +160,7 @@ class InferenceJobQueue:
             json.dumps(job),
             ex=self.DEFAULT_TTL_SECONDS,
         )
+        await self._publish_status(job_id, JobStatus.FAILED)
         await self._finalize_job(job_id)
         log.error(f"Job {job_id} failed: {error}")
 
@@ -247,6 +250,7 @@ class InferenceJobQueue:
                     json.dumps(job),
                     ex=self.DEFAULT_TTL_SECONDS,
                 )
+                await self._publish_status(job_id, JobStatus.FAILED)
                 await self._redis.rpush(self.DEAD_LETTER_KEY, job_id)  # type: ignore[misc]
                 log.error("Job %s moved to dead-letter queue after %s expired attempts", job_id, attempts)
                 continue
@@ -257,6 +261,7 @@ class InferenceJobQueue:
                 json.dumps(job),
                 ex=self.DEFAULT_TTL_SECONDS,
             )
+            await self._publish_status(job_id, JobStatus.QUEUED)
             await self._redis.rpush(self.QUEUE_KEY, job_id)  # type: ignore[misc]
             reclaimed += 1
             log.warning("Re-queued expired job %s after lease loss (attempt %s)", job_id, attempts)
@@ -269,3 +274,17 @@ class InferenceJobQueue:
         assert self._redis is not None
         await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[misc]
         await self._redis.delete(f"{self.LEASE_PREFIX}{job_id}")  # type: ignore[misc]
+
+    async def _publish_status(self, job_id: str, status: str):
+        """Notify SSE subscribers that a job's status changed.
+
+        Best-effort: failures here must never break job processing. The SSE
+        status stream also falls back to a periodic GET, so a missed publish is
+        self-healing.
+        """
+        if not self._redis:
+            return
+        try:
+            await self._redis.publish(f"{self.JOB_PREFIX}status:{job_id}", status)
+        except Exception as e:
+            log.warning(f"Failed to publish status for job {job_id}: {e}")
