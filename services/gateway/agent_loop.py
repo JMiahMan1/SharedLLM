@@ -785,7 +785,11 @@ async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | N
             log.warning(f"[workspace] bootstrap {assigned_workspace_id} failed: {e}")
         return None
 
-    # No assigned workspace: reuse an available one, else create a default (no git required).
+    # No assigned workspace: do NOT invent a workspace name. The gateway only
+    # surfaces an existing workspace the user already flagged as their default (via
+    # the ``is_default`` flag — never by name), or any available user-scoped
+    # workspace Raven may reuse. Otherwise Raven decides — via the
+    # WorkspaceCreateRequest tool — whether it needs its own dedicated sandbox.
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             lst = await client.get(
@@ -798,51 +802,33 @@ async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | N
         log.warning(f"[workspace] list failed: {e}")
         workspaces = []
     for item in workspaces:
+        if isinstance(item, dict) and item.get("is_default") and str(item.get("scope") or "user") == "user":
+            return item
+    for item in workspaces:
         if isinstance(item, dict) and item.get("available") and str(item.get("scope") or "user") == "user":
             return item
-
-    default_id = f"ws_{user_id}"
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20.0)) as client:
-            await client.post(
-                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
-                json={
-                    "id": default_id,
-                    "display_name": f"{user_id} default workspace",
-                    "default_branch": "microservices",
-                    "scope": "user",
-                    "owner_user": user_id,
-                    "is_default": True,
-                    "auto_pull_enabled": False,
-                    "auto_backup_enabled": False,
-                },
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-            )
-    except Exception:
-        pass
-    return await _resolve_one(default_id)
+    return None
 
 
 async def _is_shared_or_default_workspace(ws_id: str | None, rag_user: str) -> bool:
-    """Return True if ``ws_id`` is a default, shared, or system workspace that must
-    NOT be used when creating a brand-new repository. Creating a repo requires a
-    dedicated workspace Raven acquired for itself.
+    """Return True if ``ws_id`` is a default or system workspace that must NOT be used
+    when creating a brand-new repository. Detection is metadata-only: a workspace is
+    rejected when its ``is_default`` flag is set or its ``scope`` is ``system``. A
+    dedicated workspace Raven acquired for itself has ``is_default=False`` and
+    ``scope='user'``. Names (and the legacy 'default' user placeholder) are never used.
     """
     if not ws_id:
-        return True
-    sid = str(ws_id).lower()
-    if sid in ("sharedllm", "sharedllm_system", "ws_default", "ws_" + str(rag_user).lower()):
         return True
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             res = await client.post(
                 f"{WORKSPACE_RUNTIME_SVC}/workspace/resolve",
-                json={"workspace_id": ws_id, "user_context": {"user": rag_user, "is_admin": False}},
+                json={"workspace_id": ws_id, "user_context": {"user": rag_user, "is_admin": True}},
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
             )
             if res.status == 200:
                 ws = (await res.json()).get("workspace") or {}
-                if ws.get("is_default") or ws.get("scope") == "system":
+                if ws.get("is_default") or str(ws.get("scope") or "").lower() == "system":
                     return True
     except Exception:
         pass
@@ -1642,6 +1628,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             exec_data = {"status": "ERROR", "message": msg}
                         else:
                             exec_data = await resp.json()
+                            # Adopt a freshly-created workspace as the mission's working
+                            # workspace so later file/git tool calls run inside it.
+                            if lookup_action == "workspacecreaterequest" and isinstance(exec_data, dict):
+                                _created = (exec_data.get("workspace") or {}).get("id")
+                                if _created:
+                                    workspace_id = str(_created)
+                                    log.info(f"[AgentLoop] Adopted newly created workspace: {workspace_id}")
 
                     # Sanitize execution results before any downstream use
                     exec_data = sanitize_for_llm(exec_data)
