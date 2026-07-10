@@ -741,7 +741,7 @@ async def main():
     # Run DNS server
     logger.info("Starting UDP DNS server...")
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         transport, _ = await loop.create_datagram_endpoint(
             lambda: UDPServer(resolver),
             local_addr=('0.0.0.0', port)

@@ -71,8 +71,6 @@ class DockerEventClient:
                 url = "http://docker/events?stream=true&since=0"
 
                 async with asyncio.Semaphore(1):
-                    loop = asyncio.get_event_loop()
-
                     # Create Unix socket connection
                     reader, writer = await asyncio.open_connection(
                         sock=socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -293,7 +291,7 @@ class DNSServer:
         self.running = True
         logging.info(f"Starting DNS server on port {self.port}")
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # Start receiving
         transport, protocol = await loop.create_datagram_endpoint(
@@ -647,7 +645,7 @@ class DNSServer:
         logging.info(f"Starting DNS server on port {self.port}")
 
         # Create UDP socket
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         # Refresh containers on startup
         await self.resolver.refresh_containers()

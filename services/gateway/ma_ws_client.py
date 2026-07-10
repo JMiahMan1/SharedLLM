@@ -239,7 +239,7 @@ class MAWebSocketClient:
         if args is not None:
             payload["args"] = args
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future = loop.create_future()
         self._pending_responses[msg_id] = future
 
