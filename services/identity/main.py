@@ -6,15 +6,20 @@ Manages user profiles, device assignments, and secure credential resolution.
 import json
 import logging
 import os
+import re
+import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
+from datetime import datetime as dt
 
 import aiohttp
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
 from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import DEFAULT_GLOBAL_SETTINGS, APIKey, DeviceAssignment, DnsRecord, GlobalSetting, User, UserWidget
 from services.identity.schemas import (
@@ -43,8 +48,6 @@ from services.shared.info_endpoint import info_router
 
 log = logging.getLogger("identity")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
-
-from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
 
 
 def _require_internal_secret(x_internal_secret: str | None) -> None:
@@ -235,8 +238,6 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Jarvis OS Identity Service", lifespan=lifespan)
-
-from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
@@ -509,8 +510,6 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         preferred_tts_voice=user.preferred_tts_voice or "af_heart"
     )
 
-import time
-
 START_TIME = time.time()
 
 @app.get("/health")
@@ -553,7 +552,7 @@ async def enroll_voice(
         return {"status": "SUCCESS", "message": "Voice profile successfully enrolled."}
     except Exception as e:
         log.error(f"Enrollment failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from None
 
 @app.patch("/api/users/me", response_model=UserRead)
 def update_me(body: UserUpdate, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
@@ -561,9 +560,8 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
     update_data = body.model_dump(exclude_unset=True)
 
     # Prevent non-default users from changing system skylight integration credentials
-    if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]):
-        if user.id != 1 and user.username != "default":
-            raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
+    if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]) and user.id != 1 and user.username != "default":
+        raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
 
     # Handle encrypted fields
     crypto_map = {
@@ -609,9 +607,8 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
     update_data = body.model_dump(exclude_unset=True)
 
 # Prevent non-default users from changing system skylight integration credentials
-    if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]):
-        if user.id != 1 and user.username != "default":
-            raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
+    if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]) and user.id != 1 and user.username != "default":
+        raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
 
     # Handle encrypted fields
     crypto_map = {
@@ -678,9 +675,8 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
             val = val.strip()
         return val if val else None
 
-    if any(_coerce(k) for k in [body.skylight_url, body.skylight_email, body.skylight_pass]):
-        if admin.id != 1 and admin.username != "default":
-            raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
+    if any(_coerce(k) for k in [body.skylight_url, body.skylight_email, body.skylight_pass]) and admin.id != 1 and admin.username != "default":
+        raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")
 
     user = User(
         username=body.username.lower(),
@@ -975,7 +971,7 @@ SEEDABLE_CREDENTIALS = {
 @app.post("/api/admin/seed-credential")
 def seed_credential(body: dict, session: Session = Depends(get_session), admin: User = Depends(require_admin_or_internal)):
     """Seed a single credential for the default user (User 1) without re-seeding the entire DB.
-    
+
     Accepts a credential field name and its plain text value. The value is encrypted and stored.
     """
     if not admin.is_admin:
@@ -994,7 +990,7 @@ def seed_credential(body: dict, session: Session = Depends(get_session), admin: 
     if value is None:
         raise HTTPException(status_code=400, detail="value is required")
 
-    enc_field, plain_field = SEEDABLE_CREDENTIALS[field]
+    enc_field, _plain_field = SEEDABLE_CREDENTIALS[field]
 
     # Get the default user
     user = session.exec(select(User).where(User.id == 1)).first()
@@ -1029,7 +1025,7 @@ def seed_credential(body: dict, session: Session = Depends(get_session), admin: 
 @app.get("/api/users/me/keys")
 def get_my_keys(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     """Return list of API keys for the current user.
-    
+
     Admin users see all keys with associated usernames.
     Non-admin users see only their own keys.
     """
@@ -1302,13 +1298,6 @@ def manual_seed(body: _SeedRequest | None = None, force: bool = False, session: 
     return {"status": "SUCCESS", "count": count}
 
 # ─── DNS Management ─────────────────────────────────────────────────────────────
-
-import re
-from datetime import UTC
-from datetime import datetime as dt
-
-from pydantic import BaseModel
-
 
 def validate_ip(value: str) -> bool:
     """Validate IPv4 address."""
@@ -1841,7 +1830,7 @@ async def import_nextcloud_users(x_internal_secret: str | None = Header(default=
                     nc_users[nc_username.lower()] = nc_data
         except Exception as e:
             log.error(f"[import] Nextcloud Error: {e!s}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from None
 
         # Merge and import users
         all_usernames = set(ha_users.keys()) | set(nc_users.keys())
