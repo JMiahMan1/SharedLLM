@@ -5,12 +5,22 @@ Asynchronous Home Assistant REST client using aiohttp.
 import logging
 
 import aiohttp
+from contextlib import asynccontextmanager
 
 log = logging.getLogger("execution.ha_client")
+
+from services.execution.http_client import get_session, host_of
 
 import re
 
 _TIMEOUT = aiohttp.ClientTimeout(total=45.0, connect=15.0)
+
+
+@asynccontextmanager
+async def _ha_session(ha_url: str, verify: bool = False):
+    """Yield the pooled HA session WITHOUT closing it (reused across calls)."""
+    yield await get_session(host_of(ha_url), verify=verify)
+
 
 def authorize_action(user_context: dict, domain: str, action: str) -> bool:
     """
@@ -78,7 +88,7 @@ async def call_service(
     if service_data:
         payload.update(service_data)
 
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _ha_session(ha_url) as client:
         try:
             log.info(f"HA CALL: {domain}.{service} -> {entity_id or '(no target)'} | url={url} | payload={payload}")
             async with client.post(url, headers=headers, json=payload) as resp:
@@ -116,10 +126,10 @@ async def get_state(ha_url: str, ha_token: str, entity_id: str) -> dict | None:
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states/{entity_id}"
 
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _ha_session(ha_url) as client:
         try:
             log.debug(f"[ha_client] GET {url}")
-            async with client.get(url, headers=headers) as resp:
+            async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
                 if resp.status == 404:
                     return None
                 resp.raise_for_status()
@@ -137,10 +147,10 @@ async def get_all_states(ha_url: str, ha_token: str) -> list:
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states"
 
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _ha_session(ha_url) as client:
         try:
             log.debug(f"[ha_client] GET {url}")
-            async with client.get(url, headers=headers) as resp:
+            async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 return await resp.json()
         except Exception as e:
@@ -153,9 +163,9 @@ async def get_config(ha_url: str, ha_token: str) -> dict:
         return {}
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/config"
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _ha_session(ha_url) as client:
         try:
-            async with client.get(url, headers=headers) as resp:
+            async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 return await resp.json()
         except Exception as e:
@@ -170,9 +180,9 @@ async def get_config_entries(ha_url: str, ha_token: str, domain: str = "") -> li
     url = f"{ha_url.rstrip('/')}/api/config/config_entries/entry"
     if domain:
         url += f"?domain={domain}"
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _ha_session(ha_url) as client:
         try:
-            async with client.get(url, headers=headers) as resp:
+            async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 return await resp.json()
         except Exception as e:
@@ -198,10 +208,10 @@ async def get_states(ha_url: str, ha_token: str) -> list:
     headers = {"Authorization": f"Bearer {ha_token}"}
     url = f"{ha_url.rstrip('/')}/api/states"
 
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _ha_session(ha_url) as client:
         try:
             log.info(f"[ha_client] GET {url}")
-            async with client.get(url, headers=headers) as resp:
+            async with client.get(url, headers=headers, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
                 return await resp.json()
         except Exception as e:
@@ -220,7 +230,7 @@ async def get_history(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
     url = f"{ha_url.rstrip('/')}/api/history/period/{start_time}"
     params = {"filter_entity_id": entity_id, "no_attributes": ""}
 
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _ha_session(ha_url) as client:
         try:
             log.info(f"[ha_client] GET {url}")
             async with client.get(url, headers=headers, params=params) as resp:
@@ -244,7 +254,7 @@ async def get_logbook(ha_url: str, ha_token: str, entity_id: str, days: int = 1)
     url = f"{ha_url.rstrip('/')}/api/logbook/{start_time}"
     params = {"entity": entity_id}
 
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _ha_session(ha_url) as client:
         try:
             log.info(f"[ha_client] GET {url} | entity={entity_id}")
             async with client.get(url, headers=headers, params=params) as resp:
@@ -274,7 +284,7 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
     ]
     """
 
-    async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+    async with _ha_session(ha_url) as client:
         try:
             async with client.post(url, headers=headers, json={"template": template}) as resp:
                 resp.raise_for_status()

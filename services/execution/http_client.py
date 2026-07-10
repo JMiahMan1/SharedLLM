@@ -19,15 +19,16 @@ _DEFAULT_TIMEOUT = ClientTimeout(total=30, connect=5)
 _NEXTCLOUD_TIMEOUT = ClientTimeout(total=60, connect=10)
 _MAX_CONNECTIONS = 50
 _MAX_CONNECTIONS_PER_HOST = 10
-
 # Global session cache: {host: (session, created_at)}
 _SESSION_CACHE: dict[str, tuple[ClientSession, float]] = {}
 _CACHE_MAX_AGE = 300  # 5 minutes
+_DNS_TTL = 60  # re-resolve DNS at most every 60s so pooled connectors don't go stale
 
 
-def _get_host(url: str) -> str:
+def host_of(url: str) -> str:
     """Extract host from URL (e.g., 'https://nextcloud.example.com')"""
     from urllib.parse import urlparse
+
     parsed = urlparse(url)
     return f"{parsed.scheme}://{parsed.hostname}"
 
@@ -58,7 +59,7 @@ async def request(
     elif isinstance(timeout, int):
         timeout = ClientTimeout(total=timeout)
 
-    host = _get_host(url)
+    host = host_of(url)
 
     session = await get_session(host, verify)
 
@@ -76,34 +77,44 @@ async def request(
 
     async with session.request(method, url, timeout=timeout, **request_kwargs) as resp:
         response_text = await resp.text()
-        response_content = await resp.read()
         return {
             "status_code": resp.status,
             "headers": dict(resp.headers),
             "text": response_text,
-            "content": response_content,
+            "content": response_text.encode("utf-8"),
             "ok": resp.status in (200, 201, 204),
         }
 
 
 async def get_session(host: str, verify: bool = False) -> ClientSession:
     """Get or create a session for the given host with connection pooling."""
-    now = asyncio.get_event_loop().time()
+    now = asyncio.get_running_loop().time()
     cached = _SESSION_CACHE.get(host)
 
     if cached:
         session, created = cached
-        if now - created < _CACHE_MAX_AGE:
+        # Reuse while fresh AND still open. A closed connector (e.g. after a
+        # DNS-sidecar restart dropped the connection) is recreated below so a
+        # stale pooled connection never silently serves requests.
+        if not session.closed and now - created < _CACHE_MAX_AGE:
             return session
 
     connector = TCPConnector(
         limit=_MAX_CONNECTIONS,
         limit_per_host=_MAX_CONNECTIONS_PER_HOST,
         enable_cleanup_closed=True,
+        ttl_dns_cache=_DNS_TTL,
     )
-    if not verify:
+    if verify:
         import ssl
-        connector._ssl = ssl.create_default_context()  # type: ignore
+
+        connector = TCPConnector(
+            limit=_MAX_CONNECTIONS,
+            limit_per_host=_MAX_CONNECTIONS_PER_HOST,
+            enable_cleanup_closed=True,
+            ttl_dns_cache=_DNS_TTL,
+            ssl=ssl.create_default_context(),
+        )
 
     session = ClientSession(connector=connector)
     _SESSION_CACHE[host] = (session, now)
