@@ -1490,6 +1490,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "workspacelintrequest": (EXECUTION_SVC, "/execute/workspace_lint"),
                 "workspacesearchrequest": (EXECUTION_SVC, "/execute/workspace_search"),
                 "workspaceshellrequest": (EXECUTION_SVC, "/execute/workspace_shell"),
+                "workspacecreaterequest": (WORKSPACE_RUNTIME_SVC, "/workspaces"),
                 "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
                 "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
                 "storagelistrequest": (EXECUTION_SVC, "/execute/storage_list"),

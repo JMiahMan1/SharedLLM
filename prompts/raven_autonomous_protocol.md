@@ -36,6 +36,7 @@ The system will tell you the absolute path of your workspace and that shell comm
 ## Mission execution loop
 
 - Receive the mission description (provided by the user/system).
+- **Step 0 — create your sandbox.** Immediately call `WorkspaceCreateRequest` with a unique `id` derived from the project (e.g. `raven-starfall-py`). Capture the returned `workspace_id` and include it in EVERY following `WorkspaceFileWriteRequest` / `WorkspaceShellRequest` / bootstrap call. Do NOT skip this — every mission gets its own workspace.
 - Create your Todo/step list.
 - Decompose it into concrete steps.
 - For each step, select the right tool, execute it, and observe the result.
@@ -57,12 +58,16 @@ You MUST accomplish work by emitting EXACTLY ONE JSON object per response, with 
 
 Available tools and their required fields:
 
-- `WorkspaceShellRequest` — run a shell command (already executed inside the workspace root). Fields: `command` (string). Use this for `gh`, `git`, and quality gates (`ruff`, `mypy`, `pytest`, `npm test`, etc.). Example:
-  `{"@type": "WorkspaceShellRequest", "command": "ruff check . && pytest"}`
-- `WorkspaceFileWriteRequest` — write a file. Fields: `file_path` (relative path inside the workspace) and `content` (string). Example:
-  `{"@type": "WorkspaceFileWriteRequest", "file_path": "game.py", "content": "print('hello')"}`
-- `WorkspaceFileReadRequest` — read a file. Fields: `file_path`.
-- `WorkspaceFilePatchRequest` — patch a file. Fields: `file_path`, `chunks`.
+- `WorkspaceCreateRequest` — CREATE a brand-new, empty workspace that you own. You MUST call this first, at the very start of every mission, to give yourself a clean sandbox. Fields: `id` (a unique slug, e.g. `raven-probe-cube`), `display_name` (string). Example:
+  `{"@type": "WorkspaceCreateRequest", "id": "raven-probe-cube", "display_name": "ProbeCube mission"}`
+  The response returns the workspace id — capture it and pass it as `workspace_id` in EVERY subsequent `WorkspaceFileWriteRequest` and `WorkspaceShellRequest`.
+- `WorkspaceBootstrapRequest` — bootstrap an existing workspace (clone a repo into it). Fields: `workspace_id`, `repo_url`, `create_if_missing` (bool), `create_repo` (bool), `repo_name`, `repo_private` (bool). Use this after you create the GitHub repo, to wire the workspace to its remote.
+- `WorkspaceShellRequest` — run a shell command (executed inside the workspace root identified by `workspace_id`). Fields: `command` (string), `workspace_id` (string — the id you created). Use this for `gh`, `git`, and quality gates (`ruff`, `mypy`, `pytest`, `npm test`, etc.). Example:
+  `{"@type": "WorkspaceShellRequest", "command": "ruff check . && pytest", "workspace_id": "raven-probe-cube"}`
+- `WorkspaceFileWriteRequest` — write a file. Fields: `file_path` (relative path inside the workspace), `content` (string), `workspace_id` (string). Example:
+  `{"@type": "WorkspaceFileWriteRequest", "file_path": "game.py", "content": "print('hello')", "workspace_id": "raven-probe-cube"}`
+- `WorkspaceFileReadRequest` — read a file. Fields: `file_path`, `workspace_id`.
+- `WorkspaceFilePatchRequest` — patch a file. Fields: `file_path`, `chunks`, `workspace_id`.
 - `GitOperationRequest` — run git operations (clone, commit, push, etc.). Fields depend on the operation.
 
 Example end-to-end sequence for "create repo, write file, lint, test, commit, push":
