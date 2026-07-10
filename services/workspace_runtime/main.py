@@ -1532,12 +1532,24 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
         session.add(ws)
         session.commit()
         session.refresh(ws)
-        # Materialize the workspace directory on disk so the agent can use it
-        # immediately (file/shell operations fail with "Path not found" otherwise).
+        # Materialize the full workspace directory path on disk immediately so the
+        # agent can use it. We do this at creation time (rather than lazily at write
+        # time) so that filesystem/permission errors surface here — before the agent
+        # starts writing files and fails mid-mission. A missing backing directory is
+        # also what previously pushed the agent into the Default Workspace.
+        resolved_path = resolve_safe_path(get_workspace_root(), ws.local_path, must_exist=False)
         try:
-            os.makedirs(str(resolve_safe_path(get_workspace_root(), ws.local_path, must_exist=False)), exist_ok=True)
+            os.makedirs(str(resolved_path), exist_ok=True)
         except OSError as exc:
-            log.warning(f"Could not create workspace directory for {ws.id}: {exc}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create workspace directory {resolved_path}: {exc}",
+            )
+        if not resolved_path.is_dir():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Workspace path is not a directory: {ws.local_path}",
+            )
         return {"status": "SUCCESS", "workspace": _workspace_to_dict(ws)}
 
 
@@ -1624,6 +1636,17 @@ def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(def
     _require_workspace_capability(workspace, "write")
     req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
     workspace_path = Path(workspace["resolved_path"])
+    # Ensure the workspace directory exists before writing. The workspace was
+    # resolved as valid for this caller; if the backing directory is missing
+    # (e.g. a workspace carried over from a prior service restart), create it
+    # here rather than failing the write with a misleading path error.
+    try:
+        workspace_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create workspace directory {workspace_path}: {exc}",
+        )
     target = resolve_safe_path(workspace_path, req.relative_path, must_exist=False)
 
     if target.exists() and not target.is_file():
