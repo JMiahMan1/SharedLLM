@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any
 
@@ -38,8 +38,8 @@ async def _shared_http_client():
     from services.gateway.main import get_http_client
 
     yield get_http_client()
-from services.gateway.messaging import TIER2_SEMAPHORE, TIER3_LOCK, InferenceJobQueue
-from services.gateway.orchestrator import process_full_orchestration
+from services.gateway.messaging import TIER2_SEMAPHORE, TIER3_LOCK, InferenceJobQueue  # noqa: E402
+from services.gateway.orchestrator import process_full_orchestration  # noqa: E402
 
 log = logging.getLogger("gateway.background_worker")
 
@@ -67,9 +67,7 @@ class RavenWorker:
         query = str(payload.get("query", "")).lower()
         if any(signal in query for signal in self._autonomy_signals):
             return True
-        if user_id.lower() in ("raven_admin", SYSTEM_IDENTITY):
-            return True
-        return False
+        return user_id.lower() in ("raven_admin", SYSTEM_IDENTITY)
 
     async def _get_coding_model_from_settings(self) -> str:
         """Resolve coding model from Identity settings. Never hardcode."""
@@ -217,10 +215,8 @@ class RavenWorker:
                     delay = min(2 ** attempt, 30)
                     log.warning(f"Talk Monitor: Redis connection attempt {attempt+1}/30 failed ({REDIS_URL}): {ping_e}. Retrying in {delay}s...")
                     await asyncio.sleep(delay)
-                    try:
+                    with suppress(Exception):
                         await r.aclose()
-                    except Exception:
-                        pass
                     import redis.asyncio as redis
                     r = redis.from_url(REDIS_URL, decode_responses=True)
 
@@ -514,10 +510,8 @@ class RavenWorker:
         finally:
             if heartbeat_task:
                 heartbeat_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await heartbeat_task
-                except asyncio.CancelledError:
-                    pass
 
     def _should_upgrade_model(self, result: str, payload: dict[str, Any]) -> bool:
         """
@@ -815,10 +809,8 @@ class RavenWorker:
 
                         # Clean up orphaned Redis cache keys
                         for eid in orphaned:
-                            try:
+                            with suppress(Exception):
                                 r.delete(f"ha:state:{eid}")
-                            except Exception:
-                                pass
 
                 # Update Redis cache with fresh states
                 from services.gateway.ha_state_cache import cache_all_states
