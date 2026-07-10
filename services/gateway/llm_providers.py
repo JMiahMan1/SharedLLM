@@ -9,6 +9,8 @@ from typing import Any
 
 import aiohttp
 
+from services.gateway.config import OLLAMA_SLOT_POLL_INTERVAL, OLLAMA_SLOT_POLL_MAX
+
 log = logging.getLogger("gateway.providers")
 
 THINKING_PATTERNS = [
@@ -73,11 +75,12 @@ class OllamaProvider(BaseLLMProvider):
             slots = data.get("slots", {})
             if slots.get("available", 0) > 0:
                 return True
-            # Slots are busy — poll until one opens
+            # Slots are busy — poll until one opens (capped exponential backoff)
             deadline = loop.time() + self.slot_wait_timeout
-            poll_interval = 1.0
+            poll_interval = OLLAMA_SLOT_POLL_INTERVAL
             while loop.time() < deadline:
                 await asyncio.sleep(poll_interval)
+                poll_interval = min(poll_interval * 2, OLLAMA_SLOT_POLL_MAX)
                 resp2 = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
                 if resp2.status == 200:
                     d2 = await resp2.json()

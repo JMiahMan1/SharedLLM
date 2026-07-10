@@ -759,6 +759,70 @@ async def shared_http_client() -> AsyncIterator[aiohttp.ClientSession]:
 
 
 _stream_redis = None
+_redis_cmd: "redis.Redis | None" = None  # shared command connection (GET/SET only; never used for pub/sub)
+
+
+async def _get_redis_cmd() -> "redis.Redis":
+    """Return a shared Redis connection for non-pub/sub commands.
+
+    Reusing one connection avoids the per-iteration ``redis.from_url()`` churn
+    that the old kill/pause poll introduced.
+    """
+    global _redis_cmd
+    if _redis_cmd is None:
+        _redis_cmd = redis.from_url(REDIS_URL, decode_responses=True)
+    return _redis_cmd
+
+
+async def _await_mission_resume(
+    mission_id: int,
+    stream_event: Callable[[str, str], Awaitable[Any]],
+) -> bool:
+    """Block until a mission is resumed (or killed) via Redis pub/sub.
+
+    Returns ``True`` if a KILL arrived while paused (caller should terminate),
+    ``False`` once the mission is resumed (or was never actually paused).
+
+    Uses subscribe-then-recheck to avoid a lost-wakeup race: the pause key is
+    re-read *after* subscribing, so a RESUME published before subscribe is
+    observed, and any signal published after subscribe is delivered by listen().
+
+    ``stream_event`` is passed in (it is a closure nested inside AgentLoop).
+    """
+    pause_key = f"raven:mission:pause:{mission_id}"
+    kill_key = f"raven:mission:kill:{mission_id}"
+    cmd = await _get_redis_cmd()
+    if not await cmd.get(pause_key):
+        return False
+
+    r_ps = redis.from_url(REDIS_URL, decode_responses=True)
+    pubsub = r_ps.pubsub()
+    await pubsub.subscribe(pause_key, kill_key)
+    try:
+        # Re-check after subscribe to avoid lost-wakeup race
+        if not await cmd.get(pause_key):
+            return False
+        log.warning(f"[AgentLoop] MISSION PAUSED for {mission_id}. Waiting for resume signal.")
+        await stream_event("system", "Mission paused — waiting for LLM access to become available.")
+        async for message in pubsub.listen():
+            if message.get("type") != "message":
+                continue
+            if message.get("channel") == kill_key or message.get("data") == "KILL":
+                log.warning(f"[AgentLoop] MISSION KILL SIGNAL RECEIVED while paused for {mission_id}. Terminating.")
+                await stream_event("system", "Mission terminated by user.")
+                return True
+            if message.get("data") == "RESUMED":
+                break
+        log.info(f"[AgentLoop] Mission {mission_id} resumed.")
+        await stream_event("system", "Mission resumed.")
+        return False
+    finally:
+        with contextlib.suppress(Exception):
+            await pubsub.unsubscribe(pause_key, kill_key)
+        with contextlib.suppress(Exception):
+            await pubsub.close()
+        with contextlib.suppress(Exception):
+            await r_ps.close()
 
 def should_persist_learning(result: str) -> bool:
     """
@@ -1311,11 +1375,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await _clear_checkpoint()
             break
 
-        # --- HARD KILL SWITCH (Redis polling) ---
+        # --- HARD KILL SWITCH (Redis pub/sub) ---
         if mission_id:
             try:
-                r_kill = redis.from_url(REDIS_URL, decode_responses=True)
-                kill_flag = await r_kill.get(f"raven:mission:kill:{mission_id}")
+                kill_flag = await (await _get_redis_cmd()).get(f"raven:mission:kill:{mission_id}")
                 if kill_flag:
                     log.warning(f"[AgentLoop] MISSION KILL SIGNAL RECEIVED for {mission_id}. Terminating.")
                     await stream_event("system", "Mission terminated by user.")
@@ -1324,25 +1387,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             except Exception as e:
                 log.error(f"[AgentLoop] Error checking mission kill flag: {e}")
 
-        # --- PAUSE FOR LLM ACCESS (Redis polling) ---
+        # --- PAUSE FOR LLM ACCESS (Redis pub/sub; replaces 5s poll loop) ---
         if mission_id:
             try:
-                r_pause = redis.from_url(REDIS_URL, decode_responses=True)
-                pause_count = 0
-                while await r_pause.get(f"raven:mission:pause:{mission_id}"):
-                    if pause_count == 0:
-                        log.warning(f"[AgentLoop] MISSION PAUSED for {mission_id}. Waiting for resume signal.")
-                        await stream_event("system", "Mission paused — waiting for LLM access to become available.")
-                    pause_count += 1
-                    await asyncio.sleep(5)
-                    if pause_count % 12 == 0:
-                        log.info(f"[AgentLoop] Still paused ({pause_count * 5}s elapsed)")
-                if pause_count > 0:
-                    log.info(f"[AgentLoop] Mission {mission_id} resumed after {pause_count * 5}s pause.")
-                    await stream_event("system", f"Mission resumed after {pause_count * 5}s pause.")
-                await r_pause.close()
+                killed_while_paused = await _await_mission_resume(mission_id, stream_event)
+                if killed_while_paused:
+                    await _clear_checkpoint()
+                    return "MISSION TERMINATED: User requested cancellation via control plane."
             except Exception as e:
-                log.error(f"[AgentLoop] Error checking mission pause flag: {e}")
+                log.error(f"[AgentLoop] Error in mission pause/resume handling: {e}")
 
         await stream_event("system", f"Agent loop iteration {iter_num}/{max_iterations} started.")
         log.info(f"[AgentLoop] Iteration {iter_num}/{max_iterations} | total elapsed {elapsed_total:.0f}s")
