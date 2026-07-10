@@ -3,6 +3,7 @@ import asyncio
 import logging
 from datetime import UTC, date, datetime, timedelta
 
+import caldav
 import dateparser
 import pytz
 
@@ -63,29 +64,56 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
             )
 
         elif action == "read":
-            def _read():
+            local_tz = _get_local_tz()
+            now_lo = datetime.now(local_tz) - timedelta(days=1)
+            now_hi = datetime.now(local_tz) + timedelta(days=7)
+
+            def _list_calendars():
                 client = provider.calendar_client()
-                found_events = []
                 calendars = client.principal().calendars()
-                local_tz = _get_local_tz()
-                now_aware = datetime.now(local_tz)
+                return [
+                    (cal.url, cal.name)
+                    for cal in calendars
+                    if not any(x in (cal.name or "").lower() for x in ["birthday", "contact", "holiday"])
+                ]
 
-                for cal in calendars:
-                    if any(x in (cal.name or "").lower() for x in ["birthday", "contact", "holiday"]): continue
-                    try:
-                        events = cal.search(start=now_aware - timedelta(days=1), end=now_aware + timedelta(days=7), event=True, expand=True)
-                        for ev in events:
-                            ve = ev.vobject_instance.vevent
-                            summary = ve.summary.value if hasattr(ve, 'summary') else "No Summary"
-                            start_dt = _normalize_event_time(ve.dtstart.value)
-                            if start_dt:
-                                t_str = start_dt.strftime("%Y-%m-%d %I:%M %p")
-                                found_events.append(f"- [{t_str}] {summary} ({cal.name})")
-                    except: continue
-                found_events.sort()
-                return "Upcoming Events:\n" + "\n".join(found_events) if found_events else "No events found."
+            def _search_one(cal_url, cal_name, lo, hi):
+                try:
+                    c = provider.calendar_client()
+                    target = caldav.Calendar(client=c, url=cal_url)
+                    events = target.search(start=lo, end=hi, event=True, expand=True)
+                    out = []
+                    for ev in events:
+                        ve = ev.vobject_instance.vevent
+                        summary = ve.summary.value if hasattr(ve, "summary") else "No Summary"
+                        start_dt = _normalize_event_time(ve.dtstart.value)
+                        if start_dt:
+                            out.append((start_dt, f"- [{start_dt.strftime('%Y-%m-%d %I:%M %p')}] {summary} ({cal_name})"))
+                    return out
+                except Exception:
+                    return []
 
-            res_msg = await loop.run_in_executor(None, _read)
+            async def _search(cal_url, cal_name):
+                try:
+                    return await asyncio.wait_for(
+                        loop.run_in_executor(None, _search_one, cal_url, cal_name, now_lo, now_hi),
+                        timeout=8,
+                    )
+                except Exception:
+                    return []
+
+            try:
+                targets = await asyncio.wait_for(loop.run_in_executor(None, _list_calendars), timeout=10)
+            except Exception:
+                return ExecutionResult(status="SUCCESS", message="No events found.", service="calendar_read")
+            results = await asyncio.gather(*(_search(u, n) for u, n in targets), return_exceptions=True)
+            found = []
+            for r in results:
+                if isinstance(r, list):
+                    found.extend(r)
+            found.sort(key=lambda x: x[0])
+            lines = [item[1] for item in found]
+            res_msg = "Upcoming Events:\n" + "\n".join(lines) if lines else "No events found."
             return ExecutionResult(status="SUCCESS", message=res_msg, service="calendar_read")
 
         elif action == "add":
@@ -187,5 +215,5 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=f"Unknown calendar action: {action}", service="calendar")
 
     except Exception as e:
-        log.error(f"Calendar error: {e}")
+        log.error(f"Calendar error: {e!r}")
         return ExecutionResult(status="FAILURE", message=f"Calendar error: {e!s}", service="calendar")
