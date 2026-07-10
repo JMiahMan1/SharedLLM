@@ -660,7 +660,8 @@ async def clear_history_endpoint(request: Request):
 
         from services.gateway.history import _get_history_key, _redis
         key = _get_history_key(user_id)
-        _redis.delete(key)
+        if _redis is not None:
+            _redis.delete(key)
 
         return {"status": "SUCCESS", "message": f"History cleared for {user_id}."}
     except Exception as e:
@@ -1861,8 +1862,8 @@ async def fetch_device_history(creds: dict, entity_id: str, days: int = 1) -> li
       resp = await get_http_client().get(
           f"{EXECUTION_SVC}/discovery/history",
           params={
-            "ha_url": creds.get("ha_url"),
-            "ha_token": creds.get("ha_token"),
+            "ha_url": creds.get("ha_url") or "",
+            "ha_token": creds.get("ha_token") or "",
             "entity_id": entity_id,
             "days": days
           },
@@ -2030,7 +2031,7 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
                     try:
                         ps_resp = await slot_client.get(f"{ollama_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
                         if ps_resp.status == 200:
-                            slots = await ps_resp.json().get("slots", {})
+                            slots = (await ps_resp.json()).get("slots", {})
                             if slots.get("available", 0) > 0:
                                 break
                     except Exception:
@@ -2041,12 +2042,12 @@ async def perform_shadow_execution(query: str, creds: ResolvedCredentials, histo
         except Exception:
             log.warning("[ShadowExecution] Could not check slot availability")
         start_t = asyncio.get_event_loop().time()
-        resp = await get_http_client().post(f"{ollama_url}/api/chat", json=payload, timeout=OLLAMA_TIMEOUT)
+        resp = await get_http_client().post(f"{ollama_url}/api/chat", json=payload, timeout=aiohttp.ClientTimeout(total=OLLAMA_TIMEOUT))
         elapsed = asyncio.get_event_loop().time() - start_t
         log.info(f"[ShadowExecution] Ollama responded in {elapsed:.1f}s with status {resp.status}")
 
         if resp.status == 200:
-            proposal = await resp.json().get("message", {}).get("content", "")
+            proposal = (await resp.json()).get("message", {}).get("content", "")
             return f"\n\n### LIVE SYSTEM PROPOSAL (Shadow Execution)\n{proposal}\n\n[Dev Agent: Compare this proposal against the codebase and architectural intent. Identify any deltas and select the optimal path.]"
         else:
             log.warning(f"[ShadowExecution] Non-200 response: {resp.status} - {await resp.text()}")
@@ -2060,7 +2061,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     Supports multi-turn tool execution: call Ollama, execute tool, feed result back, repeat.
     """
     # Initialize the base payload for the loop
-    ollama_payload = {
+    ollama_payload: dict = {
         "model": selected_model,
         "messages": [{"role": "system", "content": full_system}, *short_term, {"role": "user", "content": query}],
         "stream": False # AgentLoop is always non-streaming for the brain
@@ -2200,9 +2201,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         if "--- " in code_text and "+++ " in code_text and "@@ " in code_text:
                             # It's a diff
                             path = "auto"
-                            chunks = []
-                            current_old = []
-                            current_new = []
+                            chunks: list[dict[str, str]] = []
+                            current_old: list[str] = []
+                            current_new: list[str] = []
                             in_hunk = False
                             for line in code_text.splitlines():
                                 if line.startswith("+++ b/") or line.startswith("+++ "):
@@ -2532,7 +2533,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         exec_msg += f"\n\n[DETAIL]\n{detail_txt[:10000]}"
                 else:
                     try:
-                        err_detail = await exec_resp.json().get("detail", await exec_resp.text())
+                        err_detail = (await exec_resp.json()).get("detail", await exec_resp.text())
                     except:
                         err_detail = await exec_resp.text()
                     exec_msg = f"Failed: {err_detail}"
@@ -2650,7 +2651,7 @@ async def chat_handler(request: Request, background_tasks=None):
         creds = ResolvedCredentials(**creds_data)
         user_id = creds.user
     except HTTPException as he:
-        if he.status == 401:
+        if he.status_code == 401:
             msg = "Authentication failed. Please log in or provide a valid API key."
             if is_openai:
                 return _make_openai_response(msg, selected_model, "unauthorized")
@@ -2764,7 +2765,7 @@ async def chat_handler(request: Request, background_tasks=None):
         }
         endpoint = endpoint_map.get(intent)
         if endpoint:
-            exec_payload = {
+            exec_payload: dict = {
                 "user_context": creds.model_dump(),
                 "action": "turn_on" if intent == "turn_on" else ("turn_off" if intent == "turn_off" else "play"),
                 "entity_id": resolved_entity
@@ -3102,6 +3103,8 @@ async def stream_chat_job(job_id: str):
 @app.get("/api/chat/job/{job_id}")
 async def get_chat_job_status(job_id: str):
     """Checks the status of an inference job."""
+    if job_queue is None:
+        raise HTTPException(status_code=503, detail="Inference queue not available")
     job = await job_queue.get_job_status(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -3765,7 +3768,7 @@ async def global_search(q: str, request: Request):
                 headers={"Authorization": auth_header, "X-Internal-Secret": INTERNAL_SECRET}
             )
             if resp.status == 200:
-                user_id = await resp.json().get("user", "admin")
+                user_id = (await resp.json()).get("user", "admin")
         except Exception:
             pass
 
@@ -4004,7 +4007,7 @@ async def get_collection_docs(collection_name: str, request: Request, limit: int
     try:
         content = await resp.json()
     except Exception as e:
-        log.error(f"Failed to parse collection docs JSON: {e} | Body: {resp.text[:200]}")
+        log.error(f"Failed to parse collection docs JSON: {e} | Body: {(await resp.text())[:200]}")
         content = {"status": "ERROR", "message": "Upstream RAG service returned non-JSON response", "detail": str(e)}
 
     return JSONResponse(status_code=resp.status, content=content)
@@ -5325,8 +5328,12 @@ async def ui_delete_dns_record(record_id: int):
 def resolve_service_base_url(service: str) -> str:
     """Map a tool_registry service id to its base URL."""
     if service == SVC_EXECUTION:
+        if EXECUTION_SVC is None:
+            raise ValueError("EXECUTION_SVC not configured")
         return EXECUTION_SVC
     if service == SVC_WORKSPACE:
+        if WORKSPACE_RUNTIME_SVC is None:
+            raise ValueError("WORKSPACE_RUNTIME_SVC not configured")
         return WORKSPACE_RUNTIME_SVC
     if service == SVC_ALPACA_SD:
         return ALPACA_SD_URL
@@ -6101,6 +6108,7 @@ async def sendspin_proxy(websocket: WebSocket):
     6. Proxy begins bidirectional forwarding
     """
     import websockets
+    from websockets.exceptions import InvalidStatus
     from fastapi.websockets import WebSocketDisconnect
 
     # Accept browser connection FIRST (required by FastAPI before any close())
@@ -6126,7 +6134,7 @@ async def sendspin_proxy(websocket: WebSocket):
         mass_token = creds.get("mass_token") or ""
         log.info(f"[sendspin] Identity resolved: user={creds.get('user', 'unknown')}, mass_url={mass_url}, mass_token={'set' if mass_token else 'NOT SET'}")
     except HTTPException as e:
-        log.error(f"[sendspin] Identity resolution HTTP error: status={e.status}, detail={e.detail}")
+        log.error(f"[sendspin] Identity resolution HTTP error: status={e.status_code}, detail={e.detail}")
         await websocket.close(code=1008, reason="Authentication failed")
         return
     except Exception as e:
@@ -6188,7 +6196,7 @@ async def sendspin_proxy(websocket: WebSocket):
         log.info("[sendspin] STEP 6: Waiting for MA auth response...")
         try:
             auth_response = await asyncio.wait_for(ma_ws.recv(), timeout=10.0)
-            log.info(f"[sendspin] STEP 7: MA auth response received: {auth_response[:500]}")
+            log.info(f"[sendspin] STEP 7: MA auth response received: {auth_response[:500]!r}")
         except TimeoutError:
             log.error("[sendspin] STEP 6 FAILED: MA auth response timed out after 10s")
             await ma_ws.close()
@@ -6222,7 +6230,7 @@ async def sendspin_proxy(websocket: WebSocket):
             log.info("[sendspin] STEP 9: Waiting for MA server/hello response...")
             try:
                 hello_response = await asyncio.wait_for(ma_ws.recv(), timeout=10.0)
-                log.info(f"[sendspin] STEP 10: MA server/hello received: {hello_response[:500]}")
+                log.info(f"[sendspin] STEP 10: MA server/hello received: {hello_response[:500]!r}")
             except TimeoutError:
                 log.error("[sendspin] STEP 9 FAILED: MA server/hello timed out after 10s")
                 await ma_ws.close()
@@ -6231,7 +6239,8 @@ async def sendspin_proxy(websocket: WebSocket):
 
             log.info("[sendspin] STEP 11: Forwarding server/hello to browser")
             try:
-                await websocket.send_text(hello_response)
+                hello_text = hello_response if isinstance(hello_response, str) else hello_response.decode(errors="replace")
+                await websocket.send_text(hello_text)
                 log.info("[sendspin] STEP 12: server/hello sent to browser successfully")
             except Exception as send_err:
                 log.error(f"[sendspin] STEP 11 FAILED: Failed to send server/hello to browser: {send_err}", exc_info=True)
@@ -6330,8 +6339,8 @@ async def sendspin_proxy(websocket: WebSocket):
             graceful_disconnect(),
         )
         log.info("[sendspin] STEP 15: Proxy loops complete — both directions ended")
-    except websockets.exceptions.InvalidStatusCode as e:
-        log.error(f"[sendspin] MA sendspin connection failed (status {e.status}): {e}", exc_info=True)
+    except InvalidStatus as e:
+        log.error(f"[sendspin] MA sendspin connection failed (status {e.response}): {e}", exc_info=True)
         with suppress(Exception):
             await websocket.close(code=1011, reason=f"MA connection failed: {e}")
     except websockets.exceptions.ConnectionClosed as e:
@@ -6468,6 +6477,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
     - {"event": "player_updated", "data": {...}}
     """
     import websockets
+    from websockets.exceptions import InvalidStatus
 
     # Extract API token from query params
     await websocket.accept()
@@ -6487,7 +6497,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
         mass_token = creds.get("mass_token") or ""
         log.info(f"[ma-jsonrpc] STEP 2 PASS: Identity resolved — user={creds.get('user', 'unknown')}")
     except HTTPException as e:
-        log.error(f"[ma-jsonrpc] STEP 2 FAIL: Identity resolution HTTP error: status={e.status}, detail={e.detail}")
+        log.error(f"[ma-jsonrpc] STEP 2 FAIL: Identity resolution HTTP error: status={e.status_code}, detail={e.detail}")
         await websocket.close(code=1008, reason="Authentication failed")
         return
     except Exception as e:
@@ -6600,8 +6610,8 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                 forward_ma_to_client(),
             )
             log.info("[ma-jsonrpc] STEP 7: Proxy loops complete — both directions ended")
-    except websockets.exceptions.InvalidStatusCode as e:
-        log.error(f"[ma-jsonrpc] MA JSON-RPC connection failed (status {e.status}): {e}")
+    except InvalidStatus as e:
+        log.error(f"[ma-jsonrpc] MA JSON-RPC connection failed (status {e.response}): {e}")
         with suppress(Exception):
             await websocket.close(code=1011, reason=f"MA connection failed: {e}")
     except Exception as e:
@@ -6783,7 +6793,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
 
             # Wait for queue_updated event and extract stream URL from MA's queue state
             stream_url: str | None = None
-            stream_timeout=aiohttp.ClientTimeout(total=15.0)
+            stream_timeout = 15.0
             start_time = asyncio.get_event_loop().time()
 
             while (asyncio.get_event_loop().time() - start_time) < stream_timeout:
