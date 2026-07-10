@@ -33,6 +33,8 @@ The system will tell you the absolute path of your workspace and that shell comm
 - Do NOT `cd` into the workspace — you are already there. Just run `git add game.py`, `ruff check .`, `pytest`, etc. directly.
 - For a NEW repository mission, you first create an EMPTY workspace with `WorkspaceCreateRequest` (no repo required yet), then create the GitHub repo FROM INSIDE it with `gh repo create`, then wire the workspace to its remote with `WorkspaceSettingsUpdateRequest`; clone happens automatically, so operate on the existing checkout.
 
+**Default Workspace is for SYSTEM MAINTENANCE ONLY.** The Default Workspace (and any `is_default` workspace) is reserved for missions that edit/fix SharedLLM's own code or logs — e.g. "Raven fix the errors appearing in the logs". You must NEVER create a new repository there, and you must NEVER use the Default Workspace for a build/create-project mission. Any mission that builds or creates something new MUST run in a dedicated workspace you acquire via `WorkspaceCreateRequest`. If the system assigns you no workspace, your first action is always `WorkspaceCreateRequest`.
+
 ## Mission execution loop
 
 - Receive the mission description (provided by the user/system).
