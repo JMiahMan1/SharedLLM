@@ -6,6 +6,7 @@ Reads the legacy USER_{USERNAME}_{SETTING} environment variables from the
 monolith's .env and seeds the SQL database if it is empty. Run once on
 first startup or call via the /api/admin/seed endpoint.
 """
+import contextlib
 import hashlib
 import logging
 import os
@@ -32,7 +33,7 @@ def verify_password(password: str, stored: str) -> bool:
     return pwd_hash == stored_hash
 
 # Load legacy .env if available
-import sys
+import sys  # noqa: E402
 
 if "PYTEST_CURRENT_TEST" not in os.environ and "pytest" not in sys.modules:
     from services.config import LEGACY_ENV_PATH as _LEGACY_ENV_PATH
@@ -156,13 +157,12 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         log.info("[seed] Forced re-seed: Clearing existing users/assignments.")
         # Clear using SQLModel to avoid table name mismatches
         for table in ["deviceassignment", "user", "apikey", "globalsetting"]:
-            try:
+            with contextlib.suppress(Exception):
                 session.execute(text(f"DELETE FROM {table}"))  # type: ignore[deprecated]
-            except Exception:
-                pass
         session.commit()
 
     count = 0
+    existing: GlobalSetting | None = None
     has_users = session.exec(select(User)).first() is not None
     if not has_users or force:
         env_users = _parse_env_users()
@@ -240,7 +240,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             session.add(existing)
 
     # ── Seed OLLAMA_URL from .env (seed-only, not in DEFAULT_GLOBAL_SETTINGS) ─
-    env_ollama_url = os.getenv("OLLAMA_URL", "")
+    env_ollama_url = os.getenv("OLLAMA_URL")
     if not env_ollama_url:
         env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env")
         if os.path.exists(env_path):
@@ -426,11 +426,11 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                             elif not isinstance(values, list):
                                 values = [values]
 
-                            existing = session.exec(
+                            existing_dns = session.exec(
                                 select(DnsRecord).where(DnsRecord.domain_name == domain)
                             ).first()
 
-                            if not existing or force_dns:
+                            if not existing_dns or force_dns:
                                 record = DnsRecord(
                                     domain_name=domain,
                                     record_type=record_type,
@@ -438,12 +438,12 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                                     ttl=ttl,
                                     is_active=True,
                                 )
-                                if existing:
-                                    existing.values = record.values
-                                    existing.record_type = record.record_type
-                                    existing.ttl = record.ttl
-                                    existing.is_active = record.is_active
-                                    session.add(existing)
+                                if existing_dns:
+                                    existing_dns.values = record.values
+                                    existing_dns.record_type = record.record_type
+                                    existing_dns.ttl = record.ttl
+                                    existing_dns.is_active = record.is_active
+                                    session.add(existing_dns)
                                 else:
                                     session.add(record)
                                 log.info(f"[seed] Seeded DNS record: {domain} ({record_type}) -> {values}")
