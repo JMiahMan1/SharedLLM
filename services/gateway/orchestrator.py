@@ -5,7 +5,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 
@@ -26,7 +26,7 @@ from services.gateway.schemas import ResolvedCredentials
 log = logging.getLogger("gateway.orchestrator")
 
 # --- Default service URLs (Docker DNS) — overridable via Identity settings ---
-_DEFAULTS = {
+_DEFAULTS = cast(dict[str, str], {
     "identity_svc_url": IDENTITY_SVC,
     "execution_svc_url": EXECUTION_SVC,
     "rag_svc_url": RAG_SVC,
@@ -46,7 +46,7 @@ _DEFAULTS = {
     "raven_error_threshold": "5",
     "timezone": "",  # Resolved at runtime from Identity settings
     "embedding_model": "nomic-ai/nomic-embed-text-v1.5",
-}
+})
 
 # --- Settings cache (refreshed periodically) ---
 _settings_cache: dict[str, str] | None = None
@@ -295,7 +295,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     log.info(f"[Orchestrator] Starting orchestration for query: {query[:50]}...")
 
     # 1. Retrieve Memory
-    short_term = [] # Placeholder
+    short_term: list = [] # Placeholder
 
     # 2. Context Injection (RAG + live HA state)
     rag_context = await _fetch_rag_context(query, user_id, creds)

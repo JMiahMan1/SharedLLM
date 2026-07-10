@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -12,6 +13,7 @@ import aiohttp
 import redis.asyncio as redis
 
 from services.gateway.config import (
+    ALPACA_SD_URL,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
     IDENTITY_SVC,
@@ -57,6 +59,47 @@ THINKING_PATTERNS = [
     re.compile(r'<think>.*?</think>', re.DOTALL),
     re.compile(r'<thinking>.*?</thinking>', re.DOTALL),
 ]
+
+# Tool actions that operate INSIDE a workspace. When no workspace is assigned yet
+# (a project mission), every one of these must be blocked until Raven acquires a
+# dedicated workspace via WorkspaceCreateRequest — otherwise it would silently
+# operate in the Default Workspace / WORKSPACE_ROOT.
+WORKSPACE_TOOL_ACTIONS = {
+    "workspacefilereadrequest", "workspacefilewriterequest",
+    "workspacefilepatchrequest", "workspaceshellrequest",
+    "workspacesearchrequest", "workspacelintrequest",
+    "gitoperationrequest", "workspacebootstraprequest",
+    "workspacesettingsupdaterequest",
+}
+
+# Heuristics that identify a *system-maintenance* mission — i.e. one that edits or
+# fixes SharedLLM's own source/logs (e.g. "Raven fix the errors appearing in the
+# logs"). These run in the Default Workspace. Anything that builds or creates a
+# new project must return False so Raven acquires a dedicated workspace instead of
+# polluting the Default Workspace.
+_MAINTENANCE_PATTERNS = [
+    re.compile(r"\bfix (the )?(error|log|bug|issue)s?\b", re.I),
+    re.compile(r"\berrors? (in|appearing|from|within)\b", re.I),
+    re.compile(r"\bdebug\b.*\b(gateway|server|platform|sharedllm|this repo|the codebase)\b", re.I),
+    re.compile(r"\b(repair|patch|fix)\b.*\b(sharedllm|gateway|the server|the platform|this repo)\b", re.I),
+    re.compile(r"\bsharedllm\b.*\b(fix|error|bug|log|repair|patch)\b", re.I),
+]
+
+
+def is_system_maintenance_task(query: str | None) -> bool:
+    """Return True when the mission is system maintenance on SharedLLM itself.
+
+    Such missions should run in the user's Default Workspace (so Raven edits
+    SharedLLM's own code there). Anything that builds/creates a new project must
+    return False so Raven is forced to acquire a dedicated workspace.
+    """
+    if not query:
+        return False
+    q = query.lower()
+    # Strong "build something new" signals => definitely NOT maintenance.
+    if any(k in q for k in ("build", "create a", "new ", "space shooter", "scaffold", "make a game", "make an app", "website")):
+        return False
+    return any(p.search(query) for p in _MAINTENANCE_PATTERNS)
 
 
 def strip_thinking_blocks(text: str) -> str:
@@ -770,12 +813,21 @@ def should_persist_learning(result: str) -> bool:
     return True
 
 
-async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | None = None) -> dict | None:
+async def resolve_mission_workspace(
+    user_id: str,
+    assigned_workspace_id: str | None = None,
+    query: str | None = None,
+) -> dict | None:
     """Resolve (or create) the workspace an agentic Raven mission should run in.
 
     - If ``assigned_workspace_id`` is given, resolve/bootstrap and return it.
-    - Otherwise reuse an available user-scoped workspace, or create a new DEFAULT
-      workspace for the user if none exists.
+    - Otherwise, if the mission is *system maintenance* on SharedLLM itself
+      (editing/fixing its own code or logs), return the user's **Default
+      Workspace** so Raven works there.
+    - Otherwise (a project / new-build mission) return ``None`` — do NOT fall back
+      to the Default Workspace. Raven must acquire a dedicated workspace via
+      ``WorkspaceCreateRequest`` (protocol Step 0). This keeps the Default
+      Workspace reserved for system maintenance only.
 
     Workspaces are just sandboxed directories for running commands; they do NOT
     require a git repository unless one is explicitly requested (``create_repo``).
@@ -814,29 +866,34 @@ async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | N
             log.warning(f"[workspace] bootstrap {assigned_workspace_id} failed: {e}")
         return None
 
-    # No assigned workspace: do NOT invent a workspace name. The gateway only
-    # surfaces an existing workspace the user already flagged as their default (via
-    # the ``is_default`` flag — never by name), or any available user-scoped
-    # workspace Raven may reuse. Otherwise Raven decides — via the
-    # WorkspaceCreateRequest tool — whether it needs its own dedicated sandbox.
-    try:
-        async with shared_http_client() as client:
-            lst = await client.get(
-                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
-                params={"rag_user": user_id},
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=10.0),
-            )
-            workspaces = (await lst.json()).get("workspaces", []) if lst.status == 200 else []
-    except Exception as e:
-        log.warning(f"[workspace] list failed: {e}")
-        workspaces = []
-    for item in workspaces:
-        if isinstance(item, dict) and item.get("is_default") and str(item.get("scope") or "user") == "user":
-            return item
-    for item in workspaces:
-        if isinstance(item, dict) and item.get("available") and str(item.get("scope") or "user") == "user":
-            return item
+    # No assigned workspace. System-maintenance missions (fixing SharedLLM's own
+    # code/logs) run in the user's Default Workspace. Everything else (building or
+    # creating a new project) must NOT use the Default Workspace — return None so
+    # Raven is forced to acquire a dedicated sandbox via WorkspaceCreateRequest.
+    if is_system_maintenance_task(query):
+        try:
+            async with shared_http_client() as client:
+                lst = await client.get(
+                    f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+                    params={"rag_user": user_id},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                workspaces = (await lst.json()).get("workspaces", []) if lst.status == 200 else []
+        except Exception as e:
+            log.warning(f"[workspace] list failed: {e}")
+            workspaces = []
+        for item in workspaces:
+            if isinstance(item, dict) and item.get("is_default") and str(item.get("scope") or "user") == "user":
+                return item
+        for item in workspaces:
+            if isinstance(item, dict) and item.get("available") and str(item.get("scope") or "user") == "user":
+                return item
+        return None
+
+    # Project / new-build mission: no workspace pre-assigned. Returning None (rather
+    # than the Default Workspace) forces Raven to create its own dedicated workspace
+    # and prevents it from operating in the shared Default Workspace.
     return None
 
 
@@ -967,10 +1024,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # tool described in its protocol — whether a mission needs its own dedicated
     # sandbox, or should reuse an existing one. The gateway only supplies the means.
     try:
-        if workspace_id:
-            _ws = await resolve_mission_workspace(rag_user, workspace_id)
-        else:
-            _ws = await resolve_mission_workspace(rag_user, None)
+        _ws = await resolve_mission_workspace(rag_user, workspace_id, query=query)
     except Exception as e:
         log.warning(f"[AgentLoop] workspace resolve failed: {e}")
         _ws = None
@@ -986,6 +1040,21 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 f"the absolute path above. Shell commands already run inside this workspace "
                 f"directory — do NOT prepend 'cd' to it."
             )
+    else:
+        # No workspace was pre-assigned (a project / new-build mission). Inject an
+        # explicit note so Raven follows protocol Step 0 and acquires a dedicated
+        # workspace via WorkspaceCreateRequest before any file/shell/git operation
+        # — and never operates in the Default Workspace (reserved for maintenance).
+        full_system += (
+            "\n\n[WORKSPACE NOTE]\n"
+            "No workspace is pre-assigned to this mission. Per protocol Step 0, your VERY "
+            "FIRST tool call MUST be WorkspaceCreateRequest to acquire a dedicated workspace "
+            "(e.g. {\"@type\": \"WorkspaceCreateRequest\", \"id\": \"raven-<project>\", "
+            "\"display_name\": \"...\"}). Capture the returned id and pass it as "
+            "`workspace_id` in EVERY following WorkspaceFileWriteRequest / WorkspaceShellRequest "
+            "/ WorkspaceSettingsUpdateRequest. Do NOT operate in the Default Workspace — it is "
+            "reserved for system maintenance only."
+        )
 
     # The workspace this mission started in (typically the user's flagged default).
     # A NEW repository must never be created here. Raven acquires a dedicated sandbox
@@ -1655,6 +1724,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "storagetexttorequest": (STORAGE_SVC, "/text_to_audio"),
                 "networkdevicescanrequest": (EXECUTION_SVC, "/execute/network_scan"),
                 "ghrequest": (EXECUTION_SVC, "/execute/gh"),
+                "imagegenerationrequest": (ALPACA_SD_URL, "/v1/images/generations"),
                 "controlplanerequest": (CONTROL_PLANE_URL, "/api/restart/{service_name}"),
             }
 
@@ -1748,6 +1818,89 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # loudly so it creates a workspace first instead of polluting a shared one.
                 _skip_post = False
                 _creates_repo = False
+
+                # ImageGenerationRequest: generate an image via the alpaca Stable Diffusion
+                # backend, then (optionally) save it straight into the workspace as a binary
+                # file. The SD backend only understands prompt/model/size/n, so we strip the
+                # workspace fields, call SD, decode the returned PNG, and write it via the
+                # workspace_runtime binary file endpoint (content_base64). This keeps the
+                # (large) image bytes server-side instead of round-tripping through the model.
+                if lookup_action == "imagegenerationrequest" and isinstance(payload, dict):
+                    _img_prompt = payload.get("prompt")
+                    _img_model = payload.get("model")
+                    _img_size = str(payload.get("size") or "512x512")
+                    try:
+                        _img_n = int(payload.get("n") or 1)
+                    except (TypeError, ValueError):
+                        _img_n = 1
+                    _img_ws = payload.get("workspace_id") or workspace_id
+                    _img_path = payload.get("relative_path")
+                    if not _img_prompt:
+                        exec_data = {"status": "ERROR", "message": "ImageGenerationRequest requires a 'prompt'."}
+                    else:
+                        try:
+                            async with shared_http_client() as _c:
+                                _sd = await _c.post(
+                                    f"{ALPACA_SD_URL}/v1/images/generations",
+                                    json={"prompt": _img_prompt, "model": _img_model, "size": _img_size, "n": _img_n},
+                                    timeout=aiohttp.ClientTimeout(total=180.0),
+                                )
+                                _sd_data = await _sd.json()
+                            _items = (_sd_data or {}).get("data") or []
+                            _b64 = _items[0].get("b64_json") if _items else None
+                            if not _b64 and _items and _items[0].get("url"):
+                                async with shared_http_client() as _c2:
+                                    _img_r = await _c2.get(_items[0]["url"])
+                                    _b64 = base64.b64encode(await _img_r.read()).decode()
+                            if not _b64:
+                                exec_data = {"status": "ERROR", "message": f"Image generation returned no image: {_sd_data}"}
+                            elif _img_ws and _img_path:
+                                async with shared_http_client() as _c3:
+                                    _save = await _c3.post(
+                                        f"{WORKSPACE_RUNTIME_SVC}/files/write",
+                                        json={
+                                            "workspace_id": _img_ws,
+                                            "relative_path": _img_path,
+                                            "content_base64": _b64,
+                                            "create_parents": True,
+                                        },
+                                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                        timeout=aiohttp.ClientTimeout(total=30.0),
+                                    )
+                                    _save_data = await _save.json() if _save.status == 200 else {"status": "ERROR", "detail": f"save status {_save.status}"}
+                                exec_data = {
+                                    "status": "SUCCESS",
+                                    "message": f"Generated image saved to {_img_path} ({len(_b64)} base64 bytes).",
+                                    "detail": _save_data,
+                                }
+                            else:
+                                exec_data = {
+                                    "status": "SUCCESS",
+                                    "message": f"Image generated ({len(_b64)} base64 bytes). Provide workspace_id + relative_path to save it to the workspace.",
+                                    "detail": {"b64_len": len(_b64)},
+                                }
+                        except Exception as _e:
+                            exec_data = {"status": "ERROR", "message": f"Image generation failed: {_e}"}
+                    _skip_post = True
+
+                # GUARD: project missions start with NO assigned workspace. Block every
+                # workspace-scoped operation until Raven acquires a dedicated workspace via
+                # WorkspaceCreateRequest, so it never silently operates in the Default
+                # Workspace or WORKSPACE_ROOT. Only the create request itself is allowed.
+                if workspace_id is None and lookup_action in WORKSPACE_TOOL_ACTIONS and lookup_action != "workspacecreaterequest":
+                    exec_data = {
+                        "status": "ERROR",
+                        "message": (
+                            "No workspace is assigned yet. Per protocol Step 0, your FIRST "
+                            "action must be WorkspaceCreateRequest to acquire a dedicated "
+                            "workspace, e.g. {\"@type\": \"WorkspaceCreateRequest\", "
+                            "\"id\": \"raven-<project>\", \"display_name\": \"...\"}. Capture "
+                            "the returned id and pass it as `workspace_id` in EVERY following "
+                            "WorkspaceFileWriteRequest / WorkspaceShellRequest. Do NOT operate "
+                            "in the Default Workspace."
+                        ),
+                    }
+                    _skip_post = True
                 if isinstance(payload, dict):
                     _cmd = " ".join(str(payload.get(k, "")) for k in ("command", "action", "repo_url", "operation"))
                     if "gh repo create" in _cmd or "gh repo fork" in _cmd:
