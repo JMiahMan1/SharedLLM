@@ -185,6 +185,7 @@ class FileListRequest(WorkspaceRef):
 class FileWriteRequest(WorkspaceRef):
     relative_path: str
     content: str | None = None
+    content_base64: str | None = None
     patch: str | None = None
     expected_sha256: str | None = None
     create_parents: bool = False
@@ -1612,8 +1613,12 @@ def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(def
                 )
     elif req.content is not None:
         target.write_text(req.content)
+    elif req.content_base64 is not None:
+        import base64
+
+        target.write_bytes(base64.b64decode(req.content_base64))
     else:
-        raise HTTPException(status_code=400, detail="Either 'content' or 'patch' must be provided")
+        raise HTTPException(status_code=400, detail="Either 'content', 'content_base64', or 'patch' must be provided")
 
     new_bytes = target.read_bytes()
     return {
