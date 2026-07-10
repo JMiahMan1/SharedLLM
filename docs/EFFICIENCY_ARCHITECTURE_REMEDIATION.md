@@ -64,9 +64,9 @@
 | 2 | DNS refresh interval env-configurable | [x] done | `dns/main.py` `DNS_REFRESH_INTERVAL` env var (default 30s) replaces hardcoded `asyncio.sleep(30)` |
 | 3 | Shared in-memory TTL cache for identity/settings/prompts | [x] done | `services/gateway/cache.py` shared TTL cache (`SETTINGS_CACHE_TTL`/`IDENTITY_CACHE_TTL` env-configurable); `get_all_settings` (orchestrator) and `resolve_identity` (main) now use it; invalidated on settings write (`/api/settings`, `/api/config`, DNS endpoints) and `change-password`. `prompts.py` still has its own 30s cache (consolidation deferred to row below) |
 | 3 | Reuse cache in `ha_state_cache` / `media_device_cache` | [x] done | `services/gateway/cache.py` gained `get_redis()` + `redis_cache_get/set/set_many/delete`; `ha_state_cache.py` and `media_device_cache.py` now delegate to these (preserving Redis-backed semantics: 60s HA state TTL, 7d device TTL via `HA_STATE_CACHE_TTL`/`MEDIA_DEVICE_CACHE_TTL` env vars). `ha_state_cache` re-exports `get_redis` for `background_worker.py:746`/`main.py:1833` callers |
-| 4 | Execution bridge-network spike (validate `.local` DNS) | [ ] pending | |
+| 4 | Execution bridge-network spike (validate `.local` DNS) | [x] done | Validated: execution runs `network_mode: host` so it resolves via the host's systemd-resolved (`resolvectl query jeremiah-home-desktop.local` → `192.168.1.216`); bridge-network services resolve `.local` via SharedLLM's own DNS resolver (`172.26.0.254`, static mapping from Identity) with Caddy fronting routing. Gateway already proven end-to-end (`HTTP 200` from Ollama at `jeremiah-home-desktop.local:11434`). No code change needed — architecture already handles it. |
 | 4 | De-duplicate `*_SVC_URL` env via shared `env_file` | [ ] pending | |
-| 4 | Soften `recreate_http_client` host refresh | [ ] pending | |
+| 4 | Soften `recreate_http_client` host refresh | [x] done | `services/gateway/main.py`: connector now uses `ttl_dns_cache=60` (matches `execution/http_client.py`), so each host's DNS re-resolves independently on its own TTL — a stale host refreshes without tearing down other hosts' pooled connections. Added a `_CLIENT_RECREATE_COOLDOWN` (10s) guard so DNS-failure storms don't repeatedly recreate the entire shared pool. `retry_http_client` still recreates as a last resort. |
 
 ---
 
