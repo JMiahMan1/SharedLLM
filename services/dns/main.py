@@ -15,6 +15,7 @@ import struct
 import time
 
 import docker
+from services.common.http import get_client
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -302,9 +303,7 @@ class DNSResolver:
                     try:
                         import aiohttp
                         url = f"http://{ip}:{port}{path if path.startswith('/') else '/' + path}"
-                        async with aiohttp.ClientSession(
-                            timeout=aiohttp.ClientTimeout(total=DNS_HEALTH_TIMEOUT)
-                        ) as s, s.get(url) as r:
+                        async with get_client() as s, s.get(url, timeout=aiohttp.ClientTimeout(total=DNS_HEALTH_TIMEOUT)) as r:
                             return r.status < 500
                     except ImportError:
                         pass
@@ -672,7 +671,7 @@ async def main():
 
         while True:
             try:
-                async with aiohttp.ClientSession() as http_session:
+                async with get_client() as http_session:
                     # DNS mappings (UI-backed store)
                     resp = await http_session.get(
                         f"{identity_url}/api/settings/dns_mappings",
