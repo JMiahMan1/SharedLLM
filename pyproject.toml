@@ -9,7 +9,10 @@ exclude = ["scratch", ".venv", "venv", "__pycache__", "node_modules", "dist", "b
 # Full dev standard. CI only enforces the critical subset (E9,F63,F7,F82);
 # everything else is reported non-blocking via `ruff check --exit-zero`.
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E501"]
+# E501 (line too long) is handled by the formatter; B008 is a FastAPI false
+# positive — `Header(default=None)` / `Query(default=...)` / `Depends(...)` in
+# default arguments is the intended framework pattern, not a mutable-default bug.
+ignore = ["E501", "B008"]
 
 [tool.ruff.format]
 quote-style = "double"
