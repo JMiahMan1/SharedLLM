@@ -458,6 +458,9 @@ _original_async_client = aiohttp.ClientSession
 _global_http_client: aiohttp.ClientSession | None = None
 _global_http_client_loop: asyncio.AbstractEventLoop | None = None
 _dns_recovery_lock = asyncio.Lock()
+_DNS_TTL = 60  # re-resolve DNS at most every 60s so pooled connectors don't go stale
+_CLIENT_RECREATE_COOLDOWN = 10.0  # s; avoid tearing down the shared pool on every DNS blip
+_last_client_recreate = 0.0
 
 def get_http_client() -> aiohttp.ClientSession:
     """Lazy initializer for the global aiohttp client to ensure test compatibility."""
@@ -471,7 +474,7 @@ def get_http_client() -> aiohttp.ClientSession:
         _global_http_client = _original_async_client(
             headers={"X-Request-Source": "shared-llm/app"},
             timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-            connector=aiohttp.TCPConnector(limit=100, limit_per_host=20)
+            connector=aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=_DNS_TTL)
         )
         _global_http_client_loop = current_loop
     return _global_http_client
@@ -491,9 +494,19 @@ async def shared_http_client():
 async def recreate_http_client():
     """Close the current client and create a new one with fresh DNS resolution.
     This is needed when DNS changes (e.g., dns-sync restart) cause stale keepalive
-    connections to fail with empty aiohttp.ClientError messages."""
+    connections to fail with empty aiohttp.ClientError messages.
+
+    Softened: the connector now uses ``ttl_dns_cache`` so DNS is re-resolved
+    automatically, and a short cooldown prevents storms of DNS failures from
+    repeatedly tearing down the entire shared connection pool."""
     async with _dns_recovery_lock:
-        global _global_http_client, _global_http_client_loop
+        global _global_http_client, _global_http_client_loop, _last_client_recreate
+        now = asyncio.get_running_loop().time()
+        # If the pool was already rebuilt recently, rely on the connector's
+        # ttl_dns_cache to refresh DNS instead of churning every connection.
+        if _global_http_client is not None and now - _last_client_recreate < _CLIENT_RECREATE_COOLDOWN:
+            log.debug("[DNSRecovery] Skipping client recreation (cooldown active); relying on ttl_dns_cache")
+            return
         if _global_http_client is not None:
             log.info("[DNSRecovery] Closing stale HTTP client to refresh DNS resolution")
             await _global_http_client.close()
@@ -504,9 +517,10 @@ async def recreate_http_client():
             current_loop = None
         _global_http_client = _original_async_client(
             timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-            connector=aiohttp.TCPConnector(limit=100, limit_per_host=20)
+            connector=aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=_DNS_TTL)
         )
         _global_http_client_loop = current_loop
+        _last_client_recreate = now
         log.info("[DNSRecovery] New HTTP client created with fresh DNS resolution")
 
 def _is_dns_failure(e: aiohttp.ClientError) -> bool:
