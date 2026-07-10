@@ -5,6 +5,7 @@ from services.gateway.tool_registry import (
     TOOL_IMAGE_EDIT,
     TOOL_IMAGE_GENERATE,
     TOOL_LIST_IMAGE_MODELS,
+    TOOL_RAVEN_MISSION,
     TOOL_WRITE_FILE,
     ResolvedToolCall,
     get_tool_schemas,
@@ -12,7 +13,7 @@ from services.gateway.tool_registry import (
 )
 
 
-def test_get_tool_schemas_returns_all_six_tools():
+def test_get_tool_schemas_returns_all_seven_tools():
     schemas = get_tool_schemas()
     names = {s["function"]["name"] for s in schemas}
     assert names == {
@@ -22,6 +23,7 @@ def test_get_tool_schemas_returns_all_six_tools():
         TOOL_IMAGE_GENERATE,
         TOOL_IMAGE_EDIT,
         TOOL_LIST_IMAGE_MODELS,
+        TOOL_RAVEN_MISSION,
     }
     # Every tool must declare JSON-schema parameters.
     for s in schemas:
@@ -89,3 +91,17 @@ def test_resolve_unknown_tool_raises():
 def test_workspace_id_override_takes_precedence():
     r = resolve_tool_call(TOOL_GH, {"args": ["status"], "workspace_id": "from_args"}, workspace_id="override")
     assert r.json["workspace_id"] == "override"
+
+
+def test_resolve_raven_mission_targets_gateway():
+    r = resolve_tool_call(
+        TOOL_RAVEN_MISSION,
+        {"mission": "build a 3D game", "workspace_id": "ws9"},
+    )
+    assert isinstance(r, ResolvedToolCall)
+    assert r.method == "POST"
+    assert r.service == "gateway"
+    assert r.path == "/api/raven/missions"
+    assert r.json["query"] == "build a 3D game"
+    assert r.json["workspace_id"] == "ws9"
+    assert r.requires_workspace is False
