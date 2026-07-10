@@ -399,6 +399,16 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         base_command = parsed[0]
         normalized_command = f"{base_command}-{parsed[1]}" if base_command == "git" and len(parsed) > 1 else base_command
 
+        # Guardrail: hard-block truly dangerous system-level commands regardless
+        # of context (e.g. sudo, reboot, mkfs). These can compromise the host and
+        # must never be executed from a workspace shell.
+        _blocked_token = next((t for t in parsed if t in SYSTEM_BLOCKLIST_COMMANDS), None)
+        if _blocked_token is not None:
+            return _fail(
+                f"Command blocked: '{_blocked_token}' is not permitted in a workspace shell.",
+                {"error": "command_blocked", "command": final_cmd, "blocked_token": _blocked_token},
+            )
+
         # Strip a redundant leading "cd <dir> &&" — the command already executes with
         # its cwd at the workspace root, and agents often prepend "cd /workspace".
         _cd = re.match(r"^\s*cd\s+(\S+)(?:\s*(?:&&|;)\s*)?", final_cmd)
@@ -438,7 +448,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # workspace may push there; every other workspace (incl. all test
         # workspaces) is hard-blocked so a flaky model can never push to SharedLLM
         # by accident. Covers both `git push` and `git remote add/set-url <url>`.
-        from handlers.repo_guard import (
+        from .repo_guard import (
             extract_remote_url_from_command,
             push_to_protected_allowed,
         )
