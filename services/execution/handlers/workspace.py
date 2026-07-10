@@ -443,32 +443,36 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                     {"error": "auth_required", "command": final_cmd},
                 )
 
-        # Guardrail: block pushes / remote setup that target a PROTECTED repository
-        # (e.g. the production SharedLLM repo). Only the designated SharedLLM dev
-        # workspace may push there; every other workspace (incl. all test
-        # workspaces) is hard-blocked so a flaky model can never push to SharedLLM
-        # by accident. Covers both `git push` and `git remote add/set-url <url>`.
-        from .repo_guard import (
-            extract_remote_url_from_command,
-            push_to_protected_allowed,
-        )
-        _protected_url = extract_remote_url_from_command(final_cmd)
-        if _protected_url is None and base_command == "git" and len(parsed) > 1 and parsed[1] in ("push", "remote"):
-            try:
-                _rc, _out, _err = await _run_command_async(
-                    ["git", "remote", "get-url", "origin"], cwd=abs_cwd, timeout=10.0
-                )
-                if _rc == 0 and _out.strip():
-                    _protected_url = _out.strip()
-            except Exception:
-                _protected_url = None
-        if _protected_url is not None:
-            _allowed, _reason = push_to_protected_allowed(workspace_id, _protected_url)
-            if not _allowed:
-                return _fail(
-                    _reason,
-                    {"error": "protected_repo_push_blocked", "command": final_cmd},
-                )
+        # Guardrail: a workspace may ONLY push to its OWN designated repository
+        # (its repo_url, or a repo Raven created via `gh repo create`). There is
+        # no hardcoded allow/deny list; any push to a different repo (e.g.
+        # SharedLLM from a throwaway test workspace) is refused. We gate `git
+        # push` only — configuring a remote is allowed, and the push itself is
+        # what must be protected (this also avoids order-dependence on
+        # create-then-push vs push-then-create).
+        if base_command == "git" and len(parsed) > 1 and parsed[1] == "push":
+            from .git import push_allowed
+            _target_url = None
+            _url_m = re.search(r"git\s+push\b.*?\b(https?://\S+|\S+@\S+:\S+|\S+\.git)\b", final_cmd)
+            if _url_m:
+                _target_url = _url_m.group(1)
+            if _target_url is None:
+                try:
+                    _rc, _out, _err = await _run_command_async(
+                        ["git", "remote", "get-url", "origin"], cwd=abs_cwd, timeout=10.0
+                    )
+                    if _rc == 0 and _out.strip():
+                        _target_url = _out.strip()
+                except Exception:
+                    _target_url = None
+            if _target_url is not None:
+                _ws_repo_url = (ws_details or {}).get("repo_url")
+                _allowed, _reason = push_allowed(_ws_repo_url, _target_url)
+                if not _allowed:
+                    return _fail(
+                        _reason,
+                        {"error": "repo_push_scope_blocked", "command": final_cmd},
+                    )
 
         log.info(f"Executing shell command: {final_cmd} in {abs_cwd}")
         # Enforce a max timeout of 300s

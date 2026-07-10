@@ -41,7 +41,9 @@ WORKSPACE_RUNTIME_URL = os.getenv("WORKSPACE_RUNTIME_URL", f"http://{SERVER_IP}:
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
 GH_TOKEN = os.getenv("GH_TOKEN", "")
 GH_OWNER = os.getenv("GH_OWNER", "JMiahMan1")
-REPO_URL = os.getenv("E2E_REPO_URL", "https://github.com/JMiahMan1/SharedLLM.git")
+# Default to NO repo binding; workspaces must opt in via E2E_REPO_URL.
+# Never fall back to the production SharedLLM repo as a test target.
+REPO_URL = os.getenv("E2E_REPO_URL") or None
 
 
 def _live_enabled() -> bool:

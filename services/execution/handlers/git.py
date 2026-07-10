@@ -41,6 +41,71 @@ os.system(f"git config --global --add safe.directory '{WORKSPACE_ROOT}/*'")
 log.info(f"Marked {WORKSPACE_ROOT} and subdirectories as safe.directory")
 
 
+# ---------------------------------------------------------------------------
+# Repo-write guardrail: a workspace may ONLY push to its OWN designated repository.
+# There is intentionally NO hardcoded allow/deny list of specific repos — the
+# policy is purely per-workspace. SharedLLM stays safe simply because no ordinary
+# workspace is bound to it: a workspace may only push to the repo it is bound to.
+# ---------------------------------------------------------------------------
+def normalize_repo_url(url: str | None) -> str:
+    """Canonicalize a repo URL for comparison (drops scheme, auth, .git, slashes)."""
+    if not url:
+        return ""
+    u = str(url).strip().lower()
+    if u.startswith("git@"):
+        u = u[4:]
+    u = u.replace("git+", "")
+    u = re.sub(r"\.git$", "", u)
+    u = re.sub(r"^https?://", "", u)
+    u = re.sub(r"^[^/@]+@", "", u)  # drop embedded credentials (user@host)
+    u = u.replace(":", "/")  # ssh colon -> path slash
+    return u.strip("/")
+
+
+def push_allowed(workspace_repo_url: str | None, target_url: str | None) -> tuple[bool, str]:
+    """Return (allowed, reason).
+
+    Allowed iff the target remote URL matches the workspace's designated repo.
+    If the workspace has no designated repo, pushes are refused — a workspace
+    must be bound to a repo (via its repo_url, or a `gh repo create`) before it
+    may push.
+    """
+    target = normalize_repo_url(target_url)
+    if not target:
+        return False, "Cannot determine the push target repository; refusing to push."
+    allowed = normalize_repo_url(workspace_repo_url)
+    if allowed and target == allowed:
+        return True, ""
+    return False, (
+        f"Refusing to push to '{target_url}': this workspace is only permitted to "
+        f"push to its designated repository"
+        + (f" ({workspace_repo_url})." if workspace_repo_url else " (none is set).")
+        + " Create or bind the intended repository first."
+    )
+
+
+async def _get_workspace_repo_url(workspace_id: str | None) -> str | None:
+    """Resolve the workspace's designated repo_url from the workspace_runtime service."""
+    import aiohttp
+
+    if not workspace_id:
+        return None
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+            async with client.post(
+                f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
+                json={"workspace_id": workspace_id, "user_context": {"user": "system", "is_admin": True}},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("status") == "SUCCESS":
+                        return (data.get("workspace") or {}).get("repo_url")
+    except Exception as e:
+        log.warning(f"Failed to resolve workspace repo_url for {workspace_id}: {e}")
+    return None
+
+
 async def _resolve_workspace_path(
     workspace_id: str | None = None,
     user_context: dict | None = None,
@@ -364,22 +429,25 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         if action == "push" and not is_admin:
             return GitExecutionResult(status="FAILURE", message="Push requires admin privileges.", service="git", detail={"error": "insufficient_permissions"})
 
-        # Resolve remote URL for token injection
-        remote_url = await _get_remote_url("origin", cwd=workspace_path)
-
-        # Guardrail: block pushes to protected repositories (e.g. SharedLLM) unless
-        # this is the designated SharedLLM development workspace. This is the
-        # server-side backstop so a flaky model can never push to SharedLLM from a
-        # test/agentic workspace (covers both the git API and raw shell pushes).
-        from handlers.repo_guard import push_to_protected_allowed
-        _allowed, _reason = push_to_protected_allowed(workspace_id, remote_url)
-        if not _allowed:
-            return GitExecutionResult(
-                status="FAILURE",
-                message=_reason,
-                service="git",
-                detail={"error": "protected_repo_push_blocked"},
-            )
+        if action == "push":
+            # Guardrail: a workspace may ONLY push to its OWN designated repository.
+            # No hardcoded repo lists — the policy is purely per-workspace. SharedLLM
+            # stays safe because no ordinary workspace is bound to it. This is the
+            # server-side backstop so a flaky model can never push to the wrong repo
+            # (covers both the git API and raw shell pushes via workspace.py).
+            ws_repo_url = await _get_workspace_repo_url(workspace_id)
+            remote_url = await _get_remote_url("origin", cwd=workspace_path)
+            _allowed, _reason = push_allowed(ws_repo_url, remote_url)
+            if not _allowed:
+                return GitExecutionResult(
+                    status="FAILURE",
+                    message=_reason,
+                    service="git",
+                    detail={"error": "wrong_repo_push_blocked"},
+                )
+        else:
+            # pull is read-only; resolve remote URL for token injection only
+            remote_url = await _get_remote_url("origin", cwd=workspace_path)
 
         # Determine the appropriate token for this host
         token = None
