@@ -5,65 +5,57 @@ Redis-backed cache for Home Assistant entity states.
 RAG stores static entity metadata (area, device_class, capabilities).
 Redis caches live state with a short TTL.
 entity_id is the stable join key between the two.
+
+The Redis connection and TTL handling are now shared via
+``services.gateway.cache`` (see ``redis_cache_*`` / ``HA_STATE_CACHE_TTL``).
 """
 import logging
 
 import aiohttp
-import redis
+
+from services.gateway.cache import (
+    HA_STATE_CACHE_TTL,
+    get_redis,
+    redis_cache_get,
+    redis_cache_set,
+    redis_cache_set_many,
+)
 
 log = logging.getLogger("gateway.ha_state_cache")
 
-_redis: redis.Redis | None = None
-_TTL = 60  # Cache states for 60 seconds
+# Re-exported so existing callers (background_worker, main) keep working.
+__all__ = [
+    "get_redis",
+    "get_cached_state",
+    "set_cached_state",
+    "cache_all_states",
+    "fetch_live_states",
+    "get_live_state",
+]
 
-def get_redis() -> redis.Redis:
-    global _redis
-    if _redis is None:
-        from services.gateway.config import REDIS_URL
-        _redis = redis.from_url(REDIS_URL, decode_responses=True)
-    return _redis
 
 def _key(entity_id: str) -> str:
     return f"ha:state:{entity_id}"
 
+
 def get_cached_state(entity_id: str) -> str | None:
     """Return cached state or None if missing/expired."""
-    try:
-        r = get_redis()
-        val = r.get(_key(entity_id))  # type: ignore[assignment]
-        if val is None:
-            return None
-        return str(val)
-    except Exception as e:
-        log.error(f"Redis cache read error: {e}")
-        return None
+    return redis_cache_get(_key(entity_id))
+
 
 def set_cached_state(entity_id: str, state: str) -> None:
     """Cache entity state with TTL."""
-    try:
-        r = get_redis()
-        r.setex(_key(entity_id), _TTL, state)
-    except Exception as e:
-        log.error(f"Redis cache write error: {e}")
+    redis_cache_set(_key(entity_id), state, HA_STATE_CACHE_TTL)
+
 
 def cache_all_states(entities: list[dict]) -> int:
     """Bulk cache all entity states. Returns count cached."""
-    try:
-        r = get_redis()
-        pipe = r.pipeline()
-        count = 0
-        for e in entities:
-            eid = e.get("entity_id")
-            state = e.get("state")
-            if eid and state:
-                pipe.setex(_key(eid), _TTL, state)
-                count += 1
-        if count:
-            pipe.execute()
-        return count
-    except Exception as e:
-        log.error(f"Redis bulk cache error: {e}")
-        return 0
+    items = {
+        _key(e["entity_id"]): e["state"]
+        for e in entities
+        if e.get("entity_id") and e.get("state")
+    }
+    return redis_cache_set_many(items, HA_STATE_CACHE_TTL)
 
 async def fetch_live_states(execution_url: str, ha_url: str, ha_token: str, internal_secret: str) -> list[dict]:
     """Fetch all states from HA via execution service and cache them."""

@@ -98,6 +98,10 @@ JOB_STATUS_POLL_INTERVAL = _safe_float("JOB_STATUS_POLL_INTERVAL", 5.0)
 SETTINGS_CACHE_TTL = _safe_float("SETTINGS_CACHE_TTL", 30.0)
 IDENTITY_CACHE_TTL = _safe_float("IDENTITY_CACHE_TTL", 30.0)
 
+# --- Phase 3: Redis-backed entity/device cache TTLs (env-configurable) ---
+HA_STATE_CACHE_TTL = _safe_int("HA_STATE_CACHE_TTL", 60)
+MEDIA_DEVICE_CACHE_TTL = _safe_int("MEDIA_DEVICE_CACHE_TTL", 604800)  # 7 days
+
 # --- Misc ---
 FAST_PATH_THRESHOLD = _safe_float("FAST_PATH_THRESHOLD", 0.85)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
