@@ -2,6 +2,7 @@
 import logging
 import urllib.parse
 from typing import Any
+from services.common.http import get_client
 
 log = logging.getLogger("execution.websearch")
 
@@ -13,10 +14,11 @@ async def web_search(query: str, num_results: int = 5) -> list[dict[str, Any]]:
         searxng_url = None
         try:
             from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+            async with get_client() as client:
                 resp = await client.get(
                     f"{IDENTITY_SVC_URL}/api/settings",
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
                 )
                 if resp.status == 200:
                     for item in await resp.json():
@@ -38,8 +40,8 @@ async def web_search(query: str, num_results: int = 5) -> list[dict[str, Any]]:
             "categories": "general",
         }
         url = f"{searxng_url}/search?{urllib.parse.urlencode(params)}"
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
-            resp = await client.get(url)
+        async with get_client() as client:
+            resp = await client.get(url, timeout=aiohttp.ClientTimeout(total=10.0))
             if resp.status == 200:
                 data = await resp.json()
                 results = []

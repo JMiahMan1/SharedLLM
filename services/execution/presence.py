@@ -19,6 +19,7 @@ import logging
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+from services.common.http import get_client
 
 if TYPE_CHECKING:
     import paho.mqtt.client  # pyright: ignore[reportMissingImports]
@@ -235,10 +236,11 @@ class PresenceTracker:
             import aiohttp
 
             import services.config as config
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
+            async with get_client() as client:
                 resp = await client.get(
                     f"{config.IDENTITY_SVC_URL}/api/users/{user_id}/location",
-                    headers={"X-Internal-Secret": config.INTERNAL_SECRET}
+                    headers={"X-Internal-Secret": config.INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=3.0),
                 )
                 if resp.status == 200:
                     return await resp.json()
@@ -297,10 +299,11 @@ class PresenceTracker:
             import aiohttp
 
             import services.config as config
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
+            async with get_client() as client:
                 resp = await client.get(
                     f"{config.IDENTITY_SVC_URL}/api/users/location/all",
-                    headers={"X-Internal-Secret": config.INTERNAL_SECRET}
+                    headers={"X-Internal-Secret": config.INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=3.0),
                 )
                 if resp.status == 200:
                     gps_locations = await resp.json()
