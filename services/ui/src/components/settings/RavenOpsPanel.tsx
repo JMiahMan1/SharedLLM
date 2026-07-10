@@ -403,7 +403,10 @@ export default function RavenOpsPanel() {
                         <span className="text-sm font-bold text-white truncate">Target: {mission.target_container || 'System'}</span>
                      </div>
                      <p className="text-xs text-slate-400 line-clamp-2">{mission.error_summary}</p>
-                     <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-widest">Detected: {new Date(mission.created_at).toLocaleString()}</p>
+                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-widest">
+                        Queued: {new Date(mission.queued_at ?? mission.created_at).toLocaleString()}
+                        {mission.started_at && <> · Started: {new Date(mission.started_at).toLocaleString()}</>}
+                      </p>
                    </div>
                    
                    <div className="flex-shrink-0">
@@ -458,10 +461,17 @@ export default function RavenOpsPanel() {
                      <div className="w-full bg-black/40 rounded-full h-1.5 mb-1 overflow-hidden">
                        <div className="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${mission.progress || 0}%` }}></div>
                      </div>
-                     <p className="text-[10px] text-slate-500 uppercase tracking-widest flex justify-between">
-                       <span>Progress: {mission.progress || 0}%</span>
-                       <span>Dispatched: {new Date(mission.created_at).toLocaleString()}</span>
-                     </p>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-widest flex justify-between">
+                        <span>Progress: {mission.progress || 0}%</span>
+                        <span>
+                          {mission.started_at
+                            ? `Started: ${new Date(mission.started_at).toLocaleString()}`
+                            : `Queued: ${new Date(mission.queued_at ?? mission.created_at).toLocaleString()}`}
+                          {mission.duration != null
+                            ? ` · Ran ${Math.floor(mission.duration / 60)}m ${mission.duration % 60}s`
+                            : ''}
+                        </span>
+                      </p>
                    </div>
                    <div className="flex-shrink-0 flex items-center gap-2">
                       <button

@@ -8,7 +8,9 @@ import asyncio
 import json
 import logging
 import os
+import time
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 import aiohttp
@@ -340,18 +342,22 @@ class RavenWorker:
 
         try:
             heartbeat_task = asyncio.create_task(self._job_heartbeat(job_id))
+            started_ts: float | None = None
+            started_iso: str | None = None
 
             # Acquire appropriate lock based on tier, then run orchestration
             if is_autonomous:
                 log.info(f"[Worker] Acquiring TIER3 (Raven) lock for job {job_id}")
                 async with TIER3_LOCK:
+                    started_ts = time.time()
+                    started_iso = datetime.now(UTC).isoformat()
                     mission_id = payload.get("_mission_id")
                     if mission_id:
                         try:
                             async with _shared_http_client() as client:
                                 await client.patch(
                                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                                    json={"status": "executing"},
+                                    json={"status": "executing", "started_at": started_iso},
                                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                                 )
                         except Exception as patch_e:
@@ -407,13 +413,15 @@ class RavenWorker:
             else:
                 log.info(f"[Worker] Acquiring TIER2 (Librarian) semaphore for job {job_id}")
                 async with TIER2_SEMAPHORE:
+                    started_ts = time.time()
+                    started_iso = datetime.now(UTC).isoformat()
                     mission_id = payload.get("_mission_id")
                     if mission_id:
                         try:
                             async with _shared_http_client() as client:
                                 await client.patch(
                                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                                    json={"status": "executing"},
+                                    json={"status": "executing", "started_at": started_iso},
                                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                                 )
                         except Exception as patch_e:
@@ -474,9 +482,11 @@ class RavenWorker:
                             result_str = "The mission did not produce a meaningful result. The LLM returned an empty or invalid response."
                         log.warning(f"[Worker] Mission {mission_id} marked failed — no meaningful work accomplished")
                     async with _shared_http_client() as client:
+                        completed_iso = datetime.now(UTC).isoformat()
+                        duration = int(time.time() - started_ts) if started_ts else None
                         await client.patch(
                             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                            json={"status": status, "result": result_str},
+                            json={"status": status, "result": result_str, "completed_at": completed_iso, "duration": duration},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
                 except Exception as patch_e:
@@ -492,9 +502,11 @@ class RavenWorker:
             if mission_id:
                 try:
                     async with _shared_http_client() as client:
+                        completed_iso = datetime.now(UTC).isoformat()
+                        duration = int(time.time() - started_ts) if started_ts else None
                         await client.patch(
                             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                            json={"status": "failed", "result": str(e)},
+                            json={"status": "failed", "result": str(e), "completed_at": completed_iso, "duration": duration},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
                 except Exception as patch_e:
