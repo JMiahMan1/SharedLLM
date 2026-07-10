@@ -17,7 +17,7 @@ async def resolve_hostname_with_fallback(hostname: str, port: int = 0, timeout: 
     Tries each resolved IP in order with a TCP connect test.
     """
     try:
-        results = await asyncio.get_event_loop().run_in_executor(
+        results = await asyncio.get_running_loop().run_in_executor(
             None, socket.getaddrinfo, hostname, port, socket.AF_INET, socket.SOCK_STREAM
         )
         ips = list(dict.fromkeys(str(r[4][0]) for r in results))  # deduplicate, preserve order
