@@ -144,14 +144,15 @@ class OllamaProvider(BaseLLMProvider):
                                 break
                         except json.JSONDecodeError:
                             continue
-                    # Only fall back to thinking if content is completely empty
-                    if not content.strip():
+                    # Only fall back to thinking when the caller explicitly requested it;
+                    # otherwise a thinking-only response (e.g. a degenerate internal
+                    # "draft" loop) must NOT be surfaced as the final answer.
+                    if not content.strip() and show_thinking:
                         for line in lines:
                             try:
                                 data = json.loads(line)
                                 msg = data.get("message", {})
-                                thinking = msg.get("thinking") or ""
-                                content += thinking
+                                content += msg.get("thinking") or ""
                             except json.JSONDecodeError:
                                 continue
                     # Strip thinking blocks unless explicitly requested
@@ -165,8 +166,9 @@ class OllamaProvider(BaseLLMProvider):
                         return f" [PROVIDER ERROR: {data['error']}] "
                     msg = data.get("message", {})
                     content = msg.get("content") or ""
-                    # Only fall back to thinking if content is completely empty
-                    if not content.strip():
+                    # Only fall back to thinking when the caller explicitly requested it;
+                    # otherwise a thinking-only response must not be surfaced as the answer.
+                    if not content.strip() and show_thinking:
                         content = msg.get("thinking") or ""
                     # Strip thinking blocks unless explicitly requested
                     if not show_thinking:
