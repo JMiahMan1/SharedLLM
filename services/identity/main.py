@@ -19,9 +19,10 @@ from pydantic import BaseModel
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from services.common.http import get_client, get_client_insecure
 from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
 from services.identity.crypto import decrypt, digest_secret, encrypt
-from services.identity.models import DEFAULT_GLOBAL_SETTINGS, APIKey, DeviceAssignment, DnsRecord, GlobalSetting, User, UserWidget
+from services.identity.models import DEFAULT_GLOBAL_SETTINGS, APIKey, DeviceAssignment, DnsRecord, GlobalSetting, RavenMission, User, UserWidget
 from services.identity.schemas import (
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
@@ -32,6 +33,9 @@ from services.identity.schemas import (
     ImportResponse,
     LoginRequest,
     LoginResponse,
+    RavenMissionCreate,
+    RavenMissionRead,
+    RavenMissionUpdate,
     ResolvedCredentials,
     ResolveRequest,
     UserCreate,
@@ -860,7 +864,7 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
     log.info(f"[test_connection] Testing {service} with config: { {k: '***' if 'token' in k.lower() or 'pass' in k.lower() else v for k, v in config.items()} }")
 
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0), connector=aiohttp.TCPConnector(ssl=False)) as client:
+        async with get_client_insecure() as client:
             if service == "Home Assistant":
                 url = config.get("ha_url")
                 token = config.get("ha_token")
@@ -869,7 +873,8 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
 
                 resp = await client.get(
                     f"{url.rstrip('/')}/api/config",
-                    headers={"Authorization": f"Bearer {token}"}
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
                 )
                 log.info(f"[test_connection] HA response: {resp.status}")
                 if resp.status == 200:
@@ -1110,10 +1115,11 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
     if ha_url and ha_token_enc:
         ha_token = decrypt(ha_token_enc)
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            async with get_client() as client:
                 resp = await client.get(
                     f"{ha_url.rstrip('/')}/api/states",
-                    headers={"Authorization": f"Bearer {ha_token}"}
+                    headers={"Authorization": f"Bearer {ha_token}"},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
                 )
                 if resp.status == 200:
                     for state in await resp.json():
@@ -1131,11 +1137,12 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
         nc_pass = decrypt(nc_pass_enc)
         assert nc_pass is not None
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            async with get_client() as client:
                 resp = await client.get(
                     f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users?format=json",
                     headers={"OCS-APIRequest": "true"},
-                    auth=aiohttp.BasicAuth(nc_user, nc_pass)
+                    auth=aiohttp.BasicAuth(nc_user, nc_pass),
+                    timeout=aiohttp.ClientTimeout(total=10.0),
                 )
                 if resp.status == 200:
                     data = await resp.json()
@@ -1620,13 +1627,6 @@ def update_widget_settings(
     return {"status": "SUCCESS"}
 
 # ─── Raven Missions (Autonomous Ops & User Tasks) ───────────────────────────────
-try:
-    from .models import RavenMission
-    from .schemas import RavenMissionCreate, RavenMissionRead, RavenMissionUpdate
-except ImportError:
-    # type: ignore
-    from models import RavenMission
-    from schemas import RavenMissionCreate, RavenMissionRead, RavenMissionUpdate
 
 def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:
     try:
@@ -1760,10 +1760,11 @@ async def import_nextcloud_users(x_internal_secret: str | None = Header(default=
         # Fetch HA person entities
         if ha_url and ha_token:
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0), connector=aiohttp.TCPConnector(ssl=False)) as client:
+                async with get_client_insecure() as client:
                     resp = await client.get(
                         f"{ha_url.rstrip('/')}/api/states",
-                        headers={"Authorization": f"Bearer {ha_token}"}
+                        headers={"Authorization": f"Bearer {ha_token}"},
+                        timeout=aiohttp.ClientTimeout(total=10.0),
                     )
                     if resp.status == 200:
                         for state in await resp.json():
@@ -1781,7 +1782,7 @@ async def import_nextcloud_users(x_internal_secret: str | None = Header(default=
 
         # Fetch Nextcloud users with detailed info
         try:
-            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as client:
+            async with get_client_insecure() as client:
                 resp = await client.get(
                     f"{nc_url.rstrip('/')}/ocs/v1.php/cloud/users",
                     auth=aiohttp.BasicAuth(nc_admin_user, nc_admin_pass),

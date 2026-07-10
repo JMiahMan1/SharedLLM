@@ -35,15 +35,9 @@ from services.config import (
 )
 from services.shared.info_endpoint import info_router
 
-try:
-    from .crypto import decrypt, encrypt
-    from .database import engine, init_db
-    from .models import Workspace
-except (ImportError, ValueError):
-    from crypto import decrypt, encrypt
-    from database import engine, init_db
-    from models import Workspace
-
+from .crypto import decrypt, encrypt
+from .database import engine, init_db
+from .models import Workspace
 
 log = logging.getLogger("workspace_runtime")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
