@@ -4,25 +4,22 @@ Redis-backed cache for last-used media devices.
 
 Tracks which media player was last used per user, so commands like "pause"
 or "play music" can target the correct device without explicit naming.
+
+The Redis connection and TTL handling are now shared via
+``services.gateway.cache`` (see ``redis_cache_*`` / ``MEDIA_DEVICE_CACHE_TTL``).
 """
 import json
 import logging
 from datetime import UTC, datetime
 
-import redis
+from services.gateway.cache import (
+    MEDIA_DEVICE_CACHE_TTL,
+    redis_cache_delete,
+    redis_cache_get,
+    redis_cache_set,
+)
 
 log = logging.getLogger("gateway.media_device_cache")
-
-_redis: redis.Redis | None = None
-_TTL = 86400 * 7  # 7 days
-
-
-def get_redis() -> redis.Redis:
-    global _redis
-    if _redis is None:
-        from services.gateway.config import REDIS_URL
-        _redis = redis.from_url(REDIS_URL, decode_responses=True)
-    return _redis
 
 
 def _user_key(user_id: str) -> str:
@@ -31,37 +28,28 @@ def _user_key(user_id: str) -> str:
 
 def get_last_used_device(user_id: str) -> dict | None:
     """Return cached last-used device info or None."""
-    try:
-        r = get_redis()
-        raw: str | None = r.get(_user_key(user_id))  # type: ignore[assignment]
-        if raw:
+    raw = redis_cache_get(_user_key(user_id))
+    if raw:
+        try:
             return json.loads(raw)
-    except Exception as e:
-        log.error(f"Media device cache read error: {e}")
+        except Exception:
+            return None
     return None
 
 
 def set_last_used_device(user_id: str, entity_id: str, friendly_name: str = "", state: str = "") -> None:
     """Cache the last-used media device with timestamp."""
-    try:
-        r = get_redis()
-        data = {
-            "entity_id": entity_id,
-            "friendly_name": friendly_name,
-            "state": state,
-            "updated_at": datetime.now(UTC).isoformat(),
-        }
-        r.setex(_user_key(user_id), _TTL, json.dumps(data))
-        log.info(f"[media_cache] Cached last-used device for {user_id}: {entity_id}")
-    except Exception as e:
-        log.error(f"Media device cache write error: {e}")
+    data = {
+        "entity_id": entity_id,
+        "friendly_name": friendly_name,
+        "state": state,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+    redis_cache_set(_user_key(user_id), json.dumps(data), MEDIA_DEVICE_CACHE_TTL)
+    log.info(f"[media_cache] Cached last-used device for {user_id}: {entity_id}")
 
 
 def clear_last_used_device(user_id: str) -> None:
     """Remove cached last-used device."""
-    try:
-        r = get_redis()
-        r.delete(_user_key(user_id))
-        log.info(f"[media_cache] Cleared last-used device for {user_id}")
-    except Exception as e:
-        log.error(f"Media device cache delete error: {e}")
+    redis_cache_delete(_user_key(user_id))
+    log.info(f"[media_cache] Cleared last-used device for {user_id}")

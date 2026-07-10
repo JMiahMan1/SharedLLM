@@ -2618,16 +2618,6 @@ async def chat_handler(request: Request, background_tasks=None):
             if tool["function"]["name"] not in existing:
                 body["tools"].append(tool)
 
-    try:
-        selected_model = (explicit_model if explicit_model and explicit_model != "auto" else None) or await get_assistant_model()
-        log.info(f"[ChatHandler] Model selection: explicit_model='{explicit_model}' selected_model='{selected_model}'")
-    except RuntimeError as e:
-        log.error(f"[ChatHandler] Model configuration error: {e}")
-        err_msg = str(e) + " Please configure models in the UI settings."
-        if is_openai:
-            return _make_openai_response(err_msg, "unknown", "model_config_error")
-        return _make_ollama_response(err_msg, "unknown", "model_config_error")
-
     # 2. Extract Query
     query = body.get("query")
     if not query and "messages" in body and isinstance(body["messages"], list) and len(body["messages"]) > 0:
@@ -2637,20 +2627,21 @@ async def chat_handler(request: Request, background_tasks=None):
     if not query:
         return JSONResponse({"status": "ERROR", "message": "No query provided."}, status_code=400)
 
-    # Dynamic Model Routing: Use specialized coder model for engineering tasks
-    if not explicit_model or explicit_model == "auto":
-        coding_keywords = ["code", "script", "python", "bug", "fix", "repair", "raven", "audit", "develop", "refactor"]
-        if any(k in (query or "").lower() for k in coding_keywords):
-            try:
-                override_model = await get_coding_model()
-                log.info(f"[ChatHandler] Coding task detected, overriding model from '{selected_model}' to '{override_model}'")
-                selected_model = override_model
-            except RuntimeError as e:
-                log.error(f"[ChatHandler] Coding model configuration error: {e}")
-                err_msg = str(e) + " Please configure models in the UI settings."
-                if is_openai:
-                    return JSONResponse(_make_openai_error(err_msg, "unknown"), status_code=503)
-                return JSONResponse(_make_ollama_error(err_msg, "unknown"), status_code=503)
+    # Model selection: an explicit model wins. Otherwise route by query semantics
+    # through the canonical selector (code/autonomous -> coding/35B gatekeeper,
+    # librarian/RAG -> librarian, everything else -> assistant).
+    try:
+        if explicit_model and explicit_model != "auto":
+            selected_model = explicit_model
+        else:
+            selected_model = await select_model_for_query(query)
+        log.info(f"[ChatHandler] Model selection: explicit_model='{explicit_model}' selected_model='{selected_model}'")
+    except RuntimeError as e:
+        log.error(f"[ChatHandler] Model configuration error: {e}")
+        err_msg = str(e) + " Please configure models in the UI settings."
+        if is_openai:
+            return _make_openai_response(err_msg, "unknown", "model_config_error")
+        return _make_ollama_response(err_msg, "unknown", "model_config_error")
 
     try:
         creds_data = await resolve_identity(body)
@@ -2906,7 +2897,6 @@ async def chat_handler(request: Request, background_tasks=None):
 
     # 8. Final Message Construction & Shadow Dispatch
     if is_autonomous:
-        # Use coding model for autonomous tasks
         coding_model = await get_coding_model()
         selected_model = coding_model
         log.info("[ShadowExecution] Routing chat request to Raven mission queue...")
