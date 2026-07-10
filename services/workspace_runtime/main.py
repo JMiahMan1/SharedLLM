@@ -616,9 +616,17 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
 
     # local_path is the only user-facing path field (relative for users, absolute for system)
     effective_path = str(match.get("local_path", ""))
-    resolved_path = resolve_safe_path(get_workspace_root(), effective_path)
+    resolved_path = resolve_safe_path(get_workspace_root(), effective_path, must_exist=False)
+    # Materialize the workspace directory. Workspaces are sandboxed directories; if the
+    # backing directory is missing (e.g. a workspace created via the API without an
+    # explicit mkdir), create it so file/shell operations can proceed instead of failing
+    # with a misleading "Path not found" that pushes the agent into the Default Workspace.
+    try:
+        os.makedirs(str(resolved_path), exist_ok=True)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to create workspace directory {resolved_path}: {exc}")
     if not resolved_path.is_dir():
-         raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {effective_path}")
+        raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {effective_path}")
     workspace: dict[str, Any] = dict(match)
     workspace["resolved_path"] = str(resolved_path)
     workspace["scope"] = str(workspace.get("scope") or "user")
@@ -1524,6 +1532,12 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
         session.add(ws)
         session.commit()
         session.refresh(ws)
+        # Materialize the workspace directory on disk so the agent can use it
+        # immediately (file/shell operations fail with "Path not found" otherwise).
+        try:
+            os.makedirs(str(resolve_safe_path(get_workspace_root(), ws.local_path, must_exist=False)), exist_ok=True)
+        except OSError as exc:
+            log.warning(f"Could not create workspace directory for {ws.id}: {exc}")
         return {"status": "SUCCESS", "workspace": _workspace_to_dict(ws)}
 
 
