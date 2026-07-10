@@ -1,8 +1,12 @@
 """End-to-end live test: a well-formed prompt is sent to the /api/chat endpoint
-and Raven does EVERYTHING autonomously — it creates its own workspace, builds a
-3D SPACE SHOOTER, creates a GitHub repo (via `gh`), adds a Linux GitHub Actions
-build pipeline, and pushes it. The test creates nothing; it only submits the
-prompt and then validates the resulting, publicly-observable repository.
+and the gateway routes it to Raven (as an autonomous mission). Raven does
+EVERYTHING autonomously — it creates its own workspace, builds a 3D SPACE
+SHOOTER, creates a GitHub repo (via `gh`), adds a Linux GitHub Actions build
+pipeline, and pushes it. The test creates nothing; it only submits the prompt
+(via /api/chat) and then validates the resulting, publicly-observable repo.
+
+The chat request shows up in the Raven queue (/api/raven/missions); the test
+polls that endpoint for completion.
 
 Validates, per language (python, javascript, typescript, go, rust):
   - the repo `raven-3d-shooter-<lang>` exists on GitHub
@@ -33,14 +37,17 @@ POLL_INTERVAL = float(os.getenv("E2E_POLL_INTERVAL", "20"))
 
 
 def _live_enabled() -> bool:
-    return bool(os.getenv("LIVE_E2E")) and bool(GH_TOKEN) and bool(RAVEN_API_KEY)
+    # RAVEN_API_KEY is optional: when unset the test sends no auth and the
+    # gateway resolves the request to the admin identity (which carries the
+    # GitHub token), as confirmed by a live probe.
+    return bool(os.getenv("LIVE_E2E")) and bool(GH_TOKEN)
 
 
 pytestmark = [
     pytest.mark.local_only,
     pytest.mark.skipif(
         not _live_enabled(),
-        reason="Live Raven 3D-game e2e requires LIVE_E2E=1, GH_TOKEN, and RAVEN_API_KEY",
+        reason="Live Raven 3D-game e2e requires LIVE_E2E=1 and GH_TOKEN",
     ),
 ]
 
@@ -124,13 +131,17 @@ def _chat_auth_headers() -> dict:
     return {"X-Internal-Secret": INTERNAL_SECRET}
 
 
-def _chat_submit(query: str, system: str | None = None) -> str:
-    """Submit a prompt to /api/chat as an async job; return the job_id."""
+def _chat_submit(query: str, system: str | None = None) -> int:
+    """Submit a prompt to the /api/chat endpoint.
+
+    The gateway recognizes the engineering task as a Raven mission and routes it
+    to the Raven mission queue, returning a ``mission_id``. The test creates no
+    workspace/files — Raven does all the work.
+    """
     body = {
-        "query": query,
-        "async_job": True,
+        "model": os.getenv("CODING_MODEL", "auto"),
+        "messages": [{"role": "user", "content": query}],
         "stream": False,
-        "model": "auto",
     }
     if system:
         body["system"] = system
@@ -140,21 +151,28 @@ def _chat_submit(query: str, system: str | None = None) -> str:
             f"chat submit failed ({resp.status_code}): {resp.text[:400]}"
         )
         data = resp.json()
-    job_id = data.get("job_id")
-    assert job_id, f"chat did not return a job_id: {data}"
-    return job_id
+        mission_id = data.get("mission_id")
+        # OpenAI-format responses wrap the payload as a chat message.
+        if mission_id is None and isinstance(data.get("choices"), list):
+            content = data["choices"][0]["message"]["content"]
+            try:
+                mission_id = int(content.split('"mission_id":')[1].split("}")[0].split(",")[0].strip())
+            except Exception:
+                mission_id = None
+        assert mission_id is not None, f"chat response did not return a mission_id: {data}"
+        return int(mission_id)
 
 
-def _chat_wait(job_id: str) -> dict:
-    """Poll /api/chat/job/{id} until COMPLETED/FAILED."""
+def _chat_wait(mission_id: int) -> dict:
+    """Poll /api/raven/missions/{id} until completed/failed/dismissed."""
     with httpx.Client(headers=_chat_auth_headers(), timeout=60.0) as c:
         deadline = time.time() + CHAT_TIMEOUT
         while time.time() < deadline:
-            resp = c.get(f"{GATEWAY_URL}/api/chat/job/{job_id}")
+            resp = c.get(f"{GATEWAY_URL}/api/raven/missions/{mission_id}")
             if resp.status_code == 200:
                 data = resp.json()
-                status = str(data.get("status", "")).upper()
-                if status in ("COMPLETED", "FAILED"):
+                status = data.get("status")
+                if status in ("completed", "failed", "dismissed"):
                     return data
             time.sleep(POLL_INTERVAL)
     return {"status": "TIMEOUT"}
@@ -207,11 +225,11 @@ def run_one(lang: str, human: str, stack: str, build_cmd: str, selftest_cmd: str
     out: dict = {"lang": lang, "human": human, "repo": repo, "repo_url": None,
                  "skipped": None, "errors": []}
 
-    job_id = _chat_submit(mission_prompt(lang, human, stack))
-    result = _chat_wait(job_id)
+    mission_id = _chat_submit(mission_prompt(lang, human, stack))
+    result = _chat_wait(mission_id)
     out["chat_status"] = result.get("status")
-    if result.get("status") != "COMPLETED":
-        out["errors"].append(f"chat job {job_id} ended {result.get('status')}")
+    if result.get("status") != "completed":
+        out["errors"].append(f"raven mission {mission_id} ended {result.get('status')}")
         return out
 
     # 1) Repository was created on GitHub.
