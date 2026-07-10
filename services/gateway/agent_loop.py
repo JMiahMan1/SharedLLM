@@ -554,6 +554,20 @@ def detect_repetitive_failure(recent: list[tuple[str, bool]], window: int = 3) -
     return len(sigs) == 1 and all(not ok for _, ok in last)
 
 
+def detect_repetitive_action(recent: list[tuple[str, bool]], window: int = 8) -> bool:
+    """True when the last ``window`` actions share ONE signature (success OR fail).
+
+    Catches an agent "stuck in a loop" that repeats the same step without making
+    distinct progress — even when every call succeeds (e.g. re-running the same
+    read-only command 20 times). Used to allow long missions while still halting
+    runaway repetition.
+    """
+    if len(recent) < window:
+        return False
+    last = recent[-window:]
+    return len({sig for sig, _ in last}) == 1
+
+
 _VERIFY_COMMAND_HINTS = (
     "test", "lint", "pytest", "ruff", "mypy", "eslint", "prettier",
     "npm test", "npm run", "go test", "cargo test", "tox", "flake8", "tsc",
@@ -1021,7 +1035,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     }
 
 
-    MAX_TOOL_ITERATIONS = 30
+    MAX_TOOL_ITERATIONS = 60  # ceiling; overridable per-deployment via the
+    # raven_max_iterations dynamic LLM setting. The loop also self-terminates on
+    # stagnation (repeated failures) or on a detected action loop, so a higher
+    # ceiling is safe — long missions are allowed as long as they keep making
+    # distinct progress.
     loop_start = asyncio.get_event_loop().time()
     exec_data = None
     ans = ""
@@ -1040,6 +1058,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     _verified_files: set[str] = set()
     _verification_nudge_sent = False
     _stagnation_nudge_sent = False
+    _loop_nudge_sent = False
 
     # --- PLANNING PHASE ---
     try:
@@ -1074,6 +1093,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await r_cp.close()
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to load checkpoint for mission {mission_id}: {e}")
+
+    # Iteration ceiling — long missions allowed, but bounded and guarded by
+    # stagnation/loop detection below. Overridable per-deployment.
+    try:
+        max_iterations = int(str((settings or {}).get("raven_max_iterations", MAX_TOOL_ITERATIONS)).strip())
+    except (ValueError, TypeError):
+        max_iterations = MAX_TOOL_ITERATIONS
+    if max_iterations < 1:
+        max_iterations = MAX_TOOL_ITERATIONS
 
     async def _compress_context() -> tuple[str, str]:
         """Compress action_log into a summary + recent entries to prevent context bloat.
@@ -1184,7 +1212,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         )},
     ]
 
-    for agent_iter in range(start_iteration, MAX_TOOL_ITERATIONS):
+    for agent_iter in range(start_iteration, max_iterations):
         iter_num = agent_iter + 1
         iter_start = asyncio.get_event_loop().time()
 
@@ -1229,8 +1257,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             except Exception as e:
                 log.error(f"[AgentLoop] Error checking mission pause flag: {e}")
 
-        await stream_event("system", f"Agent loop iteration {iter_num}/{MAX_TOOL_ITERATIONS} started.")
-        log.info(f"[AgentLoop] Iteration {iter_num}/{MAX_TOOL_ITERATIONS} | total elapsed {elapsed_total:.0f}s")
+        await stream_event("system", f"Agent loop iteration {iter_num}/{max_iterations} started.")
+        log.info(f"[AgentLoop] Iteration {iter_num}/{max_iterations} | total elapsed {elapsed_total:.0f}s")
 
         heartbeat_stop = asyncio.Event()
 
@@ -1870,6 +1898,25 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 await _clear_checkpoint()
                 break
 
+        # --- LOOP DETECTION (repeated identical action, success OR fail) ---
+        # Allows long missions, but halts a runaway "feel-around" loop where the
+        # same step repeats with no distinct progress (e.g. re-running the same
+        # read-only command). Nudge once; terminate if it continues.
+        if detect_repetitive_action(_recent_actions, window=8):
+            if not _loop_nudge_sent:
+                _loop_nudge_sent = True
+                log.warning("[AgentLoop] Action loop detected: same action repeated 8x. Forcing variation.")
+                action_log.append(
+                    f"ITERATION {iter_num}: The SAME action has repeated 8 times with no variation. "
+                    f"You appear to be stuck in a loop. Change your approach, make distinct progress, "
+                    f"or finish the mission. Do not issue the identical call again."
+                )
+            else:
+                log.error("[AgentLoop] Action loop persists after nudge. Terminating.")
+                ans = "ERROR: Detected an infinite loop (same action repeated). Aborting to avoid runaway."
+                await _clear_checkpoint()
+                break
+
 
     async def _persist_learning(summary: str) -> None:
         try:
@@ -1903,22 +1950,31 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # Trigger if we have successful tool calls OR if the model output is purely JSON/messy
     is_messy = "was was was" in ans or "```json" in ans or (ans.strip().startswith("{") and ans.strip().endswith("}"))
     ans_is_empty = not ans or ans.strip() in ("", "None", "null", "{}", "[]", "}")
+    # Bound the action log so the summary/reflection prompts themselves cannot
+    # exhaust the context window. A long, verbose mission log is the usual cause
+    # of a missing final answer — the model runs out of space and returns nothing,
+    # and feeding the whole log back uncompressed just repeats the failure.
+    _ctx_s, _ctx_r = await _compress_context()
+    bounded_log = (_ctx_s + "\n\n" + _ctx_r).strip() or "\n".join(action_log)
+    if len(bounded_log) > 8000:
+        bounded_log = bounded_log[:8000] + "\n...[truncated]"
+
     if (successful_tool_calls > 0 or is_messy) and (
         extract_action_json(ans) or len(ans.strip()) < 30 or is_messy
     ):
         # If the last response still looks like a tool call or is very short/messy, force a clean summary
         log.info("[AgentLoop] Finalizing with clean summarization phase...")
+
         if ans_is_empty:
             # LLM response was empty — build summary from action log only
-            action_summary = "\n".join(action_log)
             summary_prompt = [
                 {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. State what was accomplished based on the actions taken."},
-                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{action_summary}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished. Output the summary directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
+                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{bounded_log}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished. Output the summary directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
             ]
         else:
             summary_prompt = [
                 {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. Do NOT say the mission failed unless the tool execution itself reported an error."},
-                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nRaw output: {ans}\n\nPlease provide the final clean summary now: Output it directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
+                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{bounded_log}\n\nRaw output: {ans}\n\nPlease provide the final clean summary now: Output it directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
             ]
             try:
                 data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.0, "enable_thinking": False})
@@ -1928,6 +1984,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 from services.gateway.orchestrator import strip_json_from_response
                 ans = strip_json_from_response(ans)
 
+        # Last-resort: if summarization still produced nothing (e.g. context
+        # exhaustion even on the summary call), synthesize a plain-text result
+        # from the action log so the user always receives a final answer.
+        if not ans or ans.strip() in ("", "None", "null", "{}", "[]"):
+            _steps = [ln.split(": ", 1)[-1].split(" ->")[0][:120] for ln in action_log[-10:] if ": " in ln]
+            ans = (
+                f"Mission completed. {successful_tool_calls} tool call(s) executed across "
+                f"{len(action_log)} logged steps.\n\nMost recent actions:\n"
+                + "\n".join(f"- {s}" for s in _steps)
+            )
+            log.warning("[AgentLoop] Used static fallback summary (LLM summary empty).")
+
     # --- POST-MISSION REFLECTION ---
     reflection_summary = ""
     if action_log and successful_tool_calls > 0:
@@ -1935,7 +2003,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             raven_reflection = await load_prompt(get_http_client(), PROMPT_RAVEN_REFLECTION)
             reflection_prompt = [
                 {"role": "system", "content": raven_reflection},
-                {"role": "user", "content": f"Mission: {query}\n\nPlan:\n{generated_plan}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nFinal result: {ans}\n\nProvide your reflection: Output it directly as your response — do not draft, plan, or repeat phrases like 'I will write' or 'I'll write it now'."}
+                {"role": "user", "content": f"Mission: {query}\n\nPlan:\n{generated_plan}\n\nActions taken:\n{bounded_log}\n\nFinal result: {ans}\n\nProvide your reflection: Output it directly as your response — do not draft, plan, or repeat phrases like 'I will write' or 'I'll write it now'."}
             ]
             reflection_data = await execute_inference(provider, selected_model, reflection_prompt, {"temperature": 0.1, "enable_thinking": False})
             reflection_summary = reflection_data.get("message", {}).get("content", "").strip()
