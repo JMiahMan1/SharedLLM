@@ -43,19 +43,34 @@ def _safe_float(key: str, default: float) -> float:
 INTERNAL_SECRET = _required("INTERNAL_SECRET")
 FERNET_KEY = _required("FERNET_KEY")
 
+# --- Network mode: a container detects its network at runtime and selects the
+# correct service-URL set. BRIDGE_* = docker bridge network, HOST_* = host
+# network (execution service). Defaults to "bridge".
+NETWORK_MODE = os.getenv("NETWORK_MODE", "bridge").lower()
+
+def _net_url(name: str, default: str = "") -> str:
+    """Resolve a service URL for the current network mode.
+
+    Prefers ``{NETWORK_MODE}_{name}_SVC_URL`` (the network-aware BRIDGE_*/HOST_*
+    sets defined in .env), then falls back to the legacy ``{name}_SVC_URL``, then
+    to a hardcoded default. This lets a container determine its network and call
+    the correct variable instead of one variable being reused for both networks.
+    """
+    return os.getenv(f"{NETWORK_MODE}_{name}_SVC_URL") or os.getenv(f"{name}_SVC_URL") or default
+
 # --- Identity service endpoint (bootstrap only) ---
-IDENTITY_SVC_URL = _optional("IDENTITY_SVC_URL", "http://identity:8001")
+IDENTITY_SVC_URL = _net_url("IDENTITY", "http://identity:8001")
 
 # --- Runtime config: fetched from Identity service at startup ---
 # These are module-level placeholders; populated by resolve_runtime_config()
 OLLAMA_URL = ""
-EXECUTION_SVC_URL = os.getenv("EXECUTION_SVC_URL")
-RAG_SVC_URL = os.getenv("RAG_SVC_URL")
-STORAGE_SVC_URL = os.getenv("STORAGE_SVC_URL")
-LOGGING_SVC_URL = os.getenv("LOGGING_SVC_URL")
-WORKSPACE_RUNTIME_SVC_URL = os.getenv("WORKSPACE_RUNTIME_SVC_URL")
+EXECUTION_SVC_URL = _net_url("EXECUTION", "http://host.docker.internal:8003")
+RAG_SVC_URL = _net_url("RAG", "http://rag:8004")
+STORAGE_SVC_URL = _net_url("STORAGE", "http://storage:8005")
+LOGGING_SVC_URL = _net_url("LOGGING", "http://logging:8006")
+WORKSPACE_RUNTIME_SVC_URL = _net_url("WORKSPACE_RUNTIME", "http://workspace_runtime:8007")
 CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
-SEARXNG_URL = os.getenv("SEARXNG_URL")
+SEARXNG_URL = os.getenv(f"{NETWORK_MODE}_SEARXNG_URL") or os.getenv("SEARXNG_URL", "")
 HA_URL = os.getenv("HA_URL")
 HA_TOKEN = os.getenv("HA_TOKEN")
 NEXTCLOUD_URL = os.getenv("NEXTCLOUD_URL")
@@ -64,7 +79,7 @@ NEXTCLOUD_PASS = os.getenv("NEXTCLOUD_PASS")
 GIT_URL = os.getenv("GIT_URL")
 GIT_USER = os.getenv("GIT_USER")
 GIT_TOKEN = os.getenv("GIT_TOKEN")
-REDIS_URL = os.getenv("REDIS_URL")
+REDIS_URL = os.getenv(f"{NETWORK_MODE}_REDIS_URL") or os.getenv("REDIS_URL", "redis://redis:6379/0")
 LOG_RETENTION_DAYS = 30
 LOG_MAX_ENTRIES = 10000
 RAVEN_MAX_TOTAL_SECONDS = 1800
@@ -128,7 +143,7 @@ WORKSPACE_RUNTIME_SVC = WORKSPACE_RUNTIME_SVC_URL
 
 async def resolve_runtime_config():
     """Fetch all runtime configuration from Identity service.
-    
+
     The .env file is seed-only; Identity holds the authoritative runtime values.
     Call this at service startup before handling any requests.
     """
@@ -239,7 +254,7 @@ async def resolve_runtime_config():
 
 def _sync_special_vars_to_env():
     """Sync special variables (INTERNAL_SECRET, FERNET_KEY) from database to .env file.
-    
+
     If these values were changed in the UI, update the .env file to match.
     This ensures the values are available for services that read from .env.
     """
