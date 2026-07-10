@@ -551,6 +551,34 @@ def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Pat
         raise HTTPException(status_code=500, detail=f"Failed to resolve path: {relative}")
 
 
+def _strip_workspace_path_prefix(relative_path: str, workspace: dict[str, Any]) -> str:
+    """Normalize a model-supplied relative path.
+
+    Models (especially smaller ones) sometimes copy ``local_path`` /
+    ``resolved_path`` from workspace metadata and use it as a ``relative_path``
+    (e.g. ``users/default/<id>/main.py`` or even just ``users/default/<id>``).
+    Stripping that redundant prefix resolves the file at the correct location
+    instead of producing a doubled 'Path not found' error.
+    """
+    if not relative_path:
+        return relative_path
+    norm = os.path.normpath(str(relative_path)).replace("\\", "/").strip()
+    if norm in (".", "/"):
+        return ""
+    for key in ("resolved_path", "local_path"):
+        base = workspace.get(key)
+        if not base:
+            continue
+        base_norm = os.path.normpath(str(base)).replace("\\", "/").strip()
+        if not base_norm or base_norm in (".", "/"):
+            continue
+        if norm == base_norm:
+            return ""
+        if norm.startswith(base_norm + "/"):
+            return norm[len(base_norm) + 1:].strip("/")
+    return relative_path
+
+
 def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     registry = _load_registry()
     identity = _resolve_identity_context(ref)
@@ -1535,6 +1563,7 @@ def read_file(req: FileReadRequest, x_internal_secret: str | None = Header(defau
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "read")
+    req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
     workspace_path = Path(workspace["resolved_path"])
     target = resolve_safe_path(workspace_path, req.relative_path)
     if not target.is_file():
@@ -1554,6 +1583,7 @@ def list_files(req: FileListRequest, x_internal_secret: str | None = Header(defa
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "read")
+    req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
     workspace_path = Path(workspace["resolved_path"])
     root, entries, truncated = _list_workspace_entries(
         workspace_path,
@@ -1578,6 +1608,7 @@ def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(def
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
+    req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
     workspace_path = Path(workspace["resolved_path"])
     target = resolve_safe_path(workspace_path, req.relative_path, must_exist=False)
 
@@ -1640,6 +1671,7 @@ def delete_file(req: FileDeleteRequest, x_internal_secret: str | None = Header(d
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
+    req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
     workspace_path = Path(workspace["resolved_path"])
     target = resolve_safe_path(workspace_path, req.relative_path)
 
@@ -1690,6 +1722,7 @@ async def provider_sync_file(req: ProviderSyncFileRequest, x_internal_secret: st
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
     _require_workspace_capability(workspace, "write")
+    req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
     workspace_path = Path(workspace["resolved_path"])
     local_file = resolve_safe_path(workspace_path, req.relative_path)
     if not local_file.is_file():
