@@ -3075,28 +3075,55 @@ async def stream_chat_job(job_id: str):
     The UI subscribes to this to receive the final Markdown once Raven finishes.
     """
     async def event_generator():
+        import redis.asyncio as redis
+
+        from services.gateway.config import REDIS_URL, JOB_STATUS_POLL_INTERVAL
+
         last_status = None
-        while True:
-            job = await job_queue.get_job_status(job_id)
-            if not job:
-                yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
-                break
+        r = redis.from_url(REDIS_URL, decode_responses=True)
+        status_ch = f"raven:job:status:{job_id}"
+        pubsub = r.pubsub()
+        await pubsub.subscribe(status_ch)
+        try:
+            while True:
+                job = await job_queue.get_job_status(job_id)
+                if not job:
+                    yield f"data: {json.dumps({'error': 'Job not found'})}\n\n"
+                    break
 
-            status = job["status"]
-            if status != last_status:
-                yield f"data: {json.dumps({'status': status.upper(), 'job_id': job_id, 'position': await job_queue.get_queue_position(job_id)})}\n\n"
-                last_status = status
+                status = job["status"]
+                if status != last_status:
+                    yield f"data: {json.dumps({'status': status.upper(), 'job_id': job_id, 'position': await job_queue.get_queue_position(job_id)})}\n\n"
+                    last_status = status
 
-            if status == JobStatus.COMPLETED:
-                result = job["result"]
-                yield f"data: {json.dumps({'status': 'COMPLETED', 'result': result})}\n\n"
-                break
+                if status == JobStatus.COMPLETED:
+                    result = job["result"]
+                    yield f"data: {json.dumps({'status': 'COMPLETED', 'result': result})}\n\n"
+                    break
 
-            if status == JobStatus.FAILED:
-                yield f"data: {json.dumps({'status': 'FAILED', 'error': job.get('error')})}\n\n"
-                break
+                if status == JobStatus.FAILED:
+                    yield f"data: {json.dumps({'status': 'FAILED', 'error': job.get('error')})}\n\n"
+                    break
 
-            await asyncio.sleep(1.0) # Poll Redis every second for status changes
+                # Wait for the next status change via pub/sub; fall back to a
+                # periodic GET every JOB_STATUS_POLL_INTERVAL seconds so a missed
+                # publish (or a queue-position change) is still observed.
+                msg = await pubsub.get_message(timeout=JOB_STATUS_POLL_INTERVAL)
+                if msg and msg.get("type") == "message":
+                    continue  # status changed; loop re-fetches and yields
+        finally:
+            try:
+                await pubsub.unsubscribe(status_ch)
+            except Exception:
+                pass
+            try:
+                await pubsub.close()
+            except Exception:
+                pass
+            try:
+                await r.close()
+            except Exception:
+                pass
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -4689,6 +4716,7 @@ async def pause_mission(request: Request, id_or_slug: str):
         from services.gateway.config import REDIS_URL
         r = redis.from_url(REDIS_URL, decode_responses=True)
         await r.set(f"raven:mission:pause:{real_id}", "PAUSED", ex=3600)
+        await r.publish(f"raven:mission:pause:{real_id}", "PAUSED")
         await r.close()
 
         return {"status": "SUCCESS", "message": f"Mission {real_id} paused. LLM access will be deferred until resumed."}
@@ -4711,6 +4739,7 @@ async def resume_mission(request: Request, id_or_slug: str):
         from services.gateway.config import REDIS_URL
         r = redis.from_url(REDIS_URL, decode_responses=True)
         await r.delete(f"raven:mission:pause:{real_id}")
+        await r.publish(f"raven:mission:pause:{real_id}", "RESUMED")
         await r.close()
 
         return {"status": "SUCCESS", "message": f"Mission {real_id} resumed. LLM access restored."}

@@ -81,6 +81,15 @@ RAVEN_ERROR_THRESHOLD = _safe_int("RAVEN_ERROR_THRESHOLD", 5)
 # --- ABS / media timeouts ---
 ABS_TIMEOUT = _safe_int("ABS_TIMEOUT", 30)
 
+# --- Phase 2: env-configurable poll intervals (capped backoff / fallback) ---
+# /api/ps has no push/event API, so the Ollama slot wait still polls — but with
+# an exponential backoff capped at OLLAMA_SLOT_POLL_MAX instead of a fixed 1s.
+OLLAMA_SLOT_POLL_INTERVAL = _safe_float("OLLAMA_SLOT_POLL_INTERVAL", 1.0)
+OLLAMA_SLOT_POLL_MAX = _safe_float("OLLAMA_SLOT_POLL_MAX", 5.0)
+# The SSE job-status stream waits on a Redis pub/sub channel for status changes
+# and only falls back to a direct GET every JOB_STATUS_POLL_INTERVAL seconds.
+JOB_STATUS_POLL_INTERVAL = _safe_float("JOB_STATUS_POLL_INTERVAL", 5.0)
+
 # --- Misc ---
 FAST_PATH_THRESHOLD = _safe_float("FAST_PATH_THRESHOLD", 0.85)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")
