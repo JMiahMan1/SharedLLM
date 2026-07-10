@@ -108,8 +108,18 @@ Project name: "Starfall". You have a workspace, a shell, file tools, the `gh` CL
     else 'Native: open the window hidden (e.g. raylib FLAG_WINDOW_HIDDEN) and exit after 120 frames.'}
 - Add a README.md with controls + how to run/build/selftest.
 
+=== REQUIRED WORKSPACE (critical — do this FIRST) ===
+- Your VERY FIRST action must be `WorkspaceCreateRequest` with a unique id derived
+  from the project (e.g. `raven-starfall-{lang}`) and a `display_name`.
+  Capture the returned `workspace_id` and pass it as `workspace_id` in EVERY following
+  `WorkspaceFileWriteRequest`, `WorkspaceShellRequest`, and `WorkspaceSettingsUpdateRequest`.
+  NEVER operate in the Default Workspace — it is reserved for system maintenance only.
+  (This is protocol Step 0; the gateway will reject file/shell/git operations until you
+  have acquired a dedicated workspace.)
+
 === REQUIRED REPOSITORY + LINUX CI (critical) ===
-- Create a NEW GitHub repository named `{_repo_name(lang)}` using the `gh` CLI:
+- Create a NEW GitHub repository named `{_repo_name(lang)}` using the `gh` CLI FROM INSIDE
+  the dedicated workspace you just created:
   `gh repo create {_repo_name(lang)} --private -d "Starfall 3D space shooter ({human})"`
 - Add a GitHub Actions workflow at `.github/workflows/build.yml` that builds the game on Linux:
   it MUST use `runs-on: ubuntu-latest`. Steps: checkout, install the {human} toolchain, then build/compile.
@@ -131,12 +141,50 @@ def _chat_auth_headers() -> dict:
     return {"X-Internal-Secret": INTERNAL_SECRET}
 
 
+def _list_missions() -> list[dict]:
+    """GET /api/raven/missions (unauthenticated-ish; gateway accepts the same
+    internal secret the submit uses). Returns the list of mission records.
+    """
+    with httpx.Client(headers=_chat_auth_headers(), timeout=30.0) as c:
+        resp = c.get(f"{GATEWAY_URL}/api/raven/missions")
+        if resp.status_code != 200:
+            return []
+        data = resp.json()
+    if isinstance(data, list):
+        return data
+    for key in ("missions", "items", "results"):
+        if isinstance(data.get(key), list):
+            return data[key]
+    return []
+
+
+def _recover_mission_id(query: str) -> int | None:
+    """The gateway enqueues the Raven mission server-side but may be slow to
+    return the 202 (the in-process worker saturates the event loop). Poll the
+    queue for the newest mission whose prompt matches this submission.
+    """
+    marker = query.strip()[:80]
+    best: int | None = None
+    for m in _list_missions():
+        proposed = (m.get("proposed_mission") or "").strip()
+        if proposed[:80] == marker or proposed.startswith(query.strip()[:40]):
+            mid = m.get("id")
+            if isinstance(mid, int) and (best is None or mid > best):
+                best = mid
+    return best
+
+
 def _chat_submit(query: str, system: str | None = None) -> int:
     """Submit a prompt to the /api/chat endpoint.
 
     The gateway recognizes the engineering task as a Raven mission and routes it
     to the Raven mission queue, returning a ``mission_id``. The test creates no
     workspace/files — Raven does all the work.
+
+    Because the gateway can be slow to return the 202 (the in-process Raven
+    worker shares the event loop), a client-side timeout does NOT mean the
+    mission failed: it is usually created server-side. On any submit failure we
+    recover the id by polling the queue.
     """
     body = {
         "model": os.getenv("CODING_MODEL", "auto"),
@@ -145,35 +193,48 @@ def _chat_submit(query: str, system: str | None = None) -> int:
     }
     if system:
         body["system"] = system
-    with httpx.Client(headers=_chat_auth_headers(), timeout=60.0) as c:
-        resp = c.post(f"{GATEWAY_URL}/api/chat", json=body)
-        assert resp.status_code in (200, 202), (
-            f"chat submit failed ({resp.status_code}): {resp.text[:400]}"
-        )
-        data = resp.json()
-        mission_id = data.get("mission_id")
-        # OpenAI-format responses wrap the payload as a chat message.
-        if mission_id is None and isinstance(data.get("choices"), list):
-            content = data["choices"][0]["message"]["content"]
-            try:
-                mission_id = int(content.split('"mission_id":')[1].split("}")[0].split(",")[0].strip())
-            except Exception:
-                mission_id = None
-        assert mission_id is not None, f"chat response did not return a mission_id: {data}"
-        return int(mission_id)
+    try:
+        with httpx.Client(headers=_chat_auth_headers(), timeout=300.0) as c:
+            resp = c.post(f"{GATEWAY_URL}/api/chat", json=body)
+            assert resp.status_code in (200, 202), (
+                f"chat submit failed ({resp.status_code}): {resp.text[:400]}"
+            )
+            data = resp.json()
+            mission_id = data.get("mission_id")
+            # OpenAI-format responses wrap the payload as a chat message.
+            if mission_id is None and isinstance(data.get("choices"), list):
+                content = data["choices"][0]["message"]["content"]
+                try:
+                    mission_id = int(content.split('"mission_id":')[1].split("}")[0].split(",")[0].strip())
+                except Exception:
+                    mission_id = None
+            if mission_id is not None:
+                return int(mission_id)
+    except Exception:
+        pass  # fall through to queue-based recovery
+    recovered = _recover_mission_id(query)
+    assert recovered is not None, "chat submit did not return a mission_id and none found in queue"
+    return int(recovered)
 
 
 def _chat_wait(mission_id: int) -> dict:
-    """Poll /api/raven/missions/{id} until completed/failed/dismissed."""
+    """Poll /api/raven/missions/{id} until completed/failed/dismissed.
+
+    Survives transient network errors (e.g. a brief gateway flap): a failed
+    GET is treated as "still running" and we keep polling until the deadline.
+    """
     with httpx.Client(headers=_chat_auth_headers(), timeout=60.0) as c:
         deadline = time.time() + CHAT_TIMEOUT
         while time.time() < deadline:
-            resp = c.get(f"{GATEWAY_URL}/api/raven/missions/{mission_id}")
-            if resp.status_code == 200:
-                data = resp.json()
-                status = data.get("status")
-                if status in ("completed", "failed", "dismissed"):
-                    return data
+            try:
+                resp = c.get(f"{GATEWAY_URL}/api/raven/missions/{mission_id}")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    status = data.get("status")
+                    if status in ("completed", "failed", "dismissed"):
+                        return data
+            except Exception:
+                pass  # transient network error; keep polling
             time.sleep(POLL_INTERVAL)
     return {"status": "TIMEOUT"}
 
@@ -225,19 +286,28 @@ def run_one(lang: str, human: str, stack: str, build_cmd: str, selftest_cmd: str
     out: dict = {"lang": lang, "human": human, "repo": repo, "repo_url": None,
                  "skipped": None, "errors": []}
 
-    mission_id = _chat_submit(mission_prompt(lang, human, stack))
-    result = _chat_wait(mission_id)
-    out["chat_status"] = result.get("status")
-    if result.get("status") != "completed":
-        out["errors"].append(f"raven mission {mission_id} ended {result.get('status')}")
-        return out
+    # Idempotent: if the repo already exists (e.g. a prior run built it, or a
+    # parallel/restarted run is mid-flight), do NOT spin up a duplicate Raven
+    # mission — just validate the existing repository in place. This keeps a
+    # re-run from creating redundant missions after a crash/restart.
+    existing = _gh_repo_view(repo)
+    if existing["returncode"] == 0:
+        out["repo_url"] = existing["stdout"].strip().strip('"')
+        out["chat_status"] = "already-exists"
+    else:
+        mission_id = _chat_submit(mission_prompt(lang, human, stack))
+        result = _chat_wait(mission_id)
+        out["chat_status"] = result.get("status")
+        if result.get("status") != "completed":
+            out["errors"].append(f"raven mission {mission_id} ended {result.get('status')}")
+            return out
 
-    # 1) Repository was created on GitHub.
-    view = _gh_repo_view(repo)
-    if view["returncode"] != 0:
-        out["errors"].append(f"expected repo '{repo}' to exist: {view['stderr']}")
-        return out
-    out["repo_url"] = view["stdout"].strip().strip('"')
+        # 1) Repository was created on GitHub.
+        view = _gh_repo_view(repo)
+        if view["returncode"] != 0:
+            out["errors"].append(f"expected repo '{repo}' to exist: {view['stderr']}")
+            return out
+        out["repo_url"] = view["stdout"].strip().strip('"')
 
     # 2) Linux CI pipeline exists and targets ubuntu-latest.
     ci = _gh_file(repo, ".github/workflows/build.yml")
