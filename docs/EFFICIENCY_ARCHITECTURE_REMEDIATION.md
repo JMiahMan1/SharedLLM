@@ -63,7 +63,7 @@
 | 2 | `background_worker` loops use shared client + async tasks | [x] done | Already satisfied in Phase 1 row 56 (all HTTP via `_shared_http_client()`; loops are `asyncio.create_task`) — no throwaway sessions remain |
 | 2 | DNS refresh interval env-configurable | [x] done | `dns/main.py` `DNS_REFRESH_INTERVAL` env var (default 30s) replaces hardcoded `asyncio.sleep(30)` |
 | 3 | Shared in-memory TTL cache for identity/settings/prompts | [x] done | `services/gateway/cache.py` shared TTL cache (`SETTINGS_CACHE_TTL`/`IDENTITY_CACHE_TTL` env-configurable); `get_all_settings` (orchestrator) and `resolve_identity` (main) now use it; invalidated on settings write (`/api/settings`, `/api/config`, DNS endpoints) and `change-password`. `prompts.py` still has its own 30s cache (consolidation deferred to row below) |
-| 3 | Reuse cache in `ha_state_cache` / `media_device_cache` | [ ] pending | |
+| 3 | Reuse cache in `ha_state_cache` / `media_device_cache` | [x] done | `services/gateway/cache.py` gained `get_redis()` + `redis_cache_get/set/set_many/delete`; `ha_state_cache.py` and `media_device_cache.py` now delegate to these (preserving Redis-backed semantics: 60s HA state TTL, 7d device TTL via `HA_STATE_CACHE_TTL`/`MEDIA_DEVICE_CACHE_TTL` env vars). `ha_state_cache` re-exports `get_redis` for `background_worker.py:746`/`main.py:1833` callers |
 | 4 | Execution bridge-network spike (validate `.local` DNS) | [ ] pending | |
 | 4 | De-duplicate `*_SVC_URL` env via shared `env_file` | [ ] pending | |
 | 4 | Soften `recreate_http_client` host refresh | [ ] pending | |
