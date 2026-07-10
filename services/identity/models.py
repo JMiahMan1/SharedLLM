@@ -114,6 +114,10 @@ class RavenMission(SQLModel, table=True):  # type: ignore
     progress: int = Field(default=0) # 0 to 100
     scheduled_for: str | None = None # ISO format timestamp
     created_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    queued_at: str | None = None # ISO timestamp: when the mission entered the execution queue
+    started_at: str | None = None # ISO timestamp: when the worker began executing it
+    completed_at: str | None = None # ISO timestamp: when execution finished (success or failure)
+    duration: int | None = None # seconds elapsed from started_at -> completed_at
     output_log: str | None = None
     result: str | None = None
     user_id: int | None = Field(default=None, foreign_key="user.id")

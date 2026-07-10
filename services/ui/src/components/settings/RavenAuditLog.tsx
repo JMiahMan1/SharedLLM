@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { History, FileText, CheckCircle, XCircle } from 'lucide-react';
+import { History, FileText, CheckCircle, XCircle, Download } from 'lucide-react';
 import { api, type RavenMission } from '../../services/api';
 import Modal from '../ui/Modal';
 
@@ -67,8 +67,52 @@ export default function RavenAuditLog({ isOpen, onClose }: RavenAuditLogProps) {
      return <div>{logData}</div>;
    };
  
-   return (
-     <Modal isOpen={isOpen} onClose={onClose} title="Raven Audit Log" size="4xl">
+    const formatTs = (iso?: string | null) =>
+      iso ? new Date(iso).toLocaleString() : '—';
+
+    const formatDuration = (seconds?: number | null) => {
+      if (seconds == null) return '—';
+      const m = Math.floor(seconds / 60);
+      const s = seconds % 60;
+      return m > 0 ? `${m}m ${s}s` : `${s}s`;
+    };
+
+    const downloadLogs = (mission: RavenMission) => {
+      let content = '';
+      const raw = mission.output_log;
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            content = parsed
+              .map((e: { type?: string; data?: string; timestamp?: number }) => {
+                const t = e.timestamp
+                  ? new Date(e.timestamp * 1000).toISOString().split('T')[1].slice(0, -1)
+                  : '';
+                return `[${t}] [${e.type ?? 'system'}] ${e.data ?? ''}`;
+              })
+              .join('\n');
+          } else {
+            content = raw;
+          }
+        } catch {
+          content = raw;
+        }
+      }
+      if (mission.result) {
+        content += `\n\n--- MISSION RESULT ---\n${mission.result}`;
+      }
+      const blob = new Blob([content || 'No logs available.'], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `mission-${mission.id}-logs.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    };
+
+    return (
+      <Modal isOpen={isOpen} onClose={onClose} title="Raven Audit Log" size="4xl">
        <div className="flex h-[600px] gap-4">
          {/* Left Side: Mission List */}
          <div className="w-1/3 flex flex-col border-r border-white/10 pr-4">
@@ -126,12 +170,24 @@ export default function RavenAuditLog({ isOpen, onClose }: RavenAuditLogProps) {
                    </span>
                    <h3 className="text-lg font-bold text-white">Mission #{currentSelectedMission.id}</h3>
                  </div>
-                 <p className="text-sm text-slate-300">{currentSelectedMission.proposed_mission}</p>
-                 {currentSelectedMission.error_summary && (
-                   <div className="mt-2 text-xs text-slate-400 p-2 bg-black/30 rounded border border-white/5">
-                     <strong>Trigger:</strong> {currentSelectedMission.error_summary}
-                   </div>
-                 )}
+                  <p className="text-sm text-slate-300">{currentSelectedMission.proposed_mission}</p>
+                  <button
+                    onClick={() => downloadLogs(currentSelectedMission)}
+                    className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-bold uppercase tracking-widest bg-white/10 hover:bg-white/20 border border-white/10 text-slate-200 transition"
+                  >
+                    <Download size={12} /> Download Logs
+                  </button>
+                  <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] text-slate-400">
+                    <div><span className="text-slate-500">Queued:</span> {formatTs(currentSelectedMission.queued_at ?? currentSelectedMission.created_at)}</div>
+                    <div><span className="text-slate-500">Started:</span> {formatTs(currentSelectedMission.started_at)}</div>
+                    <div><span className="text-slate-500">Finished:</span> {formatTs(currentSelectedMission.completed_at)}</div>
+                    <div><span className="text-slate-500">Run time:</span> {formatDuration(currentSelectedMission.duration)}</div>
+                  </div>
+                  {currentSelectedMission.error_summary && (
+                    <div className="mt-2 text-xs text-slate-400 p-2 bg-black/30 rounded border border-white/5">
+                      <strong>Trigger:</strong> {currentSelectedMission.error_summary}
+                    </div>
+                  )}
                </div>
  
                <div className="flex-1 flex flex-col min-h-0 space-y-4">
