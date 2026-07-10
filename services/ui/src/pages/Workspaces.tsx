@@ -269,6 +269,15 @@ const Workspaces = () => {
                           <Star size={18} />
                         </button>
                         <button 
+                          onClick={() => {
+                            saveMutation.mutate({ id: ws.id, owner_user: ws.owner_user === 'default' ? null : 'default' });
+                          }}
+                          className={`p-2 rounded-xl transition-colors ${ws.owner_user === 'default' ? 'text-blue-400 hover:bg-blue-500/10' : 'text-slate-500 hover:text-blue-400 hover:bg-white/5'}`}
+                          title={ws.owner_user === 'default' ? 'Unshare (make private)' : 'Share with all users'}
+                        >
+                          <Globe size={18} />
+                        </button>
+                        <button 
                           onClick={() => openEdit(ws)}
                           className="p-2 rounded-xl text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
                         >
