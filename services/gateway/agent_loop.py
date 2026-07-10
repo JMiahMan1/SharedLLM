@@ -122,7 +122,7 @@ class OllamaProvider(BaseLLMProvider):
             if not chunk_callback:
                 resp = await client.post(f"{self.base_url}/api/chat", json=payload)
                 resp.raise_for_status()
-                raw_text = resp.text.strip()
+                raw_text = (await resp.text()).strip()
                 if not raw_text:
                     return ""
 
@@ -620,7 +620,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
             resp = await client.get(f"{local_url.rstrip('/')}/api/ps")
             if resp.status == 200:
-                raw_text = resp.text.strip()
+                raw_text = (await resp.text()).strip()
                 if not raw_text:
                     return params
 
@@ -1568,7 +1568,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # ...). The target id lives in the payload; build the PATCH URL from it and
                 # strip it from the body sent to workspace_runtime.
                 if lookup_action == "workspacesettingsupdaterequest" and isinstance(payload, dict):
-                    _ws_id = payload.pop("workspace_id", None) or payload.pop("id", None)
+                    _ws_id = payload.pop("workspace_id", None) or payload.pop("id", None) or workspace_id
                     if _ws_id:
                         svc_base = WORKSPACE_RUNTIME_SVC
                         endpoint = f"/workspaces/{_ws_id}"
@@ -1588,16 +1588,21 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "git_token": creds.git_token,
                 }
 
-                # Inject the resolved workspace_id into workspace-scoped tool calls so the
-                # execution service operates on the correct repository directory.
+                # Force workspace-scoped tool calls into the mission's CURRENT working
+                # workspace. Once Raven creates its own workspace (via
+                # WorkspaceCreateRequest) and we adopt it as `workspace_id`, all
+                # subsequent file/shell/git operations run there — overriding any id the
+                # model happens to send. This keeps Raven inside the sandbox it created
+                # even when the model doesn't reliably carry the id across turns.
                 if workspace_id and isinstance(payload, dict):
                     _ws_actions = {
                         "workspacefilereadrequest", "workspacefilewriterequest",
                         "workspacefilepatchrequest", "workspaceshellrequest",
                         "workspacesearchrequest", "workspacelintrequest",
                         "gitoperationrequest", "workspacebootstraprequest",
+                        "workspacesettingsupdaterequest",
                     }
-                    if lookup_action in _ws_actions and "workspace_id" not in payload:
+                    if lookup_action in _ws_actions:
                         payload["workspace_id"] = workspace_id
 
                 # GUARDRAIL: creating a NEW repository must happen in a dedicated
