@@ -6,7 +6,7 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, AsyncIterator, cast
 
 import aiohttp
 import redis.asyncio as redis
@@ -118,10 +118,10 @@ class OllamaProvider(BaseLLMProvider):
         }
 
         full_content = ""
-        async with aiohttp.ClientSession(headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as client:
+        async with shared_http_client() as client:
             log.info(f"[OllamaProvider-Hardened] Calling {self.base_url}/api/chat for model {model}")
             if not chunk_callback:
-                resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout)
                 resp.raise_for_status()
                 raw_text = (await resp.text()).strip()
                 if not raw_text:
@@ -176,7 +176,7 @@ class OllamaProvider(BaseLLMProvider):
                     return ""
 
             # Streaming path (used by AgentLoop)
-            async with client.post(f"{self.base_url}/api/chat", json=payload) as response:
+            async with client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as response:
                 response.raise_for_status()
                 async for raw_line in response.content:
                     clean_line = raw_line.decode("utf-8", errors="replace").strip()
@@ -596,10 +596,11 @@ def pending_verification(written: set[str], verified: set[str]) -> list[str]:
 async def get_dynamic_llm_settings() -> dict:
     """Fetches elastic LLM routing configuration directly from the Identity DB."""
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
+        async with shared_http_client() as client:
             resp = await client.get(
                 f"{IDENTITY_SVC}/api/settings",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=3.0),
             )
             if resp.status == 200:
                 fetched = {item["key"]: item["value"] for item in await resp.json()}
@@ -633,8 +634,8 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
     }
 
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
-            resp = await client.get(f"{local_url.rstrip('/')}/api/ps")
+        async with shared_http_client() as client:
+            resp = await client.get(f"{local_url.rstrip('/')}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
             if resp.status == 200:
                 raw_text = (await resp.text()).strip()
                 if not raw_text:
@@ -704,6 +705,16 @@ def get_http_client() -> aiohttp.ClientSession:
     return _global_http_client
 
 
+@contextlib.asynccontextmanager
+async def shared_http_client() -> AsyncIterator[aiohttp.ClientSession]:
+    """Borrow the module-pooled client without closing it on exit.
+
+    Use instead of ``async with aiohttp.ClientSession()`` for internal calls.
+    Per-call timeouts must be passed on the request (e.g. ``client.get(..., timeout=...)``).
+    """
+    yield get_http_client()
+
+
 _stream_redis = None
 
 def should_persist_learning(result: str) -> bool:
@@ -771,11 +782,12 @@ async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | N
     """
     async def _resolve_one(wid: str) -> dict | None:
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            async with shared_http_client() as client:
                 res = await client.post(
                     f"{WORKSPACE_RUNTIME_SVC}/workspace/resolve",
                     json={"workspace_id": wid, "user_context": {"user": user_id, "is_admin": False}},
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
                 )
                 if res.status == 200:
                     return (await res.json()).get("workspace")
@@ -789,11 +801,12 @@ async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | N
             return ws
         # Not found — try to bootstrap it (creates the repo only if requested).
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20.0)) as client:
+            async with shared_http_client() as client:
                 boot = await client.post(
                     f"{WORKSPACE_RUNTIME_SVC}/workspaces/bootstrap",
                     json={"workspace_id": assigned_workspace_id, "rag_user": user_id},
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=20.0),
                 )
                 if boot.status == 200:
                     return (await boot.json()).get("workspace")
@@ -807,11 +820,12 @@ async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | N
     # workspace Raven may reuse. Otherwise Raven decides — via the
     # WorkspaceCreateRequest tool — whether it needs its own dedicated sandbox.
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        async with shared_http_client() as client:
             lst = await client.get(
                 f"{WORKSPACE_RUNTIME_SVC}/workspaces",
                 params={"rag_user": user_id},
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
             )
             workspaces = (await lst.json()).get("workspaces", []) if lst.status == 200 else []
     except Exception as e:
@@ -849,11 +863,12 @@ async def _is_blocked_for_repo(
     # Unknown workspace: attempt a metadata lookup to confirm it is a dedicated,
     # non-default user workspace. Any failure (e.g. auth/resolve error) fails closed.
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        async with shared_http_client() as client:
             res = await client.post(
                 f"{WORKSPACE_RUNTIME_SVC}/workspace/resolve",
                 json={"workspace_id": ws_id, "user_context": {"user": "default", "is_admin": True}},
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
             )
             if res.status == 200:
                 ws = (await res.json()).get("workspace") or {}
@@ -872,11 +887,12 @@ async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials) 
     Best-effort: any failure is logged and ignored so it never blocks the mission.
     """
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        async with shared_http_client() as client:
             res = await client.post(
                 f"{WORKSPACE_RUNTIME_SVC}/workspace/resolve",
                 json={"workspace_id": workspace_id, "user_context": {"user": creds.user, "is_admin": creds.is_admin}},
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
             )
             if res.status != 200:
                 return
@@ -894,7 +910,7 @@ async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials) 
             "github_token": creds.github_token,
             "git_token": creds.git_token,
         }
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
+        async with shared_http_client() as client:
             shell = await client.post(
                 f"{EXECUTION_SVC}/execute/workspace_shell",
                 json={
@@ -903,6 +919,7 @@ async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials) 
                     "user_context": uc,
                 },
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=30.0),
             )
             if shell.status != 200:
                 return
@@ -912,11 +929,12 @@ async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials) 
         branch = next((ln for ln in lines if ln and ln != url), None) or "main"
         if not url:
             return
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
+        async with shared_http_client() as client:
             await client.patch(
                 f"{WORKSPACE_RUNTIME_SVC}/workspaces/{workspace_id}",
                 json={"repo_url": url, "git_remote": "origin", "default_branch": branch},
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=15.0),
             )
         log.info(f"[AgentLoop] Auto-wired repo {url} (branch {branch}) to workspace {workspace_id}")
     except Exception as e:
@@ -1751,7 +1769,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         _skip_post = True
 
                 if not _skip_post:
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120.0)) as client:
+                    async with shared_http_client() as client:
                         # Secure Log Redaction
                         log_payload = json.loads(json.dumps(payload)) # Deep copy
                         def redact(d):
@@ -1768,7 +1786,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
                         await stream_event("action_payload", json.dumps(log_payload, indent=2))
                         log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
-                        resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
+                        resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=120.0))
                         log.info(f"[AgentLoop] Tool response: {resp.status}")
 
                         if resp.status == 422:
@@ -1935,11 +1953,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "tags": list(dict.fromkeys(tags)),
             }
 
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
+            async with shared_http_client() as client:
                 resp = await client.post(
                     f"{EXECUTION_SVC}/execute/learning",
                     json=payload,
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=30.0),
                 )
                 if resp.status != 200:
                     log.warning(f"[AgentLoop] Learning persistence failed: {resp.status} {resp.text}")
@@ -2026,11 +2045,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     if mission_id and full_audit_log:
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            async with shared_http_client() as client:
                 await client.patch(
                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                     json={"output_log": json.dumps(full_audit_log)},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
                 )
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to persist output_log for mission {mission_id}: {e}")
@@ -2057,11 +2077,12 @@ async def run_post_write_lint(file_path: str, execution_svc: str | None, interna
         lint_payload: dict[str, Any] = {"path": file_path}
         if user_context:
             lint_payload["user_context"] = user_context
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as lint_client:
+        async with shared_http_client() as lint_client:
             lint_resp = await lint_client.post(
                 f"{execution_svc}/execute/workspace_lint",
                 json=lint_payload,
                 headers={"X-Internal-Secret": internal_secret},
+                timeout=aiohttp.ClientTimeout(total=15.0),
             )
             if lint_resp.status == 200:
                 lint_data = await lint_resp.json()

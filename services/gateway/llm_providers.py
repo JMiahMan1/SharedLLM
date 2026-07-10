@@ -98,8 +98,9 @@ class OllamaProvider(BaseLLMProvider):
         options: dict[str, Any] | None = None,
         chunk_callback: Callable[[str], Awaitable[None]] | None = None
     ) -> str:
+        from services.gateway.main import shared_http_client
         # Queue-and-wait: check if Ollama has available slots before submitting
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as slot_client:
+        async with shared_http_client() as slot_client:
             if not await self._wait_for_slot(slot_client):
                 raise RuntimeError(f"No slots available within {self.slot_wait_timeout}s")
 
@@ -114,10 +115,10 @@ class OllamaProvider(BaseLLMProvider):
         }
 
         full_content = ""
-        async with aiohttp.ClientSession(headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as client:
+        async with shared_http_client() as client:
             log.info(f"[OllamaProvider] Calling {self.base_url}/api/chat for model {model}")
             if not chunk_callback:
-                resp = await client.post(f"{self.base_url}/api/chat", json=payload)
+                resp = await client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout)
                 if resp.status >= 400:
                     raw_text = await resp.text()
                     raise RuntimeError(f"Ollama HTTP {resp.status}: {raw_text}")
@@ -179,7 +180,7 @@ class OllamaProvider(BaseLLMProvider):
                     return ""
 
             # Streaming
-            async with client.post(f"{self.base_url}/api/chat", json=payload) as response:
+            async with client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as response:
                 if response.status >= 400:
                     await response.read()
                     raise RuntimeError(f"Ollama stream HTTP {response.status}: {await response.text()}")
@@ -227,6 +228,7 @@ class OpenRouterProvider(BaseLLMProvider):
         options: dict[str, Any] | None = None,
         chunk_callback: Callable[[str], Awaitable[None]] | None = None
     ) -> str:
+        from services.gateway.main import shared_http_client
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -243,10 +245,10 @@ class OpenRouterProvider(BaseLLMProvider):
             payload["enable_thinking"] = options["enable_thinking"]
 
         full_content = ""
-        async with aiohttp.ClientSession(timeout=self.timeout) as client:
+        async with shared_http_client() as client:
             log.info(f"[OpenRouterProvider] Calling {self.base_url} for model {model}")
             if not chunk_callback:
-                resp = await client.post(self.base_url, json=payload, headers=headers)
+                resp = await client.post(self.base_url, json=payload, headers=headers, timeout=self.timeout)
                 if resp.status >= 400:
                     raw_text = await resp.text()
                     raise RuntimeError(f"OpenRouter HTTP {resp.status}: {raw_text}")
@@ -263,7 +265,7 @@ class OpenRouterProvider(BaseLLMProvider):
             # to chunk_callback. Accumulate separately as a fallback only.
             full_content = ""
             full_reasoning = ""
-            async with client.post(self.base_url, json=payload, headers=headers) as response:
+            async with client.post(self.base_url, json=payload, headers=headers, timeout=self.timeout) as response:
                 if response.status >= 400:
                     await response.read()
                     raise RuntimeError(f"OpenRouter stream HTTP {response.status}: {response.text}")
