@@ -1913,15 +1913,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             action_summary = "\n".join(action_log)
             summary_prompt = [
                 {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. State what was accomplished based on the actions taken."},
-                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{action_summary}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished."}
+                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{action_summary}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished. Output the summary directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
             ]
         else:
             summary_prompt = [
                 {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. Do NOT say the mission failed unless the tool execution itself reported an error."},
-                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nRaw output: {ans}\n\nPlease provide the final clean summary now:"}
+                {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nRaw output: {ans}\n\nPlease provide the final clean summary now: Output it directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
             ]
             try:
-                data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.0})
+                data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.0, "enable_thinking": False})
                 ans = data.get("message", {}).get("content", ans)
             except Exception as e:
                 log.warning(f"[AgentLoop] Summarization phase failed: {e}")
@@ -1935,9 +1935,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             raven_reflection = await load_prompt(get_http_client(), PROMPT_RAVEN_REFLECTION)
             reflection_prompt = [
                 {"role": "system", "content": raven_reflection},
-                {"role": "user", "content": f"Mission: {query}\n\nPlan:\n{generated_plan}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nFinal result: {ans}\n\nProvide your reflection:"}
+                {"role": "user", "content": f"Mission: {query}\n\nPlan:\n{generated_plan}\n\nActions taken:\n" + "\n".join(action_log) + f"\n\nFinal result: {ans}\n\nProvide your reflection: Output it directly as your response — do not draft, plan, or repeat phrases like 'I will write' or 'I'll write it now'."}
             ]
-            reflection_data = await execute_inference(provider, selected_model, reflection_prompt, {"temperature": 0.1})
+            reflection_data = await execute_inference(provider, selected_model, reflection_prompt, {"temperature": 0.1, "enable_thinking": False})
             reflection_summary = reflection_data.get("message", {}).get("content", "").strip()
             if reflection_summary:
                 action_log.append(f"REFLECTION:\n{reflection_summary}")
