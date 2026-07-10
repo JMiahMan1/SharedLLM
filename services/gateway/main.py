@@ -475,6 +475,18 @@ def get_http_client() -> aiohttp.ClientSession:
         _global_http_client_loop = current_loop
     return _global_http_client
 
+
+@asynccontextmanager
+async def shared_http_client():
+    """Yield the shared, pooled global HTTP client WITHOUT closing it on exit.
+
+    Use this instead of ``async with aiohttp.ClientSession()`` for internal
+    service-to-service calls so TCP connections are reused across requests
+    (the global client is created once per event loop with a connection pool).
+    The caller must not close the yielded session.
+    """
+    yield get_http_client()
+
 async def recreate_http_client():
     """Close the current client and create a new one with fresh DNS resolution.
     This is needed when DNS changes (e.g., dns-sync restart) cause stale keepalive
@@ -805,7 +817,7 @@ async def emit_log(level: str, message: str, context: dict | None = None):
       from services.gateway.agent_loop import sanitize_for_llm
       safe_context = sanitize_for_llm(context) if context else None
       safe_message = sanitize_for_llm(message)
-      async with aiohttp.ClientSession() as client:
+      async with shared_http_client() as client:
           await client.post(
             f"{LOGGING_SVC}/log",
             json={"service": "gateway", "level": level, "message": safe_message, "context": safe_context},
@@ -817,7 +829,7 @@ async def emit_log(level: str, message: str, context: dict | None = None):
 
 @app.get("/api/logs")
 async def get_api_logs(limit: int = 50):
-    async with aiohttp.ClientSession() as client:
+    async with shared_http_client() as client:
       resp = await client.get(f"{LOGGING_SVC}/logs", params={"limit": limit})
       return await resp.json()
 
@@ -1758,7 +1770,7 @@ async def _proxy_execution_with_identity(
     creds_data = await _resolve_identity_from_request(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     url = f"{EXECUTION_SVC}{endpoint}"
-    async with aiohttp.ClientSession() as client:
+    async with shared_http_client() as client:
         if method.upper() == "GET":
             resp = await client.get(url, headers=headers, params={"user_id": creds_data.get("user") or ""})
         else:
@@ -1774,7 +1786,7 @@ async def _proxy_execution_with_identity(
 async def fetch_ha_entities(creds: dict) -> list:
     try:
         url = f"{EXECUTION_SVC}/discovery/entities"
-        async with aiohttp.ClientSession() as client:
+        async with shared_http_client() as client:
             resp = await client.get(
                 url,
                 params={"ha_url": creds.get("ha_url"), "ha_token": creds.get("ha_token")},
@@ -3663,7 +3675,7 @@ async def proxy_tags():
         ollama_url = _get(settings, "llm_local_url")
         if not ollama_url:
             return JSONResponse({"models": []}, status_code=503)
-        async with aiohttp.ClientSession() as client:
+        async with shared_http_client() as client:
             resp = await client.get(f"{ollama_url}/api/tags")
             if resp.status != 200:
                 return JSONResponse({"models": []}, status_code=200)

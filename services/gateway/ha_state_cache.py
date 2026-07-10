@@ -89,10 +89,12 @@ async def get_live_state(entity_id: str, execution_url: str, ha_url: str, ha_tok
     if cached is not None:
         return cached
 
-    # Cache miss — fetch live
+    # Cache miss — fetch live (reuse the gateway's shared pooled client)
     try:
-        import aiohttp
-        async with aiohttp.ClientSession() as session, session.get(
+        from services.gateway.main import get_http_client
+
+        client = get_http_client()
+        async with client.get(
             f"{execution_url}/discovery/entities",
             params={"ha_url": ha_url, "ha_token": ha_token},
             headers={"X-Internal-Secret": internal_secret},

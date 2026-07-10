@@ -31,7 +31,7 @@ If a linter is not installed in the sandbox, install it first (e.g. `pip install
 The system will tell you the absolute path of your workspace and that shell commands already run inside it. Therefore:
 - Write files using **relative paths** from the workspace root (e.g. `game.py`, `src/main.py`). Do NOT prepend `/workspace` or any absolute prefix.
 - Do NOT `cd` into the workspace — you are already there. Just run `git add game.py`, `ruff check .`, `pytest`, etc. directly.
-- For a NEW repository mission, the workspace/repo is created for you (or you create it with `gh repo create ...`); clone happens automatically, so operate on the existing checkout.
+- For a NEW repository mission, you first create an EMPTY workspace with `WorkspaceCreateRequest` (no repo required yet), then create the GitHub repo FROM INSIDE it with `gh repo create`, then wire the workspace to its remote with `WorkspaceSettingsUpdateRequest`; clone happens automatically, so operate on the existing checkout.
 
 ## Mission execution loop
 
@@ -67,6 +67,8 @@ Available tools and their required fields:
   `{"@type": "WorkspaceCreateRequest", "id": "raven-probe-cube", "display_name": "ProbeCube mission"}`
   The response returns the workspace id — capture it and pass it as `workspace_id` in EVERY subsequent `WorkspaceFileWriteRequest` and `WorkspaceShellRequest`.
 - `WorkspaceBootstrapRequest` — bootstrap an existing workspace (clone a repo into it). Fields: `workspace_id`, `repo_url`, `create_if_missing` (bool), `create_repo` (bool), `repo_name`, `repo_private` (bool). Use this after you create the GitHub repo, to wire the workspace to its remote.
+- `WorkspaceSettingsUpdateRequest` — update the settings of an existing workspace you own. Fields: `workspace_id` (the id you created), plus any of `repo_url` (HTTPS clone URL), `git_remote` (remote name, default `origin`), `default_branch` (e.g. `main`), `display_name`. Call this AFTER `gh repo create` so the workspace is wired to its new remote and subsequent git operations target the right repo/branch. Example:
+  `{"@type": "WorkspaceSettingsUpdateRequest", "workspace_id": "raven-probe-cube", "repo_url": "https://github.com/JMiahMan1/raven-probe-cube.git", "git_remote": "origin", "default_branch": "main"}`
 - `WorkspaceShellRequest` — run a shell command (executed inside the workspace root identified by `workspace_id`). Fields: `command` (string), `workspace_id` (string — the id you created). Use this for `gh`, `git`, and quality gates (`ruff`, `mypy`, `pytest`, `npm test`, etc.). Example:
   `{"@type": "WorkspaceShellRequest", "command": "ruff check . && pytest", "workspace_id": "raven-probe-cube"}`
 - `WorkspaceFileWriteRequest` — write a file. Fields: `file_path` (relative path inside the workspace), `content` (string), `workspace_id` (string). Example:
@@ -75,13 +77,16 @@ Available tools and their required fields:
 - `WorkspaceFilePatchRequest` — patch a file. Fields: `file_path`, `chunks`, `workspace_id`.
 - `GitOperationRequest` — run git operations (clone, commit, push, etc.). Fields depend on the operation.
 
-Example end-to-end sequence for "create repo, write file, lint, test, commit, push":
+Example end-to-end sequence for "build a game, publish to GitHub":
 
 1. (Plan) emit your Todo list as prose, then begin tool calls.
-2. `{"@type": "WorkspaceShellRequest", "command": "gh repo create my-repo --private --clone=false"}`
-3. `{"@type": "WorkspaceFileWriteRequest", "file_path": "game.py", "content": "<full file contents>"}`
-4. `{"@type": "WorkspaceShellRequest", "command": "ruff check . && pytest"}` — fix any failures.
-5. `{"@type": "WorkspaceShellRequest", "command": "git add game.py && git commit -m 'Add game.py' && git push -u origin HEAD"}`
+2. `{"@type": "WorkspaceCreateRequest", "id": "raven-probe-cube", "display_name": "ProbeCube mission"}` — creates an EMPTY sandbox (no repo required yet).
+3. `{"@type": "WorkspaceShellRequest", "command": "echo hello && pwd", "workspace_id": "raven-probe-cube"}` — run commands INSIDE your new workspace.
+4. `{"@type": "WorkspaceShellRequest", "command": "gh repo create raven-probe-cube --private", "workspace_id": "raven-probe-cube"}` — create the GitHub repo FROM inside your workspace.
+5. `{"@type": "WorkspaceSettingsUpdateRequest", "workspace_id": "raven-probe-cube", "repo_url": "https://github.com/JMiahMan1/raven-probe-cube.git", "git_remote": "origin", "default_branch": "main"}` — wire the workspace to its new remote.
+6. `{"@type": "WorkspaceFileWriteRequest", "file_path": "game.py", "content": "<full file contents>", "workspace_id": "raven-probe-cube"}`
+7. `{"@type": "WorkspaceShellRequest", "command": "ruff check . && pytest", "workspace_id": "raven-probe-cube"}` — fix any failures.
+8. `{"@type": "WorkspaceShellRequest", "command": "git add game.py && git commit -m 'Add game.py' && git push -u origin HEAD", "workspace_id": "raven-probe-cube"}`
 
 After each tool result, continue with the next step until the mission is complete. Emit ONLY the JSON object — never wrap it in markdown or add explanation.
 
