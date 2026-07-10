@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -429,10 +430,8 @@ def _extract_tool_candidates(text: str) -> list:
                     if raw.startswith('"'):
                         d["function"] = {**d.get("function", {}), "arguments": raw.strip('"')}
                     else:
-                        try:
+                        with contextlib.suppress(Exception):
                             d["function"] = {**d.get("function", {}), "arguments": json.loads(raw)}
-                        except Exception:
-                            pass
                 if d:
                     candidates.append({"type": "function", **d})
 
@@ -448,10 +447,8 @@ def _extract_tool_candidates(text: str) -> list:
 
     # Any JSON object carrying a tool discriminator (@type/action/tool/type)
     for m in re.finditer(r'\{\s*"(@type|action|tool|type)"\s*:\s*"[^"]+"[^}]*\}', text, re.DOTALL):
-        try:
+        with contextlib.suppress(Exception):
             candidates.append(json.loads(m.group(0)))
-        except Exception:
-            pass
 
     # Brace-depth tracking (handles bare dicts and arrays)
     result = _extract_json_with_brace_depth(text)
@@ -826,48 +823,30 @@ async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | N
     return await _resolve_one(default_id)
 
 
-async def _create_dedicated_mission_workspace(rag_user: str, mission_id: int | None) -> dict | None:
-    """Create a dedicated, isolated workspace for a Raven mission and return it.
-
-    This is how Raven gives itself a clean sandbox per task (general — not tied to
-    any specific project). If a workspace already exists for this mission id it is
-    reused; otherwise a fresh one is created via the workspace-runtime API. Returns
-    ``None`` only if creation fails, in which case the caller falls back to a
-    default workspace.
+async def _is_shared_or_default_workspace(ws_id: str | None, rag_user: str) -> bool:
+    """Return True if ``ws_id`` is a default, shared, or system workspace that must
+    NOT be used when creating a brand-new repository. Creating a repo requires a
+    dedicated workspace Raven acquired for itself.
     """
-    ws_id = f"raven-mission-{mission_id}" if mission_id else f"raven-{rag_user}"
-    payload = {
-        "id": ws_id,
-        "display_name": f"Raven Mission {mission_id or rag_user}",
-        "scope": "user",
-        "owner_user": rag_user or "default",
-        "is_default": False,
-        "auto_pull_enabled": False,
-        "auto_backup_enabled": False,
-    }
+    if not ws_id:
+        return True
+    sid = str(ws_id).lower()
+    if sid in ("sharedllm", "sharedllm_system", "ws_default", "ws_" + str(rag_user).lower()):
+        return True
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20.0)) as client:
-            # Reuse if it already exists.
-            existing = await client.get(
-                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
-                params={"rag_user": rag_user or "default"},
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            res = await client.post(
+                f"{WORKSPACE_RUNTIME_SVC}/workspace/resolve",
+                json={"workspace_id": ws_id, "user_context": {"user": rag_user, "is_admin": False}},
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
             )
-            if existing.status == 200:
-                data = await existing.json()
-                for item in data.get("workspaces", []):
-                    if isinstance(item, dict) and item.get("id") == ws_id:
-                        return item
-            resp = await client.post(
-                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
-                json=payload,
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-            )
-            if resp.status == 200:
-                return (await resp.json()).get("workspace")
-    except Exception as e:
-        log.warning(f"[AgentLoop] dedicated workspace create failed for {ws_id}: {e}")
-    return None
+            if res.status == 200:
+                ws = (await res.json()).get("workspace") or {}
+                if ws.get("is_default") or ws.get("scope") == "system":
+                    return True
+    except Exception:
+        pass
+    return False
 
 
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None) -> Any:
@@ -891,17 +870,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.warning(f"Failed to stream event: {e}")
 
     # 0. Resolve the workspace this agentic mission runs in.
-    # Agentic tasks that run system commands MUST operate inside a workspace. Raven
-    # creates its OWN dedicated sandbox per mission (so it never collides with other
-    # work) unless the task explicitly references an existing workspace. The "means"
-    # (the workspace-create API + WorkspaceCreateRequest tool) are supplied; Raven
-    # performs the creation. When no workspace is assigned we create a dedicated one
-    # named after the mission so every task gets a clean, isolated sandbox.
+    # If the task assigned an existing workspace we use it; otherwise we resolve (or
+    # fall back to) a workspace. Raven itself decides — via the WorkspaceCreateRequest
+    # tool described in its protocol — whether a mission needs its own dedicated
+    # sandbox, or should reuse an existing one. The gateway only supplies the means.
     try:
         if workspace_id:
             _ws = await resolve_mission_workspace(rag_user, workspace_id)
         else:
-            _ws = await _create_dedicated_mission_workspace(rag_user, mission_id)
+            _ws = await resolve_mission_workspace(rag_user, None)
     except Exception as e:
         log.warning(f"[AgentLoop] workspace resolve failed: {e}")
         _ws = None
@@ -1606,38 +1583,65 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     if lookup_action in _ws_actions and "workspace_id" not in payload:
                         payload["workspace_id"] = workspace_id
 
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120.0)) as client:
-                    # Secure Log Redaction
-                    log_payload = json.loads(json.dumps(payload)) # Deep copy
-                    def redact(d):
-                        if isinstance(d, dict):
-                            for k, v in d.items():
-                                if k in ["github_token", "gitlab_token", "git_token", "api_key", "ha_token", "nextcloud_pass"]:
-                                    d[k] = "[REDACTED]"
-                                else:
-                                    redact(v)
-                        elif isinstance(d, list):
-                            for item in d:
-                                redact(item)
-                    redact(log_payload)
+                # GUARDRAIL: creating a NEW repository must happen in a dedicated
+                # workspace Raven acquired for itself — never the default/shared/system
+                # workspace. If Raven attempts `gh repo create` (or similar) there, fail
+                # loudly so it creates a workspace first instead of polluting a shared one.
+                _skip_post = False
+                _creates_repo = False
+                if isinstance(payload, dict):
+                    _cmd = " ".join(str(payload.get(k, "")) for k in ("command", "action", "repo_url", "operation"))
+                    if "gh repo create" in _cmd or "gh repo fork" in _cmd:
+                        _creates_repo = True
+                if _creates_repo:
+                    _eff_ws = (payload.get("workspace_id") if isinstance(payload, dict) else None) or workspace_id
+                    if await _is_shared_or_default_workspace(_eff_ws, rag_user):
+                        exec_data = {
+                            "status": "ERROR",
+                            "message": (
+                                "GUARDRAIL: You tried to create a new repository from a "
+                                "default/shared/system workspace. This is forbidden. Call "
+                                "WorkspaceCreateRequest FIRST to acquire a dedicated workspace "
+                                "(e.g. {\"@type\": \"WorkspaceCreateRequest\", \"id\": \"raven-<project>\", "
+                                "\"display_name\": \"...\"}), capture its id, and pass that id as "
+                                "workspace_id in this and every following tool call. Then retry."
+                            ),
+                        }
+                        _skip_post = True
 
-                    await stream_event("action_payload", json.dumps(log_payload, indent=2))
-                    log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
-                    resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
-                    log.info(f"[AgentLoop] Tool response: {resp.status}")
+                if not _skip_post:
+                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=120.0)) as client:
+                        # Secure Log Redaction
+                        log_payload = json.loads(json.dumps(payload)) # Deep copy
+                        def redact(d):
+                            if isinstance(d, dict):
+                                for k, v in d.items():
+                                    if k in ["github_token", "gitlab_token", "git_token", "api_key", "ha_token", "nextcloud_pass"]:
+                                        d[k] = "[REDACTED]"
+                                    else:
+                                        redact(v)
+                            elif isinstance(d, list):
+                                for item in d:
+                                    redact(item)
+                        redact(log_payload)
 
-                    if resp.status == 422:
-                        try:
-                            error_detail = (await resp.json()).get("detail", "Validation failed")
-                            # Sanitize error detail before exposing to LLM — 422 responses
-                            # echo back the full request payload including credentials
-                            error_detail = sanitize_for_llm(error_detail)
-                            msg = f"SCHEMA ERROR (422): {error_detail}. Ensure you are using the correct field names (e.g. 'action', 'message') instead of 'command' or 'commit_message'."
-                        except Exception:
-                            msg = f"SCHEMA ERROR (422): {await resp.text()}. Check your field names."
-                        exec_data = {"status": "ERROR", "message": msg}
-                    else:
-                        exec_data = await resp.json()
+                        await stream_event("action_payload", json.dumps(log_payload, indent=2))
+                        log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
+                        resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET})
+                        log.info(f"[AgentLoop] Tool response: {resp.status}")
+
+                        if resp.status == 422:
+                            try:
+                                error_detail = (await resp.json()).get("detail", "Validation failed")
+                                # Sanitize error detail before exposing to LLM — 422 responses
+                                # echo back the full request payload including credentials
+                                error_detail = sanitize_for_llm(error_detail)
+                                msg = f"SCHEMA ERROR (422): {error_detail}. Ensure you are using the correct field names (e.g. 'action', 'message') instead of 'command' or 'commit_message'."
+                            except Exception:
+                                msg = f"SCHEMA ERROR (422): {await resp.text()}. Check your field names."
+                            exec_data = {"status": "ERROR", "message": msg}
+                        else:
+                            exec_data = await resp.json()
 
                     # Sanitize execution results before any downstream use
                     exec_data = sanitize_for_llm(exec_data)
