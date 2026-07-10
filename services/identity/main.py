@@ -144,6 +144,14 @@ def _ensure_schema_upgrades() -> None:
         with engine.connect() as conn:
             if "slug" not in raven_columns:
                 conn.execute(text("ALTER TABLE ravenmission ADD COLUMN slug VARCHAR"))
+            if "queued_at" not in raven_columns:
+                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN queued_at VARCHAR"))
+            if "started_at" not in raven_columns:
+                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN started_at VARCHAR"))
+            if "completed_at" not in raven_columns:
+                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN completed_at VARCHAR"))
+            if "duration" not in raven_columns:
+                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN duration INTEGER"))
             conn.commit()
 
     if "deviceassignment" in inspector.get_table_names():
@@ -1663,6 +1671,9 @@ def create_mission(
             raise HTTPException(status_code=400, detail=f"Mission slug '{body.slug}' already exists")
 
     mission = RavenMission(**body.model_dump())
+    # A mission is "queued" the moment it is created for execution.
+    if not mission.queued_at:
+        mission.queued_at = datetime.now(UTC).isoformat()
     session.add(mission)
     session.commit()
     session.refresh(mission)

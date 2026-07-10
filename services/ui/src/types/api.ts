@@ -217,6 +217,10 @@ export interface RavenMission {
   progress: number;
   scheduled_for?: string | null;
   created_at: string;
+  queued_at?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  duration?: number | null;
   output_log?: string | null;
   result?: string | null;
   user_id?: number | null;
