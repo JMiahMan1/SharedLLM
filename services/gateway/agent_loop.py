@@ -850,6 +850,65 @@ async def _is_blocked_for_repo(
     return True
 
 
+async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials) -> None:
+    """After a successful ``gh repo create`` inside a workspace, fetch the new
+    remote and bind it to the workspace settings (repo_url / git_remote /
+    default_branch). This guarantees the workspace's "Source Repository" is
+    populated even if the model forgets to call WorkspaceSettingsUpdateRequest.
+    Best-effort: any failure is logged and ignored so it never blocks the mission.
+    """
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            res = await client.post(
+                f"{WORKSPACE_RUNTIME_SVC}/workspace/resolve",
+                json={"workspace_id": workspace_id, "user_context": {"user": creds.user, "is_admin": creds.is_admin}},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            if res.status != 200:
+                return
+            ws = (await res.json()).get("workspace") or {}
+            if ws.get("repo_url"):
+                return  # already wired
+            path = ws.get("resolved_path") or ws.get("local_path")
+        if not path:
+            return
+
+        uc = {
+            "user": creds.user,
+            "is_admin": creds.is_admin,
+            "api_key": creds.api_key,
+            "github_token": creds.github_token,
+            "git_token": creds.git_token,
+        }
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
+            shell = await client.post(
+                f"{EXECUTION_SVC}/execute/workspace_shell",
+                json={
+                    "workspace_id": workspace_id,
+                    "command": "git remote get-url origin 2>/dev/null; git symbolic-ref --short HEAD 2>/dev/null",
+                    "user_context": uc,
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+            if shell.status != 200:
+                return
+            out = (await shell.json()).get("message", "") or ""
+        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
+        url = next((ln for ln in lines if ln.startswith("http") or ln.endswith(".git") or "@" in ln), None)
+        branch = next((ln for ln in lines if ln and ln != url), None) or "main"
+        if not url:
+            return
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
+            await client.patch(
+                f"{WORKSPACE_RUNTIME_SVC}/workspaces/{workspace_id}",
+                json={"repo_url": url, "git_remote": "origin", "default_branch": branch},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+        log.info(f"[AgentLoop] Auto-wired repo {url} (branch {branch}) to workspace {workspace_id}")
+    except Exception as e:
+        log.warning(f"[AgentLoop] Auto-wire repo failed for {workspace_id}: {e}")
+
+
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None) -> Any:
     full_audit_log = []
 
@@ -1468,7 +1527,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 else:
                     # Build a helpful tool table for the LLM
                     tool_categories = {
-                        "Workspace Tools": ["workspacefilereadrequest", "workspacefilewriterequest", "workspacefilepatchrequest", "workspacelintrequest", "workspacesearchrequest", "workspaceshellrequest", "workspacebootstraprequest"],
+                        "Workspace Tools": ["workspacefilereadrequest", "workspacefilewriterequest", "workspacefilepatchrequest", "workspacelintrequest", "workspacesearchrequest", "workspaceshellrequest", "workspacebootstraprequest", "workspacecreaterequest", "workspacesettingsupdaterequest"],
                         "Git Tools": ["gitoperationrequest"],
                         "Storage Tools": ["storagefilereadrequest", "storagefilewriterequest", "storagelistrequest", "storageindexrequest"],
                         "Media Tools": ["mediaplayrequest", "mediatransportrequest", "mediastatusrequest", "videoplayrequest"],
@@ -1704,6 +1763,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                     workspace_id = str(_created)
                                     created_workspaces.add(workspace_id)
                                     log.info(f"[AgentLoop] Adopted newly created workspace: {workspace_id}")
+
+                            # Auto-wire the new repo to the workspace settings after a
+                            # successful `gh repo create` (best-effort, model-independent),
+                            # so the workspace's "Source Repository" is populated even if
+                            # the model forgets to call WorkspaceSettingsUpdateRequest.
+                            if (
+                                workspace_id
+                                and isinstance(exec_data, dict)
+                                and exec_data.get("status") != "ERROR"
+                                and lookup_action in _ws_actions
+                            ):
+                                _repo_cmd = " ".join(str(payload.get(k, "")) for k in ("command", "args", "action", "repo_url"))
+                                if "gh repo create" in _repo_cmd or "repo create" in _repo_cmd or "repo_create" in _repo_cmd:
+                                    await _autowire_created_repo(workspace_id, creds)
 
                     # Sanitize execution results before any downstream use
                     exec_data = sanitize_for_llm(exec_data)
