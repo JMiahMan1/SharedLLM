@@ -7,6 +7,24 @@ from cryptography.fernet import Fernet
 
 _test_fernet_key = Fernet.generate_key().decode()
 
+# Load env files (.env.test takes precedence over .env) so tests pick up real
+# configuration (e.g. TIMEZONE) that is not otherwise set by the test defaults
+# below. Called AFTER the explicit test defaults so those always win.
+def _load_env_files():
+    for _env_name in (".env.test", ".env"):
+        _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _env_name)
+        if not os.path.exists(_env_path):
+            continue
+        with open(_env_path, "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line or _line.startswith("#") or "=" not in _line:
+                    continue
+                _k, _v = _line.split("=", 1)
+                _k, _v = _k.strip(), _v.strip().strip('"').strip("'")
+                os.environ.setdefault(_k, _v)
+
+
 # Ensure root is in PYTHONPATH for imports across services
 _root = os.path.dirname(os.path.abspath(__file__))
 if _root not in sys.path:
@@ -30,6 +48,10 @@ os.environ.setdefault("LLAMA_SERVER_PROXY_URL", "http://localhost:8009")
 os.environ.setdefault("FAST_PATH_THRESHOLD", "0.85")
 os.environ.setdefault("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
 os.environ.setdefault("TEST_MODE", "true")
+
+# Load real env config (.env.test > .env) for any vars not set above
+# (e.g. TIMEZONE). Runs after the explicit test defaults so those win.
+_load_env_files()
 
 
 @pytest.fixture(scope="session")
