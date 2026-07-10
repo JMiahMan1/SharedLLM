@@ -1695,7 +1695,9 @@ async def decompose_command_query(query: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 async def resolve_identity(body: dict) -> Any:
-    async def do_resolve():
+    from services.gateway.cache import get_cached_identity
+
+    async def _do_resolve() -> Any:
         client = get_http_client()
         resp = await client.post(
             f"{IDENTITY_SVC}/api/resolve",
@@ -1712,11 +1714,15 @@ async def resolve_identity(body: dict) -> Any:
             log.error(f"Identity resolution returned non-dict: {data}")
             raise HTTPException(status_code=500, detail="Identity resolution format error")
         return data
+
     try:
-        return await retry_http_request(do_resolve, "Identity resolution", max_retries=2, base_delay=0.1)
+        return await get_cached_identity(
+            body,
+            lambda: retry_http_request(_do_resolve, "Identity resolution", max_retries=2, base_delay=0.1),
+        )
     except aiohttp.ClientError as e:
-      log.error(f"Identity service unreachable: {e}")
-      raise HTTPException(status_code=503, detail="Identity service unreachable")
+        log.error(f"Identity service unreachable: {e}")
+        raise HTTPException(status_code=503, detail="Identity service unreachable")
 
 
 async def resolve_first_user() -> Any:
@@ -3173,6 +3179,9 @@ async def proxy_change_password(request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
+        if resp.status < 400:
+            from services.gateway.cache import invalidate_identity
+            invalidate_identity()
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
 
@@ -3258,7 +3267,6 @@ async def proxy_get_settings(request: Request):
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return JSONResponse(status_code=resp.status, content=await resp.json())
-
 @app.patch("/api/settings/{key}")
 async def proxy_update_setting(key: str, request: Request):
     body = await request.json()
@@ -3270,7 +3278,11 @@ async def proxy_update_setting(key: str, request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
+        if resp.status < 400:
+            from services.gateway.cache import invalidate_settings
+            invalidate_settings()
         return JSONResponse(status_code=resp.status, content=await resp.json())
+
 
 @app.post("/api/settings")
 async def proxy_update_settings_bulk(request: Request):
@@ -3283,6 +3295,9 @@ async def proxy_update_settings_bulk(request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
+        if resp.status < 400:
+            from services.gateway.cache import invalidate_settings
+            invalidate_settings()
         return JSONResponse(status_code=resp.status, content=await resp.json())
 
 @app.get("/api/users")
@@ -5074,6 +5089,8 @@ async def update_gateway_config(new_config: dict):
                     raise HTTPException(status_code=500, detail=str(e))
 
     log.info(f"Updated Gateway Config via Identity SVC: {new_config}")
+    from services.gateway.cache import invalidate_settings
+    invalidate_settings()
     return {"status": "SUCCESS", "config": new_config}
 
 
@@ -5188,6 +5205,8 @@ async def update_dns_config(request: Request):
                 , timeout=aiohttp.ClientTimeout(total=5.0),
             )
 
+    from services.gateway.cache import invalidate_settings
+    invalidate_settings()
     return {"status": "SUCCESS", "message": "DNS configuration updated"}
 
 
@@ -5264,6 +5283,8 @@ async def _save_dns_mappings(mappings: dict) -> None:
             headers={"X-Internal-Secret": INTERNAL_SECRET},
              timeout=aiohttp.ClientTimeout(total=5.0),
         )
+    from services.gateway.cache import invalidate_settings
+    invalidate_settings()
 
 
 def _hostname_for_id(mappings: dict, record_id: int) -> str | None:
