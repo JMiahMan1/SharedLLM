@@ -4520,38 +4520,6 @@ async def _build_raven_system_prompt(query: str) -> str:
     )
 
 
-async def _create_mission_workspace(mission_id: int, query: str, owner_user: str | None) -> str | None:
-    """Create a dedicated workspace for a Raven mission so the agent has a clean
-    sandbox to operate in (and the mission visibly 'creates a workspace').
-
-    Returns the workspace id, or ``None`` if creation fails (the agent loop will
-    then fall back to a default workspace).
-    """
-    ws_id = f"raven-mission-{mission_id}"
-    payload = {
-        "id": ws_id,
-        "display_name": f"Raven Mission #{mission_id}",
-        "scope": "user",
-        "owner_user": owner_user or "default",
-        "is_default": False,
-        "auto_pull_enabled": False,
-        "auto_backup_enabled": False,
-    }
-    try:
-        async with borrow_http_client() as client:
-            resp = await client.post(
-                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
-                json=payload,
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-            )
-            if resp.status == 200:
-                return ws_id
-            log.warning(f"[mission] workspace create for {ws_id} returned {resp.status}: {await resp.text()[:200]}")
-    except Exception as e:
-        log.warning(f"[mission] workspace create for {ws_id} failed: {e}")
-    return None
-
-
 async def _enqueue_user_mission(
     *,
     query: str,
@@ -4568,15 +4536,17 @@ async def _enqueue_user_mission(
     autonomous routing, so that any chat request recognized as a Raven mission
     shows up in the Raven queue. Returns the mission record (status=queued).
 
-    If no workspace is assigned, a dedicated workspace is created for the mission
-    so Raven operates in its own sandbox (and the mission visibly creates one).
+    The mission runs with NO pre-assigned workspace: Raven creates its own
+    dedicated workspace at the start of the mission (via the WorkspaceCreateRequest
+    tool) and operates inside it. The gateway only supplies the means (the tool);
+    Raven performs the creation.
     """
     settings = await get_llm_settings()
     target_model = coding_model or settings.get("coding_model") or settings.get("ollama_coding_model")
     if not target_model:
         raise RuntimeError("No coding model configured. Mission cannot be dispatched.")
 
-    owner = creds.get("user_id") or creds.get("user") or "default"
+    owner_user = creds.get("user_id")
 
     mission_payload = {
         "slug": slug,
@@ -4584,7 +4554,7 @@ async def _enqueue_user_mission(
         "priority": priority,
         "proposed_mission": query,
         "coding_model": target_model,
-        "user_id": owner,
+        "user_id": owner_user,
         "workspace_id": workspace_id,
     }
 
@@ -4600,18 +4570,7 @@ async def _enqueue_user_mission(
         mission_data = await resp.json()
         mission_id = mission_data["id"]
 
-        # Create a dedicated workspace for this mission (Raven builds inside it).
-        if not workspace_id:
-            created_ws = await _create_mission_workspace(mission_id, query, owner)
-            if created_ws:
-                workspace_id = created_ws
-                await client.patch(
-                    f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                    json={"workspace_id": workspace_id},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                )
-
-        await job_queue.enqueue_job(owner or "raven_user", {
+        await job_queue.enqueue_job(creds.get("user") or owner_user or "raven_user", {
             "query": query,
             "model": target_model,
             "system": system,
@@ -4627,7 +4586,6 @@ async def _enqueue_user_mission(
             headers={"X-Internal-Secret": INTERNAL_SECRET},
         )
         mission_data["status"] = "queued"
-        mission_data["workspace_id"] = workspace_id
         return mission_data
 
 
