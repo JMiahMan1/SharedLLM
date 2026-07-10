@@ -8,11 +8,21 @@ The HA integration exposes domain-level services:
 These use HA's existing MA connection, avoiding direct MA REST API auth issues.
 """
 import logging
+from contextlib import asynccontextmanager
 from typing import Any
 
 import aiohttp
 
 log = logging.getLogger("execution.mass_ha")
+
+from services.execution.http_client import get_session, host_of
+
+
+@asynccontextmanager
+async def _mass_ha_session(ha_url: str, verify: bool = False):
+    """Yield the pooled session WITHOUT closing it (reused across calls)."""
+    yield await get_session(host_of(ha_url), verify=verify)
+
 
 _TIMEOUT = aiohttp.ClientTimeout(total=30.0, connect=10.0)
 
@@ -39,12 +49,13 @@ async def _call_ha_ma_service(
         payload.update(service_data)
 
     try:
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as client, client.post(url, headers=headers, json=payload) as resp:
-            if resp.status == 200:
-                return await resp.json()
-            text = await resp.text()
-            log.error(f"[mass_ha] Service {service} returned {resp.status}: {text[:300]}")
-            return None
+        async with _mass_ha_session(ha_url) as client:
+            async with client.post(url, headers=headers, json=payload, timeout=_TIMEOUT) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                text = await resp.text()
+                log.error(f"[mass_ha] Service {service} returned {resp.status}: {text[:300]}")
+                return None
     except Exception as e:
         log.error(f"[mass_ha] Service {service} failed: {e}")
         return None
@@ -309,10 +320,10 @@ async def play_media(
     }
 
     try:
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+        async with _mass_ha_session(ha_url) as client:
             headers = {"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"}
             url = f"{ha_url.rstrip('/')}/api/services/media_player/play_media"
-            async with client.post(url, headers=headers, json=payload) as resp:
+            async with client.post(url, headers=headers, json=payload, timeout=_TIMEOUT) as resp:
                 if resp.status == 200:
                     return {"ok": True, "message": f"Playing on {entity_id}"}
                 return {"ok": False, "error": f"HA returned {resp.status}", "status_code": resp.status}
@@ -330,9 +341,9 @@ async def get_ma_players(ha_url: str, ha_token: str) -> list[dict[str, Any]]:
         return []
 
     try:
-        async with aiohttp.ClientSession(timeout=_TIMEOUT) as client:
+        async with _mass_ha_session(ha_url) as client:
             headers = {"Authorization": f"Bearer {ha_token}"}
-            async with client.get(f"{ha_url.rstrip('/')}/api/states", headers=headers) as resp:
+            async with client.get(f"{ha_url.rstrip('/')}/api/states", headers=headers, timeout=_TIMEOUT) as resp:
                 if resp.status != 200:
                     return []
 
