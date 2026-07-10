@@ -8,7 +8,7 @@ import re
 import subprocess
 import tempfile
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
+from services.common.http import get_client
 from services.config import (
     IDENTITY_SVC_URL,
     INTERNAL_SECRET,
@@ -54,10 +55,11 @@ async def _get_workspace_root_async() -> Path:
     """Async implementation of get_workspace_root."""
     try:
         # We use a short timeout and cache or just fallback if identity is down
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.0)) as client:
+        async with get_client() as client:
             resp = await client.get(
                 f"{IDENTITY_SVC_URL}/api/settings/workspace_runtime_root",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=2.0),
             )
             if resp.status == 200:
                 data = await resp.json()
@@ -73,7 +75,7 @@ async def _get_workspace_root_async() -> Path:
 def get_workspace_root() -> Path:
     """Fetch the current workspace root from global settings or fallback to env/default."""
     try:
-        return asyncio.get_event_loop().run_until_complete(_get_workspace_root_async())
+        return asyncio.run(_get_workspace_root_async())
     except Exception as e:
         log.debug(f"Failed to fetch workspace_runtime_root from identity: {e}")
         return _DEFAULT_WORKSPACE_ROOT
@@ -436,7 +438,7 @@ async def lifespan(app: FastAPI):
     _seed_db_from_json()
 
     with Session(engine) as session:
-        pending = session.exec(select(Workspace).where(Workspace.webhook_token != None)).all()
+        pending = session.exec(select(Workspace).where(Workspace.webhook_token is not None)).all()
         migrated = 0
         for workspace in pending:
             if workspace.webhook_token_enc:
@@ -507,8 +509,8 @@ def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
 async def _http_post_async(url: str, **kwargs) -> Any:
     """Async HTTP POST helper using aiohttp."""
     timeout = kwargs.pop("timeout", 30.0)
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as client:
-        resp = await client.post(url, **kwargs)
+    async with get_client() as client:
+        resp = await client.post(url, timeout=aiohttp.ClientTimeout(total=timeout), **kwargs)
         if resp.status != 200:
             text = await resp.text()
             raise HTTPException(status_code=resp.status, detail=f"Request failed: {text}")
@@ -537,7 +539,7 @@ def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Pat
             target.relative_to(base)
         except (ValueError, RuntimeError):
             log.warning(f"SECURITY ALERT: Path traversal attempt blocked! Base='{base}', Relative='{relative}'")
-            raise HTTPException(status_code=403, detail="Forbidden: Path traversal detected")
+            raise HTTPException(status_code=403, detail="Forbidden: Path traversal detected") from None
 
         # Existence check if required
         if must_exist and not target.exists():
@@ -548,7 +550,7 @@ def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Pat
         raise
     except Exception as e:
         log.error(f"Unexpected error resolving path: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to resolve path: {relative}")
+        raise HTTPException(status_code=500, detail=f"Failed to resolve path: {relative}") from None
 
 
 def _strip_workspace_path_prefix(relative_path: str, workspace: dict[str, Any]) -> str:
@@ -624,7 +626,7 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     try:
         os.makedirs(str(resolved_path), exist_ok=True)
     except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to create workspace directory {resolved_path}: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to create workspace directory {resolved_path}: {exc}") from None
     if not resolved_path.is_dir():
         raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {effective_path}")
     workspace: dict[str, Any] = dict(match)
@@ -764,7 +766,7 @@ def _derive_workspace_id(requested_id: str | None, resolved_user: str, repo_url:
 
 def _derive_workspace_container_path(workspace_id: str, scope: str = "user", owner_user: str | None = None) -> str:
     """Derive the container mount path based on scope.
-    
+
     System workspaces: system/{workspace_id}
     User workspaces: users/{owner_user}/{workspace_id}
     """
@@ -828,7 +830,7 @@ def _list_workspace_entries(
             try:
                 child.relative_to(workspace_path)
             except (ValueError, RuntimeError):
-                raise HTTPException(status_code=403, detail="Forbidden: Path traversal")
+                raise HTTPException(status_code=403, detail="Forbidden: Path traversal") from None
 
             rel_path = child.relative_to(workspace_path).as_posix()
             is_dir = child.is_dir()
@@ -1179,10 +1181,11 @@ def _provider_child_path(base_path: str, relative_path: str) -> str:
 
 async def _storage_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
+        async with get_client() as client:
             resp = await client.post(
                 f"{STORAGE_SVC_URL}{path}" if not path.startswith("http") else path,
                 json=payload,
+                timeout=aiohttp.ClientTimeout(total=30.0),
             )
             if resp.status != 200:
                 text = await resp.text()
@@ -1230,32 +1233,30 @@ def _run_git_with_optional_askpass(
         return _run_command(workspace_path, args, timeout_seconds=timeout_seconds)
 
     username, password = credentials
-    askpass_file = tempfile.NamedTemporaryFile("w", delete=False, prefix="sharedllm-git-askpass-", suffix=".sh")
-    try:
+    with tempfile.NamedTemporaryFile("w", delete=False, prefix="sharedllm-git-askpass-", suffix=".sh") as askpass_file:
+        askpass_path = askpass_file.name
         askpass_file.write("#!/bin/sh\n")
         askpass_file.write('case "$1" in\n')
-        askpass_file.write('  *Username*) printf \'%s\\n\' \"$SHAREDLLM_GIT_USERNAME\" ;;\n')
-        askpass_file.write('  *) printf \'%s\\n\' \"$SHAREDLLM_GIT_PASSWORD\" ;;\n')
+        askpass_file.write('  *Username*) printf \'%s\\n\' "$SHAREDLLM_GIT_USERNAME" ;;\n')
+        askpass_file.write('  *) printf \'%s\\n\' "$SHAREDLLM_GIT_PASSWORD" ;;\n')
         askpass_file.write("esac\n")
         askpass_file.flush()
-        askpass_file.close()
-        os.chmod(askpass_file.name, 0o700)
+    os.chmod(askpass_path, 0o700)
+    try:
         return _run_command(
             workspace_path,
             args,
             timeout_seconds=timeout_seconds,
             env_overrides={
                 "GIT_TERMINAL_PROMPT": "0",
-                "GIT_ASKPASS": askpass_file.name,
+                "GIT_ASKPASS": askpass_path,
                 "SHAREDLLM_GIT_USERNAME": username,
                 "SHAREDLLM_GIT_PASSWORD": password,
             },
         )
     finally:
-        try:
-            os.unlink(askpass_file.name)
-        except FileNotFoundError:
-            pass
+        with suppress(FileNotFoundError):
+            os.unlink(askpass_path)
 
 
 START_TIME = time.time()
@@ -1365,15 +1366,14 @@ async def _create_github_repo(
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
-        async with client.post(f"{api_base}/user/repos", json=payload, headers=headers) as resp:
-            if resp.status not in (200, 201):
-                text = await resp.text()
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"GitHub repository creation failed ({resp.status}): {text[:400]}",
-                )
-            data = await resp.json()
+    async with get_client() as client, client.post(f"{api_base}/user/repos", json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60.0)) as resp:
+        if resp.status not in (200, 201):
+            text = await resp.text()
+            raise HTTPException(
+                status_code=400,
+                detail=f"GitHub repository creation failed ({resp.status}): {text[:400]}",
+            )
+        data = await resp.json()
     clone_url = data.get("clone_url") or data.get("ssh_url")
     if not clone_url:
         raise HTTPException(status_code=500, detail="GitHub repository created but no clone URL was returned")
@@ -1452,7 +1452,7 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
         except HTTPException:
             raise
         except Exception as e:  # pragma: no cover - network/parse edge cases
-            raise HTTPException(status_code=400, detail=f"GitHub repository creation failed: {e}")
+            raise HTTPException(status_code=400, detail=f"GitHub repository creation failed: {e}") from None
         created_repo = True
         workspace["repo_url"] = repo_url
         with Session(engine) as session:
@@ -1544,7 +1544,7 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to create workspace directory {resolved_path}: {exc}",
-            )
+            ) from None
         if not resolved_path.is_dir():
             raise HTTPException(
                 status_code=400,
@@ -1646,7 +1646,7 @@ def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(def
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create workspace directory {workspace_path}: {exc}",
-        )
+        ) from None
     target = resolve_safe_path(workspace_path, req.relative_path, must_exist=False)
 
     if target.exists() and not target.is_file():
@@ -2619,10 +2619,7 @@ def git_show(req: GitShowRequest, x_internal_secret: str | None = Header(default
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
 
-    if req.file_path:
-        args = ["git", "show", f"{req.ref}:{req.file_path}"]
-    else:
-        args = ["git", "show", "--stat", req.ref]
+    args = ["git", "show", f"{req.ref}:{req.file_path}"] if req.file_path else ["git", "show", "--stat", req.ref]
 
     result = _run_command(workspace_path, args)
     if result["returncode"] != 0:
@@ -2757,10 +2754,8 @@ async def git_pull_webhook(
 
                 # Check for uncommitted changes if it's a git repo
                 git_status_result = _run_command(workspace_path, ["git", "status", "--porcelain"])
-                has_unsaved_changes = False
                 if git_status_result["returncode"] == 0 and git_status_result["stdout"].strip():
                     # Git repo exists but has uncommitted changes
-                    has_unsaved_changes = True
                     untracked = [line.strip() for line in git_status_result["stdout"].strip().split("\n") if line.strip()]
                     log.error(f"Workspace {workspace_id} has {len(untracked)} uncommitted/unstaged changes. Aborting to prevent data loss.")
                     raise HTTPException(
@@ -2796,7 +2791,7 @@ async def git_pull_webhook(
                                 raise HTTPException(
                                     status_code=500,
                                     detail=f"Failed to clear workspace directory: {fallback_err!s}"
-                                )
+                                ) from None
                             break
 
                 # Use the HTTPS redirector for the clone too if needed
@@ -2837,7 +2832,7 @@ async def git_pull_webhook(
         raise
     except Exception as e:
         log.error(f"Webhook error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from None
 
 
 async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path: str, remote_path: str, excludes: list[str] | None = None):
@@ -2848,11 +2843,12 @@ async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path
     log.info(f"Starting Nextcloud sync for {workspace_id} (owner: {owner_user})")
     try:
         # 1. Resolve credentials from Identity
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        async with get_client() as client:
             resp = await client.post(
                 f"{IDENTITY_SVC_URL}/api/resolve",
                 json={"rag_user": owner_user},
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
             )
             if resp.status != 200:
                 text = await resp.text()
