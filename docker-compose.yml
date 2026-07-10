@@ -28,10 +28,13 @@ services:
       - label=disable
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    env_file:
+      - .env
     environment:
       - DNS_PORT=53
       - UPSTREAM_DNS=192.168.1.1
-      - IDENTITY_SVC_URL=${IDENTITY_SVC_URL:-http://identity:8001}
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - INTERNAL_SECRET=${INTERNAL_SECRET}
 
   caddy:
@@ -81,7 +84,8 @@ services:
       - FERNET_KEY=${FERNET_KEY}
       - LEGACY_ENV_PATH=/app/.env
       - FORCE_RESEED=${FORCE_RESEED:-false}
-      - IDENTITY_SVC_URL=${IDENTITY_SVC_URL:-http://identity:8001}
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - TZ=America/Phoenix
     volumes:
       - identity_db:/data
@@ -111,18 +115,21 @@ services:
     container_name: sharedllm_execution
     restart: always
     network_mode: host
+    env_file:
+      - .env
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=${OLLAMA_URL}
-      - IDENTITY_SVC_URL=http://localhost:8001
-      - EXECUTION_SVC_URL=http://host.docker.internal:8003
-      - RAG_SVC_URL=http://localhost:8004
-      - STORAGE_SVC_URL=http://localhost:8005
-      - LOGGING_SVC_URL=http://localhost:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://localhost:8007
-      - REDIS_URL=redis://localhost:6379/0
-      - SEARXNG_URL=http://localhost:8080
+      - NETWORK_MODE=host
+      - IDENTITY_SVC_URL=${HOST_IDENTITY_SVC_URL}
+      - EXECUTION_SVC_URL=${HOST_EXECUTION_SVC_URL}
+      - RAG_SVC_URL=${HOST_RAG_SVC_URL}
+      - STORAGE_SVC_URL=${HOST_STORAGE_SVC_URL}
+      - LOGGING_SVC_URL=${HOST_LOGGING_SVC_URL}
+      - WORKSPACE_RUNTIME_SVC_URL=${HOST_WORKSPACE_RUNTIME_SVC_URL}
+      - REDIS_URL=${HOST_REDIS_URL}
+      - SEARXNG_URL=${HOST_SEARXNG_URL}
       - EXECUTION_EXTERNAL_HOST=host.docker.internal
       - TEMP_MEDIA_DIR=/workspaces
       - MODELS_DIR=/workspaces/models
@@ -150,16 +157,19 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_rag
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=${OLLAMA_URL}
-      - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://host.docker.internal:8003
-      - RAG_SVC_URL=http://rag:8004
-      - STORAGE_SVC_URL=http://storage:8005
-      - LOGGING_SVC_URL=http://logging:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
+      - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
+      - RAG_SVC_URL=${BRIDGE_RAG_SVC_URL}
+      - STORAGE_SVC_URL=${BRIDGE_STORAGE_SVC_URL}
+      - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
+      - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - CHROMA_PERSIST_DIR=/data/chroma_db
       - TZ=America/Phoenix
       - HUGGINGFACE_HUB_DISABLE_XET=1
@@ -193,10 +203,13 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_capabilities_sync
     working_dir: /app
+    env_file:
+      - .env
     volumes:
       - ./scripts:/app/scripts:ro
     environment:
-      - RAG_SVC_URL=http://rag:8004
+      - NETWORK_MODE=bridge
+      - RAG_SVC_URL=${BRIDGE_RAG_SVC_URL}
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
     depends_on:
@@ -220,6 +233,8 @@ services:
     container_name: sharedllm_gateway
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
+    env_file:
+      - .env
     depends_on:
       identity:
         condition: service_healthy
@@ -229,14 +244,15 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=${OLLAMA_URL}
-      - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://host.docker.internal:8003
-      - RAG_SVC_URL=http://rag:8004
-      - STORAGE_SVC_URL=http://storage:8005
-      - LOGGING_SVC_URL=http://logging:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
+      - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
+      - RAG_SVC_URL=${BRIDGE_RAG_SVC_URL}
+      - STORAGE_SVC_URL=${BRIDGE_STORAGE_SVC_URL}
+      - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
+      - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - CONTROL_PLANE_URL=http://control_plane:8008
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=${BRIDGE_REDIS_URL}
       - TZ=America/Phoenix
       - HOME=/home/sharedllm
     volumes:
@@ -260,17 +276,20 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_logging
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=${OLLAMA_URL}
-      - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://host.docker.internal:8003
-      - RAG_SVC_URL=http://rag:8004
-      - STORAGE_SVC_URL=http://storage:8005
-      - LOGGING_SVC_URL=http://logging:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
-      - REDIS_URL=redis://redis:6379/0
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
+      - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
+      - RAG_SVC_URL=${BRIDGE_RAG_SVC_URL}
+      - STORAGE_SVC_URL=${BRIDGE_STORAGE_SVC_URL}
+      - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
+      - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
+      - REDIS_URL=${BRIDGE_REDIS_URL}
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
@@ -305,13 +324,14 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=${OLLAMA_URL}
-      - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://host.docker.internal:8003
-      - RAG_SVC_URL=http://rag:8004
-      - STORAGE_SVC_URL=http://storage:8005
-      - LOGGING_SVC_URL=http://logging:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
-      - REDIS_URL=redis://redis:6379/0
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
+      - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
+      - RAG_SVC_URL=${BRIDGE_RAG_SVC_URL}
+      - STORAGE_SVC_URL=${BRIDGE_STORAGE_SVC_URL}
+      - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
+      - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
+      - REDIS_URL=${BRIDGE_REDIS_URL}
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
@@ -336,16 +356,19 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_storage
     restart: unless-stopped
+    env_file:
+      - .env
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=${OLLAMA_URL}
-      - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://host.docker.internal:8003
-      - RAG_SVC_URL=http://rag:8004
-      - STORAGE_SVC_URL=http://storage:8005
-      - LOGGING_SVC_URL=http://logging:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
+      - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
+      - RAG_SVC_URL=${BRIDGE_RAG_SVC_URL}
+      - STORAGE_SVC_URL=${BRIDGE_STORAGE_SVC_URL}
+      - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
+      - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - NEXTCLOUD_URL=${NEXTCLOUD_URL:-}
       - NEXTCLOUD_USER=${NEXTCLOUD_USER:-}
       - NEXTCLOUD_PASS=${NEXTCLOUD_PASS:-}
@@ -381,12 +404,13 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=${OLLAMA_URL}
-      - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://host.docker.internal:8003
-      - RAG_SVC_URL=http://rag:8004
-      - STORAGE_SVC_URL=http://storage:8005
-      - LOGGING_SVC_URL=http://logging:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
+      - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
+      - RAG_SVC_URL=${BRIDGE_RAG_SVC_URL}
+      - STORAGE_SVC_URL=${BRIDGE_STORAGE_SVC_URL}
+      - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
+      - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - WORKSPACE_DATABASE_URL=sqlite:////data/workspace_runtime.db
       - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
       - WORKSPACE_RUNTIME_ROOT=/workspaces
@@ -456,12 +480,13 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
       - OLLAMA_URL=${OLLAMA_URL}
-      - IDENTITY_SVC_URL=http://identity:8001
-      - EXECUTION_SVC_URL=http://host.docker.internal:8003
-      - RAG_SVC_URL=http://rag:8004
-      - STORAGE_SVC_URL=http://storage:8005
-      - LOGGING_SVC_URL=http://logging:8006
-      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
+      - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
+      - RAG_SVC_URL=${BRIDGE_RAG_SVC_URL}
+      - STORAGE_SVC_URL=${BRIDGE_STORAGE_SVC_URL}
+      - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
+      - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - DOCKER_HOST=unix:///var/run/docker.sock
       - TZ=America/Phoenix
       - GHCR_TOKEN=${GHCR_TOKEN:-}
