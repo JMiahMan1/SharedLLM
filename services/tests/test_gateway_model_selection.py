@@ -495,7 +495,7 @@ async def test_single_turn_inference_supports_capability_index_tool(monkeypatch)
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def post(self, url, json=None, headers=None):
+        async def post(self, url, json=None, headers=None, **kwargs):
             captured["url"] = url
             captured["json"] = json
             captured["headers"] = headers
@@ -503,6 +503,13 @@ async def test_single_turn_inference_supports_capability_index_tool(monkeypatch)
                 status=200,
                 text=AsyncMock(return_value=""),
                 json=AsyncMock(return_value={"message": "Capability index refreshed."}),
+            )
+
+        async def get(self, url, **kwargs):
+            return SimpleNamespace(
+                status=200,
+                text=AsyncMock(return_value=""),
+                json=AsyncMock(return_value=[]),
             )
 
     monkeypatch.setattr(
@@ -519,7 +526,7 @@ async def test_single_turn_inference_supports_capability_index_tool(monkeypatch)
         ),
     )
     monkeypatch.setattr(gateway_orchestrator, "load_prompt_sync", lambda x: "test-single-turn-guide")
-    monkeypatch.setattr(gateway_orchestrator.aiohttp, "ClientSession", FakeAsyncClient)
+    monkeypatch.setattr(gateway_main, "shared_http_client", lambda: FakeAsyncClient())
 
     creds = gateway_main.ResolvedCredentials(user="alice")
     result = await gateway_orchestrator._single_turn_inference(
