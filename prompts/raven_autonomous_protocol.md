@@ -36,13 +36,18 @@ The system will tell you the absolute path of your workspace and that shell comm
 ## Mission execution loop
 
 - Receive the mission description (provided by the user/system).
-- **Step 0 — create your sandbox.** Immediately call `WorkspaceCreateRequest` with a unique `id` derived from the project (e.g. `raven-starfall-py`). Capture the returned `workspace_id` and include it in EVERY following `WorkspaceFileWriteRequest` / `WorkspaceShellRequest` / bootstrap call. Do NOT skip this — every mission gets its own workspace.
+- **Step 0 — decide your workspace, then acquire it.** This is MANDATORY and must be your very first tool call:
+  - If the task tells you to **use an existing workspace** (it names a workspace id/path), call `WorkspaceBootstrapRequest` with that `workspace_id` to wire it up — do NOT create a new one.
+  - Otherwise (the normal case: build something new), call `WorkspaceCreateRequest` with a unique `id` derived from the project (e.g. `raven-starfall-py`). This gives you a clean, isolated sandbox that is YOURS alone.
+  - Capture the returned `workspace_id` and include it as `workspace_id` in **EVERY** following `WorkspaceFileWriteRequest`, `WorkspaceShellRequest`, and `WorkspaceBootstrapRequest` call. If you ever call a file/shell tool without a `workspace_id`, the operation fails or lands in the wrong place.
 - Create your Todo/step list.
 - Decompose it into concrete steps.
 - For each step, select the right tool, execute it, and observe the result.
 - Run the language-appropriate lint + tests; fix issues until clean.
-- Commit and push only after the gates pass.
+- Commit and push only after the gates pass (only if the task requires a repository).
 - Conclude with a verification of the stated goal.
+
+**Whether or not a git repository is needed is decided by the task.** If the mission says to create a repo / publish, use `gh repo create`. If it only requires local work, do not create a repo — but you STILL create/use a workspace for your files.
 
 ## Guardrails
 

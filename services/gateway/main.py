@@ -7,7 +7,7 @@ import os
 import re
 import time
 import traceback
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -72,7 +72,7 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
-from services.gateway.tool_registry import get_tool_schemas, resolve_tool_call, SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE
+from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas
 
 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
@@ -754,7 +754,7 @@ async def get_documentation(
     if not api_key and auth_header and auth_header.startswith("Bearer "):
         api_key = auth_header.split(" ")[1]
 
-    if not internal_secret == INTERNAL_SECRET and not api_key:
+    if internal_secret != INTERNAL_SECRET and not api_key:
         # Fallback: check query params if needed, but header is preferred
         api_key = request.query_params.get("api_key")
 
@@ -1230,10 +1230,7 @@ async def build_workspace_readme_context(workspace: dict, user_id: str) -> str:
       )
       branch = str(status_data.get("branch") or "").strip() or "unknown"
       porcelain = status_data.get("porcelain") or []
-      if isinstance(porcelain, list):
-          status_lines = "\n".join(f"- {line}" for line in porcelain[:20]) or "- clean"
-      else:
-          status_lines = "- unavailable"
+      status_lines = "\n".join(f"- {line}" for line in porcelain[:20]) or "- clean" if isinstance(porcelain, list) else "- unavailable"
       git_status = f"Current branch: {branch}\nGit status:\n{status_lines}"
     except HTTPException:
       git_status = "Git status unavailable."
@@ -1286,10 +1283,7 @@ async def generate_workspace_readme_via_coding_model(
     data = await execute_inference(payload)
     generated = ""
     msg_obj = data.get("message")
-    if isinstance(msg_obj, dict):
-        generated = str(msg_obj.get("content") or "")
-    else:
-        generated = str(data.get("response") or "")
+    generated = str(msg_obj.get("content") or "") if isinstance(msg_obj, dict) else str(data.get("response") or "")
     if not generated.strip():
       raise HTTPException(status_code=502, detail="Coding model returned an empty README response")
 
@@ -1485,9 +1479,7 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str | Non
               or requested_normalized in friendly_normalized
               or friendly_normalized in requested_normalized
           )
-      if cached_device and eid == cached_device:
-          return True
-      return False
+      return bool(cached_device and eid == cached_device)
 
     def _is_cast_device(entity: dict) -> bool:
       """Check if entity is a Chromecast/Cast device based on capabilities."""
@@ -1501,9 +1493,7 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str | Non
           return True
       if app_id == "cc1ad845" or "default media receiver" in app_name:
           return True
-      if not device_class and "music_assistant" not in app_id:
-          return True
-      return False
+      return bool(not device_class and "music_assistant" not in app_id)
 
     def _is_ma_speaker(entity: dict) -> bool:
       """Check if entity is a Music Assistant speaker."""
@@ -1601,9 +1591,7 @@ def resolve_video_target(query: str, entities: list[dict], cached_device: str | 
               or requested_normalized in friendly_normalized
               or friendly_normalized in requested_normalized
           )
-      if cached_device and eid == cached_device:
-          return True
-      return False
+      return bool(cached_device and eid == cached_device)
 
     def _score(entity: dict) -> tuple[int, str]:
       eid = entity.get("entity_id", "")
@@ -1825,10 +1813,8 @@ async def fetch_ha_entities(creds: dict) -> list:
                                 from services.gateway.ha_state_cache import get_redis
                                 r = get_redis()
                                 for eid in orphaned:
-                                    try:
+                                    with suppress(Exception):
                                         r.delete(f"ha:state:{eid}")
-                                    except Exception:
-                                        pass
                                 log.info(f"[ha_sync] Cleaned up {len(orphaned)} orphaned Redis cache entries")
                     except Exception as _e:
                         log.debug(f"RAG sync fire-and-forget failed (non-critical): {_e}")
@@ -1996,7 +1982,7 @@ Example: ["Turn on the office light", "Play some jazz music"]
 
 async def perform_shadow_execution(query: str, creds: ResolvedCredentials, history: list, rag_context: str) -> str:
     """
-    Shadow Execution: Queries the live application model for a proposal, 
+    Shadow Execution: Queries the live application model for a proposal,
     then returns it to be analyzed by the dev model.
     """
     log.info("[ShadowExecution] Initiating...")
@@ -2063,9 +2049,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # Initialize the base payload for the loop
     ollama_payload = {
         "model": selected_model,
-        "messages": [
-            {"role": "system", "content": full_system}
-        ] + short_term + [{"role": "user", "content": query}],
+        "messages": [{"role": "system", "content": full_system}, *short_term, {"role": "user", "content": query}],
         "stream": False # AgentLoop is always non-streaming for the brain
     }
 
@@ -2170,30 +2154,24 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 if parsed:
                     tool_data = parsed
                 else:
-                    try:
+                    with suppress(Exception):
                         tool_data = json.loads(fenced)
-                    except Exception:
-                        pass
 
         # Strategy 2: First { to last }
         if tool_data is None:
             first_brace = ans.find("{")
             last_brace = ans.rfind("}")
             if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-                try:
+                with suppress(Exception):
                     tool_data = json.loads(ans[first_brace:last_brace+1])
-                except Exception:
-                    pass
 
         # Strategy 3: First [ to last ] (for array-wrapped)
         if tool_data is None:
             first_bracket = ans.find("[")
             last_bracket = ans.rfind("]")
             if first_bracket != -1 and last_bracket != -1 and last_bracket > first_bracket:
-                try:
+                with suppress(Exception):
                     tool_data = json.loads(ans[first_bracket:last_bracket+1])
-                except Exception:
-                    pass
 
         # Strategy 4: Fallback for raw markdown code blocks (Diffs or Full Code)
         if tool_data is None and "```" in ans:
@@ -2415,14 +2393,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         else:
                             payload[k] = v
 
-            if not action:
-                if "path" in payload:
-                    if (payload.get("is_patch") or "chunks" in payload):
-                        action = "WorkspaceFilePatchRequest"
-                    elif payload.get("content") is not None:
-                        action = "WorkspaceFileWriteRequest"
-                    else:
-                        action = "WorkspaceFileReadRequest"
+            if not action and "path" in payload:
+                if (payload.get("is_patch") or "chunks" in payload):
+                    action = "WorkspaceFilePatchRequest"
+                elif payload.get("content") is not None:
+                    action = "WorkspaceFileWriteRequest"
+                else:
+                    action = "WorkspaceFileReadRequest"
 
             action_map_aliases = {
                 "read_file": "WorkspaceFileReadRequest",
@@ -2635,10 +2612,7 @@ async def chat_handler(request: Request, background_tasks=None):
     query = body.get("query")
     if not query and "messages" in body and isinstance(body["messages"], list) and len(body["messages"]) > 0:
         last_msg = body["messages"][-1]
-        if isinstance(last_msg, dict):
-            query = last_msg.get("content")
-        else:
-            query = str(last_msg)
+        query = last_msg.get("content") if isinstance(last_msg, dict) else str(last_msg)
 
     if not query:
         return JSONResponse({"status": "ERROR", "message": "No query provided."}, status_code=400)
@@ -2983,6 +2957,7 @@ async def chat_handler(request: Request, background_tasks=None):
         "is_openai": is_openai,
     }
 
+    assert job_queue is not None, "Job queue not initialized"
     job_id = await job_queue.enqueue_job(user_id, job_payload)
 
     # 5. Modality-Specific Response Logic (Phase 2 Integration)
@@ -3273,7 +3248,7 @@ async def proxy_users(request: Request):
 # --- Telemetry Monitoring ---
 @app.get("/api/telemetry/enroll")
 async def proxy_list_telemetry_enrollments(request: Request):
-    creds = await _resolve_identity_from_request(request)
+    await _resolve_identity_from_request(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -3284,7 +3259,7 @@ async def proxy_list_telemetry_enrollments(request: Request):
 
 @app.post("/api/telemetry/enroll")
 async def proxy_enroll_telemetry(request: Request):
-    creds = await _resolve_identity_from_request(request)
+    await _resolve_identity_from_request(request)
     body = await request.json()
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
@@ -3299,7 +3274,7 @@ async def proxy_enroll_telemetry(request: Request):
 @app.post("/api/telemetry/enroll/{entity_id:path}")
 async def proxy_enroll_telemetry_by_id(entity_id: str, request: Request):
     """Path-based enrollment used by the UI (enrollTelemetry(entityId, config))."""
-    creds = await _resolve_identity_from_request(request)
+    await _resolve_identity_from_request(request)
     try:
         body = await request.json()
     except Exception:
@@ -3316,7 +3291,7 @@ async def proxy_enroll_telemetry_by_id(entity_id: str, request: Request):
 
 @app.delete("/api/telemetry/enroll/{entity_id:path}")
 async def proxy_unenroll_telemetry(entity_id: str, request: Request):
-    creds = await _resolve_identity_from_request(request)
+    await _resolve_identity_from_request(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.delete(
@@ -3327,7 +3302,7 @@ async def proxy_unenroll_telemetry(entity_id: str, request: Request):
 
 @app.post("/api/telemetry/analyze")
 async def proxy_trigger_telemetry_analysis(request: Request):
-    creds = await _resolve_identity_from_request(request)
+    await _resolve_identity_from_request(request)
     body = await request.json()
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
@@ -3340,7 +3315,7 @@ async def proxy_trigger_telemetry_analysis(request: Request):
 
 @app.get("/api/telemetry/summary/{entity_id:path}")
 async def proxy_get_telemetry_summary(entity_id: str, request: Request):
-    creds = await _resolve_identity_from_request(request)
+    await _resolve_identity_from_request(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -3351,7 +3326,7 @@ async def proxy_get_telemetry_summary(entity_id: str, request: Request):
 
 @app.get("/api/telemetry/data/{entity_id:path}")
 async def proxy_get_telemetry_data(entity_id: str, request: Request):
-    creds = await _resolve_identity_from_request(request)
+    await _resolve_identity_from_request(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -3362,7 +3337,7 @@ async def proxy_get_telemetry_data(entity_id: str, request: Request):
 
 @app.post("/api/telemetry/snapshot")
 async def proxy_ingest_telemetry_snapshot(request: Request):
-    creds = await _resolve_identity_from_request(request)
+    await _resolve_identity_from_request(request)
     body = await request.json()
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
@@ -3375,7 +3350,7 @@ async def proxy_ingest_telemetry_snapshot(request: Request):
 
 @app.get("/api/telemetry/insights")
 async def proxy_get_telemetry_insights(request: Request):
-    creds = await _resolve_identity_from_request(request)
+    await _resolve_identity_from_request(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     async with borrow_http_client() as client:
         resp = await client.get(
@@ -4340,7 +4315,7 @@ async def unload_model(request: Request):
 
                 # Ollama doesn't have a dedicated unload endpoint.
                 # We trigger unload by sending a request with keep_alive=0.
-                unload_resp = await client.post(f"{provider.base_url}/api/generate", json={
+                await client.post(f"{provider.base_url}/api/generate", json={
                     "model": model,
                     "prompt": "",
                     "keep_alive": 0
@@ -4475,6 +4450,7 @@ async def execute_raven_mission(id: int, request: Request):
             system_prompt = f"You are Raven, an autonomous agent executing a user-assigned background mission. Execute the following task to the best of your ability:\n{target['proposed_mission']}"
 
         # Push job
+        assert job_queue is not None, "Job queue not initialized"
         await job_queue.enqueue_job("raven_admin", {
             "query": target["proposed_mission"],
             "model": target["coding_model"],
@@ -4570,6 +4546,7 @@ async def _enqueue_user_mission(
         mission_data = await resp.json()
         mission_id = mission_data["id"]
 
+        assert job_queue is not None, "Job queue not initialized"
         await job_queue.enqueue_job(creds.get("user") or owner_user or "raven_user", {
             "query": query,
             "model": target_model,
@@ -4866,10 +4843,8 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
         history_key = f"raven:mission:history:{real_id}"
         existing_logs = await r.lrange(history_key, 0, -1)  # type: ignore[misc]
         for msg in existing_logs:
-            try:
+            with suppress(Exception):
                 await websocket.send_text(msg)
-            except Exception:
-                pass
 
         # 2. Subscribe to new messages
         pubsub = r.pubsub()
@@ -4908,19 +4883,15 @@ async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str
         finally:
             reader_task.cancel()
             keep_alive_task.cancel()
-            try:
+            with suppress(Exception):
                 await pubsub.unsubscribe(channel)
-            except Exception:
-                pass
             await r.close()
     except WebSocketDisconnect:
         pass
     except Exception as e:
         log.error(f"[WebSocket] Setup error for mission {id_or_slug}: {e}")
-        try:
+        with suppress(Exception):
             await websocket.close()
-        except Exception:
-            pass
 
 # ---- Config Endpoints ----
 
@@ -5554,7 +5525,7 @@ async def search_ma(request: Request, query: str = "", media_type: str = "", lim
             if resp.status == 200:
                 return await resp.json()
         return {"status": "SUCCESS", "results": []}
-    except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+    except (TimeoutError, aiohttp.ClientError) as e:
         log.warning(f"[ma/search] upstream unavailable ({type(e).__name__}), returning empty results")
         return {"status": "SUCCESS", "results": []}
 
@@ -6300,10 +6271,8 @@ async def sendspin_proxy(websocket: WebSocket):
             except Exception as e:
                 log.error(f"[sendspin] Proxy: graceful disconnect error: {e}", exc_info=True)
             finally:
-                try:
+                with suppress(Exception):
                     await ma_ws.close()
-                except Exception:
-                    pass
 
         # Run all three tasks in parallel
         log.info("[sendspin] STEP 14: Starting asyncio.gather for proxy loops")
@@ -6315,34 +6284,24 @@ async def sendspin_proxy(websocket: WebSocket):
         log.info("[sendspin] STEP 15: Proxy loops complete — both directions ended")
     except websockets.exceptions.InvalidStatusCode as e:
         log.error(f"[sendspin] MA sendspin connection failed (status {e.status}): {e}", exc_info=True)
-        try:
+        with suppress(Exception):
             await websocket.close(code=1011, reason=f"MA connection failed: {e}")
-        except Exception:
-            pass
     except websockets.exceptions.ConnectionClosed as e:
         log.error(f"[sendspin] MA sendspin connection closed: code={e.code}, reason={e.reason}", exc_info=True)
-        try:
+        with suppress(Exception):
             await websocket.close(code=1011, reason=f"MA connection closed: {e}")
-        except Exception:
-            pass
     except websockets.exceptions.WebSocketException as e:
         log.error(f"[sendspin] MA sendspin WebSocket error: {type(e).__name__}: {e}", exc_info=True)
-        try:
+        with suppress(Exception):
             await websocket.close(code=1011, reason=f"MA WebSocket error: {e}")
-        except Exception:
-            pass
     except Exception as e:
         log.error(f"[sendspin] Sendspin proxy error: {type(e).__name__}: {e}", exc_info=True)
-        try:
+        with suppress(Exception):
             await websocket.close(code=1011, reason=f"{type(e).__name__}: {e}")
-        except Exception:
-            pass
     finally:
         if ma_ws:
-            try:
+            with suppress(Exception):
                 await ma_ws.close()
-            except Exception:
-                pass
 
 
 @app.get("/api/ma-jsonrpc/debug/players")
@@ -6592,16 +6551,12 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
             log.info("[ma-jsonrpc] STEP 7: Proxy loops complete — both directions ended")
     except websockets.exceptions.InvalidStatusCode as e:
         log.error(f"[ma-jsonrpc] MA JSON-RPC connection failed (status {e.status}): {e}")
-        try:
+        with suppress(Exception):
             await websocket.close(code=1011, reason=f"MA connection failed: {e}")
-        except Exception:
-            pass
     except Exception as e:
         log.error(f"[ma-jsonrpc] JSON-RPC proxy error: {e}", exc_info=True)
-        try:
+        with suppress(Exception):
             await websocket.close(code=1011, reason=str(e))
-        except Exception:
-            pass
 
 
 @app.get("/api/media/stream/music-assistant")
@@ -6891,10 +6846,8 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
 
                 if proxy_resp.status >= 400:
                     body = ""
-                    try:
+                    with suppress(Exception):
                         body = (await proxy_resp.read()).decode("utf-8", errors="ignore").strip()
-                    except Exception:
-                        pass
                     await proxy_resp.release()
                     raise HTTPException(
                         status_code=502,
@@ -6929,10 +6882,8 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             raise
         except Exception as e:
             log.error(f"[stream/ma] WebSocket/stream handling failed: {e}", exc_info=True)
-            try:
+            with suppress(Exception):
                 await ma_client.disconnect()
-            except Exception:
-                pass
             raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}")
 
     except HTTPException:
