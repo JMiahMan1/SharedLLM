@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+from contextlib import asynccontextmanager
 from typing import Any
 
 import aiohttp
@@ -23,6 +24,18 @@ from services.gateway.config import (
     REDIS_URL,
     SYSTEM_IDENTITY,
 )
+
+
+@asynccontextmanager
+async def _shared_http_client():
+    """Yield the gateway's shared, pooled HTTP client WITHOUT closing it.
+
+    Reuses one connection pool across the worker's polling loops instead of
+    opening a fresh aiohttp session per iteration. Caller must not close it.
+    """
+    from services.gateway.main import get_http_client
+
+    yield get_http_client()
 from services.gateway.messaging import TIER2_SEMAPHORE, TIER3_LOCK, InferenceJobQueue
 from services.gateway.orchestrator import process_full_orchestration
 
@@ -99,7 +112,7 @@ class RavenWorker:
         automatically from their last checkpoint.
         """
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+            async with _shared_http_client() as client:
                 resp = await client.get(
                     "http://identity:8001/api/raven/missions",
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
@@ -232,7 +245,7 @@ class RavenWorker:
 
         # 2. List rooms
         url = f"{EXECUTION_SVC}/execute/talk"
-        async with aiohttp.ClientSession() as client:
+        async with _shared_http_client() as client:
             list_resp = await client.post(
                 url,
                 json={"user_context": creds, "action": "list"},
@@ -299,7 +312,7 @@ class RavenWorker:
 
     async def _get_system_creds(self) -> dict[str, Any] | None:
         try:
-            async with aiohttp.ClientSession() as client:
+            async with _shared_http_client() as client:
                 resp = await client.post(
                     "http://identity:8001/api/resolve",
                     json={"rag_user": "default"},
@@ -335,7 +348,7 @@ class RavenWorker:
                     mission_id = payload.get("_mission_id")
                     if mission_id:
                         try:
-                            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+                            async with _shared_http_client() as client:
                                 await client.patch(
                                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                                     json={"status": "executing"},
@@ -397,7 +410,7 @@ class RavenWorker:
                     mission_id = payload.get("_mission_id")
                     if mission_id:
                         try:
-                            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+                            async with _shared_http_client() as client:
                                 await client.patch(
                                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                                     json={"status": "executing"},
@@ -460,7 +473,7 @@ class RavenWorker:
                         else:
                             result_str = "The mission did not produce a meaningful result. The LLM returned an empty or invalid response."
                         log.warning(f"[Worker] Mission {mission_id} marked failed — no meaningful work accomplished")
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+                    async with _shared_http_client() as client:
                         await client.patch(
                             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                             json={"status": status, "result": result_str},
@@ -478,7 +491,7 @@ class RavenWorker:
             mission_id = payload.get("_mission_id")
             if mission_id:
                 try:
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+                    async with _shared_http_client() as client:
                         await client.patch(
                             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                             json={"status": "failed", "result": str(e)},
@@ -537,7 +550,7 @@ class RavenWorker:
             ollama_url = _get(settings, "llm_local_url")
             if not ollama_url:
                 raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            async with _shared_http_client() as client:
                 resp = await client.get(f"{ollama_url}/api/tags")
                 if resp.status != 200:
                     log.warning(f"[Worker] Failed to fetch Ollama models: {resp.status}")
@@ -569,7 +582,7 @@ class RavenWorker:
         retry_count = payload["_retry_count"]
         log.warning(f"[Worker] Upgrading mission {mission_id} from {original_model} → {upgrade_model} (retry {retry_count})")
 
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        async with _shared_http_client() as client:
             await client.patch(
                 f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                 json={"status": "executing", "result": f"Retrying with larger model ({upgrade_model}). Previous attempt: {result_str[:200]}"},
@@ -598,7 +611,7 @@ class RavenWorker:
                 "volume": 0.6
             }
 
-            async with aiohttp.ClientSession() as client:
+            async with _shared_http_client() as client:
                 await client.post(
                     f"{EXECUTION_SVC}/execute/announce",
                     json=announce_payload,
@@ -623,7 +636,7 @@ class RavenWorker:
                 "message": message
             }
 
-            async with aiohttp.ClientSession() as client:
+            async with _shared_http_client() as client:
                 await client.post(
                     f"{EXECUTION_SVC}/execute/talk",
                     json=talk_payload,
@@ -650,7 +663,7 @@ class RavenWorker:
 
     async def _get_containers(self):
         try:
-            async with aiohttp.ClientSession() as client:
+            async with _shared_http_client() as client:
                 resp = await client.get(f"{EXECUTION_SVC}/execute/docker_containers", headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=5.0))
                 if resp.status == 200:
                     resp_text = await resp.text()
@@ -662,7 +675,7 @@ class RavenWorker:
     async def _get_errors(self, name):
         try:
             payload = {"user_context": {"user": SYSTEM_IDENTITY, "is_admin": True}, "container_name": name, "tail": 100, "filter_level": "ERROR"}
-            async with aiohttp.ClientSession() as client:
+            async with _shared_http_client() as client:
                 resp = await client.post(f"{EXECUTION_SVC}/execute/docker_logs", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=5.0))
                 if resp.status == 200:
                     resp_text = await resp.text()
@@ -691,7 +704,7 @@ class RavenWorker:
 
             try:
                 # Push to Identity Triage Queue instead of executing immediately
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+                async with _shared_http_client() as client:
                     resp = await client.post(
                         f"{IDENTITY_SVC}/api/raven/missions",
                         json=mission_payload,
@@ -734,7 +747,7 @@ class RavenWorker:
 
         # 1. Fetch all users from Identity to sync their HA entities
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+            async with _shared_http_client() as client:
                 resp = await client.get(
                     f"{IDENTITY_SVC}/api/users",
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
@@ -761,7 +774,7 @@ class RavenWorker:
 
             try:
                 # Fetch live entities from HA
-                async with aiohttp.ClientSession() as client:
+                async with _shared_http_client() as client:
                     resp = await client.get(
                         f"{EXECUTION_SVC}/discovery/entities",
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
@@ -776,7 +789,7 @@ class RavenWorker:
                     continue
 
                 # Sync to RAG (triggers orphan cleanup in RAG collection)
-                async with aiohttp.ClientSession() as client:
+                async with _shared_http_client() as client:
                     sync_resp = await client.post(
                         f"{RAG_SVC}/rag/sync/ha",
                         json={"entities": entities, "user_id": username},

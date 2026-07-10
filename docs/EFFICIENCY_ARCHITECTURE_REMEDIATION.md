@@ -1,0 +1,78 @@
+# Efficiency & Architecture Remediation Plan
+
+> **Source review:** Full codebase audit (architecture, hardcoded values, Python best-practices, frontend).
+> **Scope (agreed):** Production `services/**` + `docker-compose.yml` / `Caddyfile` / `.github/workflows`. Scripts & tests excluded.
+> **Priority:** Efficiency / Architecture. Hardcoded-IP/secret cleanup and frontend polish are **deferred** (later opt-in phases).
+> **Branch discipline:** All work lands on `microservices`. Verify green via `soa_tests.yml` + `e2e-tests.yml` before merge.
+
+---
+
+## Findings summary (by phase)
+
+### Phase 1 — HTTP session / connection reuse
+- Gateway bypasses its own pooled client with throwaway `aiohttp.ClientSession()` per call:
+  - `emit_log` — `services/gateway/main.py:808`
+  - `get_api_logs` — `services/gateway/main.py:820`
+  - `fetch_global_setting` — `services/gateway/main.py:223`
+  - other ad-hoc sessions — `main.py:1761, 3666`, `background_worker.py`
+  - Fix: route through `get_http_client()` / `borrow_http_client()` (`main.py:461,513`).
+- Execution shared client bugs (`services/execution/http_client.py`):
+  - **Inverted TLS `verify`** at `:104-106` (`verify=False` verifies; `verify=True` does not) — security + correctness.
+  - **Double body read** at `:78-79` (`resp.text()` + `resp.read()`).
+  - **Deprecated `get_event_loop()`** at `:91` → `asyncio.get_running_loop()`.
+- Execution sub-clients open a fresh session per call: `ha_client.py`, `abs_client.py`, `mass_client.py`, `mass_ha_client.py`.
+
+### Phase 2 — Replace polling loops with event/backoff
+- Redis kill/pause poll every 5s — `services/gateway/agent_loop.py:1141` → Redis pub/sub or blocking pop.
+- LLM slot wait poll every 1s — `services/gateway/llm_providers.py:78` → `asyncio.Event` / capped backoff; interval env-configurable.
+- Job-status poll every 1s — `services/gateway/main.py:3085` → webhook/callback or Redis list-block.
+- `background_worker.py` monitor loops (10/30/300s) — reuse shared client; use `asyncio` tasks.
+- DNS refresh every 30s — `services/dns/main.py:716`, `dns-proxy` — keep, make interval an env var.
+
+### Phase 3 — Cache repeated identity/settings fetches
+- `resolve_identity` (`main.py:1683`) and `get_all_settings` run every chat; only `prompts.py:54` has a 30s TTL.
+- Add shared in-memory TTL cache for identity / global settings / prompts; reuse in `ha_state_cache.py` + `media_device_cache.py`; invalidate on write; TTLs env-configurable.
+
+### Phase 4 — Network isolation & config hygiene (higher risk, optional)
+- Execution `network_mode: host` (`docker-compose.yml:113`) → move to bridge, reach via `execution:8003` (as `docker-compose.test.yml` / `test.env` already do). Validate `.local` DNS sidecar (`services/execution/dns_resolver.py`) first as a spike.
+- De-duplicate `*_SVC_URL` env repeated in ~8 compose blocks → shared `env_file` / compose `x-` extension.
+- Soften `recreate_http_client` (`main.py:478`) — refresh only affected host, not all keepalive connections.
+
+### Deferred (opt-in later)
+- **Hardcoded IPs/secrets/config:** `192.168.2.205`, `change-me-in-production` defaults, centralize `UI_URL`/`GATEWAY_URL`/`MA_URL`.
+- **Frontend:** storage-key constants, interceptor `console.log`, `exhaustive-deps` disables, progress-bar dedupe.
+- **Correctness bugs off the efficiency path:** sync-Redis-in-async (`history.py`), `await resp.json().get()` coroutine bugs, blocking `subprocess.run` in async execution endpoints.
+
+---
+
+## Progress
+
+| Phase | Task | Status | PR / Commit |
+|-------|------|--------|-------------|
+| 1 | Fix inverted TLS `verify` in `execution/http_client.py` | [x] done | `services/execution/http_client.py` |
+| 1 | Remove double body read in `execution/http_client.py` | [x] done | `services/execution/http_client.py` |
+| 1 | Replace `get_event_loop()` with `get_running_loop()` | [x] done | `services/execution/http_client.py` |
+| 1 | Route flagged gateway hot paths through `get_http_client()` | [x] done | `emit_log`, `get_api_logs`, `fetch_global_setting`, `_proxy_execution_with_identity`, `fetch_ha_entities`, `proxy_tags` in `main.py` (`shared_http_client()` helper) |
+| 1 | Route `background_worker.py` polling loops through shared pool | [x] done | `services/gateway/background_worker.py` (`_shared_http_client()`) |
+| 1 | Route `ha_state_cache.py` live-fetch through shared pool | [x] done | `services/gateway/ha_state_cache.py` |
+| 1 | Bulk-convert remaining ~70 per-endpoint gateway handlers (preserve per-call timeouts) | [ ] pending | `main.py`, `agent_loop.py`, `orchestrator.py`, `llm_providers.py`, `history.py`, `prompts.py` |
+| 1 | Route execution sub-clients through pooled `get_session()` | [ ] AVOID | `services/execution/ha_client.py`, `abs_client.py`, `mass_client.py`, `mass_ha_client.py` — currently per-call aiohttp sessions (re-resolve DNS each call). Prior httpx pooling caused DNS-staleness (commit 4e776815). `get_session` caches connectors 5 min w/ default DNS cache → same risk. Keep per-call unless gateway-style DNS-recovery is added first. |
+| 2 | Redis kill/pause poll → pub/sub / blocking pop | [ ] pending | |
+| 2 | LLM slot wait poll → `asyncio.Event` / backoff | [ ] pending | |
+| 2 | Job-status poll → webhook / Redis list-block | [ ] pending | |
+| 2 | `background_worker` loops use shared client + async tasks | [ ] pending | |
+| 2 | DNS refresh interval env-configurable | [ ] pending | |
+| 3 | Shared in-memory TTL cache for identity/settings/prompts | [ ] pending | |
+| 3 | Reuse cache in `ha_state_cache` / `media_device_cache` | [ ] pending | |
+| 4 | Execution bridge-network spike (validate `.local` DNS) | [ ] pending | |
+| 4 | De-duplicate `*_SVC_URL` env via shared `env_file` | [ ] pending | |
+| 4 | Soften `recreate_http_client` host refresh | [ ] pending | |
+
+---
+
+## Verification per phase
+- `ruff check services/gateway services/execution`
+- `pytest services/tests`
+- `pytest tests/integration` (smoke)
+- Phase 2/4: full `e2e-tests.yml` run against `docker-compose.test.yml`; DNS failover (`.local`) test passes.
+- Each phase independently deployable; keep `microservices` green.

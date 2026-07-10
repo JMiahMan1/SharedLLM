@@ -810,29 +810,42 @@ async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | N
     return None
 
 
-async def _is_shared_or_default_workspace(ws_id: str | None, rag_user: str) -> bool:
-    """Return True if ``ws_id`` is a default or system workspace that must NOT be used
-    when creating a brand-new repository. Detection is metadata-only: a workspace is
-    rejected when its ``is_default`` flag is set or its ``scope`` is ``system``. A
-    dedicated workspace Raven acquired for itself has ``is_default=False`` and
-    ``scope='user'``. Names (and the legacy 'default' user placeholder) are never used.
+async def _is_blocked_for_repo(
+    ws_id: str | None,
+    created_workspaces: set[str],
+    starting_ws_id: str | None,
+) -> bool:
+    """Return True if a NEW repository must NOT be created in ``ws_id``.
+
+    A repo may only be created inside a workspace Raven acquired for itself via
+    WorkspaceCreateRequest during this mission (tracked in ``created_workspaces``).
+    Everything else — the mission's starting/default workspace, shared/system
+    workspaces, or any workspace we cannot prove is Raven-created — is blocked.
+    The check fails CLOSED: if we cannot confirm the workspace is Raven-created,
+    repo creation is forbidden. Detection is by tracked id, never by name.
     """
     if not ws_id:
         return True
+    if ws_id in created_workspaces:
+        return False
+    if ws_id == starting_ws_id:
+        return True
+    # Unknown workspace: attempt a metadata lookup to confirm it is a dedicated,
+    # non-default user workspace. Any failure (e.g. auth/resolve error) fails closed.
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
             res = await client.post(
                 f"{WORKSPACE_RUNTIME_SVC}/workspace/resolve",
-                json={"workspace_id": ws_id, "user_context": {"user": rag_user, "is_admin": True}},
+                json={"workspace_id": ws_id, "user_context": {"user": "default", "is_admin": True}},
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
             )
             if res.status == 200:
                 ws = (await res.json()).get("workspace") or {}
-                if ws.get("is_default") or str(ws.get("scope") or "").lower() == "system":
-                    return True
+                if not ws.get("is_default") and str(ws.get("scope") or "").lower() != "system":
+                    return False
     except Exception:
         pass
-    return False
+    return True
 
 
 async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None) -> Any:
@@ -880,6 +893,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 f"the absolute path above. Shell commands already run inside this workspace "
                 f"directory — do NOT prepend 'cd' to it."
             )
+
+    # The workspace this mission started in (typically the user's flagged default).
+    # A NEW repository must never be created here. Raven acquires a dedicated sandbox
+    # via WorkspaceCreateRequest; those ids are tracked in `created_workspaces` so the
+    # repo-creation guardrail can allow only Raven-created workspaces (fail-closed).
+    starting_ws_id = workspace_id
+    created_workspaces: set[str] = set()
 
     # 1. Fetch dynamic settings and resolve active provider/model
     settings = await get_dynamic_llm_settings()
@@ -1502,6 +1522,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "workspacesearchrequest": (EXECUTION_SVC, "/execute/workspace_search"),
                 "workspaceshellrequest": (EXECUTION_SVC, "/execute/workspace_shell"),
                 "workspacecreaterequest": (WORKSPACE_RUNTIME_SVC, "/workspaces"),
+                "workspacesettingsupdaterequest": (WORKSPACE_RUNTIME_SVC, "/workspaces/{workspace_id}"),
                 "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
                 "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
                 "storagelistrequest": (EXECUTION_SVC, "/execute/storage_list"),
@@ -1542,6 +1563,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         orig_action = orig_action.replace("git_", "")
                     payload["action"] = orig_action
 
+                # Special handling: WorkspaceSettingsUpdateRequest PATCHes an existing
+                # workspace's settings (repo_url, git_remote, default_branch, display_name,
+                # ...). The target id lives in the payload; build the PATCH URL from it and
+                # strip it from the body sent to workspace_runtime.
+                if lookup_action == "workspacesettingsupdaterequest" and isinstance(payload, dict):
+                    _ws_id = payload.pop("workspace_id", None) or payload.pop("id", None)
+                    if _ws_id:
+                        svc_base = WORKSPACE_RUNTIME_SVC
+                        endpoint = f"/workspaces/{_ws_id}"
+
                 # ALWAYS inject user_context. Pydantic schemas require it for validation.
                 payload["user_context"] = {
                     "user": creds.user,
@@ -1581,7 +1612,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         _creates_repo = True
                 if _creates_repo:
                     _eff_ws = (payload.get("workspace_id") if isinstance(payload, dict) else None) or workspace_id
-                    if await _is_shared_or_default_workspace(_eff_ws, rag_user):
+                    if await _is_blocked_for_repo(_eff_ws, created_workspaces, starting_ws_id):
                         exec_data = {
                             "status": "ERROR",
                             "message": (
@@ -1634,6 +1665,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 _created = (exec_data.get("workspace") or {}).get("id")
                                 if _created:
                                     workspace_id = str(_created)
+                                    created_workspaces.add(workspace_id)
                                     log.info(f"[AgentLoop] Adopted newly created workspace: {workspace_id}")
 
                     # Sanitize execution results before any downstream use
