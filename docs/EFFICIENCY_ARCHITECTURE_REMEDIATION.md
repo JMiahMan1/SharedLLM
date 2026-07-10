@@ -62,7 +62,7 @@
 | 2 | Job-status poll → webhook / Redis list-block | [x] done | `messaging.py` `_publish_status` notifies `raven:job:status:{id}` on every status change; `main.py` `stream_chat_job` SSE waits on pub/sub with a periodic `JOB_STATUS_POLL_INTERVAL` fallback GET |
 | 2 | `background_worker` loops use shared client + async tasks | [x] done | Already satisfied in Phase 1 row 56 (all HTTP via `_shared_http_client()`; loops are `asyncio.create_task`) — no throwaway sessions remain |
 | 2 | DNS refresh interval env-configurable | [x] done | `dns/main.py` `DNS_REFRESH_INTERVAL` env var (default 30s) replaces hardcoded `asyncio.sleep(30)` |
-| 3 | Shared in-memory TTL cache for identity/settings/prompts | [ ] pending | |
+| 3 | Shared in-memory TTL cache for identity/settings/prompts | [x] done | `services/gateway/cache.py` shared TTL cache (`SETTINGS_CACHE_TTL`/`IDENTITY_CACHE_TTL` env-configurable); `get_all_settings` (orchestrator) and `resolve_identity` (main) now use it; invalidated on settings write (`/api/settings`, `/api/config`, DNS endpoints) and `change-password`. `prompts.py` still has its own 30s cache (consolidation deferred to row below) |
 | 3 | Reuse cache in `ha_state_cache` / `media_device_cache` | [ ] pending | |
 | 4 | Execution bridge-network spike (validate `.local` DNS) | [ ] pending | |
 | 4 | De-duplicate `*_SVC_URL` env via shared `env_file` | [ ] pending | |
