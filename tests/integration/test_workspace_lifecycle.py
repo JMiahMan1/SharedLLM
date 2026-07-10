@@ -85,6 +85,58 @@ def test_workspace_lifecycle(api_client):
     print(f"Cleanup: Deleting test workspace {workspace_id}")
     api_client.delete(f"{WORKSPACE_RUNTIME_URL}/workspaces/{workspace_id}")
 
+@pytest.mark.integration
+def test_write_read_verification(api_client):
+    """Write a file then read it back. The write endpoint self-verifies the
+    content actually persisted, so the round-trip must match exactly."""
+    ws_id = f"test_write_verify_{int(time.time() * 1000)}"
+    resp = api_client.post(
+        f"{WORKSPACE_RUNTIME_URL}/workspaces",
+        json={"id": ws_id, "display_name": "Write Verify", "local_path": f"tests/{ws_id}"},
+    )
+    assert resp.status_code == 200, f"create failed: {resp.text}"
+    payload = {"workspace_id": ws_id, "relative_path": "main.py", "content": "print('hello starfall')\n"}
+    w = api_client.post(f"{WORKSPACE_RUNTIME_URL}/files/write", json=payload)
+    assert w.status_code == 200, f"write failed: {w.text}"
+    body = w.json()
+    assert body["status"] == "SUCCESS"
+    assert body.get("sha256"), "write should return a sha256"
+    assert body["bytes_written"] == len(payload["content"])
+    r = api_client.post(
+        f"{WORKSPACE_RUNTIME_URL}/files/read",
+        json={"workspace_id": ws_id, "relative_path": "main.py"},
+    )
+    assert r.status_code == 200, f"read failed: {r.text}"
+    assert "print('hello starfall')" in r.json().get("content", "")
+    api_client.delete(f"{WORKSPACE_RUNTIME_URL}/workspaces/{ws_id}")
+
+
+@pytest.mark.integration
+def test_delete_verification(api_client):
+    """Delete a file and confirm it is actually gone (delete self-verifies)."""
+    ws_id = f"test_del_verify_{int(time.time() * 1000)}"
+    resp = api_client.post(
+        f"{WORKSPACE_RUNTIME_URL}/workspaces",
+        json={"id": ws_id, "display_name": "Delete Verify", "local_path": f"tests/{ws_id}"},
+    )
+    assert resp.status_code == 200, f"create failed: {resp.text}"
+    api_client.post(
+        f"{WORKSPACE_RUNTIME_URL}/files/write",
+        json={"workspace_id": ws_id, "relative_path": "to_del.txt", "content": "bye"},
+    )
+    d = api_client.post(
+        f"{WORKSPACE_RUNTIME_URL}/files/delete",
+        json={"workspace_id": ws_id, "relative_path": "to_del.txt"},
+    )
+    assert d.status_code == 200, f"delete failed: {d.text}"
+    r = api_client.post(
+        f"{WORKSPACE_RUNTIME_URL}/files/read",
+        json={"workspace_id": ws_id, "relative_path": "to_del.txt"},
+    )
+    assert r.status_code == 404, f"deleted file should be gone, got {r.status_code}: {r.text}"
+    api_client.delete(f"{WORKSPACE_RUNTIME_URL}/workspaces/{ws_id}")
+
+
 if __name__ == "__main__":
     # Allow running directly for quick check
     with httpx.Client(headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=30.0) as client:

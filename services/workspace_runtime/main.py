@@ -1544,6 +1544,13 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
                 status_code=400,
                 detail=f"Workspace path is not a directory: {ws.local_path}",
             )
+        # Self-verify the workspace is now resolvable from the registry.
+        registry = _load_registry()
+        if not any(item.get("id") == ws.id for item in registry):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Workspace creation verification failed: {ws.id} not found in registry after commit.",
+            )
         return {"status": "SUCCESS", "workspace": _workspace_to_dict(ws)}
 
 
@@ -1661,28 +1668,59 @@ def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(def
 
     target.parent.mkdir(parents=True, exist_ok=True) if req.create_parents else None
 
-    if req.patch:
-        # Apply patch
-        with tempfile.NamedTemporaryFile("w", suffix=".patch") as patch_file:
-            patch_file.write(req.patch)
-            patch_file.flush()
-            args = ["patch", "-u", str(target), "-i", patch_file.name]
-            result = _run_command(workspace_path, args)
-            if result["returncode"] != 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Failed to apply patch to {req.relative_path}: {result['stderr'] or result['stdout']}",
-                )
-    elif req.content is not None:
-        target.write_text(req.content)
-    elif req.content_base64 is not None:
-        import base64
+    expected_bytes = None
+    try:
+        if req.patch:
+            # Apply patch
+            with tempfile.NamedTemporaryFile("w", suffix=".patch") as patch_file:
+                patch_file.write(req.patch)
+                patch_file.flush()
+                args = ["patch", "-u", str(target), "-i", patch_file.name]
+                result = _run_command(workspace_path, args)
+                if result["returncode"] != 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Failed to apply patch to {req.relative_path}: {result['stderr'] or result['stdout']}",
+                    )
+        elif req.content is not None:
+            target.write_text(req.content)
+            expected_bytes = req.content.encode("utf-8")
+        elif req.content_base64 is not None:
+            import base64
 
-        target.write_bytes(base64.b64decode(req.content_base64))
-    else:
-        raise HTTPException(status_code=400, detail="Either 'content', 'content_base64', or 'patch' must be provided")
+            expected_bytes = base64.b64decode(req.content_base64)
+            target.write_bytes(expected_bytes)
+        else:
+            raise HTTPException(status_code=400, detail="Either 'content', 'content_base64', or 'patch' must be provided")
 
-    new_bytes = target.read_bytes()
+        # Self-verify the mutation actually persisted. Catches ephemeral-volume
+        # loss, resolution to the wrong path, or permission issues that would
+        # otherwise let the caller believe the file exists when it does not.
+        try:
+            new_bytes = target.read_bytes()
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Write verification failed for {req.relative_path}: unable to read back written file: {exc}",
+            ) from None
+        if expected_bytes is not None and new_bytes != expected_bytes:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Write verification failed for {req.relative_path}: on-disk content "
+                    f"({len(new_bytes)} bytes) does not match requested content "
+                    f"({len(expected_bytes)} bytes). The write did not persist correctly."
+                ),
+            )
+        if not new_bytes:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Write verification failed for {req.relative_path}: file is empty after write.",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Write failed for {req.relative_path}: {exc}") from None
     return {
         "status": "SUCCESS",
         "workspace": workspace,
@@ -1714,6 +1752,13 @@ def delete_file(req: FileDeleteRequest, x_internal_secret: str | None = Header(d
         shutil.rmtree(target)
     else:
         target.unlink()
+
+    # Self-verify the deletion actually took effect.
+    if target.exists():
+        raise HTTPException(
+            status_code=500,
+            detail=f"Delete verification failed for {req.relative_path}: path still exists after deletion.",
+        )
 
     return {
         "status": "SUCCESS",
@@ -2097,13 +2142,19 @@ def git_commit(req: GitCommitRequest, x_internal_secret: str | None = Header(def
     if result["returncode"] != 0:
         raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git commit failed")
     commit_ref = _run_command(workspace_path, ["git", "rev-parse", "HEAD"])
+    commit_sha = commit_ref["stdout"].strip() if commit_ref["returncode"] == 0 else None
+    if not commit_sha:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Commit verification failed: 'git commit' reported success but no HEAD commit could be read back ({commit_ref.get('stderr', '').strip()}).",
+        )
     return {
         "status": "SUCCESS",
         "workspace": workspace,
         "command": result["args"],
         "stdout": result["stdout"],
         "stderr": result["stderr"],
-        "commit": commit_ref["stdout"].strip() if commit_ref["returncode"] == 0 else None,
+        "commit": commit_sha,
         "author_name": author_name,
         "author_email": author_email,
     }
