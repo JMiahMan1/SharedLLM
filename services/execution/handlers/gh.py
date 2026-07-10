@@ -19,8 +19,9 @@ import os
 import shlex
 
 from fastapi import HTTPException
+import requests
 
-from services.config import WORKSPACE_ROOT
+from services.config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
 
 try:
     from handlers.workspace import _require_capability, _resolve_workspace_info, resolve_safe_path
@@ -201,4 +202,72 @@ async def handle_gh(req: GhRequest) -> dict:
 
     if result["returncode"] != 0:
         return _fail(f"gh {' '.join(args[:2])} failed.", result)
+
+    # When a repository was just created, bind it to the workspace so the
+    # subsequent `git push` is permitted by the per-workspace guardrail (which
+    # only allows pushes to the workspace's designated repo_url). Without this,
+    # "create repo then push" would be blocked.
+    if sub == "repo" and action == "create":
+        repo_name = _extract_repo_name(args)
+        if repo_name:
+            created_url = await _created_repo_url(repo_name, abs_cwd, env_override, timeout)
+            if created_url:
+                await _bind_workspace_repo(workspace_id, created_url)
+
     return _ok(f"gh {' '.join(args[:2])} completed.", result)
+
+
+# Value-taking `gh repo create` flags whose immediate next token is NOT the name.
+_REPO_CREATE_VALUE_FLAGS = {
+    "--source", "-s", "--description", "-d", "--homepage", "-h",
+    "--team", "-t", "--template", "--license", "-l", "--gitignore",
+}
+
+
+def _extract_repo_name(args: list[str]) -> str | None:
+    """Extract the repo name from `gh repo create <name> [flags]`."""
+    i = 2  # skip ["repo", "create"]
+    while i < len(args):
+        a = args[i]
+        if a.startswith("-"):
+            if a in _REPO_CREATE_VALUE_FLAGS and i + 1 < len(args):
+                i += 2
+                continue
+            i += 1
+            continue
+        return a
+    return None
+
+
+async def _created_repo_url(repo_name: str, cwd: str, env_override: dict, timeout: int) -> str | None:
+    """Resolve the HTTPS URL of a freshly created repo via `gh repo view`."""
+    view = await _run_gh(
+        ["repo", "view", repo_name, "--json", "url", "-q", ".url"],
+        cwd, env_override, timeout,
+    )
+    if view["returncode"] == 0 and view["stdout"].strip():
+        return view["stdout"].strip()
+    return None
+
+
+async def _bind_workspace_repo(workspace_id: str | None, repo_url: str) -> None:
+    """Best-effort: PATCH the workspace's repo_url to the created repo."""
+    if not workspace_id:
+        return
+    try:
+        resp = await asyncio.to_thread(
+            requests.patch,
+            f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces/{workspace_id}",
+            json={"repo_url": repo_url},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            log.info(f"[gh] Bound workspace {workspace_id} to created repo {repo_url}")
+        else:
+            log.warning(
+                f"[gh] Failed to bind workspace {workspace_id} to {repo_url}: "
+                f"{resp.status_code} {resp.text[:200]}"
+            )
+    except Exception as e:
+        log.warning(f"[gh] Exception binding workspace {workspace_id} to {repo_url}: {e}")

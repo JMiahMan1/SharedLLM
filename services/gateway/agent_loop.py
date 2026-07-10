@@ -815,6 +815,7 @@ async def resolve_mission_workspace(user_id: str, assigned_workspace_id: str | N
                     "default_branch": "microservices",
                     "scope": "user",
                     "owner_user": user_id,
+                    "is_default": True,
                     "auto_pull_enabled": False,
                     "auto_backup_enabled": False,
                 },
