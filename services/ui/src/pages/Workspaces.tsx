@@ -67,6 +67,19 @@ const Workspaces = () => {
     onError: (err: Error) => toast.error(err.message || 'Failed to save workspace'),
   });
 
+  // Inline toggles (star / share) patch a single field — they must UPDATE, never
+  // create, even when the edit modal is closed.
+  const updateMutation = useMutation({
+    mutationFn: (data: { id: string } & Partial<Workspace>) => {
+      const { id, ...patch } = data;
+      return api.updateWorkspace(id, patch);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    },
+    onError: (err: Error) => toast.error(err.message || 'Failed to update workspace'),
+  });
+
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteWorkspace(id),
     onSuccess: () => {
@@ -261,7 +274,7 @@ const Workspaces = () => {
                       <div className="flex items-center gap-2">
                         <button 
                           onClick={() => {
-                            saveMutation.mutate({ id: ws.id, is_default: !ws.is_default });
+                            updateMutation.mutate({ id: ws.id, is_default: !ws.is_default });
                           }}
                           className={`p-2 rounded-xl transition-colors ${ws.is_default ? 'text-emerald-400 hover:bg-emerald-500/10' : 'text-slate-500 hover:text-emerald-400 hover:bg-white/5'}`}
                           title={ws.is_default ? 'Unset as default' : 'Set as default'}
@@ -270,7 +283,7 @@ const Workspaces = () => {
                         </button>
                         <button 
                           onClick={() => {
-                            saveMutation.mutate({ id: ws.id, owner_user: ws.owner_user === 'default' ? null : 'default' });
+                            updateMutation.mutate({ id: ws.id, owner_user: ws.owner_user === 'default' ? null : 'default' });
                           }}
                           className={`p-2 rounded-xl transition-colors ${ws.owner_user === 'default' ? 'text-blue-400 hover:bg-blue-500/10' : 'text-slate-500 hover:text-blue-400 hover:bg-white/5'}`}
                           title={ws.owner_user === 'default' ? 'Unshare (make private)' : 'Share with all users'}
