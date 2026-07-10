@@ -1100,9 +1100,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 f"\n\n[WORKSPACE CONTEXT]\n"
                 f"You are operating inside workspace '{workspace_id}'.\n"
                 f"Absolute workspace path on disk: {_ws_path}\n"
-                f"Write files relative to this path (e.g. 'game.py' for the root) or use "
-                f"the absolute path above. Shell commands already run inside this workspace "
-                f"directory — do NOT prepend 'cd' to it."
+                f"Write files relative to this path. In file tools, set `relative_path` to the "
+                f"file's path RELATIVE to the workspace root (e.g. 'game.py' or 'src/main.py'). "
+                f"Do NOT use the `local_path` field (e.g. 'users/default/...') as a file path — "
+                f"it is an internal identifier, not a location on disk. Shell commands already "
+                f"run inside this workspace directory — pass an empty `cwd` (or '.'), and do NOT "
+                f"'cd' into a 'users/...' path."
             )
     else:
         # No workspace was pre-assigned (a project / new-build mission). Inject an

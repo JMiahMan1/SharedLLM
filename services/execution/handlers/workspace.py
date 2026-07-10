@@ -67,42 +67,81 @@ def _fail(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="FAILURE", message=message, service="workspace", detail=detail)
 
 async def _resolve_workspace_info(workspace_id: str | None, user_context: dict | None = None) -> tuple[str, dict]:
-    """Resolves workspace path and details from workspace_runtime service, and checks capability."""
+    """Resolves workspace path and details from workspace_runtime service.
+
+    We do NOT silently fall back to ``WORKSPACE_ROOT`` (the Default Workspace)
+    when resolution fails or no ``workspace_id`` is supplied — that would route a
+    project's file/shell operations into the shared maintenance workspace and
+    confuse the agent. We fail loudly instead so a valid ``workspace_id`` is used.
+    """
     import aiohttp
-    # Defaults
-    resolved_path = WORKSPACE_ROOT
-    workspace_details = {}
+    if not workspace_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "No workspace_id provided. Workspace-scoped tools require a valid "
+                "workspace_id from WorkspaceCreateRequest; operations are NOT routed "
+                "to the Default Workspace."
+            ),
+        )
 
-    if workspace_id:
-        try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-                user_ctx = user_context or {"user": "system", "is_admin": True}
-                if hasattr(user_ctx, "model_dump"):
-                    user_ctx = user_ctx.model_dump()
-                elif hasattr(user_ctx, "dict"):
-                    user_ctx = user_ctx.dict()
-                async with client.post(
-                    f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
-                    json={"workspace_id": workspace_id, "user_context": user_ctx},
-                    headers={"X-Internal-Secret": INTERNAL_SECRET}
-                ) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        if data.get("status") == "SUCCESS":
-                            workspace_details = data.get("workspace", {})
-                            resolved_path = workspace_details.get("resolved_path") or WORKSPACE_ROOT
-                    else:
-                        try:
-                            err_detail = (await resp.json()).get("detail", await resp.text())
-                        except Exception:
-                            err_detail = await resp.text()
-                        raise HTTPException(status_code=resp.status, detail=err_detail)
-        except HTTPException:
-            raise
-        except Exception as e:
-            log.warning(f"Failed to resolve workspace {workspace_id}: {e}")
+    workspace_details: dict = {}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+            user_ctx = user_context or {"user": "system", "is_admin": True}
+            if hasattr(user_ctx, "model_dump"):
+                user_ctx = user_ctx.model_dump()
+            elif hasattr(user_ctx, "dict"):
+                user_ctx = user_ctx.dict()
+            async with client.post(
+                f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
+                json={"workspace_id": workspace_id, "user_context": user_ctx},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("status") == "SUCCESS":
+                        workspace_details = data.get("workspace", {})
+                        resolved_path = str(workspace_details.get("resolved_path") or WORKSPACE_ROOT)
+                        return resolved_path, workspace_details
+                try:
+                    err_detail = (await resp.json()).get("detail", await resp.text())
+                except Exception:
+                    err_detail = await resp.text()
+                raise HTTPException(status_code=resp.status, detail=err_detail)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to resolve workspace '{workspace_id}': {e}",
+        )
 
-    return resolved_path, workspace_details
+
+def _strip_workspace_path_prefix(relative_path: str, workspace: dict | None) -> str:
+    """Normalize a model-supplied path that duplicates the workspace path.
+
+    Mirrors the helper in workspace_runtime: if the agent copies ``local_path``
+    / ``resolved_path`` (e.g. 'users/default/<id>/main.py') into a ``cwd`` or
+    ``relative_path``, strip the redundant prefix so it resolves correctly.
+    """
+    if not relative_path or not workspace:
+        return relative_path
+    norm = os.path.normpath(str(relative_path)).replace("\\", "/").strip()
+    if norm in (".", "/"):
+        return ""
+    for key in ("resolved_path", "local_path"):
+        base = workspace.get(key)
+        if not base:
+            continue
+        base_norm = os.path.normpath(str(base)).replace("\\", "/").strip()
+        if not base_norm or base_norm in (".", "/"):
+            continue
+        if norm == base_norm:
+            return ""
+        if norm.startswith(base_norm + "/"):
+            return norm[len(base_norm) + 1:].strip("/")
+    return relative_path
 
 def _require_capability(workspace: dict, capability: str):
     identity = workspace.get("resolved_identity") or {}
@@ -378,6 +417,8 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
 
         # Resolve safe CWD
         safe_cwd = req.cwd if hasattr(req, 'cwd') and req.cwd else "."
+        # Defensive: if the model copied local_path/resolved_path into cwd, strip it.
+        safe_cwd = _strip_workspace_path_prefix(safe_cwd, ws_details) or "."
         abs_cwd = resolve_safe_path(safe_cwd, ws_root)
 
         # Determine the final command string
