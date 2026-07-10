@@ -90,6 +90,14 @@ OLLAMA_SLOT_POLL_MAX = _safe_float("OLLAMA_SLOT_POLL_MAX", 5.0)
 # and only falls back to a direct GET every JOB_STATUS_POLL_INTERVAL seconds.
 JOB_STATUS_POLL_INTERVAL = _safe_float("JOB_STATUS_POLL_INTERVAL", 5.0)
 
+# --- Phase 3: shared in-memory cache TTLs (env-configurable) ---
+# Global settings and resolved identity are fetched on every chat; cache them
+# for SETTINGS_CACHE_TTL / IDENTITY_CACHE_TTL seconds. The TTL bounds the
+# exposure window of cached identity (which includes tokens) and guarantees
+# eventual consistency even if an invalidation call is missed.
+SETTINGS_CACHE_TTL = _safe_float("SETTINGS_CACHE_TTL", 30.0)
+IDENTITY_CACHE_TTL = _safe_float("IDENTITY_CACHE_TTL", 30.0)
+
 # --- Misc ---
 FAST_PATH_THRESHOLD = _safe_float("FAST_PATH_THRESHOLD", 0.85)
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL")

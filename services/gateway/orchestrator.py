@@ -48,21 +48,15 @@ _DEFAULTS = cast(dict[str, str], {
     "embedding_model": "nomic-ai/nomic-embed-text-v1.5",
 })
 
-# --- Settings cache (refreshed periodically) ---
-_settings_cache: dict[str, str] | None = None
-_settings_cache_time: float = 0
-_SETTINGS_TTL = 30  # seconds
-
-
 async def get_all_settings() -> dict[str, str]:
-    """Fetches ALL configuration from Identity service (single source of truth)."""
-    global _settings_cache, _settings_cache_time
-    import time
-    now = time.time()
-    if _settings_cache and (now - _settings_cache_time) < _SETTINGS_TTL:
-        return _settings_cache
+    """Fetches ALL configuration from Identity service (single source of truth).
 
-    try:
+    Results are served from the shared in-memory TTL cache (see
+    ``services.gateway.cache``) and invalidated on any settings write.
+    """
+    from services.gateway.cache import get_cached_settings
+
+    async def _fetch() -> dict[str, str]:
         from services.gateway.main import shared_http_client
         async with shared_http_client() as client:
             resp = await client.get(
@@ -70,26 +64,23 @@ async def get_all_settings() -> dict[str, str]:
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=3.0),
             )
-            if resp.status == 200:
-                fetched = {item["key"]: item["value"] for item in await resp.json()}
-                # Merge with defaults for non-model keys only
-                model_keys = {
-                    "active_llm_provider", "assistant_model", "coding_model", "librarian_model",
-                }
-                for key, default in _DEFAULTS.items():
-                    if key in model_keys:
-                        continue
-                    if key not in fetched or fetched[key] in ("", "auto"):
-                        fetched[key] = default
-                _settings_cache = fetched
-                _settings_cache_time = now
-                # Sync module-level constants in main.py for backward compat
-                _sync_main_constants(fetched)
-                return fetched
-    except Exception as e:
-        log.error(f"Failed to fetch Identity settings: {e}")
-    # Fallback to cached or defaults
-    return _settings_cache or dict(_DEFAULTS)
+            if resp.status != 200:
+                raise RuntimeError(f"Identity settings returned HTTP {resp.status}")
+            fetched = {item["key"]: item["value"] for item in await resp.json()}
+            # Merge with defaults for non-model keys only
+            model_keys = {
+                "active_llm_provider", "assistant_model", "coding_model", "librarian_model",
+            }
+            for key, default in _DEFAULTS.items():
+                if key in model_keys:
+                    continue
+                if key not in fetched or fetched[key] in ("", "auto"):
+                    fetched[key] = default
+            # Sync module-level constants in main.py for backward compat
+            _sync_main_constants(fetched)
+            return fetched
+
+    return await get_cached_settings(_fetch, dict(_DEFAULTS))
 
 
 def _sync_main_constants(settings: dict[str, str]) -> None:
