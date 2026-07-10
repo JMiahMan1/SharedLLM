@@ -41,6 +41,7 @@ from services.gateway.orchestrator import _get, get_all_settings
 from services.gateway.prompts import (
     PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION,
     PROMPT_MEDIA_TROUBLESHOOTING,
+    PROMPT_RAVEN_AUTONOMOUS_PROTOCOL,
     PROMPT_SINGLE_TURN_TOOL_GUIDE,
     load_prompt,
     load_prompt_sync,
@@ -2873,8 +2874,14 @@ async def chat_handler(request: Request, background_tasks=None):
 
     # Detection of autonomous agent engagement
     is_autonomous = False
-    # Hardened intent logic: also trigger on 'Raven' or explicit 'perform' keywords
-    autonomy_signals = ["raven", "perform", "audit", "index", "reindex", "scan", "repair", "fix", "check", "synchronize", "sync"]
+    # Hardened intent logic: trigger on Raven keywords AND on complex engineering
+    # build tasks (the agent must bootstrap a workspace and run autonomously).
+    autonomy_signals = [
+        "raven", "perform", "audit", "index", "reindex", "scan", "repair", "fix",
+        "check", "synchronize", "sync", "build", "develop", "implement", "create a",
+        "make a", "game", "app", "service", "project", "program", "website", "api",
+        "bot", "scaffold", "refactor the",
+    ]
     if any(k in query.lower() for k in autonomy_signals) or ":" in query[:15]:
         log.info("[ShadowExecution] AUTONOMOUS MISSION DETECTED via keyword/protocol signal")
         is_autonomous = True
@@ -2908,7 +2915,7 @@ async def chat_handler(request: Request, background_tasks=None):
         # Use coding model for autonomous tasks
         coding_model = await get_coding_model()
         selected_model = coding_model
-        log.info("[ShadowExecution] Routing to autonomous AgentLoop...")
+        log.info("[ShadowExecution] Routing chat request to Raven mission queue...")
 
         # Auth pre-flight: only gate when the mission actually needs GitHub/Git access.
         if _mission_requires_github_auth(final_query) and not (
@@ -2923,17 +2930,40 @@ async def chat_handler(request: Request, background_tasks=None):
                 return _make_openai_response(msg, selected_model, "auth_required")
             return _make_ollama_response(msg, selected_model, "auth_required")
 
-        # Resolve the workspace this agentic mission runs in (default if none assigned).
+        # Dispatch a real Raven mission so it shows up in the Raven queue. The Raven
+        # worker runs the agent loop, which bootstraps its own workspace and executes
+        # the task. Pass the agent-loop task (the user's query + full system prompt).
         _ws_id = str(body.get("workspace_id") or "").strip() or None
         try:
-            from services.gateway.agent_loop import resolve_mission_workspace
-            _ws = await resolve_mission_workspace(user_id, _ws_id)
-            if _ws:
-                _ws_id = _ws.get("id") or _ws_id
-        except Exception as e:
-            log.warning(f"[chat] workspace resolve failed: {e}")
+            mission = await _enqueue_user_mission(
+                query=final_query,
+                system=full_system,
+                creds=creds.model_dump(),
+                coding_model=coding_model,
+                workspace_id=_ws_id,
+            )
+        except HTTPException as he:
+            if is_openai:
+                return JSONResponse(_make_openai_error(str(he.detail), selected_model), status_code=he.status_code)
+            return JSONResponse({"status": "ERROR", "message": str(he.detail)}, status_code=he.status_code)
+        except RuntimeError as e:
+            msg = str(e) + " Please configure models in the UI settings."
+            if is_openai:
+                return _make_openai_response(msg, selected_model, "model_config_error")
+            return _make_ollama_response(msg, selected_model, "model_config_error")
 
-        return await AgentLoop(final_query, selected_model, full_system, short_term, body.get("rag_user") or "", creds, workspace_id=_ws_id)
+        mission_id = mission["id"]
+        result_payload = {
+            "status": "queued",
+            "mission_id": mission_id,
+            "message": "Raven mission dispatched. Track it in the Raven queue (/api/raven/missions/{id}).",
+            "mission": mission,
+        }
+        if is_openai:
+            return _make_openai_response(
+                json.dumps(result_payload, indent=2), selected_model, "raven_mission"
+            )
+        return JSONResponse(status_code=202, content=result_payload)
 
     settings = await get_all_settings()
     _vram_params = await get_vram_safe_params(selected_model, settings)
@@ -4471,64 +4501,111 @@ class UserMissionRequest(BaseModel):
     coding_model: str | None = None
     workspace_id: str | None = None
 
-@app.post("/api/raven/missions")
-async def create_user_mission(body: UserMissionRequest, request: Request):
-    creds = await _resolve_identity_from_request(request)
-    if not creds:
-        raise HTTPException(status_code=401, detail="Unauthorized")
 
+async def _build_raven_system_prompt(query: str) -> str:
+    """Build the autonomous system prompt used for Raven missions.
+
+    Combines the Raven autonomous protocol, the global autonomous protocols, and
+    the single-turn tool guide so the agent knows to bootstrap a workspace, write
+    code, build, test, and push.
+    """
+    async with borrow_http_client() as client:
+        protocol = await load_prompt(client, PROMPT_RAVEN_AUTONOMOUS_PROTOCOL)
+        protocols = await fetch_autonomous_protocols()
+        guide = await load_prompt(client, PROMPT_SINGLE_TURN_TOOL_GUIDE)
+    return (
+        f"{protocol}\n\n{protocols}\n\n"
+        f"[Raven Mission]\n{query}\n\n"
+        f"Follow the tool-use guide below to accomplish the mission:\n{guide}"
+    )
+
+
+async def _enqueue_user_mission(
+    *,
+    query: str,
+    system: str,
+    creds: dict,
+    coding_model: str | None = None,
+    workspace_id: str | None = None,
+    slug: str | None = None,
+    priority: int = 1,
+) -> dict:
+    """Create a Raven user mission in Identity and enqueue it for the Raven worker.
+
+    Shared by the ``/api/raven/missions`` HTTP endpoint and the chat handler's
+    autonomous routing, so that any chat request recognized as a Raven mission
+    shows up in the Raven queue. Returns the mission record (status=queued).
+    """
     settings = await get_llm_settings()
-    coding_model = settings.get("coding_model") or settings.get("ollama_coding_model")
-    if not coding_model:
-        raise HTTPException(status_code=400, detail="No coding model configured. Mission cannot be dispatched.")
+    target_model = coding_model or settings.get("coding_model") or settings.get("ollama_coding_model")
+    if not target_model:
+        raise RuntimeError("No coding model configured. Mission cannot be dispatched.")
 
     mission_payload = {
-        "slug": body.slug,
+        "slug": slug,
         "mission_type": "user_task",
-        "priority": body.priority,
-        "proposed_mission": body.query,
-        "coding_model": (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or coding_model,
+        "priority": priority,
+        "proposed_mission": query,
+        "coding_model": target_model,
         "user_id": creds.get("user_id"),
-        "workspace_id": body.workspace_id,
+        "workspace_id": workspace_id,
     }
 
     async with borrow_http_client() as client:
         resp = await client.post(
             f"{IDENTITY_SVC}/api/raven/missions",
             json=mission_payload,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
         )
         if resp.status != 200:
             raise HTTPException(status_code=resp.status, detail=await resp.text())
 
         mission_data = await resp.json()
 
-        # Enqueue the job for execution
-        target_model = (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or coding_model
-        system_prompt = "You are Raven, an autonomous agent executing a user-assigned background mission.\n\n"
-        single_turn_guide = await load_prompt(client, PROMPT_SINGLE_TURN_TOOL_GUIDE)
-        system_prompt += single_turn_guide
-        system_prompt += f"\n\nExecute the following task to the best of your ability:\n{mission_data['proposed_mission']}"
-
         await job_queue.enqueue_job(creds.get("user_id") or "raven_user", {
-            "query": mission_data["proposed_mission"],
+            "query": query,
             "model": target_model,
-            "system": system_prompt,
+            "system": system,
             "stream": False,
             "creds": creds,
             "_mission_id": mission_data["id"],
-            "workspace_id": body.workspace_id,
+            "workspace_id": workspace_id,
         })
 
-        # Update status to queued
         await client.patch(
             f"{IDENTITY_SVC}/api/raven/missions/{mission_data['id']}",
             json={"status": "queued"},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
         )
         mission_data["status"] = "queued"
+        return mission_data
 
-        return {"status": "SUCCESS", "mission": mission_data}
+
+@app.post("/api/raven/missions")
+async def create_user_mission(body: UserMissionRequest, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    try:
+        settings = await get_llm_settings()
+    except Exception:
+        settings = {}
+    coding_model = (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or settings.get("coding_model") or settings.get("ollama_coding_model")
+    if not coding_model:
+        raise HTTPException(status_code=400, detail="No coding model configured. Mission cannot be dispatched.")
+
+    system_prompt = await _build_raven_system_prompt(body.query)
+    mission_data = await _enqueue_user_mission(
+        query=body.query,
+        system=system_prompt,
+        creds=creds,
+        coding_model=coding_model,
+        workspace_id=body.workspace_id,
+        slug=body.slug,
+        priority=body.priority,
+    )
+    return {"status": "SUCCESS", "mission": mission_data}
 
 @app.get("/api/raven/missions/{id_or_slug}")
 async def get_mission_details(request: Request, id_or_slug: str):

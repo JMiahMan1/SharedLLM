@@ -27,11 +27,13 @@ TOOL_WRITE_FILE = "sharedllm_write_file"
 TOOL_IMAGE_GENERATE = "sharedllm_image_generate"
 TOOL_IMAGE_EDIT = "sharedllm_image_edit"
 TOOL_LIST_IMAGE_MODELS = "sharedllm_list_image_models"
+TOOL_RAVEN_MISSION = "sharedllm_raven_mission"
 
 # Service identifiers used by the resolver / proxy layer.
 SVC_EXECUTION = "execution"
 SVC_WORKSPACE = "workspace_runtime"
 SVC_ALPACA_SD = "alpaca_sd"
+SVC_GATEWAY = "gateway"
 
 
 _GH_TOOL = {
@@ -147,6 +149,34 @@ _LIST_IMAGE_MODELS_TOOL = {
     },
 }
 
+_RAVEN_MISSION_TOOL = {
+    "type": "function",
+    "function": {
+        "name": TOOL_RAVEN_MISSION,
+        "description": (
+            "Dispatch a background Raven mission — an autonomous agent that plans, "
+            "writes code, creates its own workspace, builds, tests, and can push to "
+            "GitHub. Use this for complex multi-step engineering tasks such as "
+            "'build a 3D game', 'create a service and deploy it', or 'implement an app'. "
+            "The mission runs asynchronously in the Raven queue and returns a mission id."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "mission": {
+                    "type": "string",
+                    "description": "The full task/mission description for Raven to execute.",
+                },
+                "workspace_id": {
+                    "type": "string",
+                    "description": "Optional existing workspace id to run the mission in.",
+                },
+            },
+            "required": ["mission"],
+        },
+    },
+}
+
 
 def get_tool_schemas() -> list[dict]:
     """Return the OpenAI ``tools`` schemas for all SharedLLM tools."""
@@ -157,6 +187,7 @@ def get_tool_schemas() -> list[dict]:
         _IMAGE_GENERATE_TOOL,
         _IMAGE_EDIT_TOOL,
         _LIST_IMAGE_MODELS_TOOL,
+        _RAVEN_MISSION_TOOL,
     ]
 
 
@@ -263,6 +294,17 @@ def resolve_tool_call(
             service=SVC_ALPACA_SD,
             path="/v1/images/models",
             json={},
+        )
+
+    if name == TOOL_RAVEN_MISSION:
+        return ResolvedToolCall(
+            method="POST",
+            service=SVC_GATEWAY,
+            path="/api/raven/missions",
+            json={
+                "query": arguments.get("mission", ""),
+                "workspace_id": arguments.get("workspace_id"),
+            },
         )
 
     raise ValueError(f"Unknown SharedLLM tool: {name}")
