@@ -9,6 +9,7 @@ import secrets
 import time
 import traceback
 import warnings
+from datetime import date as date_cls, timedelta
 from contextlib import asynccontextmanager
 from typing import Any
 from uuid import uuid4
@@ -2752,7 +2753,7 @@ async def _get_skylight_session(username: str | None = None) -> dict | None:
 
 
 async def _skylight_request(
-    session: dict, method: str, suffix: str, json_body: dict | None = None
+    session: dict, method: str, suffix: str, json_body: dict | None = None, params: dict | None = None
 ) -> dict | None:
     """Call a frame-scoped Skylight endpoint. Returns parsed JSON, or None on failure."""
     url = session["url"]
@@ -2765,7 +2766,7 @@ async def _skylight_request(
     client = get_client()
     try:
         resp = await client.request(
-            method, f"{url}{path}", json=json_body, headers=headers, allow_redirects=False
+            method, f"{url}{path}", json=json_body, params=params, headers=headers, allow_redirects=False
         )
         if resp.status == 401:
             email = session.get("email")
@@ -2807,7 +2808,19 @@ async def get_skylight_chores(
     if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    result = await _skylight_request(session, "GET", "/chores")
+    # The chores endpoint requires an `after`/`before` date window. For a
+    # specific `date` we query that exact day; otherwise a bounded window of
+    # the recent past and near future keeps the payload reasonable.
+    today = date_cls.today()
+    if date:
+        after, before = date, date
+    else:
+        after = (today - timedelta(days=14)).isoformat()
+        before = (today + timedelta(days=120)).isoformat()
+
+    result = await _skylight_request(
+        session, "GET", "/chores", params={"after": after, "before": before}
+    )
     if result is None:
         return {"status": "FAILURE", "message": "Failed to fetch chores"}
 
@@ -2823,7 +2836,7 @@ async def get_skylight_chores(
         chores = [c for c in chores if user.lower() in _skylight_assignee_names(c)]
 
     if date:
-        chores = [c for c in chores if (c.get("due_date") or c.get("start") or "") == date]
+        chores = [c for c in chores if str(c.get("due_date") or c.get("start") or "").startswith(date)]
 
     return {"status": "SUCCESS", "chores": chores}
 
