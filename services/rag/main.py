@@ -178,11 +178,12 @@ async def search(req: SearchRequest):
 def purge_rag_collection(
     collection_name: str,
     user_id: str,
-    filter: dict = {},
+    filter: dict | None = None,
     x_internal_secret: str | None = Header(default=None)
 ):
     """Purge entries via query parameters (legacy interface)."""
-    if x_internal_secret is None:
+    if filter is None:
+        filter = {}
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     require_internal(x_internal_secret)
     try:

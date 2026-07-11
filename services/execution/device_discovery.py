@@ -641,7 +641,7 @@ async def _discover_via_mdns(
                 await device_registry.set_device(
                     entity_id,
                     ip=ip,
-                    hostname=hostname.rstrip(".local"),
+                    hostname=hostname.removesuffix(".local"),
                     friendly_name=friendly,
                     discovery_method="mdns",
                 )

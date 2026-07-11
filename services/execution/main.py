@@ -2661,11 +2661,12 @@ async def get_skylight_rewards(
 @app.post("/api/integrations/skylight/rewards/{reward_id}/redeem")
 async def redeem_skylight_reward(
     reward_id: str,
-    body: dict = {},
+    body: dict | None = None,
     user: str | None = None,
     x_internal_secret: str = Header(None)
 ):
     """Redeem a Skylight reward."""
+    body = body or {}
     url, token = await _get_skylight_auth(user)
     if not url or not token:
         return {"status": "FAILURE", "message": "Skylight not configured"}
@@ -2674,5 +2675,3 @@ async def redeem_skylight_reward(
     if result:
         return {"status": "SUCCESS", "message": "Reward redeemed"}
     return {"status": "FAILURE", "message": "Failed to redeem reward"}
-
-    return {"status": "SUCCESS", "message": f"Voice command received: '{transcript}'", "transcript": transcript}
