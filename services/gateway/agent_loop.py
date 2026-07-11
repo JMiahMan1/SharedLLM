@@ -791,7 +791,7 @@ async def execute_inference_with_kill(
         except Exception:
             flagged = True
         if flagged:
-            raise MissionKilledError(f"Mission {mission_id} killed during inference")
+            raise MissionKilledError(f"Mission {mission_id} killed during inference") from None
         raise
     finally:
         watch.cancel()
