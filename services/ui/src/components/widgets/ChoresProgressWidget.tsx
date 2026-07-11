@@ -6,15 +6,6 @@ import { api } from '../../services/api';
 import type { ChoreItem, IWidgetProps } from '../../types/widget';
 import toast from 'react-hot-toast';
 
-const isChoreAssignedToUser = (chore: ChoreItem, username: string): boolean => {
-  if (!chore.assignees || chore.assignees.length === 0) {
-    return false;
-  }
-  return chore.assignees.some(
-    (assignee) => assignee.toLowerCase() === username.toLowerCase()
-  );
-};
-
 const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
   const { user } = useAuth();
   const [completedOverrides, setCompletedOverrides] = useState<Record<string, boolean>>({});
@@ -35,11 +26,9 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       throw new Error(resp.message || 'Failed to fetch chores');
     }
 
-    const assigned = (resp.chores || []).filter((chore) =>
-      isChoreAssignedToUser(chore, user.username)
-    );
-
-    return assigned;
+    // Skylight returns the whole family frame with no per-user assignee data,
+    // so every chore is shown and toggleable by any household member.
+    return resp.chores || [];
   };
 
   const { data: chores = [], isLoading, error, refetch } = useWidgetData<ChoreItem[]>(
@@ -61,10 +50,6 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
 
   const handleToggleComplete = async (chore: ChoreItem) => {
     if (!user?.username) return;
-    if (!chore.assignees?.some((a) => a.toLowerCase() === user.username!.toLowerCase())) {
-      toast.error('This chore is not assigned to you');
-      return;
-    }
 
     const newStatus = !chore.completed;
     setCompletedOverrides((prev) => ({ ...prev, [chore.id]: newStatus }));
@@ -158,34 +143,22 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
 
           <div className="space-y-2 max-h-48 overflow-y-auto pr-1 flex-1 min-h-0">
             {localChores.map((chore) => {
-              const isAssignedToMe = chore.assignees?.some(
-                (a) => a.toLowerCase() === user?.username?.toLowerCase()
-              );
-
               return (
                 <button
                   key={chore.id}
-                  onClick={() => {
-                    if (isAssignedToMe) {
-                      handleToggleComplete(chore);
-                    }
-                  }}
-                  disabled={!isAssignedToMe || completingIds.has(chore.id)}
+                  onClick={() => handleToggleComplete(chore)}
+                  disabled={completingIds.has(chore.id)}
                   className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${
-                    isAssignedToMe
-                      ? chore.completed
-                        ? 'bg-emerald-500/10 border border-emerald-500/30'
-                        : 'bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50'
-                      : 'bg-slate-900/30 border border-slate-800/30 opacity-50 cursor-not-allowed'
+                    chore.completed
+                      ? 'bg-emerald-500/10 border border-emerald-500/30'
+                      : 'bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50'
                   }`}
                 >
                   <div
                     className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
                       chore.completed
                         ? 'bg-emerald-500 border-emerald-500'
-                        : isAssignedToMe
-                          ? 'border-slate-500'
-                          : 'border-slate-700'
+                        : 'border-slate-500'
                     }`}
                   >
                     {chore.completed && (
@@ -201,18 +174,14 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
                         chore.completed ? 'text-slate-400 line-through' : 'text-white'
                       }`}
                     >
-                      {chore.title}
+                      {chore.emoji_icon ? `${chore.emoji_icon} ` : ''}{chore.title}
                     </p>
-                    {chore.stars && chore.stars > 0 && (
+                    {chore.reward ? (
                       <p className="text-xs text-yellow-400">
-                        &#11088; {chore.stars} star{chore.stars > 1 ? 's' : ''}
+                        &#11088; {chore.reward} point{chore.reward > 1 ? 's' : ''}
                       </p>
-                    )}
+                    ) : null}
                   </div>
-
-                  {!isAssignedToMe && (
-                    <span className="text-xs text-slate-600 shrink-0">others</span>
-                  )}
                 </button>
               );
             })}

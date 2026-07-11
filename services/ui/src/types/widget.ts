@@ -89,6 +89,9 @@ export interface ChoreItem {
   assignees?: string[];
   recurrence?: string;
   stars?: number;
+  start?: string;
+  start_time?: string | null;
+  emoji_icon?: string | null;
 }
 
 export interface WidgetContextMenuProps {

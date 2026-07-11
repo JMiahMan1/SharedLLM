@@ -2784,17 +2784,25 @@ async def _skylight_request(
         return None
 
 
-def _skylight_assignee_names(chore: dict) -> list[str]:
-    """Return lowercased assignee names (tolerant of str or dict values)."""
-    names: list[str] = []
-    for a in chore.get("assignees", []) or []:
-        if isinstance(a, dict):
-            name = a.get("name") or a.get("display_name") or a.get("email") or ""
-        else:
-            name = str(a)
-        if name:
-            names.append(name.lower())
-    return names
+def _skylight_chore_to_item(raw: dict) -> dict:
+    """Flatten a raw Skylight JSON:API chore object into the flat shape the UI
+    widget expects. The private API does not expose per-user assignee data, so
+    `assignees` is left empty and `completed` is derived from the status."""
+    attrs = raw.get("attributes", {}) or {}
+    status = str(attrs.get("status") or "").lower()
+    recurrence = (attrs.get("recurrence_set") or [None])[0]
+    return {
+        "id": raw.get("id") or attrs.get("id"),
+        "title": attrs.get("summary") or attrs.get("description") or "Chore",
+        "completed": status == "complete" or bool(attrs.get("completed_on")),
+        "reward": attrs.get("reward_points"),
+        "assignees": [],
+        "recurrence": recurrence,
+        "stars": None,
+        "start": attrs.get("start"),
+        "start_time": attrs.get("start_time"),
+        "emoji_icon": attrs.get("emoji_icon"),
+    }
 
 
 def _skylight_chore_ids(chore_id: str) -> tuple[str, str]:
@@ -2818,15 +2826,20 @@ async def get_skylight_chores(
     if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    # The chores endpoint requires an `after`/`before` date window. For a
-    # specific `date` we query that exact day; otherwise a bounded window of
-    # the recent past and near future keeps the payload reasonable.
+    # The chores endpoint requires an `after`/`before` date window. The widget
+    # passes the literal "today"; map that (and any non-date value) to today's
+    # date window so we return just today's chores. A valid YYYY-MM-DD is
+    # queried as that exact day; otherwise a bounded window keeps things sane.
     today = date_cls.today()
-    if date:
-        after, before = date, date
-    else:
-        after = (today - timedelta(days=14)).isoformat()
-        before = (today + timedelta(days=120)).isoformat()
+    window_start = window_end = today
+    if date and date != "today":
+        try:
+            parsed = date_cls.fromisoformat(date)
+            window_start = window_end = parsed
+        except ValueError:
+            window_start, window_end = today, today
+    after = (window_start - timedelta(days=14)).isoformat()
+    before = (window_end + timedelta(days=120)).isoformat()
 
     result = await _skylight_request(
         session, "GET", "/chores", params={"after": after, "before": before}
@@ -2834,19 +2847,16 @@ async def get_skylight_chores(
     if result is None:
         return {"status": "FAILURE", "message": "Failed to fetch chores"}
 
-    chores = result.get("data", []) if isinstance(result, dict) else []
+    raw_chores = result.get("data", []) if isinstance(result, dict) else []
 
-    # The system (first) account owns Skylight and may see/edit every chore,
-    # optionally filtering by any assignee name via `user`. Other accounts are
-    # scoped to chores assigned to them.
-    first = await resolve_first_user()
-    is_system_account = bool(first) and user and user == first.get("user")
-
-    if user and not is_system_account:
-        chores = [c for c in chores if user.lower() in _skylight_assignee_names(c)]
-
-    if date:
-        chores = [c for c in chores if str(c.get("due_date") or c.get("start") or "").startswith(date)]
+    # The private API returns the whole family frame and exposes no per-user
+    # assignee data, so we surface every chore and let the widget render them.
+    day = window_end.isoformat()
+    chores = [
+        _skylight_chore_to_item(c)
+        for c in raw_chores
+        if str((c.get("attributes", {}) or {}).get("start") or "").startswith(day)
+    ]
 
     return {"status": "SUCCESS", "chores": chores}
 
