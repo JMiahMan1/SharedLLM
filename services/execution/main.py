@@ -1,7 +1,11 @@
 # services/execution/main.py
 import asyncio
+import base64
+import hashlib
 import logging
 import os
+import re
+import secrets
 import time
 import traceback
 import warnings
@@ -15,6 +19,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # Suppress InsecureRequestWarning for internal self-signed certs (homelab)
+from urllib.parse import parse_qs, urlparse
+
 from urllib3.exceptions import InsecureRequestWarning
 
 from services.common.http import get_client
@@ -2503,72 +2509,283 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
 
 
 # ─── Skylight Integration Proxy ────────────────────────────────────────────────
+# Skylight has no official/public API. We talk to the same private app API
+# (app.ourskylight.com) the community has reverse-engineered. Authentication is
+# OAuth2 Authorization-Code + PKCE (the legacy /api/sessions email/password login
+# is retired). All data endpoints are scoped to a "frame" (household), so we
+# resolve the frame id once at login. Reference: joshuaswarren/pyskylight.
 
 _SKYLIGHT_BASE = os.environ.get("SKYLIGHT_BASE_URL", "https://app.ourskylight.com")
-_skylight_tokens: dict[str, str] = {}
+_SKYLIGHT_CLIENT_ID = "skylight-mobile"
+_SKYLIGHT_REDIRECT_URI = "skylight-family://welcome"
+_SKYLIGHT_SCOPE = "everything"
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+)
+_SKYLIGHT_SESSIONS: dict[str, dict] = {}
 
 
-async def _get_skylight_auth(username: str | None = None) -> tuple[str | None, str | None]:
-    """Resolve Skylight credentials from identity service."""
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _skylight_token_expired(sess: dict, leeway: int = 120) -> bool:
+    exp = sess.get("expires_at")
+    if not exp:
+        return False
+    return time.time() >= (exp - leeway)
+
+
+def _skylight_expiry(sess: dict) -> float | None:
+    created = sess.get("created_at")
+    expires_in = sess.get("expires_in")
+    if isinstance(created, (int, float)) and isinstance(expires_in, (int, float)):
+        return float(created) + float(expires_in)
+    return None
+
+
+async def _skylight_oauth_login(client, base: str, email: str, password: str) -> dict | None:
+    """Log in via OAuth2 PKCE and return a token dict, or None on failure."""
+    verifier = _b64url(secrets.token_bytes(32))
+    challenge = _b64url(hashlib.sha256(verifier.encode("ascii")).digest())
+    state = _b64url(secrets.token_bytes(18))
+    params = {
+        "response_type": "code",
+        "client_id": _SKYLIGHT_CLIENT_ID,
+        "redirect_uri": _SKYLIGHT_REDIRECT_URI,
+        "scope": _SKYLIGHT_SCOPE,
+        "state": state,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "prompt": "login",
+    }
+    headers = {"User-Agent": _BROWSER_UA}
+    try:
+        resp = await client.get(
+            f"{base}/oauth/authorize", params=params, headers=headers, allow_redirects=False
+        )
+        loc = resp.headers.get("Location")
+        hops = 0
+        while resp.status in (301, 302, 303, 307, 308) and loc and hops < 10:
+            next_url = loc if loc.startswith("http") else base + loc
+            resp = await client.get(next_url, headers=headers, allow_redirects=False)
+            loc = resp.headers.get("Location")
+            hops += 1
+        if resp.status != 200:
+            log.error(f"[skylight] login form fetch failed: HTTP {resp.status}")
+            return None
+        html = await resp.text()
+        m = re.search(r'name="authenticity_token"[^>]*value="([^"]+)"', html)
+        if not m:
+            log.error("[skylight] no CSRF token in login form")
+            return None
+        csrf = m.group(1)
+
+        resp = await client.post(
+            f"{base}/auth/session",
+            data={"authenticity_token": csrf, "email": email, "password": password},
+            headers=headers,
+            allow_redirects=False,
+        )
+        loc = resp.headers.get("Location")
+        if not loc or not loc.startswith("skylight-family:"):
+            log.error("[skylight] invalid email or password")
+            return None
+        q = parse_qs(urlparse(loc).query)
+        if q.get("state", [""])[0] != state:
+            log.error("[skylight] OAuth state mismatch")
+            return None
+        code = q.get("code", [""])[0]
+        if not code:
+            log.error("[skylight] OAuth authorization code missing")
+            return None
+
+        resp = await client.post(
+            f"{base}/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "client_id": _SKYLIGHT_CLIENT_ID,
+                "code": code,
+                "redirect_uri": _SKYLIGHT_REDIRECT_URI,
+                "code_verifier": verifier,
+            },
+            headers=headers,
+            allow_redirects=False,
+        )
+        if resp.status >= 400:
+            log.error(f"[skylight] token exchange failed: HTTP {resp.status}")
+            return None
+        try:
+            data = await resp.json()
+        except Exception:
+            log.error("[skylight] token response was not valid JSON")
+            return None
+        token = data.get("access_token")
+        if not token:
+            return None
+        return {
+            "access_token": str(token),
+            "refresh_token": data.get("refresh_token"),
+            "created_at": data.get("created_at"),
+            "expires_in": data.get("expires_in"),
+        }
+    except Exception as e:
+        log.error(f"[skylight] login error: {e}")
+        return None
+
+
+async def _skylight_refresh(client, base: str, sess: dict) -> dict | None:
+    refresh_token = sess.get("refresh_token")
+    if not refresh_token:
+        return None
+    try:
+        resp = await client.post(
+            f"{base}/oauth/token",
+            data={
+                "grant_type": "refresh_token",
+                "client_id": _SKYLIGHT_CLIENT_ID,
+                "refresh_token": refresh_token,
+            },
+            headers={"User-Agent": _BROWSER_UA},
+            allow_redirects=False,
+        )
+        if resp.status >= 400:
+            return None
+        data = await resp.json()
+        token = data.get("access_token")
+        if not token:
+            return None
+        return {
+            "access_token": str(token),
+            "refresh_token": data.get("refresh_token") or refresh_token,
+            "created_at": data.get("created_at"),
+            "expires_in": data.get("expires_in"),
+        }
+    except Exception as e:
+        log.error(f"[skylight] refresh error: {e}")
+        return None
+
+
+async def _skylight_resolve_frame(client, base: str, token: str) -> str | None:
+    """Resolve the first frame (household) id for the account."""
+    try:
+        resp = await client.get(
+            f"{base}/api/frames",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            allow_redirects=False,
+        )
+        if resp.status != 200:
+            log.error(f"[skylight] frame resolution failed: HTTP {resp.status}")
+            return None
+        data = await resp.json()
+        frames = (data or {}).get("data") or []
+        if frames:
+            return str(frames[0].get("id"))
+        log.error("[skylight] no frames returned for account")
+        return None
+    except Exception as e:
+        log.error(f"[skylight] frame resolution error: {e}")
+        return None
+
+
+async def _get_skylight_session(username: str | None = None) -> dict | None:
+    """Return a cached Skylight session {url, access_token, frame_id, email} or None."""
     creds = await resolve_first_user()
-    log.debug(f"[skylight] resolve_first_user returned: type={type(creds).__name__}, creds={creds is not None}")
     if not creds or not isinstance(creds, dict):
-        return None, None
+        return None
 
-    url = creds.get("skylight_url") or _SKYLIGHT_BASE
+    # The Skylight account is a shared system credential, so always log in with
+    # the configured skylight_email. `username` is only used downstream to filter
+    # chores by assignee, never as the Skylight login identity.
+    email = creds.get("skylight_email")
     password = creds.get("skylight_pass")
-
-    # Determine the email/login name to use
-    email = username if username else creds.get("skylight_email")
-
     if not email or not password:
-        return None, None
+        return None
 
-    # Check if the user has disabled the integration
     if username:
         user_creds = await resolve_internal_user(rag_user=username)
         if user_creds and not user_creds.get("skylight_enabled", True):
             log.info(f"[skylight] Integration disabled for user {username}")
-            return None, None
-
-    # Reuse cached token if available
-    if email in _skylight_tokens:
-        return url, _skylight_tokens[email]
-
-
-    try:
-        async with get_client() as client:
-            resp = await client.post(
-                f"{url}/api/v1/auth/login",
-                json={"email": email, "password": password},
-                timeout=aiohttp.ClientTimeout(total=10.0),
-            )
-            if resp.status == 200:
-                body = await resp.json()
-                token = body.get("token") or body.get("access_token")
-                if token:
-                    _skylight_tokens[email] = token
-                    return url, token
-    except Exception as e:
-        log.error(f"[skylight] Auth failed for {email}: {e}")
-
-    return None, None
-
-
-async def _skylight_api(url: str, token: str, method: str, path: str, json_body: dict | None = None) -> dict | None:
-    """Make a Skylight API call. Returns the parsed JSON body, or None on failure."""
-    try:
-        async with get_client() as client:
-            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-            resp = await client.request(method, f"{url}{path}", json=json_body, headers=headers, timeout=aiohttp.ClientTimeout(total=15.0))
-            if resp.status in (200, 201):
-                return await resp.json()
-            body = await resp.text()
-            log.error(f"[skylight] API error {resp.status}: {body[:200]}")
             return None
-    except Exception as e:
-        log.error(f"[skylight] API exception: {e}")
+
+    base = (creds.get("skylight_url") or _SKYLIGHT_BASE).rstrip("/")
+    sess = _SKYLIGHT_SESSIONS.get(email)
+
+    if sess and sess.get("access_token"):
+        if _skylight_token_expired(sess) and sess.get("refresh_token"):
+            refreshed = await _skylight_refresh(get_client(), base, sess)
+            if refreshed:
+                refreshed["frame_id"] = sess.get("frame_id")
+                refreshed["expires_at"] = _skylight_expiry(refreshed)
+                _SKYLIGHT_SESSIONS[email] = refreshed
+                sess = refreshed
+            else:
+                sess = None
+        if sess and sess.get("access_token") and sess.get("frame_id"):
+            return {
+                "url": base,
+                "access_token": sess["access_token"],
+                "frame_id": sess["frame_id"],
+                "email": email,
+            }
+
+    client = get_client()
+    tokens = await _skylight_oauth_login(client, base, email, password)
+    if not tokens:
         return None
+    frame_id = await _skylight_resolve_frame(client, base, tokens["access_token"])
+    if not frame_id:
+        return None
+    tokens["frame_id"] = frame_id
+    tokens["expires_at"] = _skylight_expiry(tokens)
+    _SKYLIGHT_SESSIONS[email] = tokens
+    return {"url": base, "access_token": tokens["access_token"], "frame_id": frame_id, "email": email}
+
+
+async def _skylight_request(
+    session: dict, method: str, suffix: str, json_body: dict | None = None
+) -> dict | None:
+    """Call a frame-scoped Skylight endpoint. Returns parsed JSON, or None on failure."""
+    url = session["url"]
+    path = f"/api/frames/{session['frame_id']}{suffix}"
+    headers = {
+        "Authorization": f"Bearer {session['access_token']}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    client = get_client()
+    try:
+        resp = await client.request(
+            method, f"{url}{path}", json=json_body, headers=headers, allow_redirects=False
+        )
+        if resp.status == 401:
+            email = session.get("email")
+            if email:
+                _SKYLIGHT_SESSIONS.pop(email, None)
+            log.error(f"[skylight] 401 on {method} {path}; session cleared, retry login")
+            return None
+        if resp.status in (200, 201):
+            return await resp.json()
+        body = await resp.text()
+        log.error(f"[skylight] API error {resp.status} on {method} {path}: {body[:200]}")
+        return None
+    except Exception as e:
+        log.error(f"[skylight] API exception on {method} {path}: {e}")
+        return None
+
+
+def _skylight_assignee_names(chore: dict) -> list[str]:
+    """Return lowercased assignee names (tolerant of str or dict values)."""
+    names: list[str] = []
+    for a in chore.get("assignees", []) or []:
+        if isinstance(a, dict):
+            name = a.get("name") or a.get("display_name") or a.get("email") or ""
+        else:
+            name = str(a)
+        if name:
+            names.append(name.lower())
+    return names
 
 
 @app.get("/api/integrations/skylight/chores", dependencies=[Depends(require_internal)])
@@ -2578,34 +2795,29 @@ async def get_skylight_chores(
     x_internal_secret: str = Header(None)
 ):
     """Get chores from Skylight, optionally filtered by user and/or date."""
-    url, token = await _get_skylight_auth(user)
-    if not url or not token:
+    session = await _get_skylight_session(user)
+    if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    result = await _skylight_api(url, token, "GET", "/api/v1/chores")
-    if not result:
+    result = await _skylight_request(session, "GET", "/chores")
+    if result is None:
         return {"status": "FAILURE", "message": "Failed to fetch chores"}
 
-    chores = result.get("data", []) if result else []
+    chores = result.get("data", []) if isinstance(result, dict) else []
 
-    # Filter by user if specified
-    if user:
-        chores = [
-            c for c in chores
-            if user.lower() in [a.lower() for a in c.get("assignees", [])]
-        ]
+    # The system (first) account owns Skylight and may see/edit every chore,
+    # optionally filtering by any assignee name via `user`. Other accounts are
+    # scoped to chores assigned to them.
+    first = await resolve_first_user()
+    is_system_account = bool(first) and user and user == first.get("user")
 
-    # Filter by date if specified
+    if user and not is_system_account:
+        chores = [c for c in chores if user.lower() in _skylight_assignee_names(c)]
+
     if date:
-        chores = [
-            c for c in chores
-            if c.get("due_date", "") == date
-        ]
+        chores = [c for c in chores if (c.get("due_date") or c.get("start") or "") == date]
 
-    return {
-        "status": "SUCCESS",
-        "chores": chores,
-    }
+    return {"status": "SUCCESS", "chores": chores}
 
 
 @app.post("/api/integrations/skylight/chores/{chore_id}/complete", dependencies=[Depends(require_internal)])
@@ -2615,12 +2827,12 @@ async def complete_skylight_chore(
     x_internal_secret: str = Header(None)
 ):
     """Mark a Skylight chore as complete."""
-    url, token = await _get_skylight_auth(user)
-    if not url or not token:
+    session = await _get_skylight_session(user)
+    if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    result = await _skylight_api(url, token, "POST", f"/api/v1/chores/{chore_id}/complete")
-    if result:
+    result = await _skylight_request(session, "PUT", f"/chores/{chore_id}/completions", {"status": "complete"})
+    if result is not None:
         return {"status": "SUCCESS", "message": "Chore completed"}
     return {"status": "FAILURE", "message": "Failed to complete chore"}
 
@@ -2632,12 +2844,12 @@ async def uncomplete_skylight_chore(
     x_internal_secret: str = Header(None)
 ):
     """Mark a Skylight chore as incomplete."""
-    url, token = await _get_skylight_auth(user)
-    if not url or not token:
+    session = await _get_skylight_session(user)
+    if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    result = await _skylight_api(url, token, "POST", f"/api/v1/chores/{chore_id}/uncomplete")
-    if result:
+    result = await _skylight_request(session, "PUT", f"/chores/{chore_id}/completions", {"status": "incomplete"})
+    if result is not None:
         return {"status": "SUCCESS", "message": "Chore uncompleted"}
     return {"status": "FAILURE", "message": "Failed to uncomplete chore"}
 
@@ -2648,15 +2860,15 @@ async def get_skylight_rewards(
     x_internal_secret: str = Header(None)
 ):
     """Get Skylight rewards."""
-    url, token = await _get_skylight_auth(user)
-    if not url or not token:
+    session = await _get_skylight_session(user)
+    if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    result = await _skylight_api(url, token, "GET", "/api/v1/rewards")
-    if not result:
+    result = await _skylight_request(session, "GET", "/rewards")
+    if result is None:
         return {"status": "FAILURE", "message": "Failed to fetch rewards"}
 
-    rewards = result.get("data", []) if result else []
+    rewards = result.get("data", []) if isinstance(result, dict) else []
     return {"status": "SUCCESS", "rewards": rewards}
 
 
@@ -2669,11 +2881,11 @@ async def redeem_skylight_reward(
 ):
     """Redeem a Skylight reward."""
     body = body or {}
-    url, token = await _get_skylight_auth(user)
-    if not url or not token:
+    session = await _get_skylight_session(user)
+    if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    result = await _skylight_api(url, token, "POST", f"/api/v1/rewards/{reward_id}/redeem", body)
-    if result:
+    result = await _skylight_request(session, "POST", f"/rewards/{reward_id}/redeem", body or None)
+    if result is not None:
         return {"status": "SUCCESS", "message": "Reward redeemed"}
     return {"status": "FAILURE", "message": "Failed to redeem reward"}
