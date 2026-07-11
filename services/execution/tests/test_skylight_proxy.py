@@ -41,7 +41,7 @@ def test_skylight_chores_user_filter():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_chores}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -70,7 +70,7 @@ def test_skylight_chores_date_filter():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_chores}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -98,7 +98,7 @@ def test_skylight_chores_user_and_date_filter():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_chores}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -120,7 +120,7 @@ def test_skylight_chore_complete():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"success": True}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -140,7 +140,7 @@ def test_skylight_chore_complete_failure():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return None
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -159,7 +159,7 @@ def test_skylight_chore_uncomplete():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"success": True}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -184,7 +184,7 @@ def test_skylight_rewards():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_rewards}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -204,7 +204,7 @@ def test_skylight_rewards_failure():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return None
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -223,7 +223,7 @@ def test_skylight_redeem_reward():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"success": True}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -244,7 +244,7 @@ def test_skylight_redeem_reward_failure():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return None
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -276,7 +276,7 @@ def test_skylight_chores_empty_list():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": []}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
@@ -300,7 +300,7 @@ def test_skylight_chores_case_insensitive_user_filter():
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
-    async def mock_skylight_request(session, method, suffix, json_body=None):
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
         return {"data": mock_chores}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
