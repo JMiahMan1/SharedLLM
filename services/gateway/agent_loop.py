@@ -2038,6 +2038,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             # workspace so later file/git tool calls run inside it.
                             if lookup_action == "workspacecreaterequest" and isinstance(exec_data, dict):
                                 _created = (exec_data.get("workspace") or {}).get("id")
+                                # Fallback: even if the runtime returned an unexpected
+                                # shape (e.g. idempotent "already existed" with a
+                                # different envelope), adopt the id Raven requested so
+                                # it always has a working sandbox to operate out of.
+                                if not _created and isinstance(payload, dict):
+                                    _created = payload.get("id") or payload.get("workspace_id")
                                 if _created:
                                     workspace_id = str(_created)
                                     created_workspaces.add(workspace_id)
