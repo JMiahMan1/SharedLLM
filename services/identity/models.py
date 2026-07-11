@@ -137,6 +137,17 @@ class UserWidget(SQLModel, table=True):  # type: ignore
     config: str = Field(default="{}")
     updated_at: int = Field(default_factory=lambda: int(datetime.now().timestamp() * 1000))
 
+
+class UserCalendarSetting(SQLModel, table=True):  # type: ignore
+    """Per-user calendar integration preferences (runtime-derived, never hardcoded).
+
+    Holds: default integration, disabled integrations, per-integration
+    priority, and iCal .ics subscription URLs. One row per user.
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: dict = Field(default_factory=dict)
+
 DEFAULT_GLOBAL_SETTINGS = [
     {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
     {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},
