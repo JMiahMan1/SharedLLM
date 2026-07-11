@@ -2588,7 +2588,15 @@ async def _skylight_oauth_login(client, base: str, email: str, password: str) ->
             headers=headers,
             allow_redirects=False,
         )
+        # The session POST redirects (via /oauth/authorize) to the
+        # skylight-family:// callback. Follow that chain to the code.
         loc = resp.headers.get("Location")
+        hops = 0
+        while loc and not loc.startswith("skylight-family:") and hops < 8:
+            next_url = loc if loc.startswith("http") else base + loc
+            resp = await client.get(next_url, headers=headers, allow_redirects=False)
+            loc = resp.headers.get("Location")
+            hops += 1
         if not loc or not loc.startswith("skylight-family:"):
             log.error("[skylight] invalid email or password")
             return None
