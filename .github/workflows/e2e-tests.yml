@@ -187,6 +187,13 @@ jobs:
             fi
             sleep 2
           done
+          for i in $(seq 1 60); do
+            if curl -s http://localhost:8007/health | grep -q ok; then
+              echo "Workspace runtime service ready"
+              break
+            fi
+            sleep 2
+          done
 
       - name: Run integration tests
         env:
