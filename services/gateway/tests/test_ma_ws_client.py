@@ -132,23 +132,21 @@ class TestInitialization:
 class TestConnection:
     @pytest.mark.asyncio
     async def test_connect_establishes_websocket(self, client, mock_websocket):
-        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)):
-            with patch.object(client, "_establish_connection") as mock_establish:
-                mock_establish.return_value = None
-                await client.connect()
-                assert mock_establish.called
+        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)), patch.object(client, "_establish_connection") as mock_establish:
+            mock_establish.return_value = None
+            await client.connect()
+            assert mock_establish.called
 
     @pytest.mark.asyncio
     async def test_connect_sets_connected_state(self, client, mock_websocket):
-        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)):
-            with patch.object(client, "_establish_connection") as mock_establish:
-                async def setup_connected():
-                    client._connected = True
-                    client._authenticated = True
-                    client._ws = mock_websocket
-                mock_establish.side_effect = setup_connected
-                await client.connect()
-                assert client.connected is True
+        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)), patch.object(client, "_establish_connection") as mock_establish:
+            async def setup_connected():
+                client._connected = True
+                client._authenticated = True
+                client._ws = mock_websocket
+            mock_establish.side_effect = setup_connected
+            await client.connect()
+            assert client.connected is True
 
     @pytest.mark.asyncio
     async def test_connect_resets_reconnect_count(self, client, mock_websocket):
@@ -161,10 +159,9 @@ class TestConnection:
     @pytest.mark.asyncio
     async def test_connect_skips_if_already_connected(self, client, mock_websocket):
         client._connected = True
-        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)):
-            with patch.object(client, "_establish_connection") as mock_establish:
-                await client.connect()
-                assert not mock_establish.called
+        with patch("websockets.connect", AsyncMock(return_value=mock_websocket)), patch.object(client, "_establish_connection") as mock_establish:
+            await client.connect()
+            assert not mock_establish.called
 
     @pytest.mark.asyncio
     async def test_connect_starts_message_handler_task(self, client, mock_websocket):

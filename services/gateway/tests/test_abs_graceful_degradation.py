@@ -51,8 +51,7 @@ async def test_abs_libraries_timeout_returns_empty(client):
 
     mock_creds = {"user": "testuser"}
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(side_effect=aiohttp.ClientConnectionError("timeout"))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -74,8 +73,7 @@ async def test_abs_last_played_timeout_returns_empty(client):
 
     mock_creds = {"user": "testuser"}
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(side_effect=aiohttp.ClientConnectionError("timeout"))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -97,8 +95,7 @@ async def test_abs_search_timeout_returns_empty(client):
 
     mock_creds = {"user": "testuser"}
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(side_effect=aiohttp.ClientConnectionError("timeout"))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -120,8 +117,7 @@ async def test_abs_library_items_timeout_returns_empty(client):
 
     mock_creds = {"user": "testuser"}
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(side_effect=aiohttp.ClientConnectionError("timeout"))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -148,9 +144,7 @@ async def test_abs_connectivity_status_unreachable(client):
         {"key": "audiobookshelf_url", "value": "https://abs.sumemail.com/"}
     ])
 
-    with patch.object(services_config, 'IDENTITY_SVC_URL', 'http://identity:8001'):
-        with patch.object(services_config, 'INTERNAL_SECRET', 'test-secret'):
-            with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(services_config, 'IDENTITY_SVC_URL', 'http://identity:8001'), patch.object(services_config, 'INTERNAL_SECRET', 'test-secret'), patch('aiohttp.ClientSession') as mock_client_cls:
                 mock_client = AsyncMock()
                 mock_client.get = AsyncMock(side_effect=aiohttp.ClientConnectionError("timeout"))
                 mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -179,8 +173,7 @@ async def test_abs_libraries_success_with_data(client):
         }
     }
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=MockAioResponse(json_data=mock_response_data))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -211,8 +204,7 @@ async def test_abs_libraries_normalizes_media_type(client):
         }
     }
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=MockAioResponse(json_data=mock_response_data))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -256,8 +248,7 @@ async def test_abs_last_played_with_data(client):
         }
     }
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=MockAioResponse(json_data=mock_response_data))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -287,8 +278,7 @@ async def test_abs_search_with_data(client):
         }
     }
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=MockAioResponse(json_data=mock_response_data))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -314,9 +304,7 @@ async def test_abs_connectivity_status_available(client):
         {"key": "audiobookshelf_url", "value": "https://abs.sumemail.com/"}
     ])
 
-    with patch.object(services_config, 'IDENTITY_SVC_URL', 'http://identity:8001'):
-        with patch.object(services_config, 'INTERNAL_SECRET', 'test-secret'):
-            with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(services_config, 'IDENTITY_SVC_URL', 'http://identity:8001'), patch.object(services_config, 'INTERNAL_SECRET', 'test-secret'), patch('aiohttp.ClientSession') as mock_client_cls:
                 mock_client = AsyncMock()
                 # First call returns settings, second call pings ABS
                 mock_client.get = AsyncMock(side_effect=[
@@ -345,9 +333,7 @@ async def test_abs_connectivity_status_no_config(client):
         {"key": "other_setting", "value": "value"}
     ])
 
-    with patch.object(services_config, 'IDENTITY_SVC_URL', 'http://identity:8001'):
-        with patch.object(services_config, 'INTERNAL_SECRET', 'test-secret'):
-            with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(services_config, 'IDENTITY_SVC_URL', 'http://identity:8001'), patch.object(services_config, 'INTERNAL_SECRET', 'test-secret'), patch('aiohttp.ClientSession') as mock_client_cls:
                 mock_client = AsyncMock()
                 mock_client.get = AsyncMock(return_value=mock_settings_resp)
                 mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
@@ -377,8 +363,7 @@ async def test_abs_library_items_with_data(client):
         }
     }
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('aiohttp.ClientSession') as mock_client_cls:
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('aiohttp.ClientSession') as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.get = AsyncMock(return_value=MockAioResponse(json_data=mock_response_data))
             mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)

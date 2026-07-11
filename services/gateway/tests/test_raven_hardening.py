@@ -1,4 +1,8 @@
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import aiohttp
+import pytest
 
 
 def _aio_resp(status=200, json_data=None, text=""):
@@ -8,11 +12,6 @@ def _aio_resp(status=200, json_data=None, text=""):
     m.json = AsyncMock(return_value=json_data if json_data is not None else {"status": "SUCCESS"})
     m.text = AsyncMock(return_value=text)
     return m
-
-import os
-
-import aiohttp
-import pytest
 
 
 def test_kill_switch_logic():

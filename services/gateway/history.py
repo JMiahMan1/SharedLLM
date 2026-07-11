@@ -6,10 +6,10 @@ import time
 import aiohttp
 import redis
 
-log = logging.getLogger("gateway.history")
-
 # INTERNAL_SECRET sourced from config.py which enforces fail-secure at gateway startup.
 from services.gateway.config import INTERNAL_SECRET
+
+log = logging.getLogger("gateway.history")
 
 _redis = None
 
@@ -37,7 +37,8 @@ async def get_history(user_id: str) -> list:
         key = _get_history_key(user_id)
         r = get_redis()
         raw_msgs: list = await r.lrange(key, 0, -1)  # type: ignore[misc]
-        if not raw_msgs: return []
+        if not raw_msgs:
+            return []
 
         msgs = []
         for m in raw_msgs:
@@ -54,7 +55,8 @@ async def get_history(user_id: str) -> list:
 
 async def update_history(user_id: str, role: str, content: str):
     """Saves a message to Redis history."""
-    if not content: return
+    if not content:
+        return
     try:
         key = _get_history_key(user_id)
         msg = json.dumps({"role": role, "content": content})
@@ -143,7 +145,8 @@ Return ONLY a bulleted list of facts, or 'NONE'.
                 json={"model": LIBRARIAN_MODEL, "prompt": prompt, "stream": False},
                 timeout=aiohttp.ClientTimeout(total=60.0),
             )
-            if resp.status != 200: return
+            if resp.status != 200:
+                return
 
             data = await resp.json()
             text = data.get("response", "").strip()
@@ -152,7 +155,8 @@ Return ONLY a bulleted list of facts, or 'NONE'.
 
             facts = [f.strip("- ").strip() for f in text.split("\n") if f.strip("- ").strip()]
             for f in facts:
-                if len(f) < 5: continue
+                if len(f) < 5:
+                    continue
                 await client.post(
                     f"{rag_svc}/rag/ingest",
                     json={
@@ -174,5 +178,5 @@ def ping_redis() -> bool:
         r = get_redis()
         result = r.ping()
         return bool(result)
-    except:
+    except Exception:
         return False

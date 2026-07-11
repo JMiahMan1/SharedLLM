@@ -1,5 +1,12 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from fastapi.testclient import TestClient
+
+from services.gateway.main import app
+
+client = TestClient(app)
+
 
 def _aio_resp(status=200, json_data=None, text=""):
     """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
@@ -8,13 +15,6 @@ def _aio_resp(status=200, json_data=None, text=""):
     m.json = AsyncMock(return_value=json_data if json_data is not None else {"status": "SUCCESS"})
     m.text = AsyncMock(return_value=text)
     return m
-
-import pytest
-from fastapi.testclient import TestClient
-
-from services.gateway.main import app
-
-client = TestClient(app)
 
 
 class TestPauseMission:
@@ -37,14 +37,13 @@ class TestPauseMission:
 
         monkeypatch.setattr("redis.asyncio", mock_redis_module)
 
-        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_mission_resp)):
-            with patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
-                response = client.post("/api/raven/missions/42/pause")
-                assert response.status_code == 200
-                data = response.json()
-                assert data["status"] == "SUCCESS"
-                assert "paused" in data["message"].lower()
-                mock_redis.set.assert_called_once()
+        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_mission_resp)), patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
+            response = client.post("/api/raven/missions/42/pause")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "SUCCESS"
+            assert "paused" in data["message"].lower()
+            mock_redis.set.assert_called_once()
 
 
 class TestResumeMission:
@@ -67,14 +66,13 @@ class TestResumeMission:
 
         monkeypatch.setattr("redis.asyncio", mock_redis_module)
 
-        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_mission_resp)):
-            with patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
-                response = client.post("/api/raven/missions/42/resume")
-                assert response.status_code == 200
-                data = response.json()
-                assert data["status"] == "SUCCESS"
-                assert "resumed" in data["message"].lower()
-                mock_redis.delete.assert_called_once()
+        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_mission_resp)), patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
+            response = client.post("/api/raven/missions/42/resume")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["status"] == "SUCCESS"
+            assert "resumed" in data["message"].lower()
+            mock_redis.delete.assert_called_once()
 
 
 class TestPauseMissionNotFound:
@@ -84,16 +82,14 @@ class TestPauseMissionNotFound:
     async def test_pause_mission_not_found(self, monkeypatch):
         mock_resp = _aio_resp(404)
 
-        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)):
-            with patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
-                response = client.post("/api/raven/missions/999/pause")
-                assert response.status_code == 404
+        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)), patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
+            response = client.post("/api/raven/missions/999/pause")
+            assert response.status_code == 404
 
     @pytest.mark.asyncio
     async def test_resume_mission_not_found(self, monkeypatch):
         mock_resp = _aio_resp(404)
 
-        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)):
-            with patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
-                response = client.post("/api/raven/missions/999/resume")
-                assert response.status_code == 404
+        with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)), patch("services.gateway.main._resolve_identity_from_request", new=AsyncMock(return_value={"user": "admin", "is_admin": True})):
+            response = client.post("/api/raven/missions/999/resume")
+            assert response.status_code == 404
