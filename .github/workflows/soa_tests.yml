@@ -47,15 +47,53 @@ jobs:
         # RAG has huge deps (Torch), so we mock it for CI unit tests
         # The tests are designed to bypass heavy ML loads via mocker.
 
-    - name: Lint (ruff + mypy fast-fail)
+    - name: Lint (ruff + import smoke test fast-fail)
       env:
         PYTHONPATH: ${{ github.workspace }}/services
+        FERNET_KEY: i5ugdUh4AW_VfBsJHebDimXBS7d1AVUhAdC3P_h8Zig=
+        INTERNAL_SECRET: test-secret-github-actions
+        IDENTITY_SVC_URL: http://localhost:8001
+        EXECUTION_SVC_URL: http://localhost:8003
+        RAG_SVC_URL: http://localhost:8004
+        STORAGE_SVC_URL: http://localhost:8005
+        LOGGING_SVC_URL: http://localhost:8006
+        WORKSPACE_RUNTIME_SVC_URL: http://localhost:8007
+        CONTROL_PLANE_URL: http://localhost:8008
+        SEARXNG_URL: http://localhost:8009
+        HA_URL: http://localhost:8123
+        HA_TOKEN: test-token
+        NEXTCLOUD_URL: http://localhost:8010
+        NEXTCLOUD_USER: testuser
+        NEXTCLOUD_PASS: testpass
+        GIT_URL: http://localhost:8011
+        GIT_USER: testuser
+        GIT_TOKEN: testtoken
+        REDIS_URL: redis://localhost:6379/0
+        DEFAULT_ADMIN_PASSWORD: test-admin-password
+        DEFAULT_MODEL: qwen3:8b
+        ASSISTANT_MODEL: qwen3:8b
+        CODING_MODEL: qwen2.5-coder:7b
+        LIBRARIAN_MODEL: qwen3:8b
+        DEFAULT_TTS_VOICE: alloy
+        WORKSPACE_ROOT: /tmp/workspace
+        TEMP_MEDIA_DIR: /tmp/media
       run: |
-        # Fast static gate that catches syntax errors, undefined names within a
-        # file, and — via mypy — cross-module import breakage (e.g. a removed
-        # re-exported constant) BEFORE the heavier pytest collection step.
+        # Fast static gate that runs BEFORE the heavier pytest run.
+        # ruff catches syntax errors and undefined names within a file.
+        # pytest --collect-only imports every gateway test module (and thus the
+        # whole gateway import graph) without executing tests, surfacing
+        # ImportError / missing re-export breakage (e.g. a dropped cache constant)
+        # immediately instead of mid-collection in the test step.
         ruff check --select E9,F63,F7,F82 services/gateway
-        python -m mypy services/gateway --ignore-missing-imports --disable-error-code=assignment
+        pytest --collect-only -q \
+          services/tests/test_gateway_model_selection.py \
+          services/tests/test_gateway_media_target.py \
+          services/tests/test_intent_engine.py \
+          services/tests/test_raven_hardening.py \
+          services/tests/test_raven_routing.py \
+          services/tests/test_raven_timeout_behavior.py \
+          services/tests/test_identity_resolution.py \
+          services/tests/test_execution_handlers.py
 
     - name: Run Pytest
       env:
