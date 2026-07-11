@@ -36,7 +36,7 @@ async def get_history(user_id: str) -> list:
     try:
         key = _get_history_key(user_id)
         r = get_redis()
-        raw_msgs: list = await r.lrange(key, 0, -1)  # type: ignore[misc]
+        raw_msgs: list = r.lrange(key, 0, -1)  # type: ignore[misc]
         if not raw_msgs:
             return []
 
