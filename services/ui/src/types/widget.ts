@@ -75,6 +75,7 @@ export interface MediaState {
 }
 
 export interface CalendarEvent {
+  id?: string;
   summary: string;
   start_time: string;
   end_time?: string;

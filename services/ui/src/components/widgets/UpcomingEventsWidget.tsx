@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { useWidgetData } from '../../hooks/useWidgetData';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
@@ -92,7 +93,9 @@ const formatRelativeTime = (date: Date): string => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
-const UpcomingEventsWidget = ({ settingsButton }: IWidgetProps) => {
+  const UpcomingEventsWidget = ({ settingsButton }: IWidgetProps) => {
+    const navigate = useNavigate();
+    const openCalendar = () => navigate('/calendar');
   const fetchEvents = async () => {
     const result = await api.getCalendarEvents() as { status: string; message?: string; events?: CalendarEvent[] };
     if (result.status !== 'SUCCESS') {
@@ -130,7 +133,11 @@ const UpcomingEventsWidget = ({ settingsButton }: IWidgetProps) => {
         return (
           <div
             key={`${event.summary}-${index}`}
-            className={`p-4 rounded-xl border transition-all ${
+            role="button"
+            tabIndex={0}
+            onClick={openCalendar}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openCalendar(); } }}
+            className={`p-4 rounded-xl border cursor-pointer transition-all ${
               isVerySoon
                 ? 'bg-amber-500/10 border-amber-500/30 shadow-lg shadow-amber-500/5'
                 : 'bg-slate-900/50 border-slate-800 hover:border-slate-700/50'
