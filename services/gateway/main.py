@@ -3157,12 +3157,29 @@ async def get_chat_job_status(job_id: str):
         "message": "Raven is still thinking..." if job["status"] == JobStatus.PROCESSING else "Queued in FIFO buffer."
     }
 
+
+async def _proxy_json_response(resp: aiohttp.ClientResponse) -> JSONResponse:
+    """Proxy an upstream aiohttp response back to the caller.
+
+    Upstream services sometimes return a non-JSON body on error (e.g. a 500
+    with ``text/plain`` or an HTML error page). Calling ``resp.json()`` on
+    those raises ``ContentTypeError`` and surfaces here as a spurious 500.
+    Fall back to the raw text so the upstream status code and body survive.
+    """
+    if resp.content_type and "application/json" in resp.content_type:
+        try:
+            return await _proxy_json_response(resp)
+        except Exception:
+            pass
+    return JSONResponse(status_code=resp.status, content=await resp.text())
+
+
 @app.post("/api/auth/login")
 async def proxy_login(request: Request):
     body = await request.json()
     async with shared_http_client() as client:
         resp = await client.post(f"{IDENTITY_SVC}/api/auth/login", json=body, timeout=aiohttp.ClientTimeout(total=10.0))
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.post("/api/auth/change-password")
 async def proxy_change_password(request: Request):
@@ -3178,7 +3195,7 @@ async def proxy_change_password(request: Request):
         if resp.status < 400:
             from services.gateway.cache import invalidate_identity
             invalidate_identity()
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 
 @app.post("/api/users/{username}/password")
@@ -3190,7 +3207,7 @@ async def proxy_admin_set_password(username: str, request: Request):
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 
 @app.post("/api/auth/import/nextcloud")
@@ -3200,7 +3217,7 @@ async def proxy_import_nextcloud_users(request: Request):
             f"{IDENTITY_SVC}/api/auth/import/nextcloud",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 
 @app.post("/api/auth/test-connection")
@@ -3214,7 +3231,7 @@ async def proxy_test_connection(request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.get("/api/auth/discover")
 async def proxy_discover(request: Request):
@@ -3225,7 +3242,7 @@ async def proxy_discover(request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
             , timeout=aiohttp.ClientTimeout(total=60.0),
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.patch("/api/users/me")
 async def proxy_update_me(request: Request):
@@ -3238,7 +3255,7 @@ async def proxy_update_me(request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.patch("/api/users/{username}")
 async def proxy_update_user(username: str, request: Request):
@@ -3251,7 +3268,7 @@ async def proxy_update_user(username: str, request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.get("/api/settings")
 async def proxy_get_settings(request: Request):
@@ -3262,7 +3279,7 @@ async def proxy_get_settings(request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 @app.patch("/api/settings/{key}")
 async def proxy_update_setting(key: str, request: Request):
     body = await request.json()
@@ -3277,7 +3294,7 @@ async def proxy_update_setting(key: str, request: Request):
         if resp.status < 400:
             from services.gateway.cache import invalidate_settings
             invalidate_settings()
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 
 @app.post("/api/settings")
@@ -3294,7 +3311,7 @@ async def proxy_update_settings_bulk(request: Request):
         if resp.status < 400:
             from services.gateway.cache import invalidate_settings
             invalidate_settings()
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.get("/api/users")
 async def proxy_users(request: Request):
@@ -3305,7 +3322,7 @@ async def proxy_users(request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 
 # --- Telemetry Monitoring ---
@@ -3318,7 +3335,7 @@ async def proxy_list_telemetry_enrollments(request: Request):
             f"{IDENTITY_SVC}/api/telemetry/enroll",
             headers=headers
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.post("/api/telemetry/enroll")
 async def proxy_enroll_telemetry(request: Request):
@@ -3331,7 +3348,7 @@ async def proxy_enroll_telemetry(request: Request):
             json=body,
             headers=headers
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 
 @app.post("/api/telemetry/enroll/{entity_id:path}")
@@ -3350,7 +3367,7 @@ async def proxy_enroll_telemetry_by_id(entity_id: str, request: Request):
             json=body,
             headers=headers
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.delete("/api/telemetry/enroll/{entity_id:path}")
 async def proxy_unenroll_telemetry(entity_id: str, request: Request):
@@ -3361,7 +3378,7 @@ async def proxy_unenroll_telemetry(entity_id: str, request: Request):
             f"{IDENTITY_SVC}/api/telemetry/enroll/{entity_id}",
             headers=headers
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.post("/api/telemetry/analyze")
 async def proxy_trigger_telemetry_analysis(request: Request):
@@ -3374,7 +3391,7 @@ async def proxy_trigger_telemetry_analysis(request: Request):
             json=body,
             headers=headers
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.get("/api/telemetry/summary/{entity_id:path}")
 async def proxy_get_telemetry_summary(entity_id: str, request: Request):
@@ -3385,7 +3402,7 @@ async def proxy_get_telemetry_summary(entity_id: str, request: Request):
             f"{IDENTITY_SVC}/api/telemetry/summary/{entity_id}",
             headers=headers
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.get("/api/telemetry/data/{entity_id:path}")
 async def proxy_get_telemetry_data(entity_id: str, request: Request):
@@ -3396,7 +3413,7 @@ async def proxy_get_telemetry_data(entity_id: str, request: Request):
             f"{IDENTITY_SVC}/api/telemetry/data/{entity_id}",
             headers=headers
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.post("/api/telemetry/snapshot")
 async def proxy_ingest_telemetry_snapshot(request: Request):
@@ -3409,7 +3426,7 @@ async def proxy_ingest_telemetry_snapshot(request: Request):
             json=body,
             headers=headers
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.get("/api/telemetry/insights")
 async def proxy_get_telemetry_insights(request: Request):
@@ -3420,7 +3437,7 @@ async def proxy_get_telemetry_insights(request: Request):
             f"{IDENTITY_SVC}/api/telemetry/insights",
             headers=headers
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 
 @app.delete("/api/devices/{device_id:path}")
@@ -3432,7 +3449,7 @@ async def proxy_delete_device(device_id: str, request: Request):
             headers={"Authorization": auth_header} if auth_header else {}
             , timeout=aiohttp.ClientTimeout(total=10.0),
         )
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 
 @app.get("/api/communication/timers")
@@ -3575,7 +3592,7 @@ async def proxy_get_skylight_chores(request: Request, user: str | None = None, d
     params = {"user": creds.get("user", ""), "date": date or ""}
     async with shared_http_client() as client:
         resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/chores", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 
 @app.post("/api/integrations/skylight/chores/{chore_id}/complete")
@@ -3588,7 +3605,7 @@ async def proxy_complete_skylight_chore(chore_id: str, request: Request):
     params = {"user": creds.get("user", "")}
     async with shared_http_client() as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/complete", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 
 @app.post("/api/integrations/skylight/chores/{chore_id}/uncomplete")
@@ -3601,7 +3618,7 @@ async def proxy_uncomplete_skylight_chore(chore_id: str, request: Request):
     params = {"user": creds.get("user", "")}
     async with shared_http_client() as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/chores/{chore_id}/uncomplete", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 
 @app.get("/api/integrations/skylight/rewards")
@@ -3614,7 +3631,7 @@ async def proxy_get_skylight_rewards(request: Request):
     params = {"user": creds.get("user", "")}
     async with shared_http_client() as client:
         resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/rewards", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 
 @app.post("/api/integrations/skylight/rewards/{reward_id}/redeem")
@@ -3628,7 +3645,7 @@ async def proxy_redeem_skylight_reward(reward_id: str, request: Request):
     params = {"user": creds.get("user", "")}
     async with shared_http_client() as client:
         resp = await client.post(f"{EXECUTION_SVC}/api/integrations/skylight/rewards/{reward_id}/redeem", json=body, headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 
 @app.post("/api/communication/announcements")
@@ -3753,9 +3770,7 @@ async def proxy_show(request: Request):
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
         async with shared_http_client() as client:
             resp = await client.post(f"{ollama_url}/api/show", json=body, timeout=aiohttp.ClientTimeout(total=30.0))
-            if resp.status == 200:
-                return await resp.json()
-            return JSONResponse(content=await resp.json(), status_code=resp.status)
+            return await _proxy_json_response(resp)
     except Exception as e:
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 
@@ -3770,9 +3785,7 @@ async def proxy_embeddings(request: Request):
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
         async with shared_http_client() as client:
             resp = await client.post(f"{ollama_url}/api/embeddings", json=body, timeout=aiohttp.ClientTimeout(total=60.0))
-            if resp.status == 200:
-                return await resp.json()
-            return JSONResponse(content=await resp.json(), status_code=resp.status)
+            return await _proxy_json_response(resp)
     except Exception as e:
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 
@@ -3787,9 +3800,7 @@ async def proxy_embed(request: Request):
             return JSONResponse({"error": "Ollama not configured"}, status_code=503)
         async with shared_http_client() as client:
             resp = await client.post(f"{ollama_url}/api/embed", json=body, timeout=aiohttp.ClientTimeout(total=60.0))
-            if resp.status == 200:
-                return await resp.json()
-            return JSONResponse(content=await resp.json(), status_code=resp.status)
+            return await _proxy_json_response(resp)
     except Exception as e:
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 @app.get("/api/search")
@@ -3851,7 +3862,7 @@ async def get_workspaces_proxy(request: Request):
                 params=params,
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
             )
-            return JSONResponse(status_code=resp.status, content=await resp.json())
+            return await _proxy_json_response(resp)
     except Exception as e:
         log.error(f"Workspaces proxy failed: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
@@ -3864,7 +3875,7 @@ async def _proxy_workspace_runtime_json(method: str, path: str, request = None):
         json=body,
         headers={"X-Internal-Secret": INTERNAL_SECRET},
     )
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 @app.post("/api/workspaces")
 async def create_workspace_proxy(request: Request):
@@ -3942,7 +3953,7 @@ async def list_storage_files(request: Request, body: StorageListRequest):
         json=payload,
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 @app.post("/api/storage/index")
 async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
@@ -3969,7 +3980,7 @@ async def trigger_storage_indexing(request: Request, body: StorageIndexRequest):
         json=payload,
         headers={"X-Internal-Secret": INTERNAL_SECRET}
     )
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 @app.get("/api/storage/stats")
 async def get_storage_stats(request: Request):
@@ -4068,7 +4079,7 @@ async def purge_storage_collection(collection_name: str, request: Request):
             json=body.get("filter", {}),
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 
 @app.post("/api/admin/tests/smoke")
@@ -4079,7 +4090,7 @@ async def proxy_smoke_test(request: Request):
         headers={"X-Internal-Secret": INTERNAL_SECRET},
         timeout=aiohttp.ClientTimeout(total=65.0)
     )
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 
 @app.post("/api/admin/tests/unit")
@@ -4090,7 +4101,7 @@ async def proxy_unit_tests(request: Request):
         headers={"X-Internal-Secret": INTERNAL_SECRET},
         timeout=aiohttp.ClientTimeout(total=130.0)
     )
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    return await _proxy_json_response(resp)
 
 
 @app.get("/api/admin/volumes")
@@ -4106,7 +4117,7 @@ async def proxy_admin_volumes(request: Request):
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=120.0),
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 # ---- Autonomous Ops (Raven) Endpoints ----
 @app.get("/api/admin/raven/config")
 async def get_raven_config(request: Request):
@@ -4151,7 +4162,7 @@ async def get_raven_tts_voices(request: Request):
             f"{EXECUTION_SVC}/execute/tts/voices",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 
 @app.get("/api/admin/raven/queue")
@@ -4165,7 +4176,7 @@ async def get_raven_queue(request: Request):
             f"{IDENTITY_SVC}/api/raven/missions",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.post("/api/admin/services/{service_name}/restart")
 async def restart_service(service_name: str, request: Request):
@@ -4182,7 +4193,7 @@ async def restart_service(service_name: str, request: Request):
             raise HTTPException(status_code=404, detail=f"Service {service_name} not found")
         if resp.status != 200:
             raise HTTPException(status_code=resp.status, detail=await resp.text())
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.get("/api/admin/services")
 async def list_services(request: Request):
@@ -4195,7 +4206,7 @@ async def list_services(request: Request):
             f"{CONTROL_PLANE_URL}/api/containers",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.post("/api/admin/services/{service_name}/pull")
 async def pull_service_image(service_name: str, request: Request):
@@ -4208,7 +4219,7 @@ async def pull_service_image(service_name: str, request: Request):
             f"{CONTROL_PLANE_URL}/api/containers/{service_name}/pull",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.get("/api/admin/services/health")
 async def get_system_health(request: Request):
@@ -4221,7 +4232,7 @@ async def get_system_health(request: Request):
             f"{CONTROL_PLANE_URL}/api/health",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.get("/api/admin/services/updates")
 async def check_service_updates(request: Request):
@@ -4467,7 +4478,7 @@ async def openai_embeddings(request: Request):
                 , timeout=aiohttp.ClientTimeout(total=60.0),
             )
             if resp.status != 200:
-                return JSONResponse(content=await resp.json(), status_code=resp.status)
+                return await _proxy_json_response(resp)
 
             data = await resp.json()
             embeddings_list = data.get("embeddings", [])
@@ -4815,7 +4826,7 @@ async def proxy_list_containers(request: Request):
             f"{CONTROL_PLANE_URL}/api/containers",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.post("/api/docker/exec/{service_name}")
 async def proxy_docker_exec(service_name: str, body: dict[str, Any], request: Request):
@@ -4829,7 +4840,7 @@ async def proxy_docker_exec(service_name: str, body: dict[str, Any], request: Re
             json=body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(status_code=resp.status, content=await resp.json())
+        return await _proxy_json_response(resp)
 
 @app.get("/api/raven/missions/{id_or_slug}/logs")
 async def get_mission_logs(id_or_slug: str, request: Request):
@@ -5838,7 +5849,7 @@ async def proxy_media_status(request: Request):
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=15.0)
         )
-        return JSONResponse(content=await resp.json(), status_code=resp.status)
+        return await _proxy_json_response(resp)
     try:
         return await retry_http_request(do_proxy, "Execution service (media status)", max_retries=2, base_delay=0.1)
     except (TimeoutError, aiohttp.ClientError) as e:
@@ -5859,7 +5870,7 @@ async def proxy_media_transport(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(content=await resp.json(), status_code=resp.status)
+        return await _proxy_json_response(resp)
     try:
         return await retry_http_request(do_proxy, "Execution service (media transport)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
@@ -5880,7 +5891,7 @@ async def proxy_media_play(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(content=await resp.json(), status_code=resp.status)
+        return await _proxy_json_response(resp)
     try:
         return await retry_http_request(do_proxy, "Execution service (media play)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
@@ -5901,7 +5912,7 @@ async def proxy_media_state_sync(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(content=await resp.json(), status_code=resp.status)
+        return await _proxy_json_response(resp)
     try:
         return await retry_http_request(do_proxy, "Execution service (media state sync)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
@@ -5947,7 +5958,7 @@ async def proxy_audiobookshelf(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(content=await resp.json(), status_code=resp.status)
+        return await _proxy_json_response(resp)
     try:
         return await retry_http_request(do_proxy, "Execution service (audiobookshelf)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
@@ -5968,7 +5979,7 @@ async def proxy_ha_service(request: Request):
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
-        return JSONResponse(content=await resp.json(), status_code=resp.status)
+        return await _proxy_json_response(resp)
     try:
         return await retry_http_request(do_proxy, "Execution service (ha_service)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
