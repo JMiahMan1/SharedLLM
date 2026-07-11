@@ -9,8 +9,8 @@ import aiohttp
 from fastapi import HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
 from services.common.http import get_client
+from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
 
 log = logging.getLogger("shim_users")
 

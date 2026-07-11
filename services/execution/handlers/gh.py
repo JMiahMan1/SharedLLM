@@ -18,10 +18,10 @@ import logging
 import os
 import shlex
 
-from fastapi import HTTPException
 import requests
+from fastapi import HTTPException
 
-from services.config import WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL, INTERNAL_SECRET
+from services.config import INTERNAL_SECRET, WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL
 
 try:
     from handlers.workspace import _require_capability, _resolve_workspace_info, resolve_safe_path

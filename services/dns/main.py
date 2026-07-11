@@ -661,7 +661,6 @@ async def main():
         the UI (DnsManagementPanel via gateway /api/dns) edits. Each host may carry
         several IPs; the resolver returns only the reachable ones when health-aware
         failover is enabled."""
-        import aiohttp
         identity_url = os.environ.get('IDENTITY_SVC_URL')
         internal_secret = os.environ.get('INTERNAL_SECRET')
 

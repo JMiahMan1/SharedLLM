@@ -10,13 +10,14 @@ from typing import Any
 from uuid import uuid4
 
 import aiohttp
-from services.common.http import get_client
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # Suppress InsecureRequestWarning for internal self-signed certs (homelab)
 from urllib3.exceptions import InsecureRequestWarning
+
+from services.common.http import get_client
 
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
