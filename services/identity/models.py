@@ -143,10 +143,11 @@ class UserCalendarSetting(SQLModel, table=True):  # type: ignore
 
     Holds: default integration, disabled integrations, per-integration
     priority, and iCal .ics subscription URLs. One row per user.
+    Stored as a JSON string (mirrors UserWidget.config).
     """
     __table_args__ = {"extend_existing": True}
     username: str = Field(primary_key=True, foreign_key="user.username")
-    data: dict = Field(default_factory=dict)
+    data: str = Field(default="{}")
 
 DEFAULT_GLOBAL_SETTINGS = [
     {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
