@@ -138,10 +138,27 @@ def sanitize_for_llm(obj: Any, depth: int = 0) -> Any:
     return obj
 
 # --- HARDENED OLLAMA PROVIDER ---
+
+class MissionKilledError(Exception):
+    """Raised when a mission's kill flag is set mid-inference.
+
+    Lets the agent loop short-circuit a long-running LLM stream and
+    terminate the mission cleanly instead of hanging until the kill
+    flag is (belatedly) checked at the top of the next iteration.
+    """
+
+
 class OllamaProvider(BaseLLMProvider):
     def __init__(self, base_url: str, timeout: float | aiohttp.ClientTimeout = 600.0):
         self.base_url = base_url.rstrip("/")
-        self.timeout = timeout if isinstance(timeout, aiohttp.ClientTimeout) else aiohttp.ClientTimeout(total=timeout)
+        # `total` caps the whole request; `sock_read` caps the gap between
+        # successive chunks so a stream that stops producing data (e.g. a
+        # wedged upstream) raises instead of blocking forever.
+        if isinstance(timeout, aiohttp.ClientTimeout):
+            self.timeout = timeout
+        else:
+            read_to = min(float(timeout), 120.0) if timeout else 120.0
+            self.timeout = aiohttp.ClientTimeout(total=timeout or None, sock_read=read_to)
 
     async def generate(
         self,
@@ -727,6 +744,62 @@ async def execute_inference(provider: BaseLLMProvider, model: str, messages: lis
     """Delegates inference to the specified provider."""
     content = await provider.generate(model, messages, options=options, chunk_callback=chunk_callback)
     return {"message": {"role": "assistant", "content": content}}
+
+
+async def execute_inference_with_kill(
+    provider: BaseLLMProvider,
+    model: str,
+    messages: list,
+    options: dict,
+    mission_id: int | None,
+    chunk_callback: Callable[[str], Awaitable[None]] | None = None,
+) -> dict:
+    """Run ``execute_inference`` but abort the instant a kill flag is set.
+
+    The base provider only checks the kill flag *between* iterations, so a
+    long-running (or wedged) LLM stream can block a cancel indefinitely.
+    Here the stream runs as a task while a watcher polls the Redis kill key
+    every couple of seconds and cancels the task the moment it is set, so a
+    ``cancel`` takes effect during generation instead of at the next loop.
+    """
+    if not mission_id:
+        return await execute_inference(provider, model, messages, options, chunk_callback=chunk_callback)
+
+    inf_task = asyncio.create_task(
+        execute_inference(provider, model, messages, options, chunk_callback=chunk_callback)
+    )
+
+    async def _kill_watch() -> None:
+        cmd = await _get_redis_cmd()
+        key = f"raven:mission:kill:{mission_id}"
+        while not inf_task.done():
+            try:
+                if await cmd.get(key):
+                    inf_task.cancel()
+                    return
+            except Exception:
+                pass
+            await asyncio.sleep(2.0)
+
+    watch = asyncio.create_task(_kill_watch())
+    try:
+        return await inf_task
+    except asyncio.CancelledError:
+        # Cancelled by the watcher → confirm the flag and abort the mission.
+        try:
+            flagged = bool(await (await _get_redis_cmd()).get(f"raven:mission:kill:{mission_id}"))
+        except Exception:
+            flagged = True
+        if flagged:
+            raise MissionKilledError(f"Mission {mission_id} killed during inference")
+        raise
+    finally:
+        watch.cancel()
+        with contextlib.suppress(Exception):
+            await watch
+
+
+
 
 _original_async_client = aiohttp.ClientSession
 _global_http_client: aiohttp.ClientSession | None = None
@@ -1474,11 +1547,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     inference_options = ollama_payload.get("options", {})
                     if not isinstance(inference_options, dict):
                         inference_options = {}
-                    data = await execute_inference(
+                    data = await execute_inference_with_kill(
                         provider,
                         selected_model,
                         cast(list, ollama_payload["messages"]),
                         inference_options,
+                        mission_id=mission_id,
                         chunk_callback=chunk_logger
                     )
 
@@ -1491,6 +1565,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         raise Exception("Empty model output")
                     # inference_success = True
                     break  # Success!
+                except MissionKilledError:
+                    raise  # Never retry a user-requested cancel
                 except Exception as e:
                     log.warning(f"[AgentLoop] Inference attempt {retry_count + 1} failed: {e}")
                     if retry_count < MAX_INFERENCE_RETRIES - 1:
@@ -1507,6 +1583,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # Record this turn so the model retains context in subsequent iterations.
             if ans and ans.strip():
                 conversation.append({"role": "assistant", "content": ans})
+        except MissionKilledError:
+            heartbeat_stop.set()
+            await hb_task
+            log.warning(f"[AgentLoop] Mission {mission_id} terminated by user during iter {agent_iter + 1}.")
+            await stream_event("system", "Mission terminated by user.")
+            await _clear_checkpoint()
+            return "MISSION TERMINATED: User requested cancellation via control plane."
         except Exception as e:
             heartbeat_stop.set()
             await hb_task
