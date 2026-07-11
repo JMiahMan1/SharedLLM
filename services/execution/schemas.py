@@ -326,6 +326,7 @@ class CalendarRequest(BaseRequest):
     start_time: str | None = None
     calendar_name: str | None = None
     integration: str | None = None  # nextcloud | skylight | ical | None(=all/default)
+    event_id: str | None = None  # stable id for update/delete (skylight)
     priority_wins: bool | None = None  # if True, integration priority wins time conflicts
 
 class NoteRequest(BaseRequest):
