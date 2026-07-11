@@ -69,8 +69,8 @@ async def get_long_term_memory(user_id: str, query: str) -> str:
     """
     Retrieves relevant 'User Facts' from the RAG service to provide semantic memory.
     """
-    from services.gateway.orchestrator import _get, get_all_settings
     from services.gateway.main import shared_http_client
+    from services.gateway.orchestrator import _get, get_all_settings
     settings = await get_all_settings()
     rag_svc = _get(settings, "rag_svc_url")
     secret = _get(settings, "internal_secret", INTERNAL_SECRET)
@@ -112,8 +112,8 @@ async def extract_and_store_user_facts(user_id: str, history: list):
         return
 
     try:
-        from services.gateway.orchestrator import _get, get_all_settings
         from services.gateway.main import shared_http_client
+        from services.gateway.orchestrator import _get, get_all_settings
         settings = await get_all_settings()
         LIBRARIAN_MODEL = _get(settings, "ollama_librarian_model") or _get(settings, "librarian_model") or _get(settings, "assistant_model")
         if not LIBRARIAN_MODEL:

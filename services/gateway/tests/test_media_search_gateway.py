@@ -64,7 +64,7 @@ async def test_gateway_search_ma_library_only_default_not_found(monkeypatch, cli
             assert resp.status_code == 200
             assert resp.json() == mock_search_results
 
-            called_url, called_kwargs = mock_http_get.call_args
+            _called_url, called_kwargs = mock_http_get.call_args
             called_params = called_kwargs.get("params")
             assert called_params["query"] == "Miles Davis"
             assert called_params["library_only"] is True
@@ -92,7 +92,7 @@ async def test_gateway_search_ma_not_library_only_found(monkeypatch, client):
             assert resp.status_code == 200
             assert resp.json() == mock_search_results
 
-            called_url, called_kwargs = mock_http_get.call_args
+            _called_url, called_kwargs = mock_http_get.call_args
             called_params = called_kwargs.get("params")
             assert called_params["library_only"] is False
 
@@ -114,7 +114,7 @@ async def test_gateway_search_ma_failure_propagation(monkeypatch, client):
 
         mock_get = AsyncMock(return_value=mock_response)
 
-        with patch('services.gateway.main.aiohttp.ClientSession.get', mock_get) as mock_http_get:
+        with patch('services.gateway.main.aiohttp.ClientSession.get', mock_get):
             resp = client.get("/api/media/music-assistant/search?query=Miles+Davis")
 
             assert resp.status_code == 200
