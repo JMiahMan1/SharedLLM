@@ -194,4 +194,4 @@ These URLs require valid `session_id`, `queue_id`, `queue_item_id`, and `player_
 - [x] Update `Media.tsx` for local playback with dynamic MA/ABS stream URLs
 - [x] Create sandbox test page (`ma-stream-test.html`)
 - [x] All 8 tests passing
-- [ ] Deploy via CI/CD (push microservices branch)
+- [x] Deploy via CI/CD (push microservices branch)

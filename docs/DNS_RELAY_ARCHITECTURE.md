@@ -244,21 +244,13 @@ services:
    - URL: https://docs.docker.com/config/containers/container-networking/
    - Section: Custom hosts, DNS configuration
 
-## Implementation Checklist
+## Status
 
-- [ ] Create `services/dns_service/main.py` (host network, port 5353)
-- [ ] Create `services/dns_service/Dockerfile`
-- [ ] Create `services/dns_relay/main.py` (bridge network, port 53)
-- [ ] Create `services/dns_relay/Dockerfile`
-- [ ] Update `docker-compose.yml`:
-  - Add `dns` service with `network_mode: host`
-  - Add `dns-relay` service with bridge network
-  - Set `dns:` for all bridge services to relay IP
-  - Remove old `dns-sync` and `dns-forwarder` services
-- [ ] Test DNS resolution between bridge services
-- [ ] Test DNS resolution for host-networked services
-- [ ] Deploy to remote server (192.168.2.205)
-- [ ] Verify cross-network DNS resolution works
+Implemented via the existing `services/dns-sync` (host network, `:5353`) and
+`services/dns-forwarder` (bridge network, forwards to `dns-sync:5353`) services.
+Cross-network resolution is verified in `DNS_RELAY_VERIFICATION.md`; design
+rationale in `DNS_SYNC_SERVICE.md`. The earlier plan to replace these with
+`dns_service`/`dns_relay` was superseded by keeping the working services.
 
 ## Conclusion
 
