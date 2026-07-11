@@ -420,7 +420,7 @@ class MAWebSocketClient:
             self._last_error = e
             self._connected = False
             log.error(f"[MA-WS] Connection failed: {e}")
-            raise ConnectionError(f"Failed to connect to MA WebSocket: {e}")
+            raise ConnectionError(f"Failed to connect to MA WebSocket: {e}") from e
 
     async def _message_loop(self) -> None:
         """

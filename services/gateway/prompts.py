@@ -103,7 +103,7 @@ def load_prompt_sync(prompt_key: str) -> str:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     _settings_cache = pool.submit(lambda: asyncio.run(_fetch())).result(timeout=10) or {}
         except Exception:
-            raise ValueError("Identity service unavailable and no cached prompts available")
+            raise ValueError("Identity service unavailable and no cached prompts available") from None
 
         _settings_cache_time = now
     if _settings_cache.get(prompt_key):

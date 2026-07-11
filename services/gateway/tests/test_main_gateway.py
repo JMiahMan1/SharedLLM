@@ -67,7 +67,8 @@ async def test_bulk_settings_proxy_forwards_post(monkeypatch):
     monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
 
     class FakeRequest:
-        headers = {"Authorization": "Bearer test-token"}
+        def __init__(self):
+            self.headers = {"Authorization": "Bearer test-token"}
 
         async def json(self):
             return {"assistant_model": "qwen3.5:14b"}

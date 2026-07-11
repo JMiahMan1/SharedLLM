@@ -1,5 +1,9 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from services.gateway.background_worker import RavenWorker
+
 
 def _aio_resp(status=200, json_data=None, text=""):
     """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
@@ -8,10 +12,6 @@ def _aio_resp(status=200, json_data=None, text=""):
     m.json = AsyncMock(return_value=json_data if json_data is not None else {"status": "SUCCESS"})
     m.text = AsyncMock(return_value=text)
     return m
-
-import pytest
-
-from services.gateway.background_worker import RavenWorker
 
 
 class TestModelUpgrade:
