@@ -30,12 +30,28 @@ def test_skylight_chores_missing_auth():
     assert "Skylight not configured" in data["message"]
 
 
-def test_skylight_chores_user_filter():
-    """Test that chores can be filtered by user."""
+def _raw_chore(cid, summary, status, start, reward=1):
+    return {
+        "id": cid,
+        "type": "chore",
+        "attributes": {
+            "id": cid,
+            "summary": summary,
+            "status": status,
+            "start": start,
+            "reward_points": reward,
+        },
+    }
+
+
+def test_skylight_chores_today_literal():
+    """The widget passes date='today'; only today's chores should be returned."""
+    from datetime import date as _date
+
+    today = _date.today().isoformat()
     mock_chores = [
-        {"id": "1", "title": "Clean Room", "completed": False, "assignees": ["jeremiah"], "reward": 10},
-        {"id": "2", "title": "Do Dishes", "completed": False, "assignees": ["michele"], "reward": 5},
-        {"id": "3", "title": "Walk Dog", "completed": True, "assignees": ["jeremiah"], "reward": 10},
+        _raw_chore("1", "Clean Room", "pending", today),
+        _raw_chore("2", "Do Dishes", "pending", "2020-01-01"),
     ]
 
     async def mock_get_session(*args, **kwargs):
@@ -49,22 +65,20 @@ def test_skylight_chores_user_filter():
             resp = client.get(
                 "/api/integrations/skylight/chores",
                 headers={"X-Internal-Secret": "test-secret"},
-                params={"user": "jeremiah"}
+                params={"user": "jeremiah", "date": "today"}
             )
             assert resp.status_code == 200
             data = resp.json()
             assert data["status"] == "SUCCESS"
-            assert len(data["chores"]) == 2
-            chore_ids = [c["id"] for c in data["chores"]]
-            assert "1" in chore_ids
-            assert "3" in chore_ids
+            assert len(data["chores"]) == 1
+            assert data["chores"][0]["id"] == "1"
 
 
 def test_skylight_chores_date_filter():
-    """Test that chores can be filtered by date."""
+    """Test that chores are filtered to the requested YYYY-MM-DD day."""
     mock_chores = [
-        {"id": "1", "title": "Clean Room", "completed": False, "assignees": ["jeremiah"], "due_date": "2026-05-29"},
-        {"id": "2", "title": "Do Dishes", "completed": False, "assignees": ["jeremiah"], "due_date": "2026-05-30"},
+        _raw_chore("1", "Clean Room", "pending", "2026-05-29"),
+        _raw_chore("2", "Do Dishes", "complete", "2026-05-30"),
     ]
 
     async def mock_get_session(*args, **kwargs):
@@ -87,12 +101,11 @@ def test_skylight_chores_date_filter():
             assert data["chores"][0]["id"] == "1"
 
 
-def test_skylight_chores_user_and_date_filter():
-    """Test that chores can be filtered by both user and date."""
+def test_skylight_chores_normalization():
+    """Raw Skylight chores are flattened into the UI ChoreItem shape."""
     mock_chores = [
-        {"id": "1", "title": "Clean Room", "completed": False, "assignees": ["jeremiah"], "due_date": "2026-05-29"},
-        {"id": "2", "title": "Do Dishes", "completed": False, "assignees": ["michele"], "due_date": "2026-05-29"},
-        {"id": "3", "title": "Walk Dog", "completed": False, "assignees": ["jeremiah"], "due_date": "2026-05-30"},
+        _raw_chore("1-2026-05-29", "Clean Room", "complete", "2026-05-29", reward=10),
+        _raw_chore("2-2026-05-29", "Do Dishes", "pending", "2026-05-29", reward=5),
     ]
 
     async def mock_get_session(*args, **kwargs):
@@ -106,13 +119,17 @@ def test_skylight_chores_user_and_date_filter():
             resp = client.get(
                 "/api/integrations/skylight/chores",
                 headers={"X-Internal-Secret": "test-secret"},
-                params={"user": "jeremiah", "date": "2026-05-29"}
+                params={"date": "2026-05-29"}
             )
             assert resp.status_code == 200
             data = resp.json()
             assert data["status"] == "SUCCESS"
-            assert len(data["chores"]) == 1
-            assert data["chores"][0]["id"] == "1"
+            chores = {c["id"]: c for c in data["chores"]}
+            assert chores["1-2026-05-29"]["title"] == "Clean Room"
+            assert chores["1-2026-05-29"]["completed"] is True
+            assert chores["1-2026-05-29"]["reward"] == 10
+            assert chores["2-2026-05-29"]["completed"] is False
+            assert "assignees" in chores["1-2026-05-29"]
 
 
 def test_skylight_chore_complete():
@@ -291,10 +308,15 @@ def test_skylight_chores_empty_list():
             assert data["chores"] == []
 
 
-def test_skylight_chores_case_insensitive_user_filter():
-    """Test that user filter is case-insensitive."""
+def test_skylight_chores_no_assignee_filter():
+    """The private API exposes no per-user assignee data, so all family chores
+    are returned regardless of the `user` param."""
+    from datetime import date as _date
+
+    today = _date.today().isoformat()
     mock_chores = [
-        {"id": "1", "title": "Clean Room", "completed": False, "assignees": ["Jeremiah"], "reward": 10},
+        _raw_chore("1", "Clean Room", "pending", today),
+        _raw_chore("2", "Do Dishes", "pending", today),
     ]
 
     async def mock_get_session(*args, **kwargs):
@@ -308,12 +330,12 @@ def test_skylight_chores_case_insensitive_user_filter():
             resp = client.get(
                 "/api/integrations/skylight/chores",
                 headers={"X-Internal-Secret": "test-secret"},
-                params={"user": "jeremiah"}  # lowercase
+                params={"user": "jeremiah", "date": "today"}
             )
             assert resp.status_code == 200
             data = resp.json()
             assert data["status"] == "SUCCESS"
-            assert len(data["chores"]) == 1
+            assert len(data["chores"]) == 2
 
 
 def test_skylight_calendar_events():
