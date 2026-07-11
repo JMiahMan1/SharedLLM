@@ -26,6 +26,7 @@ from services.gateway.config import (
     REDIS_URL,
     SYSTEM_IDENTITY,
 )
+from services.gateway.intent_engine import is_raven_intent
 
 
 @asynccontextmanager
@@ -53,19 +54,10 @@ class RavenWorker:
         self._health_task = None
         self._inference_task = None
         self.job_queue = InferenceJobQueue(REDIS_URL)
-        # Autonomous detection signals — must match orchestrator list
-        self._autonomy_signals = [
-            "raven", "use raven", "audit", "repair", "self repair", "self-heal",
-            "self fix", "deploy", "bootstrap", "develop", "fix the app",
-            "fix the service", "fix the codebase", "agentic", "autonomous",
-            "audit the codebase", "sync workspace", "pull latest", "convert them to",
-            "review requirements", "check dependencies", "report any conflicts",
-        ]
-
     def _is_autonomous_job(self, payload: dict[str, Any], user_id: str) -> bool:
         """Determine if a job requires Tier-3 (Raven) exclusive lock."""
         query = str(payload.get("query", "")).lower()
-        if any(signal in query for signal in self._autonomy_signals):
+        if is_raven_intent(query):
             return True
         return user_id.lower() in ("raven_admin", SYSTEM_IDENTITY)
 
