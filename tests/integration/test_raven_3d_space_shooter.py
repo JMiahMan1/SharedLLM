@@ -88,6 +88,16 @@ def mission_prompt(lang: str, human: str, stack: str) -> str:
     return f"""Raven, build a complete, fun, playable 3D SPACE SHOOTER game in {human} using {stack}.
 Project name: "Starfall". You have a workspace, a shell, file tools, the `gh` CLI, and git.
 
+CRITICAL EXECUTION ORDER — perform these steps IN ORDER and do NOT skip ahead or loop on a single file:
+Step 0: WorkspaceCreateRequest with id `raven-3d-shooter-{lang}` + a display_name. Capture the returned `workspace_id` and pass it as `workspace_id` to EVERY later WorkspaceFileWriteRequest / WorkspaceShellRequest / WorkspaceSettingsUpdateRequest. NEVER use the Default Workspace.
+Step 1: `gh repo create raven-3d-shooter-{lang} --private -d "Starfall 3D space shooter ({human})" 2>&1 || echo REPO_EXISTS`. If REPO_EXISTS, `gh repo clone raven-3d-shooter-{lang} .` (or `git clone <url> .`) inside the workspace.
+Step 2: Write these files ONCE (WorkspaceFileWriteRequest, workspace_id set): requirements.txt, main.py, README.md, and .github/workflows/build.yml (rules below). main.py's FIRST line MUST be exactly `#!/usr/bin/env python3` then a docstring, then code — never code before the shebang. Keep main.py <= 400 lines. Write each file exactly once.
+Step 3 — PUSH FIRST (mandatory; do this before any polishing): `git init` (if needed) -> `git add -A` -> `git commit -m "Initial Starfall ({human})"` -> `git push -u origin HEAD` (use `git push --force` ONLY if a plain push is rejected). You MUST reach a successful `git push` before doing anything else. Do not proceed past Step 3 until `git push` reports the branch was pushed.
+Step 4: ONLY after the push succeeds, run the headless self-test and confirm `GAME_OK`. If it fails, FIX the bug with a NEW WorkspaceFileWrite (overwrite the file) + a NEW `git commit` + `git push`. You may overwrite main.py at most ONE more time (never more than twice total).
+Step 5: FINAL VERIFICATION — `gh repo view raven-3d-shooter-{lang}` and confirm your files are on GitHub. Only then report done. If push/verify fails, keep retrying the git steps. Do NOT claim success otherwise.
+
+You may ONLY push to raven-3d-shooter-{lang}. Never push elsewhere.
+
 === GAME DESIGN (implement every item) ===
 - 3D perspective camera that follows the player ship.
 - Player ship near the bottom; moves on a 2D plane with WASD or arrow keys.
@@ -103,8 +113,8 @@ Project name: "Starfall". You have a workspace, a shell, file tools, the `gh` CL
 - Support a `--selftest` flag (or `SELFTEST=1`). When set, run the simulation update loop for ~120
   frames with NO user input and NO visible window (hidden/minimized or headless), then print EXACTLY
   the line `GAME_OK` to stdout and exit 0. Never require a display for selftest.
-  - Native (Python/Go/Rust): import the `raylib` package and open the window hidden
-    (e.g. `rl.set_config_flags(rl.FLAG_WINDOW_HIDDEN)` before `rl.init_window`) and exit after 120 frames.
+  - Python: use `pygame` and set `SDL_VIDEODRIVER=dummy` (no raylib needed) so it runs
+    headless; exit after ~120 frames. For other languages use the native 3D lib.
 - Do NOT write exploratory/probe scripts (e.g. `_explore.py`) to discover the API — write the game
   directly against the `raylib` Python package. Add a README.md with controls + how to run/build/selftest.
 
