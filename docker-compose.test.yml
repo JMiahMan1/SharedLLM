@@ -158,6 +158,40 @@ services:
       - identity
       - redis
 
+  workspace_runtime:
+    build:
+      context: .
+      dockerfile: services/workspace_runtime/Dockerfile
+      args:
+        - BASE_IMAGE=sharedllm-base:local
+    container_name: sharedllm_test_workspace_runtime
+    ports:
+      - "8007:8007"
+    environment:
+      - INTERNAL_SECRET=test-secret-ci
+      - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
+      - IDENTITY_SVC_URL=http://identity:8001
+      - EXECUTION_SVC_URL=http://execution:8003
+      - RAG_SVC_URL=http://rag:8004
+      - STORAGE_SVC_URL=http://storage:8005
+      - LOGGING_SVC_URL=http://logging:8006
+      - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
+      - WORKSPACE_DATABASE_URL=sqlite:////tmp/workspace_runtime_test.db
+      - WORKSPACE_REGISTRY_PATH=/app/config/workspaces.json
+      - WORKSPACE_RUNTIME_ROOT=/tmp/workspaces
+      - REDIS_URL=redis://redis:6379/0
+      - OLLAMA_URL=http://ollama_mock:11434
+      - GIT_WEBHOOK_SECRET=test-webhook-secret
+      - TEST_MODE=true
+      - HOME=/home/sharedllm
+      - WORKSPACE_ROOT=/tmp/workspaces
+    volumes:
+      - ./test.env:/app/.env:ro
+      - ./config/workspaces.json:/app/config/workspaces.json:ro
+    depends_on:
+      - redis
+      - identity
+
   ollama_mock:
     image: python:3.11-slim
     container_name: sharedllm_test_ollama_mock
