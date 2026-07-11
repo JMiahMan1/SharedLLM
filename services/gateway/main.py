@@ -4756,7 +4756,64 @@ async def kill_mission(request: Request, id_or_slug: str):
         await r.publish(f"raven:mission:kill:{real_id}", "KILL")
         await r.close()
 
+        # Also remove any pending job from the Redis queue so a queued mission
+        # can never be picked up again after a kill.
+        if job_queue is not None:
+            try:
+                await job_queue.drop_jobs_for_mission(real_id)
+            except Exception as e:
+                log.warning(f"Failed to drop Redis job for killed mission {real_id}: {e}")
+
         return {"status": "SUCCESS", "message": f"Mission {real_id} kill signal sent."}
+
+@app.post("/api/raven/missions/{id_or_slug}/cancel")
+async def cancel_mission(request: Request, id_or_slug: str):
+    """Close/cancel a Raven mission in ANY state (queued, executing, paused, failed).
+
+    Unlike ``/kill`` — which only sets the DB status and publishes a kill flag that
+    the running agent loop checks between steps — this fully purges the backing
+    Redis job (and its lease/metadata) so the singleton worker can never claim a
+    job whose mission no longer exists. This is the safe way to clear orphaned
+    ``queued`` missions that have no active worker.
+    """
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    async with borrow_http_client() as client:
+        m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        if m_resp.status != 200:
+            raise HTTPException(status_code=m_resp.status, detail="Mission not found")
+        mission_data = await m_resp.json()
+        real_id = mission_data["id"]
+
+        # 1. Remove any pending/processing job from Redis.
+        dropped = 0
+        if job_queue is not None:
+            try:
+                dropped = await job_queue.drop_jobs_for_mission(real_id)
+            except Exception as e:
+                log.warning(f"Failed to drop Redis job for cancelled mission {real_id}: {e}")
+
+        # 2. Publish kill signal for safety (in case it is currently running).
+        import redis.asyncio as redis
+
+        from services.gateway.config import REDIS_URL
+        r = redis.from_url(REDIS_URL, decode_responses=True)
+        await r.set(f"raven:mission:kill:{real_id}", "KILL", ex=3600)
+        await r.publish(f"raven:mission:kill:{real_id}", "KILL")
+        await r.close()
+
+        # 3. Mark the mission cancelled in the database.
+        resp = await client.patch(
+            f"{IDENTITY_SVC}/api/raven/missions/{real_id}",
+            json={"status": "failed", "result": "Cancelled by user"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        if resp.status != 200:
+            raise HTTPException(status_code=resp.status, detail="Failed to update mission status")
+
+        return {"status": "SUCCESS", "message": f"Mission {real_id} cancelled.", "jobs_dropped": dropped}
 
 @app.post("/api/raven/missions/{id_or_slug}/pause")
 async def pause_mission(request: Request, id_or_slug: str):

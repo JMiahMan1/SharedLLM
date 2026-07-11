@@ -275,6 +275,52 @@ class InferenceJobQueue:
         await self._redis.lrem(self.PROCESSING_KEY, 1, job_id)  # type: ignore[misc]
         await self._redis.delete(f"{self.LEASE_PREFIX}{job_id}")  # type: ignore[misc]
 
+    async def find_jobs_for_mission(self, mission_id: str | int) -> list[str]:
+        """Return job_ids whose payload carries ``_mission_id == mission_id``.
+
+        Scans both the pending queue and the in-progress list so a mission can be
+        located no matter which stage its job is in.
+        """
+        if not self._redis:
+            await self.connect()
+        assert self._redis is not None
+
+        target = str(mission_id)
+        job_ids: list[str] = []
+        for key in (self.QUEUE_KEY, self.PROCESSING_KEY):
+            items = await self._redis.lrange(key, 0, -1)  # type: ignore[misc]
+            for jid in items:
+                raw = await self._redis.get(f"{self.JOB_PREFIX}{jid}")  # type: ignore[misc]
+                if not raw:
+                    continue
+                try:
+                    job = json.loads(raw)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                payload = job.get("payload") or {}
+                if str(payload.get("_mission_id")) == target:
+                    job_ids.append(jid)
+        return job_ids
+
+    async def drop_jobs_for_mission(self, mission_id: str | int) -> int:
+        """Remove every queued/in-progress job for a mission and its metadata/lease.
+
+        Returns the number of jobs dropped. Used when cancelling a mission so the
+        singleton worker can never claim a job whose mission no longer exists.
+        """
+        if not self._redis:
+            await self.connect()
+        assert self._redis is not None
+
+        dropped = 0
+        for jid in await self.find_jobs_for_mission(mission_id):
+            await self._redis.lrem(self.QUEUE_KEY, 1, jid)  # type: ignore[misc]
+            await self._redis.lrem(self.PROCESSING_KEY, 1, jid)  # type: ignore[misc]
+            await self._redis.delete(f"{self.JOB_PREFIX}{jid}")  # type: ignore[misc]
+            await self._redis.delete(f"{self.LEASE_PREFIX}{jid}")  # type: ignore[misc]
+            dropped += 1
+        return dropped
+
     async def _publish_status(self, job_id: str, status: str):
         """Notify SSE subscribers that a job's status changed.
 

@@ -186,6 +186,16 @@ class RavenWorker:
                 if reclaimed:
                     log.warning("Recovered %s expired Raven job(s) back into the queue.", reclaimed)
 
+                # Periodically reap orphaned queued/executing missions (no backing
+                # Redis job) so they cannot linger forever after a worker crash.
+                now = time.time()
+                if now - getattr(self, "_last_reap", 0) > 60:
+                    self._last_reap = now
+                    try:
+                        await self._reap_orphaned_missions()
+                    except Exception as e:
+                        log.warning(f"[RavenWorker] Orphan reaper failed (non-critical): {e}")
+
                 job = await self.job_queue.claim_job()
                 if job:
                     log.info(f"Processing job {job['job_id']} for {job['user_id']}")
@@ -195,6 +205,70 @@ class RavenWorker:
             except Exception as e:
                 log.error(f"Error in Inference loop: {e}")
                 await asyncio.sleep(5.0)
+
+    async def _reap_orphaned_missions(self):
+        """Cancel queued/executing Raven missions that have no backing Redis job.
+
+        A mission can be left in ``queued`` (or ``executing``) if the worker died
+        before its job was enqueued, or the Redis job was lost on a crash. These
+        would otherwise sit forever with no worker to pick them up. After a grace
+        period with no backing job, we cancel them so the queue stays clean.
+        """
+        grace_seconds = 900  # 15 minutes
+        try:
+            async with _shared_http_client() as client:
+                resp = await client.get(
+                    f"{IDENTITY_SVC}/api/raven/missions",
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                )
+                if resp.status != 200:
+                    return
+                missions = await resp.json()
+        except Exception as e:
+            log.warning(f"[RavenWorker] Orphan reaper list failed (non-critical): {e}")
+            return
+
+        for m in missions:
+            status = m.get("status")
+            if status not in ("queued", "executing"):
+                continue
+            mid = m.get("id")
+
+            # A live mission has a job in the queue/processing list.
+            jobs = await self.job_queue.find_jobs_for_mission(mid)
+            if jobs:
+                continue
+
+            # No job and still queued/executing — only reap if old enough.
+            ts_raw = m.get("queued_at") or m.get("created_at") or m.get("updated_at")
+            if ts_raw:
+                try:
+                    ts = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+                    age = (datetime.now(UTC) - ts).total_seconds()
+                except Exception:
+                    age = grace_seconds + 1
+            else:
+                age = grace_seconds + 1
+
+            if age < grace_seconds:
+                continue
+
+            log.warning(
+                f"[RavenWorker] Reaping orphaned {status} mission #{mid} "
+                f"(no backing job, age {age:.0f}s)"
+            )
+            try:
+                async with _shared_http_client() as client:
+                    await client.patch(
+                        f"{IDENTITY_SVC}/api/raven/missions/{mid}",
+                        json={
+                            "status": "failed",
+                            "result": "Cancelled: orphaned mission with no backing job",
+                        },
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    )
+            except Exception as e:
+                log.warning(f"[RavenWorker] Failed to reap mission #{mid}: {e}")
 
     async def _talk_monitor_loop(self):
         """Polls Nextcloud Talk for @jarvis mentions."""
