@@ -18,6 +18,37 @@ from typing import Any
 
 log = logging.getLogger("gateway.intent_engine")
 
+# Explicit Raven invocation keywords. A Raven autonomous mission is only
+# triggered when the user EXPLICITLY invokes Raven (e.g. "Raven, build me ...")
+# AND pairs it with an actionable command. This prevents generic requests
+# (e.g. "system diagnostic and maintenance scan") from being force-routed to
+# the slow/expensive Raven mission queue just because they contain words like
+# "scan", "check", or "build".
+RAVEN_KEYWORDS = ("raven", "use raven")
+RAVEN_COMMAND_VERBS = (
+    "build", "create", "make", "develop", "implement", "fix", "repair",
+    "audit", "scan", "index", "reindex", "deploy", "refactor", "scaffold",
+    "generate", "write", "check", "update", "convert", "review", "bootstrap",
+    "sync", "synchronize", "diagnose", "maintain", "maintenance", "setup",
+    "set up", "prototype", "run",
+)
+
+
+def is_raven_intent(query: str | None) -> bool:
+    """True only when the prompt explicitly invokes Raven AND issues a command.
+
+    Used by the chat path, the orchestrator, and the worker to decide whether a
+    request should become a Raven autonomous mission. Requiring both a Raven
+    keyword and a command verb avoids false positives on ordinary queries.
+    """
+    if not query:
+        return False
+    q = query.lower()
+    if not any(k in q for k in RAVEN_KEYWORDS):
+        return False
+    return any(v in q for v in RAVEN_COMMAND_VERBS)
+
+
 class IntentEngine:
     def __init__(self):
         self.model = None

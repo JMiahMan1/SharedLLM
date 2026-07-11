@@ -45,7 +45,7 @@ from services.gateway.config import (
 )
 from services.gateway.config_validator import validate_config
 from services.gateway.history import get_history, get_long_term_memory, ping_redis, update_history
-from services.gateway.intent_engine import engine
+from services.gateway.intent_engine import engine, is_raven_intent
 from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 from services.gateway.ma_ws_client import MAWebSocketClient
 from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
@@ -2871,16 +2871,12 @@ async def chat_handler(request: Request, background_tasks=None):
 
     # Detection of autonomous agent engagement
     is_autonomous = False
-    # Hardened intent logic: trigger on Raven keywords AND on complex engineering
-    # build tasks (the agent must bootstrap a workspace and run autonomously).
-    autonomy_signals = [
-        "raven", "perform", "audit", "index", "reindex", "scan", "repair", "fix",
-        "check", "synchronize", "sync", "build", "develop", "implement", "create a",
-        "make a", "game", "app", "service", "project", "program", "website", "api",
-        "bot", "scaffold", "refactor the",
-    ]
-    if any(k in query.lower() for k in autonomy_signals) or ":" in query[:15]:
-        log.info("[ShadowExecution] AUTONOMOUS MISSION DETECTED via keyword/protocol signal")
+    # Hardened intent logic: a Raven autonomous mission is only triggered when
+    # the prompt EXPLICITLY invokes Raven AND pairs it with a command verb.
+    # Bare action words (e.g. "scan", "build", "check") no longer auto-route
+    # ordinary requests to the Raven mission queue.
+    if is_raven_intent(query) or ":" in query[:15]:
+        log.info("[ShadowExecution] AUTONOMOUS MISSION DETECTED via Raven keyword + command")
         is_autonomous = True
         system_instruction = await load_prompt(get_http_client(), "raven_autonomous_protocol")
 

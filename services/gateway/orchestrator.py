@@ -19,6 +19,7 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
+from services.gateway.intent_engine import is_raven_intent
 from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
 from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
@@ -291,21 +292,11 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     # 2. Context Injection (RAG + live HA state)
     rag_context = await _fetch_rag_context(query, user_id, creds)
 
-    # 3. Autonomous Detection (Raven/Coding/Repair ONLY)
-    # Raven runs in Workspaces and handles long-running or coding tasks.
-    # Home Automation should NOT be treated as autonomous (no long-running loops)
-    autonomy_signals = [
-        "raven", "use raven", "audit", "repair", "self repair", "self-heal",
-        "self fix", "deploy", "bootstrap", "develop", "fix the app",
-        "fix the service", "fix the codebase", "agentic", "autonomous",
-        "audit the codebase", "sync workspace", "pull latest", "convert them to",
-        "review requirements", "check dependencies", "report any conflicts",
-    ]
-    # Also match queries starting with action verbs
-    is_autonomous = any(k in query.lower() for k in autonomy_signals)
-    if not is_autonomous:
-        first_word = query.lower().split()[0] if query.split() else ""
-        is_autonomous = first_word in ("fix", "repair", "audit", "deploy", "convert", "review", "check", "update", "refactor")
+    # Hardened intent: only flag a Raven mission when the prompt explicitly
+    # invokes Raven AND issues a command. Bare action verbs (e.g. "fix the
+    # app") without the Raven keyword no longer auto-route to the autonomous
+    # queue / AgentLoop.
+    is_autonomous = is_raven_intent(query)
 
     # 4. Final Inference
     full_system = job_payload.get("system", "")
