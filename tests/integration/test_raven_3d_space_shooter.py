@@ -122,6 +122,10 @@ Project name: "Starfall". You have a workspace, a shell, file tools, the `gh` CL
 - Create a NEW GitHub repository named `{_repo_name(lang)}` using the `gh` CLI FROM INSIDE
   the dedicated workspace you just created:
   `gh repo create {_repo_name(lang)} --private -d "Starfall 3D space shooter ({human})"`
+- If `gh repo create` reports the repository ALREADY exists (e.g. a prior
+  run left an empty shell), do NOT fail and do NOT create a different repo:
+  instead `cd` into your workspace and `gh repo clone {_repo_name(lang)} .`
+  (or `git clone <url> .`), then continue adding files and pushing.
 - Add a GitHub Actions workflow at `.github/workflows/build.yml` that builds the game on Linux:
   it MUST use `runs-on: ubuntu-latest`. Steps: checkout, install the {human} toolchain, then build/compile.
 - Initialize git (if needed), add ALL files, commit, and push to the created repo:
@@ -291,8 +295,9 @@ def run_one(lang: str, human: str, stack: str, build_cmd: str, selftest_cmd: str
     # parallel/restarted run is mid-flight), do NOT spin up a duplicate Raven
     # mission — just validate the existing repository in place. This keeps a
     # re-run from creating redundant missions after a crash/restart.
+    # RAVEN_FORCE=1 overrides this (debug: rebuild an incomplete/empty repo).
     existing = _gh_repo_view(repo)
-    if existing["returncode"] == 0:
+    if existing["returncode"] == 0 and not os.getenv("RAVEN_FORCE"):
         out["repo_url"] = existing["stdout"].strip().strip('"')
         out["chat_status"] = "already-exists"
     else:
