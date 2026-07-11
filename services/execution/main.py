@@ -2881,23 +2881,12 @@ async def uncomplete_skylight_chore(
     user: str | None = None,
     x_internal_secret: str = Header(None)
 ):
-    """Mark a Skylight chore as incomplete (best effort).
+    """Uncomplete a Skylight chore.
 
     NOTE: the Skylight private API only exposes marking a chore complete; there is
-    no documented undo, so this returns FAILURE if the API rejects the request.
+    no documented way to undo a completion, so this returns FAILURE.
     """
-    session = await _get_skylight_session(user)
-    if not session:
-        return {"status": "FAILURE", "message": "Skylight not configured"}
-
-    series_id, instance_date = _skylight_chore_ids(chore_id)
-    result = await _skylight_request(
-        session, "PUT", f"/chores/{series_id}/completions",
-        {"id": series_id, "instance_date": instance_date, "status": "incomplete"},
-    )
-    if result is not None:
-        return {"status": "SUCCESS", "message": "Chore uncompleted"}
-    return {"status": "FAILURE", "message": "Failed to uncomplete chore"}
+    return {"status": "FAILURE", "message": "Skylight API does not support uncompleting chores"}
 
 
 @app.get("/api/integrations/skylight/rewards", dependencies=[Depends(require_internal)])

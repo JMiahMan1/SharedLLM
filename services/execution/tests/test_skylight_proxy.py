@@ -155,23 +155,17 @@ def test_skylight_chore_complete_failure():
 
 
 def test_skylight_chore_uncomplete():
-    """Test uncompleting a skylight chore."""
-    async def mock_get_session(*args, **kwargs):
-        return _mock_session()
-
-    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
-        return {"success": True}
-
-    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
-        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
-            resp = client.post(
-                "/api/integrations/skylight/chores/1/uncomplete",
-                headers={"X-Internal-Secret": "test-secret"}
-            )
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["status"] == "SUCCESS"
-            assert "Chore uncompleted" in data["message"]
+    """Uncompleting is not supported by the Skylight private API (confirmed via
+    pyskylight: only complete_chore / delete_chore exist, no undo). The endpoint
+    returns an honest FAILURE."""
+    resp = client.post(
+        "/api/integrations/skylight/chores/1/uncomplete",
+        headers={"X-Internal-Secret": "test-secret"}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "FAILURE"
+    assert "does not support" in data["message"]
 
 
 def test_skylight_rewards():
