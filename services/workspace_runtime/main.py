@@ -1521,7 +1521,24 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
     with Session(engine) as session:
         existing = session.get(Workspace, ws.id)
         if existing:
-            raise HTTPException(status_code=400, detail=f"Workspace {ws.id} already exists")
+            # Idempotent acquire: a workspace that already exists is treated as
+            # "acquired" rather than an error, so callers (e.g. Raven's
+            # WorkspaceCreateRequest — the sandbox it must work out of, like a
+            # chroot) can adopt it as their working environment on re-runs
+            # instead of failing with "already exists". Re-materialize the
+            # backing directory in case it was removed, then return the record.
+            ws_path = existing.local_path or _derive_workspace_container_path(
+                existing.id, existing.scope, existing.owner_user
+            )
+            resolved_path = resolve_safe_path(get_workspace_root(), ws_path, must_exist=False)
+            with suppress(OSError):
+                os.makedirs(str(resolved_path), exist_ok=True)
+            return {
+                "status": "SUCCESS",
+                "workspace": _workspace_to_dict(existing),
+                "already_existed": True,
+                "message": f"Workspace {existing.id} already existed; adopted as working sandbox.",
+            }
         _store_workspace_secret_fields(ws)
         session.add(ws)
         session.commit()
