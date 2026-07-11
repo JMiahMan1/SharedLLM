@@ -3538,8 +3538,36 @@ async def proxy_add_calendar_event(request: Request):
         "calendar_name": body.get("calendar_name"),
     }
     if body.get("integration"):
-        payload["integration"] = body["integration"]
+        payload["integration"] = body.get("integration")
     return await _proxy_execution_with_identity(request, "/execute/calendar", payload)
+
+
+@app.put("/api/communication/calendar/events")
+async def proxy_update_calendar_event(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "update",
+        "event_id": body.get("event_id"),
+        "integration": body.get("integration"),
+        "query": body.get("query"),
+        "summary": body.get("summary"),
+        "start_time": body.get("start_time"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/calendar", payload)
+
+
+@app.delete("/api/communication/calendar/events")
+async def proxy_delete_calendar_event(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "delete",
+        "event_id": body.get("event_id"),
+        "integration": body.get("integration"),
+        "query": body.get("query"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/calendar", payload)
+
+
 
 
 @app.post("/api/communication/notes/create")
