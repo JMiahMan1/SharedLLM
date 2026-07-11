@@ -15,7 +15,7 @@ def _load_env_files():
         _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _env_name)
         if not os.path.exists(_env_path):
             continue
-        with open(_env_path, "r", encoding="utf-8") as _f:
+        with open(_env_path, encoding="utf-8") as _f:
             for _line in _f:
                 _line = _line.strip()
                 if not _line or _line.startswith("#") or "=" not in _line:

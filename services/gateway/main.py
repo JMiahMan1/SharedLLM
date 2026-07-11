@@ -30,13 +30,13 @@ from services.gateway.agent_loop import (
 )
 from services.gateway.background_worker import worker as raven_worker
 from services.gateway.config import (
-    CONFIG,
-    INTERNAL_SECRET,
     ABS_TIMEOUT,
     ALPACA_SD_URL,
+    CONFIG,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
     IDENTITY_SVC,
+    INTERNAL_SECRET,
     LOGGING_SVC,
     OLLAMA_TIMEOUT,
     RAG_SVC,
@@ -578,7 +578,7 @@ async def retry_http_request(func, service_name: str, max_retries: int = 2, base
             if attempt == max_retries:
                 log.error(f"{service_name}: Timed out after {max_retries + 1} attempts: {e}")
                 # Re-raise as aiohttp.ClientError so callers' error handling returns clean 5xx
-                raise aiohttp.ClientError(f"Timeout: {e}")
+                raise aiohttp.ClientError(f"Timeout: {e}") from e
             delay = base_delay * (2 ** attempt)
             log.warning(f"{service_name}: Timeout (attempt {attempt+1}/{max_retries+1}): {e}. Retrying in {delay}s")
             await asyncio.sleep(delay)
@@ -813,7 +813,7 @@ async def get_documentation(
             target_path.relative_to(docs_dir)
     except (ValueError, RuntimeError):
         log.warning(f"SECURITY: Blocked doc path traversal attempt: {doc_name}")
-        raise HTTPException(status_code=403, detail="Forbidden: Document path traversal detected")
+        raise HTTPException(status_code=403, detail="Forbidden: Document path traversal detected") from None
 
     if not target_path.exists() or not target_path.is_file():
         raise HTTPException(status_code=404, detail=f"Documentation '{doc_name}' not found")
@@ -823,7 +823,7 @@ async def get_documentation(
         return {"name": doc_name, "content": content}
     except Exception as e:
         log.error(f"Error reading doc {doc_name}: {e}")
-        raise HTTPException(status_code=500, detail="Error reading documentation file")
+        raise HTTPException(status_code=500, detail="Error reading documentation file") from e
 
 # --- Logging Helper ---
 async def emit_log(level: str, message: str, context: dict | None = None):
@@ -1402,7 +1402,7 @@ async def orchestrate_code_change(
         plan_data = _parse_llm_json_object(plan)
     except Exception as e:
         log.error(f"Failed to parse coding plan: {e}\nRaw: {plan}")
-        raise HTTPException(status_code=500, detail="Invalid JSON plan from coding model")
+        raise HTTPException(status_code=500, detail="Invalid JSON plan from coding model") from e
 
     rel_path = plan_data.get("relative_path")
     content = plan_data.get("content")
@@ -1734,7 +1734,7 @@ async def resolve_identity(body: dict) -> Any:
         )
     except aiohttp.ClientError as e:
         log.error(f"Identity service unreachable: {e}")
-        raise HTTPException(status_code=503, detail="Identity service unreachable")
+        raise HTTPException(status_code=503, detail="Identity service unreachable") from e
 
 
 async def resolve_first_user() -> Any:
@@ -1962,7 +1962,7 @@ async def secure_logging_middleware(request: Request, call_next):
             safe_headers[key] = "[REDACTED]"
 
     log.info(f"REQUEST: {request.method} {request.url} | Headers: {safe_headers}")
-    _ = asyncio.create_task(emit_log("INFO", f"{request.method} {request.url.path}", {"headers": safe_headers}))
+    _ =     _ = asyncio.create_task(emit_log("INFO", f"{request.method} {request.url.path}", {"headers": safe_headers}))
 
     try:
         response = await call_next(request)
@@ -1980,7 +1980,7 @@ async def secure_logging_middleware(request: Request, call_next):
 
     status_code = getattr(response, 'status_code', None) or getattr(response, 'status', 'N/A')
     log.info(f"RESPONSE: {request.method} {request.url} | Status: {status_code}")
-    _ = asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
+    _ =     _ = asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
     return response
 
 # --- Core Handlers ---
@@ -2552,7 +2552,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 else:
                     try:
                         err_detail = (await exec_resp.json()).get("detail", await exec_resp.text())
-                    except:
+                    except Exception:
                         err_detail = await exec_resp.text()
                     exec_msg = f"Failed: {err_detail}"
 
@@ -5084,7 +5084,7 @@ async def update_gateway_config(new_config: dict):
                     log.info(f"Synchronized global config: {key} -> {val}")
                 except Exception as e:
                     log.error(f"Exception during global config sync for {key}: {e}")
-                    raise HTTPException(status_code=500, detail=str(e))
+                    raise HTTPException(status_code=500, detail=str(e)) from e
 
     log.info(f"Updated Gateway Config via Identity SVC: {new_config}")
     from services.gateway.cache import invalidate_settings
@@ -5843,7 +5843,7 @@ async def proxy_media_status(request: Request):
         return await retry_http_request(do_proxy, "Execution service (media status)", max_retries=2, base_delay=0.1)
     except (TimeoutError, aiohttp.ClientError) as e:
         log.error(f"Execution service unreachable for media status: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable")
+        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
 
 
 @app.post("/execute/media/transport")
@@ -5864,7 +5864,7 @@ async def proxy_media_transport(request: Request):
         return await retry_http_request(do_proxy, "Execution service (media transport)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for media transport: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable")
+        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
 
 
 @app.post("/execute/media/play")
@@ -5885,7 +5885,7 @@ async def proxy_media_play(request: Request):
         return await retry_http_request(do_proxy, "Execution service (media play)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for media play: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable")
+        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
 
 
 @app.post("/execute/media/state/sync")
@@ -5906,7 +5906,7 @@ async def proxy_media_state_sync(request: Request):
         return await retry_http_request(do_proxy, "Execution service (media state sync)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for media state sync: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable")
+        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
 
 
 @app.post("/execute/entity/search")
@@ -5931,7 +5931,7 @@ async def proxy_entity_search(request: Request):
         return await retry_http_request(do_proxy, "Execution service (entity search)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for entity search: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable")
+        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
 
 
 @app.post("/execute/audiobookshelf")
@@ -5952,7 +5952,7 @@ async def proxy_audiobookshelf(request: Request):
         return await retry_http_request(do_proxy, "Execution service (audiobookshelf)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for audiobookshelf: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable")
+        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
 
 
 @app.post("/execute/ha_service")
@@ -5973,7 +5973,7 @@ async def proxy_ha_service(request: Request):
         return await retry_http_request(do_proxy, "Execution service (ha_service)", max_retries=2, base_delay=0.1)
     except aiohttp.ClientError as e:
         log.error(f"Execution service unreachable for ha_service: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable")
+        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
 
 
 @app.get("/api/media/stream/audiobookshelf/{book_id}")
@@ -5988,10 +5988,10 @@ async def stream_audiobookshelf(book_id: str, request: Request):
             log.info(f"[stream/abs] Identity resolved successfully for user: {creds.get('user')}")
         except HTTPException as e:
             log.error(f"[stream/abs] Identity resolution failed: {e.detail}")
-            raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
+            raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
         except Exception as e:
             log.error(f"[stream/abs] Identity resolution crashed: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Internal server error resolving identity")
+            raise HTTPException(status_code=500, detail="Internal server error resolving identity") from e
 
         abs_url = creds.get("audiobookshelf_url") or ""
         abs_key = creds.get("audiobookshelf_api_key") or ""
@@ -6089,12 +6089,12 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         except Exception as e:
             log.error(f"[stream/abs] Stream initiation failed: {e}", exc_info=True)
             await client.close()
-            raise HTTPException(status_code=502, detail="Failed to connect to media source")
+            raise HTTPException(status_code=502, detail="Failed to connect to media source") from e
     except HTTPException as he:
         raise he
     except Exception as e:
         log.error(f"[stream/abs] Unhandled exception in stream_audiobookshelf: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal stream error: {e!s}")
+        raise HTTPException(status_code=500, detail=f"Internal stream error: {e!s}") from e
 
 
 def _fix_sendspin_client_hello(msg: dict) -> dict:
@@ -6419,9 +6419,9 @@ async def debug_list_players(request: Request):
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
     except HTTPException as e:
-        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
+        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}") from e
 
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
@@ -6450,9 +6450,9 @@ async def debug_list_queues(request: Request):
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
     except HTTPException as e:
-        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
+        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}") from e
 
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
@@ -6481,9 +6481,9 @@ async def debug_get_player(request: Request, player_id: str):
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
     except HTTPException as e:
-        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
+        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}") from e
 
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
@@ -6694,10 +6694,10 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             log.info(f"[stream/ma] Identity resolved for user: {creds.get('user')}")
         except HTTPException as e:
             log.error(f"[stream/ma] Identity resolution failed: {e.detail}")
-            raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}")
+            raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
         except Exception as e:
             log.error(f"[stream/ma] Identity resolution crashed: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Internal server error resolving identity")
+            raise HTTPException(status_code=500, detail="Internal server error resolving identity") from e
 
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
@@ -6816,7 +6816,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             raise HTTPException(
                 status_code=502,
                 detail=f"Failed to connect to Music Assistant WebSocket: {e}"
-            )
+            ) from e
 
         try:
             # Generate session_id for MA stream URL construction
@@ -6824,11 +6824,10 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             # Convert ABS book IDs to MA-compatible URIs
             import re as _re
             ma_uri = uri
-            if not _re.match(r'^[a-z]+://', uri):
-                # URI has no scheme - check if it looks like an ABS book ID (UUID)
-                if _re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', uri, _re.IGNORECASE):
-                    ma_uri = f"library://audiobookshelf/book/{uri}"
-                    log.info(f"[stream/ma] Detected ABS book ID, converted to MA URI: {ma_uri}")
+            if not _re.match(r'^[a-z]+://', uri) and _re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', uri, _re.IGNORECASE):
+                # URI has no scheme and looks like an ABS book ID (UUID) — convert to MA URI
+                ma_uri = f"library://audiobookshelf/book/{uri}"
+                log.info(f"[stream/ma] Detected ABS book ID, converted to MA URI: {ma_uri}")
 
             # Send play_media using the MA frontend signature so the requested URI
             # replaces the active queue instead of reusing the previous item.
@@ -6986,7 +6985,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             except Exception as e:
                 log.error(f"[stream/ma] Stream proxy failed: {e}", exc_info=True)
                 await proxy_client.close()
-                raise HTTPException(status_code=502, detail=f"Failed to proxy MA stream: {e}")
+                raise HTTPException(status_code=502, detail=f"Failed to proxy MA stream: {e}") from e
 
         except HTTPException:
             raise
@@ -6994,13 +6993,13 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             log.error(f"[stream/ma] WebSocket/stream handling failed: {e}", exc_info=True)
             with suppress(Exception):
                 await ma_client.disconnect()
-            raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}")
+            raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}") from e
 
     except HTTPException:
         raise
     except Exception as e:
         log.error(f"[stream/ma] Unhandled exception: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}") from e
 
 
 @app.get("/api/media/imageproxy")
@@ -7021,7 +7020,7 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
             creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
     except Exception as e:
         log.error(f"[imageproxy] Identity resolution failed: {e}")
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise HTTPException(status_code=401, detail="Authentication required") from e
 
     parsed = urlparse(path)
     is_full = bool(parsed.scheme and parsed.netloc)
@@ -7103,7 +7102,7 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
         raise
     except Exception as e:
         log.error(f"[imageproxy] Exception proxying image ({svc}) {target_url}: {e}")
-        raise HTTPException(status_code=500, detail="Error fetching image")
+        raise HTTPException(status_code=500, detail="Error fetching image") from e
 
 
 @app.get("/api/media/detail")
@@ -7116,7 +7115,7 @@ async def get_media_detail(uri: str, request: Request):
             creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
     except Exception as e:
         log.error(f"[media/detail] Identity resolution failed: {e}")
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise HTTPException(status_code=401, detail="Authentication required") from e
 
     mass_url = creds.get("mass_url") or ""
     mass_token = creds.get("mass_token") or ""
@@ -7143,7 +7142,7 @@ async def get_media_detail(uri: str, request: Request):
                 raise HTTPException(status_code=resp.status, detail="Failed to fetch media details from Music Assistant")
         except Exception as e:
             log.error(f"[media/detail] Exception: {e}", exc_info=True)
-            raise HTTPException(status_code=502, detail="Error communicating with Music Assistant")
+            raise HTTPException(status_code=502, detail="Error communicating with Music Assistant") from e
 
 
 class FavoriteRequest(BaseModel):
@@ -7164,7 +7163,7 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
             creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
     except Exception as e:
         log.error(f"[media/favorite] Identity resolution failed: {e}")
-        raise HTTPException(status_code=401, detail="Authentication required")
+        raise HTTPException(status_code=401, detail="Authentication required") from e
 
     mass_url = creds.get("mass_url") or ""
     mass_token = creds.get("mass_token") or ""
@@ -7234,4 +7233,4 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
             raise he
         except Exception as e:
             log.error(f"[media/favorite] Exception: {e}", exc_info=True)
-            raise HTTPException(status_code=502, detail="Error communicating with Music Assistant")
+            raise HTTPException(status_code=502, detail="Error communicating with Music Assistant") from e

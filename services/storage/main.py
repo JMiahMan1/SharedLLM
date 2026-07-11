@@ -3,10 +3,10 @@ import logging
 import re
 
 import aiohttp
-from services.common.http import get_client
 from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
+from services.common.http import get_client
 from services.config import INTERNAL_SECRET, RAG_SVC_URL
 from services.shared.info_endpoint import info_router
 from services.storage.indexer import CheckpointManager, build_content_index, extract_and_chunk_contents, is_indexer_paused, set_indexer_pause
