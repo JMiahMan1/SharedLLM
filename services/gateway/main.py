@@ -29,7 +29,20 @@ from services.gateway.agent_loop import (
     get_vram_safe_params,
 )
 from services.gateway.background_worker import worker as raven_worker
-from services.gateway.config import CONFIG, INTERNAL_SECRET
+from services.gateway.config import (
+    CONFIG,
+    INTERNAL_SECRET,
+    ABS_TIMEOUT,
+    ALPACA_SD_URL,
+    CONTROL_PLANE_URL,
+    EXECUTION_SVC,
+    IDENTITY_SVC,
+    LOGGING_SVC,
+    OLLAMA_TIMEOUT,
+    RAG_SVC,
+    STORAGE_SVC,
+    WORKSPACE_RUNTIME_SVC,
+)
 from services.gateway.config_validator import validate_config
 from services.gateway.history import get_history, get_long_term_memory, ping_redis, update_history
 from services.gateway.intent_engine import engine
@@ -46,6 +59,7 @@ from services.gateway.prompts import (
     load_prompt_sync,
 )
 from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
+from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas
 from services.shared.info_endpoint import info_router
 
 START_TIME = time.time()
@@ -57,21 +71,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 # Singleton lock for Ollama inference to prevent concurrent VRAM exhaustion
 INFERENCE_LOCK = asyncio.Lock()
 
-
-# Backward-compatible aliases — sourced from config.py, updated by _sync_main_constants from Identity settings
-from services.gateway.config import (
-    ABS_TIMEOUT,
-    ALPACA_SD_URL,
-    CONTROL_PLANE_URL,
-    EXECUTION_SVC,
-    IDENTITY_SVC,
-    LOGGING_SVC,
-    OLLAMA_TIMEOUT,
-    RAG_SVC,
-    STORAGE_SVC,
-    WORKSPACE_RUNTIME_SVC,
-)
-from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas
 
 QWEN_GROUNDING_INSTRUCTION = """
 # MISSION LOCK: Raven Autonomous Repair Protocol
@@ -1851,7 +1850,7 @@ async def fetch_ha_entities(creds: dict) -> list:
                                 log.info(f"[ha_sync] Cleaned up {len(orphaned)} orphaned Redis cache entries")
                     except Exception as _e:
                         log.debug(f"RAG sync fire-and-forget failed (non-critical): {_e}")
-                asyncio.create_task(_sync_to_rag())
+                _ =                 _ = asyncio.create_task(_sync_to_rag())
 
                 # 2. Auto-assign to user in Identity for RBAC bypass/mapping
                 async def auto_assign():
@@ -1869,7 +1868,7 @@ async def fetch_ha_entities(creds: dict) -> list:
                     except Exception as ae:
                         log.error(f"Auto-assign failed: {ae}")
 
-                asyncio.create_task(auto_assign())
+                _ =                 _ = asyncio.create_task(auto_assign())
 
             return entities
     except Exception as e:
@@ -1963,7 +1962,7 @@ async def secure_logging_middleware(request: Request, call_next):
             safe_headers[key] = "[REDACTED]"
 
     log.info(f"REQUEST: {request.method} {request.url} | Headers: {safe_headers}")
-    asyncio.create_task(emit_log("INFO", f"{request.method} {request.url.path}", {"headers": safe_headers}))
+    _ = asyncio.create_task(emit_log("INFO", f"{request.method} {request.url.path}", {"headers": safe_headers}))
 
     try:
         response = await call_next(request)
@@ -1981,7 +1980,7 @@ async def secure_logging_middleware(request: Request, call_next):
 
     status_code = getattr(response, 'status_code', None) or getattr(response, 'status', 'N/A')
     log.info(f"RESPONSE: {request.method} {request.url} | Status: {status_code}")
-    asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
+    _ = asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
     return response
 
 # --- Core Handlers ---
@@ -2112,7 +2111,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         # ── Heartbeat task ──────────────────────────────────────────────────
         heartbeat_stop = asyncio.Event()
 
-        async def _heartbeat(iter_n: int, t0: float) -> None:
+        async def _heartbeat(iter_n: int, t0: float, heartbeat_stop: asyncio.Event = heartbeat_stop) -> None:
             elapsed = 0.0
             while not heartbeat_stop.is_set():
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
