@@ -376,10 +376,16 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 session = await _get_skylight_session(req.user_context.user)
                 if not session:
                     return ExecutionResult(status="FAILURE", message="Skylight not configured.", service="calendar_add")
+                dt = dateparser.parse(req.start_time, settings={"PREFER_DATES_FROM": "future"})
+                if dt is None:
+                    return ExecutionResult(status="FAILURE", message=f"Could not parse date: {req.start_time}", service="calendar_add")
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=_get_local_tz())
+                dt_end = dt + timedelta(hours=1)
                 body = {
                     "summary": req.summary,
-                    "start": req.start_time,
-                    "end": req.start_time,
+                    "starts_at": dt.isoformat(),
+                    "ends_at": dt_end.isoformat(),
                 }
                 result = await _skylight_request(session, "POST", "/calendar_events", body)
                 if result is not None:
