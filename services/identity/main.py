@@ -511,8 +511,21 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         skylight_email=sys_user.skylight_email if sys_user else user.username,
         skylight_pass=decrypt(sys_user.skylight_pass_enc) if (sys_user and sys_user.skylight_pass_enc) else None,
         skylight_enabled=user.skylight_enabled,
-        preferred_tts_voice=user.preferred_tts_voice or "af_heart"
+        preferred_tts_voice=user.preferred_tts_voice or "af_heart",
+        calendar_settings=_load_calendar_settings(session, user.username),
     )
+
+
+def _load_calendar_settings(session: Session, username: str) -> dict:
+    row = session.exec(
+        select(UserCalendarSetting).where(UserCalendarSetting.username == username)
+    ).first()
+    if row and row.data:
+        try:
+            return json.loads(row.data)
+        except (ValueError, TypeError):
+            return {}
+    return {}
 
 START_TIME = time.time()
 

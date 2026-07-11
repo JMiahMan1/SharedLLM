@@ -1,6 +1,7 @@
 import { useWidgetData } from '../../hooks/useWidgetData';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
+import { integrationMeta } from '../calendar/integrationMeta';
 import type { CalendarEvent, IWidgetProps } from '../../types/widget';
 
 interface ParsedEvent {
@@ -8,6 +9,7 @@ interface ParsedEvent {
   start_time: string;
   end_time?: string;
   location?: string;
+  integration?: string;
   startHour: number;
   startMinute: number;
   isToday: boolean;
@@ -24,6 +26,7 @@ const parseEvent = (event: CalendarEvent): ParsedEvent => {
     start_time: event.start_time,
     end_time: event.end_time,
     location: event.location,
+    integration: event.integration,
     startHour: start.getHours(),
     startMinute: start.getMinutes(),
     isToday,
@@ -144,9 +147,16 @@ const UpcomingEventsWidget = ({ settingsButton }: IWidgetProps) => {
               </div>
 
               <div className="flex-1 min-w-0">
-                <p className={`text-sm font-semibold truncate ${isVerySoon ? 'text-amber-300' : 'text-white'}`}>
-                  {event.summary}
-                </p>
+                <div className="flex items-center gap-2">
+                  <span
+                    className="inline-block h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: integrationMeta(event.integration).color }}
+                    title={integrationMeta(event.integration).label}
+                  />
+                  <p className={`text-sm font-semibold truncate ${isVerySoon ? 'text-amber-300' : 'text-white'}`}>
+                    {event.summary}
+                  </p>
+                </div>
                 {event.location && (
                   <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
                     <span>📍</span> <span className="truncate">{event.location}</span>
