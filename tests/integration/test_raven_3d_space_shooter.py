@@ -190,45 +190,42 @@ def _recover_mission_id(query: str) -> int | None:
 
 
 def _chat_submit(query: str, system: str | None = None) -> int:
-    """Submit a prompt to the /api/chat endpoint.
+    """Submit a prompt to Raven as an autonomous mission via the dedicated
+    mission API (``POST /api/raven/missions``).
 
-    The gateway recognizes the engineering task as a Raven mission and routes it
-    to the Raven mission queue, returning a ``mission_id``. The test creates no
-    workspace/files — Raven does all the work.
+    This endpoint enqueues the mission and returns a clean 200 JSON with the
+    ``mission_id`` -- it does NOT stream (unlike ``/api/chat``, which
+    streams a long-running Raven task and would block the client for the whole
+    run). Raven does all the work; the test only observes the outcome.
 
-    Because the gateway can be slow to return the 202 (the in-process Raven
-    worker shares the event loop), a client-side timeout does NOT mean the
-    mission failed: it is usually created server-side. On any submit failure we
-    recover the id by polling the queue.
+    Because the gateway can be slow to return (the in-process Raven worker
+    shares the event loop), a submit failure is treated as "mission may
+    still have been created server-side" and we recover the id by polling
+    the queue.
     """
     body = {
-        "model": os.getenv("CODING_MODEL", "auto"),
-        "messages": [{"role": "user", "content": query}],
-        "stream": False,
+        "query": query,
+        "coding_model": os.getenv("CODING_MODEL", "auto"),
     }
     if system:
         body["system"] = system
     try:
-        with httpx.Client(headers=_chat_auth_headers(), timeout=300.0) as c:
-            resp = c.post(f"{GATEWAY_URL}/api/chat", json=body)
-            assert resp.status_code in (200, 202), (
-                f"chat submit failed ({resp.status_code}): {resp.text[:400]}"
+        with httpx.Client(headers=_chat_auth_headers(), timeout=60.0) as c:
+            resp = c.post(f"{GATEWAY_URL}/api/raven/missions", json=body)
+            assert resp.status_code in (200, 201, 202), (
+                f"mission submit failed ({resp.status_code}): {resp.text[:400]}"
             )
             data = resp.json()
-            mission_id = data.get("mission_id")
-            # OpenAI-format responses wrap the payload as a chat message.
-            if mission_id is None and isinstance(data.get("choices"), list):
-                content = data["choices"][0]["message"]["content"]
-                try:
-                    mission_id = int(content.split('"mission_id":')[1].split("}")[0].split(",")[0].strip())
-                except Exception:
-                    mission_id = None
+            mission = data.get("mission") or {}
+            mission_id = mission.get("id") or data.get("mission_id")
             if mission_id is not None:
                 return int(mission_id)
-    except Exception:
-        pass  # fall through to queue-based recovery
+    except Exception as e:
+        print(f"[warn] mission submit error: {e}")
     recovered = _recover_mission_id(query)
-    assert recovered is not None, "chat submit did not return a mission_id and none found in queue"
+    assert recovered is not None, (
+        "mission submit did not return a mission_id and none found in queue"
+    )
     return int(recovered)
 
 
