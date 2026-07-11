@@ -11,6 +11,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useDarkModeSync } from '../../hooks/useDarkModeSync';
 import { api } from '../../services/api';
 import { integrationMeta } from './integrationMeta';
 import type { CalendarEvent } from '../../types/widget';
@@ -40,7 +41,7 @@ const formatTime = (iso: string): string => {
   return `${h}:${m.toString().padStart(2, '0')} ${period}`;
 };
 
-// Pick readable text color on a warm fill
+// Pick readable text color on a fill
 const textOn = (hex: string): string => {
   const c = hex.replace('#', '');
   const r = parseInt(c.slice(0, 2), 16);
@@ -94,7 +95,49 @@ const buildByDay = (events: CalendarEvent[], rangeStart: Date, rangeEnd: Date) =
   return map;
 };
 
-// ─── Warm EventCard (OpenSkyLight paper-planner look) ───────────────────────
+// Warm "paper-planner" (OpenSkyLight) palette — used in light mode.
+const LIGHT_VARS = `
+  --os-paper:#f5efe3;
+  --os-paper-deep:#ece4d2;
+  --os-card:#fffdf8;
+  --os-ink:#34302a;
+  --os-ink-soft:#756d5f;
+  --os-ink-faint:#a89f8d;
+  --os-line:#e3dac6;
+  --os-ember:#d95b3a;
+  --os-ember-deep:#bf4526;
+  --os-ember-soft:#f8ddd2;
+  --os-sun:#ffd9a0;
+  --os-sun-soft:#fdf0da;
+  --os-shadow:0 1px 3px rgba(72,60,38,0.07),0 10px 28px -10px rgba(72,60,38,0.16);
+  --os-input-bg:#fffdf8;
+  --os-panel-bg:rgba(255,253,248,0.6);
+  --os-body-font:'Nunito',ui-sans-serif,system-ui,sans-serif;
+  --os-display:'Fraunces',Georgia,'Times New Roman',serif;
+`;
+
+// Glass / neon palette — matches the rest of the SharedLLM site (dark default).
+const DARK_VARS = `
+  --os-paper:rgba(255,255,255,0.03);
+  --os-paper-deep:rgba(255,255,255,0.07);
+  --os-card:rgba(255,255,255,0.06);
+  --os-ink:#f1f5f9;
+  --os-ink-soft:rgba(241,245,249,0.62);
+  --os-ink-faint:rgba(241,245,249,0.38);
+  --os-line:rgba(255,255,255,0.12);
+  --os-ember:#8b5cf6;
+  --os-ember-deep:#c4b5fd;
+  --os-ember-soft:rgba(139,92,246,0.15);
+  --os-sun:#a78bfa;
+  --os-sun-soft:rgba(139,92,246,0.14);
+  --os-shadow:0 4px 24px rgba(0,0,0,0.45),0 1px 0 rgba(255,255,255,0.04) inset;
+  --os-input-bg:rgba(0,0,0,0.25);
+  --os-panel-bg:rgba(255,255,255,0.05);
+  --os-body-font:'Outfit',ui-sans-serif,system-ui,sans-serif;
+  --os-display:'Outfit',ui-sans-serif,system-ui,sans-serif;
+`;
+
+// ─── Warm EventCard ──────────────────────────────────────────────────────────
 const EventCard = ({ ev, size = 'md' }: { ev: CalendarEvent; size?: 'md' | 'lg' }) => {
   const meta = integrationMeta(ev.integration);
   const color = meta.color;
@@ -117,13 +160,11 @@ const EventCard = ({ ev, size = 'md' }: { ev: CalendarEvent; size?: 'md' | 'lg' 
       style={{ backgroundColor: 'var(--os-card)', borderLeft: `5px solid ${color}` }}
     >
       <div className="flex items-center gap-1.5">
-        <span className={`font-extrabold ${size === 'lg' ? 'text-base' : 'text-[13px]'}`} style={{ color }}>
-          {formatTime(ev.start_time)}
-        </span>
+        <span className={`font-extrabold ${size === 'lg' ? 'text-base' : 'text-[13px]'}`} style={{ color }}>{formatTime(ev.start_time)}</span>
       </div>
-      <div className={`truncate font-bold text-[#34302a] ${size === 'lg' ? 'text-xl' : 'text-[15px]'}`}>{ev.summary}</div>
+      <div className={`truncate font-bold ${size === 'lg' ? 'text-xl' : 'text-[15px]'}`} style={{ color: 'var(--os-ink)' }}>{ev.summary}</div>
       {size === 'lg' && ev.location && (
-        <div className="mt-1 flex items-center gap-1 text-sm font-semibold text-[#756d5f]">
+        <div className="mt-1 flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--os-ink-soft)' }}>
           <MapPin size={14} />
           <span className="truncate">{ev.location}</span>
         </div>
@@ -133,6 +174,7 @@ const EventCard = ({ ev, size = 'md' }: { ev: CalendarEvent; size?: 'md' | 'lg' 
 };
 
 const CalendarApp = () => {
+  const { isDark } = useDarkModeSync();
   const queryClient = useQueryClient();
   const [view, setView] = useState<ViewKind>('agenda');
   const [focused, setFocused] = useState<Date>(() => new Date());
@@ -243,24 +285,29 @@ const CalendarApp = () => {
     <button
       key={key}
       onClick={() => setView(key)}
-      className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${
-        view === key ? 'bg-[#34302a] text-[#fffdf8]' : 'text-[#756d5f] hover:text-[#34302a]'
-      }`}
+      className={`px-4 py-1.5 rounded-full text-xs font-bold transition ${view === key ? '' : 'hover:opacity-80'}`}
+      style={view === key ? { background: 'var(--os-ember)', color: '#fffdf8' } : { color: 'var(--os-ink-soft)' }}
     >
       {label}
     </button>
   );
 
+  // Today highlight styles (shared look; colors come from the active theme vars)
+  const todayCell = (radius: string) => ({
+    background: 'var(--os-sun-soft)',
+    boxShadow: '0 0 0 2px var(--os-sun)',
+    borderRadius: radius,
+  });
+  const todayNum = { background: 'var(--os-ember)', color: '#fffdf8' };
+
   return (
     <section className="os-calendar rounded-[1.25rem] p-4 md:p-6" style={{ background: 'var(--os-paper)' }}>
       <style>{`
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400..900&family=Nunito:wght@400..900&display=swap');
+${isDark ? DARK_VARS : LIGHT_VARS}
 .os-calendar{
-  --os-paper:#f5efe3; --os-paper-deep:#ece4d2; --os-card:#fffdf8; --os-ink:#34302a; --os-ink-soft:#756d5f; --os-ink-faint:#a89f8d; --os-line:#e3dac6; --os-ember:#d95b3a; --os-ember-deep:#bf4526; --os-ember-soft:#f8ddd2; --os-sun:#ffd9a0; --os-sun-soft:#fdf0da;
-  --os-shadow:0 1px 3px rgba(72,60,38,0.07),0 10px 28px -10px rgba(72,60,38,0.16);
-  font-family:'Nunito',ui-sans-serif,system-ui,sans-serif; color:var(--os-ink);
+  font-family:var(--os-body-font); color:var(--os-ink);
 }
-.os-calendar .os-display{ font-family:'Fraunces',Georgia,'Times New Roman',serif; }
+.os-calendar .os-display{ font-family:var(--os-display); }
 .os-calendar .os-card{ background:var(--os-card); box-shadow:var(--os-shadow); }
 `}</style>
 
@@ -281,9 +328,9 @@ const CalendarApp = () => {
       </div>
 
       <div className="mb-4 flex items-center gap-2">
-        <button onClick={() => shift(-1)} className="os-card rounded-full p-2 text-[#756d5f] hover:text-[#34302a]"><ChevronLeft size={18} /></button>
+        <button onClick={() => shift(-1)} className="os-card rounded-full p-2 transition hover:opacity-80" style={{ color: 'var(--os-ink-soft)' }}><ChevronLeft size={18} /></button>
         <button onClick={goToday} className="rounded-full px-3 py-1 text-xs font-bold" style={{ background: 'var(--os-sun-soft)', color: 'var(--os-ember-deep)' }}>Today</button>
-        <button onClick={() => shift(1)} className="os-card rounded-full p-2 text-[#756d5f] hover:text-[#34302a]"><ChevronRight size={18} /></button>
+        <button onClick={() => shift(1)} className="os-card rounded-full p-2 transition hover:opacity-80" style={{ color: 'var(--os-ink-soft)' }}><ChevronRight size={18} /></button>
         <div className="ml-2 os-display text-lg font-semibold" style={{ color: 'var(--os-ink-soft)' }}>
           {focused.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
         </div>
@@ -307,7 +354,7 @@ const CalendarApp = () => {
 
       {/* Integration chips */}
       <div className="mb-5 flex flex-wrap gap-2">
-        <button onClick={() => setActiveIntegration('all')} className={`rounded-full border px-4 py-1.5 text-xs font-bold transition ${activeIntegration === 'all' ? 'text-[#fffdf8]' : 'text-[#756d5f]'}`} style={activeIntegration === 'all' ? { background: 'var(--os-ink)', borderColor: 'var(--os-ink)' } : { borderColor: 'var(--os-line)' }}>
+        <button onClick={() => setActiveIntegration('all')} className={`rounded-full border px-4 py-1.5 text-xs font-bold transition ${activeIntegration === 'all' ? '' : 'hover:opacity-80'}`} style={activeIntegration === 'all' ? { background: 'var(--os-ember)', borderColor: 'var(--os-ember)', color: '#fffdf8' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
           All
         </button>
         {integrations.filter((i) => i.enabled && i.provides_calendar).map((i) => {
@@ -333,7 +380,7 @@ const CalendarApp = () => {
               const isToday = key === todayKey;
               return (
                 <div key={key} className="flex gap-4 py-2">
-                  <button onClick={() => openDay(key)} className={`flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-2xl ${isToday ? '' : ''}`} style={isToday ? { background: 'var(--os-ember)', color: '#fff' } : { background: 'rgba(236,228,210,0.6)', color: 'var(--os-ink)' }}>
+                  <button onClick={() => openDay(key)} className={`flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-2xl ${isToday ? '' : ''}`} style={isToday ? { ...todayNum, boxShadow: 'var(--os-shadow)' } : { background: 'var(--os-paper-deep)', color: 'var(--os-ink)' }}>
                     <span className={`text-xs font-extrabold uppercase ${isToday ? 'text-white/80' : 'text-[#a89f8d]'}`}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
                     <span className="os-display text-3xl leading-none">{day.getDate()}</span>
                     <span className={`text-xs font-bold ${isToday ? 'text-white/80' : 'text-[#a89f8d]'}`}>{day.toLocaleDateString('en-US', { month: 'short' })}</span>
@@ -374,10 +421,10 @@ const CalendarApp = () => {
             const evs = byDay.get(key) ?? [];
             const isToday = key === todayKey;
             return (
-              <div key={key} className={`flex min-h-0 flex-col rounded-[1.25rem] p-2 ${isToday ? '' : ''}`} style={isToday ? { background: 'var(--os-sun-soft)', boxShadow: '0 0 0 2px var(--os-sun)', borderRadius: '1.25rem' } : { background: 'rgba(236,228,210,0.4)' }}>
+              <div key={key} className={`flex min-h-0 flex-col rounded-[1.25rem] p-2 ${isToday ? '' : ''}`} style={isToday ? todayCell('1.25rem') : { background: 'var(--os-paper-deep)' }}>
                 <button onClick={() => openDay(key)} className="mb-2 flex items-baseline gap-2 rounded-xl px-2 py-1 text-left">
-                  <span className={`text-sm font-extrabold uppercase ${isToday ? 'text-[#bf4526]' : 'text-[#a89f8d]'}`}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-                  <span className={`os-display text-3xl ${isToday ? 'flex h-11 w-11 items-center justify-center rounded-full text-[#fffdf8]' : 'text-[#34302a]'}`} style={isToday ? { background: 'var(--os-ember)' } : undefined}>{day.getDate()}</span>
+                  <span className={`text-sm font-extrabold uppercase ${isToday ? 'text-[#bf4526]' : 'text-[#a89f8d]'}`} style={isToday ? { color: 'var(--os-ember-deep)' } : undefined}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+                  <span className={`os-display text-3xl ${isToday ? 'flex h-11 w-11 items-center justify-center rounded-full text-[#fffdf8]' : 'text-[#34302a]'}`} style={isToday ? todayNum : { color: 'var(--os-ink)' }}>{day.getDate()}</span>
                 </button>
                 <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
                   {evs.map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} />)}
@@ -391,7 +438,7 @@ const CalendarApp = () => {
       {view === 'month' && (
         <div className="flex flex-col">
           <div className="grid grid-cols-7 gap-x-2 pb-1">
-            {WEEKDAYS.map((w) => <div key={w} className="px-2 text-sm font-extrabold uppercase text-[#a89f8d]">{w}</div>)}
+            {WEEKDAYS.map((w) => <div key={w} className="px-2 text-sm font-extrabold uppercase text-[#a89f8d]" style={{ color: 'var(--os-ink-faint)' }}>{w}</div>)}
           </div>
           <div className="grid min-h-0 flex-1 grid-cols-7 grid-rows-6 gap-2">
             {days.map((day) => {
@@ -401,8 +448,8 @@ const CalendarApp = () => {
               const inMonth = day.getMonth() === focused.getMonth();
               const overflow = evs.length - 3;
               return (
-                <button key={key} onClick={() => openDay(key)} className={`flex min-h-0 flex-col overflow-hidden rounded-2xl p-1.5 text-left ${isToday ? '' : ''}`} style={isToday ? { background: 'var(--os-sun-soft)', boxShadow: '0 0 0 2px var(--os-sun)', borderRadius: '1rem' } : inMonth ? { background: 'rgba(255,253,248,0.8)', boxShadow: 'var(--os-shadow)' } : { background: 'rgba(236,228,210,0.3)' }}>
-                  <span className={`mb-1 flex h-8 w-8 items-center justify-center rounded-full os-display text-lg ${isToday ? 'text-[#fffdf8]' : inMonth ? 'text-[#34302a]' : 'text-[#a89f8d]'}`} style={isToday ? { background: 'var(--os-ember)' } : undefined}>{day.getDate()}</span>
+                <button key={key} onClick={() => openDay(key)} className={`flex min-h-0 flex-col overflow-hidden rounded-2xl p-1.5 text-left ${isToday ? '' : ''}`} style={isToday ? todayCell('1rem') : inMonth ? { background: 'var(--os-card)', boxShadow: 'var(--os-shadow)' } : { background: 'var(--os-paper-deep)' }}>
+                  <span className={`mb-1 flex h-8 w-8 items-center justify-center rounded-full os-display text-lg ${isToday ? 'text-[#fffdf8]' : inMonth ? 'text-[#34302a]' : 'text-[#a89f8d]'}`} style={isToday ? todayNum : { color: inMonth ? 'var(--os-ink)' : 'var(--os-ink-faint)' }}>{day.getDate()}</span>
                   <span className="flex min-h-0 flex-col gap-1 overflow-hidden">
                     {evs.slice(0, 3).map((ev, idx) => {
                       const meta = integrationMeta(ev.integration);
@@ -411,7 +458,7 @@ const CalendarApp = () => {
                         <span key={idx} className="truncate rounded-md px-1.5 py-0.5 text-xs font-bold" style={ad ? { background: meta.color, color: textOn(meta.color) } : { background: 'transparent', color: 'var(--os-ink)', borderLeft: `3px solid ${meta.color}` }}>{ev.summary}</span>
                       );
                     })}
-                    {overflow > 0 && <span className="px-1.5 text-xs font-extrabold text-[#a89f8d]">+{overflow} more</span>}
+                    {overflow > 0 && <span className="px-1.5 text-xs font-extrabold text-[#a89f8d]" style={{ color: 'var(--os-ink-faint)' }}>+{overflow} more</span>}
                   </span>
                 </button>
               );
@@ -421,16 +468,16 @@ const CalendarApp = () => {
       )}
 
       {isLoading && <p className="text-sm" style={{ color: 'var(--os-ink-soft)' }}>Loading your agenda…</p>}
-      {error && <p className="text-sm" style={{ color: '#bf4526' }}>Failed to load calendar.</p>}
+      {error && <p className="text-sm" style={{ color: 'var(--os-ember-deep)' }}>Failed to load calendar.</p>}
 
       {/* Add event */}
-      <div className="mt-6 rounded-2xl border p-4" style={{ background: 'rgba(255,253,248,0.6)', borderColor: 'var(--os-line)' }}>
+      <div className="mt-6 rounded-2xl border p-4" style={{ background: 'var(--os-panel-bg)', borderColor: 'var(--os-line)' }}>
         <p className="mb-3 text-xs font-black uppercase tracking-widest" style={{ color: 'var(--os-ink-faint)' }}>Add Event</p>
         <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-          <input type="text" value={summary} onChange={(e) => setSummary(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: '#fffdf8', color: 'var(--os-ink)' }} placeholder="Event title" />
-          <input type="text" value={startInput} onChange={(e) => setStartInput(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: '#fffdf8', color: 'var(--os-ink)' }} placeholder="When (e.g. tomorrow at 2pm)" />
+          <input type="text" value={summary} onChange={(e) => setSummary(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="Event title" />
+          <input type="text" value={startInput} onChange={(e) => setStartInput(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="When (e.g. tomorrow at 2pm)" />
           <div className="flex gap-2">
-            <select aria-label="Target calendar" value={addIntegration} onChange={(e) => setAddIntegration(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: '#fffdf8', color: 'var(--os-ink)' }}>
+            <select aria-label="Target calendar" value={addIntegration} onChange={(e) => setAddIntegration(e.target.value)} className="rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }}>
               <option value="">Default ({integrationMeta(detail?.default).label})</option>
               {writable.map((i) => <option key={i.type} value={i.type}>{integrationMeta(i.type).label}</option>)}
             </select>
@@ -440,7 +487,7 @@ const CalendarApp = () => {
       </div>
 
       {showSources && (
-        <div className="mt-6 rounded-2xl border p-4 space-y-4" style={{ background: 'rgba(255,253,248,0.6)', borderColor: 'var(--os-line)' }}>
+        <div className="mt-6 rounded-2xl border p-4 space-y-4" style={{ background: 'var(--os-panel-bg)', borderColor: 'var(--os-line)' }}>
           <div className="flex items-center justify-between">
             <p className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>Connected Sources</p>
             <button onClick={() => setShowSources(false)} className="p-1" style={{ color: 'var(--os-ink-soft)' }}><X size={16} /></button>
@@ -449,7 +496,7 @@ const CalendarApp = () => {
             const meta = integrationMeta(i.type);
             const isDisabled = disabledSet.has(i.type);
             return (
-              <div key={i.type} className="flex items-center justify-between rounded-xl border p-3" style={{ background: 'rgba(255,253,248,0.5)', borderColor: 'var(--os-line)' }}>
+              <div key={i.type} className="flex items-center justify-between rounded-xl border p-3" style={{ background: 'var(--os-panel-bg)', borderColor: 'var(--os-line)' }}>
                 <div className="flex items-center gap-2">
                   <span className="h-2.5 w-2.5 rounded-full" style={{ background: meta.color }} />
                   <div>
@@ -457,7 +504,7 @@ const CalendarApp = () => {
                     <p className="text-[10px]" style={{ color: 'var(--os-ink-soft)' }}>{i.writable ? 'Read & write' : 'Read-only'}</p>
                   </div>
                 </div>
-                <button onClick={() => toggleDisabledMutation.mutate(i.type)} className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[10px] font-bold ${isDisabled ? '' : ''}`} style={isDisabled ? { borderColor: '#8a8378', background: 'rgba(138,131,120,0.12)', color: '#756d5f' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
+                <button onClick={() => toggleDisabledMutation.mutate(i.type)} className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[10px] font-bold transition`} style={isDisabled ? { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
                   {isDisabled ? <Check size={12} /> : null}{isDisabled ? 'Enable' : 'Disable'}
                 </button>
               </div>
@@ -466,8 +513,8 @@ const CalendarApp = () => {
           <div className="pt-2 border-t" style={{ borderColor: 'var(--os-line)' }}>
             <p className="mb-2 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>iCal Subscriptions</p>
             <div className="flex gap-2">
-              <input type="text" value={icalUrl} onChange={(e) => setIcalUrl(e.target.value)} className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: '#fffdf8', color: 'var(--os-ink)' }} placeholder="https://example.com/feed.ics" />
-              <button onClick={() => { if (!icalUrl.trim()) { toast.error('Enter a .ics URL'); return; } addIcalMutation.mutate(icalUrl.trim()); }} className="rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest" style={{ background: 'var(--os-ember)', color: '#fffdf8' }}><Plus size={12} />Add</button>
+              <input type="text" value={icalUrl} onChange={(e) => setIcalUrl(e.target.value)} className="flex-1 rounded-xl border px-3 py-2 text-sm outline-none" style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }} placeholder="https://example.com/feed.ics" />
+              <button onClick={() => { if (!icalUrl.trim()) { toast.error('Enter a .ics URL'); return; } addIcalMutation.mutate(icalUrl.trim()); }} className="rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest text-[#fffdf8]" style={{ background: 'var(--os-ember)' }}><Plus size={12} />Add</button>
             </div>
             {(settingsData?.settings?.ical_urls ?? []).map((u) => <p key={u} className="mt-2 truncate text-[10px]" style={{ color: 'var(--os-ink-soft)' }}>{u}</p>)}
           </div>
