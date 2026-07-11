@@ -303,8 +303,8 @@ const CalendarApp = () => {
   return (
     <section className="os-calendar rounded-[1.25rem] p-4 md:p-6" style={{ background: 'var(--os-paper)' }}>
       <style>{`
-${isDark ? DARK_VARS : LIGHT_VARS}
 .os-calendar{
+${isDark ? DARK_VARS : LIGHT_VARS}
   font-family:var(--os-body-font); color:var(--os-ink);
 }
 .os-calendar .os-display{ font-family:var(--os-display); }
