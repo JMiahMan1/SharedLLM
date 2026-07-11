@@ -118,19 +118,30 @@ def _nextcloud_list_calendars(client):
 def _nextcloud_search_one(client, cal_url, cal_name, lo, hi):
     try:
         c = caldav.Calendar(client=client, url=cal_url)
-        events = c.search(start=lo, end=hi, event=True, expand=True)
+        # NOTE: caldav's server-side time-range filter (start=/end=) is
+        # unreliable here -- it silently returns 0 results for valid windows.
+        # Fetch all VEVENTs for the calendar and filter in Python instead.
+        events = c.search(event=True)
         out = []
         for ev in events:
-            ve = ev.vobject_instance.vevent
-            summary = ve.summary.value if hasattr(ve, "summary") else "No Summary"
+            try:
+                ve = ev.vobject_instance.vevent
+            except Exception:
+                continue
+            if not hasattr(ve, "dtstart"):
+                continue
             start_dt = _normalize_event_time(ve.dtstart.value)
             if not start_dt:
+                continue
+            # Drop events outside the requested window (calendars hold years
+            # of historical data; only upcoming/near-past matter for the feed).
+            if start_dt < lo or start_dt > hi:
                 continue
             end_dt = _normalize_event_time(ve.dtend.value) if hasattr(ve, "dtend") else None
             loc = ve.location.value if hasattr(ve, "location") else None
             out.append({
                 "integration": "nextcloud",
-                "summary": summary,
+                "summary": (ve.summary.value if hasattr(ve, "summary") else "No Summary"),
                 "start_time": start_dt.isoformat(),
                 "end_time": end_dt.isoformat() if end_dt else None,
                 "location": loc,
