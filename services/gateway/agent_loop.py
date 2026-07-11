@@ -661,7 +661,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
     if not local_url:
         log.warning("[AgentLoop] llm_local_url not configured; returning default VRAM-safe params")
         return {
-            "num_predict": 1024,
+            "num_predict": 8192,
             "temperature": 0.1,
             "top_p": 0.9,
             "repeat_penalty": 1.1,
@@ -669,7 +669,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         }
     max_ctx = int(settings.get("llm_local_max_ctx", "4096"))
     params = {
-        "num_predict": 1024,  # Allow sufficient tokens for full JSON tool calls
+        "num_predict": 8192,  # large enough for full file writes, not just JSON tool calls
         "temperature": 0.1,
         "top_p": 0.9,
         "repeat_penalty": 1.1,
