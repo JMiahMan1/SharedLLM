@@ -435,6 +435,21 @@ class RavenWorker:
                         except Exception as patch_e:
                             log.error(f"Failed to update mission {mission_id} to executing: {patch_e}")
 
+                        # Clear any stale kill flag for this mission id. Mission ids can be
+                        # REUSED by SQLite (INTEGER PRIMARY KEY has no AUTOINCREMENT),
+                        # so a kill flag left over from a *previous* run that shared
+                        # this id must not abort the fresh one. The agent-loop kill
+                        # watcher polls this key, so a lingering "KILL" would otherwise
+                        # terminate a brand-new mission the instant it starts.
+                        try:
+                            import redis.asyncio as redis
+
+                            r_clear = redis.from_url(REDIS_URL, decode_responses=True)
+                            await r_clear.delete(f"raven:mission:kill:{mission_id}")
+                            await r_clear.close()
+                        except Exception:
+                            pass
+
                     async def chunk_callback(chunk: str):
                         await self.job_queue.push_chunk(job_id, chunk)
                     payload["_job_id"] = job_id  # traceability
@@ -498,6 +513,18 @@ class RavenWorker:
                                 )
                         except Exception as patch_e:
                             log.error(f"Failed to update mission {mission_id} to executing: {patch_e}")
+
+                        # Clear any stale kill flag for this mission id (see TIER3
+                        # path): SQLite reuses ids, so a leftover "KILL" from a
+                        # prior run must not abort this fresh one.
+                        try:
+                            import redis.asyncio as redis
+
+                            r_clear = redis.from_url(REDIS_URL, decode_responses=True)
+                            await r_clear.delete(f"raven:mission:kill:{mission_id}")
+                            await r_clear.close()
+                        except Exception:
+                            pass
 
                     async def chunk_callback(chunk: str):
                         await self.job_queue.push_chunk(job_id, chunk)
