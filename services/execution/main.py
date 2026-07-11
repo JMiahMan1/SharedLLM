@@ -2881,12 +2881,20 @@ async def uncomplete_skylight_chore(
     user: str | None = None,
     x_internal_secret: str = Header(None)
 ):
-    """Uncomplete a Skylight chore.
+    """Mark a Skylight chore as incomplete by resetting its status to pending.
 
-    NOTE: the Skylight private API only exposes marking a chore complete; there is
-    no documented way to undo a completion, so this returns FAILURE.
+    Setting the chore's status back to "pending" clears the completed state (the
+    private API has no dedicated completion-undo endpoint).
     """
-    return {"status": "FAILURE", "message": "Skylight API does not support uncompleting chores"}
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+
+    series_id, _ = _skylight_chore_ids(chore_id)
+    result = await _skylight_request(session, "PUT", f"/chores/{series_id}", {"status": "pending"})
+    if result is not None:
+        return {"status": "SUCCESS", "message": "Chore uncompleted"}
+    return {"status": "FAILURE", "message": "Failed to uncomplete chore"}
 
 
 @app.get("/api/integrations/skylight/rewards", dependencies=[Depends(require_internal)])
@@ -2924,3 +2932,52 @@ async def redeem_skylight_reward(
     if result is not None:
         return {"status": "SUCCESS", "message": "Reward redeemed"}
     return {"status": "FAILURE", "message": "Failed to redeem reward"}
+
+
+@app.get("/api/integrations/skylight/calendar/events", dependencies=[Depends(require_internal)])
+async def get_skylight_calendar_events(
+    user: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    timezone: str | None = None,
+    x_internal_secret: str = Header(None)
+):
+    """Get Skylight calendar events for a date window."""
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+
+    if not start_date:
+        start_date = (date_cls.today() - timedelta(days=14)).isoformat()
+    if not end_date:
+        end_date = (date_cls.today() + timedelta(days=120)).isoformat()
+
+    params = {
+        "date_min": start_date,
+        "date_max": end_date,
+        "timezone": timezone or "America/New_York",
+    }
+    result = await _skylight_request(session, "GET", "/calendar_events", params=params)
+    if result is None:
+        return {"status": "FAILURE", "message": "Failed to fetch calendar events"}
+
+    events = result.get("data", []) if isinstance(result, dict) else []
+    return {"status": "SUCCESS", "events": events}
+
+
+@app.post("/api/integrations/skylight/calendar/events", dependencies=[Depends(require_internal)])
+async def create_skylight_calendar_event(
+    body: dict | None = None,
+    user: str | None = None,
+    x_internal_secret: str = Header(None)
+):
+    """Create a Skylight calendar event. Body: summary, start, end, description, location, ..."""
+    body = body or {}
+    session = await _get_skylight_session(user)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight not configured"}
+
+    result = await _skylight_request(session, "POST", "/calendar_events", body or None)
+    if result is not None:
+        return {"status": "SUCCESS", "message": "Event created", "event": result}
+    return {"status": "FAILURE", "message": "Failed to create event"}

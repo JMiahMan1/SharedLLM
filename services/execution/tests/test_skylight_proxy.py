@@ -155,17 +155,23 @@ def test_skylight_chore_complete_failure():
 
 
 def test_skylight_chore_uncomplete():
-    """Uncompleting is not supported by the Skylight private API (confirmed via
-    pyskylight: only complete_chore / delete_chore exist, no undo). The endpoint
-    returns an honest FAILURE."""
-    resp = client.post(
-        "/api/integrations/skylight/chores/1/uncomplete",
-        headers={"X-Internal-Secret": "test-secret"}
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["status"] == "FAILURE"
-    assert "does not support" in data["message"]
+    """Uncompleting resets the chore status to pending."""
+    async def mock_get_session(*args, **kwargs):
+        return _mock_session()
+
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
+        return {"success": True}
+
+    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
+        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
+            resp = client.post(
+                "/api/integrations/skylight/chores/1/uncomplete",
+                headers={"X-Internal-Secret": "test-secret"}
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "SUCCESS"
+            assert "Chore uncompleted" in data["message"]
 
 
 def test_skylight_rewards():
@@ -308,3 +314,70 @@ def test_skylight_chores_case_insensitive_user_filter():
             data = resp.json()
             assert data["status"] == "SUCCESS"
             assert len(data["chores"]) == 1
+
+
+def test_skylight_calendar_events():
+    """Test fetching Skylight calendar events."""
+    mock_events = [
+        {"id": "1", "summary": "Dentist", "start": "2026-07-15T09:00:00Z"},
+        {"id": "2", "summary": "Birthday", "start": "2026-07-20T12:00:00Z"},
+    ]
+
+    async def mock_get_session(*args, **kwargs):
+        return _mock_session()
+
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
+        return {"data": mock_events}
+
+    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
+        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
+            resp = client.get(
+                "/api/integrations/skylight/calendar/events",
+                headers={"X-Internal-Secret": "test-secret"}
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "SUCCESS"
+            assert len(data["events"]) == 2
+
+
+def test_skylight_calendar_events_failure():
+    """Test calendar events failure path."""
+
+    async def mock_get_session(*args, **kwargs):
+        return _mock_session()
+
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
+        return None
+
+    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
+        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
+            resp = client.get(
+                "/api/integrations/skylight/calendar/events",
+                headers={"X-Internal-Secret": "test-secret"}
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "FAILURE"
+
+
+def test_skylight_create_calendar_event():
+    """Test creating a Skylight calendar event."""
+
+    async def mock_get_session(*args, **kwargs):
+        return _mock_session()
+
+    async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
+        return {"data": {"id": "99", "summary": "Walk"}}
+
+    with patch("services.execution.main._get_skylight_session", new=mock_get_session):
+        with patch("services.execution.main._skylight_request", new=mock_skylight_request):
+            resp = client.post(
+                "/api/integrations/skylight/calendar/events",
+                headers={"X-Internal-Secret": "test-secret"},
+                json={"summary": "Walk", "start": "2026-07-15T09:00:00Z"}
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "SUCCESS"
+            assert "created" in data["message"].lower()
