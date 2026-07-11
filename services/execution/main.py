@@ -2789,7 +2789,12 @@ async def _skylight_request(
             log.error(f"[skylight] 401 on {method} {path}; session cleared, retry login")
             return None
         if resp.status in (200, 201):
-            return await resp.json()
+            try:
+                return await resp.json()
+            except Exception:
+                return {}
+        if resp.status in (202, 204):
+            return {}
         body = await resp.text()
         log.error(f"[skylight] API error {resp.status} on {method} {path}: {body[:200]}")
         return None
