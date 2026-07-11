@@ -95,7 +95,7 @@ def test_write_read_verification(api_client):
         json={"id": ws_id, "display_name": "Write Verify", "local_path": f"tests/{ws_id}"},
     )
     assert resp.status_code == 200, f"create failed: {resp.text}"
-    payload = {"workspace_id": ws_id, "relative_path": "main.py", "content": "print('hello starfall')\n"}
+    payload = {"workspace_id": ws_id, "relative_path": "main.py", "content": "print('hello starfall')\n", "user_context": {"user": "default", "is_admin": True}}
     w = api_client.post(f"{WORKSPACE_RUNTIME_URL}/files/write", json=payload)
     assert w.status_code == 200, f"write failed: {w.text}"
     body = w.json()
@@ -104,7 +104,7 @@ def test_write_read_verification(api_client):
     assert body["bytes_written"] == len(payload["content"])
     r = api_client.post(
         f"{WORKSPACE_RUNTIME_URL}/files/read",
-        json={"workspace_id": ws_id, "relative_path": "main.py"},
+        json={"workspace_id": ws_id, "relative_path": "main.py", "user_context": {"user": "default", "is_admin": True}},
     )
     assert r.status_code == 200, f"read failed: {r.text}"
     assert "print('hello starfall')" in r.json().get("content", "")
@@ -122,16 +122,16 @@ def test_delete_verification(api_client):
     assert resp.status_code == 200, f"create failed: {resp.text}"
     api_client.post(
         f"{WORKSPACE_RUNTIME_URL}/files/write",
-        json={"workspace_id": ws_id, "relative_path": "to_del.txt", "content": "bye"},
+        json={"workspace_id": ws_id, "relative_path": "to_del.txt", "content": "bye", "user_context": {"user": "default", "is_admin": True}},
     )
     d = api_client.post(
         f"{WORKSPACE_RUNTIME_URL}/files/delete",
-        json={"workspace_id": ws_id, "relative_path": "to_del.txt"},
+        json={"workspace_id": ws_id, "relative_path": "to_del.txt", "user_context": {"user": "default", "is_admin": True}},
     )
     assert d.status_code == 200, f"delete failed: {d.text}"
     r = api_client.post(
         f"{WORKSPACE_RUNTIME_URL}/files/read",
-        json={"workspace_id": ws_id, "relative_path": "to_del.txt"},
+        json={"workspace_id": ws_id, "relative_path": "to_del.txt", "user_context": {"user": "default", "is_admin": True}},
     )
     assert r.status_code == 404, f"deleted file should be gone, got {r.status_code}: {r.text}"
     api_client.delete(f"{WORKSPACE_RUNTIME_URL}/workspaces/{ws_id}")
