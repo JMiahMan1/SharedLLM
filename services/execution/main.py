@@ -2512,7 +2512,7 @@ async def _get_skylight_auth(username: str | None = None) -> tuple[str | None, s
     """Resolve Skylight credentials from identity service."""
     creds = await resolve_first_user()
     log.debug(f"[skylight] resolve_first_user returned: type={type(creds).__name__}, creds={creds is not None}")
-    if not creds:
+    if not creds or not isinstance(creds, dict):
         return None, None
 
     url = creds.get("skylight_url") or _SKYLIGHT_BASE
@@ -2556,21 +2556,22 @@ async def _get_skylight_auth(username: str | None = None) -> tuple[str | None, s
 
 
 async def _skylight_api(url: str, token: str, method: str, path: str, json_body: dict | None = None) -> dict | None:
-    """Make a Skylight API call."""
+    """Make a Skylight API call. Returns the parsed JSON body, or None on failure."""
     try:
         async with get_client() as client:
             headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
             resp = await client.request(method, f"{url}{path}", json=json_body, headers=headers, timeout=aiohttp.ClientTimeout(total=15.0))
             if resp.status in (200, 201):
                 return await resp.json()
-            log.error(f"[skylight] API error {resp.status}: {resp.text[:200]}")
+            body = await resp.text()
+            log.error(f"[skylight] API error {resp.status}: {body[:200]}")
             return None
     except Exception as e:
         log.error(f"[skylight] API exception: {e}")
         return None
 
 
-@app.get("/api/integrations/skylight/chores")
+@app.get("/api/integrations/skylight/chores", dependencies=[Depends(require_internal)])
 async def get_skylight_chores(
     user: str | None = None,
     date: str | None = None,
@@ -2607,7 +2608,7 @@ async def get_skylight_chores(
     }
 
 
-@app.post("/api/integrations/skylight/chores/{chore_id}/complete")
+@app.post("/api/integrations/skylight/chores/{chore_id}/complete", dependencies=[Depends(require_internal)])
 async def complete_skylight_chore(
     chore_id: str,
     user: str | None = None,
@@ -2624,7 +2625,7 @@ async def complete_skylight_chore(
     return {"status": "FAILURE", "message": "Failed to complete chore"}
 
 
-@app.post("/api/integrations/skylight/chores/{chore_id}/uncomplete")
+@app.post("/api/integrations/skylight/chores/{chore_id}/uncomplete", dependencies=[Depends(require_internal)])
 async def uncomplete_skylight_chore(
     chore_id: str,
     user: str | None = None,
@@ -2641,7 +2642,7 @@ async def uncomplete_skylight_chore(
     return {"status": "FAILURE", "message": "Failed to uncomplete chore"}
 
 
-@app.get("/api/integrations/skylight/rewards")
+@app.get("/api/integrations/skylight/rewards", dependencies=[Depends(require_internal)])
 async def get_skylight_rewards(
     user: str | None = None,
     x_internal_secret: str = Header(None)
@@ -2659,7 +2660,7 @@ async def get_skylight_rewards(
     return {"status": "SUCCESS", "rewards": rewards}
 
 
-@app.post("/api/integrations/skylight/rewards/{reward_id}/redeem")
+@app.post("/api/integrations/skylight/rewards/{reward_id}/redeem", dependencies=[Depends(require_internal)])
 async def redeem_skylight_reward(
     reward_id: str,
     body: dict | None = None,
