@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Brain, FolderKanban, Home, MessageSquare, Music, Settings } from 'lucide-react';
+import { Brain, Calendar, FolderKanban, Home, MessageSquare, Music, Settings } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -18,6 +18,7 @@ const BottomNav = () => {
   const navItems = [
     { icon: Home, label: 'Home', path: '/', roles: ['admin', 'user', 'child'] },
     { icon: Music, label: 'Media', path: '/media', roles: ['admin', 'user', 'child'] },
+    { icon: Calendar, label: 'Calendar', path: '/calendar', roles: ['admin', 'user', 'child'] },
     { icon: MessageSquare, label: 'Chat', path: '/communication', roles: ['admin', 'user', 'child'] },
     { icon: FolderKanban, label: 'Workspaces', path: '/workspaces', roles: ['admin', 'user', 'child'] },
   ];

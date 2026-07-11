@@ -662,6 +662,16 @@ export const api = {
     return resp.data;
   },
 
+  async getCalendarSettings(): Promise<ExecutionResponse> {
+    const resp = await apiClient.get('/api/calendar/settings');
+    return resp.data;
+  },
+
+  async updateCalendarSettings(payload: { default?: string; disabled?: string[]; priority?: Record<string, number>; ical_urls?: string[] }): Promise<ExecutionResponse> {
+    const resp = await apiClient.put('/api/calendar/settings', payload);
+    return resp.data;
+  },
+
   async createNote(payload: { title: string; content?: string; category?: string; storage?: string }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/create', payload);
     return resp.data;

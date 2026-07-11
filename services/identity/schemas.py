@@ -51,6 +51,7 @@ class ResolvedCredentials(BaseModel):
     skylight_pass: str | None = None
     skylight_enabled: bool = True
     preferred_tts_voice: str | None = "af_heart"
+    calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)
 
 
 # ─── External CRUD schemas ─────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ class UserCreate(BaseModel):
     skylight_pass: str | None = None
     skylight_enabled: bool = True
     preferred_tts_voice: str | None = "af_heart"
+    calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)
 
 
 class UserUpdate(BaseModel):
@@ -144,6 +146,7 @@ class UserRead(BaseModel):
     skylight_enabled: bool = True
     voice_fingerprint: str | None = None
     preferred_tts_voice: str | None = "af_heart"
+    calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)
     api_key: str | None = None
     # NOTE: Encrypted fields (pass/token) are intentionally omitted from read responses
 

@@ -79,6 +79,8 @@ export interface CalendarEvent {
   start_time: string;
   end_time?: string;
   location?: string;
+  integration?: string;
+  calendar?: string;
 }
 
 export interface ChoreItem {

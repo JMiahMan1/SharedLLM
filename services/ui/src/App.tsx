@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard';
 import Admin from './pages/Admin';
 import Identity from './pages/Identity';
 import Communication from './pages/Communication';
+import Calendar from './pages/Calendar';
 import JarvisLab, { JarvisLabAdmin } from './pages/JarvisLab';
 import KnowledgeHub from './pages/KnowledgeHub';
 import Workspaces from './pages/Workspaces';
@@ -88,6 +89,7 @@ function App() {
             {/* Service routes */}
             <Route path="/identity" element={<ProtectedRoute isMobile={isNative}><Identity /></ProtectedRoute>} />
             <Route path="/communication" element={<ProtectedRoute isMobile={isNative}><Communication /></ProtectedRoute>} />
+            <Route path="/calendar" element={<ProtectedRoute isMobile={isNative}><Calendar /></ProtectedRoute>} />
             <Route path="/media" element={<ProtectedRoute isMobile={isNative}><Media /></ProtectedRoute>} />
             <Route path="/remote" element={<ProtectedRoute isMobile={isNative}><Remote /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute isMobile={isNative}><Settings /></ProtectedRoute>} />

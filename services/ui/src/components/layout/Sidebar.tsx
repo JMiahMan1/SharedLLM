@@ -11,6 +11,7 @@ import {
   Loader2,
   ShieldCheck,
   Shield,
+  Calendar,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -26,6 +27,7 @@ function cn(...inputs: ClassValue[]) {
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
   { icon: MessageSquare, label: 'Chat', path: '/communication' },
+  { icon: Calendar, label: 'Calendar', path: '/calendar' },
   { icon: Music, label: 'Media', path: '/media' },
   { icon: FolderKanban, label: 'Workspaces', path: '/workspaces' },
   { icon: Brain, label: 'Lab', path: '/lab' },
