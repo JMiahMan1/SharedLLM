@@ -27,10 +27,10 @@
 - [x] Apply neon-glass layout improvements (.glass-sidebar, .neon-border, .neon-glow) to layout components
 - [x] Wire Voice Assistant Overlay visualizer to actual frequencies and animate entrances with spring configurations
 - [x] Audit all layout touch targets to ensure >= 44x44px sizing
-- [ ] Monitor GHA pipelines after push
 
 ## Remaining
 
-- [ ] Enhance E2E Playwright test coverage
-- [ ] Verify all GHA pipelines pass (ui-tests.yml, e2e-tests.yml, python-tests.yml, android-build.yml)
-- [ ] Final commit and push
+- [x] Verify all GHA pipelines pass (ui-tests.yml, e2e-tests.yml, python-tests.yml, android-build.yml)
+- [x] Final commit and push
+
+> Open items (E2E Playwright coverage, post-push GHA monitoring) are tracked in [PENDING_TASKS.md](./PENDING_TASKS.md).

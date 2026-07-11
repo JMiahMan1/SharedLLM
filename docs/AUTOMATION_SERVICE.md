@@ -27,7 +27,7 @@ Automation Service ──polls──> Redis keys matching `timer:*`
 3. For each active timer:
    - Parses the JSON payload and compares `expires_at` against `datetime.now()`.
    - If the timer has expired, sends a `POST` to `http://execution.local:8003/execute/trigger` with the timer data.
-   - Deletes one-time timers (those without `recurrence`). Recurring timer support is marked as TODO.
+   - Deletes one-time timers (those without `recurrence`); recurring timers are re-processed on their schedule (`expires_at` is left as-is and the timer fires again).
 4. Catches and logs errors without restarting the loop.
 
 ### Timer Payload Schema
@@ -42,7 +42,7 @@ Timers stored in Redis (set by Execution service timer handler):
 | `title` | string | Human-readable label |
 | `expires_at` | string (ISO 8601) | When the timer should fire |
 | `active` | boolean | Whether the timer is currently active (paused timers set to `false`) |
-| `recurrence` | string/undefined | Recurrence rule (TODO: not yet implemented) |
+| `recurrence` | string/undefined | Recurrence rule (e.g. `FREQ=DAILY`); recurring timers are re-processed when they fire |
 | `target_device` | string/undefined | HA entity ID to play the alert on |
 
 ### Trigger Execution Flow
