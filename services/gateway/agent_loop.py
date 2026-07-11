@@ -1856,16 +1856,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # subsequent file/shell/git operations run there — overriding any id the
                 # model happens to send. This keeps Raven inside the sandbox it created
                 # even when the model doesn't reliably carry the id across turns.
-                if workspace_id and isinstance(payload, dict):
-                    _ws_actions = {
-                        "workspacefilereadrequest", "workspacefilewriterequest",
-                        "workspacefilepatchrequest", "workspaceshellrequest",
-                        "workspacesearchrequest", "workspacelintrequest",
-                        "gitoperationrequest", "workspacebootstraprequest",
-                        "workspacesettingsupdaterequest",
-                    }
-                    if lookup_action in _ws_actions:
-                        payload["workspace_id"] = workspace_id
+                # Defined unconditionally so it is also in scope for the post-call
+                # auto-wire check at the end of this block (a first Create Workspace
+                # call enters with `workspace_id is None`, so a guarded definition here
+                # would raise NameError later).
+                _ws_actions = {
+                    "workspacefilereadrequest", "workspacefilewriterequest",
+                    "workspacefilepatchrequest", "workspaceshellrequest",
+                    "workspacesearchrequest", "workspacelintrequest",
+                    "gitoperationrequest", "workspacebootstraprequest",
+                    "workspacesettingsupdaterequest",
+                }
+                if workspace_id and isinstance(payload, dict) and lookup_action in _ws_actions:
+                    payload["workspace_id"] = workspace_id
 
                 # GUARDRAIL: creating a NEW repository must happen in a dedicated
                 # workspace Raven acquired for itself — never the default/shared/system
