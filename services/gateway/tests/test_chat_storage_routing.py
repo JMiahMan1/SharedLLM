@@ -1,23 +1,21 @@
+import json
+import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
-_mock_redis_async = MagicMock()
-_mock_redis = MagicMock()
-_mock_redis.asyncio = _mock_redis_async
-sys.modules['redis'] = _mock_redis
-sys.modules['redis.asyncio'] = _mock_redis_async
-
-import json
-import os
-
 from fastapi.testclient import TestClient
 from sqlmodel import Session, create_engine, select
 
 from services.gateway import main as gateway_main
 from services.gateway.main import app
 from services.identity.models import GlobalSetting
+
+_mock_redis_async = MagicMock()
+_mock_redis = MagicMock()
+_mock_redis.asyncio = _mock_redis_async
+sys.modules['redis'] = _mock_redis
+sys.modules['redis.asyncio'] = _mock_redis_async
 
 # Provide default model values so get_test_settings() doesn't raise
 os.environ.setdefault("ASSISTANT_MODEL", "qwen3:8b")

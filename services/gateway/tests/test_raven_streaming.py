@@ -1,5 +1,12 @@
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from fastapi.testclient import TestClient
+
+from services.gateway.main import app
+
+client = TestClient(app)
+
 
 def _aio_resp(status=200, json_data=None, text=""):
     """aiohttp-compatible mock response (code does `await resp.json()`/`resp.status`)."""
@@ -8,13 +15,6 @@ def _aio_resp(status=200, json_data=None, text=""):
     m.json = AsyncMock(return_value=json_data if json_data is not None else {"status": "SUCCESS"})
     m.text = AsyncMock(return_value=text)
     return m
-
-import pytest
-from fastapi.testclient import TestClient
-
-from services.gateway.main import app
-
-client = TestClient(app)
 
 def test_raven_mission_stream_rejects_non_websocket():
     response = client.get("/api/raven/missions/123/stream")
@@ -58,8 +58,7 @@ async def test_raven_mission_stream_websocket(monkeypatch):
 
     mock_resp = _aio_resp(200, {"id": 999, "status": "executing", "output_log": "[]"})
 
-    with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)):
-        with client.websocket_connect("/api/raven/missions/999/stream") as websocket:
+    with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)), client.websocket_connect("/api/raven/missions/999/stream") as websocket:
             data1 = websocket.receive_text()
             assert "Thinking..." in data1
             data2 = websocket.receive_text()

@@ -132,16 +132,15 @@ async def test_stream_abs_uses_dict_get_not_dot_notation(monkeypatch, client):
     )
     session = MockAioSession(stream_resp=stream_resp)
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
-            resp = client.get("/api/media/stream/audiobookshelf/book-123")
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
+        resp = client.get("/api/media/stream/audiobookshelf/book-123")
 
-            # If dot notation was used, this would 500 with AttributeError
-            # We expect 200 (streaming) or at least no 500 from credential access
-            assert resp.status_code != 500, (
-                f"stream_audiobookshelf failed with {resp.status_code}. "
-                "This likely means dot notation was used on a dict credential object."
-            )
+        # If dot notation was used, this would 500 with AttributeError
+        # We expect 200 (streaming) or at least no 500 from credential access
+        assert resp.status_code != 500, (
+            f"stream_audiobookshelf failed with {resp.status_code}. "
+            "This likely means dot notation was used on a dict credential object."
+        )
 
 
 @pytest.mark.asyncio
@@ -164,16 +163,15 @@ async def test_stream_ma_uses_dict_get_not_dot_notation(monkeypatch, client):
     )
     session = MockAioSession(players_resp=players_resp)
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
-            resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
+        resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
 
-            # If dot notation was used, this would 500 with AttributeError
-            # We expect 404 (no players) or some other error, but not 500 from credential access
-            assert resp.status_code != 500, (
-                f"stream_music_assistant failed with {resp.status_code}. "
-                "This likely means dot notation was used on a dict credential object."
-            )
+        # If dot notation was used, this would 500 with AttributeError
+        # We expect 404 (no players) or some other error, but not 500 from credential access
+        assert resp.status_code != 500, (
+            f"stream_music_assistant failed with {resp.status_code}. "
+            "This likely means dot notation was used on a dict credential object."
+        )
 
 
 @pytest.mark.asyncio
@@ -228,12 +226,11 @@ async def test_stream_ma_no_players_returns_404(monkeypatch, client):
     )
     session = MockAioSession(players_resp=players_resp)
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
-            resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
+        resp = client.get("/api/media/stream/music-assistant?uri=https://www.youtube.com/watch?v=test123")
 
-            assert resp.status_code == 404
-            assert "No Music Assistant players" in resp.json().get("detail", "")
+        assert resp.status_code == 404
+        assert "No Music Assistant players" in resp.json().get("detail", "")
 
 
 @pytest.mark.asyncio
@@ -295,15 +292,14 @@ async def test_stream_abs_credential_fields_accessed_correctly(monkeypatch, clie
     )
     session = MockAioSession(login_resp=login_resp, stream_resp=stream_resp)
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
-            resp = client.get("/api/media/stream/audiobookshelf/book-456")
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)), patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
+        resp = client.get("/api/media/stream/audiobookshelf/book-456")
 
-            # Should get 200 (streaming), not 500 (crash from dot notation)
-            assert resp.status_code != 500, (
-                f"stream_audiobookshelf crashed with {resp.status_code} - "
-                "credential field access is broken"
-            )
+        # Should get 200 (streaming), not 500 (crash from dot notation)
+        assert resp.status_code != 500, (
+            f"stream_audiobookshelf crashed with {resp.status_code} - "
+            "credential field access is broken"
+        )
 
 
 @pytest.mark.asyncio
@@ -363,24 +359,26 @@ async def test_stream_ma_targets_browser_player_without_muting(monkeypatch, clie
 
     session = MockAioSession(players_resp=players_resp, stream_resp=flow_resp)
 
-    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)):
-        with patch('services.gateway.main.aiohttp.ClientSession', return_value=session):
-            with patch('services.gateway.main.MAWebSocketClient', return_value=mock_ma_client):
-                resp = client.get("/api/media/stream/music-assistant?uri=library://track/123")
+    with (
+        patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=mock_creds)),
+        patch('services.gateway.main.aiohttp.ClientSession', return_value=session),
+        patch('services.gateway.main.MAWebSocketClient', return_value=mock_ma_client),
+    ):
+        resp = client.get("/api/media/stream/music-assistant?uri=library://track/123")
 
-                # Verify the response is successful (streaming audio)
-                assert resp.status_code == 200, (
-                    f"Expected 200 for streaming, got {resp.status_code}: {resp.text}"
-                )
+        # Verify the response is successful (streaming audio)
+        assert resp.status_code == 200, (
+            f"Expected 200 for streaming, got {resp.status_code}: {resp.text}"
+        )
 
-                # Extract command names from sent commands
-                command_names = [cmd[0] for cmd in sent_commands]
+        # Extract command names from sent commands
+        command_names = [cmd[0] for cmd in sent_commands]
 
-                # Verify the browser queue was targeted directly and no physical-device
-                # mute/pause calls were emitted.
-                assert "player_queues/play_media" in command_names, (
-                    f"player_queues/play_media not sent! Commands: {command_names}"
-                )
-                assert "players/mute" not in command_names, f"Unexpected mute command: {command_names}"
-                assert "player_queues/pause" not in command_names, f"Unexpected pause command: {command_names}"
-                assert sent_commands[0][1].get("queue_id") == "browser-player"
+        # Verify the browser queue was targeted directly and no physical-device
+        # mute/pause calls were emitted.
+        assert "player_queues/play_media" in command_names, (
+            f"player_queues/play_media not sent! Commands: {command_names}"
+        )
+        assert "players/mute" not in command_names, f"Unexpected mute command: {command_names}"
+        assert "player_queues/pause" not in command_names, f"Unexpected pause command: {command_names}"
+        assert sent_commands[0][1].get("queue_id") == "browser-player"
