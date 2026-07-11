@@ -1639,7 +1639,7 @@ def get_calendar_settings(
     row = session.exec(
         select(UserCalendarSetting).where(UserCalendarSetting.username == user.username)
     ).first()
-    data = row.data if row else {}
+    data = json.loads(row.data) if row and row.data else {}
     return {"status": "SUCCESS", "settings": data}
 
 
@@ -1662,12 +1662,12 @@ def update_calendar_settings(
         row = UserCalendarSetting(username=user.username, data={})
         session.add(row)
 
-    data = dict(row.data or {})
+    data = json.loads(row.data) if (row and row.data) else {}
     allowed = {"default", "disabled", "priority", "ical_urls"}
     for key, value in (body or {}).items():
         if key in allowed:
             data[key] = value
-    row.data = data
+    row.data = json.dumps(data)
     session.add(row)
     session.commit()
     return {"status": "SUCCESS", "settings": data}
