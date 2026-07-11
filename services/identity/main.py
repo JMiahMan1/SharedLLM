@@ -22,7 +22,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from services.common.http import get_client, get_client_insecure
 from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
 from services.identity.crypto import decrypt, digest_secret, encrypt
-from services.identity.models import DEFAULT_GLOBAL_SETTINGS, APIKey, DeviceAssignment, DnsRecord, GlobalSetting, RavenMission, User, UserWidget
+from services.identity.models import DEFAULT_GLOBAL_SETTINGS, APIKey, DeviceAssignment, DnsRecord, GlobalSetting, RavenMission, User, UserWidget, UserCalendarSetting
 from services.identity.schemas import (
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
@@ -1627,6 +1627,51 @@ def update_widget_settings(
     return {"status": "SUCCESS"}
 
 # ─── Raven Missions (Autonomous Ops & User Tasks) ───────────────────────────────
+
+# ─── Calendar Integration Settings (per-user) ───────────────────────────────
+
+@app.get("/api/calendar/settings")
+def get_calendar_settings(
+    session: Session = Depends(get_session),
+    user: User = Depends(require_api_key),
+):
+    """Get the current user's calendar integration preferences."""
+    row = session.exec(
+        select(UserCalendarSetting).where(UserCalendarSetting.username == user.username)
+    ).first()
+    data = row.data if row else {}
+    return {"status": "SUCCESS", "settings": data}
+
+
+@app.put("/api/calendar/settings")
+def update_calendar_settings(
+    body: dict,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_api_key),
+):
+    """Update the current user's calendar integration preferences.
+
+    Accepted keys: default (integration name), disabled (list[str]),
+    priority (dict[name->int]), ical_urls (list[str]).
+    Unknown keys are ignored; missing keys are preserved.
+    """
+    row = session.exec(
+        select(UserCalendarSetting).where(UserCalendarSetting.username == user.username)
+    ).first()
+    if row is None:
+        row = UserCalendarSetting(username=user.username, data={})
+        session.add(row)
+
+    data = dict(row.data or {})
+    allowed = {"default", "disabled", "priority", "ical_urls"}
+    for key, value in (body or {}).items():
+        if key in allowed:
+            data[key] = value
+    row.data = data
+    session.add(row)
+    session.commit()
+    return {"status": "SUCCESS", "settings": data}
+
 
 def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:
     try:

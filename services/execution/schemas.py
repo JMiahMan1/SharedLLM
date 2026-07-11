@@ -129,7 +129,7 @@ class UserContext(BaseModel):
     audiobookshelf_pass: str | None = None
     audiobookshelf_api_key: str | None = None
     preferred_tts_voice: str | None = None
-
+    calendar_settings: dict | None = None  # per-user calendar integration prefs (Identity UserCalendarSetting)
 
 
 
@@ -160,7 +160,7 @@ class ExecutionResult(BaseModel):
     message: str
     service: str
     detail: dict[str, Any] | None = None
-
+    events: list[dict] | None = None  # structured calendar events (calendar_read)
 class GitExecutionResult(ExecutionResult):
     """Specific result for Git operations."""
     pass
@@ -325,7 +325,8 @@ class CalendarRequest(BaseRequest):
     summary: str | None = None
     start_time: str | None = None
     calendar_name: str | None = None
-
+    integration: str | None = None  # nextcloud | skylight | ical | None(=all/default)
+    priority_wins: bool | None = None  # if True, integration priority wins time conflicts
 
 class NoteRequest(BaseRequest):
     user_context: UserContext

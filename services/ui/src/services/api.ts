@@ -649,12 +649,15 @@ export const api = {
     return resp.data;
   },
 
-  async getCalendarEvents(calendar_name?: string): Promise<ExecutionResponse> {
-    const resp = await apiClient.get('/api/communication/calendar/events', { params: { calendar_name } });
+  async getCalendarEvents(calendar_name?: string, integration?: string): Promise<ExecutionResponse> {
+    const params: Record<string, string> = {};
+    if (calendar_name) params.calendar_name = calendar_name;
+    if (integration) params.integration = integration;
+    const resp = await apiClient.get('/api/communication/calendar/events', { params });
     return resp.data;
   },
 
-  async addCalendarEvent(payload: { summary: string; start_time: string; calendar_name?: string }): Promise<ExecutionResponse> {
+  async addCalendarEvent(payload: { summary: string; start_time: string; calendar_name?: string; integration?: string }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/calendar/events', payload);
     return resp.data;
   },

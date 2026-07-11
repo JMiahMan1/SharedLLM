@@ -3499,10 +3499,12 @@ async def proxy_list_calendars(request: Request):
 
 
 @app.get("/api/communication/calendar/events")
-async def proxy_read_calendar(request: Request, calendar_name: str | None = None):
+async def proxy_read_calendar(request: Request, calendar_name: str | None = None, integration: str | None = None):
     payload = {"action": "read"}
     if calendar_name:
         payload["calendar_name"] = calendar_name
+    if integration:
+        payload["integration"] = integration
     return await _proxy_execution_with_identity(request, "/execute/calendar", payload)
 
 
@@ -3515,6 +3517,8 @@ async def proxy_add_calendar_event(request: Request):
         "start_time": body.get("start_time"),
         "calendar_name": body.get("calendar_name"),
     }
+    if body.get("integration"):
+        payload["integration"] = body["integration"]
     return await _proxy_execution_with_identity(request, "/execute/calendar", payload)
 
 

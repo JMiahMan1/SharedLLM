@@ -2752,6 +2752,20 @@ async def _get_skylight_session(username: str | None = None) -> dict | None:
     return {"url": base, "access_token": tokens["access_token"], "frame_id": frame_id, "email": email}
 
 
+async def _skylight_configured(username: str | None = None) -> bool:
+    """Cheap enablement probe: Skylight creds present (and not disabled
+    for this user). Does NOT perform OAuth -- safe to call on every
+    calendar read to decide whether the integration is enabled."""
+    creds = await resolve_first_user()
+    if not creds or not creds.get("skylight_email") or not creds.get("skylight_pass"):
+        return False
+    if username:
+        user_creds = await resolve_internal_user(rag_user=username)
+        if user_creds and not user_creds.get("skylight_enabled", True):
+            return False
+    return True
+
+
 async def _skylight_request(
     session: dict, method: str, suffix: str, json_body: dict | None = None, params: dict | None = None
 ) -> dict | None:

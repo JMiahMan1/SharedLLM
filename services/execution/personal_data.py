@@ -39,12 +39,24 @@ class NextcloudPersonalDataProvider:
     kind: str = "nextcloud"
 
     def calendar_client(self) -> caldav.DAVClient:
-        return caldav.DAVClient(
+        client = caldav.DAVClient(
             url=f"{self.base_url.rstrip('/')}/remote.php/dav",
             username=self.username,
             password=self.password,
             timeout=60,
         )
+        # Disable HTTP/3 (Alt-Svc) negotiation. Nextcloud advertises h3 the
+        # client cannot use, so niquests pays a slow MustDowngradeError retry on
+        # every request -- across many calendars this blows past the UI's 15s
+        # timeout and aborts with ECONNABORTED. Auth is applied per-request
+        # by caldav (self.auth), so swapping the session is safe.
+        try:
+            import niquests
+
+            client.session = niquests.Session(disable_http3=True, multiplexed=False)
+        except Exception:
+            pass
+        return client
 
     async def ensure_directory(self, path: str) -> None:
         await ensure_webdav_dir(self.base_url, self.username, self.password, path)
