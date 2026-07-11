@@ -40,3 +40,6 @@ node_modules/
 .bmad/
 .kiro/
 .opencode/
+
+# Local repo rules — kept on disk, intentionally not committed
+AGENTS.md
