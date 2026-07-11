@@ -1,8 +1,9 @@
+from unittest.mock import MagicMock
+
 import aiohttp
 import pytest
 import respx
 from fastapi import status
-from unittest.mock import MagicMock
 
 # This test suite simulates production failure scenarios using respx
 # to ensure the Gateway handles downstream microservice failures gracefully.

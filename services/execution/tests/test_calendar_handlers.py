@@ -1,5 +1,5 @@
 import types
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from services.execution.handlers.calendar import handle_calendar
 from services.execution.schemas import CalendarRequest, UserContext
@@ -47,7 +47,7 @@ def _make_fake_caldav(calendars):
 
 
 async def test_calendar_read_merges_and_sorts_all_calendars():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     provider = _make_fake_provider([
         ("https://nc/calA", "Personal", [_make_event("Alpha", now)]),
         ("https://nc/calB", "Work", [_make_event("Beta", now)]),
@@ -71,7 +71,7 @@ async def test_calendar_read_merges_and_sorts_all_calendars():
 
 
 async def test_calendar_read_survives_one_failing_calendar():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     class FailingCaldav:
         class Calendar:
@@ -101,7 +101,7 @@ async def test_calendar_read_survives_one_failing_calendar():
 
 
 async def test_calendar_read_skips_noise_calendars():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     provider = _make_fake_provider([
         ("https://nc/birthdays", "Birthdays", [_make_event("Should Skip", now)]),
         ("https://nc/personal", "Personal", [_make_event("Keep", now)]),

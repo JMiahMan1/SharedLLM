@@ -2,6 +2,7 @@
 import logging
 import urllib.parse
 from typing import Any
+
 from services.common.http import get_client
 
 log = logging.getLogger("execution.websearch")

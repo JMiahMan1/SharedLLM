@@ -91,16 +91,15 @@ async def _get_workspace_repo_url(workspace_id: str | None) -> str | None:
     if not workspace_id:
         return None
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-            async with client.post(
-                f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
-                json={"workspace_id": workspace_id, "user_context": {"user": "system", "is_admin": True}},
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("status") == "SUCCESS":
-                        return (data.get("workspace") or {}).get("repo_url")
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.post(
+            f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
+            json={"workspace_id": workspace_id, "user_context": {"user": "system", "is_admin": True}},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        ) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data.get("status") == "SUCCESS":
+                    return (data.get("workspace") or {}).get("repo_url")
     except Exception as e:
         log.warning(f"Failed to resolve workspace repo_url for {workspace_id}: {e}")
     return None

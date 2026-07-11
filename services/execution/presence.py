@@ -19,6 +19,7 @@ import logging
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
+
 from services.common.http import get_client
 
 if TYPE_CHECKING:

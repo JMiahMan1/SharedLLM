@@ -49,13 +49,12 @@ async def _call_ha_ma_service(
         payload.update(service_data)
 
     try:
-        async with _mass_ha_session(ha_url) as client:
-            async with client.post(url, headers=headers, json=payload, timeout=_TIMEOUT) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                text = await resp.text()
-                log.error(f"[mass_ha] Service {service} returned {resp.status}: {text[:300]}")
-                return None
+        async with _mass_ha_session(ha_url) as client, client.post(url, headers=headers, json=payload, timeout=_TIMEOUT) as resp:
+            if resp.status == 200:
+                return await resp.json()
+            text = await resp.text()
+            log.error(f"[mass_ha] Service {service} returned {resp.status}: {text[:300]}")
+            return None
     except Exception as e:
         log.error(f"[mass_ha] Service {service} failed: {e}")
         return None

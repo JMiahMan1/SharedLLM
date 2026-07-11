@@ -3,15 +3,15 @@
 Asynchronous Home Assistant REST client using aiohttp.
 """
 import logging
+from contextlib import asynccontextmanager
 
 import aiohttp
-from contextlib import asynccontextmanager
 
 log = logging.getLogger("execution.ha_client")
 
-from services.execution.http_client import get_session, host_of
-
 import re
+
+from services.execution.http_client import get_session, host_of
 
 _TIMEOUT = aiohttp.ClientTimeout(total=45.0, connect=15.0)
 

@@ -9,7 +9,7 @@ os.environ["INTERNAL_SECRET"] = "test-secret"
 
 # Import the service module at collection time so SQLModel metadata (Workspace table)
 # is registered before we call create_all() in the fixtures below.
-import services.workspace_runtime.main as main  # noqa: E402
+import services.workspace_runtime.main as main
 
 
 @pytest.fixture(name="session")

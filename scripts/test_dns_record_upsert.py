@@ -9,8 +9,8 @@ restored to its original value. Safe to run repeatedly.
 """
 import json
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 
 BASE = "http://localhost:11435"
 TARGET_DOMAIN = "jeremiah-home-desktop.local"

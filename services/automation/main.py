@@ -69,7 +69,7 @@ async def scheduler_loop():
             # 1. List Timers from Redis
             keys = await redis_client.keys("timer:*")
             now = datetime.now()
-            next_due: "datetime | None" = None
+            next_due: datetime | None = None
 
             for key in keys:
                 timer_data = await redis_client.get(key)
