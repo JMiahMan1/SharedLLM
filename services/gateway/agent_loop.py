@@ -1194,6 +1194,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # stagnation (repeated failures) or on a detected action loop, so a higher
     # ceiling is safe — long missions are allowed as long as they keep making
     # distinct progress.
+    # Consecutive textual (no-tool-call) responses tolerated before the loop
+    # decides the agent is stuck and terminates. Without this, a single plan-as-
+    # text reply after the first tool call ends the whole mission prematurely.
+    MAX_IDLE_NUDGES = 6
     loop_start = asyncio.get_event_loop().time()
     exec_data = None
     ans = ""
@@ -1213,6 +1217,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     _verification_nudge_sent = False
     _stagnation_nudge_sent = False
     _loop_nudge_sent = False
+    _consecutive_no_tool = 0
 
     # --- PLANNING PHASE ---
     try:
@@ -1554,6 +1559,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             # If it's just yapping without a JSON block
             log.warning(f"[AgentLoop] No valid tool call found in textual response (iter {iter_num})")
+            _consecutive_no_tool += 1
 
             if agent_iter > 0 and successful_tool_calls > 0:
                 # OpenCode-orchestrator idle-boundary rule: the RUNTIME decides
@@ -1572,8 +1578,24 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             f"complete until verification passes."
                         )
                         continue
-                log.info(f"[AgentLoop] Agent provided textual answer after {successful_tool_calls} successful tool call(s). Terminating loop.")
-                break
+                # The mission is multi-step; a plan-as-text reply is NOT "done".
+                # Nudge the agent to keep executing tool calls instead of ending
+                # the loop after the first one. Only give up once it has stalled
+                # for MAX_IDLE_NUDGES consecutive no-tool replies (runaway guard).
+                if _consecutive_no_tool >= MAX_IDLE_NUDGES:
+                    log.error(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} tool call(s). Terminating to prevent runaway.")
+                    ans = "ERROR: Agent stalled — produced no tool calls for several turns after making progress. Last response: " + (ans[:200] if ans else "empty")
+                    await _clear_checkpoint()
+                    break
+                log.warning(f"[AgentLoop] Textual reply after progress (idle {_consecutive_no_tool}/{MAX_IDLE_NUDGES}); nudging to continue with tool calls.")
+                action_log.append(
+                    f"ITERATION {iter_num}: You described the next step but did not emit a tool "
+                    f"call. The mission is NOT complete — you must keep executing it with tool "
+                    f"calls (e.g. WorkspaceShellRequest to run `gh repo create`, "
+                    f"WorkspaceFileWriteRequest to write files, then git add/commit/push). Emit "
+                    f"the next concrete tool call now; do not stop at a description."
+                )
+                continue
 
             if agent_iter >= 3:
                 log.error(f"[AgentLoop] No valid tool calls after {agent_iter + 1} iterations. Terminating to prevent runaway.")
@@ -2065,6 +2087,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     # Track successful tool executions (non-ERROR responses)
                     if isinstance(exec_data, dict) and exec_data.get("status") != "ERROR":
                         successful_tool_calls += 1
+                        _consecutive_no_tool = 0
                         sig = action_signature(action_name, payload)
                         _recent_actions.append((sig, True))
                         if len(_recent_actions) > 12:

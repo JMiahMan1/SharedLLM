@@ -110,7 +110,8 @@ Project name: "Starfall". You have a workspace, a shell, file tools, the `gh` CL
 
 === REQUIRED WORKSPACE (critical — do this FIRST) ===
 - Your VERY FIRST action must be `WorkspaceCreateRequest` with a unique id derived
-  from the project (e.g. `raven-starfall-{lang}`) and a `display_name`.
+   from the project (e.g. `raven-3d-shooter-{lang}`) and a `display_name`.
+   This workspace id should match the repository name you will create next.
   Capture the returned `workspace_id` and pass it as `workspace_id` in EVERY following
   `WorkspaceFileWriteRequest`, `WorkspaceShellRequest`, and `WorkspaceSettingsUpdateRequest`.
   NEVER operate in the Default Workspace — it is reserved for system maintenance only.
