@@ -54,6 +54,7 @@ jobs:
             base:
               - 'docker/Dockerfile.base'
               - 'requirements.txt'
+              - 'services/common/**'
               - '.github/workflows/build-images.yml'
             caddy:
               - 'Caddyfile'
@@ -65,33 +66,43 @@ jobs:
               - '.github/workflows/build-images.yml'
             identity:
               - 'services/identity/**'
+              - 'services/common/**'
               - 'services/config.py'
             gateway:
               - 'services/gateway/**'
+              - 'services/common/**'
               - 'services/config.py'
             rag:
               - 'services/rag/**'
+              - 'services/common/**'
               - 'services/config.py'
             execution:
               - 'services/execution/**'
+              - 'services/common/**'
               - 'services/config.py'
             storage:
               - 'services/storage/**'
+              - 'services/common/**'
               - 'services/config.py'
             logging:
               - 'services/logging/**'
+              - 'services/common/**'
               - 'services/config.py'
             automation:
               - 'services/automation/**'
+              - 'services/common/**'
               - 'services/config.py'
             workspace_runtime:
               - 'services/workspace_runtime/**'
+              - 'services/common/**'
               - 'services/config.py'
             control_plane:
               - 'services/control_plane/**'
+              - 'services/common/**'
               - 'services/config.py'
             dns:
               - 'services/dns/**'
+              - 'services/common/**'
               - 'services/config.py'
               - '.github/workflows/build-images.yml'
 
