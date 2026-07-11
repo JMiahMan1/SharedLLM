@@ -17,6 +17,7 @@ Validates, per language (python, javascript, typescript, go, rust):
 Requires LIVE_E2E=1, GH_TOKEN, RAVEN_API_KEY (a user API key whose account has a
 connected GitHub token), and a reachable gateway (GATEWAY_URL).
 """
+import json
 import os
 import subprocess
 import time
@@ -102,11 +103,10 @@ Project name: "Starfall". You have a workspace, a shell, file tools, the `gh` CL
 - Support a `--selftest` flag (or `SELFTEST=1`). When set, run the simulation update loop for ~120
   frames with NO user input and NO visible window (hidden/minimized or headless), then print EXACTLY
   the line `GAME_OK` to stdout and exit 0. Never require a display for selftest.
-  - {f'Web ({human}): keep core simulation in a PURE module with no DOM/WebGL, and add an `npm run selftest` '
-    f'(node or tsx) that imports it, steps 120 times, asserts score/lives changed, then prints `GAME_OK`.'
-    if stack.startswith('Three')
-    else 'Native: open the window hidden (e.g. raylib FLAG_WINDOW_HIDDEN) and exit after 120 frames.'}
-- Add a README.md with controls + how to run/build/selftest.
+  - Native (Python/Go/Rust): import the `raylib` package and open the window hidden
+    (e.g. `rl.set_config_flags(rl.FLAG_WINDOW_HIDDEN)` before `rl.init_window`) and exit after 120 frames.
+- Do NOT write exploratory/probe scripts (e.g. `_explore.py`) to discover the API — write the game
+  directly against the `raylib` Python package. Add a README.md with controls + how to run/build/selftest.
 
 === REQUIRED WORKSPACE (critical — do this FIRST) ===
 - Your VERY FIRST action must be `WorkspaceCreateRequest` with a unique id derived
@@ -123,15 +123,25 @@ Project name: "Starfall". You have a workspace, a shell, file tools, the `gh` CL
   the dedicated workspace you just created:
   `gh repo create {_repo_name(lang)} --private -d "Starfall 3D space shooter ({human})"`
 - If `gh repo create` reports the repository ALREADY exists (e.g. a prior
-  run left an empty shell), do NOT fail and do NOT create a different repo:
-  instead `cd` into your workspace and `gh repo clone {_repo_name(lang)} .`
-  (or `git clone <url> .`), then continue adding files and pushing.
-- Add a GitHub Actions workflow at `.github/workflows/build.yml` that builds the game on Linux:
-  it MUST use `runs-on: ubuntu-latest`. Steps: checkout, install the {human} toolchain, then build/compile.
+  run left an empty shell or a previous build), do NOT fail and do NOT create a different
+  repo: instead `cd` into your workspace and `gh repo clone {_repo_name(lang)} .`
+  (or `git clone <url> .`), overwrite all project files with your new build, then
+  `git add -A && git commit -m "Initial Starfall ({human})" && git push -u origin HEAD`
+  (use `git push --force` ONLY if a plain push is rejected by the remote).
+- Add a GitHub Actions workflow at `.github/workflows/build.yml` that builds AND TESTS the
+  game on Linux: it MUST use `runs-on: ubuntu-latest`. Steps: checkout, install the
+  {human} toolchain, install a headless display (`sudo apt-get update && sudo apt-get install -y xvfb`
+  for native builds), build/compile, then run the self-test and FAIL the job if stdout lacks `GAME_OK`
+  (e.g. for native Python: `xvfb-run -a python main.py --selftest | tee selftest.log &&
+  grep -q GAME_OK selftest.log`).
 - Initialize git (if needed), add ALL files, commit, and push to the created repo:
   `git remote add origin <repo-url-from-gh>`, `git add -A`,
   `git commit -m "Initial Starfall ({human})"`, `git push -u origin HEAD`.
 - You may ONLY ever push to the repository you just created. Never push to any other repository.
+- FINAL VERIFICATION (do not report done until this passes): after pushing, run
+  `gh repo view {_repo_name(lang)}` and `git -C . ls-files` to confirm your files are on
+  GitHub. Only then report the mission complete. If the push or verification fails, keep
+  retrying the git steps — do NOT claim success.
 
 Deliver ONE self-contained, working project with no TODOs or placeholders.
 """
@@ -283,6 +293,30 @@ def _gh_has_selftest(repo: str) -> bool:
     return any("selftest" in p.lower() for p in paths)
 
 
+def _gh_run_check(repo: str, timeout: int = 1200) -> dict:
+    """Wait for the latest GitHub Actions run on the repo to finish, then report
+    its conclusion. The CI workflow (written by Raven) is the authoritative
+    check that the game actually builds and self-tests (prints GAME_OK).
+    """
+    deadline = time.time() + timeout
+    last: dict | None = None
+    while time.time() < deadline:
+        out = _run_local(
+            f"gh run list --repo {GH_OWNER}/{repo} --limit 1 --json status,conclusion,url,headBranch"
+        )
+        if out["returncode"] == 0 and out["stdout"].strip():
+            try:
+                runs = json.loads(out["stdout"])
+            except Exception:
+                runs = []
+            if runs:
+                last = runs[0]
+                if last.get("status") == "completed":
+                    return last
+        time.sleep(30)
+    return last or {"status": "TIMEOUT"}
+
+
 # ---------------------------------------------------------------------------
 # Core live flow — Raven does everything; the test only validates the result.
 # ---------------------------------------------------------------------------
@@ -291,29 +325,24 @@ def run_one(lang: str, human: str, stack: str, build_cmd: str, selftest_cmd: str
     out: dict = {"lang": lang, "human": human, "repo": repo, "repo_url": None,
                  "skipped": None, "errors": []}
 
-    # Idempotent: if the repo already exists (e.g. a prior run built it, or a
-    # parallel/restarted run is mid-flight), do NOT spin up a duplicate Raven
-    # mission — just validate the existing repository in place. This keeps a
-    # re-run from creating redundant missions after a crash/restart.
-    # RAVEN_FORCE=1 overrides this (debug: rebuild an incomplete/empty repo).
-    existing = _gh_repo_view(repo)
-    if existing["returncode"] == 0 and not os.getenv("RAVEN_FORCE"):
-        out["repo_url"] = existing["stdout"].strip().strip('"')
-        out["chat_status"] = "already-exists"
-    else:
-        mission_id = _chat_submit(mission_prompt(lang, human, stack))
-        result = _chat_wait(mission_id)
-        out["chat_status"] = result.get("status")
-        if result.get("status") != "completed":
-            out["errors"].append(f"raven mission {mission_id} ended {result.get('status')}")
-            return out
+    # The test NEVER pre-validates or shortcuts. It submits the prompt to the
+    # gateway (which routes it to Raven as an autonomous mission) and lets Raven
+    # do 100% of the work: create/adopt the workspace, build the game, create
+    # the GitHub repo, add CI, commit and push. The test only observes the
+    # publicly-visible outcome afterwards.
+    mission_id = _chat_submit(mission_prompt(lang, human, stack))
+    result = _chat_wait(mission_id)
+    out["chat_status"] = result.get("status")
+    if result.get("status") != "completed":
+        out["errors"].append(f"raven mission {mission_id} ended {result.get('status')}")
+        return out
 
-        # 1) Repository was created on GitHub.
-        view = _gh_repo_view(repo)
-        if view["returncode"] != 0:
-            out["errors"].append(f"expected repo '{repo}' to exist: {view['stderr']}")
-            return out
-        out["repo_url"] = view["stdout"].strip().strip('"')
+    # 1) Repository was created (by Raven) on GitHub.
+    view = _gh_repo_view(repo)
+    if view["returncode"] != 0:
+        out["errors"].append(f"expected repo '{repo}' to exist after Raven ran: {view['stderr']}")
+        return out
+    out["repo_url"] = view["stdout"].strip().strip('"')
 
     # 2) Linux CI pipeline exists and targets ubuntu-latest.
     ci = _gh_file(repo, ".github/workflows/build.yml")
@@ -327,7 +356,7 @@ def run_one(lang: str, human: str, stack: str, build_cmd: str, selftest_cmd: str
         return out
 
     # 4) Optional: clone + build + headless self-test on the runner.
-    clone = _run_local(f"gh repo clone {repo} /tmp/{repo}", timeout=120)
+    clone = _run_local(f"rm -rf /tmp/{repo} && gh repo clone {repo} /tmp/{repo}", timeout=120)
     if clone["returncode"] != 0:
         out["skipped"] = f"could not clone {repo} to verify build locally"
         return out
@@ -340,6 +369,21 @@ def run_one(lang: str, human: str, stack: str, build_cmd: str, selftest_cmd: str
         out["errors"].append(f"self-test did not print GAME_OK: {run}")
         return out
     out["selftest"] = "ok"
+
+    # 5) Authoritative: the GitHub Actions CI run MUST pass (build + selftest
+    #    prints GAME_OK). This is the real "tested and working" gate — Raven's
+    #    own workflow proves the game builds and runs on Linux, not just that
+    #    files exist.
+    ci = _gh_run_check(repo)
+    if ci.get("status") != "completed":
+        out["errors"].append(f"CI run never completed: {ci}")
+        return out
+    if ci.get("conclusion") != "success":
+        out["errors"].append(
+            f"CI run concluded '{ci.get('conclusion')}' (expected success): {ci.get('url')}"
+        )
+        return out
+    out["ci"] = "pass"
     return out
 
 
