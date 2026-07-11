@@ -117,12 +117,12 @@ class TestInitialization:
     def test_init_ws_url_with_https_port_8095(self):
         """HTTPS URL with port 8095 should use ws:// (MA direct port)."""
         client = MAWebSocketClient("https://ha.sumemail.com:8095", "test-token")
-        assert "ws://ha.sumemail.com:8095/ws?token=test-token" == client.ws_url
+        assert client.ws_url == "ws://ha.sumemail.com:8095/ws?token=test-token"
 
     def test_init_ws_url_with_http_port_8095(self):
         """HTTP URL with port 8095 should use ws://."""
         client = MAWebSocketClient("http://ha.sumemail.com:8095", "test-token")
-        assert "ws://ha.sumemail.com:8095/ws?token=test-token" == client.ws_url
+        assert client.ws_url == "ws://ha.sumemail.com:8095/ws?token=test-token"
 
 
 # ---------------------------------------------------------------------------
@@ -687,7 +687,7 @@ class TestReconnectLogic:
 
     @pytest.mark.asyncio
     async def test_reconnect_exponential_backoff_calculation(self):
-        client = MAWebSocketClient(
+        MAWebSocketClient(
             "http://localhost:8095",
             "token",
             reconnect_base_delay=1.0,
@@ -729,7 +729,7 @@ class TestReconnectLogic:
     async def test_reconnect_skipped_when_shutdown(self, client):
         client._shutdown_event.set()
 
-        with patch("asyncio.sleep", AsyncMock()) as mock_sleep, patch.object(client, "_establish_connection", side_effect=Exception("fail")):
+        with patch("asyncio.sleep", AsyncMock()), patch.object(client, "_establish_connection", side_effect=Exception("fail")):
             await client._reconnect()
             assert client._reconnect_task is None
 

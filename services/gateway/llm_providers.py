@@ -241,7 +241,7 @@ class OpenRouterProvider(BaseLLMProvider):
             "model": model,
             "messages": messages,
             "temperature": options.get("temperature", 0.7) if options else 0.7,
-            "stream": True if chunk_callback else False
+            "stream": bool(chunk_callback)
         }
         # Forward enable_thinking if set — disables qwen3-style extended reasoning
         if options and "enable_thinking" in options:

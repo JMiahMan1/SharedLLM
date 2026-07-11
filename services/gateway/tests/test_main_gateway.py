@@ -1,3 +1,4 @@
+import contextlib
 import os
 import sys
 from typing import cast
@@ -453,7 +454,6 @@ def test_dns_crud_roundtrip(client, monkeypatch):
 
 
 def test_dns_legacy_string_mapping_listed(client, monkeypatch):
-    from services.gateway import main
     _patch_dns_storage(monkeypatch, initial_mappings='{"old.lan": "10.0.0.1"}')
     listed = client.get("/api/dns").json()
     assert len(listed) == 1
@@ -474,7 +474,7 @@ async def test_v1_tools_discovery(client):
 
 async def test_run_sharedllm_tool_calls_execution_service(monkeypatch):
     from services.gateway import main
-    from services.gateway.tool_registry import resolve_tool_call, TOOL_GH
+    from services.gateway.tool_registry import TOOL_GH, resolve_tool_call
 
     resolved = resolve_tool_call(TOOL_GH, {"args": ["repo", "view", "x"], "workspace_id": "ws"})
 
@@ -515,7 +515,7 @@ async def test_run_sharedllm_tool_calls_execution_service(monkeypatch):
 
 async def test_run_sharedllm_tool_gets_image_models(monkeypatch):
     from services.gateway import main
-    from services.gateway.tool_registry import resolve_tool_call, TOOL_LIST_IMAGE_MODELS
+    from services.gateway.tool_registry import TOOL_LIST_IMAGE_MODELS, resolve_tool_call
 
     resolved = resolve_tool_call(TOOL_LIST_IMAGE_MODELS, {})
     captured = {}
@@ -585,8 +585,6 @@ async def test_recreate_http_client_cooldown():
         main._global_http_client_loop = saved_loop
         main._last_client_recreate = saved_ts
         if recreated is not None and recreated is not saved_client:
-            try:
+            with contextlib.suppress(Exception):
                 await recreated.close()
-            except Exception:
-                pass
 

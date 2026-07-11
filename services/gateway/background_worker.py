@@ -106,6 +106,8 @@ class RavenWorker:
         log.info("Raven Background Worker (Health + Inference + Talk Monitor + Cleanup) started.")
 
     async def _recover_orphaned_missions(self):
+        from services.gateway.main import _build_raven_system_prompt
+
         """
         On startup, any mission still in 'executing' or 'paused' status is an orphan —
         the gateway was killed or restarted mid-run. Re-enqueue them so they resume
@@ -128,7 +130,7 @@ class RavenWorker:
                     payload = {
                         "query": mission["proposed_mission"],
                         "model": coding_model,
-                        "system": f"You are Raven, an autonomous agent executing a user-assigned background mission.\n\nExecute the following task to the best of your ability:\n{mission['proposed_mission']}",
+                        "system": await _build_raven_system_prompt(mission["proposed_mission"]),
                         "stream": False,
                         "creds": {"user": "default", "is_admin": True},
                         "_mission_id": mid,

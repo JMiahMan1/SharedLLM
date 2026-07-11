@@ -25,12 +25,12 @@ log = logging.getLogger("gateway.ha_state_cache")
 
 # Re-exported so existing callers (background_worker, main) keep working.
 __all__ = [
-    "get_redis",
-    "get_cached_state",
-    "set_cached_state",
     "cache_all_states",
     "fetch_live_states",
+    "get_cached_state",
     "get_live_state",
+    "get_redis",
+    "set_cached_state",
 ]
 
 
