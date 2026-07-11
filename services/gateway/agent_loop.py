@@ -2046,6 +2046,64 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             exec_data = {"status": "ERROR", "message": f"Image generation failed: {_e}"}
                     _skip_post = True
 
+                # RavenBuildToolRequest: let Raven discover an existing tool,
+                # chain existing tools together, or scaffold + run a brand-new tool.
+                # Decision logic lives in tool_builder.decide() (existing -> chain -> build).
+                if lookup_action == "ravenbuildtoolrequest" and isinstance(payload, dict):
+                    _cap = str(
+                        payload.get("capability")
+                        or payload.get("capability_description")
+                        or payload.get("description")
+                        or payload.get("task")
+                        or ""
+                    ).strip()
+                    try:
+                        from services.gateway.tool_builder import decide, scaffold_source
+                        _decision = decide(_cap)
+                        if _decision.get("decision") == "build":
+                            _slug = _decision.get("slug")
+                            _rel = f"tools/{_slug}.py"
+                            _src = scaffold_source(_cap, _slug)
+                            # Write the scaffold into the mission workspace if one exists.
+                            _bws = workspace_id or payload.get("workspace_id")
+                            if _bws:
+                                async with shared_http_client() as _bc:
+                                    _w = await _bc.post(
+                                        f"{WORKSPACE_RUNTIME_SVC}/files/write",
+                                        json={
+                                            "workspace_id": _bws,
+                                            "relative_path": _rel,
+                                            "content": _src,
+                                            "create_parents": True,
+                                        },
+                                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                        timeout=aiohttp.ClientTimeout(total=30.0),
+                                    )
+                                    if _w.status != 200:
+                                        _decision["write_status"] = f"scaffold write failed: {_w.status}"
+                                _decision["tool_path"] = _rel
+                            else:
+                                _decision["tool_path"] = None
+                                _decision.setdefault(
+                                    "write_status",
+                                    "No workspace assigned yet; create one via WorkspaceCreateRequest, then re-issue this request to write the scaffold.",
+                                )
+                            exec_data = {
+                                "status": "SUCCESS",
+                                "decision": _decision,
+                                "message": "Build decision computed. " + _decision.get("instruction", ""),
+                            }
+                        else:
+                            exec_data = {
+                                "status": "SUCCESS",
+                                "decision": _decision,
+                                "message": "Use the existing/chain tool(s) listed in 'decision'.",
+                            }
+                        _skip_post = True
+                    except Exception as _e:
+                        exec_data = {"status": "ERROR", "message": f"RavenBuildToolRequest failed: {_e}"}
+                        _skip_post = True
+
                 # GUARD: project missions start with NO assigned workspace. Block every
                 # workspace-scoped operation until Raven acquires a dedicated workspace via
                 # WorkspaceCreateRequest, so it never silently operates in the Default

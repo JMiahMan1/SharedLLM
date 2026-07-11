@@ -78,6 +78,11 @@ Available tools and their required fields:
 - `WorkspaceFileReadRequest` — read a file. Fields: `file_path`, `workspace_id`.
 - `WorkspaceFilePatchRequest` — patch a file. Fields: `file_path`, `chunks`, `workspace_id`.
 - `GitOperationRequest` — run git operations (clone, commit, push, etc.). Fields depend on the operation.
+- `RavenBuildToolRequest` — BEFORE you hand-roll a brand-new capability, call this to check whether it already has a tool, can be done by chaining existing tools, or needs a new one. Fields: `capability` (string describing what you need). The response returns exactly one of:
+  - `use_existing` — a single existing tool already covers it; call that tool directly (the response names it).
+  - `chain` — no single tool fits, but 2–3 existing tools together cover it; the response lists them in execution order, so run them in sequence.
+  - `build` — nothing fits; a runnable scaffold `tools/<slug>.py` is written into your workspace with a `run()` for YOU to implement, then execute it via `WorkspaceShellRequest` with `python tools/<slug>.py <args>`.
+  Example: `{"@type": "RavenBuildToolRequest", "capability": "send a Slack message when the build finishes"}`
 
 Example end-to-end sequence for "build a game, publish to GitHub":
 
