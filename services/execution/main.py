@@ -10,6 +10,7 @@ from typing import Any
 from uuid import uuid4
 
 import aiohttp
+from services.common.http import get_client
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -126,11 +127,12 @@ async def resolve_internal_user(user_id: int | None = None, rag_user: str | None
     if rag_user is not None:
         payload["rag_user"] = rag_user
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+        async with get_client() as client:
             resp = await client.post(
                 f"{IDENTITY_SVC_URL}/api/resolve",
                 json=payload,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
             )
             if resp.status == 200:
                 return await resp.json()
@@ -180,7 +182,7 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
 
             # Fetch enrollments (those flagged for power tracking)
             try:
-                async with aiohttp.ClientSession() as session, session.get(
+                async with get_client() as session, session.get(
                     f"{IDENTITY_SVC_URL}/api/telemetry/enroll",
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=aiohttp.ClientTimeout(total=10),
@@ -216,7 +218,7 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
                         "state": raw,
                         "source": "ha-poll",
                     }
-                    async with aiohttp.ClientSession() as session, session.post(
+                    async with get_client() as session, session.post(
                         f"{IDENTITY_SVC_URL}/api/telemetry/snapshot",
                         headers={"X-Internal-Secret": INTERNAL_SECRET},
                         json=snapshot,
@@ -601,23 +603,23 @@ async def execute_identity(req: IdentityRequest):
     log.info(f"[identity] Proxying action={action} for user={req.user_context.user}")
 
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
+        async with get_client() as client:
             headers = {"X-Internal-Secret": INTERNAL_SECRET}
             if action == "import_nextcloud":
-                resp = await client.post(f"{IDENTITY_SVC_URL}/api/auth/import/nextcloud", headers=headers)
+                resp = await client.post(f"{IDENTITY_SVC_URL}/api/auth/import/nextcloud", headers=headers, timeout=aiohttp.ClientTimeout(total=30.0))
             elif action == "discover":
-                resp = await client.get(f"{IDENTITY_SVC_URL}/api/auth/discover", headers=headers)
+                resp = await client.get(f"{IDENTITY_SVC_URL}/api/auth/discover", headers=headers, timeout=aiohttp.ClientTimeout(total=30.0))
             elif action == "list":
-                resp = await client.get(f"{IDENTITY_SVC_URL}/api/users", headers=headers)
+                resp = await client.get(f"{IDENTITY_SVC_URL}/api/users", headers=headers, timeout=aiohttp.ClientTimeout(total=30.0))
             elif action == "create":
                 payload = {
                     "username": req.username,
                     "display_name": req.display_name or req.username,
                     "is_admin": req.is_admin
                 }
-                resp = await client.post(f"{IDENTITY_SVC_URL}/api/users", json=payload, headers=headers)
+                resp = await client.post(f"{IDENTITY_SVC_URL}/api/users", json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=30.0))
             elif action == "delete":
-                resp = await client.delete(f"{IDENTITY_SVC_URL}/api/users/{req.username}", headers=headers)
+                resp = await client.delete(f"{IDENTITY_SVC_URL}/api/users/{req.username}", headers=headers, timeout=aiohttp.ClientTimeout(total=30.0))
             else:
                 return _fail(f"Action {action} not supported", "identity")
 
@@ -954,11 +956,12 @@ async def execute_discovery_sync(req: DiscoverySyncRequest):
     from services.config import GATEWAY_INTERNAL_URL
     GATEWAY_INTERNAL = GATEWAY_INTERNAL_URL or "http://localhost:11435"
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0)) as client:
+        async with get_client() as client:
             resp = await client.post(
                 f"{GATEWAY_INTERNAL}/api/discovery/sync",
                 json={"api_key": "internal"}, # Simplified for internal bridge
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=60.0),
             )
             if resp.status == 200:
                 data = await resp.json()
@@ -980,7 +983,7 @@ async def execute_identity_admin(req: IdentityManageRequest):
     try:
         action = req.action
         username = req.username or req.user_context.user
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
+        async with get_client() as client:
             headers = {"X-Internal-Secret": INTERNAL_SECRET}
 
             if action == "update_password":
@@ -988,6 +991,7 @@ async def execute_identity_admin(req: IdentityManageRequest):
                     f"{IDENTITY_SVC}/api/users/{username}/password",
                     json={"new_password": req.display_name or ""},
                     headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30.0),
                 )
             elif action == "update_user":
                 payload = {}
@@ -999,6 +1003,7 @@ async def execute_identity_admin(req: IdentityManageRequest):
                     f"{IDENTITY_SVC}/api/users/{username}",
                     json=payload,
                     headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30.0),
                 )
             elif action == "assign_device":
                 resp = await client.post(
@@ -1009,33 +1014,39 @@ async def execute_identity_admin(req: IdentityManageRequest):
                         "device_type": req.category or "media_player",
                     },
                     headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30.0),
                 )
             elif action == "list_devices":
                 resp = await client.get(
                     f"{IDENTITY_SVC}/api/users/devices",
                     params={"user_id": username},
                     headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30.0),
                 )
             elif action == "generate_key":
                 resp = await client.post(
                     f"{IDENTITY_SVC}/api/users/me/keys",
                     json={"label": req.display_name or "CLI Client"},
                     headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30.0),
                 )
             elif action == "revoke_key":
                 resp = await client.delete(
                     f"{IDENTITY_SVC}/api/users/me/keys/{req.display_name or ''}",
                     headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30.0),
                 )
             elif action == "list_keys":
                 resp = await client.get(
                     f"{IDENTITY_SVC}/api/users/me/keys",
                     headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30.0),
                 )
             elif action == "get_profile":
                 resp = await client.get(
                     f"{IDENTITY_SVC}/api/users/me",
                     headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=30.0),
                 )
             else:
                 return _fail(f"Identity admin action '{action}' not supported. Use primary /execute/identity for list/create/delete/discover.", "identity_admin")
@@ -1315,8 +1326,8 @@ async def execute_announce(req: AnnouncementRequest):
             media_ready = False
             for attempt in range(5):
                 try:
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=2.0)) as client:
-                        resp = await client.get(media_url)
+                    async with get_client() as client:
+                        resp = await client.get(media_url, timeout=aiohttp.ClientTimeout(total=2.0))
                         if resp.status == 200 and len(resp.content) > 0:
                             media_ready = True
                             log.info(f"[announce] Media endpoint verified: {len(resp.content)} bytes, content-type={resp.headers.get('content-type')}")
@@ -1864,8 +1875,8 @@ async def _ping_redis() -> dict:
 async def _check_service_health(service_url: str, service_name: str) -> dict:
     """Check if a service is healthy by hitting its /health endpoint."""
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
-            resp = await client.get(f"{service_url.rstrip('/')}/health")
+        async with get_client() as client:
+            resp = await client.get(f"{service_url.rstrip('/')}/health", timeout=aiohttp.ClientTimeout(total=3.0))
             if resp.status == 200:
                 return {"healthy": True, "status": "ok"}
             elif resp.status == 503:
@@ -2203,8 +2214,8 @@ async def execute_llm_info(req: LLMInfoRequest):
     from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
     ollama_url = ""
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-            resp = await client.get(f"{IDENTITY_SVC_URL}/api/settings", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        async with get_client() as client:
+            resp = await client.get(f"{IDENTITY_SVC_URL}/api/settings", headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=5.0))
             if resp.status == 200:
                 for s in await resp.json():
                     if s.get("key") == "llm_local_url" and s.get("value"):
@@ -2234,11 +2245,11 @@ async def execute_llm_info(req: LLMInfoRequest):
         return _fail("model is required for 'show' action", "llm_info")
 
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        async with get_client() as client:
             if payload:
-                resp = await client.post(f"{OLLAMA_URL}{endpoint}", json=payload)
+                resp = await client.post(f"{OLLAMA_URL}{endpoint}", json=payload, timeout=aiohttp.ClientTimeout(total=10.0))
             else:
-                resp = await client.get(f"{OLLAMA_URL}{endpoint}")
+                resp = await client.get(f"{OLLAMA_URL}{endpoint}", timeout=aiohttp.ClientTimeout(total=10.0))
 
             if resp.status == 200:
                 data = await resp.json()
@@ -2525,10 +2536,11 @@ async def _get_skylight_auth(username: str | None = None) -> tuple[str | None, s
 
 
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client:
+        async with get_client() as client:
             resp = await client.post(
                 f"{url}/api/v1/auth/login",
-                json={"email": email, "password": password}
+                json={"email": email, "password": password},
+                timeout=aiohttp.ClientTimeout(total=10.0),
             )
             if resp.status == 200:
                 body = await resp.json()
@@ -2545,9 +2557,9 @@ async def _get_skylight_auth(username: str | None = None) -> tuple[str | None, s
 async def _skylight_api(url: str, token: str, method: str, path: str, json_body: dict | None = None) -> dict | None:
     """Make a Skylight API call."""
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
+        async with get_client() as client:
             headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-            resp = await client.request(method, f"{url}{path}", json=json_body, headers=headers)
+            resp = await client.request(method, f"{url}{path}", json=json_body, headers=headers, timeout=aiohttp.ClientTimeout(total=15.0))
             if resp.status in (200, 201):
                 return await resp.json()
             log.error(f"[skylight] API error {resp.status}: {resp.text[:200]}")
