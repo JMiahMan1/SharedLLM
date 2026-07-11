@@ -663,12 +663,12 @@ export const api = {
   },
 
   async updateCalendarEvent(payload: { action: 'update'; event_id?: string; integration?: string; query?: string; summary: string; start_time?: string }): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/calendar/events', payload);
+    const resp = await apiClient.put('/api/communication/calendar/events', payload);
     return resp.data;
   },
 
   async deleteCalendarEvent(payload: { action: 'delete'; event_id?: string; integration?: string; query?: string }): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/calendar/events', payload);
+    const resp = await apiClient.delete('/api/communication/calendar/events', { data: payload });
     return resp.data;
   },
 
