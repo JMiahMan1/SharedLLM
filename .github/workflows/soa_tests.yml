@@ -33,7 +33,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pytest pytest-cov pytest-mock pytest-asyncio respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests
+        pip install pytest pytest-cov pytest-mock pytest-asyncio respx anyio httpx fastapi uvicorn sqlmodel cryptography pydantic requests ruff mypy
         # We install dummy packages for chromadb and sentence-transformers to run tests
         # without downloading heavy machine learning models on GitHub actions runners.
         # But since our tests mock these heavy deps, we only need the API contracts.
@@ -46,6 +46,16 @@ jobs:
         pip install -r services/storage/requirements.txt
         # RAG has huge deps (Torch), so we mock it for CI unit tests
         # The tests are designed to bypass heavy ML loads via mocker.
+
+    - name: Lint (ruff + mypy fast-fail)
+      env:
+        PYTHONPATH: ${{ github.workspace }}/services
+      run: |
+        # Fast static gate that catches syntax errors, undefined names within a
+        # file, and — via mypy — cross-module import breakage (e.g. a removed
+        # re-exported constant) BEFORE the heavier pytest collection step.
+        ruff check --select E9,F63,F7,F82 services/gateway
+        python -m mypy services/gateway --ignore-missing-imports --disable-error-code=assignment
 
     - name: Run Pytest
       env:
