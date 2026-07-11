@@ -208,6 +208,7 @@ async def _read_skylight(req: CalendarRequest, lo, hi) -> list[dict]:
         if not start:
             continue
         out.append({
+            "id": ev.get("id"),
             "integration": "skylight",
             "summary": attrs.get("summary") or "Event",
             "start_time": start,
@@ -438,6 +439,20 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 return ExecutionResult(status="FAILURE", message=f"Calendar add error: {e!s}", service="calendar_add")
 
         elif action == "delete":
+            target = (req.integration or "").strip().lower()
+            if req.event_id and target == "skylight":
+                try:
+                    from services.execution.main import _get_skylight_session, _skylight_request
+                except Exception:
+                    return ExecutionResult(status="FAILURE", message="Skylight module unavailable.", service="calendar_delete")
+                session = await _get_skylight_session(req.user_context.user)
+                if not session:
+                    return ExecutionResult(status="FAILURE", message="Skylight not configured.", service="calendar_delete")
+                result = await _skylight_request(session, "DELETE", f"/calendar_events/{req.event_id}")
+                if result is not None:
+                    return ExecutionResult(status="SUCCESS", message="Deleted Skylight event.", service="calendar_delete")
+                return ExecutionResult(status="FAILURE", message="Failed to delete Skylight event.", service="calendar_delete")
+
             if not req.query:
                 return ExecutionResult(status="FAILURE", message="Query parameter is required for delete.", service="calendar_delete")
 
@@ -473,6 +488,33 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 return ExecutionResult(status="FAILURE", message=f"Calendar delete error: {e!s}", service="calendar_delete")
 
         elif action == "update":
+            target = (req.integration or "").strip().lower()
+            if req.event_id and target == "skylight":
+                try:
+                    from services.execution.main import _get_skylight_session, _skylight_request
+                except Exception:
+                    return ExecutionResult(status="FAILURE", message="Skylight module unavailable.", service="calendar_update")
+                session = await _get_skylight_session(req.user_context.user)
+                if not session:
+                    return ExecutionResult(status="FAILURE", message="Skylight not configured.", service="calendar_update")
+                body: dict = {}
+                if req.summary:
+                    body["summary"] = req.summary
+                if req.start_time:
+                    dt = dateparser.parse(req.start_time, settings={"PREFER_DATES_FROM": "future"})
+                    if dt is None:
+                        return ExecutionResult(status="FAILURE", message=f"Could not parse date: {req.start_time}", service="calendar_update")
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=_get_local_tz())
+                    body["starts_at"] = dt.isoformat()
+                    body["ends_at"] = (dt + timedelta(hours=1)).isoformat()
+                if not body:
+                    return ExecutionResult(status="FAILURE", message="Nothing to update.", service="calendar_update")
+                result = await _skylight_request(session, "PATCH", f"/calendar_events/{req.event_id}", body)
+                if result is not None:
+                    return ExecutionResult(status="SUCCESS", message="Updated Skylight event.", service="calendar_update")
+                return ExecutionResult(status="FAILURE", message="Failed to update Skylight event.", service="calendar_update")
+
             if not req.query or not req.summary:
                 return ExecutionResult(status="FAILURE", message="Query and summary are required for update.", service="calendar_update")
 

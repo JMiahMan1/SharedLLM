@@ -11,6 +11,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import Modal from '../../components/ui/Modal';
 import { useDarkModeSync } from '../../hooks/useDarkModeSync';
 import { api } from '../../services/api';
 import { integrationMeta } from './integrationMeta';
@@ -138,7 +139,7 @@ const DARK_VARS = `
 `;
 
 // ─── Warm EventCard ──────────────────────────────────────────────────────────
-const EventCard = ({ ev, size = 'md' }: { ev: CalendarEvent; size?: 'md' | 'lg' }) => {
+const EventCard = ({ ev, size = 'md', onSelect }: { ev: CalendarEvent; size?: 'md' | 'lg'; onSelect?: (ev: CalendarEvent) => void }) => {
   const meta = integrationMeta(ev.integration);
   const color = meta.color;
   const allDay = isAllDay(ev);
@@ -146,6 +147,7 @@ const EventCard = ({ ev, size = 'md' }: { ev: CalendarEvent; size?: 'md' | 'lg' 
     return (
       <button
         type="button"
+        onClick={() => onSelect?.(ev)}
         className={`w-full text-left font-bold shadow-[0_1px_3px_rgba(72,60,38,0.07),0_10px_28px_-10px_rgba(72,60,38,0.16)] ${size === 'lg' ? 'min-h-14 rounded-2xl px-4 py-3 text-lg' : 'min-h-11 rounded-xl px-3 py-2 text-[15px]'}`}
         style={{ backgroundColor: color, color: textOn(color) }}
       >
@@ -156,9 +158,11 @@ const EventCard = ({ ev, size = 'md' }: { ev: CalendarEvent; size?: 'md' | 'lg' 
   return (
     <button
       type="button"
-      className={`w-full text-left shadow-[0_1px_3px_rgba(72,60,38,0.07),0_10px_28px_-10px_rgba(72,60,38,0.16)] ${size === 'lg' ? 'rounded-2xl p-4' : 'rounded-xl px-3 py-2'}`}
-      style={{ backgroundColor: 'var(--os-card)', borderLeft: `5px solid ${color}` }}
+      className={`relative w-full text-left overflow-hidden shadow-[0_1px_3px_rgba(72,60,38,0.07),0_10px_28px_-10px_rgba(72,60,38,0.16)] ${size === 'lg' ? 'rounded-2xl py-4 pr-4 pl-5' : 'rounded-xl py-2 pr-3 pl-4'}`}
+      style={{ backgroundColor: 'var(--os-card)' }}
+      title={integrationMeta(ev.integration).label}
     >
+      <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: color }} aria-hidden="true" />
       <div className="flex items-center gap-1.5">
         <span className={`font-extrabold ${size === 'lg' ? 'text-base' : 'text-[13px]'}`} style={{ color }}>{formatTime(ev.start_time)}</span>
       </div>
@@ -173,6 +177,111 @@ const EventCard = ({ ev, size = 'md' }: { ev: CalendarEvent; size?: 'md' | 'lg' 
   );
 };
 
+const EditEventModal = ({ event, onClose }: { event: CalendarEvent; onClose: () => void }) => {
+  const queryClient = useQueryClient();
+  const meta = integrationMeta(event.integration);
+  const isSkylight = (event.integration || '').toLowerCase() === 'skylight';
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const d = new Date(event.start_time);
+  const [summary, setSummary] = useState(event.summary);
+  const [startInput, setStartInput] = useState(
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
+
+  const updateMut = useMutation({
+    mutationFn: () =>
+      api.updateCalendarEvent({
+        action: 'update',
+        integration: event.integration,
+        ...(isSkylight && event.id ? { event_id: event.id } : { query: event.summary }),
+        summary: summary.trim(),
+        start_time: startInput.trim(),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['calendar-app'] });
+      toast.success('Event updated');
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message || 'Failed to update event'),
+  });
+  const deleteMut = useMutation({
+    mutationFn: () =>
+      api.deleteCalendarEvent({
+        action: 'delete',
+        integration: event.integration,
+        ...(isSkylight && event.id ? { event_id: event.id } : { query: event.summary }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['calendar-app'] });
+      toast.success('Event deleted');
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message || 'Failed to delete event'),
+  });
+
+  return (
+    <Modal isOpen={true} onClose={onClose} title="Edit Event" size="md">
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--os-ink-soft)' }}>
+          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: meta.color }} />
+          {meta.label}
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>Title</label>
+          <input
+            value={summary}
+            onChange={(e) => setSummary(e.target.value)}
+            className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+            style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>When</label>
+          <input
+            value={startInput}
+            onChange={(e) => setStartInput(e.target.value)}
+            placeholder="YYYY-MM-DD HH:MM"
+            className="w-full rounded-xl border px-3 py-2 text-sm outline-none"
+            style={{ borderColor: 'var(--os-line)', background: 'var(--os-input-bg)', color: 'var(--os-ink)' }}
+          />
+          <p className="mt-1 text-[11px]" style={{ color: 'var(--os-ink-faint)' }}>24-hour date/time. Leave as-is to keep the current time.</p>
+        </div>
+        {event.location && (
+          <p className="flex items-center gap-1 text-sm" style={{ color: 'var(--os-ink-soft)' }}>
+            <MapPin size={13} /> {event.location}
+          </p>
+        )}
+        <div className="flex items-center justify-between gap-2 pt-2">
+          <button
+            onClick={() => { if (window.confirm('Delete this event?')) deleteMut.mutate(); }}
+            className="rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[#fffdf8]"
+            style={{ background: '#dc2626' }}
+          >
+            Delete
+          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={onClose}
+              className="rounded-xl border px-4 py-2 text-xs font-bold"
+              style={{ borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}
+            >
+              Cancel
+            </button>
+            <button
+              disabled={!summary.trim()}
+              onClick={() => updateMut.mutate()}
+              className="rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest text-[#fffdf8]"
+              style={{ background: 'var(--os-ember)' }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
 const CalendarApp = () => {
   const { isDark } = useDarkModeSync();
   const queryClient = useQueryClient();
@@ -183,7 +292,7 @@ const CalendarApp = () => {
   const [summary, setSummary] = useState('');
   const [startInput, setStartInput] = useState('');
   const [addIntegration, setAddIntegration] = useState('');
-
+  const [editing, setEditing] = useState<CalendarEvent | null>(null);
   const { data, isLoading, error } = useQuery<ExecutionResponse>({
     queryKey: ['calendar-app'],
     queryFn: () => api.getCalendarEvents(),
@@ -386,7 +495,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
                     <span className={`text-xs font-bold ${isToday ? 'text-white/80' : 'text-[#a89f8d]'}`}>{day.toLocaleDateString('en-US', { month: 'short' })}</span>
                   </button>
                   <div className="flex min-w-0 flex-1 flex-col gap-2">
-                    {evs.map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} size="lg" />)}
+                    {evs.map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} size="lg" onSelect={setEditing} />)}
                   </div>
                 </div>
               );
@@ -403,7 +512,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
           <div className="os-display text-5xl mb-1">{focused.toLocaleDateString('en-US', { weekday: 'long' })}</div>
           <div className="text-xl font-bold mb-4" style={{ color: 'var(--os-ink-soft)' }}>{focused.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</div>
           <div className="flex flex-col gap-3">
-            {(byDay.get(ymd(focused)) ?? []).map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} size="lg" />)}
+            {(byDay.get(ymd(focused)) ?? []).map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} size="lg" onSelect={setEditing} />)}
             {(byDay.get(ymd(focused)) ?? []).length === 0 && (
               <div className="mt-12 flex flex-col items-center gap-4 text-center">
                 <div className="os-display text-3xl" style={{ color: 'var(--os-ink-faint)' }}>A clear day</div>
@@ -427,7 +536,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
                   <span className={`os-display text-3xl ${isToday ? 'flex h-11 w-11 items-center justify-center rounded-full text-[#fffdf8]' : 'text-[#34302a]'}`} style={isToday ? todayNum : { color: 'var(--os-ink)' }}>{day.getDate()}</span>
                 </button>
                 <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-                  {evs.map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} />)}
+                  {evs.map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} onSelect={setEditing} />)}
                 </div>
               </div>
             );
@@ -455,7 +564,10 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
                       const meta = integrationMeta(ev.integration);
                       const ad = isAllDay(ev);
                       return (
-                        <span key={idx} className="truncate rounded-md px-1.5 py-0.5 text-xs font-bold" style={ad ? { background: meta.color, color: textOn(meta.color) } : { background: 'transparent', color: 'var(--os-ink)', borderLeft: `3px solid ${meta.color}` }}>{ev.summary}</span>
+                        <span key={idx} role="button" tabIndex={0} onClick={() => setEditing(ev)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(ev); } }} className={`relative cursor-pointer truncate overflow-hidden rounded-md py-0.5 pl-2.5 pr-1.5 text-xs font-bold ${ad ? '' : ''}`} style={ad ? { background: meta.color, color: textOn(meta.color) } : { background: 'transparent', color: 'var(--os-ink)' }}>
+                          {!ad && <span className="pointer-events-none absolute inset-y-0 left-0 w-1" style={{ backgroundColor: meta.color }} aria-hidden="true" />}
+                          <span className="truncate">{ev.summary}</span>
+                        </span>
                       );
                     })}
                     {overflow > 0 && <span className="px-1.5 text-xs font-extrabold text-[#a89f8d]" style={{ color: 'var(--os-ink-faint)' }}>+{overflow} more</span>}
@@ -520,6 +632,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
           </div>
         </div>
       )}
+      {editing && <EditEventModal event={editing} onClose={() => setEditing(null)} />}
     </section>
   );
 };
