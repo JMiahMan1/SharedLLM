@@ -3165,13 +3165,21 @@ async def _proxy_json_response(resp: aiohttp.ClientResponse) -> JSONResponse:
     with ``text/plain`` or an HTML error page). Calling ``resp.json()`` on
     those raises ``ContentTypeError`` and surfaces here as a spurious 500.
     Fall back to the raw text so the upstream status code and body survive.
+
+    Tolerates lightweight response stubs (e.g. ``types.SimpleNamespace`` used
+    in tests) that lack ``content_type``/``text``.
     """
-    if resp.content_type and "application/json" in resp.content_type:
+    status = getattr(resp, "status", 200)
+    try:
+        body = await resp.json()
+    except Exception:
+        text = ""
         try:
-            return await _proxy_json_response(resp)
+            text = await resp.text()
         except Exception:
-            pass
-    return JSONResponse(status_code=resp.status, content=await resp.text())
+            text = str(resp)
+        return JSONResponse(status_code=status, content=text)
+    return JSONResponse(status_code=status, content=body)
 
 
 @app.post("/api/auth/login")
