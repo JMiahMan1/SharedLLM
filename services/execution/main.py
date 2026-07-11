@@ -2797,6 +2797,16 @@ def _skylight_assignee_names(chore: dict) -> list[str]:
     return names
 
 
+def _skylight_chore_ids(chore_id: str) -> tuple[str, str]:
+    """Split an API chore instance id ({series}-{YYYY}-{MM}-{DD}) into the
+    numeric series id (path) and the instance date (body). Falls back to today
+    for plain series ids."""
+    parts = chore_id.split("-")
+    if len(parts) >= 4:
+        return parts[0], "-".join(parts[1:])
+    return chore_id, date_cls.today().isoformat()
+
+
 @app.get("/api/integrations/skylight/chores", dependencies=[Depends(require_internal)])
 async def get_skylight_chores(
     user: str | None = None,
@@ -2852,7 +2862,14 @@ async def complete_skylight_chore(
     if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    result = await _skylight_request(session, "PUT", f"/chores/{chore_id}/completions", {"status": "complete"})
+    # Chore ids from the API are instance ids of the form {series}-{YYYY}-{MM}-{DD}.
+    # The completions endpoint expects the numeric series id in the path plus the
+    # instance date in the body.
+    series_id, instance_date = _skylight_chore_ids(chore_id)
+    result = await _skylight_request(
+        session, "PUT", f"/chores/{series_id}/completions",
+        {"id": series_id, "instance_date": instance_date, "status": "complete"},
+    )
     if result is not None:
         return {"status": "SUCCESS", "message": "Chore completed"}
     return {"status": "FAILURE", "message": "Failed to complete chore"}
@@ -2864,12 +2881,20 @@ async def uncomplete_skylight_chore(
     user: str | None = None,
     x_internal_secret: str = Header(None)
 ):
-    """Mark a Skylight chore as incomplete."""
+    """Mark a Skylight chore as incomplete (best effort).
+
+    NOTE: the Skylight private API only exposes marking a chore complete; there is
+    no documented undo, so this returns FAILURE if the API rejects the request.
+    """
     session = await _get_skylight_session(user)
     if not session:
         return {"status": "FAILURE", "message": "Skylight not configured"}
 
-    result = await _skylight_request(session, "PUT", f"/chores/{chore_id}/completions", {"status": "incomplete"})
+    series_id, instance_date = _skylight_chore_ids(chore_id)
+    result = await _skylight_request(
+        session, "PUT", f"/chores/{series_id}/completions",
+        {"id": series_id, "instance_date": instance_date, "status": "incomplete"},
+    )
     if result is not None:
         return {"status": "SUCCESS", "message": "Chore uncompleted"}
     return {"status": "FAILURE", "message": "Failed to uncomplete chore"}
