@@ -3313,12 +3313,36 @@ async def proxy_update_settings_bulk(request: Request):
         resp = await client.post(
             f"{IDENTITY_SVC}/api/settings",
             json=body,
-            headers={"Authorization": auth_header} if auth_header else {}
-            , timeout=aiohttp.ClientTimeout(total=10.0),
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
         )
         if resp.status < 400:
             from services.gateway.cache import invalidate_settings
             invalidate_settings()
+        return await _proxy_json_response(resp)
+
+@app.get("/api/calendar/settings")
+async def proxy_get_calendar_settings(request: Request):
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/calendar/settings",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+@app.put("/api/calendar/settings")
+async def proxy_update_calendar_settings(request: Request):
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.put(
+            f"{IDENTITY_SVC}/api/calendar/settings",
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
         return await _proxy_json_response(resp)
 
 @app.get("/api/users")
