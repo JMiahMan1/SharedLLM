@@ -143,6 +143,13 @@ export interface ExecutionResponse {
   message: string;
   service: string;
   detail?: Record<string, unknown> | null;
+  events?: unknown[];
+  settings?: {
+    default?: string;
+    disabled?: string[];
+    priority?: Record<string, number>;
+    ical_urls?: string[];
+  } | null;
 }
 
 export interface TimerRecord {
