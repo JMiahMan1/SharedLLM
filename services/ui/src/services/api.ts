@@ -1136,6 +1136,9 @@ export const api = {
       assignees?: string[];
       recurrence?: string;
       stars?: number;
+      start?: string;
+      start_time?: string | null;
+      emoji_icon?: string | null;
     }>;
   }> {
     const params = new URLSearchParams();
