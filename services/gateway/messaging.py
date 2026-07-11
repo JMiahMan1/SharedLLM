@@ -70,7 +70,7 @@ class InferenceJobQueue:
         )
 
         # Push to FIFO queue (Right push) - rpush returns int but we await for consistency
-        rpush_result = await self._redis.rpush(self.QUEUE_KEY, job_id)  # type: ignore[misc]
+        await self._redis.rpush(self.QUEUE_KEY, job_id)  # type: ignore[misc]
 
         log.info(f"Job {job_id} enqueued for user {user_id}")
         return job_id

@@ -17,7 +17,7 @@ log = logging.getLogger("state_machine")
 class StateMachine:
     """
     Enhanced state machine for Raven 2.0 with checkpointing and resumability.
-    
+
     This class extends the existing AgentLoop architecture to provide:
     - Mission checkpointing and resumability
     - Structured state management
@@ -64,7 +64,7 @@ class StateMachine:
                   agent_type: str | None = None) -> dict[str, Any]:
         """
         Execute the mission using the state machine.
-        
+
         Args:
             query: The user's request
             selected_model: LLM model to use
@@ -75,7 +75,7 @@ class StateMachine:
             rag_context: Additional RAG context
             show_thinking: Whether to show thinking blocks
             agent_type: Specialized agent type
-            
+
         Returns:
             Dict containing mission results and metrics
         """
@@ -187,7 +187,7 @@ async def run_state_machine_agent(query: str,
                                  agent_type: str | None = None) -> dict[str, Any]:
     """
     Entry point for Raven 2.0's enhanced autonomous execution.
-    
+
     Args:
         query: User's query/request
         selected_model: LLM model to use
@@ -199,7 +199,7 @@ async def run_state_machine_agent(query: str,
         rag_context: Additional RAG context
         show_thinking: Whether to show thinking blocks
         agent_type: Specialized agent type
-        
+
     Returns:
         Dict containing mission results and metrics
     """

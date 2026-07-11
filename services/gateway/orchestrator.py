@@ -468,7 +468,7 @@ async def _fetch_weather_context(creds: ResolvedCredentials) -> str:
 
 async def _enrich_entities_with_live_state(hits: list, creds: ResolvedCredentials) -> list:
     """Fetch live HA state (Redis-cached) and merge with RAG entity metadata.
-    
+
     entity_id is the stable join key between RAG metadata and live state.
     Even if friendly_name changes in HA, entity_id remains constant.
     """
@@ -628,7 +628,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
     log.info(f"[_single_turn_inference] RAG context length: {len(rag_context)} chars")
     if rag_context:
         log.info(f"[_single_turn_inference] RAG context preview: {rag_context[:300]}")
-    messages = [{"role": "system", "content": system}] + history + [{"role": "user", "content": query}]
+    messages = [{"role": "system", "content": system}, *history, {"role": "user", "content": query}]
 
     log.info(f"[_single_turn_inference] Executing for model {model}")
 

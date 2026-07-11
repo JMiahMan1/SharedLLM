@@ -58,9 +58,9 @@ _settings_ttl = 30  # seconds
 
 def load_prompt_sync(prompt_key: str) -> str:
     """Fetch a prompt from the Identity service GlobalSettings table (sync).
-    
+
     Uses a cached settings cache to minimize overhead.
-    
+
     Raises ValueError if the prompt key is not found in the DB.
     """
     import asyncio
@@ -114,7 +114,7 @@ def load_prompt_sync(prompt_key: str) -> str:
 
 async def load_prompt(client: aiohttp.ClientSession, prompt_key: str) -> str:
     """Fetch a prompt from the Identity service GlobalSettings table (async).
-    
+
     Raises ValueError if the prompt key is not found in the DB,
     ensuring fail-fast behavior when a prompt is missing.
     """

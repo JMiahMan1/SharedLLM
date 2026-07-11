@@ -42,7 +42,6 @@ from services.gateway.prompts import (
     PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION,
     PROMPT_MEDIA_TROUBLESHOOTING,
     PROMPT_RAVEN_AUTONOMOUS_PROTOCOL,
-    PROMPT_SINGLE_TURN_TOOL_GUIDE,
     load_prompt,
     load_prompt_sync,
 )
@@ -3087,7 +3086,7 @@ async def stream_chat_job(job_id: str):
     async def event_generator():
         import redis.asyncio as redis
 
-        from services.gateway.config import REDIS_URL, JOB_STATUS_POLL_INTERVAL
+        from services.gateway.config import JOB_STATUS_POLL_INTERVAL, REDIS_URL
 
         last_status = None
         r = redis.from_url(REDIS_URL, decode_responses=True)
@@ -3122,18 +3121,12 @@ async def stream_chat_job(job_id: str):
                 if msg and msg.get("type") == "message":
                     continue  # status changed; loop re-fetches and yields
         finally:
-            try:
+            with suppress(Exception):
                 await pubsub.unsubscribe(status_ch)
-            except Exception:
-                pass
-            try:
+            with suppress(Exception):
                 await pubsub.close()
-            except Exception:
-                pass
-            try:
+            with suppress(Exception):
                 await r.close()
-            except Exception:
-                pass
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 
@@ -4552,20 +4545,22 @@ class UserMissionRequest(BaseModel):
 
 
 async def _build_raven_system_prompt(query: str) -> str:
-    """Build the autonomous system prompt used for Raven missions.
+    """Build the single, self-contained system prompt used for Raven missions.
 
-    Combines the Raven autonomous protocol, the global autonomous protocols, and
-    the single-turn tool guide so the agent knows to bootstrap a workspace, write
-    code, build, test, and push.
+    The prompt is ONE portable document: the Raven autonomous protocol (which
+    already embeds the workspace tool-call format, language-aware quality gates,
+    and the execution loop) plus the global autonomous protocols and the mission
+    itself. It depends on no test-harness scaffolding or runtime-injected context,
+    so the same prompt can be copied and run standalone against any capable model.
     """
     async with borrow_http_client() as client:
         protocol = await load_prompt(client, PROMPT_RAVEN_AUTONOMOUS_PROTOCOL)
         protocols = await fetch_autonomous_protocols()
-        guide = await load_prompt(client, PROMPT_SINGLE_TURN_TOOL_GUIDE)
     return (
         f"{protocol}\n\n{protocols}\n\n"
         f"[Raven Mission]\n{query}\n\n"
-        f"Follow the tool-use guide below to accomplish the mission:\n{guide}"
+        f"Execute the mission above using the tool-call format defined in your protocol. "
+        f"Emit exactly one tool-call JSON object per turn and drive the mission to completion."
     )
 
 
@@ -6162,8 +6157,8 @@ async def sendspin_proxy(websocket: WebSocket):
     6. Proxy begins bidirectional forwarding
     """
     import websockets
-    from websockets.exceptions import InvalidStatus
     from fastapi.websockets import WebSocketDisconnect
+    from websockets.exceptions import InvalidStatus
 
     # Accept browser connection FIRST (required by FastAPI before any close())
     await websocket.accept()
@@ -7098,14 +7093,13 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
             headers["Authorization"] = f"Bearer {token}"
 
     try:
-        async with shared_http_client() as client:
-            async with client.get(target_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
-                if resp.status == 200:
-                    content_type = resp.headers.get("Content-Type", "image/jpeg")
-                    data = await resp.read()
-                    return Response(content=data, media_type=content_type)
-                log.error(f"[imageproxy] upstream {svc} status {resp.status} for {target_url}")
-                raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
+        async with shared_http_client() as client, client.get(target_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
+            if resp.status == 200:
+                content_type = resp.headers.get("Content-Type", "image/jpeg")
+                data = await resp.read()
+                return Response(content=data, media_type=content_type)
+            log.error(f"[imageproxy] upstream {svc} status {resp.status} for {target_url}")
+            raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
     except HTTPException:
         raise
     except Exception as e:

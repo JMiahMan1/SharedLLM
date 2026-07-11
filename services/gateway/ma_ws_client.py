@@ -20,6 +20,7 @@ Usage:
     await client.disconnect()
 """
 import asyncio
+import contextlib
 import inspect
 import json
 import logging
@@ -204,10 +205,8 @@ class MAWebSocketClient:
         await self._stop_background_tasks()
 
         if self._ws:
-            try:
+            with contextlib.suppress(Exception):
                 await self._ws.close(code=1000, reason="Gateway shutting down")
-            except Exception:
-                pass
             self._ws = None
 
         self._connected = False
@@ -707,10 +706,8 @@ class MAWebSocketClient:
         for task in (self._reconnect_task, self._message_handler_task):
             if task and not task.done():
                 task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await task
-                except asyncio.CancelledError:
-                    pass
 
         self._reconnect_task = None
         self._message_handler_task = None

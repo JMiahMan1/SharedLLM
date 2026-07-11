@@ -11,14 +11,13 @@ Caches are process-local and TTL-bounded:
 """
 import logging
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import redis as _redis_lib
 
 from services.gateway.config import (
-    HA_STATE_CACHE_TTL,
     IDENTITY_CACHE_TTL,
-    MEDIA_DEVICE_CACHE_TTL,
     SETTINGS_CACHE_TTL,
 )
 

@@ -5,9 +5,9 @@ import json
 import logging
 import re
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime
-from typing import Any, AsyncIterator, cast
+from typing import Any, cast
 
 import aiohttp
 import redis.asyncio as redis

@@ -69,10 +69,7 @@ class IntentEngine:
             if fname:
                 new_cache[fname] = eid
             # Also index the ID itself (stripped of domain)
-            if eid:
-                short_id = eid.split(".")[-1].replace("_", " ")
-            else:
-                short_id = ""
+            short_id = eid.split(".")[-1].replace("_", " ") if eid else ""
             if short_id and short_id not in new_cache:
                 new_cache[short_id] = eid
 
@@ -183,7 +180,7 @@ class IntentEngine:
             return "unknown", 0.0
 
         try:
-            query_emb = list(self.model.embed([query.lower()]))[0]
+            query_emb = next(iter(self.model.embed([query.lower()])))
             query_norm = np.linalg.norm(query_emb)
             if query_norm == 0:
                 return "unknown", 0.0

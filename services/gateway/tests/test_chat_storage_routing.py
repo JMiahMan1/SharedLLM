@@ -9,8 +9,8 @@ _mock_redis.asyncio = _mock_redis_async
 sys.modules['redis'] = _mock_redis
 sys.modules['redis.asyncio'] = _mock_redis_async
 
-import os
 import json
+import os
 
 from fastapi.testclient import TestClient
 from sqlmodel import Session, create_engine, select

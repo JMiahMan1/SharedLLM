@@ -71,14 +71,12 @@ def validate_config(settings: dict[str, str]) -> ConfigValidationResult:
 
     for key, (priority, _description, impact) in GATEWAY_CONFIG_SCHEMA.items():
         # Skip cloud keys if not using cloud provider
-        if key.startswith("llm_cloud_"):
-            if active_provider != "openrouter":
-                continue
+        if key.startswith("llm_cloud_") and active_provider != "openrouter":
+            continue
 
         # Skip local/ollama keys if using cloud provider
-        if key == "llm_local_url":
-            if active_provider == "openrouter":
-                continue
+        if key == "llm_local_url" and active_provider == "openrouter":
+            continue
 
         value = settings.get(key, "")
         if not value or value in ("auto", "none", "null"):
