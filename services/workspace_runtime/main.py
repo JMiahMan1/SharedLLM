@@ -42,6 +42,25 @@ from .models import Workspace
 log = logging.getLogger("workspace_runtime")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
+import threading
+WORKSPACE_SYNC_LOCKS: dict[str, threading.RLock] = {}
+WORKSPACE_LOCKS_MUTEX = threading.Lock()
+
+def get_workspace_lock(workspace_id: str) -> threading.RLock:
+    with WORKSPACE_LOCKS_MUTEX:
+        if workspace_id not in WORKSPACE_SYNC_LOCKS:
+            WORKSPACE_SYNC_LOCKS[workspace_id] = threading.RLock()
+        return WORKSPACE_SYNC_LOCKS[workspace_id]
+
+ASYNC_SYNC_LOCKS: dict[str, asyncio.Lock] = {}
+ASYNC_LOCKS_MUTEX = threading.Lock()
+
+def get_async_sync_lock(workspace_id: str) -> asyncio.Lock:
+    with ASYNC_LOCKS_MUTEX:
+        if workspace_id not in ASYNC_SYNC_LOCKS:
+            ASYNC_SYNC_LOCKS[workspace_id] = asyncio.Lock()
+        return ASYNC_SYNC_LOCKS[workspace_id]
+
 WORKSPACE_REGISTRY_PATH = _WRP or "/app/config/workspaces.json"
 _DEFAULT_WORKSPACE_ROOT = Path(os.getenv("WORKSPACE_RUNTIME_ROOT", "/workspace")).resolve()
 
@@ -575,14 +594,77 @@ def _strip_workspace_path_prefix(relative_path: str, workspace: dict[str, Any]) 
     return relative_path
 
 
-def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
+WORKSPACE_CLONING_IN_PROGRESS: set[str] = set()
+WORKSPACE_CLONING_MUTEX = threading.Lock()
+
+def _ensure_workspace_recovered(workspace: dict[str, Any]) -> None:
+    ws_id = workspace.get("id")
+    if not ws_id:
+        return
+
+    repo_url = str(workspace.get("repo_url") or "").strip()
+    if not repo_url:
+        return
+
+    resolved_path = Path(workspace["resolved_path"])
+    if (resolved_path / ".git").is_dir():
+        return
+
+    with WORKSPACE_CLONING_MUTEX:
+        if ws_id in WORKSPACE_CLONING_IN_PROGRESS:
+            lock = get_workspace_lock(ws_id)
+            lock.acquire()
+            lock.release()
+            return
+        WORKSPACE_CLONING_IN_PROGRESS.add(ws_id)
+
+    try:
+        lock = get_workspace_lock(ws_id)
+        with lock:
+            if (resolved_path / ".git").is_dir():
+                return
+
+            log.warning(f"Git repository missing on disk for workspace '{ws_id}' at {resolved_path}. Re-cloning for auto-recovery.")
+            try:
+                branch_name = str(workspace.get("default_branch") or "main").strip()
+                clone_args = ["git", "clone", "--single-branch"]
+                if branch_name:
+                    clone_args.extend(["--branch", branch_name])
+                clone_args.extend([repo_url, str(resolved_path)])
+
+                if any(resolved_path.iterdir()):
+                    backup_path = Path(str(resolved_path) + f"-backup-{int(time.time_ns())}")
+                    log.info(f"Workspace path not empty during recovery. Backing up to {backup_path}")
+                    resolved_path.rename(backup_path)
+                    resolved_path.mkdir(parents=True, exist_ok=True)
+
+                identity = workspace.get("resolved_identity") or {}
+                _run_git_with_optional_askpass(
+                    resolved_path.parent,
+                    clone_args,
+                    identity=identity,
+                    remote_url=repo_url,
+                    timeout_seconds=60
+                )
+                log.info(f"Auto-recovery successful: cloned {repo_url} into {resolved_path}")
+            except Exception as recovery_err:
+                log.error(f"Auto-recovery failed to clone repository {repo_url}: {recovery_err}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Workspace repository was missing and auto-recovery clone failed: {recovery_err}"
+                )
+    finally:
+        with WORKSPACE_CLONING_MUTEX:
+            WORKSPACE_CLONING_IN_PROGRESS.discard(ws_id)
+
+
+def _resolve_workspace(ref: WorkspaceRef, check_recovery: bool = False) -> dict[str, Any]:
     registry = _load_registry()
     identity = _resolve_identity_context(ref)
     resolved_user = identity["user"] if identity else None
     is_admin = bool(identity and identity.get("is_admin"))
     match = None
 
-    # Resolution priority: workspace_id > local_path (only field users need to set)
     if ref.workspace_id:
         match = next((item for item in registry if item.get("id") == ref.workspace_id), None)
     elif ref.local_path:
@@ -605,30 +687,24 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail=f"Workspace '{match.get('id')}' requires an admin identity")
     owner_user = str(match.get("owner_user") or "").strip()
 
-    # Default Shared Profile: owner_user="default" grants read+git_status to all authenticated users
     is_default_shared = owner_user == "default"
     if owner_user and not is_admin and owner_user != resolved_user and not is_default_shared:
         raise HTTPException(status_code=404, detail="Workspace not found")
 
-    # local_path is the only user-facing path field (relative for users, absolute for system)
     effective_path = str(match.get("local_path", ""))
     resolved_path = resolve_safe_path(get_workspace_root(), effective_path, must_exist=False)
-    # Materialize the workspace directory. Workspaces are sandboxed directories; if the
-    # backing directory is missing (e.g. a workspace created via the API without an
-    # explicit mkdir), create it so file/shell operations can proceed instead of failing
-    # with a misleading "Path not found" that pushes the agent into the Default Workspace.
     try:
         os.makedirs(str(resolved_path), exist_ok=True)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Failed to create workspace directory {resolved_path}: {exc}") from None
     if not resolved_path.is_dir():
         raise HTTPException(status_code=400, detail=f"Workspace path is not a directory: {effective_path}")
+
     workspace: dict[str, Any] = dict(match)
     workspace["resolved_path"] = str(resolved_path)
     workspace["scope"] = str(workspace.get("scope") or "user")
     workspace["access_policy"] = access_policy
 
-    # For default-shared workspaces accessed by non-owners, restrict capabilities to read-only
     if is_default_shared and not is_admin and owner_user != resolved_user:
         workspace["capabilities"] = ["read", "git_status"]
     else:
@@ -641,6 +717,8 @@ def _resolve_workspace(ref: WorkspaceRef) -> dict[str, Any]:
     workspace["is_new"] = not bool(workspace.get("repo_url"))
     workspace["has_repo"] = bool(workspace.get("repo_url"))
     workspace["needs_repo"] = workspace["is_new"]
+    if check_recovery:
+        _ensure_workspace_recovered(workspace)
     return workspace
 
 
@@ -1427,7 +1505,15 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
                 "repo_url": remote_url,
             }
         if any(target_path.iterdir()):
-            raise HTTPException(status_code=409, detail=f"Workspace path exists and is not an empty git checkout: {target_path}")
+            backup_path = Path(str(target_path) + f"-backup-{int(time.time())}")
+            log.warning(f"Git repo is missing (.git folder not found) in non-empty workspace {target_path}. Backing up to {backup_path} and recreating/cloning fresh.")
+            try:
+                target_path.rename(backup_path)
+            except Exception as rename_err:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Git repo is missing, and failed to back up existing directory to {backup_path}: {rename_err}"
+                )
 
     repo_url = str(req.repo_url or workspace.get("repo_url") or "").strip()
     branch_name = str(req.branch or workspace.get("default_branch") or "main").strip()
@@ -1650,103 +1736,109 @@ def list_files(req: FileListRequest, x_internal_secret: str | None = Header(defa
 @app.post("/files/write")
 def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "write")
     req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
     workspace_path = Path(workspace["resolved_path"])
-    # Ensure the workspace directory exists before writing. The workspace was
-    # resolved as valid for this caller; if the backing directory is missing
-    # (e.g. a workspace carried over from a prior service restart), create it
-    # here rather than failing the write with a misleading path error.
+
+    lock = get_workspace_lock(workspace["id"])
+    lock.acquire()
     try:
-        workspace_path.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create workspace directory {workspace_path}: {exc}",
-        ) from None
-    target = resolve_safe_path(workspace_path, req.relative_path, must_exist=False)
-
-    if target.exists() and not target.is_file():
-        raise HTTPException(status_code=400, detail=f"Path is not a file: {req.relative_path}")
-
-    created = not target.exists()
-    previous_sha256 = None
-    if target.exists():
-        current_bytes = target.read_bytes()
-        previous_sha256 = _sha256_bytes(current_bytes)
-        if req.expected_sha256 and req.expected_sha256 != previous_sha256:
-            raise HTTPException(
-                status_code=409,
-                detail=f"File contents changed for {req.relative_path}; expected {req.expected_sha256}, found {previous_sha256}",
-            )
-    elif req.expected_sha256 not in (None, "", "new"):
-        raise HTTPException(status_code=409, detail=f"File does not yet exist: {req.relative_path}")
-
-    target.parent.mkdir(parents=True, exist_ok=True) if req.create_parents else None
-
-    expected_bytes = None
-    try:
-        if req.patch:
-            # Apply patch
-            with tempfile.NamedTemporaryFile("w", suffix=".patch") as patch_file:
-                patch_file.write(req.patch)
-                patch_file.flush()
-                args = ["patch", "-u", str(target), "-i", patch_file.name]
-                result = _run_command(workspace_path, args)
-                if result["returncode"] != 0:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Failed to apply patch to {req.relative_path}: {result['stderr'] or result['stdout']}",
-                    )
-        elif req.content is not None:
-            target.write_text(req.content)
-            expected_bytes = req.content.encode("utf-8")
-        elif req.content_base64 is not None:
-            import base64
-
-            expected_bytes = base64.b64decode(req.content_base64)
-            target.write_bytes(expected_bytes)
-        else:
-            raise HTTPException(status_code=400, detail="Either 'content', 'content_base64', or 'patch' must be provided")
-
-        # Self-verify the mutation actually persisted. Catches ephemeral-volume
-        # loss, resolution to the wrong path, or permission issues that would
-        # otherwise let the caller believe the file exists when it does not.
+        # Ensure the workspace directory exists before writing. The workspace was
+        # resolved as valid for this caller; if the backing directory is missing
+        # (e.g. a workspace carried over from a prior service restart), create it
+        # here rather than failing the write with a misleading path error.
         try:
-            new_bytes = target.read_bytes()
+            workspace_path.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
             raise HTTPException(
                 status_code=500,
-                detail=f"Write verification failed for {req.relative_path}: unable to read back written file: {exc}",
+                detail=f"Failed to create workspace directory {workspace_path}: {exc}",
             ) from None
-        if expected_bytes is not None and new_bytes != expected_bytes:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"Write verification failed for {req.relative_path}: on-disk content "
-                    f"({len(new_bytes)} bytes) does not match requested content "
-                    f"({len(expected_bytes)} bytes). The write did not persist correctly."
-                ),
-            )
-        if not new_bytes:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Write verification failed for {req.relative_path}: file is empty after write.",
-            )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Write failed for {req.relative_path}: {exc}") from None
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "relative_path": req.relative_path,
-        "created": created,
-        "bytes_written": len(new_bytes),
-        "sha256": _sha256_bytes(new_bytes),
-        "previous_sha256": previous_sha256,
-    }
+        target = resolve_safe_path(workspace_path, req.relative_path, must_exist=False)
+
+        if target.exists() and not target.is_file():
+            raise HTTPException(status_code=400, detail=f"Path is not a file: {req.relative_path}")
+
+        created = not target.exists()
+        previous_sha256 = None
+        if target.exists():
+            current_bytes = target.read_bytes()
+            previous_sha256 = _sha256_bytes(current_bytes)
+            if req.expected_sha256 and req.expected_sha256 != previous_sha256:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"File contents changed for {req.relative_path}; expected {req.expected_sha256}, found {previous_sha256}",
+                )
+        elif req.expected_sha256 not in (None, "", "new"):
+            raise HTTPException(status_code=409, detail=f"File does not yet exist: {req.relative_path}")
+
+        target.parent.mkdir(parents=True, exist_ok=True) if req.create_parents else None
+
+        expected_bytes = None
+        try:
+            if req.patch:
+                # Apply patch
+                with tempfile.NamedTemporaryFile("w", suffix=".patch") as patch_file:
+                    patch_file.write(req.patch)
+                    patch_file.flush()
+                    args = ["patch", "-u", str(target), "-i", patch_file.name]
+                    result = _run_command(workspace_path, args)
+                    if result["returncode"] != 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Failed to apply patch to {req.relative_path}: {result['stderr'] or result['stdout']}",
+                        )
+            elif req.content is not None:
+                target.write_text(req.content)
+                expected_bytes = req.content.encode("utf-8")
+            elif req.content_base64 is not None:
+                import base64
+
+                expected_bytes = base64.b64decode(req.content_base64)
+                target.write_bytes(expected_bytes)
+            else:
+                raise HTTPException(status_code=400, detail="Either 'content', 'content_base64', or 'patch' must be provided")
+
+            # Self-verify the mutation actually persisted. Catches ephemeral-volume
+            # loss, resolution to the wrong path, or permission issues that would
+            # otherwise let the caller believe the file exists when it does not.
+            try:
+                new_bytes = target.read_bytes()
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Write verification failed for {req.relative_path}: unable to read back written file: {exc}",
+                ) from None
+            if expected_bytes is not None and new_bytes != expected_bytes:
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Write verification failed for {req.relative_path}: on-disk content "
+                        f"({len(new_bytes)} bytes) does not match requested content "
+                        f"({len(expected_bytes)} bytes). The write did not persist correctly."
+                    ),
+                )
+            if not new_bytes:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Write verification failed for {req.relative_path}: file is empty after write.",
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Write failed for {req.relative_path}: {exc}") from None
+        return {
+            "status": "SUCCESS",
+            "workspace": workspace,
+            "relative_path": req.relative_path,
+            "created": created,
+            "bytes_written": len(new_bytes),
+            "sha256": _sha256_bytes(new_bytes),
+            "previous_sha256": previous_sha256,
+        }
+    finally:
+        lock.release()
 
 
 class FileDeleteRequest(WorkspaceRef):
@@ -1755,34 +1847,40 @@ class FileDeleteRequest(WorkspaceRef):
 @app.post("/files/delete")
 def delete_file(req: FileDeleteRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "write")
     req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
     workspace_path = Path(workspace["resolved_path"])
-    target = resolve_safe_path(workspace_path, req.relative_path)
 
-    if not target.exists():
-        raise HTTPException(status_code=404, detail=f"File not found: {req.relative_path}")
+    lock = get_workspace_lock(workspace["id"])
+    lock.acquire()
+    try:
+        target = resolve_safe_path(workspace_path, req.relative_path)
 
-    if target.is_dir():
-        import shutil
-        shutil.rmtree(target)
-    else:
-        target.unlink()
+        if not target.exists():
+            raise HTTPException(status_code=404, detail=f"File not found: {req.relative_path}")
 
-    # Self-verify the deletion actually took effect.
-    if target.exists():
-        raise HTTPException(
-            status_code=500,
-            detail=f"Delete verification failed for {req.relative_path}: path still exists after deletion.",
-        )
+        if target.is_dir():
+            import shutil
+            shutil.rmtree(target)
+        else:
+            target.unlink()
 
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "relative_path": req.relative_path,
-        "message": f"Deleted {req.relative_path}"
-    }
+        # Self-verify the deletion actually took effect.
+        if target.exists():
+            raise HTTPException(
+                status_code=500,
+                detail=f"Delete verification failed for {req.relative_path}: path still exists after deletion.",
+            )
+
+        return {
+            "status": "SUCCESS",
+            "workspace": workspace,
+            "relative_path": req.relative_path,
+            "message": f"Deleted {req.relative_path}"
+        }
+    finally:
+        lock.release()
 
 
 @app.post("/provider/scan")
@@ -1899,183 +1997,188 @@ async def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_
 @app.post("/workflow/write-sync-commit")
 def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_secret: str | None = Header(default=None)) -> dict:
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "write")
 
-    ws_id = workspace.get("id", "")
-    with Session(engine) as session:
-        ws = session.get(Workspace, ws_id)
-        if ws and ws.quarantined:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Workspace '{ws.display_name}' is quarantined after repeated verification failures. Admin review required.",
+    lock = get_workspace_lock(workspace["id"])
+    lock.acquire()
+    try:
+        ws_id = workspace.get("id", "")
+        with Session(engine) as session:
+            ws = session.get(Workspace, ws_id)
+            if ws and ws.quarantined:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Workspace '{ws.display_name}' is quarantined after repeated verification failures. Admin review required.",
+                )
+
+        workspace_path = Path(workspace["resolved_path"])
+        identity = workspace.get("resolved_identity") or {}
+        requested_branch = _validate_branch_name(req.branch) if req.branch else ""
+        branch_name = requested_branch or _current_branch_name(workspace_path)
+
+        if not requested_branch and req.auto_create_review_branch and (
+            not branch_name or _is_protected_branch(branch_name, identity)
+        ):
+            branch_name = _create_review_branch(
+                workspace_path=workspace_path,
+                identity=identity,
+                workspace=workspace,
+                relative_path=req.relative_path,
+                prefix=req.review_branch_prefix,
             )
 
-    workspace_path = Path(workspace["resolved_path"])
-    identity = workspace.get("resolved_identity") or {}
-    requested_branch = _validate_branch_name(req.branch) if req.branch else ""
-    branch_name = requested_branch or _current_branch_name(workspace_path)
+        if req.push:
+            if not branch_name:
+                raise HTTPException(status_code=400, detail="Unable to determine branch to push")
+            if _is_protected_branch(branch_name, identity):
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"Autonomous push to protected branch '{branch_name}' is blocked. "
+                        "Create or switch to a review branch and open a Pull Request."
+                    ),
+                )
+            if not req.pytest_targets:
+                raise HTTPException(
+                    status_code=400,
+                    detail="pytest_targets are required before autonomous push so Raven can prove the branch is review-ready.",
+                )
 
-    if not requested_branch and req.auto_create_review_branch and (
-        not branch_name or _is_protected_branch(branch_name, identity)
-    ):
-        branch_name = _create_review_branch(
-            workspace_path=workspace_path,
-            identity=identity,
-            workspace=workspace,
-            relative_path=req.relative_path,
-            prefix=req.review_branch_prefix,
-        )
-
-    if req.push:
-        if not branch_name:
-            raise HTTPException(status_code=400, detail="Unable to determine branch to push")
-        if _is_protected_branch(branch_name, identity):
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    f"Autonomous push to protected branch '{branch_name}' is blocked. "
-                    "Create or switch to a review branch and open a Pull Request."
-                ),
-            )
-        if not req.pytest_targets:
-            raise HTTPException(
-                status_code=400,
-                detail="pytest_targets are required before autonomous push so Raven can prove the branch is review-ready.",
-            )
-
-    write_result = write_file(
-        FileWriteRequest(
-            workspace_id=req.workspace_id,
-            local_path=req.local_path,
-            rag_user=req.rag_user,
-            voice_id=req.voice_id,
-            device_id=req.device_id,
-            relative_path=req.relative_path,
-            content=req.content,
-            expected_sha256=req.expected_sha256,
-            create_parents=req.create_parents,
-        ),
-        x_internal_secret,
-    )
-
-    lint_targets = _sanitize_targets(req.lint_paths or [req.relative_path])
-    lint_results = []
-    for lint_target in lint_targets:
-        lint_result = _run_lint_for_file(workspace_path, lint_target)
-        lint_results.append(lint_result)
-        if not lint_result["passed"]:
-            failure_count = _record_verification_failure(req.relative_path)
-            log.warning(f"[Quarantine] Lint failed for {req.relative_path} (failure #{failure_count} in window)")
-            if failure_count >= RAVEN_QUARANTINE_THRESHOLD:
-                _auto_quarantine_workspace(ws_id, req.relative_path, failure_count)
-            raise HTTPException(
-                status_code=400,
-                detail=f"Lint failed for workflow request on {lint_target}",
-            )
-
-    pytest_result = None
-    if req.pytest_targets:
-        pytest_result = run_pytest(
-            PytestRequest(
-                workspace_id=req.workspace_id,
-                local_path=req.local_path,
-                rag_user=req.rag_user,
-                voice_id=req.voice_id,
-                device_id=req.device_id,
-                targets=req.pytest_targets,
-                timeout_seconds=req.pytest_timeout_seconds,
-            ),
-            x_internal_secret,
-        )
-        if not pytest_result.get("passed"):
-            failure_count = _record_verification_failure(req.relative_path)
-            log.warning(f"[Quarantine] Pytest failed for {req.relative_path} (failure #{failure_count} in window)")
-            if failure_count >= RAVEN_QUARANTINE_THRESHOLD:
-                _auto_quarantine_workspace(ws_id, req.relative_path, failure_count)
-            raise HTTPException(
-                status_code=400,
-                detail=f"Pytest failed for workflow request on {req.relative_path}",
-            )
-
-    commit_result = git_commit(
-        GitCommitRequest(
-            workspace_id=req.workspace_id,
-            local_path=req.local_path,
-            rag_user=req.rag_user,
-            voice_id=req.voice_id,
-            device_id=req.device_id,
-            message=req.commit_message,
-            pathspecs=[req.relative_path],
-            author_name=req.author_name,
-            author_email=req.author_email,
-            allow_empty=req.allow_empty_commit,
-        ),
-        x_internal_secret,
-    )
-
-    push_result = None
-    if req.push:
-        push_result = git_push(
-            GitPushRequest(
-                workspace_id=req.workspace_id,
-                local_path=req.local_path,
-                rag_user=req.rag_user,
-                voice_id=req.voice_id,
-                device_id=req.device_id,
-                remote=req.remote,
-                branch=req.branch,
-                set_upstream=req.set_upstream,
-            ),
-            x_internal_secret,
-        )
-
-    provider_sync_result = None
-    if req.sync_to_provider:
-        provider_sync_result = provider_sync_file(
-            ProviderSyncFileRequest(
+        write_result = write_file(
+            FileWriteRequest(
                 workspace_id=req.workspace_id,
                 local_path=req.local_path,
                 rag_user=req.rag_user,
                 voice_id=req.voice_id,
                 device_id=req.device_id,
                 relative_path=req.relative_path,
+                content=req.content,
+                expected_sha256=req.expected_sha256,
                 create_parents=req.create_parents,
-                verify=req.verify_provider_write,
             ),
             x_internal_secret,
         )
 
-    review = _build_review_metadata(
-        workspace=workspace,
-        relative_path=req.relative_path,
-        commit_message=req.commit_message,
-        branch_name=branch_name or _current_branch_name(workspace_path),
-        commit_result=commit_result,
-        lint_results=lint_results,
-        pytest_result=pytest_result,
-        push_result=push_result,
-    )
+        lint_targets = _sanitize_targets(req.lint_paths or [req.relative_path])
+        lint_results = []
+        for lint_target in lint_targets:
+            lint_result = _run_lint_for_file(workspace_path, lint_target)
+            lint_results.append(lint_result)
+            if not lint_result["passed"]:
+                failure_count = _record_verification_failure(req.relative_path)
+                log.warning(f"[Quarantine] Lint failed for {req.relative_path} (failure #{failure_count} in window)")
+                if failure_count >= RAVEN_QUARANTINE_THRESHOLD:
+                    _auto_quarantine_workspace(ws_id, req.relative_path, failure_count)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Lint failed for workflow request on {lint_target}",
+                )
 
-    _clear_verification_failures(req.relative_path)
+        pytest_result = None
+        if req.pytest_targets:
+            pytest_result = run_pytest(
+                PytestRequest(
+                    workspace_id=req.workspace_id,
+                    local_path=req.local_path,
+                    rag_user=req.rag_user,
+                    voice_id=req.voice_id,
+                    device_id=req.device_id,
+                    targets=req.pytest_targets,
+                    timeout_seconds=req.pytest_timeout_seconds,
+                ),
+                x_internal_secret,
+            )
+            if not pytest_result.get("passed"):
+                failure_count = _record_verification_failure(req.relative_path)
+                log.warning(f"[Quarantine] Pytest failed for {req.relative_path} (failure #{failure_count} in window)")
+                if failure_count >= RAVEN_QUARANTINE_THRESHOLD:
+                    _auto_quarantine_workspace(ws_id, req.relative_path, failure_count)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Pytest failed for workflow request on {req.relative_path}",
+                )
 
-    return {
-        "status": "SUCCESS",
-        "relative_path": req.relative_path,
-        "write": write_result,
-        "lint": lint_results,
-        "pytest": pytest_result,
-        "commit": commit_result,
-        "push": push_result,
-        "provider_sync": provider_sync_result,
-        "review": review,
-    }
+        commit_result = git_commit(
+            GitCommitRequest(
+                workspace_id=req.workspace_id,
+                local_path=req.local_path,
+                rag_user=req.rag_user,
+                voice_id=req.voice_id,
+                device_id=req.device_id,
+                message=req.commit_message,
+                pathspecs=[req.relative_path],
+                author_name=req.author_name,
+                author_email=req.author_email,
+                allow_empty=req.allow_empty_commit,
+            ),
+            x_internal_secret,
+        )
+
+        push_result = None
+        if req.push:
+            push_result = git_push(
+                GitPushRequest(
+                    workspace_id=req.workspace_id,
+                    local_path=req.local_path,
+                    rag_user=req.rag_user,
+                    voice_id=req.voice_id,
+                    device_id=req.device_id,
+                    remote=req.remote,
+                    branch=req.branch,
+                    set_upstream=req.set_upstream,
+                ),
+                x_internal_secret,
+            )
+
+        provider_sync_result = None
+        if req.sync_to_provider:
+            provider_sync_result = provider_sync_file(
+                ProviderSyncFileRequest(
+                    workspace_id=req.workspace_id,
+                    local_path=req.local_path,
+                    rag_user=req.rag_user,
+                    voice_id=req.voice_id,
+                    device_id=req.device_id,
+                    relative_path=req.relative_path,
+                    create_parents=req.create_parents,
+                    verify=req.verify_provider_write,
+                ),
+                x_internal_secret,
+            )
+
+        review = _build_review_metadata(
+            workspace=workspace,
+            relative_path=req.relative_path,
+            commit_message=req.commit_message,
+            branch_name=branch_name or _current_branch_name(workspace_path),
+            commit_result=commit_result,
+            lint_results=lint_results,
+            pytest_result=pytest_result,
+            push_result=push_result,
+        )
+
+        _clear_verification_failures(req.relative_path)
+
+        return {
+            "status": "SUCCESS",
+            "relative_path": req.relative_path,
+            "write": write_result,
+            "lint": lint_results,
+            "pytest": pytest_result,
+            "commit": commit_result,
+            "push": push_result,
+            "provider_sync": provider_sync_result,
+            "review": review,
+        }
+    finally:
+        lock.release()
 
 
 @app.post("/git/status")
 def git_status(req: WorkspaceRef, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
     branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
@@ -2094,7 +2197,7 @@ def git_status(req: WorkspaceRef, x_internal_secret: str | None = Header(default
 @app.post("/git/diff")
 def git_diff(req: DiffRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_diff")
     workspace_path = Path(workspace["resolved_path"])
     pathspecs = _sanitize_targets(req.pathspecs)
@@ -2107,7 +2210,7 @@ def git_diff(req: DiffRequest, x_internal_secret: str | None = Header(default=No
 @app.post("/git/add")
 def git_add(req: GitAddRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     pathspecs = _sanitize_targets(req.pathspecs)
@@ -2127,7 +2230,7 @@ def git_add(req: GitAddRequest, x_internal_secret: str | None = Header(default=N
 @app.post("/git/commit")
 def git_commit(req: GitCommitRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     identity = workspace.get("resolved_identity") or {}
@@ -2180,7 +2283,7 @@ def git_commit(req: GitCommitRequest, x_internal_secret: str | None = Header(def
 @app.post("/git/branch/create")
 def git_branch_create(req: GitBranchCreateRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     branch_name = _validate_branch_name(req.branch_name)
@@ -2210,7 +2313,7 @@ def git_branch_create(req: GitBranchCreateRequest, x_internal_secret: str | None
 @app.post("/git/push")
 def git_push(req: GitPushRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     identity = workspace.get("resolved_identity") or {}
@@ -2307,7 +2410,7 @@ def run_unit_tests(x_internal_secret: str | None = Header(default=None)):
 @app.post("/git/fetch")
 def git_fetch(req: GitFetchRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     identity = workspace.get("resolved_identity") or {}
@@ -2340,7 +2443,7 @@ def git_fetch(req: GitFetchRequest, x_internal_secret: str | None = Header(defau
 @app.post("/git/pull")
 def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
     identity = workspace.get("resolved_identity") or {}
@@ -2472,7 +2575,7 @@ def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_
 @app.post("/git/revert")
 def git_revert(req: GitRevertRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace_data = _resolve_workspace(req)
+    workspace_data = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace_data, "git_write")
     path = Path(workspace_data["resolved_path"])
 
@@ -2506,7 +2609,7 @@ def git_revert(req: GitRevertRequest, x_internal_secret: str | None = Header(def
 @app.post("/git/log")
 def git_log(req: GitLogRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -2552,7 +2655,7 @@ def git_log(req: GitLogRequest, x_internal_secret: str | None = Header(default=N
 @app.post("/git/checkout")
 def git_checkout(req: GitCheckoutRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -2582,7 +2685,7 @@ def git_checkout(req: GitCheckoutRequest, x_internal_secret: str | None = Header
 @app.post("/git/stash")
 def git_stash(req: GitStashRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -2625,7 +2728,7 @@ def git_stash(req: GitStashRequest, x_internal_secret: str | None = Header(defau
 @app.post("/git/remote")
 def git_remote(req: GitRemoteRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -2677,7 +2780,7 @@ def git_remote(req: GitRemoteRequest, x_internal_secret: str | None = Header(def
 @app.post("/git/show")
 def git_show(req: GitShowRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -2741,7 +2844,7 @@ def file_search(req: FileSearchRequest, x_internal_secret: str | None = Header(d
 @app.post("/git/rebase")
 def git_rebase(req: GitRebaseRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
+    workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_write")
     workspace_path = Path(workspace["resolved_path"])
 
@@ -2902,55 +3005,57 @@ async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path
     Background task to mirror a local workspace directory to Nextcloud.
     Resolves credentials via Identity service and calls Storage mirror endpoint.
     """
-    log.info(f"Starting Nextcloud sync for {workspace_id} (owner: {owner_user})")
-    try:
-        # 1. Resolve credentials from Identity
-        async with get_client() as client:
-            resp = await client.post(
-                f"{IDENTITY_SVC_URL}/api/resolve",
-                json={"rag_user": owner_user},
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=10.0),
-            )
-            if resp.status != 200:
-                text = await resp.text()
-                log.error(f"Failed to resolve identity for {owner_user}: {text}")
-                return
+    lock = get_async_sync_lock(workspace_id)
+    async with lock:
+        try:
+            log.info(f"Starting Nextcloud sync for {workspace_id} (owner: {owner_user})")
+            # 1. Resolve credentials from Identity
+            async with get_client() as client:
+                resp = await client.post(
+                    f"{IDENTITY_SVC_URL}/api/resolve",
+                    json={"rag_user": owner_user},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                if resp.status != 200:
+                    text = await resp.text()
+                    log.error(f"Failed to resolve identity for {owner_user}: {text}")
+                    return
 
-            creds = await resp.json()
-            nc_url = creds.get("nextcloud_url")
-            nc_user = creds.get("nextcloud_user")
-            nc_pass = creds.get("nextcloud_pass")
+                creds = await resp.json()
+                nc_url = creds.get("nextcloud_url")
+                nc_user = creds.get("nextcloud_user")
+                nc_pass = creds.get("nextcloud_pass")
 
-            if not all([nc_url, nc_user, nc_pass]):
-                log.warning(f"Nextcloud credentials missing for {owner_user}. Skipping sync.")
-                return
+                if not all([nc_url, nc_user, nc_pass]):
+                    log.warning(f"Nextcloud credentials missing for {owner_user}. Skipping sync.")
+                    return
 
-            # 2. Trigger mirror via Storage Service
-            mirror_req = {
-                "provider": {
-                    "kind": "nextcloud",
-                    "settings": {
-                        "url": nc_url,
-                        "username": nc_user,
-                        "password": nc_pass
-                    }
-                },
-                "remote_path": remote_path,
-                "local_path": local_path,
-                "excludes": excludes or []
-            }
+                # 2. Trigger mirror via Storage Service
+                mirror_req = {
+                    "provider": {
+                        "kind": "nextcloud",
+                        "settings": {
+                            "url": nc_url,
+                            "username": nc_user,
+                            "password": nc_pass
+                        }
+                    },
+                    "remote_path": remote_path,
+                    "local_path": local_path,
+                    "excludes": excludes or []
+                }
 
-            resp = await client.post(
-                f"{STORAGE_SVC_URL}/providers/mirror",
-                json=mirror_req,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if resp.status == 200:
-                log.info(f"Successfully triggered Nextcloud mirror for {workspace_id}")
-            else:
-                text = await resp.text()
-                log.error(f"Failed to trigger Nextcloud mirror: {text}")
+                resp = await client.post(
+                    f"{STORAGE_SVC_URL}/providers/mirror",
+                    json=mirror_req,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                if resp.status == 200:
+                    log.info(f"Successfully triggered Nextcloud mirror for {workspace_id}")
+                else:
+                    text = await resp.text()
+                    log.error(f"Failed to trigger Nextcloud mirror: {text}")
 
-    except Exception as e:
-        log.error(f"Error in _trigger_nextcloud_sync: {e}")
+        except Exception as e:
+            log.error(f"Error in _trigger_nextcloud_sync: {e}")

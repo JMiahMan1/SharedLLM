@@ -14,6 +14,22 @@ export default function RavenOpsPanel() {
   const [liveMissionId, setLiveMissionId] = useState<number | null>(null);
   const [searxngTestResult, setSearxngTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   
+  // 🔍 Detailed mission inspection & chat refinement state
+  const [detailedMission, setDetailedMission] = useState<RavenMission | null>(null);
+  const [refinePrompt, setRefinePrompt] = useState('');
+
+  const refineMissionMutation = useMutation({
+    mutationFn: ({ id, prompt }: { id: number; prompt: string }) => api.refineRavenMission(id, prompt),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['raven-missions-admin'] });
+      toast.success('🎯 Refinement enqueued! Launching live monitor.');
+      setLiveMissionId(data.mission_id);
+      setDetailedMission(null);
+      setRefinePrompt('');
+    },
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to refine mission'),
+  });
+  
   // 🔍 Investigation state management
   const [investigationPrompt, setInvestigationPrompt] = useState('');
   const [showTemplates, setShowTemplates] = useState(false);
@@ -499,6 +515,66 @@ export default function RavenOpsPanel() {
         )}
       </div>
 
+      {/* 📜 Mission History & Refinement Chat Trigger */}
+      <div className="mt-8 pt-8 border-t border-white/10">
+        <div className="flex items-center justify-between mb-4">
+          <h4 className="flex items-center gap-2 text-sm font-bold text-slate-300 uppercase tracking-widest">
+            <Clock size={16} className="text-blue-400" />
+            Mission History & Refinement
+          </h4>
+        </div>
+
+        {missionsLoading ? (
+           <div className="text-slate-500 text-sm italic">Loading history...</div>
+        ) : missions.filter(m => ['completed', 'failed'].includes(m.status)).length === 0 ? (
+           <div className="rounded-2xl border border-white/5 bg-white/5 px-4 py-8 text-center text-sm text-slate-500">
+             No completed or failed missions found.
+           </div>
+        ) : (
+           <div className="space-y-3">
+             {missions.filter(m => ['completed', 'failed'].includes(m.status)).slice(0, 15).map((mission) => (
+               <div 
+                 key={mission.id} 
+                 onClick={() => setDetailedMission(mission)}
+                 className={`glass-card p-4 border-l-4 cursor-pointer hover:bg-white/5 transition-all ${
+                   mission.status === 'completed' ? 'border-l-emerald-500/40' : 'border-l-red-500/40'
+                 }`}
+               >
+                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                   <div className="min-w-0 flex-1">
+                     <div className="flex items-center gap-3 mb-1">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-widest ${
+                          mission.status === 'completed' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-red-500/10 text-red-300'
+                        }`}>
+                          {mission.status}
+                        </span>
+                        <span className="text-sm font-bold text-white truncate">Target: {mission.target_container || 'System'}</span>
+                        <span className="text-xs text-slate-500 font-mono">#{mission.id}</span>
+                     </div>
+                     <p className="text-xs text-slate-400 line-clamp-1">{mission.proposed_mission}</p>
+                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-widest">
+                        Completed: {mission.completed_at ? new Date(mission.completed_at).toLocaleString() : '—'}
+                        {mission.duration != null ? ` · Duration: ${Math.floor(mission.duration / 60)}m ${mission.duration % 60}s` : ''}
+                      </p>
+                   </div>
+                   <div className="flex-shrink-0 flex items-center gap-2">
+                     <button
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         setDetailedMission(mission);
+                       }}
+                       className="glass-button bg-slate-500/10 border-slate-500/20 text-slate-300 hover:bg-slate-500/20 px-3 py-1.5 text-[10px] font-black uppercase tracking-widest"
+                     >
+                       Inspect & Chat
+                     </button>
+                   </div>
+                 </div>
+               </div>
+             ))}
+           </div>
+        )}
+      </div>
+
       {/* Investigation Prompt Area - COMPLETELY MISSING AND BEING ADDED */}
       <div className="mt-8 p-6 bg-gradient-to-br from-emerald-500/10 to-blue-500/10 rounded-2xl border border-emerald-500/30 backdrop-blur-md shadow-2xl">
         <div className="flex items-center justify-between mb-4">
@@ -806,7 +882,163 @@ The agent will use this correction alongside its investigation prompt.`}
         onClose={() => setLiveMissionId(null)}
         missionId={liveMissionId}
       />
+
+      {/* 🔍 Mission Details & Chat Refinement Modal */}
+      {detailedMission && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col justify-between">
+            <div>
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/5">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Terminal size={18} className="text-blue-400" />
+                  Mission #{detailedMission.id} Details & Refinement
+                </h3>
+                <button
+                  onClick={() => {
+                    setDetailedMission(null);
+                    setRefinePrompt('');
+                  }}
+                  className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-colors"
+                >
+                  ✖️
+                </button>
+              </div>
+
+              {/* Grid Metadata */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 bg-white/5 p-4 rounded-xl border border-white/5 text-xs">
+                <div>
+                  <span className="text-slate-500 uppercase font-black text-[9px] block">Status</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold inline-block uppercase mt-1 ${
+                    detailedMission.status === 'completed' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
+                  }`}>
+                    {detailedMission.status}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 uppercase font-black text-[9px] block">Container</span>
+                  <span className="text-white font-semibold block mt-1 truncate">{detailedMission.target_container || 'System'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 uppercase font-black text-[9px] block">Duration</span>
+                  <span className="text-white font-semibold block mt-1">
+                    {detailedMission.duration != null ? `${Math.floor(detailedMission.duration / 60)}m ${detailedMission.duration % 60}s` : '—'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 uppercase font-black text-[9px] block">Workspace ID</span>
+                  <span className="text-blue-300 font-mono block mt-1 truncate">{detailedMission.workspace_id || 'System Default'}</span>
+                </div>
+              </div>
+
+              {/* Sections */}
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Original Mission Directive</label>
+                  <div className="bg-black/30 border border-white/5 p-3 rounded-lg text-xs text-slate-300 max-h-24 overflow-y-auto">
+                    {detailedMission.proposed_mission}
+                  </div>
+                </div>
+
+                {detailedMission.result && (
+                  <div>
+                    <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Final Result Summary</label>
+                    <div className="bg-black/30 border border-white/5 p-3 rounded-lg text-xs text-emerald-300 max-h-24 overflow-y-auto">
+                      {detailedMission.result}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Audit Execution Timeline</label>
+                  {renderTimeline(detailedMission.output_log)}
+                </div>
+              </div>
+            </div>
+
+            {/* Chat Refinement Interface */}
+            <div className="mt-4 pt-4 border-t border-white/5 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-300 mb-2 block flex items-center gap-1.5">
+                  <Activity size={14} className="text-purple-400" />
+                  Tweak or Fix Results (Interactive Chat)
+                </label>
+                <p className="text-[10px] text-slate-500 mb-2 leading-relaxed">
+                  Provide follow-up instructions to resolve remaining errors. Raven will run in the exact same workspace, preserve history context, and update outputs/artifacts.
+                </p>
+                <div className="flex gap-2">
+                  <textarea
+                    value={refinePrompt}
+                    onChange={(e) => setRefinePrompt(e.target.value)}
+                    placeholder="💬 Enter follow-up instructions (e.g. 'Fix the syntax error on line 42', 'Add missing import sys', 'Tweak CSS colors to match design')"
+                    rows={2}
+                    disabled={refineMissionMutation.isPending}
+                    className="flex-1 bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:border-purple-500/50 focus:outline-none transition-all resize-none"
+                  />
+                  <button
+                    onClick={() => refineMissionMutation.mutate({ id: detailedMission.id, prompt: refinePrompt })}
+                    disabled={!refinePrompt.trim() || refineMissionMutation.isPending}
+                    className="px-4 py-2 bg-gradient-to-r from-purple-500/20 to-pink-500/20 border border-purple-500/30 rounded-xl font-black text-[10px] uppercase tracking-widest text-purple-300 hover:from-purple-500/30 hover:to-pink-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                  >
+                    {refineMissionMutation.isPending ? 'Sending...' : 'Refine'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   </div>
   );
 }
+
+// 📜 Reconstruct readable log events from output_log in database
+const renderTimeline = (outputLog: string | null | undefined) => {
+  if (!outputLog) return <p className="text-slate-500 text-xs italic">No audit trail logs recorded.</p>;
+  try {
+    const logs = JSON.parse(outputLog);
+    if (!Array.isArray(logs) || logs.length === 0) return <p className="text-slate-500 text-xs italic text-center p-2">No execution events captured.</p>;
+    
+    return (
+      <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-2 font-mono text-[10px] text-slate-300 bg-black/40 p-3 rounded-lg border border-white/5">
+        {logs.map((logItem, idx) => {
+          const timeStr = logItem.timestamp ? new Date(logItem.timestamp * 1000).toLocaleTimeString() : '';
+          let bgClass = 'bg-slate-800 text-slate-300';
+          let label = logItem.type;
+          
+          if (logItem.type === 'action') {
+            bgClass = 'bg-blue-500/20 text-blue-300 border border-blue-500/30';
+            label = '🔧 TOOL';
+          } else if (logItem.type === 'action_payload') {
+            return null; // Skip payload for clean view
+          } else if (logItem.type === 'result_success') {
+            bgClass = 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+            label = '✅ SUCCESS';
+          } else if (logItem.type === 'result_error') {
+            bgClass = 'bg-red-500/20 text-red-300 border border-red-500/30';
+            label = '❌ ERROR';
+          } else if (logItem.type === 'system') {
+            bgClass = 'bg-purple-500/20 text-purple-300 border border-purple-500/30';
+            label = 'ℹ️ SYSTEM';
+          } else if (logItem.type === 'reasoning') {
+            bgClass = 'bg-slate-800/85 text-slate-400 border border-white/5';
+            label = '🧠 THOUGHT';
+          }
+          
+          return (
+            <div key={idx} className="flex gap-2 items-start border-b border-white/5 pb-1.5 last:border-0 last:pb-0">
+              <span className="text-[9px] text-slate-500 select-none">{timeStr}</span>
+              <span className={`px-1 rounded text-[8px] font-black uppercase tracking-wider select-none ${bgClass}`}>
+                {label}
+              </span>
+              <span className="break-all">{logItem.data}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  } catch (e) {
+    return <p className="text-red-400 text-xs italic text-center p-2">Failed to parse execution log: {String(e)}</p>;
+  }
+};
