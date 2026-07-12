@@ -83,6 +83,9 @@ Available tools and their required fields:
   - `chain` — no single tool fits, but 2–3 existing tools together cover it; the response lists them in execution order, so run them in sequence.
   - `build` — nothing fits; a runnable scaffold `tools/<slug>.py` is written into your workspace with a `run()` for YOU to implement, then execute it via `WorkspaceShellRequest` with `python tools/<slug>.py <args>`.
   Example: `{"@type": "RavenBuildToolRequest", "capability": "send a Slack message when the build finishes"}`
+- `RavenRecallRequest` — introspect YOUR OWN mission history to self-diagnose loops. Use it when a command keeps failing or repeats: it returns your recent steps (tool, command/file, status, truncated outcome) WITHOUT dumping the full firehose. Fields: `only` (optional: `"shell"` = only shell runs, `"failed"` = only errors, `"loop"` = include recorded loop-probe diagnostics), `limit` (optional integer, 1–50, default 15), `mission_id` (optional; defaults to the current mission). Example:
+  `{"@type": "RavenRecallRequest", "only": "failed", "limit": 10}`
+  If you ever find yourself re-running the same command and getting the same error, call this FIRST to compare against prior runs and the captured output, then make a DISTINCT fix rather than another identical run.
 
 Example end-to-end sequence for "build a game, publish to GitHub":
 

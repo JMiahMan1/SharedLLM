@@ -286,6 +286,7 @@ ALLOWED_TOOLS = {
     "entitysearchrequest", "logbookrequest", "executionlogrequest",
     "documentbroadcastrequest", "nightmoderequest", "ttsrequest", "storagetexttorequest",
     "ghrequest",
+    "ravenrecallrequest",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -626,6 +627,71 @@ def detect_repetitive_action(recent: list[tuple[str, bool]], window: int = 8) ->
         return False
     last = recent[-window:]
     return len({sig for sig, _ in last}) == 1
+
+
+# How many identical-result shell runs in a row count as a stuck loop.
+NO_PROGRESS_WINDOW = 4
+
+
+def normalize_shell_goal(command: str) -> str:
+    """Collapse the volatile parts of a shell command so that
+
+        SDL_VIDEODRIVER=dummy python main.py --selftest 2>&1
+    and
+        SDL_VIDEODRIVER=dummy python main.py --selftest 2>/tmp/e; echo EXIT=$?; cat /tmp/e | tail -30
+
+    map to the SAME goal key. We only care about the executable + script + args
+    that decide *what* runs, not redirections or exit-code/inspection wrappers —
+    otherwise a re-run with a slightly different wrapper evades loop detection.
+    """
+    if not command:
+        return ""
+    s = command
+    # 1) Drop inspection/exit-code probes FIRST — before env-strip, because
+    #    `echo EXIT=$?` would otherwise look like an env assignment to step 3
+    #    and survive. These wrappers must not change the normalized goal.
+    s = re.sub(r';\s*echo\s+EXIT=.*$', '', s)
+    s = re.sub(r';\s*cat\s+\S+(?:\s*\|\s*tail\s*-\d+)?', '', s)
+    # 2) Drop redirections (stdout/stderr).
+    s = re.sub(r'2>&1|2>/dev/null|&>\s*/?\S*|2>\s*/?\S+|>\s*/?\S+', ' ', s)
+    # 3) Drop leading env-var assignments: FOO=bar BAZ=1
+    s = re.sub(r'(?:\s|^)[A-Z][A-Z0-9_]*=[^\s"\']+', ' ', s)
+    # 4) Collapse whitespace and lowercase.
+    s = re.sub(r'\s+', ' ', s).strip().lower()
+    return s[:160]
+
+
+def outcome_digest(exec_data) -> str:
+    """Short, stable fingerprint of a tool result so we can tell whether a
+    re-run produced *identical* output (no progress) vs a new error.
+
+    For a shell run this is the tail of the combined stdout/stderr — the part
+    that usually holds the actual error (e.g. a NameError traceback). An empty
+    digest means the command produced no meaningful output (a clean pass).
+    """
+    if not isinstance(exec_data, dict):
+        return "na"
+    msg = exec_data.get("message") or exec_data.get("detail") or ""
+    msg = re.sub(r'\s+', ' ', str(msg)).strip()
+    return msg[-200:]
+
+
+def detect_no_progress(outcomes: list[tuple[str, str]], window: int = NO_PROGRESS_WINDOW) -> bool:
+    """True when the last ``window`` shell runs share ONE goal AND produced
+    IDENTICAL (non-empty) output. Catches the "exit-0 but never makes progress"
+    loop that ``detect_repetitive_failure`` (which needs all-fail) misses — e.g.
+    a ``--selftest`` that crashes before printing GAME_OK yet still returns a
+    successful shell exit, so the agent re-runs it forever. The non-empty
+    requirement avoids flagging clean, repeated passes (empty output).
+    """
+    if len(outcomes) < window:
+        return False
+    last = outcomes[-window:]
+    if any(not out for _, out in last):
+        return False
+    goals = {g for g, _ in last}
+    outs = {o for _, o in last}
+    return len(goals) == 1 and len(outs) == 1
 
 
 _VERIFY_COMMAND_HINTS = (
@@ -1181,6 +1247,30 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         except Exception as e:
             log.warning(f"Failed to stream event: {e}")
 
+    async def _record_loop_probe(iter_num: int, goal: str, outcome: str, directive: str) -> None:
+        """Persist a structured, pullable record of a detected no-progress loop
+        to raven:mission:loopstate:{mission_id} so an operator (or Raven on a
+        resumed run) can inspect exactly what was looping and what the last error
+        was. Best-effort: failures are logged, never raised."""
+        if not mission_id:
+            return
+        try:
+            import json as _json
+            import time as _time
+            r = await _get_redis_cmd()
+            rec = {
+                "type": "loop_probe",
+                "iteration": iter_num,
+                "goal": goal,
+                "outcome_fingerprint": outcome,
+                "directive": directive,
+                "timestamp": _time.time(),
+            }
+            await r.rpush(f"raven:mission:loopstate:{mission_id}", _json.dumps(rec))
+            await r.expire(f"raven:mission:loopstate:{mission_id}", 86400)
+        except Exception as e:
+            log.warning(f"[AgentLoop] loop-probe record failed: {e}")
+
     # 0. Resolve the workspace this agentic mission runs in.
     # If the task assigned an existing workspace we use it; otherwise we resolve (or
     # fall back to) a workspace. Raven itself decides — via the WorkspaceCreateRequest
@@ -1311,11 +1401,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     #  * _recent_actions: (signature, succeeded) for stagnation detection.
     #  * _written_files / _verified_files: enforce lint/test before finishing.
     _recent_actions: list[tuple[str, bool]] = []
+    # (goal_sig, outcome_sig) for shell runs only — feeds detect_no_progress so
+    # exit-0 loops (e.g. a --selftest that crashes before printing GAME_OK) are
+    # caught even when the literal command string varies between iterations.
+    _recent_shell_runs: list[tuple[str, str]] = []
     _written_files: set[str] = set()
     _verified_files: set[str] = set()
     _verification_nudge_sent = False
     _stagnation_nudge_sent = False
     _loop_nudge_sent = False
+    _shell_loop_nudge_sent = False
     _consecutive_no_tool = 0
 
     # --- PLANNING PHASE ---
@@ -1752,6 +1847,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "diff": "gitoperationrequest",
                 "log": "gitoperationrequest",
                 "restart_service": "controlplanerequest",
+                "recall": "ravenrecallrequest",
+                "ravenrecall": "ravenrecallrequest",
+                "missionhistory": "ravenrecallrequest",
             }
             if short_action in action_map_aliases:
                 action_name = action_map_aliases[short_action]
@@ -1811,6 +1909,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     (r'.*entity.*search.*', "entitysearchrequest"),
                     (r'.*logbook.*', "logbookrequest"),
                     (r'.*execution.*log.*', "executionlogrequest"),
+                    (r'.*raven.*recall.*', "ravenrecallrequest"),
+                    (r'.*mission.*history.*', "ravenrecallrequest"),
                 ]
                 for pattern, target in regex_aliases:
                     if re.match(pattern, short_action):
@@ -2129,6 +2229,99 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         exec_data = {"status": "ERROR", "message": f"RavenBuildToolRequest failed: {_e}"}
                         _skip_post = True
 
+                # RavenRecallRequest: let Raven introspect its OWN mission history so
+                # it can self-diagnose loops (e.g. "I've run --selftest N times; what
+                # succeeded before and is the error identical?"). Reads the pullable
+                # raven:mission:history:{id} (and raven:mission:loopstate:{id}) we
+                # already write every step, returning a capped, scoped summary — never
+                # the raw firehose, which would blow the context window.
+                if lookup_action == "ravenrecallrequest" and isinstance(payload, dict):
+                    try:
+                        _rk = max(1, min(int(payload.get("limit") or 15), 50))
+                        _only = str(payload.get("only") or "").lower()
+                        _rid = payload.get("mission_id") or mission_id
+                        if not _rid:
+                            exec_data = {"status": "ERROR", "message": "RavenRecallRequest requires an active mission_id."}
+                        else:
+                            _rr = redis.from_url(REDIS_URL, decode_responses=True)
+                            _raw = await _rr.lrange(f"raven:mission:history:{_rid}", -60, -1)
+                            _recall_steps: list[dict] = []
+                            _recall_cur: dict | None = None
+                            for _ent in _raw:
+                                try:
+                                    _o = json.loads(_ent)
+                                except Exception:
+                                    continue
+                                _t = _o.get("type")
+                                _d = _o.get("data", "") or ""
+                                if _t == "action":
+                                    if _recall_cur:
+                                        _recall_steps.append(_recall_cur)
+                                    _recall_cur = {"tool": str(_d).replace("Executing Tool: ", "").strip()}
+                                elif _t == "action_payload":
+                                    try:
+                                        _p = json.loads(_d)
+                                    except Exception:
+                                        _p = {}
+                                    if not isinstance(_p, dict):
+                                        _p = {}
+                                    if _recall_cur is None:
+                                        _recall_cur = {}
+                                    if "command" in _p:
+                                        _recall_cur["command"] = _p["command"]
+                                    _fp = _p.get("file_path") or _p.get("path") or _p.get("relative_path")
+                                    if _fp:
+                                        _recall_cur["file"] = _fp
+                                    if "action" in _p:
+                                        _recall_cur["git_action"] = _p["action"]
+                                elif _t in ("result_success", "result_error"):
+                                    if _recall_cur is None:
+                                        _recall_cur = {}
+                                    _recall_cur["status"] = "ERROR" if _t == "result_error" else "SUCCESS"
+                                    _recall_cur["outcome"] = str(_d)[:300]
+                                    _recall_steps.append(_recall_cur)
+                                    _recall_cur = None
+                            if _recall_cur:
+                                _recall_steps.append(_recall_cur)
+                            if _only == "shell":
+                                _recall_steps = [s for s in _recall_steps if "command" in s or s.get("tool") == "workspaceshellrequest"]
+                            elif _only == "failed":
+                                _recall_steps = [s for s in _recall_steps if s.get("status") == "ERROR"]
+                            if _only == "loop":
+                                try:
+                                    _lp = await _rr.lrange(f"raven:mission:loopstate:{_rid}", -20, -1)
+                                    for _l in _lp:
+                                        try:
+                                            _lo = json.loads(_l)
+                                        except Exception:
+                                            continue
+                                        _recall_steps.insert(0, {
+                                            "tool": "LOOP_PROBE",
+                                            "status": "LOOP",
+                                            "outcome": _lo.get("directive", ""),
+                                            "goal": _lo.get("goal", ""),
+                                        })
+                                except Exception:
+                                    pass
+                            _recall_steps = _recall_steps[-_rk:]
+                            _summary = "\n".join(
+                                f"- {s.get('tool', '?')}"
+                                + (f" cmd={s['command']}" if s.get("command") else "")
+                                + (f" file={s['file']}" if s.get("file") else "")
+                                + f" -> {s.get('status', '?')}"
+                                + (f" | {s['outcome']}" if s.get("outcome") else "")
+                                for s in _recall_steps
+                            ) or "(no matching history)"
+                            exec_data = {
+                                "status": "SUCCESS",
+                                "message": f"Last {len(_recall_steps)} mission step(s){(' [' + _only + ']') if _only else ''}:\n{_summary}",
+                                "history": _recall_steps,
+                                "count": len(_recall_steps),
+                            }
+                    except Exception as _e:
+                        exec_data = {"status": "ERROR", "message": f"RavenRecallRequest failed: {_e}"}
+                    _skip_post = True
+
                 # GUARD: project missions start with NO assigned workspace. Block every
                 # workspace-scoped operation until Raven acquires a dedicated workspace via
                 # WorkspaceCreateRequest, so it never silently operates in the Default
@@ -2264,6 +2457,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         _recent_actions.append((sig, True))
                         if len(_recent_actions) > 12:
                             _recent_actions = _recent_actions[-12:]
+                        if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
+                            _recent_shell_runs.append(
+                                (normalize_shell_goal(str(payload.get("command", ""))),
+                                 outcome_digest(exec_data))
+                            )
+                            if len(_recent_shell_runs) > 16:
+                                _recent_shell_runs = _recent_shell_runs[-16:]
                         if lookup_action in ("workspacefilewriterequest", "workspacefilepatchrequest") \
                                 and isinstance(payload, dict):
                             fp = payload.get("file_path") or payload.get("path", "")
@@ -2278,6 +2478,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         _recent_actions.append((sig, False))
                         if len(_recent_actions) > 12:
                             _recent_actions = _recent_actions[-12:]
+                        if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
+                            _recent_shell_runs.append(
+                                (normalize_shell_goal(str(payload.get("command", ""))),
+                                 outcome_digest(exec_data))
+                            )
+                            if len(_recent_shell_runs) > 16:
+                                _recent_shell_runs = _recent_shell_runs[-16:]
 
                         # --- POST-WRITE LINT HOOK ---
                         lintable_actions = {"workspacefilewriterequest", "workspacefilepatchrequest"}
@@ -2338,6 +2545,37 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             else:
                 log.error("[AgentLoop] Action loop persists after nudge. Terminating.")
                 ans = "ERROR: Detected an infinite loop (same action repeated). Aborting to avoid runaway."
+                await _clear_checkpoint()
+                break
+
+        # --- NO-PROGRESS DETECTION (exit-0 selftest/build loops) ---
+        # Catches an agent re-running the same command and getting IDENTICAL
+        # output (e.g. a --selftest that crashes before printing GAME_OK but
+        # still exits 0). detect_repetitive_failure needs all-fail and
+        # detect_repetitive_action needs the identical literal command, so
+        # neither fires here. On first catch we PROBE: inject a directive that
+        # forces Raven to read the error + source and make a DISTINCT fix
+        # (and persist a pullable loop_probe record); on a second catch we abort.
+        if detect_no_progress(_recent_shell_runs, window=NO_PROGRESS_WINDOW):
+            _np_goal = _recent_shell_runs[-1][0]
+            _np_out = _recent_shell_runs[-1][1]
+            if not _shell_loop_nudge_sent:
+                _shell_loop_nudge_sent = True
+                _np_directive = (
+                    f"ITERATION {iter_num}: LOOP PROBE — you have run the same command "
+                    f"({_np_goal[:90]!r}) {NO_PROGRESS_WINDOW} times and the output has not "
+                    f"changed (fingerprint: {_np_out[:60]!r}). Re-running it will NOT help. "
+                    f"STOP and diagnose: use RavenRecallRequest (only='shell' or only='failed') "
+                    f"to inspect prior runs, READ the source file involved and the captured "
+                    f"error above, identify the root cause, and make a DISTINCT fix — not "
+                    f"another identical run."
+                )
+                action_log.append(_np_directive)
+                log.warning(f"[AgentLoop] No-progress loop detected (goal={_np_goal[:90]}); probing.")
+                await _record_loop_probe(iter_num, _np_goal, _np_out, _np_directive)
+            else:
+                log.error("[AgentLoop] No-progress loop persists after probe. Terminating.")
+                ans = "ERROR: Detected a no-progress loop (same command repeated with identical output despite a probe). Aborting to avoid runaway."
                 await _clear_checkpoint()
                 break
 
