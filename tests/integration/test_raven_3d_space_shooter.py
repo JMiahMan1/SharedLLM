@@ -55,19 +55,19 @@ pytestmark = [
 
 # (lang, human language, stack, local build cmd, local selftest cmd, is_web)
 LANGUAGES = [
-    ("python", "Python", "raylib (Python 3D window)",
+    ("python", "Python", "pygame (SDL2; headless via SDL_VIDEODRIVER=dummy)",
      "pip install -r requirements.txt",
-     "xvfb-run -a python main.py --selftest", False),
-    ("javascript", "JavaScript", "Three.js + Vite (WebGL browser)",
+     "SDL_VIDEODRIVER=dummy python main.py --selftest", False),
+    ("javascript", "JavaScript", "Three.js + Vite (WebGL, runs in browser)",
      "npm install && npm run build",
      "npm run selftest", True),
-    ("typescript", "TypeScript", "Three.js + Vite (WebGL browser)",
+    ("typescript", "TypeScript", "Three.js + Vite (WebGL, runs in browser)",
      "npm install && npm run build",
      "npm run selftest", True),
-    ("go", "Go", "raylib-go (native 3D window)",
+    ("go", "Go", "raylib-go (native 3D, GLFW/Wayland)",
      "go mod download && go build ./...",
      "xvfb-run -a go run . --selftest", False),
-    ("rust", "Rust", "Bevy (or raylib-rs) native 3D",
+    ("rust", "Rust", "Bevy (wgpu/Wayland) or raylib-rs native 3D",
      "cargo build",
      "xvfb-run -a cargo run -- --selftest", False),
 ]
@@ -82,84 +82,50 @@ def _repo_name(lang: str) -> str:
 # ---------------------------------------------------------------------------
 # Well-formed chat prompt. The query carries an autonomy signal ("Raven, ...")
 # so the gateway routes it to the autonomous AgentLoop (which uses tools to do
-# all the work). The full game/CI spec lives here; Raven writes everything.
+# all the work). Raven writes the game, repo, CI and docs; the test only checks
+# the observable result (repo + Linux CI that prints GAME_OK + shipped binary).
 # ---------------------------------------------------------------------------
 def mission_prompt(lang: str, human: str, stack: str) -> str:
-    return f"""Raven, build a complete, fun, playable 3D SPACE SHOOTER game in {human} using {stack}.
-Project name: "Starfall". You have a workspace, a shell, file tools, the `gh` CLI, and git.
+    return f"""Raven, build a complete, fun, playable 3D SPACE SHOOTER called "Starfall" in {human} using {stack}.
 
-CRITICAL EXECUTION ORDER - perform these steps IN ORDER and do NOT skip ahead or loop on a single file:
-Step 0: WorkspaceCreateRequest with id `raven-3d-shooter-{lang}` + a display_name. Capture the returned `workspace_id` and pass it as `workspace_id` to EVERY later WorkspaceFileWriteRequest / WorkspaceShellRequest / WorkspaceSettingsUpdateRequest. NEVER use the Default Workspace.
-Step 1: `gh repo create raven-3d-shooter-{lang} --private -d "Starfall 3D space shooter ({human})" 2>&1 || echo REPO_EXISTS`. If REPO_EXISTS, `gh repo clone raven-3d-shooter-{lang} .` (or `git clone <url> .`) inside the workspace.
-Step 2: Write these files ONCE (WorkspaceFileWriteRequest, workspace_id set): requirements.txt, main.py, README.md, and .github/workflows/build.yml (rules below). main.py's FIRST line MUST be exactly `#!/usr/bin/env python3` then a docstring, then code - never code before the shebang. Keep main.py <= 400 lines. Write each file exactly once.
-Step 3 - PUSH FIRST (mandatory; do this before any polishing): `git init` (if needed) -> `git add -A` -> `git commit -m "Initial Starfall ({human})"` -> `git push -u origin HEAD` (use `git push --force` ONLY if a plain push is rejected). You MUST reach a successful `git push` before doing anything else. Do not proceed past Step 3 until `git push` reports the branch was pushed.
-Step 4: ONLY after the push succeeds, run the headless self-test and confirm `GAME_OK`. If it fails, FIX the bug with a NEW WorkspaceFileWrite (overwrite the file) + a NEW `git commit` + `git push`. You may overwrite main.py at most ONE more time (never more than twice total).
-Step 5: FINAL VERIFICATION - `gh repo view raven-3d-shooter-{lang}` and confirm your files are on GitHub. Only then report done. If push/verify fails, keep retrying the git steps. Do NOT claim success otherwise.
+Do 100% of the work yourself — you have a workspace, a shell, file tools, the `gh` CLI and git.
 
-You may ONLY push to raven-3d-shooter-{lang}. Never push elsewhere.
+Execution order:
+1. Create a dedicated workspace with id `raven-3d-shooter-{lang}` + a display_name. Use its
+   `workspace_id` for EVERY file/shell/git call. NEVER use the Default Workspace.
+2. `gh repo create raven-3d-shooter-{lang} --private -d "Starfall 3D space shooter ({human})"`.
+   If it already exists, `gh repo clone raven-3d-shooter-{lang} .` and overwrite all project files.
+3. Write the game, a README.md (install/run/controls), and `.github/workflows/build.yml`.
+   Commit and push (only to this repo).
+4. Verify with `gh repo view raven-3d-shooter-{lang}` that everything is on GitHub before done.
 
-=== GAME DESIGN (implement every item) ===
-- 3D perspective camera that follows the player ship.
-- Player ship near the bottom; moves on a 2D plane with WASD or arrow keys.
-- An endless starfield / asteroid field scrolls toward the player (real 3D meshes moving along Z).
-- Enemy drones spawn at random X and fly toward the player. The player shoots projectiles with
-  SPACE or left-click; projectiles travel forward and destroy enemies on collision.
-- Score increases per kill; show a HUD (score + lives) as on-screen text.
-- Player has 3 lives; losing all shows a GAME OVER screen with "PRESS R TO RESTART". R restarts.
-- Use lighting and at least one 3D mesh type (cube/cone/sphere) for ship, enemies, projectiles, asteroids.
-- It must actually run: `python main.py` / `npm run dev` / `go run .` / `cargo run`.
+Game design (implement all):
+- 3D perspective camera follows the player ship; player moves on a 2D plane (WASD/arrows).
+- Endless starfield/asteroid field scrolling in 3D; enemy drones spawn and approach the player.
+- Fire with SPACE/click; projectiles destroy enemies on collision; score + lives HUD.
+- 3 lives; GAME OVER with "PRESS R TO RESTART" (R restarts).
+- Lighting + 3D meshes (cube/cone/sphere) for ship, enemies, projectiles, asteroids.
 
-=== REQUIRED HEADLESS SELF-TEST (for automated grading) ===
-- Support a `--selftest` flag (or `SELFTEST=1`). When set, run the simulation update loop for ~120
-  frames with NO user input and NO visible window (hidden/minimized or headless), then print EXACTLY
-  the line `GAME_OK` to stdout and exit 0. Never require a display for selftest.
-  - Python: use `pygame` and set `SDL_VIDEODRIVER=dummy` (no raylib needed) so it runs
-    headless; exit after ~120 frames. For other languages use the native 3D lib.
-- CRITICAL SELFTEST RULE (do not violate): Your `run_selftest()` function MUST NOT call any
-  windowing or input functions - this includes `InitWindow`, `BeginDrawing`, `EndDrawing`,
-  `BeginMode3D`, `EndMode3D`, `IsKeyDown`, `IsKeyPressed`, `IsMouseButtonDown`, or any raylib/pygame
-  input/poll function. It must ONLY run your pure game-logic `update()` step (movement, enemy/asteroid
-  spawning, bullet motion, collisions, scoring, lives) using FIXED/synthetic input values, then
-  `print("GAME_OK")` and `sys.exit(0)`. Importing your rendering library at module load is fine, but
-  the selftest code path must never touch the display or keyboard. If `run_selftest` references an
-  undefined input symbol (e.g. `IsKeyDown`) it will crash with NameError and never print GAME_OK.
-- Do NOT write exploratory/probe scripts (e.g. `_explore.py`) to discover the API - write the game
-  directly against the `raylib` Python package. Add a README.md with controls + how to run/build/selftest.
+Headless self-test (automated grading):
+- Support `--selftest` (or `SELFTEST=1`): run the PURE game-logic update loop for ~120 frames with
+  synthetic input and NO window, print EXACTLY `GAME_OK`, exit 0. The selftest must NOT open a window
+  or read input (no {stack} window/init/input calls) — only your update/movement/collision/scoring
+  logic, then `print("GAME_OK")`. Module-level imports of the render lib are fine.
 
-=== REQUIRED WORKSPACE (critical - do this FIRST) ===
-- Your VERY FIRST action must be `WorkspaceCreateRequest` with a unique id derived
-   from the project (e.g. `raven-3d-shooter-{lang}`) and a `display_name`.
-   This workspace id should match the repository name you will create next.
-  Capture the returned `workspace_id` and pass it as `workspace_id` in EVERY following
-  `WorkspaceFileWriteRequest`, `WorkspaceShellRequest`, and `WorkspaceSettingsUpdateRequest`.
-  NEVER operate in the Default Workspace - it is reserved for system maintenance only.
-  (This is protocol Step 0; the gateway will reject file/shell/git operations until you
-  have acquired a dedicated workspace.)
+Platform + packaging (important):
+- It MUST run on modern Linux with Wayland (e.g. Fedora 42). Python: `SDL_VIDEODRIVER=wayland` (or
+  dummy); native builds: rely on GLFW/winit Wayland support; web: any browser.
+- Ship an easy run path: a single binary for Go/Rust (`go build` / `cargo build --release`),
+  `pip install -r requirements.txt && python main.py` for Python, `npm install && npm run dev` for
+  web. Document it clearly in README.md.
+- Linux CI (`.github/workflows/build.yml`, `runs-on: ubuntu-latest`): install the {human} toolchain
+  AND required system libs (xvfb, libgl1-mesa-dev, libglu1-mesa-dev, pkg-config), build, run the
+  headless `--selftest` (fail the job if stdout lacks `GAME_OK`), then do a short real-launch smoke
+  test (run the game headless a few seconds and confirm it starts/renders without crashing) to catch
+  runtime errors the logic-only selftest misses.
 
-=== REQUIRED REPOSITORY + LINUX CI (critical) ===
-- Create a NEW GitHub repository named `{_repo_name(lang)}` using the `gh` CLI FROM INSIDE
-  the dedicated workspace you just created:
-  `gh repo create {_repo_name(lang)} --private -d "Starfall 3D space shooter ({human})"`
-- If `gh repo create` reports the repository ALREADY exists (e.g. a prior
-  run left an empty shell or a previous build), do NOT fail and do NOT create a different
-  repo: instead `cd` into your workspace and `gh repo clone {_repo_name(lang)} .`
-  (or `git clone <url> .`), overwrite all project files with your new build, then
-  `git add -A && git commit -m "Initial Starfall ({human})" && git push -u origin HEAD`
-  (use `git push --force` ONLY if a plain push is rejected by the remote).
-- Add a GitHub Actions workflow at `.github/workflows/build.yml` that builds AND TESTS the
-  game on Linux: it MUST use `runs-on: ubuntu-latest`. Steps: checkout, install the
-  {human} toolchain, install a headless display (`sudo apt-get update && sudo apt-get install -y xvfb`
-  for native builds), build/compile, then run the self-test and FAIL the job if stdout lacks `GAME_OK`
-  (e.g. for native Python: `xvfb-run -a python main.py --selftest | tee selftest.log &&
-  grep -q GAME_OK selftest.log`).
-- Initialize git (if needed), add ALL files, commit, and push to the created repo:
-  `git remote add origin <repo-url-from-gh>`, `git add -A`,
-  `git commit -m "Initial Starfall ({human})"`, `git push -u origin HEAD`.
-- You may ONLY ever push to the repository you just created. Never push to any other repository.
-- FINAL VERIFICATION (do not report done until this passes): after pushing, run
-  `gh repo view {_repo_name(lang)}` and `git -C . ls-files` to confirm your files are on
-  GitHub. Only then report the mission complete. If the push or verification fails, keep
-  retrying the git steps - do NOT claim success.
+For web (Three.js): provide a headless self-test that exercises the game logic and prints `GAME_OK`
+(e.g. a node script or headless-browser run), and have CI fail if `GAME_OK` is absent.
 
 Deliver ONE self-contained, working project with no TODOs or placeholders.
 """
@@ -390,25 +356,28 @@ def run_one(lang: str, human: str, stack: str, build_cmd: str, selftest_cmd: str
         out["errors"].append("no --selftest entry found in repo")
         return out
 
-    # 4) Optional: clone + build + headless self-test on the runner.
+    # 4) Best-effort LOCAL clone + build + headless self-test. This is a bonus
+    #    verification only — it is SKIPPED (not fatal) when the language toolchain
+    #    or a display is unavailable on the test runner. The authoritative gate is
+    #    the GitHub Actions CI run in step 5, which needs no local toolchain.
     clone = _run_local(f"rm -rf /tmp/{repo} && gh repo clone {repo} /tmp/{repo}", timeout=120)
-    if clone["returncode"] != 0:
-        out["skipped"] = f"could not clone {repo} to verify build locally"
-        return out
-    build = _run_local(build_cmd, cwd=f"/tmp/{repo}", timeout=900)
-    if build["returncode"] != 0:
-        out["skipped"] = f"build/toolchain for {human} unavailable on runner; repo+CI verified"
-        return out
-    run = _run_local(selftest_cmd, cwd=f"/tmp/{repo}", timeout=900)
-    if "GAME_OK" not in run.get("stdout", ""):
-        out["errors"].append(f"self-test did not print GAME_OK: {run}")
-        return out
-    out["selftest"] = "ok"
+    if clone["returncode"] == 0:
+        build = _run_local(build_cmd, cwd=f"/tmp/{repo}", timeout=900)
+        if build["returncode"] == 0:
+            run = _run_local(selftest_cmd, cwd=f"/tmp/{repo}", timeout=900)
+            if "GAME_OK" in run.get("stdout", ""):
+                out["selftest"] = "ok (local)"
+            else:
+                out["local_note"] = "local self-test did not print GAME_OK (CI is authoritative)"
+        else:
+            out["local_note"] = f"build/toolchain for {human} unavailable on runner"
+    else:
+        out["local_note"] = f"could not clone {repo} locally"
 
     # 5) Authoritative: the GitHub Actions CI run MUST pass (build + selftest
     #    prints GAME_OK). This is the real "tested and working" gate - Raven's
     #    own workflow proves the game builds and runs on Linux, not just that
-    #    files exist.
+    #    files exist. It runs regardless of local toolchain availability.
     ci = _gh_run_check(repo)
     if ci.get("status") != "completed":
         out["errors"].append(f"CI run never completed: {ci}")
