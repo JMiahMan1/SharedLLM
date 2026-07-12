@@ -461,10 +461,8 @@ class RavenWorker:
                                     r_kill = redis.from_url(REDIS_URL, decode_responses=True)
                                     pubsub = r_kill.pubsub()
                                     await pubsub.subscribe(f"raven:mission:kill:{mid}")
-                                    log.warning(f"[DEBUG] kill_monitor subscribed to raven:mission:kill:{mid}")
                                     try:
                                         async for message in pubsub.listen():
-                                            log.warning(f"[DEBUG] kill_monitor msg mid={mid} type={message.get('type')} data={message.get('data')!r}")
                                             if message["type"] == "message" and message["data"] == "KILL":
                                                 log.warning(f"[Worker] KILL SIGNAL RECEIVED for mission {mid}. Cancelling task.")
                                                 task_to_cancel.cancel()
@@ -476,17 +474,8 @@ class RavenWorker:
 
                             try:
                                 ans = await orchestration_task
-                            except asyncio.CancelledError as _ce:
-                                import traceback as _tb
-                                km_state = kill_monitor.done() if kill_monitor else "no-monitor"
-                                km_exc = None
-                                if kill_monitor and kill_monitor.done():
-                                    km_exc = kill_monitor.exception() if not kill_monitor.cancelled() else "cancelled"
-                                log.warning(
-                                    f"[Worker] Orchestration for mission {mission_id} was CANCELLED. "
-                                    f"kill_monitor={km_state} kill_monitor_exc={km_exc!r}"
-                                )
-                                log.warning(f"[DEBUG] cancel traceback:\n{''.join(_tb.format_exception(type(_ce), _ce, _ce.__traceback__))}")
+                            except asyncio.CancelledError:
+                                log.warning(f"[Worker] Orchestration for mission {mission_id} was CANCELLED.")
                                 ans = "Mission aborted by user."
                             finally:
                                 if kill_monitor:
