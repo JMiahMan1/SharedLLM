@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { useWidgetData } from '../../hooks/useWidgetData';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
-import { integrationMeta } from '../calendar/integrationMeta';
+import { calendarColor, calendarLabel } from '../calendar/calendarMeta';
 import type { CalendarEvent, IWidgetProps } from '../../types/widget';
 
 interface ParsedEvent {
@@ -11,6 +11,7 @@ interface ParsedEvent {
   end_time?: string;
   location?: string;
   integration?: string;
+  calendar?: string;
   startHour: number;
   startMinute: number;
   isToday: boolean;
@@ -28,6 +29,7 @@ const parseEvent = (event: CalendarEvent): ParsedEvent => {
     end_time: event.end_time,
     location: event.location,
     integration: event.integration,
+    calendar: event.calendar,
     startHour: start.getHours(),
     startMinute: start.getMinutes(),
     isToday,
@@ -157,9 +159,12 @@ const formatRelativeTime = (date: Date): string => {
                 <div className="flex items-center gap-2">
                   <span
                     className="inline-block h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: integrationMeta(event.integration).color }}
-                    title={integrationMeta(event.integration).label}
+                    style={{ backgroundColor: calendarColor(event.calendar) }}
+                    title={calendarLabel(event.calendar)}
                   />
+                  <span className="text-[10px] font-semibold truncate" style={{ color: calendarColor(event.calendar) }}>
+                    {calendarLabel(event.calendar)}
+                  </span>
                   <p className={`text-sm font-semibold truncate ${isVerySoon ? 'text-amber-300' : 'text-white'}`}>
                     {event.summary}
                   </p>

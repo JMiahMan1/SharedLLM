@@ -15,6 +15,7 @@ import Modal from '../../components/ui/Modal';
 import { useDarkModeSync } from '../../hooks/useDarkModeSync';
 import { api } from '../../services/api';
 import { integrationMeta } from './integrationMeta';
+import { calendarColor, calendarLabel } from './calendarMeta';
 import type { CalendarEvent } from '../../types/widget';
 import type { ExecutionResponse } from '../../services/api';
 
@@ -140,8 +141,7 @@ const DARK_VARS = `
 
 // ─── Warm EventCard ──────────────────────────────────────────────────────────
 const EventCard = ({ ev, size = 'md', onSelect }: { ev: CalendarEvent; size?: 'md' | 'lg'; onSelect?: (ev: CalendarEvent) => void }) => {
-  const meta = integrationMeta(ev.integration);
-  const color = meta.color;
+  const color = calendarColor(ev.calendar);
   const allDay = isAllDay(ev);
   if (allDay) {
     return (
@@ -152,6 +152,7 @@ const EventCard = ({ ev, size = 'md', onSelect }: { ev: CalendarEvent; size?: 'm
         style={{ backgroundColor: color, color: textOn(color) }}
       >
         <span className="truncate">{ev.summary}</span>
+        <span className="mt-0.5 block truncate text-[11px] font-semibold opacity-80">{calendarLabel(ev.calendar)}</span>
       </button>
     );
   }
@@ -161,13 +162,14 @@ const EventCard = ({ ev, size = 'md', onSelect }: { ev: CalendarEvent; size?: 'm
         onClick={() => onSelect?.(ev)}
         className={`relative w-full text-left overflow-hidden shadow-[0_1px_3px_rgba(72,60,38,0.07),0_10px_28px_-10px_rgba(72,60,38,0.16)] ${size === 'lg' ? 'rounded-2xl py-4 pr-4 pl-5' : 'rounded-xl py-2 pr-3 pl-4'}`}
         style={{ backgroundColor: 'var(--os-card)' }}
-        title={integrationMeta(ev.integration).label}
+        title={calendarLabel(ev.calendar)}
       >
       <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: color }} aria-hidden="true" />
       <div className="flex items-center gap-1.5">
         <span className={`font-extrabold ${size === 'lg' ? 'text-base' : 'text-[13px]'}`} style={{ color }}>{formatTime(ev.start_time)}</span>
       </div>
       <div className={`truncate font-bold ${size === 'lg' ? 'text-xl' : 'text-[15px]'}`} style={{ color: 'var(--os-ink)' }}>{ev.summary}</div>
+      <div className="text-[11px] font-semibold" style={{ color }}>{calendarLabel(ev.calendar)}</div>
       {size === 'lg' && ev.location && (
         <div className="mt-1 flex items-center gap-1 text-sm font-semibold" style={{ color: 'var(--os-ink-soft)' }}>
           <MapPin size={14} />
@@ -224,8 +226,9 @@ const EditEventModal = ({ event, onClose }: { event: CalendarEvent; onClose: () 
     <Modal isOpen={true} onClose={onClose} title="Edit Event" size="md">
       <div className="space-y-4">
         <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--os-ink-soft)' }}>
-          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: meta.color }} />
+          <span className="h-3 w-3 rounded-full" style={{ backgroundColor: calendarColor(event.calendar) }} />
           {meta.label}
+          <span className="font-semibold" style={{ color: calendarColor(event.calendar) }}>· {calendarLabel(event.calendar)}</span>
         </div>
         <div>
           <label className="mb-1 block text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-soft)' }}>Title</label>
@@ -562,11 +565,11 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
                   <span className={`mb-1 flex h-8 w-8 items-center justify-center rounded-full os-display text-lg ${isToday ? 'text-[#fffdf8]' : inMonth ? 'text-[#34302a]' : 'text-[#a89f8d]'}`} style={isToday ? todayNum : { color: inMonth ? 'var(--os-ink)' : 'var(--os-ink-faint)' }}>{day.getDate()}</span>
                   <span className="flex min-h-0 flex-col gap-1 overflow-hidden">
                     {evs.slice(0, 3).map((ev, idx) => {
-                      const meta = integrationMeta(ev.integration);
                       const ad = isAllDay(ev);
+                      const c = calendarColor(ev.calendar);
                       return (
-                        <span key={idx} role="button" tabIndex={0} onClick={() => setEditing(ev)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(ev); } }} className={`relative cursor-pointer truncate overflow-hidden rounded-md py-0.5 pl-2.5 pr-1.5 text-xs font-bold ${ad ? '' : ''}`} style={ad ? { background: meta.color, color: textOn(meta.color) } : { background: 'transparent', color: 'var(--os-ink)' }}>
-                          {!ad && <span className="pointer-events-none absolute inset-y-0 left-0 w-1" style={{ backgroundColor: meta.color }} aria-hidden="true" />}
+                        <span key={idx} role="button" tabIndex={0} onClick={() => setEditing(ev)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(ev); } }} title={calendarLabel(ev.calendar)} className={`relative cursor-pointer truncate overflow-hidden rounded-md py-0.5 pl-2.5 pr-1.5 text-xs font-bold ${ad ? '' : ''}`} style={ad ? { background: c, color: textOn(c) } : { background: 'transparent', color: 'var(--os-ink)' }}>
+                          {!ad && <span className="pointer-events-none absolute inset-y-0 left-0 w-1" style={{ backgroundColor: c }} aria-hidden="true" />}
                           <span className="truncate">{ev.summary}</span>
                         </span>
                       );
