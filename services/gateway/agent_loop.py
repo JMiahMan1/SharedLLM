@@ -770,10 +770,12 @@ async def execute_inference_with_kill(
     )
 
     async def _kill_watch() -> None:
+        cmd = await _get_redis_cmd()
         while not inf_task.done():
             try:
+                raw = await cmd.get(f"raven:mission:kill:{mission_id}")
                 if await _is_kill_flag_set(mission_id):
-                    log.warning(f"[AgentLoop] KILL flag detected for mission {mission_id} during inference — cancelling stream.")
+                    log.warning(f"[AgentLoop] KILL flag detected (raw={raw!r}) for mission {mission_id} during inference — cancelling stream.")
                     inf_task.cancel()
                     return
             except Exception:
