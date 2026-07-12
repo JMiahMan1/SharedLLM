@@ -1775,10 +1775,23 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         log.warning(f"[AgentLoop] Unverified writes {unverified}; nudging for lint/test before finish.")
                         action_log.append(
                             f"ITERATION {iter_num}: You changed files ({', '.join(unverified)}) "
-                            f"but have NOT run lint/test on them. Before finishing, run the "
-                            f"language-appropriate linter/tests (e.g. ruff + pytest for Python, "
-                            f"eslint for JS/TS) and cite the results. Do not consider the mission "
-                            f"complete until verification passes."
+                            f"but have NOT verified them. Before finishing, run the standard STATIC CHECK "
+                            f"for the language you wrote and confirm it PASSES — do NOT consider the "
+                            f"mission complete until it is clean:\n"
+                            f"  - Python:        `ruff check .` (+ `python -m pyflakes .`). Fix EVERY issue, "
+                            f"especially `F821`/`F405` 'undefined name' — that almost always means a MISSING "
+                            f"IMPORT (add `from raylib import *` / `import raylib as rl`, or the right module). "
+                            f"A static check catches these WITHOUT running the program; a runtime NameError "
+                            f"means you shipped broken code.\n"
+                            f"  - JS/TS:         `eslint .` (TS also: `tsc --noEmit`).\n"
+                            f"  - Shell:         `shellcheck`.\n"
+                            f"  - Go:            `gofmt -l .` + `go vet ./...`.\n"
+                            f"  - Rust:          `rustfmt --check` (+ `cargo check`).\n"
+                            f"  - C/C++:         `gcc -fsyntax-only` / `g++ -fsyntax-only`.\n"
+                            f"  - Java:          `javac -d /dev/null File.java`.\n"
+                            f"  - Ruby/Lua/PHP:  `ruby -c` / `luac -p` / `php -l`.\n"
+                            f"  - JSON/YAML:     `python -m json.tool` / `yamllint`.\n"
+                            f"Then run the real test/selftest (e.g. `pytest`, `npm test`, `--selftest`)."
                         )
                         continue
                 # The mission is multi-step; a plan-as-text reply is NOT "done".
@@ -2449,8 +2462,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         action_log.append(f"Step {iter_num}: {action} -> {short_msg} | {detail.strip()[:300]}")
                     else:
                         action_log.append(f"Step {iter_num}: {action} -> {short_msg}")
-                    # Track successful tool executions (non-ERROR responses)
-                    if isinstance(exec_data, dict) and exec_data.get("status") != "ERROR":
+                    # Track successful tool executions (non-ERROR responses).
+                    # NOTE: "LINT_ERRORS" is NOT a success — a file that fails the
+                    # post-write lint (e.g. ruff F821 undefined name, syntax error)
+                    # must NOT be counted as a verified/completed step, otherwise
+                    # Raven can push code that a static checker would have caught
+                    # instantly. Treating LINT_ERRORS as a failure keeps the
+                    # verification gate real.
+                    if isinstance(exec_data, dict) and exec_data.get("status") not in ("ERROR", "LINT_ERRORS"):
                         successful_tool_calls += 1
                         _consecutive_no_tool = 0
                         sig = action_signature(action_name, payload)

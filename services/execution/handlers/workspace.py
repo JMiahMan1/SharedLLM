@@ -688,6 +688,19 @@ async def handle_workspace_lint(req) -> ExecutionResult:
             except FileNotFoundError:
                 return -1, "", f"Tool not found: {cmd[0]}"
 
+        async def _lint_step(tool, args, label=None):
+            """Run one linter. Returns True if the tool was actually present.
+            A MISSING tool is skipped (not counted as a failure) so the gate only
+            fails on genuinely reported issues, never on a missing binary."""
+            rc, out, err = await _run([tool, *args, str(abs_path)])
+            if rc == -1 and "Tool not found" in err:
+                return False
+            results.append({"tool": label or tool, "returncode": rc, "output": out or err})
+            if rc != 0:
+                nonlocal passed
+                passed = False
+            return True
+
         # ── Python ───────────────────────────────────────────────────────────
         if ext == ".py" or forced in ("ruff", "black", "flake8", "python"):
             # Syntax check first — catches malformed files (missing imports, broken syntax)
@@ -699,32 +712,74 @@ async def handle_workspace_lint(req) -> ExecutionResult:
                 passed = False
             else:
                 # Ruff: fast modern linter + formatter (replaces flake8, black, isort)
-                rc, out, err = await _run(["ruff", "check", str(abs_path)])
-                results.append({"tool": "ruff", "returncode": rc, "output": out or err})
-                if rc != 0:
-                    passed = False
+                await _lint_step("ruff", ["check"])
+                # Pyflakes as a second opinion for undefined names (F821/F405)
+                await _lint_step("python3", ["-m", "pyflakes"])
 
         # ── JavaScript / TypeScript ───────────────────────────────────────────
         elif ext in (".js", ".ts", ".jsx", ".tsx", ".mjs") or forced == "eslint":
             fix_flag = ["--fix"] if req.fix else []
-            rc, out, err = await _run(["eslint"] + fix_flag + [str(abs_path)])
-            results.append({"tool": "eslint", "returncode": rc, "output": out or err})
-            if rc != 0:
-                passed = False
+            await _lint_step("eslint", fix_flag)
+            if ext in (".ts", ".tsx") and not req.fix:
+                # tsc type-check (no emit) catches undefined names in TS too
+                await _lint_step("tsc", ["--noEmit", "--skipLibCheck"])
+
+        # ── Shell ─────────────────────────────────────────────────────────────
+        elif ext in (".sh", ".bash") or forced == "shellcheck":
+            await _lint_step("shellcheck", ["-S", "error"])
+
+        # ── Go ────────────────────────────────────────────────────────────────
+        elif ext == ".go" or forced == "go":
+            # gofmt -l exits 0 but prints unformatted files => treat output as failure
+            rc, out, err = await _run(["gofmt", "-l", str(abs_path)])
+            if not (rc == -1 and "Tool not found" in err):
+                results.append({"tool": "gofmt", "returncode": rc, "output": out or err})
+                if out.strip():
+                    passed = False
+            # go vet catches undefined symbols; skip if there's no module context
+            rc, out, err = await _run(["go", "vet", "./..."])
+            if not (rc == -1 and "Tool not found" in err) and "go.mod" not in err and "no Go files" not in err:
+                results.append({"tool": "go vet", "returncode": rc, "output": out or err})
+                if rc != 0:
+                    passed = False
+
+        # ── Rust ──────────────────────────────────────────────────────────────
+        elif ext == ".rs" or forced == "rust":
+            await _lint_step("rustfmt", ["--check", "--edition", "2021"])
+
+        # ── C / C++ ───────────────────────────────────────────────────────────
+        elif ext in (".c", ".h", ".cpp", ".cc", ".cxx", ".hpp") or forced in ("gcc", "clang"):
+            cc = "g++" if ext in (".cpp", ".cc", ".cxx", ".hpp") else "gcc"
+            await _lint_step(cc, ["-fsyntax-only"])
+            await _lint_step("clang", ["-fsyntax-only"])
+
+        # ── Java ──────────────────────────────────────────────────────────────
+        elif ext == ".java" or forced == "java":
+            await _lint_step("javac", ["-d", "/dev/null"])
+
+        # ── Ruby ──────────────────────────────────────────────────────────────
+        elif ext == ".rb" or forced == "ruby":
+            await _lint_step("ruby", ["-c"])
+
+        # ── Lua ───────────────────────────────────────────────────────────────
+        elif ext == ".lua" or forced == "lua":
+            await _lint_step("luac", ["-p"])
+
+        # ── PHP ───────────────────────────────────────────────────────────────
+        elif ext == ".php" or forced == "php":
+            await _lint_step("php", ["-l"])
 
         # ── JSON ─────────────────────────────────────────────────────────────
         elif ext == ".json" or forced == "json":
-            rc, out, err = await _run(["python3", "-m", "json.tool", str(abs_path)])
-            results.append({"tool": "json.tool", "returncode": rc, "output": out or err})
-            if rc != 0:
-                passed = False
+            await _lint_step("python3", ["-m", "json.tool"])
 
         # ── YAML ─────────────────────────────────────────────────────────────
         elif ext in (".yaml", ".yml") or forced == "yamllint":
-            rc, out, err = await _run(["yamllint", "-d", "relaxed", str(abs_path)])
-            results.append({"tool": "yamllint", "returncode": rc, "output": out or err})
-            if rc != 0:
-                passed = False
+            await _lint_step("yamllint", ["-d", "relaxed"])
+
+        # ── Dockerfile ────────────────────────────────────────────────────────
+        elif os.path.basename(req.path) == "Dockerfile" or forced == "hadolint":
+            await _lint_step("hadolint", [])
 
         else:
             return _ok(f"No linter configured for {ext} files — skipping.", {"path": req.path, "skipped": True})
