@@ -321,8 +321,13 @@ class RavenWorker:
                 return
 
             list_text = await list_resp.text()
-            list_json = json.loads(list_text) if list_text else {}
-            rooms = list_json.get("detail", {}).get("conversations", [])
+            try:
+                list_json = json.loads(list_text) if list_text else {}
+            except Exception:
+                list_json = {}
+            if not isinstance(list_json, dict):
+                list_json = {}
+            rooms = (list_json.get("detail") or {}).get("conversations", [])
             for room in rooms:
                 token = room["token"]
 
@@ -335,8 +340,13 @@ class RavenWorker:
                     continue
 
                 msg_text = await msg_resp.text()
-                msg_json = json.loads(msg_text) if msg_text else {}
-                messages = msg_json.get("detail", {}).get("messages", [])
+                try:
+                    msg_json = json.loads(msg_text) if msg_text else {}
+                except Exception:
+                    msg_json = {}
+                if not isinstance(msg_json, dict):
+                    msg_json = {}
+                messages = (msg_json.get("detail") or {}).get("messages", [])
                 if not messages:
                     continue
 

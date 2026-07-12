@@ -4,6 +4,7 @@ import contextlib
 import json
 import logging
 import re
+import shlex
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime
@@ -1204,11 +1205,66 @@ async def _is_blocked_for_repo(
     return True
 
 
-async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials) -> None:
+def _extract_repo_name_from_cmd(cmd: str | None) -> str | None:
+    """Extract the repository name from a ``gh repo create <name> [flags]`` shell
+    command (Raven usually runs ``gh`` via the shell, not the dedicated tool)."""
+    if not cmd:
+        return None
+    try:
+        toks = shlex.split(cmd)
+    except ValueError:
+        toks = cmd.split()
+    value_flags = {
+        "--source", "-s", "--description", "-d", "--homepage", "-h",
+        "--team", "-t", "--template", "--license", "-l", "--gitignore",
+    }
+    for i, t in enumerate(toks):
+        if t == "create" and i >= 1 and toks[i - 1] == "repo":
+            j = i + 1
+            while j < len(toks):
+                a = toks[j]
+                if a.startswith("-"):
+                    if a in value_flags and j + 1 < len(toks):
+                        j += 2
+                        continue
+                    j += 1
+                    continue
+                return a
+            return None
+    return None
+
+
+async def _shell_out(workspace_id: str, uc: dict, command: str) -> str | None:
+    """Run a shell command in the workspace and return trimmed stdout, or None."""
+    try:
+        async with shared_http_client() as client:
+            res = await client.post(
+                f"{EXECUTION_SVC}/execute/workspace_shell",
+                json={"workspace_id": workspace_id, "command": command, "user_context": uc},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=30.0),
+            )
+            if res.status != 200:
+                return None
+            out = (await res.json()).get("message", "") or ""
+            return "\n".join(ln.strip() for ln in out.splitlines() if ln.strip())
+    except Exception:
+        return None
+
+
+async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials, repo_cmd: str | None = None) -> None:
     """After a successful ``gh repo create`` inside a workspace, fetch the new
     remote and bind it to the workspace settings (repo_url / git_remote /
     default_branch). This guarantees the workspace's "Source Repository" is
     populated even if the model forgets to call WorkspaceSettingsUpdateRequest.
+
+    The repo URL is resolved from the ``gh repo create <name>`` command itself
+    (via ``gh repo view <name> --json url``), NOT from ``git remote get-url
+    origin`` — at ``gh repo create`` time the workspace git remote has NOT been
+    added yet (that happens later, right before ``git push``), so reading the
+    remote would return nothing and the bind would silently no-op, leaving every
+    later ``git push`` refused by the per-workspace guardrail.
+
     Best-effort: any failure is logged and ignored so it never blocks the mission.
     """
     try:
@@ -1224,10 +1280,6 @@ async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials) 
             ws = (await res.json()).get("workspace") or {}
             if ws.get("repo_url"):
                 return  # already wired
-            path = ws.get("resolved_path") or ws.get("local_path")
-        if not path:
-            return
-
         uc = {
             "user": creds.user,
             "is_admin": creds.is_admin,
@@ -1235,33 +1287,35 @@ async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials) 
             "github_token": creds.github_token,
             "git_token": creds.git_token,
         }
-        async with shared_http_client() as client:
-            shell = await client.post(
-                f"{EXECUTION_SVC}/execute/workspace_shell",
-                json={
-                    "workspace_id": workspace_id,
-                    "command": "git remote get-url origin 2>/dev/null; git symbolic-ref --short HEAD 2>/dev/null",
-                    "user_context": uc,
-                },
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=30.0),
-            )
-            if shell.status != 200:
-                return
-            out = (await shell.json()).get("message", "") or ""
-        lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
-        url = next((ln for ln in lines if ln.startswith("http") or ln.endswith(".git") or "@" in ln), None)
-        branch = next((ln for ln in lines if ln and ln != url), None) or "main"
+
+        url: str | None = None
+        name = _extract_repo_name_from_cmd(repo_cmd)
+        if name:
+            # Resolve the freshly-created repo's HTTPS URL via gh (the repo now
+            # exists on GitHub). Retry once to absorb GitHub propagation lag.
+            out = await _shell_out(workspace_id, uc, f"gh repo view {name} --json url -q .url")
+            if not out:
+                import asyncio
+                await asyncio.sleep(2.0)
+                out = await _shell_out(workspace_id, uc, f"gh repo view {name} --json url -q .url")
+            if out:
+                url = out.strip().strip('"').strip("'")
+        if not url:
+            # Fallback: read whatever remote is configured now.
+            out = await _shell_out(workspace_id, uc, "git remote get-url origin 2>/dev/null")
+            if out:
+                url = out.strip().strip('"').strip("'")
+
         if not url:
             return
         async with shared_http_client() as client:
             await client.patch(
                 f"{WORKSPACE_RUNTIME_SVC}/workspaces/{workspace_id}",
-                json={"repo_url": url, "git_remote": "origin", "default_branch": branch},
+                json={"repo_url": url, "git_remote": "origin", "default_branch": "main"},
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=15.0),
             )
-        log.info(f"[AgentLoop] Auto-wired repo {url} (branch {branch}) to workspace {workspace_id}")
+        log.info(f"[AgentLoop] Auto-wired repo {url} to workspace {workspace_id}")
     except Exception as e:
         log.warning(f"[AgentLoop] Auto-wire repo failed for {workspace_id}: {e}")
 
@@ -2473,7 +2527,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             ):
                                 _repo_cmd = " ".join(str(payload.get(k, "")) for k in ("command", "args", "action", "repo_url"))
                                 if "gh repo create" in _repo_cmd or "repo create" in _repo_cmd or "repo_create" in _repo_cmd:
-                                    await _autowire_created_repo(workspace_id, creds)
+                                    await _autowire_created_repo(workspace_id, creds, _repo_cmd)
 
                     # Sanitize execution results before any downstream use
                     exec_data = sanitize_for_llm(exec_data)
