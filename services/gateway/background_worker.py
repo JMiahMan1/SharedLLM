@@ -476,7 +476,7 @@ class RavenWorker:
 
                             try:
                                 ans = await orchestration_task
-                            except asyncio.CancelledError:
+                            except asyncio.CancelledError as _ce:
                                 import traceback as _tb
                                 km_state = kill_monitor.done() if kill_monitor else "no-monitor"
                                 km_exc = None
@@ -486,7 +486,7 @@ class RavenWorker:
                                     f"[Worker] Orchestration for mission {mission_id} was CANCELLED. "
                                     f"kill_monitor={km_state} kill_monitor_exc={km_exc!r}"
                                 )
-                                log.warning(f"[DEBUG] cancel traceback:\n{''.join(_tb.format_stack())}")
+                                log.warning(f"[DEBUG] cancel traceback:\n{''.join(_tb.format_exception(type(_ce), _ce, _ce.__traceback__))}")
                                 ans = "Mission aborted by user."
                             finally:
                                 if kill_monitor:
