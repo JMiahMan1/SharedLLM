@@ -1,6 +1,6 @@
 """End-to-end live test: a well-formed prompt is sent to the /api/chat endpoint
 and the gateway routes it to Raven (as an autonomous mission). Raven does
-EVERYTHING autonomously — it creates its own workspace, builds a 3D SPACE
+EVERYTHING autonomously - it creates its own workspace, builds a 3D SPACE
 SHOOTER, creates a GitHub repo (via `gh`), adds a Linux GitHub Actions build
 pipeline, and pushes it. The test creates nothing; it only submits the prompt
 (via /api/chat) and then validates the resulting, publicly-observable repo.
@@ -88,13 +88,13 @@ def mission_prompt(lang: str, human: str, stack: str) -> str:
     return f"""Raven, build a complete, fun, playable 3D SPACE SHOOTER game in {human} using {stack}.
 Project name: "Starfall". You have a workspace, a shell, file tools, the `gh` CLI, and git.
 
-CRITICAL EXECUTION ORDER — perform these steps IN ORDER and do NOT skip ahead or loop on a single file:
+CRITICAL EXECUTION ORDER - perform these steps IN ORDER and do NOT skip ahead or loop on a single file:
 Step 0: WorkspaceCreateRequest with id `raven-3d-shooter-{lang}` + a display_name. Capture the returned `workspace_id` and pass it as `workspace_id` to EVERY later WorkspaceFileWriteRequest / WorkspaceShellRequest / WorkspaceSettingsUpdateRequest. NEVER use the Default Workspace.
 Step 1: `gh repo create raven-3d-shooter-{lang} --private -d "Starfall 3D space shooter ({human})" 2>&1 || echo REPO_EXISTS`. If REPO_EXISTS, `gh repo clone raven-3d-shooter-{lang} .` (or `git clone <url> .`) inside the workspace.
-Step 2: Write these files ONCE (WorkspaceFileWriteRequest, workspace_id set): requirements.txt, main.py, README.md, and .github/workflows/build.yml (rules below). main.py's FIRST line MUST be exactly `#!/usr/bin/env python3` then a docstring, then code — never code before the shebang. Keep main.py <= 400 lines. Write each file exactly once.
-Step 3 — PUSH FIRST (mandatory; do this before any polishing): `git init` (if needed) -> `git add -A` -> `git commit -m "Initial Starfall ({human})"` -> `git push -u origin HEAD` (use `git push --force` ONLY if a plain push is rejected). You MUST reach a successful `git push` before doing anything else. Do not proceed past Step 3 until `git push` reports the branch was pushed.
+Step 2: Write these files ONCE (WorkspaceFileWriteRequest, workspace_id set): requirements.txt, main.py, README.md, and .github/workflows/build.yml (rules below). main.py's FIRST line MUST be exactly `#!/usr/bin/env python3` then a docstring, then code - never code before the shebang. Keep main.py <= 400 lines. Write each file exactly once.
+Step 3 - PUSH FIRST (mandatory; do this before any polishing): `git init` (if needed) -> `git add -A` -> `git commit -m "Initial Starfall ({human})"` -> `git push -u origin HEAD` (use `git push --force` ONLY if a plain push is rejected). You MUST reach a successful `git push` before doing anything else. Do not proceed past Step 3 until `git push` reports the branch was pushed.
 Step 4: ONLY after the push succeeds, run the headless self-test and confirm `GAME_OK`. If it fails, FIX the bug with a NEW WorkspaceFileWrite (overwrite the file) + a NEW `git commit` + `git push`. You may overwrite main.py at most ONE more time (never more than twice total).
-Step 5: FINAL VERIFICATION — `gh repo view raven-3d-shooter-{lang}` and confirm your files are on GitHub. Only then report done. If push/verify fails, keep retrying the git steps. Do NOT claim success otherwise.
+Step 5: FINAL VERIFICATION - `gh repo view raven-3d-shooter-{lang}` and confirm your files are on GitHub. Only then report done. If push/verify fails, keep retrying the git steps. Do NOT claim success otherwise.
 
 You may ONLY push to raven-3d-shooter-{lang}. Never push elsewhere.
 
@@ -116,23 +116,23 @@ You may ONLY push to raven-3d-shooter-{lang}. Never push elsewhere.
   - Python: use `pygame` and set `SDL_VIDEODRIVER=dummy` (no raylib needed) so it runs
     headless; exit after ~120 frames. For other languages use the native 3D lib.
 - CRITICAL SELFTEST RULE (do not violate): Your `run_selftest()` function MUST NOT call any
-  windowing or input functions — this includes `InitWindow`, `BeginDrawing`, `EndDrawing`,
+  windowing or input functions - this includes `InitWindow`, `BeginDrawing`, `EndDrawing`,
   `BeginMode3D`, `EndMode3D`, `IsKeyDown`, `IsKeyPressed`, `IsMouseButtonDown`, or any raylib/pygame
   input/poll function. It must ONLY run your pure game-logic `update()` step (movement, enemy/asteroid
   spawning, bullet motion, collisions, scoring, lives) using FIXED/synthetic input values, then
   `print("GAME_OK")` and `sys.exit(0)`. Importing your rendering library at module load is fine, but
   the selftest code path must never touch the display or keyboard. If `run_selftest` references an
   undefined input symbol (e.g. `IsKeyDown`) it will crash with NameError and never print GAME_OK.
-- Do NOT write exploratory/probe scripts (e.g. `_explore.py`) to discover the API — write the game
+- Do NOT write exploratory/probe scripts (e.g. `_explore.py`) to discover the API - write the game
   directly against the `raylib` Python package. Add a README.md with controls + how to run/build/selftest.
 
-=== REQUIRED WORKSPACE (critical — do this FIRST) ===
+=== REQUIRED WORKSPACE (critical - do this FIRST) ===
 - Your VERY FIRST action must be `WorkspaceCreateRequest` with a unique id derived
    from the project (e.g. `raven-3d-shooter-{lang}`) and a `display_name`.
    This workspace id should match the repository name you will create next.
   Capture the returned `workspace_id` and pass it as `workspace_id` in EVERY following
   `WorkspaceFileWriteRequest`, `WorkspaceShellRequest`, and `WorkspaceSettingsUpdateRequest`.
-  NEVER operate in the Default Workspace — it is reserved for system maintenance only.
+  NEVER operate in the Default Workspace - it is reserved for system maintenance only.
   (This is protocol Step 0; the gateway will reject file/shell/git operations until you
   have acquired a dedicated workspace.)
 
@@ -159,7 +159,7 @@ You may ONLY push to raven-3d-shooter-{lang}. Never push elsewhere.
 - FINAL VERIFICATION (do not report done until this passes): after pushing, run
   `gh repo view {_repo_name(lang)}` and `git -C . ls-files` to confirm your files are on
   GitHub. Only then report the mission complete. If the push or verification fails, keep
-  retrying the git steps — do NOT claim success.
+  retrying the git steps - do NOT claim success.
 
 Deliver ONE self-contained, working project with no TODOs or placeholders.
 """
@@ -353,7 +353,7 @@ def _gh_run_check(repo: str, timeout: int = 1200) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Core live flow — Raven does everything; the test only validates the result.
+# Core live flow - Raven does everything; the test only validates the result.
 # ---------------------------------------------------------------------------
 def run_one(lang: str, human: str, stack: str, build_cmd: str, selftest_cmd: str, is_web: bool) -> dict:
     repo = _repo_name(lang)
@@ -406,7 +406,7 @@ def run_one(lang: str, human: str, stack: str, build_cmd: str, selftest_cmd: str
     out["selftest"] = "ok"
 
     # 5) Authoritative: the GitHub Actions CI run MUST pass (build + selftest
-    #    prints GAME_OK). This is the real "tested and working" gate — Raven's
+    #    prints GAME_OK). This is the real "tested and working" gate - Raven's
     #    own workflow proves the game builds and runs on Linux, not just that
     #    files exist.
     ci = _gh_run_check(repo)

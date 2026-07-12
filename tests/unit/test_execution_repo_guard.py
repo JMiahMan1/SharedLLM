@@ -2,7 +2,7 @@
 
 The policy is purely per-workspace: a workspace may ONLY push to its OWN
 designated repository (its `repo_url`, or a repo Raven created via
-`gh repo create`). There is no hardcoded allow/deny list of specific repos —
+`gh repo create`). There is no hardcoded allow/deny list of specific repos -
 SharedLLM stays safe simply because no ordinary workspace is bound to it.
 """
 
