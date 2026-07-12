@@ -45,6 +45,10 @@ def _normalize_event_time(dt_value):
 _SKYLIGHT_CONFIG_CACHE: dict = {"enabled": None, "ts": 0.0}
 _SKYLIGHT_CONFIG_TTL = 300  # seconds
 
+# Per-source health to detect "soft" outages: a source that usually returns
+# events but now returns an empty payload (without raising) is soft-unavailable.
+_SOURCE_HEALTH: dict[str, dict] = {}  # type -> {"last_non_empty": float, "last_count": int}
+
 
 async def _resolve_calendar_integrations(req: CalendarRequest, availability: dict | None = None) -> list[dict]:
     """Build the live list of calendar integrations for this user.
@@ -92,6 +96,8 @@ async def _resolve_calendar_integrations(req: CalendarRequest, availability: dic
             info["available"] = av.get("available", en)
             if av.get("error"):
                 info["error"] = av["error"]
+            if av.get("soft"):
+                info["soft"] = True
         else:
             info["available"] = en  # optimistic when not yet probed
         return info
@@ -375,17 +381,30 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
             except asyncio.TimeoutError:
                 results = None
 
-            # Per-integration liveness: did this source's read succeed right now?
+            # Per-integration liveness. A source is "hard" down when its read
+            # raised or timed out. It is "soft" down when the read succeeded but
+            # returned nothing AND this source normally carries events (it had
+            # some within the last day) — a blip that yields an empty payload
+            # instead of an error. A genuinely empty calendar (no recent data)
+            # is left alone so we never cry wolf on a quiet period.
             availability: dict = {}
             if results is None:
                 for i in targets:
-                    availability[i["type"]] = {"available": False, "error": "timed out"}
+                    availability[i["type"]] = {"available": False, "error": "timed out", "soft": False}
             else:
                 for i, r in zip(targets, results):
+                    t = i["type"]
                     if isinstance(r, Exception):
-                        availability[i["type"]] = {"available": False, "error": str(r)[:120]}
+                        availability[t] = {"available": False, "error": str(r)[:120], "soft": False}
+                        continue
+                    count = len(r) if isinstance(r, list) else 0
+                    if count > 0:
+                        _SOURCE_HEALTH[t] = {"last_non_empty": time.time(), "last_count": count}
+                        availability[t] = {"available": True, "error": None, "soft": False}
                     else:
-                        availability[i["type"]] = {"available": True, "error": None}
+                        h = _SOURCE_HEALTH.get(t)
+                        had_recent = bool(h) and (time.time() - h["last_non_empty"]) < 86400
+                        availability[t] = {"available": not had_recent, "error": None, "soft": had_recent}
 
             integrations = await _resolve_calendar_integrations(req, availability)
 
