@@ -665,7 +665,7 @@ async def get_dynamic_llm_settings() -> dict:
             if resp.status == 200:
                 fetched = {item["key"]: item["value"] for item in await resp.json()}
                 for k, v in list(fetched.items()):
-                    if v in ["auto", ""]:
+                    if not v:
                         fetched[k] = None
                 return fetched
     except Exception as e:
@@ -1213,12 +1213,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
              f"assistant_model={settings.get('assistant_model')}, "
              f"coding_model={settings.get('coding_model')}")
 
-    # 2. Resolve Role-Based Model (Coder/Assistant) if selected_model is generic or "auto"
+    # 2. Resolve Role-Based Model (Coder/Assistant) if selected_model is a generic alias
     original_model = selected_model
     # Role aliases that should resolve to a configured model rather than being
     # treated as an explicit model name. "coding" (the settings key) and synonyms
     # all map to coding_model; assistant/chat map to assistant_model.
-    ROLE_ASSISTANT = {"auto", "assistant", "chat"}
+    ROLE_ASSISTANT = {"assistant", "chat"}
     ROLE_CODER = {"coder", "coding", "code", "repair", "raven", "dev", "developer", "technical"}
     if selected_model in ROLE_ASSISTANT or selected_model in ROLE_CODER:
         tech_keywords = ["coder", "fix", "repair", "audit", "mission", "raven", "development", "git", "workspace"]
@@ -1230,7 +1230,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         log.info(f"[AgentLoop] Using explicit model: '{selected_model}' (not a role alias)")
 
     # Fail fast if config is missing or invalid
-    if not selected_model or selected_model == "auto":
+    if not selected_model:
         error_msg = f"No valid model configured for {active_provider_name}. Please configure it in the UI."
         await stream_event("result_error", error_msg)
         return error_msg

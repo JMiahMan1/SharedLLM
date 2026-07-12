@@ -166,6 +166,26 @@ def _chat_auth_headers() -> dict:
     return {"X-Internal-Secret": INTERNAL_SECRET}
 
 
+def _live_coding_model() -> str:
+    """Pull the coding model from the live gateway/Identity config (the settings of
+    the live page) rather than hardcoding a model or defaulting to 'auto'.
+
+    Returns the configured ``coding_model`` string, or "" if it cannot be read
+    (the gateway then falls back to its own config DB value).
+    """
+    try:
+        with httpx.Client(headers=_chat_auth_headers(), timeout=30.0) as c:
+            r = c.get(f"{GATEWAY_URL}/api/config")
+            if r.status_code == 200:
+                cfg = (r.json() or {}).get("config", {})
+                m = cfg.get("coding_model")
+                if m:
+                    return str(m)
+    except Exception:
+        pass
+    return ""
+
+
 def _list_missions() -> list[dict]:
     """GET /api/raven/missions (unauthenticated-ish; gateway accepts the same
     internal secret the submit uses). Returns the list of mission records.
@@ -215,7 +235,7 @@ def _chat_submit(query: str, system: str | None = None) -> int:
     """
     body = {
         "query": query,
-        "coding_model": os.getenv("CODING_MODEL", "auto"),
+        "coding_model": _live_coding_model(),
     }
     if system:
         body["system"] = system
