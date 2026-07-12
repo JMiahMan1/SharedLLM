@@ -221,6 +221,7 @@ class RavenMissionCreate(BaseModel):
     coding_model: str = "Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_M"
     user_id: int | None = None
     queued_at: str | None = None
+    workspace_id: str | None = None
 
 class RavenMissionUpdate(BaseModel):
     slug: str | None = None
@@ -232,6 +233,7 @@ class RavenMissionUpdate(BaseModel):
     started_at: str | None = None
     completed_at: str | None = None
     duration: int | None = None
+    workspace_id: str | None = None
 
 class RavenMissionRead(BaseModel):
     id: int
@@ -252,6 +254,7 @@ class RavenMissionRead(BaseModel):
     duration: int | None = None
     output_log: str | None = None
     result: str | None = None
+    workspace_id: str | None = None
 
 class UserWidgetRead(BaseModel):
     widget_key: str
