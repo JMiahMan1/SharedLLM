@@ -8,12 +8,12 @@ autonomously and exercises the full Raven tool surface:
   GitOperationRequest (native add/commit/push), WorkspaceSettingsUpdateRequest.
 
 Raven creates its own dedicated workspace, builds a 3D SPACE SHOOTER in pure
-Python (its OWN rendering code — no raylib/Three.js/Bevy), generates sprite
+Python (its OWN rendering code - no raylib/Three.js/Bevy), generates sprite
 graphics via the image tool, creates a GitHub repo (via `gh`), adds a Linux
 GitHub Actions build pipeline, and pushes it. The test creates nothing; it only
 submits the prompt (via /api/chat) and then validates the resulting repo.
 
-The same prompt is exposed as PYTHON_SPACE_SHOOTER_PROMPT below — it is fully
+The same prompt is exposed as PYTHON_SPACE_SHOOTER_PROMPT below - it is fully
 self-contained, so you can paste it straight into the chat box (no test file
 required) and get the same outcome.
 
@@ -65,20 +65,20 @@ pytestmark = [
 # Self-contained chat prompt. Paste this directly into the chat box to run the
 # mission without this test file. It drives the full Raven tool surface.
 # ---------------------------------------------------------------------------
-PYTHON_SPACE_SHOOTER_PROMPT = """Raven, build a complete, fun, playable 3D SPACE SHOOTER game in Python, rendered with YOUR OWN code (do NOT use raylib, Three.js, Bevy, Unity, or any high-level game engine). You have the full Raven tool surface — use every tool below, in order.
+PYTHON_SPACE_SHOOTER_PROMPT = """Raven, build a complete, fun, playable 3D SPACE SHOOTER game in Python, rendered with YOUR OWN code (do NOT use raylib, Three.js, Bevy, Unity, or any high-level game engine). You have the full Raven tool surface - use every tool below, in order.
 
 Project name: "Starfall". GitHub repository name: "raven-3d-shooter-python".
 
 === TOOL COVERAGE (exercise the full surface; each step is REQUIRED) ===
-1. WorkspaceCreateRequest — your VERY FIRST action. Create a dedicated workspace with id "raven-starfall-py" and display_name "Starfall Python". Capture the returned workspace_id and pass it as `workspace_id` in EVERY following tool call. NEVER operate in the Default Workspace (it is reserved for system maintenance only).
-2. WorkspaceFileWriteRequest — write every source file, requirements.txt, README.md, and `.github/workflows/build.yml`.
-3. ImageGenerationRequest — generate game graphics and save them into the workspace: a player ship sprite saved as `assets/ship.png`, and an enemy drone sprite saved as `assets/enemy.png`. Prompt them clearly (e.g. "top-down 3D sci-fi fighter ship, cyan glow, transparent background"). If image generation is unavailable, draw the shapes procedurally instead (the game must still run).
-4. WorkspaceFileReadRequest — read back `main.py` to confirm its contents before building.
-5. WorkspaceSearchRequest — search the workspace for the string "GAME_OK" to confirm the selftest hook exists.
-6. WorkspaceLintRequest — lint with `ruff`; if issues are found, fix them with WorkspaceFilePatchRequest and re-lint until clean.
-7. WorkspaceShellRequest — from inside the workspace, run `gh repo create raven-3d-shooter-python --private -d "Starfall 3D space shooter (Python)"`, then `pip install -r requirements.txt`, then the headless self-test.
-8. GitOperationRequest — `git add -A`, `git commit -m "Initial Starfall (Python)"`, then `git push -u origin HEAD` (native git tool, uses the injected token).
-9. WorkspaceSettingsUpdateRequest — set `repo_url` to the created repo's HTTPS URL, `git_remote`=origin, `default_branch`=main, so the workspace is wired to its remote.
+1. WorkspaceCreateRequest - your VERY FIRST action. Create a dedicated workspace with id "raven-starfall-py" and display_name "Starfall Python". Capture the returned workspace_id and pass it as `workspace_id` in EVERY following tool call. NEVER operate in the Default Workspace (it is reserved for system maintenance only).
+2. WorkspaceFileWriteRequest - write every source file, requirements.txt, README.md, and `.github/workflows/build.yml`.
+3. ImageGenerationRequest - generate game graphics and save them into the workspace: a player ship sprite saved as `assets/ship.png`, and an enemy drone sprite saved as `assets/enemy.png`. Prompt them clearly (e.g. "top-down 3D sci-fi fighter ship, cyan glow, transparent background"). If image generation is unavailable, draw the shapes procedurally instead (the game must still run).
+4. WorkspaceFileReadRequest - read back `main.py` to confirm its contents before building.
+5. WorkspaceSearchRequest - search the workspace for the string "GAME_OK" to confirm the selftest hook exists.
+6. WorkspaceLintRequest - lint with `ruff`; if issues are found, fix them with WorkspaceFilePatchRequest and re-lint until clean.
+7. WorkspaceShellRequest - from inside the workspace, run `gh repo create raven-3d-shooter-python --private -d "Starfall 3D space shooter (Python)"`, then `pip install -r requirements.txt`, then the headless self-test.
+8. GitOperationRequest - `git add -A`, `git commit -m "Initial Starfall (Python)"`, then `git push -u origin HEAD` (native git tool, uses the injected token).
+9. WorkspaceSettingsUpdateRequest - set `repo_url` to the created repo's HTTPS URL, `git_remote`=origin, `default_branch`=main, so the workspace is wired to its remote.
 
 === GAME DESIGN (implement every item, in your own code) ===
 - Use `pygame` ONLY for the window, keyboard input, and blitting; implement the 3D math YOURSELF: perspective projection of 3D points to the 2D screen, vector math, and collision detection. A software 3D renderer that projects 3D vertices and draws with pygame primitives/sprites is preferred.
@@ -216,7 +216,7 @@ def _gh_has_selftest(repo: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Core live flow — Raven does everything; the test only validates the result.
+# Core live flow - Raven does everything; the test only validates the result.
 # ---------------------------------------------------------------------------
 def run_one() -> dict:
     repo = REPO

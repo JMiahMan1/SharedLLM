@@ -128,7 +128,7 @@ def _create_workspace(client: httpx.Client, workspace_id: str, display_name: str
 
 def _bootstrap_workspace(client: httpx.Client, workspace_id: str, **extra) -> dict:
     # Resolve identity via rag_user so the service fetches the real credentials
-    # (github_token) from the identity service — mirroring how the gateway injects them.
+    # (github_token) from the identity service - mirroring how the gateway injects them.
     resp = client.post(
         f"{WORKSPACE_RUNTIME_URL}/workspaces/bootstrap",
         json={"workspace_id": workspace_id, "rag_user": "default", **extra},
@@ -148,7 +148,7 @@ def _delete_repo(repo_name: str) -> None:
 
 def _assert_chat_completed(data: dict, workspace_id: str) -> None:
     """Minimal, chat-level assertion: the mission ran to a terminal, non-failed state
-    and produced output. We deliberately avoid asserting internal specifics here —
+    and produced output. We deliberately avoid asserting internal specifics here -
     this is "basically a chat call": submit a mission, expect a completed result."""
     status = data.get("status")
     assert status in ("completed", "dismissed"), f"mission did not complete (status={status})"
@@ -157,7 +157,7 @@ def _assert_chat_completed(data: dict, workspace_id: str) -> None:
 
 
 def test_raven_creates_repo_and_writes_game_via_chat(internal_client):
-    """Raven creates a repo, writes a file, and pushes — driven purely via chat."""
+    """Raven creates a repo, writes a file, and pushes - driven purely via chat."""
     ts = int(time.time())
     workspace_id = f"raven_e2e_{ts}"
     repo_name = f"raven-e2e-{ts}"
@@ -203,7 +203,7 @@ def test_raven_new_workspace_server_creates_repo(internal_client):
             f"1. Write a file named 'game.py' into this workspace containing a simple "
             f"Python number-guessing game.\n"
             f"2. Run: `git add game.py && git commit -m 'Add game' && git push -u origin HEAD`.\n"
-            f"3. The GitHub repository already exists — do NOT create a new one.\n"
+            f"3. The GitHub repository already exists - do NOT create a new one.\n"
             f"Do not ask questions. Report the final repository URL when done."
         )
         data = _run_raven(internal_client, workspace_id, mission)
@@ -217,7 +217,7 @@ def test_raven_new_workspace_server_creates_repo(internal_client):
 
 
 def test_raven_fixes_bug_via_chat(internal_client):
-    """Raven seeds a buggy file + repo, then fixes the bug — both via chat."""
+    """Raven seeds a buggy file + repo, then fixes the bug - both via chat."""
     ts = int(time.time())
     workspace_id = f"raven_e2e_fix_{ts}"
     repo_name = f"raven-e2e-fix-{ts}"
@@ -233,7 +233,7 @@ def test_raven_fixes_bug_via_chat(internal_client):
         _run_raven(internal_client, workspace_id, seed)
 
         fix = (
-            f"Raven, in workspace '{workspace_id}': the file game.py has a bug — the "
+            f"Raven, in workspace '{workspace_id}': the file game.py has a bug - the "
             f"`add(a, b)` function returns `a - b` but it should return `a + b`. Fix it, "
             f"commit with the message 'fix: add() returns sum', and push. Do not ask "
             f"questions."
@@ -250,7 +250,7 @@ def test_raven_fixes_bug_via_chat(internal_client):
 
 # Missions in several languages. The point is to exercise the language-aware
 # verification gate (ruff/pytest for Python, eslint/tsc for JS/TS, go vet/build,
-# cargo build, ...) through a plain chat call — not to assert language specifics.
+# cargo build, ...) through a plain chat call - not to assert language specifics.
 LANGUAGE_MISSIONS = {
     "python": (
         "Raven, in workspace '{wid}': create a private GitHub repo named '{repo}', "

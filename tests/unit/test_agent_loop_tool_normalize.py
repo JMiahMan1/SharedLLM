@@ -1,4 +1,4 @@
-"""Unit tests for agent_loop._normalize_tool — the tool-call schema normalizer.
+"""Unit tests for agent_loop._normalize_tool - the tool-call schema normalizer.
 
 These guard against the recurring "Neither 'command' nor 'commands' provided"
 class of bugs by proving the normalizer extracts the command from every shape
