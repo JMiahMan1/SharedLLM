@@ -694,6 +694,45 @@ def detect_no_progress(outcomes: list[tuple[str, str]], window: int = NO_PROGRES
     return len(goals) == 1 and len(outs) == 1
 
 
+def no_progress_directive(stage: int, iter_num: int, goal: str, out: str) -> str:
+    """Build the escalating loop-control directive for a detected no-progress loop.
+
+    Three stages (never a blind abort):
+      stage 1 PROBE     — stop re-running; read the error + source; make a DISTINCT fix.
+      stage 2 REDIRECT  — steer to a different debug route (web search, recall its
+                          own history, re-read source) instead of another blind attempt.
+    stage 3 is a hard abort handled separately by the caller.
+    """
+    goal_s = goal[:90]
+    out_s = out[:60]
+    if stage == 1:
+        return (
+            f"ITERATION {iter_num}: LOOP PROBE — you have run the same command "
+            f"({goal_s!r}) repeatedly and the output has not changed "
+            f"(fingerprint: {out_s!r}). Re-running it will NOT help. "
+            f"STOP and diagnose: use RavenRecallRequest (only='shell' or only='failed') "
+            f"to inspect prior runs, READ the source file involved and the captured "
+            f"error above, identify the root cause, and make a DISTINCT fix — not "
+            f"another identical run."
+        )
+    if stage == 2:
+        return (
+            f"ITERATION {iter_num}: LOOP REDIRECT — still looping on {goal_s!r} "
+            f"with identical output ({out_s!r}). Another identical attempt will "
+            f"fail the same way. Take a DIFFERENT route to diagnose:\n"
+            f"  1. websearchrequest — search the web for the exact error / how the "
+            f"library or API actually works (e.g. the F821 undefined name, the missing "
+            f"import, or the correct raylib/pygame call). External docs beat guessing.\n"
+            f"  2. RavenRecallRequest (only='failed') — review what you already tried and "
+            f"what the prior errors were so you don't repeat them.\n"
+            f"  3. WorkspaceFileReadRequest — re-read the actual source file (not just "
+            f"patch from memory) and the captured error above, then make a DISTINCT fix.\n"
+            f"Do NOT run {goal_s!r} again until you have changed the underlying code "
+            f"based on what you learned from the web/history."
+        )
+    return ""
+
+
 _VERIFY_COMMAND_HINTS = (
     "test", "lint", "pytest", "ruff", "mypy", "eslint", "prettier",
     "npm test", "npm run", "go test", "cargo test", "tox", "flake8", "tsc",
@@ -2584,35 +2623,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if not _shell_loop_nudge_sent:
                 # STAGE 1 — PROBE
                 _shell_loop_nudge_sent = True
-                _np_directive = (
-                    f"ITERATION {iter_num}: LOOP PROBE — you have run the same command "
-                    f"({_np_goal[:90]!r}) {NO_PROGRESS_WINDOW} times and the output has not "
-                    f"changed (fingerprint: {_np_out[:60]!r}). Re-running it will NOT help. "
-                    f"STOP and diagnose: use RavenRecallRequest (only='shell' or only='failed') "
-                    f"to inspect prior runs, READ the source file involved and the captured "
-                    f"error above, identify the root cause, and make a DISTINCT fix — not "
-                    f"another identical run."
-                )
+                _np_directive = no_progress_directive(1, iter_num, _np_goal, _np_out)
                 action_log.append(_np_directive)
                 log.warning(f"[AgentLoop] No-progress loop detected (goal={_np_goal[:90]}); probing.")
                 await _record_loop_probe(iter_num, _np_goal, _np_out, _np_directive)
             elif not _shell_loop_diversify_sent:
                 # STAGE 2 — REDIRECT to a different debugging route (do NOT terminate yet).
                 _shell_loop_diversify_sent = True
-                _np_directive = (
-                    f"ITERATION {iter_num}: LOOP REDIRECT — still looping on {_np_goal[:90]!r} "
-                    f"with identical output ({_np_out[:60]!r}). Another identical attempt will "
-                    f"fail the same way. Take a DIFFERENT route to diagnose:\n"
-                    f"  1. websearchrequest — search the web for the exact error / how the "
-                    f"library or API actually works (e.g. the F821 undefined name, the missing "
-                    f"import, or the correct raylib/pygame call). External docs beat guessing.\n"
-                    f"  2. RavenRecallRequest (only='failed') — review what you already tried and "
-                    f"what the prior errors were so you don't repeat them.\n"
-                    f"  3. WorkspaceFileReadRequest — re-read the actual source file (not just "
-                    f"patch from memory) and the captured error above, then make a DISTINCT fix.\n"
-                    f"Do NOT run {_np_goal[:90]!r} again until you have changed the underlying "
-                    f"code based on what you learned from the web/history."
-                )
+                _np_directive = no_progress_directive(2, iter_num, _np_goal, _np_out)
                 action_log.append(_np_directive)
                 log.warning(f"[AgentLoop] No-progress loop persists; redirecting to alternate debug route (goal={_np_goal[:90]}).")
                 await _record_loop_probe(iter_num, _np_goal, _np_out, _np_directive)

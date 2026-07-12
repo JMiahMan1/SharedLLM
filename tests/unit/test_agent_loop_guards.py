@@ -109,9 +109,9 @@ def _load_no_progress():
     from services.gateway.agent_loop import (
         detect_no_progress,
         normalize_shell_goal,
-        outcome_digest,
+        no_progress_directive,
     )
-    return detect_no_progress, normalize_shell_goal, outcome_digest
+    return detect_no_progress, normalize_shell_goal, no_progress_directive
 
 
 def test_normalize_shell_goal_collapses_redirections():
@@ -133,7 +133,7 @@ def test_normalize_shell_goal_strips_env_and_truncates():
 
 
 def test_outcome_digest_is_stable_tail():
-    _, _, digest = _load_no_progress()
+    from services.gateway.agent_loop import outcome_digest as digest
     d1 = digest({"message": "line1\nline2\nNameError: name 'IsKeyDown' is not defined\n  at run_selftest"})
     d2 = digest({"message": "line1\nline2\nNameError: name 'IsKeyDown' is not defined\n  at run_selftest"})
     assert d1 == d2
@@ -193,4 +193,24 @@ def test_detect_no_progress_true_with_varied_command_strings():
              normalize("python main.py --selftest 2>/tmp/e; echo EXIT=$?")]
     outcomes = [(g, "NameError: IsKeyDown") for g in goals]
     assert detect(outcomes, window=4) is True
+
+
+def test_no_progress_directive_probe_and_redirect():
+    _, _, directive = _load_no_progress()
+    goal = "python main.py --selftest 2>&1"
+    out = "NameError: IsKeyDown is not defined"
+    probe = directive(1, 12, goal, out)
+    redirect = directive(2, 13, goal, out)
+    assert "LOOP PROBE" in probe
+    assert "RavenRecallRequest" in probe
+    assert "LOOP REDIRECT" in redirect
+    # Stage 2 steers to DIFFERENT debug routes instead of another blind attempt.
+    assert "websearchrequest" in redirect
+    assert "RavenRecallRequest" in redirect
+    assert "WorkspaceFileReadRequest" in redirect
+    # Unknown stage yields nothing (the hard-abort is handled by the caller).
+    assert directive(3, 14, goal, out) == ""
+    # Goal/output fingerprints are embedded so Raven can see the exact failure.
+    assert "NameError" in probe
+    assert "NameError" in redirect
 
