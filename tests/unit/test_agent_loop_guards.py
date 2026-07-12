@@ -214,3 +214,20 @@ def test_no_progress_directive_probe_and_redirect():
     assert "NameError" in probe
     assert "NameError" in redirect
 
+
+def test_extract_repo_name_from_cmd():
+    # Pure helper used by the auto-wire that binds a freshly created GitHub repo
+    # to the workspace, so `git push` is permitted by the per-workspace guardrail.
+    from services.gateway.agent_loop import _extract_repo_name_from_cmd as extract
+
+    assert extract("gh repo create raven-3d-shooter-python --private -d 'Starfall'") == "raven-3d-shooter-python"
+    assert extract("cd /home/users/default/x && gh repo create my-game --private") == "my-game"
+    # value-taking flags must not be mistaken for the name
+    assert extract("gh repo create -d 'desc here' my-repo --private") == "my-repo"
+    assert extract("gh repo create --template tpl my-repo") == "my-repo"
+    # not a repo-create command
+    assert extract("gh repo view foo") is None
+    assert extract("git commit -m 'x'") is None
+    assert extract(None) is None
+    assert extract("") is None
+
