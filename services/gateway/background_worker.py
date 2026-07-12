@@ -79,7 +79,7 @@ class RavenWorker:
             from services.gateway.orchestrator import get_all_settings
             settings = await get_all_settings()
             model = settings.get("ollama_librarian_model") or settings.get("librarian_model") or settings.get("assistant_model")
-            if model and model not in ("", "auto"):
+            if model:
                 return model
         except Exception:
             pass
@@ -787,7 +787,7 @@ class RavenWorker:
 
     async def trigger_self_repair(self, problematic, settings):
         coding_model = settings.get("coding_model") or settings.get("ollama_coding_model")
-        if not coding_model or coding_model == "auto":
+        if not coding_model:
             log.error("No valid coding model configured in Identity. Triage queue may fail to execute.")
             # We still push the anomaly, but the UI must be used to assign a model.
 

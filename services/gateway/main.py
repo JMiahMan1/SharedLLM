@@ -226,7 +226,7 @@ async def fetch_global_setting(key: str, default: str = "") -> str:
             )
             if resp.status == 200:
                 val = (await resp.json()).get("value", default)
-                return val if val != "auto" else default
+                return val
     except Exception as e:
         log.warning(f"Failed to fetch global setting '{key}': {e}")
     return default
@@ -331,7 +331,7 @@ async def get_assistant_model():
     active = settings.get("active_llm_provider", "ollama")
     model = settings.get("assistant_model")
     if not model:
-        available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v and v != "auto"}
+        available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v}
         log.error(f"[get_assistant_model] No assistant model found. active_provider={active}. Available models: {available_models}")
         raise RuntimeError(f"No assistant model configured. Set assistant_model in Identity settings. Available: {available_models}")
     log.info(f"[get_assistant_model] active_provider={active} resolved_model={model}")
@@ -343,7 +343,7 @@ async def get_coding_model():
     active = settings.get("active_llm_provider", "ollama")
     model = settings.get("coding_model")
     if not model:
-        available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v and v != "auto"}
+        available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v}
         log.error(f"[get_coding_model] No coding model found. active_provider={active}. Available models: {available_models}")
         raise RuntimeError(f"No coding model configured. Set coding_model in Identity settings. Available: {available_models}")
     log.info(f"[get_coding_model] active_provider={active} resolved_model={model}")
@@ -373,7 +373,7 @@ async def get_librarian_model():
     active = settings.get("active_llm_provider", "ollama")
     model = settings.get("librarian_model")
     if not model:
-        available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v and v != "auto"}
+        available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v}
         log.error(f"[get_librarian_model] No librarian model found. active_provider={active}. Available models: {available_models}")
         raise RuntimeError(f"No librarian model configured. Set librarian_model in Identity settings. Available: {available_models}")
     return model
@@ -2643,7 +2643,7 @@ async def chat_handler(request: Request, background_tasks=None):
     # through the canonical selector (code/autonomous -> coding/35B gatekeeper,
     # librarian/RAG -> librarian, everything else -> assistant).
     try:
-        if explicit_model and explicit_model != "auto":
+        if explicit_model:
             selected_model = explicit_model
         else:
             selected_model = await select_model_for_query(query)
@@ -4714,7 +4714,7 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         settings = await get_llm_settings()
     except Exception:
         settings = {}
-    coding_model = (body.coding_model if body.coding_model and body.coding_model != "auto" else None) or settings.get("coding_model") or settings.get("ollama_coding_model")
+    coding_model = body.coding_model or settings.get("coding_model") or settings.get("ollama_coding_model")
     if not coding_model:
         raise HTTPException(status_code=400, detail="No coding model configured. Mission cannot be dispatched.")
 

@@ -88,7 +88,7 @@ async def _get_talk_model_from_settings() -> str:
             model = (settings.get("ollama_librarian_model") or
                     settings.get("librarian_model") or
                     settings.get("assistant_model"))
-            if model and model not in ("", "auto"):
+            if model:
                 return model
     except Exception as e:
         log.warning(f"Failed to resolve Talk model from settings: {e}")

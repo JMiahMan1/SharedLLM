@@ -75,7 +75,7 @@ async def get_all_settings() -> dict[str, str]:
             for key, default in _DEFAULTS.items():
                 if key in model_keys:
                     continue
-                if key not in fetched or fetched[key] in ("", "auto"):
+                if key not in fetched or not fetched[key]:
                     fetched[key] = default
             # Sync module-level constants in main.py for backward compat
             _sync_main_constants(fetched)
@@ -110,7 +110,7 @@ _MODEL_KEYS = {
 def _get(settings: dict[str, str], key: str, default: str = "") -> str:
     """Get setting with fallback to defaults (excludes model keys)."""
     val = settings.get(key, "")
-    if val in ("", "auto"):
+    if not val:
         if key in _MODEL_KEYS:
             return default
         return _DEFAULTS.get(key, default)
