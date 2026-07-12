@@ -1411,6 +1411,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     _stagnation_nudge_sent = False
     _loop_nudge_sent = False
     _shell_loop_nudge_sent = False
+    _shell_loop_diversify_sent = False
     _consecutive_no_tool = 0
 
     # --- PLANNING PHASE ---
@@ -2572,13 +2573,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         # output (e.g. a --selftest that crashes before printing GAME_OK but
         # still exits 0). detect_repetitive_failure needs all-fail and
         # detect_repetitive_action needs the identical literal command, so
-        # neither fires here. On first catch we PROBE: inject a directive that
-        # forces Raven to read the error + source and make a DISTINCT fix
-        # (and persist a pullable loop_probe record); on a second catch we abort.
+        # neither fires here. Three escalating stages (never a blind abort):
+        #   1) PROBE      — stop re-running; read error + source; make a DISTINCT fix.
+        #   2) REDIRECT   — don't just give up: steer Raven to a DIFFERENT debug
+        #                   route (web search, recall its own history, re-read source).
+        #   3) TERMINATE  — hard cap: even after a probe + redirect it still loops.
         if detect_no_progress(_recent_shell_runs, window=NO_PROGRESS_WINDOW):
             _np_goal = _recent_shell_runs[-1][0]
             _np_out = _recent_shell_runs[-1][1]
             if not _shell_loop_nudge_sent:
+                # STAGE 1 — PROBE
                 _shell_loop_nudge_sent = True
                 _np_directive = (
                     f"ITERATION {iter_num}: LOOP PROBE — you have run the same command "
@@ -2592,9 +2596,30 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 action_log.append(_np_directive)
                 log.warning(f"[AgentLoop] No-progress loop detected (goal={_np_goal[:90]}); probing.")
                 await _record_loop_probe(iter_num, _np_goal, _np_out, _np_directive)
+            elif not _shell_loop_diversify_sent:
+                # STAGE 2 — REDIRECT to a different debugging route (do NOT terminate yet).
+                _shell_loop_diversify_sent = True
+                _np_directive = (
+                    f"ITERATION {iter_num}: LOOP REDIRECT — still looping on {_np_goal[:90]!r} "
+                    f"with identical output ({_np_out[:60]!r}). Another identical attempt will "
+                    f"fail the same way. Take a DIFFERENT route to diagnose:\n"
+                    f"  1. websearchrequest — search the web for the exact error / how the "
+                    f"library or API actually works (e.g. the F821 undefined name, the missing "
+                    f"import, or the correct raylib/pygame call). External docs beat guessing.\n"
+                    f"  2. RavenRecallRequest (only='failed') — review what you already tried and "
+                    f"what the prior errors were so you don't repeat them.\n"
+                    f"  3. WorkspaceFileReadRequest — re-read the actual source file (not just "
+                    f"patch from memory) and the captured error above, then make a DISTINCT fix.\n"
+                    f"Do NOT run {_np_goal[:90]!r} again until you have changed the underlying "
+                    f"code based on what you learned from the web/history."
+                )
+                action_log.append(_np_directive)
+                log.warning(f"[AgentLoop] No-progress loop persists; redirecting to alternate debug route (goal={_np_goal[:90]}).")
+                await _record_loop_probe(iter_num, _np_goal, _np_out, _np_directive)
             else:
-                log.error("[AgentLoop] No-progress loop persists after probe. Terminating.")
-                ans = "ERROR: Detected a no-progress loop (same command repeated with identical output despite a probe). Aborting to avoid runaway."
+                # STAGE 3 — hard cap: probe + redirect both failed to break the loop.
+                log.error("[AgentLoop] No-progress loop persists after probe + route redirect. Terminating.")
+                ans = "ERROR: Detected a no-progress loop (same command repeated with identical output despite a probe and a route redirect). Aborting to avoid runaway."
                 await _clear_checkpoint()
                 break
 
