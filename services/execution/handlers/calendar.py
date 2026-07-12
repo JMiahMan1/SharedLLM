@@ -1,6 +1,7 @@
 # services/execution/handlers/calendar.py
 import asyncio
 import logging
+import time
 import urllib.request
 from datetime import UTC, date, datetime, timedelta
 
@@ -39,14 +40,20 @@ def _normalize_event_time(dt_value):
 # ── Integration resolution (runtime-derived, never hardcoded) ──────────────
 
 
-async def _resolve_calendar_integrations(req: CalendarRequest) -> list[dict]:
+# Cache last-known Skylight configuration so a transient identity/host blip
+# (which makes resolve_first_user() throw) doesn't silently disable Skylight.
+_SKYLIGHT_CONFIG_CACHE: dict = {"enabled": None, "ts": 0.0}
+_SKYLIGHT_CONFIG_TTL = 300  # seconds
+
+
+async def _resolve_calendar_integrations(req: CalendarRequest, availability: dict | None = None) -> list[dict]:
     """Build the live list of calendar integrations for this user.
 
-    Enabled state is derived from credentials/config (never hardcoded):
-      - nextcloud : personal-data provider configured
-      - skylight : skylight session resolvable
-      - ical      : >=1 .ics URL configured
-    A user may disable any integration via calendar_settings["disabled"].
+    `enabled` = configured (credentials/URLs present, not disabled) and is
+    intentionally STABLE across transient backend blips. `available` = reachable
+    right now (set from a live read; defaults to enabled when unknown). A source
+    that is enabled but temporarily unavailable stays VISIBLE (greyed) so the UI
+    can show a notice and keep retrying, instead of silently disappearing.
     """
     settings = (req.user_context.calendar_settings or {}) if getattr(req.user_context, "calendar_settings", None) else {}
     disabled = set(settings.get("disabled") or [])
@@ -55,21 +62,44 @@ async def _resolve_calendar_integrations(req: CalendarRequest) -> list[dict]:
     nc_enabled = provider is not None and "nextcloud" not in disabled
 
     sk_enabled = False
+    sk_error = None
     if "skylight" not in disabled:
         try:
             from services.execution.main import _skylight_configured
 
-            sk_enabled = await _skylight_configured(req.user_context.user)
-        except Exception:
-            sk_enabled = False
+            configured = await _skylight_configured(req.user_context.user)
+            _SKYLIGHT_CONFIG_CACHE["enabled"] = configured
+            _SKYLIGHT_CONFIG_CACHE["ts"] = time.time()
+            sk_enabled = configured
+        except Exception as e:
+            # Transient failure (identity/host blip). Fall back to last-known
+            # config if recent so Skylight isn't dropped mid-outage.
+            cached = _SKYLIGHT_CONFIG_CACHE
+            if cached["enabled"] is not None and (time.time() - cached["ts"]) < _SKYLIGHT_CONFIG_TTL:
+                sk_enabled = cached["enabled"]
+                sk_error = "configuration temporarily unreachable"
+            else:
+                sk_enabled = False
+                sk_error = str(e)[:120]
 
     ical_urls = settings.get("ical_urls") or []
     ical_enabled = bool(ical_urls) and "ical" not in disabled
 
+    def _mk(t: str, en: bool, writable: bool, **extra: object) -> dict:
+        av = (availability or {}).get(t)
+        info: dict = {"type": t, "enabled": en, "writable": writable, "provides_calendar": True, **extra}
+        if av is not None:
+            info["available"] = av.get("available", en)
+            if av.get("error"):
+                info["error"] = av["error"]
+        else:
+            info["available"] = en  # optimistic when not yet probed
+        return info
+
     return [
-        {"type": "nextcloud", "enabled": nc_enabled, "writable": True, "provides_calendar": True},
-        {"type": "skylight", "enabled": sk_enabled, "writable": True, "provides_calendar": True},
-        {"type": "ical", "enabled": ical_enabled, "writable": False, "provides_calendar": True, "urls": ical_urls},
+        _mk("nextcloud", nc_enabled, True),
+        _mk("skylight", sk_enabled, True, **({"error": sk_error} if sk_error else {})),
+        _mk("ical", ical_enabled, False, urls=ical_urls),
     ]
 
 
@@ -338,14 +368,29 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 return []
 
             try:
-                sets = await asyncio.wait_for(
+                results = await asyncio.wait_for(
                     asyncio.gather(*(_gather_one(i) for i in targets), return_exceptions=True),
                     timeout=12,
                 )
             except asyncio.TimeoutError:
-                sets = []
+                results = None
+
+            # Per-integration liveness: did this source's read succeed right now?
+            availability: dict = {}
+            if results is None:
+                for i in targets:
+                    availability[i["type"]] = {"available": False, "error": "timed out"}
+            else:
+                for i, r in zip(targets, results):
+                    if isinstance(r, Exception):
+                        availability[i["type"]] = {"available": False, "error": str(r)[:120]}
+                    else:
+                        availability[i["type"]] = {"available": True, "error": None}
+
+            integrations = await _resolve_calendar_integrations(req, availability)
 
             events: list[dict] = []
+            sets = results if results is not None else []
             for s in sets:
                 if isinstance(s, list):
                     events.extend(s)

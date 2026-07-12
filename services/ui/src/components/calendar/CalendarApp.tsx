@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   MapPin,
+  RefreshCw as RefreshIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Modal from '../../components/ui/Modal';
@@ -62,6 +63,8 @@ interface IntegrationInfo {
   writable: boolean;
   provides_calendar: boolean;
   urls?: string[];
+  available?: boolean;
+  error?: string;
 }
 interface CalendarDetail {
   integrations: IntegrationInfo[];
@@ -298,10 +301,14 @@ const CalendarApp = () => {
   const [startInput, setStartInput] = useState('');
   const [addIntegration, setAddIntegration] = useState('');
   const [editing, setEditing] = useState<CalendarEvent | null>(null);
-  const { data, isLoading, error } = useQuery<ExecutionResponse>({
+  const { data, isLoading, error, refetch } = useQuery<ExecutionResponse>({
     queryKey: ['calendar-app'],
     queryFn: () => api.getCalendarEvents(),
-    refetchInterval: 300_000,
+    refetchInterval: (q) => {
+      const integ = (q.state.data?.detail as CalendarDetail | undefined)?.integrations ?? [];
+      const down = integ.filter((i) => i.enabled && i.available === false);
+      return down.length > 0 ? 30_000 : 300_000;
+    },
   });
   const { data: settingsData } = useQuery<ExecutionResponse>({
     queryKey: ['calendar-settings'],
@@ -310,6 +317,7 @@ const CalendarApp = () => {
 
   const detail = data?.detail as CalendarDetail | undefined;
   const integrations = detail?.integrations ?? [];
+  const unavailable = integrations.filter((i) => i.enabled && i.available === false);
   const allEvents = useMemo<CalendarEvent[]>(
     () => (data?.events as CalendarEvent[] | undefined) ?? [],
     [data]
@@ -451,6 +459,9 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
         </div>
         <button onClick={() => setShowSources(!showSources)} className="rounded-full px-3 py-1.5 text-[10px] font-black uppercase tracking-widest" style={{ background: 'var(--os-ember-soft)', color: 'var(--os-ember-deep)' }}>
           <SettingsIcon size={14} className="inline mr-1" />Sources
+        </button>
+        <button onClick={() => refetch()} title="Refresh" className="rounded-full p-2" style={{ background: 'var(--os-paper-deep)', color: 'var(--os-ink-soft)' }}>
+          <RefreshIcon size={14} />
         </button>
       </div>
 
@@ -599,6 +610,12 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
 
       {isLoading && <p className="text-sm" style={{ color: 'var(--os-ink-soft)' }}>Loading your agenda…</p>}
       {error && <p className="text-sm" style={{ color: 'var(--os-ember-deep)' }}>Failed to load calendar.</p>}
+      {unavailable.length > 0 && (
+        <div className="my-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs" style={{ background: 'var(--os-sun-soft)', borderColor: 'var(--os-sun)', color: 'var(--os-ink)' }}>
+          <RefreshIcon size={14} className="animate-spin" />
+          {unavailable.map((i) => integrationMeta(i.type).label).join(', ')} temporarily unreachable — showing cached events and retrying.
+        </div>
+      )}
 
       {/* Add event */}
       <div className="mt-6 rounded-2xl border p-4" style={{ background: 'var(--os-panel-bg)', borderColor: 'var(--os-line)' }}>
@@ -625,13 +642,14 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
           {integrations.map((i) => {
             const meta = integrationMeta(i.type);
             const isDisabled = disabledSet.has(i.type);
+            const isDown = i.available === false;
             return (
-              <div key={i.type} className="flex items-center justify-between rounded-xl border p-3" style={{ background: 'var(--os-panel-bg)', borderColor: 'var(--os-line)' }}>
+              <div key={i.type} className="flex items-center justify-between rounded-xl border p-3" style={{ background: 'var(--os-panel-bg)', borderColor: 'var(--os-line)', opacity: isDown && !isDisabled ? 0.6 : 1 }}>
                 <div className="flex items-center gap-2">
-                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: meta.color }} />
+                  <span className="h-2.5 w-2.5 rounded-full" style={{ background: isDown ? 'var(--os-ink-faint)' : meta.color }} />
                   <div>
-                    <p className="text-sm font-bold" style={{ color: 'var(--os-ink)' }}>{meta.label}</p>
-                    <p className="text-[10px]" style={{ color: 'var(--os-ink-soft)' }}>{i.writable ? 'Read & write' : 'Read-only'}</p>
+                    <p className="text-sm font-bold" style={{ color: 'var(--os-ink)' }}>{meta.label}{isDown ? ' — temporarily unreachable' : ''}</p>
+                    <p className="text-[10px]" style={{ color: 'var(--os-ink-soft)' }}>{isDisabled ? 'Disabled' : i.writable ? 'Read & write' : 'Read-only'}{isDown ? ' · retrying' : ''}</p>
                   </div>
                 </div>
                 <button onClick={() => toggleDisabledMutation.mutate(i.type)} className={`flex items-center gap-1 rounded-full border px-3 py-1 text-[10px] font-bold transition`} style={isDisabled ? { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' } : { borderColor: 'var(--os-line)', color: 'var(--os-ink-soft)' }}>
