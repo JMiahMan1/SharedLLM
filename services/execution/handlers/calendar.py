@@ -497,19 +497,20 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 session = await _get_skylight_session(req.user_context.user)
                 if not session:
                     return ExecutionResult(status="FAILURE", message="Skylight not configured.", service="calendar_update")
-                body: dict = {}
+                attributes: dict = {}
                 if req.summary:
-                    body["summary"] = req.summary
+                    attributes["summary"] = req.summary
                 if req.start_time:
                     dt = dateparser.parse(req.start_time, settings={"PREFER_DATES_FROM": "future"})
                     if dt is None:
                         return ExecutionResult(status="FAILURE", message=f"Could not parse date: {req.start_time}", service="calendar_update")
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=_get_local_tz())
-                    body["starts_at"] = dt.isoformat()
-                    body["ends_at"] = (dt + timedelta(hours=1)).isoformat()
-                if not body:
+                    attributes["starts_at"] = dt.isoformat()
+                    attributes["ends_at"] = (dt + timedelta(hours=1)).isoformat()
+                if not attributes:
                     return ExecutionResult(status="FAILURE", message="Nothing to update.", service="calendar_update")
+                body = {"data": {"type": "calendar_event", "id": req.event_id, "attributes": attributes}}
                 result = await _skylight_request(session, "PATCH", f"/calendar_events/{req.event_id}", body)
                 if result is not None:
                     return ExecutionResult(status="SUCCESS", message="Updated Skylight event.", service="calendar_update")
