@@ -316,7 +316,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
         elif action == "read":
             disabled = set(settings.get("disabled") or [])
             want = (req.integration or "").strip().lower()
-            if want:
+            if want and want != "all":
                 targets = [i for i in integrations if i["type"] == want and i["enabled"]]
             else:
                 targets = [
