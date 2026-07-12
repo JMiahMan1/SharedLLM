@@ -770,11 +770,10 @@ async def execute_inference_with_kill(
     )
 
     async def _kill_watch() -> None:
-        cmd = await _get_redis_cmd()
-        key = f"raven:mission:kill:{mission_id}"
         while not inf_task.done():
             try:
-                if await cmd.get(key):
+                if await _is_kill_flag_set(mission_id):
+                    log.warning(f"[AgentLoop] KILL flag detected for mission {mission_id} during inference — cancelling stream.")
                     inf_task.cancel()
                     return
             except Exception:
@@ -787,7 +786,7 @@ async def execute_inference_with_kill(
     except asyncio.CancelledError:
         # Cancelled by the watcher → confirm the flag and abort the mission.
         try:
-            flagged = bool(await (await _get_redis_cmd()).get(f"raven:mission:kill:{mission_id}"))
+            flagged = await _is_kill_flag_set(mission_id)
         except Exception:
             flagged = True
         if flagged:
@@ -847,6 +846,30 @@ async def _get_redis_cmd() -> "redis.Redis":
     return _redis_cmd
 
 
+# Sentinel values that the control plane may write to a kill/pause flag to mean
+# "not active". Because Redis returns these as non-empty strings
+# (``decode_responses=True``), a naive ``if flag:`` would treat "false"/"0" as
+# truthy and abort the mission. Always route flag reads through this helper.
+_KILL_INACTIVE_VALUES = {"0", "false", "none", "null", "off", "no", ""}
+
+
+async def _redis_flag_active(key: str) -> bool:
+    """Return True only if a Redis flag key holds an active (non-sentinel) value.
+
+    Safe against the classic Python-Redis string-eval bug: a flag holding
+    "false" or "0" is treated as NOT active.
+    """
+    val = await (await _get_redis_cmd()).get(key)
+    if not val:
+        return False
+    return str(val).strip().lower() not in _KILL_INACTIVE_VALUES
+
+
+async def _is_kill_flag_set(mission_id: int) -> bool:
+    """Return True only if the kill flag is explicitly set to an active value."""
+    return await _redis_flag_active(f"raven:mission:kill:{mission_id}")
+
+
 async def _await_mission_resume(
     mission_id: int,
     stream_event: Callable[[str, str], Awaitable[Any]],
@@ -864,8 +887,7 @@ async def _await_mission_resume(
     """
     pause_key = f"raven:mission:pause:{mission_id}"
     kill_key = f"raven:mission:kill:{mission_id}"
-    cmd = await _get_redis_cmd()
-    if not await cmd.get(pause_key):
+    if not await _redis_flag_active(pause_key):
         return False
 
     r_ps = redis.from_url(REDIS_URL, decode_responses=True)
@@ -873,7 +895,7 @@ async def _await_mission_resume(
     await pubsub.subscribe(pause_key, kill_key)
     try:
         # Re-check after subscribe to avoid lost-wakeup race
-        if not await cmd.get(pause_key):
+        if not await _redis_flag_active(pause_key):
             return False
         log.warning(f"[AgentLoop] MISSION PAUSED for {mission_id}. Waiting for resume signal.")
         await stream_event("system", "Mission paused — waiting for LLM access to become available.")
@@ -1458,8 +1480,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         # --- HARD KILL SWITCH (Redis pub/sub) ---
         if mission_id:
             try:
-                kill_flag = await (await _get_redis_cmd()).get(f"raven:mission:kill:{mission_id}")
-                if kill_flag:
+                if await _is_kill_flag_set(mission_id):
                     log.warning(f"[AgentLoop] MISSION KILL SIGNAL RECEIVED for {mission_id}. Terminating.")
                     await stream_event("system", "Mission terminated by user.")
                     await _clear_checkpoint()

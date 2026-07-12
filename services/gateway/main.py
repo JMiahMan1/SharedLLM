@@ -4751,6 +4751,12 @@ async def kill_mission(request: Request, id_or_slug: str):
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    caller_ip = getattr(request.client, "host", "unknown")
+    log.warning(
+        f"[AUDIT] KILL requested for mission '{id_or_slug}' by user="
+        f"{creds.get('user')} from {caller_ip} at {datetime.utcnow().isoformat()}Z"
+    )
+
     async with borrow_http_client() as client:
         # Resolve to real ID
         m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
@@ -4776,6 +4782,7 @@ async def kill_mission(request: Request, id_or_slug: str):
 
         from services.gateway.config import REDIS_URL
         r = redis.from_url(REDIS_URL, decode_responses=True)
+        log.warning(f"[AUDIT] Setting kill flag raven:mission:kill:{real_id}=KILL (ttl=3600) for mission '{id_or_slug}'")
         await r.set(f"raven:mission:kill:{real_id}", "KILL", ex=3600)
         await r.publish(f"raven:mission:kill:{real_id}", "KILL")
         await r.close()
@@ -4804,6 +4811,12 @@ async def cancel_mission(request: Request, id_or_slug: str):
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+    caller_ip = getattr(request.client, "host", "unknown")
+    log.warning(
+        f"[AUDIT] CANCEL requested for mission '{id_or_slug}' by user="
+        f"{creds.get('user')} from {caller_ip} at {datetime.utcnow().isoformat()}Z"
+    )
+
     async with borrow_http_client() as client:
         m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
         if m_resp.status != 200:
@@ -4824,6 +4837,7 @@ async def cancel_mission(request: Request, id_or_slug: str):
 
         from services.gateway.config import REDIS_URL
         r = redis.from_url(REDIS_URL, decode_responses=True)
+        log.warning(f"[AUDIT] Setting kill flag raven:mission:kill:{real_id}=KILL (ttl=3600) for mission '{id_or_slug}'")
         await r.set(f"raven:mission:kill:{real_id}", "KILL", ex=3600)
         await r.publish(f"raven:mission:kill:{real_id}", "KILL")
         await r.close()
