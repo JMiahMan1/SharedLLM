@@ -156,12 +156,13 @@ const EventCard = ({ ev, size = 'md', onSelect }: { ev: CalendarEvent; size?: 'm
     );
   }
   return (
-    <button
-      type="button"
-      className={`relative w-full text-left overflow-hidden shadow-[0_1px_3px_rgba(72,60,38,0.07),0_10px_28px_-10px_rgba(72,60,38,0.16)] ${size === 'lg' ? 'rounded-2xl py-4 pr-4 pl-5' : 'rounded-xl py-2 pr-3 pl-4'}`}
-      style={{ backgroundColor: 'var(--os-card)' }}
-      title={integrationMeta(ev.integration).label}
-    >
+      <button
+        type="button"
+        onClick={() => onSelect?.(ev)}
+        className={`relative w-full text-left overflow-hidden shadow-[0_1px_3px_rgba(72,60,38,0.07),0_10px_28px_-10px_rgba(72,60,38,0.16)] ${size === 'lg' ? 'rounded-2xl py-4 pr-4 pl-5' : 'rounded-xl py-2 pr-3 pl-4'}`}
+        style={{ backgroundColor: 'var(--os-card)' }}
+        title={integrationMeta(ev.integration).label}
+      >
       <span className="pointer-events-none absolute inset-y-0 left-0 w-1.5" style={{ backgroundColor: color }} aria-hidden="true" />
       <div className="flex items-center gap-1.5">
         <span className={`font-extrabold ${size === 'lg' ? 'text-base' : 'text-[13px]'}`} style={{ color }}>{formatTime(ev.start_time)}</span>
