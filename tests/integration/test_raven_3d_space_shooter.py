@@ -115,6 +115,14 @@ You may ONLY push to raven-3d-shooter-{lang}. Never push elsewhere.
   the line `GAME_OK` to stdout and exit 0. Never require a display for selftest.
   - Python: use `pygame` and set `SDL_VIDEODRIVER=dummy` (no raylib needed) so it runs
     headless; exit after ~120 frames. For other languages use the native 3D lib.
+- CRITICAL SELFTEST RULE (do not violate): Your `run_selftest()` function MUST NOT call any
+  windowing or input functions — this includes `InitWindow`, `BeginDrawing`, `EndDrawing`,
+  `BeginMode3D`, `EndMode3D`, `IsKeyDown`, `IsKeyPressed`, `IsMouseButtonDown`, or any raylib/pygame
+  input/poll function. It must ONLY run your pure game-logic `update()` step (movement, enemy/asteroid
+  spawning, bullet motion, collisions, scoring, lives) using FIXED/synthetic input values, then
+  `print("GAME_OK")` and `sys.exit(0)`. Importing your rendering library at module load is fine, but
+  the selftest code path must never touch the display or keyboard. If `run_selftest` references an
+  undefined input symbol (e.g. `IsKeyDown`) it will crash with NameError and never print GAME_OK.
 - Do NOT write exploratory/probe scripts (e.g. `_explore.py`) to discover the API — write the game
   directly against the `raylib` Python package. Add a README.md with controls + how to run/build/selftest.
 
