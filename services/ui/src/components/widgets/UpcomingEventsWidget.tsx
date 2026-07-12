@@ -1,9 +1,10 @@
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useWidgetData } from '../../hooks/useWidgetData';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
 import { calendarColor, calendarLabel } from '../calendar/calendarMeta';
-import type { CalendarEvent, IWidgetProps } from '../../types/widget';
+import type { CalendarEvent, CalendarPerson, IWidgetProps } from '../../types/widget';
 
 interface ParsedEvent {
   summary: string;
@@ -98,6 +99,11 @@ const formatRelativeTime = (date: Date): string => {
   const UpcomingEventsWidget = ({ settingsButton }: IWidgetProps) => {
     const navigate = useNavigate();
     const openCalendar = () => navigate('/calendar');
+    const { data: settingsData } = useQuery({
+      queryKey: ['calendar-settings-widget'],
+      queryFn: () => api.getCalendarSettings(),
+    });
+    const people = (settingsData?.settings as { people?: CalendarPerson[] } | undefined)?.people ?? [];
   const fetchEvents = async () => {
     const result = await api.getCalendarEvents() as { status: string; message?: string; events?: CalendarEvent[] };
     if (result.status !== 'SUCCESS') {
@@ -159,11 +165,11 @@ const formatRelativeTime = (date: Date): string => {
                 <div className="flex items-center gap-2">
                   <span
                     className="inline-block h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: calendarColor(event.calendar) }}
-                    title={calendarLabel(event.calendar)}
+                    style={{ backgroundColor: calendarColor(event.calendar, people) }}
+                    title={calendarLabel(event.calendar, people)}
                   />
-                  <span className="text-[10px] font-semibold truncate" style={{ color: calendarColor(event.calendar) }}>
-                    {calendarLabel(event.calendar)}
+                  <span className="text-[10px] font-semibold truncate" style={{ color: calendarColor(event.calendar, people) }}>
+                    {calendarLabel(event.calendar, people)}
                   </span>
                   <p className={`text-sm font-semibold truncate ${isVerySoon ? 'text-amber-300' : 'text-white'}`}>
                     {event.summary}

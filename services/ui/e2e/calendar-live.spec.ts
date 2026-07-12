@@ -50,10 +50,21 @@ async function agendaLoaded(page: Page) {
   await expect.poll(async () => (await hasEvents.count()) > 0 || (await empty.count()) > 0).toBeTruthy();
 }
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page, request }) => {
   Object.keys(calls).forEach((k) => delete calls[k]);
   captureResponses(page);
   await login(page);
+  // Reset calendar settings to a clean baseline so state from previous
+  // runs (disabled sources, junk iCal URLs) can't pollute this run.
+  const token = await page.evaluate(() => localStorage.getItem('jarvis_api_key'));
+  if (token) {
+    await request
+      .put(`${UI}/api/calendar/settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+        data: { disabled: [], ical_urls: [], default: 'skylight' },
+      })
+      .catch(() => {});
+  }
   await gotoCalendar(page);
 });
 

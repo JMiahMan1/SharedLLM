@@ -1665,7 +1665,8 @@ def update_calendar_settings(
     """Update the current user's calendar integration preferences.
 
     Accepted keys: default (integration name), disabled (list[str]),
-    priority (dict[name->int]), ical_urls (list[str]).
+    priority (dict[name->int]), ical_urls (list[str]), people (list of
+    calendar-owner person records: {id, name, color, accounts}).
     Unknown keys are ignored; missing keys are preserved.
     """
     row = session.exec(
@@ -1676,7 +1677,7 @@ def update_calendar_settings(
         session.add(row)
 
     data = json.loads(row.data) if (row and row.data) else {}
-    allowed = {"default", "disabled", "priority", "ical_urls"}
+    allowed = {"default", "disabled", "priority", "ical_urls", "people"}
     for key, value in (body or {}).items():
         if key in allowed:
             data[key] = value

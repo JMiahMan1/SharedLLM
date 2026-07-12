@@ -1,7 +1,7 @@
 import axios, { type AxiosRequestConfig } from 'axios';
 import { storageGetSync } from '../lib/storage';
 import { Capacitor } from '@capacitor/core';
-import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry } from '../types/widget';
+import type { DeviceSortMode, WidgetVisibility, WidgetSize, DeviceEntry, CalendarPerson } from '../types/widget';
 import type {
   HealthStatus,
   ServiceInfo,
@@ -677,7 +677,7 @@ export const api = {
     return resp.data;
   },
 
-  async updateCalendarSettings(payload: { default?: string; disabled?: string[]; priority?: Record<string, number>; ical_urls?: string[] }): Promise<ExecutionResponse> {
+  async updateCalendarSettings(payload: { default?: string; disabled?: string[]; priority?: Record<string, number>; ical_urls?: string[]; people?: CalendarPerson[] }): Promise<ExecutionResponse> {
     const resp = await apiClient.put('/api/calendar/settings', payload);
     return resp.data;
   },
