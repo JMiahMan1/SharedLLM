@@ -770,12 +770,10 @@ async def execute_inference_with_kill(
     )
 
     async def _kill_watch() -> None:
-        cmd = await _get_redis_cmd()
         while not inf_task.done():
             try:
-                raw = await cmd.get(f"raven:mission:kill:{mission_id}")
                 if await _is_kill_flag_set(mission_id):
-                    log.warning(f"[AgentLoop] KILL flag detected (raw={raw!r}) for mission {mission_id} during inference — cancelling stream.")
+                    log.warning(f"[AgentLoop] KILL flag detected for mission {mission_id} during inference — cancelling stream.")
                     inf_task.cancel()
                     return
             except Exception:
@@ -785,9 +783,7 @@ async def execute_inference_with_kill(
     watch = asyncio.create_task(_kill_watch())
     try:
         return await inf_task
-    except asyncio.CancelledError as _ce:
-        import traceback as _tb
-        log.warning(f"[DEBUG] execute_inference_with_kill caught CancelledError for mission {mission_id}. traceback:\n{''.join(_tb.format_exception(type(_ce), _ce, _ce.__traceback__))}")
+    except asyncio.CancelledError:
         # Cancelled by the watcher → confirm the flag and abort the mission.
         try:
             flagged = await _is_kill_flag_set(mission_id)
@@ -798,7 +794,11 @@ async def execute_inference_with_kill(
         raise
     finally:
         watch.cancel()
-        with contextlib.suppress(Exception):
+        # NOTE: CancelledError is a BaseException (not Exception) in Python 3.8+,
+        # so `suppress(Exception)` would NOT swallow the cancellation raised by
+        # awaiting the just-cancelled watcher — leaking it as a spurious
+        # "user abort". Suppress CancelledError explicitly.
+        with contextlib.suppress(asyncio.CancelledError):
             await watch
 
 
