@@ -785,7 +785,9 @@ async def execute_inference_with_kill(
     watch = asyncio.create_task(_kill_watch())
     try:
         return await inf_task
-    except asyncio.CancelledError:
+    except asyncio.CancelledError as _ce:
+        import traceback as _tb
+        log.warning(f"[DEBUG] execute_inference_with_kill caught CancelledError for mission {mission_id}. traceback:\n{''.join(_tb.format_exception(type(_ce), _ce, _ce.__traceback__))}")
         # Cancelled by the watcher → confirm the flag and abort the mission.
         try:
             flagged = await _is_kill_flag_set(mission_id)
