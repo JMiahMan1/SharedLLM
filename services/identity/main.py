@@ -22,7 +22,17 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from services.common.http import get_client, get_client_insecure
 from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
 from services.identity.crypto import decrypt, digest_secret, encrypt
-from services.identity.models import DEFAULT_GLOBAL_SETTINGS, APIKey, DeviceAssignment, DnsRecord, GlobalSetting, RavenMission, User, UserWidget, UserCalendarSetting
+from services.identity.models import (
+    DEFAULT_GLOBAL_SETTINGS,
+    APIKey,
+    DeviceAssignment,
+    DnsRecord,
+    GlobalSetting,
+    RavenMission,
+    User,
+    UserCalendarSetting,
+    UserWidget,
+)
 from services.identity.schemas import (
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
@@ -34,6 +44,7 @@ from services.identity.schemas import (
     LoginRequest,
     LoginResponse,
     RavenMissionCreate,
+    RavenMissionListItem,
     RavenMissionRead,
     RavenMissionUpdate,
     ResolvedCredentials,
@@ -1700,9 +1711,13 @@ def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:
         raise HTTPException(status_code=404, detail="Mission not found")
     return mission
 
-@app.get("/api/raven/missions", response_model=list[RavenMissionRead])
+@app.get("/api/raven/missions", response_model=list[RavenMissionListItem])
 def get_missions(limit: int = 200, session: Session = Depends(get_session)):
+    from typing import Any, cast
+
+    from sqlalchemy.orm import defer
     stmt = select(RavenMission).order_by(text("created_at DESC"))
+    stmt = stmt.options(defer(cast(Any, RavenMission.output_log)), defer(cast(Any, RavenMission.result)))
     if limit and limit > 0:
         stmt = stmt.limit(limit)
     return session.exec(stmt).all()

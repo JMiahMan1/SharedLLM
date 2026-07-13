@@ -256,6 +256,25 @@ class RavenMissionRead(BaseModel):
     result: str | None = None
     workspace_id: str | None = None
 
+class RavenMissionListItem(BaseModel):
+    id: int
+    slug: str | None = None
+    mission_type: str
+    priority: int
+    target_container: str | None = None
+    error_summary: str | None = None
+    proposed_mission: str
+    coding_model: str | None = None
+    status: str
+    progress: int
+    scheduled_for: str | None = None
+    created_at: str
+    queued_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    duration: int | None = None
+    workspace_id: str | None = None
+
 class UserWidgetRead(BaseModel):
     widget_key: str
     visibility: str
