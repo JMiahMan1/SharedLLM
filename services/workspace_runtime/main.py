@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 import aiohttp
 import redis
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
@@ -187,6 +187,10 @@ class WorkspaceRef(BaseModel):
 class FileReadRequest(WorkspaceRef):
     relative_path: str
     max_bytes: int = Field(default=DEFAULT_FILE_READ_LIMIT, ge=1, le=200000)
+
+
+class FileRawRequest(WorkspaceRef):
+    relative_path: str
 
 
 class FileListRequest(WorkspaceRef):
@@ -1706,6 +1710,22 @@ def read_file(req: FileReadRequest, x_internal_secret: str | None = Header(defau
         "content": content[: req.max_bytes],
         "truncated": len(content) > req.max_bytes,
     }
+
+
+@app.post("/files/raw")
+def read_file_raw(req: FileRawRequest, x_internal_secret: str | None = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req)
+    _require_workspace_capability(workspace, "read")
+    req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
+    workspace_path = Path(workspace["resolved_path"])
+    target = resolve_safe_path(workspace_path, req.relative_path)
+    if not target.is_file():
+        raise HTTPException(status_code=400, detail=f"Path is not a file: {req.relative_path}")
+    import mimetypes
+
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    return FileResponse(path=str(target), media_type=media_type, filename=target.name)
 
 
 @app.post("/files/list")
