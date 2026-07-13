@@ -4152,6 +4152,16 @@ async def git_fetch_workspace_proxy(request: Request):
 async def git_branches_workspace_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/git/branches", request)
 
+
+@app.post("/api/workspaces/git/checkout")
+async def git_checkout_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/checkout", request)
+
+
+@app.post("/api/workspaces/git/branch/create")
+async def git_branch_create_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/branch/create", request)
+
 @app.get("/api/workspaces/{workspace_id}/raven/missions")
 async def get_workspace_raven_missions_proxy(workspace_id: str, request: Request, limit: int = 50):
     resp = await get_http_client().get(
