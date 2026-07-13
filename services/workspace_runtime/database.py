@@ -35,9 +35,14 @@ def _migrate_workspace_table():
         if "is_default" not in columns:
             conn.execute(text("ALTER TABLE workspace ADD COLUMN is_default BOOLEAN DEFAULT 0"))
         if "created_at" not in columns:
-            # SQLite applies DEFAULT to existing rows, so pre-existing workspaces
-            # get a best-effort creation time instead of NULL.
-            conn.execute(text("ALTER TABLE workspace ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"))
+            # Add the column WITHOUT a server default: some SQLite builds / legacy
+            # file formats reject ADD COLUMN ... DEFAULT CURRENT_TIMESTAMP ("Cannot
+            # add a column with non-constant default"). New rows still get created_at
+            # via the model's default_factory, and we backfill existing rows here.
+            conn.execute(text("ALTER TABLE workspace ADD COLUMN created_at TIMESTAMP"))
+            conn.execute(
+                text("UPDATE workspace SET created_at = CURRENT_TIMESTAMP WHERE created_at IS NULL")
+            )
 
 
 def get_session():
