@@ -2895,7 +2895,13 @@ async def get_skylight_chores(
         if str((c.get("attributes", {}) or {}).get("start") or "").startswith(day)
     ]
 
-    return {"status": "SUCCESS", "chores": chores}
+    included = result.get("included", []) if isinstance(result, dict) else []
+    return {
+        "status": "SUCCESS",
+        "chores": chores,
+        "_debug_raw": raw_chores[:1],
+        "_debug_included": included[:8],
+    }
 
 
 @app.post("/api/integrations/skylight/chores/{chore_id}/complete", dependencies=[Depends(require_internal)])
