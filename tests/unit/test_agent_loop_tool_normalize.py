@@ -120,3 +120,27 @@ def test_repair_json_control_chars_escapes_raw_newline():
     src = '{"a": "line1\nline2"}'
     out = _repair_json_control_chars(src)
     assert out == '{"a": "line1\\nline2"}'
+
+
+def test_extract_action_json_no_infinite_recursion_on_unparseable():
+    """Regression: an unparseable model output that still contains a quoted
+    string previously triggered unbounded recursion in extract_action_json.
+
+    The control-char repair path used ``re.sub``, which returns a *new* string
+    object (different identity) on every match even when the replacement text
+    is identical. The old guard ``repaired is not text`` was therefore always
+    True, so a persistently-unparseable payload (common with the local 35B
+    model) recursed forever and raised ``RecursionError`` — killing the entire
+    mission job before any tool action (e.g. a git commit/push) could run.
+
+    The fix compares by CONTENT (``!=``) and bounds the recursion depth, so an
+    unparseable payload now degrades to ``None`` (the caller re-prompts)
+    instead of crashing the mission.
+    """
+    from services.gateway.agent_loop import extract_action_json
+
+    # Unterminated JSON (missing closing braces) that still contains a quoted
+    # string — the exact shape that sent the old code into infinite recursion.
+    text = '{"action": "WorkspaceShellRequest", "payload": {"command": "git push"'
+    norm = extract_action_json(text)
+    assert norm is None
