@@ -91,7 +91,7 @@ def test_run_workspace_cmd_shell_wraps_sh(fake_docker):
     container, _ = fake_docker
 
     async def go():
-        return await sb.run_workspace_cmd("ws", "/w", "echo hi && ls", shell=True, timeout=5.0)
+        return await sb.run_workspace_cmd("ws", "/workspaces/w", "echo hi && ls", shell=True, timeout=5.0)
 
     asyncio.run(go())
     args, _ = container.exec_run.call_args
