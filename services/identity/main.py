@@ -692,9 +692,7 @@ def delete_user(username: str, session: Session = Depends(get_session), admin: U
     return {"status": "SUCCESS"}
 
 @app.get("/api/users", response_model=list[UserRead])
-def list_users(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
-    if not user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin only")
+def list_users(session: Session = Depends(get_session), _: bool = Depends(require_admin_or_internal)):
     return session.exec(select(User)).all()
 
 @app.post("/api/users", response_model=UserRead)

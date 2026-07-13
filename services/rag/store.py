@@ -64,8 +64,12 @@ class SqliteVecAdapter(VectorStoreAdapter):
 
     def add(self, doc_id: str, embedding: list[float], collection: str, user_id: str) -> None:
         blob = serialize_vector(embedding)
+        # vec0 virtual tables do NOT honor INSERT OR REPLACE — upsert explicitly
+        # so re-syncing an existing id (e.g. HA entities) updates the vector
+        # instead of raising "UNIQUE constraint failed on primary key".
+        self.conn.execute("DELETE FROM vec_rag_items WHERE id = ?", [doc_id])
         self.conn.execute(
-            "INSERT OR REPLACE INTO vec_rag_items(id, embedding) VALUES(?, ?)",
+            "INSERT INTO vec_rag_items(id, embedding) VALUES(?, ?)",
             [doc_id, blob],
         )
 
@@ -116,8 +120,10 @@ class NumpyVecAdapter(VectorStoreAdapter):
 
     def add(self, doc_id: str, embedding: list[float], collection: str, user_id: str) -> None:
         blob = serialize_vector(embedding)
+        # Upsert: remove any prior row for this id before inserting.
+        self.conn.execute("DELETE FROM vec_store WHERE id = ?", [doc_id])
         self.conn.execute(
-            "INSERT OR REPLACE INTO vec_store(id, collection_name, user_id, embedding) "
+            "INSERT INTO vec_store(id, collection_name, user_id, embedding) "
             "VALUES(?, ?, ?, ?)",
             [doc_id, collection, user_id, blob],
         )

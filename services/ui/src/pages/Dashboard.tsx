@@ -440,25 +440,7 @@ const Dashboard = () => {
         </div>
       </header>
 
-      {/* ── System health banner (only shown when degraded) ── */}
-      {!overallHealthOk && unhealthyCount > 0 && (
-        <div className="glass-panel px-5 py-4 border-amber-500/20 bg-amber-950/10 flex items-center gap-3">
-          <AlertTriangle size={18} className="text-amber-400 shrink-0" />
-          <p className="text-sm text-amber-300">
-            <span className="font-semibold">{unhealthyCount} service{unhealthyCount !== 1 ? 's' : ''} degraded.</span>
-            {' '}The system may have limited functionality.
-          </p>
-        </div>
-      )}
-
-      {/* ── Widget Grid (BentoBox) ── */}
-      <SectionErrorBoundary label="Widget Grid">
-        <section>
-          <BentoBoxDashboard />
-        </section>
-      </SectionErrorBoundary>
-
-      {/* ── Search Results ── */}
+      {/* ── Search Results (anchored directly beneath the search bar) ── */}
       {searchResults && (
         <SectionErrorBoundary label="Search Results">
           <section className="glass-panel p-6 border-indigo-500/20 bg-indigo-950/5">
@@ -503,6 +485,24 @@ const Dashboard = () => {
           </section>
         </SectionErrorBoundary>
       )}
+
+      {/* ── System health banner (only shown when degraded) ── */}
+      {!overallHealthOk && unhealthyCount > 0 && (
+        <div className="glass-panel px-5 py-4 border-amber-500/20 bg-amber-950/10 flex items-center gap-3">
+          <AlertTriangle size={18} className="text-amber-400 shrink-0" />
+          <p className="text-sm text-amber-300">
+            <span className="font-semibold">{unhealthyCount} service{unhealthyCount !== 1 ? 's' : ''} degraded.</span>
+            {' '}The system may have limited functionality.
+          </p>
+        </div>
+      )}
+
+      {/* ── Widget Grid (BentoBox) ── */}
+      <SectionErrorBoundary label="Widget Grid">
+        <section>
+          <BentoBoxDashboard />
+        </section>
+      </SectionErrorBoundary>
 
       {/* ── Live Service Status ── */}
       <SectionErrorBoundary label="Service Status">

@@ -191,6 +191,9 @@ def _delete_items(ids: list[str]):
     _conn().execute(f"DELETE FROM rag_items WHERE id IN ({placeholders})", ids)
     _conn().execute(f"DELETE FROM rag_fts WHERE id IN ({placeholders})", ids)
     _conn().execute(f"DELETE FROM vec_store WHERE id IN ({placeholders})", ids)
+    # Clean the sqlite-vec virtual table too (numpy fallback uses vec_store above).
+    with suppress(Exception):
+        _conn().execute(f"DELETE FROM vec_rag_items WHERE id IN ({placeholders})", ids)
     for doc_id in ids:
         with suppress(Exception):
             _adapter().delete(doc_id)
@@ -215,10 +218,15 @@ def _bm25_search(collection: str, user_id: str, query: str, k: int) -> list[tupl
 
 
 def _hybrid_search(
-    collection: str, user_id: str, query: str, k: int, alpha: float, use_rrf: bool
+    collection: str,
+    user_id: str,
+    query: str,
+    query_vector: list[float],
+    k: int,
+    alpha: float,
+    use_rrf: bool,
 ) -> list[SearchResultItem]:
     user_id = user_id.lower()
-    query_vector = embed([query])[0]
 
     vec_res = _adapter().search(collection, user_id, query_vector, k * 2)
     bm25_res = _bm25_search(collection, user_id, query, k * 2)
@@ -261,16 +269,62 @@ def _hybrid_search(
     return results
 
 
+def _search_all_collections(
+    user_id: str, query: str, k: int, alpha: float, use_rrf: bool
+) -> list[SearchResultItem]:
+    """Search every collection the user (or the shared ``default`` user) owns.
+
+    The embedding is computed once and reused across collections. Per-collection
+    hybrid results are merged, de-duplicated by content, and re-ranked globally
+    by fused score so a global "search everything" query returns the best hits
+    regardless of which collection they live in.
+    """
+    user_id = user_id.lower()
+    query_vector = embed([query])[0]
+
+    rows = _conn().execute(
+        "SELECT DISTINCT collection_name FROM rag_items "
+        "WHERE user_id = ? OR user_id = 'default'",
+        [user_id],
+    ).fetchall()
+    collections = [r["collection_name"] for r in rows]
+
+    merged: list[SearchResultItem] = []
+    seen_contents: set[str] = set()
+    for coll in collections:
+        try:
+            res = _hybrid_search(coll, user_id, query, query_vector, k, alpha, use_rrf)
+        except Exception as e:  # pragma: no cover - isolated per collection
+            log.debug(f"Search failed for collection {coll}: {e}")
+            res = []
+        for item in res:
+            if item.content in seen_contents:
+                continue
+            seen_contents.add(item.content)
+            merged.append(item)
+
+    merged.sort(key=lambda x: (x.score or 0.0), reverse=True)
+    return merged[:k]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Search / Ingest endpoints (legacy contract preserved)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/rag/search", response_model=SearchResponse, dependencies=[Depends(require_internal)])
 async def search(req: SearchRequest):
+    # `collection_name` of "all"/""/None searches across every collection the
+    # user (or shared `default`) owns, instead of a single hardcoded one.
     try:
-        results = _hybrid_search(
-            req.collection_name, req.user_id, req.query, req.k, req.alpha, req.use_rrf
-        )
+        if req.collection_name in (None, "", "all", "__all__"):
+            results = _search_all_collections(
+                req.user_id, req.query, req.k, req.alpha, req.use_rrf
+            )
+        else:
+            results = _hybrid_search(
+                req.collection_name, req.user_id, req.query,
+                embed([req.query])[0], req.k, req.alpha, req.use_rrf
+            )
         return SearchResponse(results=results)
     except Exception as e:
         log.error(f"Hybrid search failed: {e}")

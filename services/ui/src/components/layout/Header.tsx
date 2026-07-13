@@ -1,10 +1,33 @@
-import { useState } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search, Bell, LogOut, Trash2, Satellite } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import type { LogEntry } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useLocation } from '../../context/LocationContext';
+
+// Navigation search index — the header box is a *command-palette* style finder
+// for pages/tabs/settings, distinct from the RAG/semantic search on Knowledge.
+type NavItem = { label: string; path: string; section: string; keywords: string };
+const NAV_ITEMS: NavItem[] = [
+  { label: 'Dashboard', path: '/', section: 'Pages', keywords: 'home overview jarvis' },
+  { label: 'Knowledge', path: '/knowledge', section: 'Pages', keywords: 'rag semantic memory storage indexed files ha entities' },
+  { label: 'Identity', path: '/identity', section: 'Pages', keywords: 'users accounts login credentials' },
+  { label: 'Communication', path: '/communication', section: 'Pages', keywords: 'talk nextcloud messages chat' },
+  { label: 'Calendar', path: '/calendar', section: 'Pages', keywords: 'schedule events' },
+  { label: 'Media', path: '/media', section: 'Pages', keywords: 'music assistant audiobookshelf player' },
+  { label: 'Remote', path: '/remote', section: 'Pages', keywords: 'home assistant control devices' },
+  { label: 'Settings', path: '/settings', section: 'Pages', keywords: 'preferences configuration profile' },
+  { label: 'Workspaces', path: '/workspaces', section: 'Pages', keywords: 'files folders registry' },
+  { label: 'Docs', path: '/docs', section: 'Pages', keywords: 'documentation help' },
+  { label: 'Lab', path: '/lab', section: 'Pages', keywords: 'raven missions autonomous agent' },
+  { label: 'Admin', path: '/admin', section: 'Pages', keywords: 'manage control panel users services' },
+  { label: 'Profile Settings', path: '/settings', section: 'Settings', keywords: 'account name password' },
+  { label: 'RAG / Storage Settings', path: '/knowledge', section: 'Settings', keywords: 'embeddings collections purge index' },
+  { label: 'Voice Assistant', path: '/settings', section: 'Settings', keywords: 'microphone speech tts' },
+  { label: 'Notifications', path: '/', section: 'Tabs', keywords: 'alerts bell logs' },
+];
 
 const LEVEL_COLOR: Record<string, string> = {
   ERROR: 'text-red-400',
@@ -17,6 +40,26 @@ const LEVEL_COLOR: Record<string, string> = {
 const Header = () => {
   const { user, logout } = useAuth();
   const { isTracking } = useLocation();
+  const navigate = useNavigate();
+  const [navQuery, setNavQuery] = useState('');
+  const [navOpen, setNavOpen] = useState(false);
+  const navRef = useRef<HTMLDivElement>(null);
+
+  const matches = useMemo(() => {
+    const q = navQuery.trim().toLowerCase();
+    if (!q) return [];
+    return NAV_ITEMS.filter((it) =>
+      (it.label + ' ' + it.keywords + ' ' + it.section).toLowerCase().includes(q)
+    ).slice(0, 12);
+  }, [navQuery]);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (navRef.current && !navRef.current.contains(e.target as Node)) setNavOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
   
   const { data: health, isLoading, error } = useQuery({
     queryKey: ['health'],
@@ -93,15 +136,46 @@ const Header = () => {
 
   return (
     <header className="h-14 md:h-20 flex items-center justify-between px-4 md:px-8 bg-transparent">
-      <div className="flex-1 max-w-2xl relative group md:flex hidden">
+      <div className="flex-1 max-w-2xl relative group md:flex hidden" ref={navRef}>
         <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none text-slate-400 group-focus-within:text-purple-400 transition-colors">
           <Search size={20} />
         </div>
-        <input 
-          type="text" 
-          placeholder="Search semantic memory or storage..."
+        <input
+          type="text"
+          value={navQuery}
+          onChange={(e) => { setNavQuery(e.target.value); setNavOpen(true); }}
+          onFocus={() => setNavOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') { setNavOpen(false); setNavQuery(''); }
+            if (e.key === 'Enter' && matches[0]) {
+              navigate(matches[0].path);
+              setNavOpen(false); setNavQuery('');
+            }
+          }}
+          placeholder="Search pages, tabs & settings…"
           className="w-full glass-input pl-12 h-12 text-lg"
+          aria-label="Search pages, tabs and settings"
         />
+        {navOpen && navQuery.trim() && (
+          <div className="absolute top-14 left-0 right-0 z-50 glass-panel p-2 max-h-96 overflow-y-auto">
+            {matches.length === 0 ? (
+              <p className="text-xs text-slate-500 px-3 py-3">No matches found.</p>
+            ) : (
+              matches.map((m) => (
+                <button
+                  key={`${m.path}-${m.label}`}
+                  onClick={() => { navigate(m.path); setNavOpen(false); setNavQuery(''); }}
+                  className="w-full flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-left hover:bg-white/5 transition-colors"
+                >
+                  <span className="text-sm text-white font-medium">{m.label}</span>
+                  <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 bg-white/5 px-2 py-0.5 rounded-md">
+                    {m.section}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-3 md:gap-6 ml-auto md:ml-0">

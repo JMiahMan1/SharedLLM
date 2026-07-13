@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Database,
@@ -27,6 +27,31 @@ const KnowledgeHub = () => {
   const [purgeModalCollection, setPurgeModalCollection] = useState<string | null>(null);
   const [fullReindexForce, setFullReindexForce] = useState(false);
   const [indexForce, setIndexForce] = useState(false);
+
+  const [ragQuery, setRagQuery] = useState('');
+  const [ragResults, setRagResults] = useState<{ answer?: string; files?: { name: string; path: string }[] } | null>(null);
+  const [ragLoading, setRagLoading] = useState(false);
+  const [ragError, setRagError] = useState<string | null>(null);
+
+  const runRagSearch = async (e: FormEvent) => {
+    e.preventDefault();
+    const q = ragQuery.trim();
+    if (!q) return;
+    setRagLoading(true);
+    setRagError(null);
+    setRagResults(null);
+    try {
+      const data = await api.globalSearch(q);
+      setRagResults(data);
+      if (!data.files || data.files.length === 0) {
+        setRagError('No results found for that query.');
+      }
+    } catch {
+      setRagError('Search failed. Please try again.');
+    } finally {
+      setRagLoading(false);
+    }
+  };
 
   const { data: stats, isLoading: statsLoading } = useQuery<RagStats>({
     queryKey: ['rag-stats'],
@@ -130,6 +155,63 @@ const KnowledgeHub = () => {
         </div>
       </header>
 
+      {/* RAG Semantic Search — the home for semantic memory / indexed storage */}
+      <section className="glass-panel p-6 border-indigo-500/20 bg-indigo-950/5">
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <Search size={16} className="text-indigo-300" />
+          <h3 className="font-bold text-indigo-300">Semantic Memory Search</h3>
+          <span className="text-[10px] uppercase tracking-widest text-slate-500">
+            RAG · indexed files, Home Assistant, missions &amp; more
+          </span>
+        </div>
+        <form onSubmit={runRagSearch} className="relative">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500" size={16} />
+          <input
+            type="text"
+            value={ragQuery}
+            onChange={(e) => setRagQuery(e.target.value)}
+            placeholder="Ask the brain — search indexed files, Home Assistant devices, missions…"
+            className="glass-input w-full py-3 pl-10 pr-28 text-sm"
+            aria-label="Semantic memory search"
+          />
+          <button
+            type="submit"
+            disabled={ragLoading}
+            className="absolute right-2 top-1/2 -translate-y-1/2 glass-button px-4 py-1.5 text-xs font-bold h-8"
+          >
+            {ragLoading ? <RefreshCw size={13} className="animate-spin" /> : 'Search'}
+          </button>
+        </form>
+
+        {ragError && (
+          <div className="mt-4 rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4 text-sm text-indigo-300">
+            {ragError}
+          </div>
+        )}
+        {ragResults && (
+          <div className="mt-4 space-y-4">
+            {ragResults.answer && (
+              <div className="rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-relaxed text-slate-300">
+                {ragResults.answer}
+              </div>
+            )}
+            {ragResults.files && ragResults.files.length > 0 && (
+              <div className="grid gap-3 md:grid-cols-2">
+                {ragResults.files.map((f) => (
+                  <div key={f.path} className="glass-card flex items-center gap-3 p-4">
+                    <File size={15} className="text-blue-400 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-white">{f.name}</p>
+                      <p className="truncate text-xs text-slate-500">{f.path}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+
       {/* Stats Grid */}
       <div className="grid gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         <div className="glass-panel p-6 relative overflow-hidden group">
@@ -150,7 +232,7 @@ const KnowledgeHub = () => {
             )}
             <p className="text-xs text-slate-500 mt-4 flex items-center gap-1">
               <Info size={12} />
-              Atomic units of knowledge in ChromaDB
+               Atomic units of knowledge in sqlite-vec
             </p>
           </div>
         </div>

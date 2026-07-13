@@ -4044,6 +4044,60 @@ async def list_workspace_files_proxy(request: Request):
 async def write_workspace_file_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/files/write", request)
 
+@app.post("/api/workspaces/files/raw")
+async def read_workspace_file_raw_proxy(request: Request):
+    body = await request.json()
+    if isinstance(body, dict) and not body.get("user_context"):
+        try:
+            body = {**body, "user_context": await _resolve_user_context(request, body)}
+        except Exception:
+            pass
+    resp = await get_http_client().post(
+        f"{WORKSPACE_RUNTIME_SVC}/files/raw",
+        json=body,
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    return Response(
+        content=resp.content,
+        status_code=resp.status,
+        media_type=resp.headers.get("content-type", "application/octet-stream"),
+    )
+
+def _sd_request_authorized(request: Request) -> bool:
+    api_key = request.headers.get("X-API-Key")
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        api_key = auth_header.split(" ")[1]
+    if request.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+        return True
+    return bool(api_key)
+
+@app.post("/api/images/generate")
+async def sd_image_generate_proxy(request: Request):
+    if not _sd_request_authorized(request):
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    body = await request.json()
+    base_url = resolve_service_base_url(SVC_ALPACA_SD)
+    resp = await get_http_client().post(f"{base_url}/v1/images/generations", json=body)
+    return JSONResponse(status_code=resp.status, content=await resp.json())
+
+@app.post("/api/images/edit")
+async def sd_image_edit_proxy(request: Request):
+    if not _sd_request_authorized(request):
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    body = await request.json()
+    base_url = resolve_service_base_url(SVC_ALPACA_SD)
+    resp = await get_http_client().post(f"{base_url}/v1/images/edits", json=body)
+    return JSONResponse(status_code=resp.status, content=await resp.json())
+
+@app.get("/api/images/models")
+async def sd_image_models_proxy(request: Request):
+    if not _sd_request_authorized(request):
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    base_url = resolve_service_base_url(SVC_ALPACA_SD)
+    resp = await get_http_client().get(f"{base_url}/v1/images/models")
+    return JSONResponse(status_code=resp.status, content=await resp.json())
+
 @app.post("/api/workspaces/git/status")
 async def git_status_workspace_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/git/status", request)
