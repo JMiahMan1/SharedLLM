@@ -234,6 +234,7 @@ class RavenMissionUpdate(BaseModel):
     completed_at: str | None = None
     duration: int | None = None
     workspace_id: str | None = None
+    last_llm_reply: str | None = None
 
 class RavenMissionRead(BaseModel):
     id: int
@@ -255,6 +256,7 @@ class RavenMissionRead(BaseModel):
     output_log: str | None = None
     result: str | None = None
     workspace_id: str | None = None
+    last_llm_reply: str | None = None
 
 class RavenMissionListItem(BaseModel):
     id: int
@@ -274,6 +276,7 @@ class RavenMissionListItem(BaseModel):
     completed_at: str | None = None
     duration: int | None = None
     workspace_id: str | None = None
+    last_llm_reply: str | None = None
 
 class UserWidgetRead(BaseModel):
     widget_key: str

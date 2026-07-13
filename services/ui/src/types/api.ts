@@ -231,6 +231,8 @@ export interface RavenMission {
   output_log?: string | null;
   result?: string | null;
   user_id?: number | null;
+  workspace_id?: string | null;
+  last_llm_reply?: string | null;
 }
 
 export interface RavenConfig {
@@ -512,6 +514,53 @@ export interface WorkspaceFileEntry {
 
 export interface WorkspaceFilesListResponse {
   files: WorkspaceFileEntry[];
+}
+
+export interface WorkspaceFileListResponse {
+  status: string;
+  relative_path: string;
+  resolved_path?: string;
+  entries: WorkspaceFileEntry[];
+  truncated: boolean;
+}
+
+export interface GitStatusResponse {
+  status: string;
+  branch?: string;
+  upstream?: string | null;
+  porcelain: string[];
+  dirty: boolean;
+}
+
+export interface GitDiffResponse {
+  status: string;
+  diff: string;
+}
+
+export interface GitCommitResponse {
+  status: string;
+  message?: string;
+}
+
+export interface GitPushResponse {
+  status: string;
+  message?: string;
+}
+
+export interface GitLogEntry {
+  commit: string;
+  message: string;
+  author?: string;
+}
+
+export interface GitLogResponse {
+  status: string;
+  entries: GitLogEntry[];
+}
+
+export interface StorageMirrorResponse {
+  status: string;
+  message?: string;
 }
 
 export interface WorkspaceFileReadResponse {

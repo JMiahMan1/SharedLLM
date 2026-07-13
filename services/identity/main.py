@@ -172,6 +172,8 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE ravenmission ADD COLUMN duration INTEGER"))
             if "workspace_id" not in raven_columns:
                 conn.execute(text("ALTER TABLE ravenmission ADD COLUMN workspace_id VARCHAR"))
+            if "last_llm_reply" not in raven_columns:
+                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN last_llm_reply TEXT"))
             conn.commit()
 
     if "deviceassignment" in inspector.get_table_names():
@@ -1712,11 +1714,13 @@ def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:
     return mission
 
 @app.get("/api/raven/missions", response_model=list[RavenMissionListItem])
-def get_missions(limit: int = 200, session: Session = Depends(get_session)):
+def get_missions(limit: int = 200, workspace_id: str | None = None, session: Session = Depends(get_session)):
     from typing import Any, cast
 
     from sqlalchemy.orm import defer
     stmt = select(RavenMission).order_by(text("created_at DESC"))
+    if workspace_id:
+        stmt = stmt.where(RavenMission.workspace_id == workspace_id)
     stmt = stmt.options(defer(cast(Any, RavenMission.output_log)), defer(cast(Any, RavenMission.result)))
     if limit and limit > 0:
         stmt = stmt.limit(limit)

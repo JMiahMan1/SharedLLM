@@ -1,17 +1,18 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
-import { 
-  Database, 
-  Plus, 
-  Edit3, 
-  Trash2, 
-  Save, 
-  Copy, 
-  Check, 
-  GitPullRequest, 
-  Folder, 
-  Globe, 
+import {
+  Database,
+  Plus,
+  Edit3,
+  Trash2,
+  Save,
+  Copy,
+  Check,
+  GitPullRequest,
+  Folder,
+  FolderOpen,
+  Globe,
   ShieldCheck,
   ShieldAlert,
   RotateCcw,
@@ -22,6 +23,7 @@ import {
 import toast from 'react-hot-toast';
 import { api, type Workspace } from '../services/api';
 import Modal from '../components/ui/Modal';
+import WorkspaceIDE from '../components/workspace/WorkspaceIDE';
 
 const generateWebhookToken = () =>
   Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -32,6 +34,7 @@ const Workspaces = () => {
   const isAdmin = user?.is_admin ?? false;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingWs, setEditingWs] = useState<Workspace | null>(null);
+  const [ideWs, setIdeWs] = useState<Workspace | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const [form, setForm] = useState<Partial<Workspace>>({
@@ -291,6 +294,13 @@ const Workspaces = () => {
                           <Globe size={18} />
                         </button>
                         <button 
+                          onClick={() => setIdeWs(ws)}
+                          className="p-2 rounded-xl text-slate-500 hover:text-emerald-400 hover:bg-white/5 transition-colors"
+                          title="Open workspace files (IDE)"
+                        >
+                          <FolderOpen size={18} />
+                        </button>
+                        <button 
                           onClick={() => openEdit(ws)}
                           className="p-2 rounded-xl text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
                         >
@@ -448,6 +458,10 @@ const Workspaces = () => {
           ))
         )}
       </div>
+
+      {ideWs && (
+        <WorkspaceIDE workspace={ideWs} onClose={() => setIdeWs(null)} />
+      )}
 
       <Modal
         isOpen={isModalOpen}
