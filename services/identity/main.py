@@ -1701,9 +1701,11 @@ def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:
     return mission
 
 @app.get("/api/raven/missions", response_model=list[RavenMissionRead])
-def get_missions(session: Session = Depends(get_session)):
-    missions = session.exec(select(RavenMission).order_by(text("created_at DESC"))).all()
-    return missions
+def get_missions(limit: int = 200, session: Session = Depends(get_session)):
+    stmt = select(RavenMission).order_by(text("created_at DESC"))
+    if limit and limit > 0:
+        stmt = stmt.limit(limit)
+    return session.exec(stmt).all()
 
 @app.get("/api/raven/missions/{mission_id_or_slug}", response_model=RavenMissionRead)
 def get_mission(mission_id_or_slug: str, session: Session = Depends(get_session)):

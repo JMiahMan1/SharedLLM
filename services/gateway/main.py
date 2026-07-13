@@ -4996,9 +4996,11 @@ async def get_user_missions(request: Request):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     # Ideally filter by user_id if we want isolation, for now just proxy it all
+    qs = request.url.query
+    url = f"{IDENTITY_SVC}/api/raven/missions" + (f"?{qs}" if qs else "")
     async with borrow_http_client() as client:
         resp = await client.get(
-            f"{IDENTITY_SVC}/api/raven/missions",
+            url,
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         missions = [m for m in await resp.json() if m["mission_type"] != "admin_fix" or creds.get("is_admin")]
