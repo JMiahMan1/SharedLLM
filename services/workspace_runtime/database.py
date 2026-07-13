@@ -34,6 +34,10 @@ def _migrate_workspace_table():
             conn.execute(text("ALTER TABLE workspace ADD COLUMN excludes TEXT"))
         if "is_default" not in columns:
             conn.execute(text("ALTER TABLE workspace ADD COLUMN is_default BOOLEAN DEFAULT 0"))
+        if "created_at" not in columns:
+            # SQLite applies DEFAULT to existing rows, so pre-existing workspaces
+            # get a best-effort creation time instead of NULL.
+            conn.execute(text("ALTER TABLE workspace ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"))
 
 
 def get_session():

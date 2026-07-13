@@ -1,4 +1,6 @@
 
+from datetime import datetime
+
 from sqlmodel import JSON, Column, Field, SQLModel
 
 
@@ -23,3 +25,4 @@ class Workspace(SQLModel, table=True):
     quarantined: bool = Field(default=False)
     last_raven_mission_id: int | None = Field(default=None)
     excludes: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    created_at: datetime | None = Field(default_factory=datetime.utcnow)

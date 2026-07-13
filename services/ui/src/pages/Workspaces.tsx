@@ -18,10 +18,12 @@ import {
   RotateCcw,
   AlertTriangle,
   Star,
-  Brain
+  Brain,
+  Calendar
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type Workspace } from '../services/api';
+import { formatDate } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import WorkspaceIDE from '../components/workspace/WorkspaceIDE';
 
@@ -342,6 +344,13 @@ const Workspaces = () => {
                       <div className="flex items-center gap-2 text-sm text-slate-300">
                         <GitPullRequest size={14} className="text-slate-600" />
                         <span>{ws.git_remote}/{ws.default_branch}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Created</p>
+                      <div className="flex items-center gap-2 text-sm text-slate-300">
+                        <Calendar size={14} className="text-slate-600" />
+                        <span>{formatDate(ws.created_at) ?? 'Unknown'}</span>
                       </div>
                     </div>
                     {ws.repo_url && (
