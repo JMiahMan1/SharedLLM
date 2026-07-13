@@ -362,6 +362,45 @@ async def lifespan(app: FastAPI):
     # Background telemetry ingestion (live Energy Insights usage)
     telemetry_task = asyncio.create_task(telemetry_ingestion_loop())
 
+    # Configure GitHub CLI (gh) auth + git credential helper at startup so the
+    # agent's workspace shells can push / manage repos without per-request token
+    # plumbing. `gh` reads GH_TOKEN/GITHUB_TOKEN from the environment for API auth,
+    # but an explicit `gh auth login --with-token` also wires up the git credential
+    # helper used by raw `git push` over HTTPS, and makes `gh auth status` report a
+    # logged-in state. This is the durable "proper" auth setup (survives restarts).
+    try:
+        _gh_tok = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if _gh_tok:
+            _gh_env = {**os.environ, "GH_PROMPT_DISABLED": "1"}
+            # Raw `git push` (HTTPS) should use gh's credential helper.
+            subprocess.run(
+                ["git", "config", "--global", "credential.https://github.com.helper",
+                 "!", "gh", "auth", "git-credential"],
+                env=_gh_env, capture_output=True, text=True, timeout=30,
+            )
+            # Log gh in (idempotent; no-op if already authenticated).
+            _login = subprocess.run(
+                ["gh", "auth", "login", "--with-token"],
+                input=_gh_tok, env=_gh_env, capture_output=True, text=True, timeout=30,
+            )
+            if _login.returncode == 0:
+                log.info("GitHub CLI (gh) authenticated via GITHUB_TOKEN at startup.")
+            else:
+                log.warning(f"gh auth login returned {_login.returncode}: {_login.stderr[:200]}")
+            # Sensible git identity so commits don't fail on missing user.name/email.
+            for _k, _v in (("user.email", "raven@sharedllm.local"), ("user.name", "Raven")):
+                _cur = subprocess.run(
+                    ["git", "config", "--global", _k], env=_gh_env, capture_output=True, text=True, timeout=30,
+                )
+                if _cur.returncode != 0 or not _cur.stdout.strip():
+                    subprocess.run(
+                        ["git", "config", "--global", _k, _v], env=_gh_env, capture_output=True, text=True, timeout=30,
+                    )
+        else:
+            log.info("No GITHUB_TOKEN/GH_TOKEN in environment; skipping gh auth setup.")
+    except Exception as _e:
+        log.warning(f"GitHub CLI startup auth setup failed (non-fatal): {_e}")
+
     yield
     telemetry_task.cancel()
     try:
@@ -1823,14 +1862,27 @@ async def health():
     if not identity_ok["healthy"]:
         overall_status = "unhealthy"
 
-    # Check RAG Service
+    # Check RAG Service — bounded SHORT timeout and NO retry. RAG is the service
+    # the Raven worker hammers hardest, so under worker load its /health can lag.
+    # If this sub-check inherited the default 3s timeout + retries, a slow RAG
+    # would make *this* service's /health endpoint itself time out — which then
+    # cascades into the gateway marking Execution UNREACHABLE (a false alarm that
+    # flips the whole gateway to DEGRADED). A degraded RAG only downgrades
+    # Execution to "degraded"; it must never block Execution's own health probe.
     rag_url = os.getenv("RAG_SVC_URL", "http://localhost:8004")
-    rag_ok = await _check_dependency(
-        "rag",
-        lambda: _check_service_health(rag_url, "rag"),
-        max_retries=1,
-        retry_delay=0.5
-    )
+
+    async def _rag_health_check():
+        async with get_client() as client:
+            r = await client.get(
+                f"{rag_url.rstrip('/')}/health",
+                timeout=aiohttp.ClientTimeout(total=1.5),
+            )
+            return {
+                "healthy": r.status == 200,
+                "status": "ok" if r.status == 200 else f"status {r.status}",
+            }
+
+    rag_ok = await _check_dependency("rag", _rag_health_check, max_retries=0, retry_delay=0)
     checks["rag"] = rag_ok["status"]
     if not rag_ok["healthy"]:
         overall_status = "degraded"

@@ -742,28 +742,42 @@ async def readiness():
 
     async with shared_http_client() as client:
       for name, url in services.items():
-          try:
-            log.info(f"[health] Checking {name} at {url}")
-            resp = await client.get(url, timeout=aiohttp.ClientTimeout(total=2.0))
-            log.info(f"[health] {name} response: {resp.status}")
-            if resp.status == 200:
-                services_status[name] = "OK"
-                try:
-                    data = await resp.json()
-                    if isinstance(data, dict):
-                        service_details[name] = {
-                            "git_sha": data.get("git_sha", "unknown"),
-                            "start_time": data.get("start_time", None)
-                        }
-                except Exception:
-                    pass
-            else:
-                services_status[name] = f"ERROR ({resp.status})"
-                all_ok = False
-          except Exception as e:
-            log.error(f"[health] {name} failed: {e}")
-            services_status[name] = "UNREACHABLE"
-            all_ok = False
+          # Retry with a generous per-probe timeout. RAG/Execution are the two
+          # services the Raven worker hammers; under worker load their /health
+          # can briefly exceed a tight timeout. A short retry here prevents a
+          # transient blip from marking a healthy service UNREACHABLE (which in
+          # turn made the whole gateway report DEGRADED for no real reason).
+          ok = False
+          status_val = "UNREACHABLE"
+          for _attempt in range(3):
+              try:
+                log.info(f"[health] Checking {name} at {url} (attempt {_attempt + 1})")
+                resp = await client.get(url, timeout=aiohttp.ClientTimeout(total=5.0))
+                log.info(f"[health] {name} response: {resp.status}")
+                if resp.status == 200:
+                    ok = True
+                    try:
+                        data = await resp.json()
+                        if isinstance(data, dict):
+                            service_details[name] = {
+                                "git_sha": data.get("git_sha", "unknown"),
+                                "start_time": data.get("start_time", None)
+                            }
+                    except Exception:
+                        pass
+                    break
+                else:
+                    status_val = f"ERROR ({resp.status})"
+              except Exception as e:
+                status_val = "UNREACHABLE"
+                log.warning(f"[health] {name} failed (attempt {_attempt + 1}): {e}")
+              if not ok:
+                await asyncio.sleep(0.3)
+          if ok:
+              services_status[name] = "OK"
+          else:
+              services_status[name] = status_val
+              all_ok = False
 
     # The Gateway itself is running if we are responding to this request
     services_status["gateway"] = "OK"

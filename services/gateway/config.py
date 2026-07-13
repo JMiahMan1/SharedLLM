@@ -71,7 +71,13 @@ INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "")
 SYSTEM_IDENTITY = "raven_system"
 
 # --- Raven agent limits (overridable via Identity settings) ---
-RAVEN_MAX_TOTAL_SECONDS = _safe_int("RAVEN_MAX_TOTAL_SECONDS", 14400)
+# Hard wall-clock cap for a single Raven mission. Kept deliberately low (30 min)
+# so a model that loops without making distinct progress — e.g. re-running the
+# same failing step with slightly varied command text to dodge the literal-string
+# loop detector — is force-terminated well before it can saturate RAG/Execution
+# for an hour. Overridable via RAVEN_MAX_TOTAL_SECONDS env if a legitimately long
+# mission needs more time. Mirrors services/config.py's 1800s default.
+RAVEN_MAX_TOTAL_SECONDS = _safe_int("RAVEN_MAX_TOTAL_SECONDS", 1800)
 RAVEN_ITERATION_TIMEOUT = _safe_int("RAVEN_ITERATION_TIMEOUT", 600)
 RAVEN_HEARTBEAT_INTERVAL = _safe_int("RAVEN_HEARTBEAT_INTERVAL", 30)
 RAVEN_HUNG_THRESHOLD = _safe_int("RAVEN_HUNG_THRESHOLD", 600)
