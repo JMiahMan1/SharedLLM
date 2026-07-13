@@ -829,23 +829,26 @@ async def get_dynamic_llm_settings() -> dict:
 async def get_vram_safe_params(model: str, settings: dict) -> dict:
     """Dynamically checks VRAM pressure using DB constraints."""
     local_url = settings.get("llm_local_url", "")
-    if not local_url:
-        log.warning("[AgentLoop] llm_local_url not configured; returning default VRAM-safe params")
-        return {
-            "num_predict": 8192,
-            "temperature": 0.1,
-            "top_p": 0.9,
-            "repeat_penalty": 1.1,
-            "thinking": False,
-        }
     max_ctx = int(settings.get("llm_local_max_ctx", "16384"))
+    # P1: ALWAYS honor the configured context as the baseline. The previous
+    # behaviour only set num_ctx inside the successful /api/ps branch, so any
+    # transient failure to reach Ollama silently fell back to Ollama's tiny
+    # default context (context starvation -> 40-60 iterations). Now num_ctx is
+    # set up front and only scaled DOWN when VRAM pressure is confirmed.
     params = {
         "num_predict": 8192,  # large enough for full file writes, not just JSON tool calls
         "temperature": 0.1,
         "top_p": 0.9,
         "repeat_penalty": 1.1,
         "thinking": False,  # Disable thinking blocks to get content faster
+        "num_ctx": max_ctx,
     }
+    if not local_url:
+        log.warning("[AgentLoop] llm_local_url not configured; returning default VRAM-safe params")
+        # No local URL => not an Ollama/local model; drop the context hint so we
+        # don't misconfigure a cloud provider.
+        params.pop("num_ctx", None)
+        return params
 
     try:
         async with shared_http_client() as client:
@@ -863,13 +866,12 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
                         safe_ctx = max(4096, max_ctx // 2)
                         params["num_ctx"] = safe_ctx
                         log.info(f"[AgentLoop] VRAM PRESSURE. Scaling context down to {safe_ctx}.")
-                    else:
-                        # If only one model is loaded, give it the full requested context
-                        params["num_ctx"] = max_ctx
+                    # else: keep the configured max_ctx baseline
                 except json.JSONDecodeError:
-                    log.warning(f"[AgentLoop] Failed to parse VRAM status (api/ps) from {local_url}")
-    except Exception:
-        pass
+                    log.warning(f"[AgentLoop] Failed to parse VRAM status (api/ps) from {local_url}; using configured num_ctx={max_ctx}")
+    except Exception as e:
+        # Never let a transient VRAM check drop the context to Ollama's default.
+        log.warning(f"[AgentLoop] VRAM status check failed ({e!r}); using configured num_ctx={max_ctx}")
     return params
 
 
