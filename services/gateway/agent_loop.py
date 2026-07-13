@@ -1322,48 +1322,48 @@ async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials, 
 
 def normalize_audit_log(audit_log: list[dict]) -> list[dict]:
     normalized = []
-    
+
     current_action = None
     current_action_payload = None
-    
+
     for ev in audit_log:
         ev_type = ev.get("type")
         ev_data = ev.get("data")
         timestamp = ev.get("timestamp")
-        
+
         if ev_type == "action":
             tool_name = str(ev_data).replace("Executing Tool: ", "").strip()
             current_action = tool_name
-            
+
         elif ev_type == "action_payload":
             try:
                 current_action_payload = json.loads(ev_data) if isinstance(ev_data, str) else ev_data
             except Exception:
                 current_action_payload = ev_data
-                
+
         elif ev_type in ("result_success", "result_error"):
             summary_msg = f"Executed {current_action}"
-            
+
             if current_action == "workspacefilewriterequest" and isinstance(current_action_payload, dict):
                 path = current_action_payload.get("path") or current_action_payload.get("relative_path") or "file"
                 content = current_action_payload.get("content") or ""
                 lines_count = len(str(content).splitlines())
                 summary_msg = f"Wrote {path} ({lines_count} lines)"
-                
+
             elif current_action == "workspaceshellrequest" and isinstance(current_action_payload, dict):
                 cmd = current_action_payload.get("command") or ""
                 summary_msg = f"Shell command: `{cmd[:60]}`"
-                
+
             elif current_action == "workspacegitcommitrequest" and isinstance(current_action_payload, dict):
                 msg = current_action_payload.get("message") or ""
                 summary_msg = f"Git commit: \"{msg[:50]}\""
-                
+
             elif current_action == "workspacegitpushrequest":
                 summary_msg = "Git push"
-                
+
             elif current_action == "workspacegitpullrequest":
                 summary_msg = "Git pull"
-                
+
             elif current_action == "workspacesearchrequest" and isinstance(current_action_payload, dict):
                 q = current_action_payload.get("query") or ""
                 summary_msg = f"Search Query: `{q}`"
@@ -1384,7 +1384,7 @@ def normalize_audit_log(audit_log: list[dict]) -> list[dict]:
                             summary_msg += f" (Tests: {'passed' if passed else 'failed'})"
                 except Exception:
                     pass
-            
+
             normalized.append({
                 "type": ev_type,
                 "data": summary_msg,
@@ -1394,20 +1394,20 @@ def normalize_audit_log(audit_log: list[dict]) -> list[dict]:
                 "tool": current_action,
                 "payload": str(current_action_payload)[:400] if current_action_payload else None
             })
-            
+
             current_action = None
             current_action_payload = None
-            
+
         elif ev_type == "system":
             normalized.append({
                 "type": "system",
                 "data": ev_data,
                 "timestamp": timestamp
             })
-            
+
         elif ev_type == "reasoning":
             pass
-            
+
     return normalized
 
 
@@ -1450,7 +1450,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "directive": directive,
                 "timestamp": _time.time(),
             }
-            from typing import cast, Awaitable
+            from collections.abc import Awaitable
+            from typing import cast
             res1 = r.rpush(f"raven:mission:loopstate:{mission_id}", _json.dumps(rec))
             await cast(Awaitable[Any], res1)
             res2 = r.expire(f"raven:mission:loopstate:{mission_id}", 86400)
@@ -1756,7 +1757,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     if resp.status == 200:
                         m_data = await resp.json()
                         output_log_raw = m_data.get("output_log")
-            
+
             if output_log_raw and isinstance(output_log_raw, str):
                 try:
                     audit_events = json.loads(output_log_raw)
@@ -1764,14 +1765,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     audit_events = []
                 if audit_events:
                     log.info(f"[AgentLoop] Found existing output_log with {len(audit_events)} events for mission {mission_id}. Reconstructing history.")
-                    
+
                     current_tool = None
                     current_payload = None
-                    
+
                     for ev in audit_events:
                         ev_type = ev.get("raw_type") or ev.get("type")
                         ev_data = ev.get("raw_data") or ev.get("data")
-                        
+
                         if ev_type == "action":
                             current_tool = str(ev_data).replace("Executing Tool: ", "").strip()
                         elif ev_type == "action_payload":
@@ -1791,7 +1792,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 action_log.append(f"Step {step_num}: {tool_name} -> {str(ev_data)[:200]}")
                             current_tool = None
                             current_payload = None
-                            
+
                     # Cap reconstructed history to the last 20 tool/result pairs (40 turns)
                     if len(prior_conversation_turns) > 40:
                         prior_conversation_turns = prior_conversation_turns[-40:]
