@@ -152,64 +152,102 @@ def _translate():
 
 
 def test_translate_git_status():
-    assert _translate()("git status") == {"action": "status"}
+    assert _translate()("git status") == [{"action": "status"}]
 
 
 def test_translate_git_add_path():
-    assert _translate()("git add game.py") == {"action": "add", "path": "game.py"}
-    assert _translate()("git add .") == {"action": "add", "path": "."}
+    assert _translate()("git add game.py") == [{"action": "add", "path": "game.py"}]
+    assert _translate()("git add .") == [{"action": "add", "path": "."}]
 
 
 def test_translate_git_commit_message():
-    assert _translate()('git commit -m "feat: add game"') == {
-        "action": "commit",
-        "commit_message": "feat: add game",
-    }
+    assert _translate()('git commit -m "feat: add game"') == [
+        {"action": "commit", "commit_message": "feat: add game"},
+    ]
 
 
 def test_translate_git_push_branch():
-    assert _translate()("git push origin main") == {"action": "push", "branch": "main"}
-    assert _translate()("git push -u origin HEAD:main") == {"action": "push", "branch": "main"}
-    assert _translate()("git push") == {"action": "push", "branch": "microservices"}
+    assert _translate()("git push origin main") == [{"action": "push", "branch": "main"}]
+    assert _translate()("git push -u origin HEAD:main") == [{"action": "push", "branch": "main"}]
+    assert _translate()("git push") == [{"action": "push", "branch": "microservices"}]
 
 
 def test_translate_git_pull_branch():
-    assert _translate()("git pull origin dev") == {"action": "pull", "branch": "dev"}
+    assert _translate()("git pull origin dev") == [{"action": "pull", "branch": "dev"}]
 
 
 def test_translate_git_log_count():
-    assert _translate()("git log --oneline -5") == {"action": "log", "log_count": 5}
-    assert _translate()("git log") == {"action": "log", "log_count": 10}
+    assert _translate()("git log --oneline -5") == [{"action": "log", "log_count": 5}]
+    assert _translate()("git log") == [{"action": "log", "log_count": 10}]
 
 
 def test_translate_git_fetch_branch_checkout_init():
-    assert _translate()("git fetch") == {"action": "fetch"}
-    assert _translate()("git branch feature-x") == {"action": "branch", "path": "feature-x"}
-    assert _translate()("git checkout main") == {"action": "checkout", "path": "main"}
-    assert _translate()("git init") == {"action": "init"}
+    assert _translate()("git fetch") == [{"action": "fetch"}]
+    assert _translate()("git branch feature-x") == [{"action": "branch", "path": "feature-x"}]
+    assert _translate()("git checkout main") == [{"action": "checkout", "path": "main"}]
+    assert _translate()("git init") == [{"action": "init"}]
 
 
 def test_translate_git_remote_add():
-    assert _translate()("git remote add origin https://github.com/u/r.git") == {
-        "action": "remote_add",
-        "remote_name": "origin",
-        "repo_url": "https://github.com/u/r.git",
-    }
+    assert _translate()("git remote add origin https://github.com/u/r.git") == [
+        {
+            "action": "remote_add",
+            "remote_name": "origin",
+            "repo_url": "https://github.com/u/r.git",
+        }
+    ]
 
 
 def test_translate_gh_repo_create():
-    assert _translate()("gh repo create my-repo --private") == {
-        "action": "repo_create",
-        "repo_name": "my-repo",
-        "private": True,
-        "description": None,
-    }
-    assert _translate()('gh repo create my-repo --description "My project"') == {
-        "action": "repo_create",
-        "repo_name": "my-repo",
-        "private": False,
-        "description": "My project",
-    }
+    assert _translate()("gh repo create my-repo --private") == [
+        {
+            "action": "repo_create",
+            "repo_name": "my-repo",
+            "private": True,
+            "description": None,
+        }
+    ]
+    assert _translate()('gh repo create my-repo --description "My project"') == [
+        {
+            "action": "repo_create",
+            "repo_name": "my-repo",
+            "private": False,
+            "description": "My project",
+        }
+    ]
+
+
+def test_translate_compound_pipeline_fans_out():
+    # The exact shape that previously dropped every op after the first:
+    # `git init && git remote add origin <url> && git fetch origin 2>&1 || true`
+    out = _translate()(
+        "git init && git remote add origin https://github.com/u/r.git && git fetch origin 2>&1 || true"
+    )
+    assert out == [
+        {"action": "init"},
+        {"action": "remote_add", "remote_name": "origin", "repo_url": "https://github.com/u/r.git"},
+        {"action": "fetch"},
+    ]
+
+
+def test_translate_compound_commit_push():
+    out = _translate()('git add . && git commit -m "feat: x" && git push origin main')
+    assert out == [
+        {"action": "add", "path": "."},
+        {"action": "commit", "commit_message": "feat: x"},
+        {"action": "push", "branch": "main"},
+    ]
+
+
+def test_translate_compound_with_redirections_and_guards():
+    # Redirections and `|| true` guards are stripped, not routed.
+    out = _translate()("git status 2>&1 || true")
+    assert out == [{"action": "status"}]
+
+
+def test_translate_mixed_non_git_aborts_interception():
+    # A real, non-git command mixed in means we must not intercept the pipeline.
+    assert _translate()("git add . && ruff check .") is None
 
 
 def test_translate_non_git_passthrough():
