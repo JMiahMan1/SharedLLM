@@ -33,3 +33,43 @@ class UserFact(BaseModel):
     category: str = "preference" # e.g., 'preference', 'routine', 'entity_mapping'
     extracted_at: float
     confidence: float = 1.0
+
+
+# ─── Section 6: New relational-vector collection schemas ─────────────────────
+
+class MissionRecord(BaseModel):
+    mission_id: str
+    task_description: str
+    final_status: str = "UNKNOWN"  # SUCCESS, FAILURE, ABORTED
+    error_summary: str = ""
+    steps: list[dict] = Field(default_factory=list)
+    user_id: str = "default"
+    created_at: float | None = None
+
+
+class ConversationUtterance(BaseModel):
+    utterance_id: str | None = None
+    speaker: str = "unknown"
+    text_content: str
+    room_id: str = "unknown"
+    user_id: str = "default"
+    timestamp: int | None = None
+
+
+class NetworkContainer(BaseModel):
+    container_name: str
+    ip_address: str = ""
+    exposed_ports: list[str] = Field(default_factory=list)
+    discovered_services: list[str] = Field(default_factory=list)
+    network_name: str = ""
+    user_id: str = "default"
+
+
+class TelemetryAlert(BaseModel):
+    alert_id: str | None = None
+    entity_id: str
+    alert_type: str = "generic"
+    severity: str = "info"
+    content: str = ""
+    user_id: str = "default"
+    created_at: float | None = None

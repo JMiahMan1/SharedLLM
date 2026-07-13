@@ -1,7 +1,21 @@
 # services/rag/main.py
 """
 Microservice 4: Context & RAG Service
-Manages ChromaDB for vector search and ingestion.
+
+Vector/semantic search and ingestion. ChromaDB has been replaced with a native
+SQLite database backed by the ``sqlite-vec`` extension (with a pure-numpy
+fallback). See ``docs/SQLITE_VEC_MIGRATION.md``.
+
+Key design notes:
+* The embedding **dimension is detected dynamically** from the active
+  ``EMBEDDING_MODEL``. The migration blueprint hardcodes ``float[384]``, but the
+  deployed model (``nomic-ai/nomic-embed-text-v1.5``) produces 768-dim vectors,
+  so a hardcoded dimension would corrupt every insert. We probe the model at
+  startup instead.
+* All collections (generic + the Section 6 structured ones) store their vectors
+  in a single unified ``vec_rag_items`` table keyed by ``id``, and their
+  metadata in ``rag_items``. Structured collections additionally mirror into
+  dedicated relational tables for direct SQL queries.
 """
 import hashlib
 import json
@@ -9,74 +23,114 @@ import logging
 import os
 import time
 import traceback
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
-import chromadb  # pyright: ignore[reportMissingTypeStubs]
-from chromadb.api.types import EmbeddingFunction
-from chromadb.config import Settings  # pyright: ignore[reportMissingTypeStubs]
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
-from services.config import CHROMA_PERSIST_DIR, EMBEDDING_MODEL, INTERNAL_SECRET
-
-
-class FastembedEmbeddingFunction(EmbeddingFunction):
-    """Wraps fastembed's TextEmbedding for use with ChromaDB."""
-
-    def __init__(self, model_name: str, **kwargs: Any) -> None:
-        from fastembed import TextEmbedding  # pyright: ignore[reportMissingImports]
-
-        self._embedder = TextEmbedding(model_name=model_name, **kwargs)
-
-    def __call__(self, input: list[str]) -> list[list[float]]:
-        return [emb.tolist() for emb in self._embedder.embed(input)]
-
-    def embed_query(self, input: list[str]) -> list[list[float]]:
-        return [emb.tolist() for emb in self._embedder.embed(input)]
-
-    def name(self) -> str:
-        return f"fastembed:{self._embedder.model_name}"
-
-
-# pyright: ignore reportGeneralTypeIssues
-# The class implements chromadb's EmbeddingFunction protocol at runtime
-# (via __call__), but pyright can't verify the protocol match statically.
-
-
+from services.config import INTERNAL_SECRET
+from services.rag import db
 from services.rag.schemas import IngestRequest, SearchRequest, SearchResponse, SearchResultItem
+from services.rag.store import VectorStoreAdapter, build_adapter
 from services.shared.info_endpoint import info_router
 
 log = logging.getLogger("rag")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-CHROMA_DIR = CHROMA_PERSIST_DIR
+DEFAULT_EMBEDDING_MODEL = "nomic-ai/nomic-embed-text-v1.5"
+DEFAULT_EMBEDDING_DIM = 768
 
-# Global clients
-chroma_client = None
-embedding_fn = None
+# Globals populated in the lifespan
+conn = None
+adapter: VectorStoreAdapter | None = None
+BACKEND = "unknown"
+embedder = None
+EMBEDDING_MODEL = DEFAULT_EMBEDDING_MODEL
+EMBEDDING_DIM = DEFAULT_EMBEDDING_DIM
+
+
+def _conn():
+    assert conn is not None, "RAG database not initialized"
+    return conn
+
+
+def _adapter():
+    assert adapter is not None, "RAG vector adapter not initialized"
+    return adapter
+
+ACTIVE_STATES = {"on", "playing", "idle", "standby", "home", "cooling", "heating", "drying", "cleaning"}
+
+
+def embed(texts: list[str]) -> list[list[float]]:
+    """Embed a list of texts into float vectors using fastembed."""
+    if embedder is None:
+        raise RuntimeError("Embedder not initialized")
+    return [v.tolist() for v in embedder.embed(texts)]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global chroma_client, embedding_fn
-    # Resolve runtime config from Identity service
+    global conn, adapter, embedder, EMBEDDING_MODEL, EMBEDDING_DIM, BACKEND
+    from services import config as cfg
     from services.config import resolve_runtime_config
+
+    # Resolve runtime config (sets cfg.EMBEDDING_MODEL from Identity).
     await resolve_runtime_config()
 
-    log.info(f"Initializing RAG Service. Chroma DB dir: {CHROMA_DIR}")
+    EMBEDDING_MODEL = cfg.EMBEDDING_MODEL or DEFAULT_EMBEDDING_MODEL
+    log.info(f"Initializing RAG Service. Embedding model: {EMBEDDING_MODEL}")
 
-    os.makedirs(CHROMA_DIR, exist_ok=True)
-    chroma_client = chromadb.PersistentClient(path=CHROMA_DIR, settings=Settings(anonymized_telemetry=False))  # pyright: ignore[reportAttributeAccessIssue]
-    # Use fastembed for CPU-only embedding (avoids CUDA torch dependency)
-    embedding_fn = FastembedEmbeddingFunction(model_name=EMBEDDING_MODEL)
+    os.makedirs(os.path.dirname(db.RAG_DB_PATH) or ".", exist_ok=True)
 
+    conn = db.get_db_connection()
+    embedder = _init_embedder(EMBEDDING_MODEL)
+
+    # Detect the true embedding dimension from the live model.
+    EMBEDDING_DIM = db.detect_dimension(embedder.embed, fallback=DEFAULT_EMBEDDING_DIM)
+    log.info(f"Detected embedding dimension: {EMBEDDING_DIM}")
+
+    db.init_schema(conn, EMBEDDING_DIM)
+    _ensure_dimension_consistent(conn)
+
+    adapter = build_adapter(conn)
+    BACKEND = "sqlite-vec" if type(adapter).__name__ == "SqliteVecAdapter" else "numpy"
     log.info("RAG Service Ready.")
     yield
+    try:
+        _conn().commit()
+        _conn().close()
+    except Exception:
+        pass
     log.info("RAG Service shutting down.")
 
-app = FastAPI(title="SharedLLM RAG Service", version="1.0.0", lifespan=lifespan)
+
+def _init_embedder(model_name: str):
+    from fastembed import TextEmbedding  # pyright: ignore[reportMissingImports]
+
+    return TextEmbedding(model_name=model_name)
+
+
+def _ensure_dimension_consistent(connection):
+    """If the stored dimension differs from the detected one, rebuild vec tables."""
+    stored = db.get_stored_dimension(connection)
+    if stored is not None and stored != EMBEDDING_DIM:
+        log.warning(
+            f"Stored embedding dim {stored} != detected {EMBEDDING_DIM}; "
+            "rebuilding vec_rag_items (vectors will be re-created on next sync)."
+        )
+        connection.execute("DROP TABLE IF EXISTS vec_rag_items")
+        connection.execute(
+            f"CREATE VIRTUAL TABLE vec_rag_items USING vec0("
+            f"id TEXT PRIMARY KEY, embedding float[{EMBEDDING_DIM}])"
+        )
+        connection.commit()
+
+
+app = FastAPI(title="SharedLLM RAG Service", version="2.0.0", lifespan=lifespan)
 
 app.include_router(info_router)
+
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -87,117 +141,157 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"status": "ERROR", "message": "Internal RAG Error", "detail": str(exc)}
     )
 
+
 def require_internal(x_internal_secret: str = Header(...)):
     if x_internal_secret != INTERNAL_SECRET:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-def get_collection(name: str):
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Core storage helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _add_item(
+    collection: str,
+    doc_id: str,
+    user_id: str,
+    content: str,
+    metadata: dict,
+    created_at: int,
+    indexed_at: str,
+):
+    """Insert/replace a document into rag_items + vector store + FTS5."""
+    user_id = user_id.lower()
+    _conn().execute(
+        "INSERT OR REPLACE INTO rag_items"
+        "(id, collection_name, user_id, content, metadata, created_at, indexed_at) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?)",
+        [doc_id, collection, user_id, content, json.dumps(metadata), created_at, indexed_at],
+    )
+    vector = embed([content])[0]
+    _adapter().add(doc_id, vector, collection, user_id)
+
+    # BM25 keyword index (best effort).
     try:
-        return chroma_client.get_or_create_collection(
-            name=name,
-            embedding_function=embedding_fn
+        _conn().execute("DELETE FROM rag_fts WHERE id = ?", [doc_id])
+        _conn().execute(
+            "INSERT INTO rag_fts(id, content, collection_name, user_id) VALUES(?, ?, ?, ?)",
+            [doc_id, content, collection, user_id],
         )
-    except Exception as e:
-        log.error(f"Failed to get collection {name}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception as e:  # pragma: no cover - FTS5 may be disabled
+        log.debug(f"FTS5 index skip for {doc_id}: {e}")
+
+    _conn().commit()
 
 
-def _freeze_for_hash(value):
-    if isinstance(value, dict):
-        return tuple(sorted((str(k), _freeze_for_hash(v)) for k, v in value.items()))
-    if isinstance(value, list):
-        return tuple(_freeze_for_hash(item) for item in value)
-    if isinstance(value, set):
-        return tuple(sorted(_freeze_for_hash(item) for item in value))
-    return value
+def _delete_items(ids: list[str]):
+    if not ids:
+        return
+    placeholders = ",".join("?" * len(ids))
+    _conn().execute(f"DELETE FROM rag_items WHERE id IN ({placeholders})", ids)
+    _conn().execute(f"DELETE FROM rag_fts WHERE id IN ({placeholders})", ids)
+    _conn().execute(f"DELETE FROM vec_store WHERE id IN ({placeholders})", ids)
+    for doc_id in ids:
+        with suppress(Exception):
+            _adapter().delete(doc_id)
+    _conn().commit()
+
+
+def _bm25_search(collection: str, user_id: str, query: str, k: int) -> list[tuple[str, float]]:
+    """Return ``(doc_id, rank)`` ordered best-first, or [] if FTS5 unavailable."""
+    try:
+        safe = '"' + query.replace('"', " ").strip() + '"'
+        rows = _conn().execute(
+            "SELECT id, bm25(rag_fts) AS rank FROM rag_fts "
+            "WHERE rag_fts MATCH ? AND collection_name = ? "
+            "AND (user_id = ? OR user_id = 'default') "
+            "ORDER BY rank LIMIT ?",
+            [safe, collection, user_id, k],
+        ).fetchall()
+        return [(r["id"], float(r["rank"])) for r in rows]
+    except Exception as e:  # pragma: no cover - FTS5 may be disabled
+        log.debug(f"BM25 search unavailable: {e}")
+        return []
+
+
+def _hybrid_search(
+    collection: str, user_id: str, query: str, k: int, alpha: float, use_rrf: bool
+) -> list[SearchResultItem]:
+    user_id = user_id.lower()
+    query_vector = embed([query])[0]
+
+    vec_res = _adapter().search(collection, user_id, query_vector, k * 2)
+    bm25_res = _bm25_search(collection, user_id, query, k * 2)
+
+    K_RRF = 60
+    vec_scores: dict[str, float] = {}
+    for i, (doc_id, _dist) in enumerate(vec_res):
+        vec_scores[doc_id] = vec_scores.get(doc_id, 0.0) + 1.0 / (K_RRF + i + 1)
+    bm25_scores: dict[str, float] = {}
+    for i, (doc_id, _rank) in enumerate(bm25_res):
+        bm25_scores[doc_id] = bm25_scores.get(doc_id, 0.0) + 1.0 / (K_RRF + i + 1)
+
+    if not use_rrf and (vec_res or bm25_res):
+        # Blend by alpha (dense weight) / (1 - alpha) (BM25 weight).
+        fused: dict[str, float] = {}
+        for doc_id, s in vec_scores.items():
+            fused[doc_id] = fused.get(doc_id, 0.0) + alpha * s
+        for doc_id, s in bm25_scores.items():
+            fused[doc_id] = fused.get(doc_id, 0.0) + (1.0 - alpha) * s
+    else:
+        fused = {}
+        for doc_id in set(vec_scores) | set(bm25_scores):
+            fused[doc_id] = vec_scores.get(doc_id, 0.0) + bm25_scores.get(doc_id, 0.0)
+
+    ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)[:k]
+
+    results: list[SearchResultItem] = []
+    for doc_id, score in ranked:
+        row = _conn().execute(
+            "SELECT content, metadata FROM rag_items WHERE id = ?", [doc_id]
+        ).fetchone()
+        if row:
+            results.append(
+                SearchResultItem(
+                    content=row["content"],
+                    metadata=json.loads(row["metadata"]),
+                    score=score,
+                )
+            )
+    return results
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Search / Ingest endpoints (legacy contract preserved)
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/rag/search", response_model=SearchResponse, dependencies=[Depends(require_internal)])
 async def search(req: SearchRequest):
-    collection = get_collection(req.collection_name)
-
-    user_id = req.user_id.lower()
-    if user_id == "default":
-        where_filter = {"user_id": {"$eq": "default"}}
-    else:
-        where_filter = {
-            "$or": [
-                {"user_id": {"$eq": user_id}},
-                {"user_id": {"$eq": "default"}}
-            ]
-        }
-
     try:
-        vector_results = collection.query(
-            query_texts=[req.query],
-            n_results=req.k * 2,
-            where=where_filter
+        results = _hybrid_search(
+            req.collection_name, req.user_id, req.query, req.k, req.alpha, req.use_rrf
         )
-
-        keyword_results = collection.query(
-            query_texts=[req.query],
-            n_results=req.k * 2,
-            where=where_filter,
-            where_document={"$contains": req.query}
-        )
-
-        K_RRF = 60
-        scores = {}
-
-        def process_results(results):
-            if not results or not results["documents"] or not results["documents"][0]:
-                return
-            docs = results["documents"][0]
-            metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
-            for i, (doc, meta) in enumerate(zip(docs, metas)):
-                key = (
-                    doc,
-                    tuple(
-                        sorted(
-                            (str(k), _freeze_for_hash(v)) for k, v in meta.items()
-                        )
-                    ),
-                )
-                scores[key] = scores.get(key, 0) + (1.0 / (K_RRF + i + 1))
-
-        process_results(vector_results)
-        process_results(keyword_results)
-
-        sorted_results = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-        top_k = sorted_results[:req.k]
-
-        response_items = []
-        for (doc, meta_tuple), _score in top_k:
-            response_items.append(SearchResultItem(content=doc, metadata=dict(meta_tuple), score=_score))
-
-        return SearchResponse(results=response_items)
+        return SearchResponse(results=results)
     except Exception as e:
         log.error(f"Hybrid search failed: {e}")
         return SearchResponse(results=[])
 
-@app.post("/rag/purge/{collection_name}")
-def purge_rag_collection(
-    collection_name: str,
-    user_id: str,
-    filter: dict | None = None,
-    x_internal_secret: str | None = Header(default=None)
-):
-    """Purge entries via query parameters (legacy interface)."""
-    if filter is None:
-        filter = {}
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    require_internal(x_internal_secret)
+
+@app.post("/rag/ingest", dependencies=[Depends(require_internal)])
+async def ingest(req: IngestRequest):
+    import uuid
+
+    doc_id = str(uuid.uuid4())
+    meta = dict(req.metadata)
+    meta["user_id"] = req.user_id.lower()
+    meta["indexed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    now = int(time.time())
     try:
-        user_id = user_id.lower()
-        coll = chroma_client.get_collection(name=collection_name, embedding_function=embedding_fn)
-        where_filter = {"user_id": user_id}
-        if filter:
-            where_filter.update(filter)
-        coll.delete(where=where_filter)
-        log.info(f"Purged collection {collection_name} for user {user_id} with filter {where_filter}")
-        return {"status": "SUCCESS", "message": f"Collection {collection_name} purged for user {user_id}"}
+        _add_item(req.collection_name, doc_id, req.user_id, req.content, meta, now, meta["indexed_at"])
+        return {"status": "SUCCESS", "id": doc_id}
     except Exception as e:
-        log.error(f"Purge failed for {collection_name}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        log.error(f"Ingest failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to ingest document") from e
 
 
 @app.get("/rag/stats", dependencies=[Depends(require_internal)])
@@ -208,46 +302,34 @@ async def get_stats(user_id: str = "default"):
     try:
         collections = ["nextcloud_files", "ha_entities", "system_capabilities", "system_learnings"]
         total_chunks = 0
-        coll_chunks_map = {}
-        coll_docs_map = {}
+        coll_chunks_map: dict[str, int] = {}
+        coll_docs_map: dict[str, int] = {}
         total_documents = 0
-        providers = []
+        providers: list[str] = []
         last_indexed = None
 
         for name in collections:
-            coll = chroma_client.get_or_create_collection(name=name, embedding_function=embedding_fn)
-
-            # For system_capabilities, we always use the 'default' user_id
-            # For others, we use the provided user_id
             target_user = "default" if name == "system_capabilities" else user_id
-
-            # Query all entries for this user to get counts and documents
-            results = coll.get(where={"user_id": target_user}, include=["metadatas"])
-            if results and results["ids"]:
-                total_chunks += len(results["ids"])
-                coll_chunks_map[name] = len(results["ids"])
-                providers.append(name.split('_')[0])
-
-                if results["metadatas"]:
-                    unique_items = set()
-                    for m in results["metadatas"]:
-                        item_id = m.get("path") or m.get("friendly_name") or m.get("entity_id")
-                        if item_id:
-                            unique_items.add(item_id)
-
-                        # Track last indexed timestamp
-                        idx_at = m.get("indexed_at")
-                        if idx_at:
-                            if not last_indexed or idx_at > last_indexed:
-                                last_indexed = idx_at
-
-                    doc_count = len(unique_items)
-
-                    if not unique_items and len(results["ids"]) > 0:
-                        doc_count = 1
-
-                    total_documents += doc_count
-                    coll_docs_map[name] = doc_count
+            rows = _conn().execute(
+                "SELECT metadata FROM rag_items WHERE collection_name = ? AND user_id = ?",
+                [name, target_user],
+            ).fetchall()
+            if rows:
+                total_chunks += len(rows)
+                coll_chunks_map[name] = len(rows)
+                providers.append(name.split("_")[0])
+                unique_items = set()
+                for r in rows:
+                    m = json.loads(r["metadata"])
+                    item_id = m.get("path") or m.get("friendly_name") or m.get("entity_id")
+                    if item_id:
+                        unique_items.add(item_id)
+                    idx_at = m.get("indexed_at")
+                    if idx_at and (last_indexed is None or idx_at > last_indexed):
+                        last_indexed = idx_at
+                doc_count = len(unique_items) or 1
+                total_documents += doc_count
+                coll_docs_map[name] = doc_count
 
         return {
             "status": "SUCCESS",
@@ -258,102 +340,73 @@ async def get_stats(user_id: str = "default"):
             "breakdown": {
                 name: {
                     "chunks": coll_chunks_map.get(name, 0),
-                    "documents": coll_docs_map.get(name, 0)
-                } for name in collections
-            }
+                    "documents": coll_docs_map.get(name, 0),
+                }
+                for name in collections
+            },
         }
     except Exception as e:
         log.error(f"Stats failed: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
+
 @app.get("/rag/collection/{collection_name}", dependencies=[Depends(require_internal)])
 async def list_collection_documents(collection_name: str, user_id: str = "default", limit: int = 100):
-    """Retrieve documents and metadata from a specific collection for a user."""
     try:
-        collection = chroma_client.get_or_create_collection(name=collection_name, embedding_function=embedding_fn)
         target_user = "default" if collection_name == "system_capabilities" else user_id
-
-        results = collection.get(
-            where={"user_id": target_user},
-            limit=limit,
-            include=["documents", "metadatas"]
-        )
-
-        items = []
-        if results and results["ids"]:
-            for i in range(len(results["ids"])):
-                items.append({
-                    "id": results["ids"][i],
-                    "document": results["documents"][i],
-                    "metadata": results["metadatas"][i]
-                })
-
+        rows = _conn().execute(
+            "SELECT id, content, metadata FROM rag_items "
+            "WHERE collection_name = ? AND user_id = ? LIMIT ?",
+            [collection_name, target_user, limit],
+        ).fetchall()
+        items = [
+            {"id": r["id"], "document": r["content"], "metadata": json.loads(r["metadata"])}
+            for r in rows
+        ]
         return {
             "status": "SUCCESS",
             "collection": collection_name,
             "user_id": target_user,
             "count": len(items),
-            "items": items
+            "items": items,
         }
     except Exception as e:
         log.error(f"Failed to list collection {collection_name}: {e}")
         return {"status": "ERROR", "message": str(e)}
 
+
 @app.get("/rag/indexed-paths", dependencies=[Depends(require_internal)])
 async def get_indexed_paths(user_id: str = "default"):
-    """Return a list of all paths currently indexed for a user."""
     user_id = user_id.lower()
     try:
-        collection = chroma_client.get_or_create_collection(name="nextcloud_files", embedding_function=embedding_fn)
-        results = collection.get(where={"user_id": user_id}, include=["metadatas"])
-        if results and results["metadatas"]:
-            paths = {m.get("path") for m in results["metadatas"] if m.get("path")}
-            return {"status": "SUCCESS", "paths": list(paths)}
-        return {"status": "SUCCESS", "paths": []}
+        rows = _conn().execute(
+            "SELECT metadata FROM rag_items WHERE collection_name = 'nextcloud_files' AND user_id = ?",
+            [user_id],
+        ).fetchall()
+        paths = {json.loads(r["metadata"]).get("path") for r in rows if r["metadata"]}
+        paths.discard(None)
+        return {"status": "SUCCESS", "paths": list(paths)}
     except Exception as e:
         log.error(f"Failed to fetch indexed paths: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
-@app.post("/rag/ingest", dependencies=[Depends(require_internal)])
-async def ingest(req: IngestRequest):
-    collection = get_collection(req.collection_name)
-    import uuid
-    doc_id = str(uuid.uuid4())
-    # Enforce user_id in metadata for privacy
-    meta = req.metadata.copy()
-    meta["user_id"] = req.user_id.lower()
-    # Add timestamp
-    meta["indexed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-    try:
-        collection.add(
-            documents=[req.content],
-            metadatas=[meta],
-            ids=[doc_id]
-        )
-        return {"status": "SUCCESS", "id": doc_id}
-    except Exception as e:
-        log.error(f"Ingest failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to ingest document")
 
 @app.post("/rag/sync/files", dependencies=[Depends(require_internal)])
 async def sync_files(payload: dict):
     chunks = payload.get("chunks", [])
     user_id = payload.get("user_id", "default").lower()
     collection_name = payload.get("collection_name", "nextcloud_files")
-    collection = get_collection(collection_name)
 
     if not chunks:
         return {"status": "SUCCESS", "count": 0}
 
-    ids = []
-    docs = []
-    metas = []
-
     now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    now = int(time.time())
+    count = 0
 
     for c in chunks:
-        if not isinstance(c, dict): continue
+        if not isinstance(c, dict):
+            continue
         content = c.get("content")
         metadata = c.get("metadata", {})
         if not content:
@@ -363,91 +416,111 @@ async def sync_files(payload: dict):
         chunk_idx = metadata.get("chunk_index", 0)
         path_hash = hashlib.md5(path.encode()).hexdigest()
 
-        if metadata.get("is_metadata"):
-            cid = f"file:{user_id}:{path_hash}:meta"
-        else:
-            cid = f"file:{user_id}:{path_hash}:{chunk_idx}"
+        cid = (
+            f"file:{user_id}:{path_hash}:meta"
+            if metadata.get("is_metadata")
+            else f"file:{user_id}:{path_hash}:{chunk_idx}"
+        )
 
         meta = {}
         for k, v in metadata.items():
-            if isinstance(v, (str, int, float, bool)):
-                meta[k] = v
-            else:
-                meta[k] = str(v)
+            meta[k] = v if isinstance(v, (str, int, float, bool)) else str(v)
         meta["user_id"] = user_id
-        # Always ensure indexed_at is present
         if "indexed_at" not in meta:
             meta["indexed_at"] = now_ts
+        if "created_at" not in meta:
+            meta["created_at"] = now
 
-        ids.append(cid)
-        docs.append(content)
-        metas.append(meta)
-
-    if docs:
         try:
-            collection.upsert(
-                ids=ids,
-                documents=docs,
-                metadatas=metas
-            )
-            log.info(f"Synced {len(docs)} file chunks for user {user_id} into {collection_name}")
-            return {"status": "SUCCESS", "count": len(docs)}
+            _add_item(collection_name, cid, user_id, content, meta, now, now_ts)
+            count += 1
         except Exception as e:
-            log.error(f"File Sync failed: {e}")
-            raise HTTPException(status_code=500, detail="Sync failed")
+            log.error(f"File chunk sync failed for {cid}: {e}")
 
-    return {"status": "SUCCESS", "count": 0}
+    log.info(f"Synced {count} file chunks for user {user_id} into {collection_name}")
+    return {"status": "SUCCESS", "count": count}
+
 
 @app.post("/rag/purge/{collection_name}", dependencies=[Depends(require_internal)])
 async def purge_collection_endpoint(collection_name: str, payload: dict):
     user_id = payload.get("user_id", "default").lower()
     filter_meta = payload.get("filter", {})
-    collection = get_collection(collection_name)
-    where_filter = {"user_id": {"$eq": user_id}}
-    if filter_meta:
-        where_filter = {"$and": [{"user_id": {"$eq": user_id}}, filter_meta]}
     try:
-        collection.delete(where=where_filter)
-        log.info(f"Purged entries from {collection_name} for user {user_id}")
+        sql = "SELECT id FROM rag_items WHERE collection_name = ? AND user_id = ?"
+        params: list[Any] = [collection_name, user_id]
+        if filter_meta:
+            for k, v in filter_meta.items():
+                sql += " AND json_extract(metadata, ?) = ?"
+                params.extend([f"$.{k}", v])
+        rows = _conn().execute(sql, params).fetchall()
+        ids = [r["id"] for r in rows]
+        _delete_items(ids)
+        log.info(f"Purged {len(ids)} entries from {collection_name} for user {user_id}")
         return {"status": "SUCCESS", "message": f"Purged entries from {collection_name}"}
     except Exception as e:
         log.error(f"Purge failed: {e}")
-        raise HTTPException(status_code=500, detail="Purge failed")
+        raise HTTPException(status_code=500, detail="Purge failed") from e
 
-ACTIVE_STATES = {"on", "playing", "idle", "standby", "home", "cooling", "heating", "drying", "cleaning"}
+
+@app.get("/rag/purge/{collection_name}", dependencies=[Depends(require_internal)])
+async def purge_rag_collection(
+    collection_name: str,
+    user_id: str,
+    filter: str | None = None,
+    x_internal_secret: str | None = Header(default=None),
+):
+    """Purge entries via query parameters (legacy interface)."""
+    if filter is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    require_internal(x_internal_secret or "")
+    try:
+        user_id = user_id.lower()
+        rows = _conn().execute(
+            "SELECT id FROM rag_items WHERE collection_name = ? AND user_id = ?",
+            [collection_name, user_id],
+        ).fetchall()
+        ids = [r["id"] for r in rows]
+        _delete_items(ids)
+        log.info(f"Purged collection {collection_name} for user {user_id}")
+        return {"status": "SUCCESS", "message": f"Collection {collection_name} purged for user {user_id}"}
+    except Exception as e:
+        log.error(f"Purge failed for {collection_name}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Home Assistant sync
+# ─────────────────────────────────────────────────────────────────────────────
 
 @app.post("/rag/sync/ha", dependencies=[Depends(require_internal)])
 async def sync_ha(payload: dict, user_id: str | None = None):
     entities = payload.get("entities", [])
-    # Prioritize query param, then payload, then default to 'default'
     resolved_user = (user_id or payload.get("user_id", "default")).lower()
-    collection = get_collection("ha_entities")
     now = int(time.time())
     now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     try:
-        existing = collection.get(where={"user_id": resolved_user})
-        existing_ids = set(existing["ids"]) if existing and "ids" in existing else set()
-    except:
+        existing_rows = _conn().execute(
+            "SELECT id FROM rag_items WHERE collection_name = 'ha_entities' AND user_id = ?",
+            [resolved_user],
+        ).fetchall()
+        existing_ids = {r["id"] for r in existing_rows}
+    except Exception:
         existing_ids = set()
 
-    ids = []
-    docs = []
-    metas = []
     new_count = 0
-
     for e in entities:
-        if not isinstance(e, dict): continue
+        if not isinstance(e, dict):
+            continue
         eid = e.get("entity_id", "")
-        if not eid: continue
-        e.get("state", "unknown")
+        if not eid:
+            continue
         attrs = e.get("attributes", {})
         fname = attrs.get("friendly_name", eid)
         area = attrs.get("area_id") or "unassigned area"
         device_class = attrs.get("device_class", "")
         supported = attrs.get("supported_features", 0)
 
-        # Device registry enrichment
         dev_ip = attrs.get("_device_ip", "")
         dev_mac = attrs.get("_device_mac", "")
         dev_hostname = attrs.get("_device_hostname", "")
@@ -455,7 +528,6 @@ async def sync_ha(payload: dict, user_id: str | None = None):
         dev_last_verified = attrs.get("_device_last_verified", 0)
         dev_metadata = attrs.get("_device_metadata", {})
 
-        # Build content string (semantic search text)
         content = f"Device: {fname} (ID: {eid}) | Area: {area} | Type: {eid.split('.')[0]}"
         if device_class:
             content += f" | Device Class: {device_class}"
@@ -470,12 +542,8 @@ async def sync_ha(payload: dict, user_id: str | None = None):
         created_at = now
         if cid not in existing_ids:
             new_count += 1
-        else:
-            created_at = now # Simplified
 
-        ids.append(cid)
-        docs.append(content)
-        metas.append({
+        meta = {
             "entity_id": eid,
             "friendly_name": fname,
             "area": area,
@@ -487,100 +555,283 @@ async def sync_ha(payload: dict, user_id: str | None = None):
             "updated_at": now,
             "created_at": created_at,
             "indexed_at": now_ts,
-            # Device registry fields (for structured filtering)
             "device_ip": dev_ip,
             "device_mac": dev_mac,
             "device_hostname": dev_hostname,
             "device_discovery_method": dev_method,
             "device_last_verified": str(dev_last_verified) if dev_last_verified else "",
             "device_metadata": json.dumps(dev_metadata) if dev_metadata else "",
-        })
-
-    if docs:
+        }
         try:
-            collection.upsert(ids=ids, documents=docs, metadatas=metas)
+            _add_item("ha_entities", cid, resolved_user, content, meta, created_at, now_ts)
+        except Exception as ex:
+            log.error(f"HA entity sync failed for {cid}: {ex}")
 
-            # ── Orphan cleanup: delete entries that no longer exist in HA ──
-            incoming_ids = set(ids)
-            orphaned_ids = existing_ids - incoming_ids
-            # Exclude non-entity entries (sync_status, etc.)
-            orphaned_entities = [oid for oid in orphaned_ids if oid.startswith("ha:")]
-            if orphaned_entities:
-                collection.delete(ids=orphaned_entities)
-                log.info(f"[ha_sync] Removed {len(orphaned_entities)} orphaned entity entries: {orphaned_entities[:5]}...")
+    # Orphan cleanup: delete entities no longer present in HA.
+    incoming_ids = {f"ha:{e.get('entity_id')}" for e in entities if e.get("entity_id")}
+    orphaned_entities = [oid for oid in (existing_ids - incoming_ids) if oid.startswith("ha:")]
+    if orphaned_entities:
+        _delete_items(orphaned_entities)
+        log.info(f"[ha_sync] Removed {len(orphaned_entities)} orphaned entity entries")
 
-            collection.upsert(
-                ids=[f"sync_status:{resolved_user}"],
-                documents=[f"Last HA sync for {resolved_user} at {now}. Total: {len(docs)}, New: {new_count}, Removed: {len(orphaned_entities)}"],
-                metadatas=[{"type": "sync_status", "user_id": resolved_user, "timestamp": now, "count": len(docs), "new_count": new_count, "removed_count": len(orphaned_entities), "indexed_at": now_ts}]
-            )
-            return {"status": "SUCCESS", "count": len(docs), "new_count": new_count, "removed_count": len(orphaned_entities), "orphaned_entity_ids": orphaned_entities}
-        except Exception as e:
-            log.error(f"HA Sync failed: {e}")
-            raise HTTPException(status_code=500, detail="Sync failed")
-    return {"status": "SUCCESS", "count": 0, "new_count": 0}
+    try:
+        _add_item(
+            "ha_entities",
+            f"sync_status:{resolved_user}",
+            resolved_user,
+            f"Last HA sync for {resolved_user} at {now}. Total: {len(entities)}, "
+            f"New: {new_count}, Removed: {len(orphaned_entities)}",
+            {
+                "type": "sync_status",
+                "user_id": resolved_user,
+                "timestamp": now,
+                "count": len(entities),
+                "new_count": new_count,
+                "removed_count": len(orphaned_entities),
+                "indexed_at": now_ts,
+            },
+            now,
+            now_ts,
+        )
+    except Exception as ex:
+        log.error(f"HA sync_status update failed: {ex}")
+
+    return {
+        "status": "SUCCESS",
+        "count": len(entities),
+        "new_count": new_count,
+        "removed_count": len(orphaned_entities),
+        "orphaned_entity_ids": orphaned_entities,
+    }
+
 
 @app.get("/rag/ha/status", dependencies=[Depends(require_internal)])
 async def get_ha_status(user_id: str = "default"):
-    collection = get_collection("ha_entities")
-    try:
-        res = collection.get(ids=[f"sync_status:{user_id}"])
-        if res and res["metadatas"]:
-            return {"status": "SUCCESS", "data": res["metadatas"][0]}
-        return {"status": "ERROR", "message": "No sync history found"}
-    except Exception as e:
-        return {"status": "ERROR", "message": str(e)}
+    row = _conn().execute(
+        "SELECT metadata FROM rag_items WHERE id = ?",
+        [f"sync_status:{user_id}"],
+    ).fetchone()
+    if row:
+        return {"status": "SUCCESS", "data": json.loads(row["metadata"])}
+    return {"status": "ERROR", "message": "No sync history found"}
+
 
 @app.get("/rag/ha/new", dependencies=[Depends(require_internal)])
 async def get_new_devices(user_id: str = "default", limit: int = 10):
-    collection = get_collection("ha_entities")
-    try:
-        last_24h = int(time.time()) - 86400
-        res = collection.get(
-            where={"$and": [{"user_id": {"$eq": user_id}}, {"created_at": {"$gt": last_24h}}]},
-            limit=limit
-        )
-        return {"status": "SUCCESS", "devices": res["metadatas"] if res else []}
-    except Exception as e:
-        return {"status": "ERROR", "message": str(e)}
+    user_id = user_id.lower()
+    last_24h = int(time.time()) - 86400
+    rows = _conn().execute(
+        "SELECT metadata FROM rag_items "
+        "WHERE collection_name = 'ha_entities' AND user_id = ? AND created_at > ? LIMIT ?",
+        [user_id, last_24h, limit],
+    ).fetchall()
+    return {"status": "SUCCESS", "devices": [json.loads(r["metadata"]) for r in rows]}
+
 
 @app.post("/rag/sync/capabilities", dependencies=[Depends(require_internal)])
 async def sync_capabilities(payload: dict):
     capabilities = payload.get("capabilities", [])
-    collection = get_collection("system_capabilities")
-    ids = []
-    docs = []
-    metas = []
     now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
+    now = int(time.time())
+    count = 0
     for cap in capabilities:
         name = cap.get("name")
         description = cap.get("description", "")
         schema = cap.get("schema", "")
         type_ = cap.get("type", "tool")
-        if not name: continue
+        if not name:
+            continue
         cid = f"cap:{type_}:{name}"
         content = f"Capability: {name} | Description: {description} | Schema/Usage: {schema}"
-        ids.append(cid)
-        docs.append(content)
-        metas.append({
+        meta = {
             "name": name,
             "type": type_,
             "user_id": "default",
             "description": description[:200],
-            "indexed_at": now_ts
-        })
-    if docs:
+            "indexed_at": now_ts,
+        }
         try:
-            collection.upsert(ids=ids, documents=docs, metadatas=metas)
-            return {"status": "SUCCESS", "count": len(docs)}
+            _add_item("system_capabilities", cid, "default", content, meta, now, now_ts)
+            count += 1
         except Exception as e:
-            log.error(f"Capability Sync failed: {e}")
-            raise HTTPException(status_code=500, detail="Sync failed")
-    return {"status": "SUCCESS", "count": 0}
+            log.error(f"Capability sync failed for {cid}: {e}")
+    return {"status": "SUCCESS", "count": count}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Section 6: New relational-vector collections + sync endpoints
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.post("/rag/sync/missions", dependencies=[Depends(require_internal)])
+async def sync_missions(payload: dict):
+    """Ingest a completed agent-loop mission (post-mortem) for self-repair recall."""
+    missions = payload.get("missions") or ([payload] if payload.get("mission_id") else [])
+    if not missions:
+        return {"status": "SUCCESS", "count": 0}
+
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    user_id = payload.get("user_id", "default").lower()
+    count = 0
+    for m in missions:
+        mission_id = m.get("mission_id") or m.get("id")
+        if not mission_id:
+            continue
+        task = m.get("task_description", "")
+        final_status = m.get("final_status", "UNKNOWN")
+        error_summary = m.get("error_summary") or ""
+        steps = m.get("steps") or m.get("steps_json") or []
+        steps_json = json.dumps(steps) if not isinstance(steps, str) else steps
+        content = f"Task: {task}\nStatus: {final_status}\nError: {error_summary}".strip()
+        created_at = int(m.get("created_at", time.time()))
+
+        _conn().execute(
+            "INSERT OR REPLACE INTO mission_history"
+            "(mission_id, task_description, final_status, error_summary, steps_json, "
+            "content, user_id, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            [mission_id, task, final_status, error_summary, steps_json, content, user_id, created_at],
+        )
+        _add_item("mission_history", mission_id, user_id, content, {
+            "mission_id": mission_id,
+            "final_status": final_status,
+            "user_id": user_id,
+            "indexed_at": now_ts,
+        }, created_at, now_ts)
+        count += 1
+
+    return {"status": "SUCCESS", "count": count}
+
+
+@app.post("/rag/sync/conversations", dependencies=[Depends(require_internal)])
+async def sync_conversations(payload: dict):
+    """Ingest intercom voice transcripts for conversational memory."""
+    utterances = payload.get("utterances") or []
+    if not utterances:
+        return {"status": "SUCCESS", "count": 0}
+
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    user_id = payload.get("user_id", "default").lower()
+    count = 0
+    for u in utterances:
+        utterance_id = u.get("utterance_id") or u.get("id") or str(hashlib.md5(
+            f"{u.get('speaker','?')}:{u.get('text_content','')}:{u.get('timestamp',0)}".encode()
+        ).hexdigest())
+        speaker = u.get("speaker", "unknown")
+        text_content = u.get("text_content", "")
+        room_id = u.get("room_id", "unknown")
+        timestamp = int(u.get("timestamp", time.time()))
+        content = f"{speaker} in {room_id}: {text_content}"
+        _conn().execute(
+            "INSERT OR REPLACE INTO conversation_memory"
+            "(utterance_id, speaker, text_content, room_id, content, user_id, timestamp) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?)",
+            [utterance_id, speaker, text_content, room_id, content, user_id, timestamp],
+        )
+        _add_item("conversation_memory", utterance_id, user_id, content, {
+            "speaker": speaker,
+            "room_id": room_id,
+            "user_id": user_id,
+            "indexed_at": now_ts,
+        }, timestamp, now_ts)
+        count += 1
+
+    return {"status": "SUCCESS", "count": count}
+
+
+@app.post("/rag/sync/network", dependencies=[Depends(require_internal)])
+async def sync_network(payload: dict):
+    """Ingest Docker DNS/service-discovery topology for semantic resolution."""
+    containers = payload.get("containers") or []
+    if not containers:
+        # Allow single-container payloads too.
+        if payload.get("container_name"):
+            containers = [payload]
+        else:
+            return {"status": "SUCCESS", "count": 0}
+
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    user_id = payload.get("user_id", "default").lower()
+    count = 0
+    for c in containers:
+        container_name = c.get("container_name") or c.get("name")
+        if not container_name:
+            continue
+        ip_address = c.get("ip_address", "")
+        exposed_ports = json.dumps(c.get("exposed_ports", c.get("ports", [])))
+        discovered_services = json.dumps(c.get("discovered_services", c.get("services", [])))
+        network_name = c.get("network_name", "")
+        content = (
+            f"Container {container_name} on network {network_name} at {ip_address} "
+            f"exposes ports {exposed_ports} and services {discovered_services}"
+        )
+        _conn().execute(
+            "INSERT OR REPLACE INTO network_topology"
+            "(container_name, ip_address, exposed_ports, discovered_services, "
+            "network_name, content, user_id) VALUES(?, ?, ?, ?, ?, ?, ?)",
+            [container_name, ip_address, exposed_ports, discovered_services, network_name, content, user_id],
+        )
+        _add_item("network_topology", container_name, user_id, content, {
+            "container_name": container_name,
+            "ip_address": ip_address,
+            "network_name": network_name,
+            "user_id": user_id,
+            "indexed_at": now_ts,
+        }, int(time.time()), now_ts)
+        count += 1
+
+    return {"status": "SUCCESS", "count": count}
+
+
+@app.post("/rag/sync/telemetry_alerts", dependencies=[Depends(require_internal)])
+async def sync_telemetry_alerts(payload: dict):
+    """Ingest processed semantic telemetry alerts so Jarvis can recall them."""
+    alerts = payload.get("alerts") or ([payload] if payload.get("entity_id") else [])
+    if not alerts:
+        return {"status": "SUCCESS", "count": 0}
+
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    user_id = payload.get("user_id", "default").lower()
+    count = 0
+    for a in alerts:
+        entity_id = a.get("entity_id", "unknown")
+        alert_type = a.get("alert_type", "generic")
+        severity = a.get("severity", "info")
+        text = a.get("content") or a.get("text") or a.get("alert_text") or (
+            f"Telemetry Alert: {entity_id} {alert_type} ({severity})"
+        )
+        alert_id = a.get("alert_id") or f"alert:{entity_id}:{int(time.time()*1000)}"
+        created_at = int(a.get("created_at", time.time()))
+        _conn().execute(
+            "INSERT OR REPLACE INTO telemetry_alerts"
+            "(alert_id, entity_id, alert_type, severity, content, user_id, created_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?)",
+            [alert_id, entity_id, alert_type, severity, text, user_id, created_at],
+        )
+        _add_item("telemetry_alerts", alert_id, user_id, text, {
+            "entity_id": entity_id,
+            "alert_type": alert_type,
+            "severity": severity,
+            "user_id": user_id,
+            "indexed_at": now_ts,
+        }, created_at, now_ts)
+        count += 1
+
+    return {"status": "SUCCESS", "count": count}
+
+
+@app.get("/rag/mission/{mission_id}", dependencies=[Depends(require_internal)])
+async def get_mission(mission_id: str):
+    row = _conn().execute(
+        "SELECT mission_id, task_description, final_status, error_summary, steps_json, created_at "
+        "FROM mission_history WHERE mission_id = ?",
+        [mission_id],
+    ).fetchone()
+    if not row:
+        return {"status": "ERROR", "message": "Mission not found"}
+    return {"status": "SUCCESS", "mission": dict(row)}
 
 
 START_TIME = time.time()
+
 
 @app.get("/health")
 def health():
@@ -588,5 +839,7 @@ def health():
         "status": "ok",
         "service": "rag",
         "git_sha": os.getenv("GIT_SHA", "unknown"),
-        "start_time": START_TIME
+        "start_time": START_TIME,
+        "backend": BACKEND,
+        "embedding_dim": EMBEDDING_DIM,
     }
