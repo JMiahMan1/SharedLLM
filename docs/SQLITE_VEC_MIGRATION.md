@@ -224,6 +224,23 @@ ORDER BY vec_distance_cosine(v.embedding, :query_vector)
 LIMIT :k;
 ```
 
+### C. Domain-Driven Smart Threshold Selection
+To prevent manual rule configuration overhead, the system intelligently determines rule options and thresholds based on the selected Home Assistant device context:
+
+1. **Domain & Class Rules Engine:** 
+   When enrolling a device (e.g. at `/api/telemetry/enroll`), the worker maps default rules based on the `entity_id` domain or the `device_class` attribute:
+   * **`vacuum.*` or `device_class: battery`:** Auto-configures battery drop alerts (e.g., drop $>15\%$ in 5 minutes).
+   * **`switch.*` / Outlets (with power tracking):** Auto-configures overload protection alerts (e.g., current draw $>1800\text{W}$) and phantom standby draw warnings.
+   * **`climate.*` (Thermostats):** Auto-configures short-cycling checks (e.g., alert if HVAC toggles state in $<5$ minutes).
+
+2. **Statistical Calibration Mode:**
+   Rather than using static limits, enrolled devices support a 7-day calibration phase. The worker logs normal metrics to compute the **Mean ($\mu$)** and **Standard Deviation ($\sigma$)** of active states. The system then automatically binds the anomaly threshold to:
+   $$\text{Threshold} = \mu + 3\sigma$$
+   This automatically customizes alerts to specific devices without manual configuration.
+
+3. **LLM-Guided Recommendations:**
+   The UI queries RAG for the device's capabilities and sends them to the LLM to suggest customized semantic rules. For example, if a user enrolls `switch.bedroom_humidifier`, the LLM can recommend alerts if power drops below 10W while the switch is ON (suggesting the water tank is empty).
+
 ---
 
 ## 7. Verification Plan
