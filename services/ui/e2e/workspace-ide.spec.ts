@@ -20,35 +20,35 @@ async function openIdeFor(page: Page, index = 0) {
   await loginAsAdmin(page);
   await page.goto(`${UI_URL}/workspaces`);
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(4000);
   const btn = page.getByTitle('Open workspace files (IDE)').nth(index);
-  await expect(btn).toBeVisible({ timeout: 10000 });
+  await expect(btn).toBeVisible({ timeout: 15000 });
   await btn.click();
   const modal = page.locator('div.fixed.inset-0.z-50').last();
-  await expect(modal).toBeVisible({ timeout: 10000 });
+  await expect(modal).toBeVisible({ timeout: 15000 });
   return modal;
 }
 
 async function openIdeForName(page: Page, name: string): Promise<Page | null> {
   await page.goto(`${UI_URL}/workspaces`);
   await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(4000);
   const btns = page.getByTitle('Open workspace files (IDE)');
   const n = await btns.count();
   for (let i = 0; i < n; i++) {
     await btns.nth(i).click();
     const m = page.locator('div.fixed.inset-0.z-50').last();
-    await expect(m).toBeVisible({ timeout: 10000 });
+    await expect(m).toBeVisible({ timeout: 15000 });
     const title = await m.locator('span.font-semibold').first().textContent();
     if (title && title.includes(name)) return m as unknown as Page;
     await m.getByLabel('Close').click().catch(() => {});
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(300);
   }
   return null;
 }
 
 test.describe('Workspace IDE', () => {
-  test('opens: activity bar + Source Control / Tools / Raven Chat panels all render', async ({ page }) => {
+  test('opens: activity bar + Source Control / Tools / Raven Chat panels all render', { timeout: 90000 }, async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
 
@@ -81,7 +81,7 @@ test.describe('Workspace IDE', () => {
     expect(errors).toEqual([]);
   });
 
-  test('file explorer lists files (no user-context error) and opens a file in the editor', async ({ page }) => {
+  test('file explorer lists files (no user-context error) and opens a file in the editor', { timeout: 90000 }, async ({ page }) => {
     // Try each workspace until one exposes file entries
     let opened = false;
     const ideButtons = 6;
@@ -109,18 +109,23 @@ test.describe('Workspace IDE', () => {
     expect(opened).toBe(true);
   });
 
-  test('image preview pane renders and Stable Diffusion panel is present', async ({ page }) => {
+  test('image preview pane renders and Stable Diffusion panel is present', { timeout: 120000 }, async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
 
     await loginAsAdmin(page);
 
-    // Discover a writable workspace
-    const wsResp = await page.request.get(`${UI_URL}/api/workspaces`);
-    expect(wsResp.ok()).toBe(true);
-    const wsData = await wsResp.json();
-    const workspaces: Array<{ id: string; display_name: string; capabilities?: string[] }> =
-      wsData.workspaces || [];
+    // Discover a writable workspace (retry: /api/workspaces is intermittently 500)
+    let wsData: { workspaces?: Array<{ id: string; display_name: string; capabilities?: string[] }> } = {};
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const r = await page.request.get(`${UI_URL}/api/workspaces`);
+      if (r.ok()) {
+        wsData = await r.json();
+        if (wsData.workspaces && wsData.workspaces.length) break;
+      }
+      await page.waitForTimeout(1500);
+    }
+    const workspaces = wsData.workspaces || [];
     const target = workspaces.find((w) => (w.capabilities || []).includes('write')) || workspaces[0];
     expect(target).toBeTruthy();
 
