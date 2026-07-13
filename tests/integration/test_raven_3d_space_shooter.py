@@ -102,7 +102,11 @@ Execution order:
 Game design (implement all):
 - 3D perspective camera follows the player ship; player moves on a 2D plane (WASD/arrows).
 - Endless starfield/asteroid field scrolling in 3D; enemy drones spawn and approach the player.
-- Fire with SPACE/click; projectiles destroy enemies on collision; score + lives HUD.
+- Fire with SPACE/click; projectiles spawn AT the ship and travel FORWARD toward the incoming
+  enemies (the +Z / spawn direction), colliding with enemies to award score; enemies and asteroids
+  spawn AHEAD of the player and approach it. Ensure your headless selftest feeds synthetic
+  fire/movement input that actually lets projectiles meet enemies so the score increases (otherwise
+  the game is unwinnable).
 - 3 lives; GAME OVER with "PRESS R TO RESTART" (R restarts).
 - Lighting + 3D meshes (cube/cone/sphere) for ship, enemies, projectiles, asteroids.
 
