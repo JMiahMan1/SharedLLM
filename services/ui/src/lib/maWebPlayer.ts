@@ -13,6 +13,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { getPlayerId, savePlayerId, setState } from './webPlayer';
 import { SendspinPlayer, type PlayerState } from '@sendspin/sendspin-js';
 import type { ConnectionState } from './wsManager';
+import { getServerOrigin, getWsProtocolFor } from './serverUrl';
 
 const STORAGE_KEY = 'sendspin_webplayer_id';
 
@@ -85,11 +86,16 @@ function extractMaImage(img: unknown): string | null {
 /* ── Sendspin URL builder ──────────────────────────────────────────────────
  *
  * Returns a native WebSocket URL for the sendspin proxy.
- * SendspinPlayer requires a real WebSocket (not a wrapper class).
+ * SendspinPlayer requires a real WebSocket (not a wrapper class). On the
+ * Capacitor app the bundled page is served from localhost, so we resolve the
+ * host from the configured server URL (see serverUrl.ts) instead of
+ * window.location.
  */
-function getSendspinUrl(baseUrl: string, apiToken: string): string {
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${wsProtocol}://${window.location.host}/api/sendspin?token=${encodeURIComponent(apiToken)}`;
+function getSendspinUrl(apiToken: string): string {
+  const origin = getServerOrigin();
+  const wsProtocol = getWsProtocolFor(origin);
+  const host = new URL(origin).host;
+  return `${wsProtocol}://${host}/api/sendspin?token=${encodeURIComponent(apiToken)}`;
 }
 
 /* ── JSON-RPC URL builder ─────────────────────────────────────────────────
@@ -98,8 +104,25 @@ function getSendspinUrl(baseUrl: string, apiToken: string): string {
  * Matches ma-stream-test.ts: plain WebSocket, not WebSocketManager.
  */
 function getJsonRpcUrl(apiToken: string): string {
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  return `${wsProtocol}://${window.location.host}/api/ma-jsonrpc?token=${encodeURIComponent(apiToken)}`;
+  const origin = getServerOrigin();
+  const wsProtocol = getWsProtocolFor(origin);
+  const host = new URL(origin).host;
+  return `${wsProtocol}://${host}/api/ma-jsonrpc?token=${encodeURIComponent(apiToken)}`;
+}
+
+/* Resolve a (possibly relative) MA image reference to an absolute URL so the
+   OS MediaSession artwork can load it. */
+function buildMediaArtwork(img?: string | null): MediaImage[] {
+  if (!img) return [];
+  let url = img;
+  if (img.startsWith('/')) {
+    try {
+      url = new URL(img, getServerOrigin()).href;
+    } catch {
+      /* keep as-is */
+    }
+  }
+  return [{ src: url, sizes: '512x512', type: 'image/png' }];
 }
 
 /* ── Hook ────────────────────────────────────────────────────────────────── */
@@ -334,11 +357,10 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
     try {
       console.log('[MAWebPlayer] [1/6] Starting initialization...');
-      const baseUrl = window.location.origin;
 
       // 1. Create native WebSocket for Sendspin
       console.log('[MAWebPlayer] [1/6] Creating Sendspin WebSocket...');
-      const sendspinWsUrl = getSendspinUrl(baseUrl, apiToken);
+      const sendspinWsUrl = getSendspinUrl(apiToken);
       sendspinWs = new WebSocket(sendspinWsUrl);
 
       sendspinWs.onerror = (event) => {
@@ -854,6 +876,46 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     await new Promise(resolve => setTimeout(resolve, 1000));
     await initPlayer();
   }, [initPlayer]);
+
+  // Keep the OS MediaSession (lock-screen / background controls) in sync so
+  // playback keeps working when the app is backgrounded and media keys work.
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    try {
+      ms.metadata = new MediaMetadata({
+        title: state.mediaTitle || 'Jarvis OS',
+        artist: state.mediaArtist || 'Music Assistant',
+        album: 'Jarvis OS',
+        artwork: buildMediaArtwork(state.mediaImage),
+      });
+      ms.playbackState = state.isPlaying ? 'playing' : 'paused';
+    } catch {
+      /* MediaSession unsupported in this WebView */
+    }
+  }, [state.mediaTitle, state.mediaArtist, state.mediaImage, state.isPlaying]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    const ms = navigator.mediaSession;
+    const setHandler = (action: MediaSessionAction, handler: MediaSessionActionHandler | null) => {
+      try {
+        ms.setActionHandler(action, handler);
+      } catch {
+        /* action not supported */
+      }
+    };
+    setHandler('play', () => { void play(); });
+    setHandler('pause', () => { void pause(); });
+    setHandler('nexttrack', () => { void next(); });
+    setHandler('previoustrack', () => { void previous(); });
+    return () => {
+      setHandler('play', null);
+      setHandler('pause', null);
+      setHandler('nexttrack', null);
+      setHandler('previoustrack', null);
+    };
+  }, [play, pause, next, previous]);
 
   return {
     ...state,

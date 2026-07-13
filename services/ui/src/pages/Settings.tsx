@@ -3,11 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
-import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import type { GlobalSetting } from '../services/api';
 import LocationPanel from '../components/location/LocationPanel';
+import { isAdminPinSet, setAdminPin, clearAdminPin } from '../lib/adminPin';
+import toast from 'react-hot-toast';
 
 const Settings = () => {
   const { user, logout } = useAuth();
@@ -98,6 +100,8 @@ const Settings = () => {
             </div>
             <ChevronRight size={16} className="text-slate-500" />
           </button>
+
+          <AdminPinManager trigger={trigger} />
         </div>
       )}
 
@@ -143,6 +147,138 @@ const Settings = () => {
         </button>
       </div>
     </div>
+  );
+};
+
+const AdminPinManager = ({
+  trigger,
+  onChanged,
+}: {
+  trigger: ReturnType<typeof useHaptics>['trigger'];
+  onChanged?: () => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const [pin, setPin] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [configured, setConfigured] = useState(isAdminPinSet());
+
+  const reset = () => {
+    setPin('');
+    setConfirm('');
+    setError('');
+  };
+
+  const close = () => {
+    setOpen(false);
+    reset();
+  };
+
+  const save = async () => {
+    if (pin.length < 4) {
+      setError('PIN must be at least 4 digits');
+      return;
+    }
+    if (pin !== confirm) {
+      setError('PINs do not match');
+      return;
+    }
+    setSaving(true);
+    try {
+      await setAdminPin(pin);
+      setConfigured(true);
+      trigger('success');
+      toast.success('Admin PIN updated');
+      onChanged?.();
+      close();
+    } catch {
+      setError('Could not save PIN');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    clearAdminPin();
+    setConfigured(false);
+    trigger('light');
+    toast.success('Admin PIN removed');
+    onChanged?.();
+    close();
+  };
+
+  return (
+    <>
+      <button
+        onClick={() => { trigger('light'); setOpen(true); }}
+        className="w-full flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <Lock size={18} className="text-slate-400" />
+          <div className="text-left">
+            <p className="text-white text-sm font-medium">Admin PIN</p>
+            <p className="text-xs text-slate-400">
+              {configured ? 'Required to unlock admin features on this device' : 'Not set — set to protect admin access'}
+            </p>
+          </div>
+        </div>
+        <span className="text-xs text-purple-400 font-medium">{configured ? 'Change' : 'Set'}</span>
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xl">
+          <div className="glass-panel w-full max-w-sm mx-4 p-6 rounded-2xl relative">
+            <button onClick={close} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+              <X size={20} />
+            </button>
+
+            <h2 className="text-xl font-bold text-white text-center mb-1">
+              {configured ? 'Change Admin PIN' : 'Set Admin PIN'}
+            </h2>
+            <p className="text-sm text-slate-400 text-center mb-6">Use at least 4 digits</p>
+
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="new-password"
+              placeholder="New PIN"
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+              className="w-full mb-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
+            />
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="new-password"
+              placeholder="Confirm PIN"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value.replace(/\D/g, ''))}
+              className="w-full mb-3 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-center tracking-[0.5em] text-lg outline-none focus:border-purple-500/50"
+            />
+
+            {error && <p className="text-sm text-red-400 text-center mb-3">{error}</p>}
+
+            <button
+              onClick={save}
+              disabled={saving}
+              className="w-full py-3 rounded-xl bg-purple-500/30 border border-purple-500/30 text-white font-medium hover:bg-purple-500/40 transition-colors disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save PIN'}
+            </button>
+
+            {configured && (
+              <button
+                onClick={remove}
+                className="w-full mt-2 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 font-medium hover:bg-red-500/20 transition-colors"
+              >
+                Remove PIN
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 

@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { useHaptics } from '../../hooks/useHaptics';
 import BiometricAuthModal from './BiometricAuthModal';
+import { verifyAdminPin, isAdminPinSet } from '../../lib/adminPin';
 
 interface AdminElevationProps {
   children: React.ReactNode;
@@ -18,12 +19,17 @@ const AdminElevation = ({ children }: AdminElevationProps) => {
     setShowModal(false);
   }, [trigger]);
 
-  const handlePinSubmit = useCallback(async (_pin: string): Promise<boolean> => {
-    if (_pin.length < 4) return false;
-    trigger('success');
-    setElevated(true);
-    setShowModal(false);
-    return true;
+  const handlePinSubmit = useCallback(async (_pin: string): Promise<boolean | string> => {
+    if (_pin.length < 4) return 'PIN must be at least 4 digits';
+    if (!isAdminPinSet()) return 'No admin PIN is set. Add one in Settings → Admin.';
+    const ok = await verifyAdminPin(_pin);
+    if (ok) {
+      trigger('success');
+      setElevated(true);
+      setShowModal(false);
+      return true;
+    }
+    return 'Incorrect PIN';
   }, [trigger]);
 
   if (!Capacitor.isNativePlatform()) return <>{children}</>;
