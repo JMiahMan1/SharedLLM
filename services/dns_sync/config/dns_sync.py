@@ -17,6 +17,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
+import urllib.request
 
 # Try to import docker library for container discovery
 try:
@@ -157,10 +158,22 @@ def discover_containers_via_docker():
             # Get container IP from any network
             networks = container.attrs['NetworkSettings']['Networks']
             ip = None
-            for _, net_config in networks.items():
+            network_name = ""
+            for net_name, net_config in networks.items():
+                network_name = net_name
                 if net_config.get('IPAddress'):
                     ip = net_config['IPAddress']
                     break
+
+            # Exposed ports (host:container/proto strings)
+            ports = []
+            port_map = container.attrs['NetworkSettings'].get('Ports') or {}
+            for container_port, host_bindings in port_map.items():
+                if host_bindings:
+                    for binding in host_bindings:
+                        ports.append(f"{binding.get('HostIp', '0.0.0.0')}:{binding.get('HostPort')}->{container_port}")
+                else:
+                    ports.append(container_port)
 
             # Check if host-networked
             network_mode = container.attrs['HostConfig'].get('NetworkMode', '')
@@ -168,6 +181,8 @@ def discover_containers_via_docker():
 
             containers[name] = {
                 'ip': ip,
+                'network': network_name,
+                'ports': ports,
                 'host_networked': host_networked,
                 'status': container.status
             }
@@ -580,6 +595,50 @@ def dns_server():
     print("[dns-sync] DNS server stopped", flush=True)
 
 
+# ─── RAG network-topology producer (Section 6) ──────────────────────────────
+# Best-effort: push discovered container topology to the RAG service so Jarvis
+# can resolve service routes ("what port is redis?") semantically. Never blocks
+# or breaks the DNS loop on RAG outage.
+RAG_SVC_URL = os.environ.get("RAG_SVC_URL", "http://rag:8004").rstrip("/")
+_RAG_PUSH_INTERVAL = 300  # seconds between pushes
+_last_rag_push = 0.0
+
+
+def push_network_topology_rag(containers: dict) -> None:
+    """POST discovered containers to the RAG /rag/sync/network endpoint."""
+    global _last_rag_push
+    now = time.time()
+    if now - _last_rag_push < _RAG_PUSH_INTERVAL:
+        return
+    if not containers:
+        return
+    try:
+        payload = {
+            "containers": [
+                {
+                    "container_name": name,
+                    "ip_address": info.get("ip", ""),
+                    "exposed_ports": info.get("ports", []),
+                    "discovered_services": [name],
+                    "network_name": info.get("network", ""),
+                }
+                for name, info in containers.items()
+            ]
+        }
+        req = urllib.request.Request(
+            f"{RAG_SVC_URL}/rag/sync/network",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json", "X-Internal-Secret": INTERNAL_SECRET},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            if resp.status == 200:
+                _last_rag_push = now
+                print(f"[dns-sync] Pushed {len(payload['containers'])} containers to RAG", flush=True)
+    except Exception as e:
+        print(f"[dns-sync] RAG network push skipped: {e}", flush=True)
+
+
 def main():
     global running
     print(f"[dns-sync] Starting DNS sync sidecar (poll every {POLL_INTERVAL}s)", flush=True)
@@ -642,6 +701,8 @@ def main():
                     dns_records = records
                 last_records = records
                 print(f"[dns-sync] Discovered {len(containers)} containers, {len(records)} DNS records", flush=True)
+                # Best-effort: push topology to RAG for semantic service resolution.
+                push_network_topology_rag(containers)
 
             last_discovery = time.time()
 

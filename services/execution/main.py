@@ -35,6 +35,7 @@ from services.config import (
     INTERNAL_SECRET,
     OLLAMA_URL,
 )
+from services.shared.rag_client import push_telemetry_alert
 
 # Now import everything from sibling modules
 from services.execution import device_registry, ha_client
@@ -179,6 +180,8 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
     error) is caught per-entity and the loop keeps running.
     """
     log.info("[telemetry] ingestion loop starting (interval=%ss)", interval_seconds)
+    # Throttle telemetry->RAG alert pushes (once per entity per 10 minutes).
+    _alert_last: dict[str, float] = {}
     while True:
         try:
             await asyncio.sleep(interval_seconds)
@@ -226,6 +229,21 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
                         "state": raw,
                         "source": "ha-poll",
                     }
+                    # Best-effort: when a tracked device goes unavailable, push a
+                    # semantic telemetry alert into RAG for recall (Section 6).
+                    now_ts = time.time()
+                    if not is_available and (now_ts - _alert_last.get(entity_id, 0.0)) > 600:
+                        _alert_last[entity_id] = now_ts
+                        asyncio.ensure_future(
+                            push_telemetry_alert(
+                                entity_id,
+                                "availability_loss",
+                                "medium",
+                                f"Telemetry Alert: {entity_id} became unavailable at "
+                                f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}.",
+                                user_id="default",
+                            )
+                        )
                     async with get_client() as session, session.post(
                         f"{IDENTITY_SVC_URL}/api/telemetry/snapshot",
                         headers={"X-Internal-Secret": INTERNAL_SECRET},
