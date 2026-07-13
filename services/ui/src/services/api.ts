@@ -1286,7 +1286,7 @@ export const api = {
   },
 
   async unenrollTelemetry(entityId: string): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post(`/api/telemetry/unenroll/${entityId}`);
+    const resp = await apiClient.delete(`/api/telemetry/enroll/${entityId}`);
     return resp.data;
   },
 
