@@ -42,6 +42,11 @@ SANDBOX_MEM = os.getenv("WORKSPACE_SANDBOX_MEM", "1g")
 SANDBOX_PIDS = int(os.getenv("WORKSPACE_SANDBOX_PIDS", "256"))
 SANDBOX_CPU_QUOTA = int(os.getenv("WORKSPACE_SANDBOX_CPU_QUOTA", "50000"))
 SANDBOX_MOUNT_ROOT = os.getenv("SANDBOX_MOUNT_ROOT", "/workspaces")
+# The Docker host path that the in-container SANDBOX_MOUNT_ROOT (e.g. /workspaces)
+# is itself a bind-mount of. The Docker daemon interprets bind-mount SOURCES as
+# paths on the Docker HOST filesystem, not inside the calling container, so we
+# must translate /workspaces/... -> $WORKSPACE_HOST_PATH/... for the mount.
+SANDBOX_HOST_ROOT = os.getenv("WORKSPACE_HOST_PATH", "")
 
 
 def _under_mount_root(path: str) -> bool:
@@ -57,6 +62,23 @@ def _under_mount_root(path: str) -> bool:
         )
     except ValueError:
         return False
+
+
+def _host_mount_source(container_path: str) -> str:
+    """Translate an in-container /workspaces path to the real Docker-host path.
+
+    The daemon mounts the SOURCE from the host filesystem. If we passed the
+    container-internal "/workspaces/..." path as the source, the daemon would
+    bind an unrelated (often empty, auto-created) host directory instead of the
+    real workspace data, so the sandbox could neither see nor write the
+    workspace. When WORKSPACE_HOST_PATH is set we map /workspaces/<rest> to
+    <WORKSPACE_HOST_PATH>/<rest>; otherwise the path is used as-is (tests,
+    dev boxes where /workspaces is already a real host path).
+    """
+    if SANDBOX_HOST_ROOT and container_path.startswith(SANDBOX_MOUNT_ROOT + "/"):
+        rel = os.path.relpath(container_path, SANDBOX_MOUNT_ROOT)
+        return os.path.join(SANDBOX_HOST_ROOT, rel)
+    return container_path
 
 
 def _slug(workspace_id: str) -> str:
@@ -132,6 +154,11 @@ def ensure_workspace_container(
     except NotFound:
         pass
     img = image or SANDBOX_IMAGE
+    # The SOURCE must be the real Docker-host path (e.g. /home/jeremiah/workspaces/...),
+    # not the container-internal /workspaces/... path, or the daemon would bind an
+    # unrelated empty host directory. The TARGET stays host_path so the agent's
+    # absolute paths remain valid verbatim inside the container.
+    mount_source = _host_mount_source(host_path)
     c = client.containers.run(
         img,
         name=cname,
@@ -140,12 +167,10 @@ def ensure_workspace_container(
         user=f"{uid}:{gid}",
         network=_network_name(workspace_id),
         working_dir=host_path,
-        # Mount the workspace at its IDENTICAL absolute host path inside the
-        # container. This keeps every absolute path an agent uses
-        # (/workspaces/users/x/<id>/file.py) valid verbatim, so we never have to
-        # translate paths between host and sandbox. Only this one directory is
-        # visible — the agent cannot reach any other workspace or host path.
-        volumes={host_path: {"bind": host_path, "mode": "rw"}},
+        # Mount the workspace at its IDENTICAL absolute path inside the container.
+        # Only this directory is visible — the agent cannot reach any other
+        # workspace or host path.
+        volumes={mount_source: {"bind": host_path, "mode": "rw"}},
         mem_limit=SANDBOX_MEM,
         memswap_limit=SANDBOX_MEM,
         pids_limit=SANDBOX_PIDS,
@@ -157,7 +182,7 @@ def ensure_workspace_container(
         restart_policy={"Name": "unless-stopped"},
         auto_remove=False,
     )
-    log.info(f"[Sandbox] Created container {cname} for workspace {workspace_id} (mount {host_path})")
+    log.info(f"[Sandbox] Created container {cname} for workspace {workspace_id} (mount {mount_source} -> {host_path})")
     return c
 
 
