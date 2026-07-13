@@ -353,9 +353,20 @@ async def git_push(req: GitPushRequest, x_internal_secret: str | None = Header(d
     result = await run_git_with_optional_askpass(ws_id, workspace_path, args, identity=identity, remote_url=remote_url)
     if result["returncode"] != 0:
         raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git push failed")
+    # Push verification (Aider-style): confirm the ref actually advanced and no
+    # commits remain unpushed. `git push` can exit 0 yet leave commits behind
+    # (e.g. one ref rejected while another succeeded, or nothing was committed).
+    unpushed = await _count_unpushed(ws_id, workspace_path, remote_name, branch_name)
+    # Unknown (-1, e.g. remote-tracking ref not yet fetched) is treated as
+    # verified by trusting the successful push exit code, to avoid false PARTIALs
+    # on first pushes.
+    verified = unpushed == 0 if unpushed >= 0 else True
     upstream = await run_git(ws_id, workspace_path, ["git", "rev-parse", "--abbrev-ref", "@{upstream}"])
     return {
         "status": "SUCCESS",
+        "verified": verified,
+        "unpushed_count": unpushed if unpushed >= 0 else None,
+        "warning": None if verified else f"{unpushed} commit(s) still unpushed after push",
         "workspace": workspace,
         "command": args,
         "stdout": result["stdout"],
@@ -364,6 +375,21 @@ async def git_push(req: GitPushRequest, x_internal_secret: str | None = Header(d
         "branch": branch_name,
         "upstream": upstream["stdout"].strip() if upstream["returncode"] == 0 else None,
     }
+
+
+async def _count_unpushed(ws_id: str, workspace_path: Path, remote_name: str, branch_name: str) -> int:
+    """Return local commits absent from the remote-tracking ref.
+
+    Negative means the check could not run (remote-tracking ref missing / git
+    error) — callers treat that as "unknown", not as a failed push.
+    """
+    res = await run_git(ws_id, workspace_path, ["git", "rev-list", "--count", f"{remote_name}/{branch_name}..{branch_name}"])
+    if res["returncode"] != 0:
+        return -1
+    try:
+        return int((res["stdout"] or "0").strip())
+    except ValueError:
+        return -1
 
 
 @git_router.post("/git/fetch")
