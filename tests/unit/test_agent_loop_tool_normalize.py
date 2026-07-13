@@ -90,3 +90,33 @@ def test_extract_action_json_array_of_calls():
     assert isinstance(norm, dict)
     assert norm["action"] == "WorkspaceShellRequest"
     assert norm["command"] == "ls"
+
+
+def test_extract_action_json_unescaped_newline_in_payload():
+    """Regression: a model that leaks a raw newline inside a JSON string value
+    must still parse after control-char repair."""
+    from services.gateway.agent_loop import extract_action_json
+
+    text = '{"action": "WorkspaceFileWriteRequest", "file_path": "game.py", "content": "def f():\n    return 1\n"}'
+    norm = extract_action_json(text)
+    assert isinstance(norm, dict)
+    assert norm["action"] == "WorkspaceFileWriteRequest"
+    assert "def f()" in norm["content"]
+
+
+def test_repair_json_control_chars_preserves_escapes():
+    """The repair must not double-escape already-escaped sequences or touch
+    structural whitespace outside of string values."""
+    from services.gateway.agent_loop import _repair_json_control_chars
+
+    src = '{"a": "line1\\nline2", "b": 1}'
+    out = _repair_json_control_chars(src)
+    assert out == src  # already-valid JSON is returned unchanged
+
+
+def test_repair_json_control_chars_escapes_raw_newline():
+    from services.gateway.agent_loop import _repair_json_control_chars
+
+    src = '{"a": "line1\nline2"}'
+    out = _repair_json_control_chars(src)
+    assert out == '{"a": "line1\\nline2"}'

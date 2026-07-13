@@ -577,7 +577,37 @@ def extract_action_json(text: str) -> dict | None:
             except Exception:
                 pass
 
+    # Priority 3b: Repair control chars leaked inside JSON strings (models
+    # occasionally emit unescaped newlines/tabs inside a tool-call payload).
+    repaired = _repair_json_control_chars(text)
+    if repaired and repaired is not text:
+        norm = extract_action_json(repaired)
+        if norm:
+            return norm
+
     return None
+
+
+def _repair_json_control_chars(text: str) -> str:
+    """Escape raw newlines/tabs/carriage-returns that leaked inside JSON string
+    values so ``json.loads`` can parse otherwise-valid tool-call payloads.
+
+    Only string *contents* are touched (matched between unescaped quotes), so
+    structural whitespace outside strings is left intact. Best-effort only —
+    callers must still validate the result.
+    """
+    def _esc_quoted(m: "re.Match[str]") -> str:
+        s = m.group(0)
+        # Protect any already-escaped sequences before inserting new escapes.
+        s = s.replace("\\\\", "\x00")  # placeholder for a literal backslash
+        s = s.replace("\\n", "\x01").replace("\\t", "\x02").replace("\\r", "\x03")
+        s = s.replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
+        # restore protected escapes
+        s = s.replace("\x01", "\\n").replace("\x02", "\\t").replace("\x03", "\\r")
+        s = s.replace("\x00", "\\\\")
+        return s
+
+    return re.sub(r'"[^"\\]*(?:\\.[^"\\]*)*"', _esc_quoted, text)
 
 
 # --- HARNESS GUARDS (patterns borrowed from OpenCode-orchestrator / Hermes) ---
@@ -795,7 +825,7 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
             "repeat_penalty": 1.1,
             "thinking": False,
         }
-    max_ctx = int(settings.get("llm_local_max_ctx", "4096"))
+    max_ctx = int(settings.get("llm_local_max_ctx", "16384"))
     params = {
         "num_predict": 8192,  # large enough for full file writes, not just JSON tool calls
         "temperature": 0.1,
@@ -1577,6 +1607,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         await stream_event("result_error", error_msg)
         return error_msg
 
+    # P2: Pre-compute VRAM-safe inference params ONCE per mission instead of an
+    # HTTP round-trip to the LLM on every iteration and every retry (a 30-60
+    # iteration mission with 3 retries each was making ~180 redundant calls).
+    # Settings and VRAM posture are stable for the duration of a single mission.
+    mission_vram_params = await get_vram_safe_params(selected_model, settings)
+    log.info(f"[AgentLoop] Cached mission VRAM params: {mission_vram_params}")
+
     log.info(f"[AgentLoop] Active Provider: {active_provider_name} | Model: {selected_model}")
 
     # 3. Detect model capabilities (thinking/reasoning support) and configure accordingly
@@ -1960,8 +1997,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 try:
                     # Stick to the requested model for all attempts
                     model_to_use = selected_model
-                    dynamic_settings = await get_dynamic_llm_settings()
-                    vram_params = await get_vram_safe_params(model_to_use, dynamic_settings)
+                    # P2: reuse the per-mission cached VRAM params (computed once
+                    # above) rather than re-querying the LLM every retry.
+                    vram_params = mission_vram_params
                     ollama_payload["options"] = vram_params
                     log.info(f"[AgentLoop] Inference options: {vram_params}")
                     log.info(f"[AgentLoop] Executing inference (Attempt {retry_count + 1}/{MAX_INFERENCE_RETRIES}) for {model_to_use}")
