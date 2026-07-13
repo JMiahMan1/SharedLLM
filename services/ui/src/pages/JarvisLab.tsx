@@ -581,13 +581,21 @@ const MissionsPane = () => {
                     </button>
                   )}
                   {(mission.status === 'completed' || mission.status === 'failed') && (
-                    <button
-                      onClick={() => deleteMissionMutation.mutate(mission.id)}
-                      disabled={deleteMissionMutation.isPending}
-                      className="glass-button bg-slate-500/10 border-slate-500/20 text-slate-400 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/30 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                    >
-                      <Trash2 size={12} /> Delete
-                    </button>
+                    <>
+                      <button
+                        onClick={() => setLiveMissionId(mission.id)}
+                        className="glass-button bg-indigo-500/10 border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest"
+                      >
+                        <Eye size={12} /> View Logs
+                      </button>
+                      <button
+                        onClick={() => deleteMissionMutation.mutate(mission.id)}
+                        disabled={deleteMissionMutation.isPending}
+                        className="glass-button bg-slate-500/10 border-slate-500/20 text-slate-400 hover:bg-red-500/20 hover:text-red-300 hover:border-red-500/30 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                      >
+                        <Trash2 size={12} /> Delete
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
