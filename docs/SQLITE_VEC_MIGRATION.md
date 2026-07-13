@@ -196,50 +196,111 @@ if __name__ == "__main__":
 
 ---
 
-## 6. Telemetry Semantic Summary Integration
+## 6. Target Schema Extensions (New Relational-Vector Use Cases)
 
-High-frequency, raw time-series telemetry data (e.g. power logs, battery volts) should remain in the **Identity Service** for rendering graphs. To allow Jarvis to search and recall telemetry events, we will ingest **processed semantic summaries** into the RAG database under a new collection.
+By switching from ChromaDB's isolated collections to SQLite's relational database, we can store structured transactional data in standard SQL tables and join them with virtual vector tables.
 
-### A. Integration Roadmap
-1. **Define a New Collection:** Register `"telemetry_alerts"` in the active RAG collections list.
+### A. Telemetry Semantic Summary Integration
+High-frequency, raw time-series telemetry data (e.g. power logs, battery volts) remains in the **Identity Service** for rendering graphs. To allow Jarvis to search and recall telemetry events, we will ingest **processed semantic summaries** into the RAG database:
+1. **Define a New Collection:** Register `"telemetry_alerts"` in RAG.
 2. **Generate Natural Language Alerts:**
-   When the telemetry worker in the execution or identity service detects a threshold crossing (e.g., connectivity loss, high power draw, fast battery drain), it compiles the event into a text summary:
+   When the telemetry worker in the execution or identity service detects a threshold crossing, it compiles the event into a text summary:
    * **Alert Content:** `"Telemetry Alert: robot_vacuum battery dropped 90% in 5 minutes at 2026-07-12T19:00:00Z."`
    * **Metadata:** `{"entity_id": "vacuum.robot", "alert_type": "battery_drain", "severity": "high", "user_id": "admin"}`
-3. **Ingest to RAG:**
-   Call `/rag/ingest` with the generated alert text and metadata.
+3. **Smart Threshold Options:**
+   * **Domain & Class Engine:** Maps rules based on device type (e.g. general availability, `vacuum` battery, `switch` overload checks, and `climate` short-cycling checks).
+   * **Statistical Calibration:** Auto-configures alert thresholds to $\mu + 3\sigma$ (Mean + 3 Standard Deviations) after a 7-day calibration phase.
+   * **LLM-Guided Recommendations:** Prompts the LLM to output custom rules during enrollment (e.g., alert if power drops indicating a dry run).
 
-### B. SQLite Relational Search Example
-Because SQLite is relational, we can easily join the alert search results with our device registry or run target lookups:
-```sql
-SELECT 
-    i.content, 
-    i.indexed_at,
-    v.distance
-FROM vec_rag_items v
-JOIN rag_items i ON v.id = i.id
-WHERE i.collection_name = 'telemetry_alerts'
-  AND (i.user_id = :user_id OR i.user_id = 'default')
-ORDER BY vec_distance_cosine(v.embedding, :query_vector)
-LIMIT :k;
-```
+---
 
-### C. Domain-Driven Smart Threshold Selection
-To prevent manual rule configuration overhead, the system intelligently determines rule options and thresholds based on the selected Home Assistant device context:
+### B. Mission History & Error Post-Mortems (`mission_history`)
+* **Context:** The agent loop generates step traces and audit logs during autonomous coding/debugging missions.
+* **Goal:** Enable Jarvis to remember past failures and successful file edits so it can perform self-repair on similar subsequent errors.
+* **Schema Design:**
+  ```sql
+  CREATE TABLE IF NOT EXISTS mission_history (
+      mission_id TEXT PRIMARY KEY,
+      task_description TEXT NOT NULL,
+      final_status TEXT NOT NULL, -- SUCCESS, FAILURE, ABORTED
+      error_summary TEXT, -- Stack trace summary if failed
+      steps_json TEXT NOT NULL, -- JSON list of executed tools/actions
+      created_at INTEGER NOT NULL
+  );
 
-1. **Domain & Class Rules Engine:** 
-   When enrolling a device (e.g. at `/api/telemetry/enroll`), the worker maps default rules based on the `entity_id` domain or the `device_class` attribute:
-   * **`vacuum.*` or `device_class: battery`:** Auto-configures battery drop alerts (e.g., drop $>15\%$ in 5 minutes).
-   * **`switch.*` / Outlets (with power tracking):** Auto-configures overload protection alerts (e.g., current draw $>1800\text{W}$) and phantom standby draw warnings.
-   * **`climate.*` (Thermostats):** Auto-configures short-cycling checks (e.g., alert if HVAC toggles state in $<5$ minutes).
+  CREATE VIRTUAL TABLE IF NOT EXISTS vec_mission_history USING vec0(
+      mission_id TEXT PRIMARY KEY,
+      embedding float[384] -- Embeds task description and error summary
+  );
+  ```
+* **Endpoint:** `POST /rag/sync/missions`
+  Pushes a completed mission's details, triggers `fastembed` for the task/error summary, and updates the SQLite tables.
 
-2. **Statistical Calibration Mode:**
-   Rather than using static limits, enrolled devices support a 7-day calibration phase. The worker logs normal metrics to compute the **Mean ($\mu$)** and **Standard Deviation ($\sigma$)** of active states. The system then automatically binds the anomaly threshold to:
-   $$\text{Threshold} = \mu + 3\sigma$$
-   This automatically customizes alerts to specific devices without manual configuration.
+---
 
-3. **LLM-Guided Recommendations:**
-   The UI queries RAG for the device's capabilities and sends them to the LLM to suggest customized semantic rules. For example, if a user enrolls `switch.bedroom_humidifier`, the LLM can recommend alerts if power drops below 10W while the switch is ON (suggesting the water tank is empty).
+### C. Intercom Conversational Memory (`conversation_memory`)
+* **Context:** The household intercom system manages voice broadcasts and session logs.
+* **Goal:** Allow Jarvis to retrieve verbal reminders and household instructions (e.g. *"remember to turn off kitchen lights"*).
+* **Schema Design:**
+  ```sql
+  CREATE TABLE IF NOT EXISTS conversation_memory (
+      utterance_id TEXT PRIMARY KEY,
+      speaker TEXT NOT NULL,
+      text_content TEXT NOT NULL,
+      room_id TEXT NOT NULL,
+      timestamp INTEGER NOT NULL
+  );
+
+  CREATE VIRTUAL TABLE IF NOT EXISTS vec_conversation_memory USING vec0(
+      utterance_id TEXT PRIMARY KEY,
+      embedding float[384] -- Embeds the transcribed text_content
+  );
+  ```
+* **Endpoint:** `POST /rag/sync/conversations`
+  Ingests voice transcripts, generates text embeddings, and saves them to the SQLite tables.
+
+---
+
+### D. Semantic Network Topology & Service Discovery (`network_topology`)
+* **Context:** The DNS sync and forwarder services manage container networking and service gateways.
+* **Goal:** Allow Jarvis to resolve service routes (e.g. *"what is the port of the redis database?"*) and debug communication errors.
+* **Schema Design:**
+  ```sql
+  CREATE TABLE IF NOT EXISTS network_topology (
+      container_name TEXT PRIMARY KEY,
+      ip_address TEXT NOT NULL,
+      exposed_ports TEXT NOT NULL, -- JSON-serialized list
+      discovered_services TEXT NOT NULL, -- JSON-serialized list (e.g. ['webdav'])
+      network_name TEXT NOT NULL
+  );
+
+  CREATE VIRTUAL TABLE IF NOT EXISTS vec_network_topology USING vec0(
+      container_name TEXT PRIMARY KEY,
+      embedding float[384] -- Embeds container name and service list
+  );
+  ```
+* **Endpoint:** `POST /rag/sync/network`
+  Updates container topologies during docker discovery syncs.
+
+---
+
+### E. Testing Strategy for the New Data Layers
+
+We will implement unit and integration tests inside `services/rag/tests/` to guarantee correctness:
+
+#### 1. Unit Tests (`services/rag/tests/test_adapters.py`)
+* **Mock Loading:** Mock `sqlite_vec` load extension and test table initialization.
+* **Verification Checks:**
+  - Test that calling `SqliteVecAdapter.add()` inserts rows into `rag_items` and `vec_rag_items` respectively.
+  - Test that data validation constraints (e.g., matching vector dimensions of 384) are enforced, throwing errors on invalid dimensions.
+  - Verify that standard relational filters (`user_id` and `collection_name` indexes) function correctly and return matching data.
+
+#### 2. API Integration Tests (`services/rag/tests/test_api_endpoints.py`)
+* Test the sync endpoints (`/rag/sync/missions`, `/rag/sync/conversations`, `/rag/sync/network`) to ensure they handle batch payloads and return `200 OK`.
+* Test `/rag/search` when querying these collections:
+  - Assert that query "vitest import error" successfully matches a past `mission_history` post-mortem containing "vitest import failure".
+  - Assert that query "redis port" successfully matches `network_topology` service descriptions.
+  - Verify that search responses respect the user-level partitions (`user_id`).
 
 ---
 
