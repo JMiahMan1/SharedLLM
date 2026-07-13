@@ -3394,7 +3394,15 @@ async def run_post_write_lint(file_path: str, execution_svc: str | None, interna
     if not execution_svc:
         return None
     ext = file_path.rsplit(".", 1)[-1].lower() if "." in file_path else ""
-    lintable_exts = {"py", "js", "ts", "tsx", "sh", "bash", "json", "yaml", "yml"}
+    # Keep this in sync with the extensions the lint handler actually supports
+    # (services/execution/handlers/workspace.py). If a language's compiler is
+    # missing from the sandbox, the handler reports `verified=False` rather than
+    # lying about a clean pass — see below.
+    lintable_exts = {
+        "py", "js", "jsx", "mjs", "ts", "tsx",
+        "sh", "bash", "go", "rs", "c", "h", "cpp", "cc", "cxx", "hpp",
+        "java", "rb", "lua", "php", "json", "yaml", "yml",
+    }
     if ext not in lintable_exts:
         return None
 
@@ -3412,11 +3420,13 @@ async def run_post_write_lint(file_path: str, execution_svc: str | None, interna
             )
             if lint_resp.status == 200:
                 lint_data = await lint_resp.json()
-                lint_passed = lint_data.get("detail", {}).get("passed", True)
+                detail = lint_data.get("detail", {}) or {}
+                lint_passed = detail.get("passed", True) if isinstance(detail, dict) else True
+                lint_verified = detail.get("verified", True) if isinstance(detail, dict) else True
+                results = detail.get("results", []) if isinstance(detail, dict) else []
+
                 if lint_passed is False:
                     lint_msg = lint_data.get("message", "")
-                    detail = lint_data.get("detail", {}) or {}
-                    results = detail.get("results", []) if isinstance(detail, dict) else []
                     if results:
                         issue_lines = []
                         for r in results:
@@ -3428,8 +3438,22 @@ async def run_post_write_lint(file_path: str, execution_svc: str | None, interna
                         lint_feedback = f"LINT FAILED for {file_path}: {lint_msg}"
                     logger.warning(f"{lint_feedback}")
                     return lint_feedback
-                else:
-                    logger.info(f"Post-write lint clean for {file_path}")
+
+                # UNVERIFIED: the handler ran but NO checker was installed, so we
+                # have no real signal. Surface this so the model cannot trust a
+                # phantom "clean" and so a missing toolchain gets flagged in CI.
+                if not lint_verified:
+                    skipped = [r.get("tool") for r in results if r.get("skipped")]
+                    warn = (
+                        f"LINT UNVERIFIED for {file_path}: no code checker ("
+                        + ", ".join(skipped or ["?"])
+                        + ") is installed in the sandbox. This code was NOT actually "
+                        + "verified — install the language toolchain or rely on CI to catch errors."
+                    )
+                    logger.warning(warn)
+                    return warn
+
+                logger.info(f"Post-write lint clean for {file_path}")
     except Exception as lint_e:
         logger.warning(f"Post-write lint check failed: {lint_e}")
     return None

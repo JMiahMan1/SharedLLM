@@ -923,22 +923,36 @@ async def handle_workspace_lint(req) -> ExecutionResult:
 
         # ── Go ────────────────────────────────────────────────────────────────
         elif ext == ".go" or forced == "go":
-            # gofmt -l exits 0 but prints unformatted files => treat output as failure
+            # gofmt -l prints the file path when it is NOT gofmt-clean (exits 0
+            # either way) => treat non-empty output as a finding, not a tool miss.
             rc, out, err = await _run(["gofmt", "-l", str(abs_path)])
-            if not (rc == -1 and "Tool not found" in err):
-                results.append({"tool": "gofmt", "returncode": rc, "output": out or err})
+            if rc == -1 and "Tool not found" in err:
+                results.append({"tool": "gofmt", "returncode": None, "skipped": True, "output": "gofmt not installed in sandbox"})
+            else:
+                verified = True
+                results.append({"tool": "gofmt", "returncode": rc, "output": out or err or "(formatted)"})
                 if out.strip():
                     passed = False
-            # go vet catches undefined symbols; skip if there's no module context
-            rc, out, err = await _run(["go", "vet", "./..."])
-            if not (rc == -1 and "Tool not found" in err) and "go.mod" not in err and "no Go files" not in err:
-                results.append({"tool": "go vet", "returncode": rc, "output": out or err})
-                if rc != 0:
-                    passed = False
+            # go vet: undefined symbols / wrong arg counts (needs module context)
+            await _lint_step("go", ["vet", "./..."], label="go vet")
+            # go build: REAL compile check (syntax + type errors). For a single
+            # file this only works when the package is self-contained, but it
+            # catches the common errors and never silently lies about passing.
+            await _lint_step("go", ["build", "-o", "/dev/null", str(abs_path)], label="go build")
 
         # ── Rust ──────────────────────────────────────────────────────────────
         elif ext == ".rs" or forced == "rust":
+            # rustfmt --check: formatting + parse errors (exits non-zero if unformatted)
             await _lint_step("rustfmt", ["--check", "--edition", "2021"])
+            # Real compile/type check. `rustc` on a lone .rs file false-fails for
+            # normal bin/lib files (no main / split modules), so only run cargo
+            # when a project is actually present — otherwise report the gap.
+            cargo_toml = os.path.join(os.path.dirname(abs_path), "Cargo.toml")
+            if os.path.exists(cargo_toml):
+                await _lint_step("cargo", ["check", "--offline"], label="cargo check")
+            else:
+                results.append({"tool": "cargo check", "returncode": None, "skipped": True,
+                                "output": "no Cargo.toml here — compile check requires a Cargo project"})
 
         # ── C / C++ ───────────────────────────────────────────────────────────
         elif ext in (".c", ".h", ".cpp", ".cc", ".cxx", ".hpp") or forced in ("gcc", "clang"):
@@ -978,12 +992,22 @@ async def handle_workspace_lint(req) -> ExecutionResult:
             return _ok(f"No linter configured for {ext} files — skipping.", {"path": req.path, "skipped": True})
 
         summary = "PASSED" if passed else "ISSUES_FOUND"
-        detail = "\n".join(f"[{r['tool']}] rc={r['returncode']}\n{r['output']}" for r in results)
-        msg = f"Lint {summary} for {req.path}:\n{detail}"
+        if not verified:
+            # Every configured checker was missing in the sandbox — the code was
+            # NEVER actually checked. Surface this loudly so the model can't read
+            # "clean" and trust it. This is the root-cause fix for error-ridden
+            # code passing review.
+            summary = "UNVERIFIED"
+            prefix = "Lint ran but NO checker executed (tools missing in sandbox). "
+        else:
+            prefix = ""
+        detail = "\n".join(f"[{r['tool']}] rc={r.get('returncode')} {'[SKIPPED]' if r.get('skipped') else ''}\n{r['output']}" for r in results)
+        msg = f"{prefix}Lint {summary} for {req.path}:\n{detail}"
         # Return SUCCESS regardless of lint outcome — lint findings are diagnostic results,
-        # not tool failures. The LLM inspects `passed` in the detail to decide next steps.
-        # Using "issues found" instead of "failed" avoids triggering the mission failure detector.
-        return _ok(msg, {"path": req.path, "passed": passed, "results": results})
+        # not tool failures. The LLM inspects `passed`/`verified` in the detail to decide
+        # next steps. Using "issues found" instead of "failed" avoids triggering the
+        # mission failure detector. `verified` lets run_post_write_lint flag untrusted passes.
+        return _ok(msg, {"path": req.path, "passed": passed, "verified": verified, "results": results})
 
     except Exception as e:
         log.error(f"Workspace lint failed: {e}")
