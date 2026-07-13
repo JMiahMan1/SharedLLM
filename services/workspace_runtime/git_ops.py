@@ -180,6 +180,31 @@ async def git_status(req: WorkspaceRef, x_internal_secret: str | None = Header(d
     }
 
 
+@git_router.post("/git/branches")
+async def git_branches(req: WorkspaceRef, x_internal_secret: str | None = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req, check_recovery=True)
+    _require_workspace_capability(workspace, "git_status")
+    workspace_path = Path(workspace["resolved_path"])
+    ws_id = workspace["id"]
+    local_res = await run_git(ws_id, workspace_path, ["git", "branch", "--format=%(refname:short)"])
+    current_res = await run_git(ws_id, workspace_path, ["git", "branch", "--show-current"])
+    remote_res = await run_git(ws_id, workspace_path, ["git", "branch", "-r", "--format=%(refname:short)"])
+    local = [b.strip() for b in local_res["stdout"].splitlines() if b.strip()]
+    remote = [
+        b.strip()
+        for b in remote_res["stdout"].splitlines()
+        if b.strip() and "HEAD" not in b and " -> " not in b
+    ]
+    return {
+        "status": "SUCCESS",
+        "workspace": workspace,
+        "current": current_res["stdout"].strip(),
+        "local": local,
+        "remote": remote,
+    }
+
+
 @git_router.post("/git/diff")
 async def git_diff(req: DiffRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
