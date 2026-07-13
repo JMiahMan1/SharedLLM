@@ -1505,7 +1505,7 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
                 "repo_url": remote_url,
             }
         if any(target_path.iterdir()):
-            backup_path = Path(str(target_path) + f"-backup-{int(time.time())}")
+            backup_path = Path(str(target_path) + f"-backup-{int(time.time_ns())}")
             log.warning(f"Git repo is missing (.git folder not found) in non-empty workspace {target_path}. Backing up to {backup_path} and recreating/cloning fresh.")
             try:
                 target_path.rename(backup_path)
