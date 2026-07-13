@@ -529,7 +529,14 @@ def _extract_tool_candidates(text: str) -> list:
     return candidates
 
 
-def extract_action_json(text: str) -> dict | None:
+# Cap on how many times the JSON-repair fallback may recurse. Without this, a
+# persistently-unparseable model output (common with the local 35B model) drove
+# unbounded recursion and a RecursionError that killed the entire mission job
+# before any tool action (e.g. a git commit/push) could run.
+_EXTRACT_MAX_REPAIR_DEPTH = 8
+
+
+def extract_action_json(text: str, _depth: int = 0) -> dict | None:
     """Extract and normalize the first tool call from arbitrary model output."""
     if not text:
         return None
@@ -579,9 +586,15 @@ def extract_action_json(text: str) -> dict | None:
 
     # Priority 3b: Repair control chars leaked inside JSON strings (models
     # occasionally emit unescaped newlines/tabs inside a tool-call payload).
+    # NOTE: _repair_json_control_chars uses re.sub, which returns a *new* string
+    # object (different identity) on every match even when the replacement text
+    # is identical. The previous identity check (`repaired is not text`) was
+    # therefore always True, causing infinite self-recursion. Compare by CONTENT
+    # (`!=`) and bound the recursion depth so an unparseable payload degrades to
+    # None (the caller re-prompts) instead of crashing the mission.
     repaired = _repair_json_control_chars(text)
-    if repaired and repaired is not text:
-        norm = extract_action_json(repaired)
+    if repaired and repaired != text and _depth < _EXTRACT_MAX_REPAIR_DEPTH:
+        norm = extract_action_json(repaired, _depth + 1)
         if norm:
             return norm
 
