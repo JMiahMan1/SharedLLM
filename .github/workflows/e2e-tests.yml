@@ -148,6 +148,9 @@ jobs:
           docker tag ghcr.io/jmiahman1/sharedllm-base:latest sharedllm-base:local 2>/dev/null || true
           docker tag ghcr.io/jmiahman1/sharedllm-base:microservices sharedllm-base:local 2>/dev/null || true
 
+      - name: Generate test.env from example
+        run: cp test.env.example test.env
+
       - name: Start test services
         run: |
           docker compose -f docker-compose.test.yml up -d --build
@@ -265,6 +268,9 @@ jobs:
           docker pull ghcr.io/jmiahman1/sharedllm-base:latest || docker pull ghcr.io/jmiahman1/sharedllm-base:microservices || echo "Base image not found in GHCR, building locally"
           docker tag ghcr.io/jmiahman1/sharedllm-base:latest sharedllm-base:local 2>/dev/null || true
           docker tag ghcr.io/jmiahman1/sharedllm-base:microservices sharedllm-base:local 2>/dev/null || true
+
+      - name: Generate test.env from example
+        run: cp test.env.example test.env
 
       - name: Start full test stack
         run: |
