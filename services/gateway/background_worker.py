@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
@@ -53,6 +54,10 @@ class RavenWorker:
         self.is_running = False
         self._health_task = None
         self._inference_task = None
+        self._talk_task = None
+        self._cleanup_task = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
         self.job_queue = InferenceJobQueue(REDIS_URL)
     def _is_autonomous_job(self, payload: dict[str, Any], user_id: str) -> bool:
         """Determine if a job requires Tier-3 (Raven) exclusive lock."""
@@ -85,17 +90,64 @@ class RavenWorker:
             pass
         raise RuntimeError("No assistant/librarian model configured in Identity settings")
 
-    async def start(self):
+    def start(self):
+        """Start the worker on its OWN event loop in a dedicated daemon thread.
+
+        Running the worker loop separately from the FastAPI API event loop is
+        what prevents a long-running Raven mission from saturating the API:
+        mission orchestration (LLM calls, shell, file I/O) executes on the
+        worker loop, so the API loop stays free to serve /api/raven/missions
+        and the rest of the gateway while a mission is in flight.
+        """
         if self.is_running:
             return
         self.is_running = True
+        self._loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self._run_loop, name="raven-worker", daemon=True)
+        self._thread.start()
+        # Bootstrap (connect redis, recover orphans, spawn loops) on the worker loop.
+        fut = asyncio.run_coroutine_threadsafe(self._bootstrap(), self._loop)
+        try:
+            fut.result(timeout=60)
+        except Exception as e:  # pragma: no cover - defensive
+            log.error(f"[RavenWorker] Bootstrap failed (non-critical): {e}")
+
+    def _run_loop(self):
+        asyncio.set_event_loop(self._loop)
+        try:
+            self._loop.run_forever()
+        finally:
+            self._loop.close()
+
+    async def _bootstrap(self):
         await self.job_queue.connect()
         await self._recover_orphaned_missions()
-        self._health_task = asyncio.create_task(self._health_loop())
-        self._inference_task = asyncio.create_task(self._inference_loop())
-        self._talk_task = asyncio.create_task(self._talk_monitor_loop())
-        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+        self._health_task = self._loop.create_task(self._health_loop())
+        self._inference_task = self._loop.create_task(self._inference_loop())
+        self._talk_task = self._loop.create_task(self._talk_monitor_loop())
+        self._cleanup_task = self._loop.create_task(self._cleanup_loop())
         log.info("Raven Background Worker (Health + Inference + Talk Monitor + Cleanup) started.")
+
+    def stop(self):
+        """Signal the worker loops to stop and shut the worker loop down."""
+        self.is_running = False
+        loop = self._loop
+        if loop is not None:
+            try:
+                asyncio.run_coroutine_threadsafe(self._shutdown(), loop).result(timeout=30)
+            except Exception as e:  # pragma: no cover - defensive
+                log.warning(f"[RavenWorker] Shutdown error (non-critical): {e}")
+        thread = self._thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=5)
+
+    async def _shutdown(self):
+        for t in (self._health_task, self._inference_task, self._talk_task, self._cleanup_task):
+            if t is not None:
+                t.cancel()
+        await self.job_queue.close()
+        # Stop the worker's own event loop so its thread can exit.
+        self._loop.stop()
 
     async def _recover_orphaned_missions(self):
         from services.gateway.main import _build_raven_system_prompt
@@ -136,17 +188,6 @@ class RavenWorker:
                     log.warning(f"[RavenWorker] Recovered orphaned mission #{mid} → re-enqueued (will resume from checkpoint)")
         except Exception as e:
             log.warning(f"[RavenWorker] Orphan recovery failed (non-critical): {e}")
-
-    async def stop(self):
-        self.is_running = False
-        if self._health_task:
-            self._health_task.cancel()
-        if self._inference_task:
-            self._inference_task.cancel()
-        if self._talk_task:
-            self._talk_task.cancel()
-        await self.job_queue.close()
-        log.info("Raven Background Worker stopped.")
 
     async def _health_loop(self):
         while self.is_running:
