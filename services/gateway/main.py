@@ -3686,7 +3686,9 @@ async def proxy_get_skylight_chores(request: Request, user: str | None = None, d
         return JSONResponse(status_code=400, content={"status": "FAILURE", "message": "Skylight is disabled for your account"})
 
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
-    params = {"user": creds.get("user", ""), "date": date or ""}
+    # Admins see the whole family frame (blank user); a regular member is
+    # scoped to just their own chores via the Skylight category label.
+    params = {"user": "" if creds.get("is_admin") else (creds.get("user") or ""), "date": date or ""}
     async with shared_http_client() as client:
         resp = await client.get(f"{EXECUTION_SVC}/api/integrations/skylight/chores", headers=headers, params=params, timeout=aiohttp.ClientTimeout(total=30.0))
     return await _proxy_json_response(resp)

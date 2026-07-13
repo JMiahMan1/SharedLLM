@@ -30,7 +30,18 @@ def test_skylight_chores_missing_auth():
     assert "Skylight not configured" in data["message"]
 
 
-def _raw_chore(cid, summary, status, start, reward=1):
+def _category_included(label):
+    return {
+        "id": f"cat-{label}",
+        "type": "category",
+        "attributes": {"id": 0, "label": label, "linked_to_profile": True},
+    }
+
+
+def _raw_chore(cid, summary, status, start, reward=1, assignee=None):
+    rel = {}
+    if assignee:
+        rel["category"] = {"data": {"id": f"cat-{assignee}", "type": "category"}}
     return {
         "id": cid,
         "type": "chore",
@@ -41,6 +52,7 @@ def _raw_chore(cid, summary, status, start, reward=1):
             "start": start,
             "reward_points": reward,
         },
+        "relationships": rel,
     }
 
 
@@ -50,15 +62,15 @@ def test_skylight_chores_today_literal():
 
     today = _date.today().isoformat()
     mock_chores = [
-        _raw_chore("1", "Clean Room", "pending", today),
-        _raw_chore("2", "Do Dishes", "pending", "2020-01-01"),
+        _raw_chore("1", "Clean Room", "pending", today, assignee="Jeremiah"),
+        _raw_chore("2", "Do Dishes", "pending", "2020-01-01", assignee="Jeremiah"),
     ]
 
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
-        return {"data": mock_chores}
+        return {"data": mock_chores, "included": [_category_included("Jeremiah")]}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
         with patch("services.execution.main._skylight_request", new=mock_skylight_request):
@@ -308,29 +320,44 @@ def test_skylight_chores_empty_list():
             assert data["chores"] == []
 
 
-def test_skylight_chores_no_assignee_filter():
-    """The private API exposes no per-user assignee data, so all family chores
-    are returned regardless of the `user` param."""
+def test_skylight_chores_user_filter():
+    """Chores are scoped to the requested user via the `category` assignee label,
+    and an empty (admin) user returns the whole family frame."""
     from datetime import date as _date
 
     today = _date.today().isoformat()
     mock_chores = [
-        _raw_chore("1", "Clean Room", "pending", today),
-        _raw_chore("2", "Do Dishes", "pending", today),
+        _raw_chore("1", "Clean Room", "pending", today, assignee="Jeremiah"),
+        _raw_chore("2", "Do Dishes", "pending", today, assignee="Noah"),
     ]
+    included = [_category_included("Jeremiah"), _category_included("Noah")]
 
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
 
     async def mock_skylight_request(session, method, suffix, json_body=None, params=None):
-        return {"data": mock_chores}
+        return {"data": mock_chores, "included": included}
 
     with patch("services.execution.main._get_skylight_session", new=mock_get_session):
         with patch("services.execution.main._skylight_request", new=mock_skylight_request):
+            # A regular member only sees their own chores.
             resp = client.get(
                 "/api/integrations/skylight/chores",
                 headers={"X-Internal-Secret": "test-secret"},
-                params={"user": "jeremiah", "date": "today"}
+                params={"user": "jeremiah", "date": "today"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "SUCCESS"
+            assert len(data["chores"]) == 1
+            assert data["chores"][0]["id"] == "1"
+            assert data["chores"][0]["assignees"] == ["Jeremiah"]
+
+            # No user (admin) sees every chore in the frame.
+            resp = client.get(
+                "/api/integrations/skylight/chores",
+                headers={"X-Internal-Secret": "test-secret"},
+                params={"date": "today"},
             )
             assert resp.status_code == 200
             data = resp.json()

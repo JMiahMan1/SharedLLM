@@ -26,8 +26,9 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       throw new Error(resp.message || 'Failed to fetch chores');
     }
 
-    // Skylight returns the whole family frame with no per-user assignee data,
-    // so every chore is shown and toggleable by any household member.
+    // Each chore carries its assignee (the Skylight `category` label, i.e. the
+    // family member's name). The gateway scopes the result to the logged-in
+    // user (admins get the whole family frame), and any member can toggle.
     return resp.chores || [];
   };
 
@@ -47,6 +48,23 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       return chore;
     });
   }, [chores, completedOverrides]);
+
+  // Group chores by their assignee (Skylight `category` label). When there is
+  // only a single assignee (or none), we render a flat list instead.
+  const assigneeGroups = useMemo(() => {
+    const groups: Record<string, ChoreItem[]> = {};
+    for (const chore of localChores) {
+      const key =
+        chore.assignees && chore.assignees.length > 0
+          ? chore.assignees.join(', ')
+          : 'Unassigned';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(chore);
+    }
+    return groups;
+  }, [localChores]);
+
+  const shouldGroupByUser = Object.keys(assigneeGroups).length > 1;
 
   const handleToggleComplete = async (chore: ChoreItem) => {
     if (!user?.username) return;
@@ -89,6 +107,47 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
   const totalCount = localChores.length;
   const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
   const allCompleted = totalCount > 0 && completedCount === totalCount;
+
+  const renderChoreButton = (chore: ChoreItem) => (
+    <button
+      key={chore.id}
+      onClick={() => handleToggleComplete(chore)}
+      disabled={completingIds.has(chore.id)}
+      className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${
+        chore.completed
+          ? 'bg-emerald-500/10 border border-emerald-500/30'
+          : 'bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50'
+      }`}
+    >
+      <div
+        className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
+          chore.completed ? 'bg-emerald-500 border-emerald-500' : 'border-slate-500'
+        }`}
+      >
+        {chore.completed && (
+          <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+          </svg>
+        )}
+      </div>
+
+      <div className="flex-1 text-left min-w-0">
+        <p
+          className={`text-sm truncate ${
+            chore.completed ? 'text-slate-400 line-through' : 'text-white'
+          }`}
+        >
+          {chore.emoji_icon ? `${chore.emoji_icon} ` : ''}
+          {chore.title}
+        </p>
+        {chore.reward ? (
+          <p className="text-xs text-yellow-400">
+            &#11088; {chore.reward} point{chore.reward > 1 ? 's' : ''}
+          </p>
+        ) : null}
+      </div>
+    </button>
+  );
 
   const renderContent = (expanded: boolean) =>
     totalCount === 0 ? (
@@ -135,56 +194,39 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
         )}
 
         {/* Compact mode caps the list and scrolls internally; expanded (full-screen)
-            mode drops the cap so every chore is visible and the overlay scrolls. */}
-        <div
-          className={`space-y-2 pr-1 flex-1 min-h-0 ${
-            expanded ? '' : 'max-h-48 overflow-y-auto'
-          }`}
-        >
-          {localChores.map((chore) => {
-            return (
-              <button
-                key={chore.id}
-                onClick={() => handleToggleComplete(chore)}
-                disabled={completingIds.has(chore.id)}
-                className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${
-                  chore.completed
-                    ? 'bg-emerald-500/10 border border-emerald-500/30'
-                    : 'bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50'
-                }`}
-              >
-                <div
-                  className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
-                    chore.completed
-                      ? 'bg-emerald-500 border-emerald-500'
-                      : 'border-slate-500'
-                  }`}
-                >
-                  {chore.completed && (
-                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  )}
+             mode drops the cap so every chore is visible and the overlay scrolls.
+             When chores span multiple assignees, the expanded view groups them by
+             user so each person's progress is shown; a single assignee falls back
+             to the flat list. */}
+        {expanded && shouldGroupByUser ? (
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-4">
+            {Object.entries(assigneeGroups).map(([label, groupChores]) => {
+              const done = groupChores.filter((c) => c.completed).length;
+              const pct = groupChores.length
+                ? Math.round((done / groupChores.length) * 100)
+                : 0;
+              return (
+                <div key={label}>
+                  <div className="flex items-center justify-between mb-2 px-1">
+                    <span className="text-sm font-semibold text-slate-200">{label}</span>
+                    <span className="text-xs text-slate-400">
+                      {done}/{groupChores.length} · {pct}%
+                    </span>
+                  </div>
+                  <div className="space-y-2 pr-1">{groupChores.map(renderChoreButton)}</div>
                 </div>
-
-                <div className="flex-1 text-left min-w-0">
-                  <p
-                    className={`text-sm truncate ${
-                      chore.completed ? 'text-slate-400 line-through' : 'text-white'
-                    }`}
-                  >
-                    {chore.emoji_icon ? `${chore.emoji_icon} ` : ''}{chore.title}
-                  </p>
-                  {chore.reward ? (
-                    <p className="text-xs text-yellow-400">
-                      &#11088; {chore.reward} point{chore.reward > 1 ? 's' : ''}
-                    </p>
-                  ) : null}
-                </div>
-              </button>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div
+            className={`space-y-2 pr-1 flex-1 min-h-0 ${
+              expanded ? '' : 'max-h-48 overflow-y-auto'
+            }`}
+          >
+            {localChores.map(renderChoreButton)}
+          </div>
+        )}
       </div>
     );
 
