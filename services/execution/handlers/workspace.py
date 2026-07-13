@@ -856,6 +856,7 @@ async def handle_workspace_lint(req) -> ExecutionResult:
         forced = (req.linter or "").strip().lower()
         results = []
         passed = True
+        verified = False  # becomes True once any real checker actually runs
 
         async def _run(cmd):
             try:
@@ -869,12 +870,19 @@ async def handle_workspace_lint(req) -> ExecutionResult:
                 return -1, "", f"Tool not found: {cmd[0]}"
 
         async def _lint_step(tool, args, label=None):
-            """Run one linter. Returns True if the tool was actually present.
-            A MISSING tool is skipped (not counted as a failure) so the gate only
-            fails on genuinely reported issues, never on a missing binary."""
+            """Run one linter/compiler. Returns True if the tool actually ran.
+
+            A MISSING tool is recorded as skipped (not a code failure) so the
+            caller can see verification never actually happened. Previously a
+            missing binary was silently dropped, which let the gate report
+            "clean" for code that was never checked at all — wrong information
+            that let error-ridden code pass."""
             rc, out, err = await _run([tool, *args, str(abs_path)])
             if rc == -1 and "Tool not found" in err:
+                results.append({"tool": label or tool, "returncode": None, "skipped": True, "output": f"{tool} not installed in sandbox"})
                 return False
+            nonlocal verified
+            verified = True
             results.append({"tool": label or tool, "returncode": rc, "output": out or err})
             if rc != 0:
                 nonlocal passed
@@ -887,6 +895,7 @@ async def handle_workspace_lint(req) -> ExecutionResult:
             rc, out, err = await _run(["python3", "-m", "py_compile", str(abs_path)])
             if rc == -1:
                 return _ok("Python compiler not available — skipping lint.", {"path": req.path, "skipped": True})
+            verified = True
             results.append({"tool": "py_compile", "returncode": rc, "output": out or err})
             if rc != 0:
                 passed = False
@@ -899,7 +908,11 @@ async def handle_workspace_lint(req) -> ExecutionResult:
         # ── JavaScript / TypeScript ───────────────────────────────────────────
         elif ext in (".js", ".ts", ".jsx", ".tsx", ".mjs") or forced == "eslint":
             fix_flag = ["--fix"] if req.fix else []
-            await _lint_step("eslint", fix_flag)
+            had_eslint = await _lint_step("eslint", fix_flag)
+            # eslint may be absent in older sandboxes — at minimum syntax-check
+            # JS with node so parse errors are still caught (no silent skip).
+            if not had_eslint and ext in (".js", ".jsx", ".mjs"):
+                await _lint_step("node", ["--check", str(abs_path)], label="node --check")
             if ext in (".ts", ".tsx") and not req.fix:
                 # tsc type-check (no emit) catches undefined names in TS too
                 await _lint_step("tsc", ["--noEmit", "--skipLibCheck"])

@@ -13,8 +13,9 @@ type ChoresPayload = {
   assignee_meta?: Record<string, string>;
 };
 
-/* OpenSkyLight "paper planner" palette — warm light (matches the screenshot)
-   and a sunset dark. Driven by the app's light/dark selection. */
+/* Palette driven by the app's light/dark selection.
+   Light = OpenSkyLight "paper planner" warm palette (matches the screenshot).
+   Dark  = SharedLLM's existing dark theme tokens (blends with the rest of the UI). */
 const OSK_LIGHT = `
   --osk-paper:#f5efe3;
   --osk-paper-deep:#ece4d2;
@@ -30,20 +31,22 @@ const OSK_LIGHT = `
   --osk-sun-soft:#fdf0da;
   --osk-shadow:0 1px 3px rgba(72,60,38,0.07),0 10px 28px -10px rgba(72,60,38,0.16);
 `;
+/* Dark mode reuses the SharedLLM dark theme (deep navy base, translucent
+   surfaces, slate text, purple accent) so the widget blends with the UI. */
 const OSK_DARK = `
-  --osk-paper:#17130e;
-  --osk-paper-deep:#241e16;
-  --osk-card:#262019;
-  --osk-ink:#ece4d4;
-  --osk-ink-soft:#b5a892;
-  --osk-ink-faint:#7e7260;
-  --osk-line:#3b332a;
-  --osk-ember:#d95b3a;
-  --osk-ember-deep:#f08a68;
-  --osk-ember-soft:#4a2c20;
-  --osk-sun:#6b5326;
-  --osk-sun-soft:#332a1a;
-  --osk-shadow:0 1px 3px rgba(0,0,0,0.3),0 10px 28px -10px rgba(0,0,0,0.5);
+  --osk-paper: var(--color-bg-base);
+  --osk-paper-deep: var(--color-surface-1);
+  --osk-card: var(--color-surface-0);
+  --osk-ink: #f1f5f9;
+  --osk-ink-soft: #cbd5e1;
+  --osk-ink-faint: #94a3b8;
+  --osk-line: var(--color-border-mid);
+  --osk-ember: #8b5cf6;
+  --osk-ember-deep: #c4b5fd;
+  --osk-ember-soft: rgba(139, 92, 246, 0.18);
+  --osk-sun: #fbbf24;
+  --osk-sun-soft: rgba(251, 191, 36, 0.16);
+  --osk-shadow: var(--shadow-panel);
 `;
 
 /** Readable text color (ink or paper) for a given background hex. */
@@ -238,7 +241,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
     return (
       <div
         key={name}
-        className="flex w-full shrink-0 flex-col rounded-[1.25rem] p-3 md:w-80"
+        className="flex w-full shrink-0 flex-col rounded-[1.25rem] p-3 md:w-80 md:shrink-0"
         style={{ background: 'var(--osk-paper-deep)' }}
       >
         <div className="mb-3 flex items-center gap-3">
@@ -307,7 +310,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
               {completedCount}/{totalCount} done
             </div>
           </div>
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 md:flex-row md:items-start md:gap-4 md:overflow-x-auto">
+          <div className="flex min-h-0 flex-1 flex-wrap content-start items-start gap-4 overflow-y-auto pb-2">
             {names.map((name) => renderPersonColumn(name, assigneeGroups[name], colorForAssignee(name)))}
           </div>
         </div>
