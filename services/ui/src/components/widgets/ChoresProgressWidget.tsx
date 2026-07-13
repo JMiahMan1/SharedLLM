@@ -90,6 +90,104 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
   const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
   const allCompleted = totalCount > 0 && completedCount === totalCount;
 
+  const renderContent = (expanded: boolean) =>
+    totalCount === 0 ? (
+      <div className="flex flex-col items-center justify-center text-center h-full">
+        <p className="text-sm text-slate-400">No chores assigned</p>
+        <p className="text-xs text-slate-500">All clear for today!</p>
+      </div>
+    ) : (
+      <div className="flex flex-col h-full justify-between">
+        <div className="relative w-20 h-20 mx-auto mb-5 shrink-0">
+          <svg className="w-20 h-20 -rotate-90" viewBox="0 0 36 36">
+            <path
+              d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+              fill="none"
+              stroke="rgba(71, 85, 105, 0.3)"
+              strokeWidth="3"
+            />
+            <path
+              d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+              fill="none"
+              stroke="url(#progressGradient)"
+              strokeWidth="3"
+              strokeDasharray={`${progress}, 100`}
+              strokeLinecap="round"
+              className="transition-all duration-500"
+            />
+            <defs>
+              <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#10b981" />
+                <stop offset="50%" stopColor="#06b6d4" />
+                <stop offset="100%" stopColor="#8b5cf6" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <span className="text-lg font-bold text-white">{Math.round(progress)}%</span>
+          </div>
+        </div>
+
+        {allCompleted && (
+          <div className="text-center mb-4 shrink-0">
+            <span className="text-xs text-emerald-400 font-semibold">All chores completed! &#127881;</span>
+          </div>
+        )}
+
+        {/* Compact mode caps the list and scrolls internally; expanded (full-screen)
+            mode drops the cap so every chore is visible and the overlay scrolls. */}
+        <div
+          className={`space-y-2 pr-1 flex-1 min-h-0 ${
+            expanded ? '' : 'max-h-48 overflow-y-auto'
+          }`}
+        >
+          {localChores.map((chore) => {
+            return (
+              <button
+                key={chore.id}
+                onClick={() => handleToggleComplete(chore)}
+                disabled={completingIds.has(chore.id)}
+                className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${
+                  chore.completed
+                    ? 'bg-emerald-500/10 border border-emerald-500/30'
+                    : 'bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50'
+                }`}
+              >
+                <div
+                  className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
+                    chore.completed
+                      ? 'bg-emerald-500 border-emerald-500'
+                      : 'border-slate-500'
+                  }`}
+                >
+                  {chore.completed && (
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </div>
+
+                <div className="flex-1 text-left min-w-0">
+                  <p
+                    className={`text-sm truncate ${
+                      chore.completed ? 'text-slate-400 line-through' : 'text-white'
+                    }`}
+                  >
+                    {chore.emoji_icon ? `${chore.emoji_icon} ` : ''}{chore.title}
+                  </p>
+                  {chore.reward ? (
+                    <p className="text-xs text-yellow-400">
+                      &#11088; {chore.reward} point{chore.reward > 1 ? 's' : ''}
+                    </p>
+                  ) : null}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+
   return (
     <WidgetCard
       title="Today's Chores"
@@ -104,97 +202,9 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
           {completedCount}/{totalCount} done · {Math.round(progress)}%
         </span>
       }
+      expandedChildren={renderContent(true)}
     >
-      {totalCount === 0 ? (
-        <div className="flex flex-col items-center justify-center text-center h-full">
-          <p className="text-sm text-slate-400">No chores assigned</p>
-          <p className="text-xs text-slate-500">All clear for today!</p>
-        </div>
-      ) : (
-        <div className="flex flex-col h-full justify-between">
-          <div className="relative w-20 h-20 mx-auto mb-5 shrink-0">
-            <svg className="w-20 h-20 -rotate-90" viewBox="0 0 36 36">
-              <path
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="rgba(71, 85, 105, 0.3)"
-                strokeWidth="3"
-              />
-              <path
-                d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                fill="none"
-                stroke="url(#progressGradient)"
-                strokeWidth="3"
-                strokeDasharray={`${progress}, 100`}
-                strokeLinecap="round"
-                className="transition-all duration-500"
-              />
-              <defs>
-                <linearGradient id="progressGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#10b981" />
-                  <stop offset="50%" stopColor="#06b6d4" />
-                  <stop offset="100%" stopColor="#8b5cf6" />
-                </linearGradient>
-              </defs>
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-lg font-bold text-white">{Math.round(progress)}%</span>
-            </div>
-          </div>
-
-          {allCompleted && (
-            <div className="text-center mb-4 shrink-0">
-              <span className="text-xs text-emerald-400 font-semibold">All chores completed! &#127881;</span>
-            </div>
-          )}
-
-          <div className="space-y-2 max-h-48 overflow-y-auto pr-1 flex-1 min-h-0">
-            {localChores.map((chore) => {
-              return (
-                <button
-                  key={chore.id}
-                  onClick={() => handleToggleComplete(chore)}
-                  disabled={completingIds.has(chore.id)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all ${
-                    chore.completed
-                      ? 'bg-emerald-500/10 border border-emerald-500/30'
-                      : 'bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50'
-                  }`}
-                >
-                  <div
-                    className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors ${
-                      chore.completed
-                        ? 'bg-emerald-500 border-emerald-500'
-                        : 'border-slate-500'
-                    }`}
-                  >
-                    {chore.completed && (
-                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    )}
-                  </div>
-
-                  <div className="flex-1 text-left min-w-0">
-                    <p
-                      className={`text-sm truncate ${
-                        chore.completed ? 'text-slate-400 line-through' : 'text-white'
-                      }`}
-                    >
-                      {chore.emoji_icon ? `${chore.emoji_icon} ` : ''}{chore.title}
-                    </p>
-                    {chore.reward ? (
-                      <p className="text-xs text-yellow-400">
-                        &#11088; {chore.reward} point{chore.reward > 1 ? 's' : ''}
-                      </p>
-                    ) : null}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {renderContent(false)}
     </WidgetCard>
   );
 };
