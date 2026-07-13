@@ -2821,10 +2821,39 @@ async def _skylight_request(
         return None
 
 
-def _skylight_chore_to_item(raw: dict) -> dict:
+def _skylight_included_map(result: dict) -> dict:
+    """Index a JSON:API `included` array by (type, id) for relationship lookups."""
+    included = result.get("included", []) if isinstance(result, dict) else []
+    lookup: dict = {}
+    for inc in included:
+        if not isinstance(inc, dict):
+            continue
+        lookup[(inc.get("type"), str(inc.get("id")))] = inc
+    return lookup
+
+
+def _skylight_assignees(raw: dict, included_map: dict) -> list[str]:
+    """Resolve the family member(s) a chore is assigned to.
+
+    Skylight models assignment through a `category` relationship whose included
+    record carries the member's name in `attributes.label` (e.g. "Noah")."""
+    rel = raw.get("relationships", {}) or {}
+    cat = (rel.get("category") or {}).get("data")
+    if not cat or not cat.get("id"):
+        return []
+    inc = included_map.get(("category", str(cat["id"])))
+    if not inc:
+        return []
+    label = (inc.get("attributes", {}) or {}).get("label")
+    return [label] if label else []
+
+
+def _skylight_chore_to_item(raw: dict, included_map: dict | None = None) -> dict:
     """Flatten a raw Skylight JSON:API chore object into the flat shape the UI
-    widget expects. The private API does not expose per-user assignee data, so
-    `assignees` is left empty and `completed` is derived from the status."""
+    widget expects. `assignees` is derived from the chore's `category`
+    relationship (the family member it is assigned to); `completed` is derived
+    from the status."""
+    included_map = included_map or {}
     attrs = raw.get("attributes", {}) or {}
     status = str(attrs.get("status") or "").lower()
     recurrence = (attrs.get("recurrence_set") or [None])[0]
@@ -2833,7 +2862,7 @@ def _skylight_chore_to_item(raw: dict) -> dict:
         "title": attrs.get("summary") or attrs.get("description") or "Chore",
         "completed": status == "complete" or bool(attrs.get("completed_on")),
         "reward": attrs.get("reward_points"),
-        "assignees": [],
+        "assignees": _skylight_assignees(raw, included_map),
         "recurrence": recurrence,
         "stars": None,
         "start": attrs.get("start"),
@@ -2889,19 +2918,31 @@ async def get_skylight_chores(
     # The private API returns the whole family frame and exposes no per-user
     # assignee data, so we surface every chore and let the widget render them.
     day = window_end.isoformat()
+    included_map = _skylight_included_map(result)
     chores = [
-        _skylight_chore_to_item(c)
+        _skylight_chore_to_item(c, included_map)
         for c in raw_chores
         if str((c.get("attributes", {}) or {}).get("start") or "").startswith(day)
     ]
 
-    included = result.get("included", []) if isinstance(result, dict) else []
-    return {
-        "status": "SUCCESS",
-        "chores": chores,
-        "_debug_raw": raw_chores[:1],
-        "_debug_included": included[:8],
-    }
+    # When a specific (non-admin) user is requested, keep only the chores
+    # assigned to them. The gateway blanks `user` for admins so they see the
+    # whole family frame. Matching is case-insensitive and lenient (a name
+    # contained within the other) so a Jarvis OS username lines up with the
+    # Skylight category label.
+    if user:
+        uname = str(user).strip().lower()
+        if uname:
+            chores = [
+                c
+                for c in chores
+                if any(
+                    uname == a.lower() or uname in a.lower() or a.lower() in uname
+                    for a in (c.get("assignees") or [])
+                )
+            ]
+
+    return {"status": "SUCCESS", "chores": chores}
 
 
 @app.post("/api/integrations/skylight/chores/{chore_id}/complete", dependencies=[Depends(require_internal)])

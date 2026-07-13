@@ -607,13 +607,29 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                 required_cap = "read"
             _require_capability(ws_details, required_cap)
 
+        # Resolve GitHub auth for this command. Prefer an explicit per-user token
+        # from the user context; fall back to the runtime-injected container token
+        # (GITHUB_TOKEN/GH_TOKEN sourced from .env) so `gh`/`git` are authenticated
+        # even when the agent's user_context does not carry a github_token (the
+        # common case). Without this fallback, raw `gh`/`git push` shells are
+        # unauthenticated and every push is hard-blocked with auth_required.
+        def _resolve_gh_tok() -> str | None:
+            tok = None
+            if isinstance(user_ctx, dict):
+                tok = user_ctx.get("github_token")
+            elif user_ctx is not None:
+                tok = getattr(user_ctx, "github_token", None)
+            if not tok:
+                tok = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+            return tok
+
         # Proactive auth check: git push requires an authenticated remote.
         if base_command == "git" and len(parsed) > 1 and parsed[1] == "push":
-            gh_tok_check = user_ctx.get("github_token") if isinstance(user_ctx, dict) else getattr(user_ctx, "github_token", None)
+            gh_tok_check = _resolve_gh_tok()
             if not gh_tok_check:
                 return _fail(
-                    "Git push requires authentication, but no GitHub/Git token is present in the user context. "
-                    "Connect a GitHub account (Settings) so Raven can push.",
+                    "Git push requires authentication, but no GitHub/Git token is present. "
+                    "Connect a GitHub account (Settings) or provide GITHUB_TOKEN so Raven can push.",
                     {"error": "auth_required", "command": final_cmd},
                 )
 
@@ -664,11 +680,7 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # with KeyError('GITHUB_TOKEN') unless the env var is present.
         cmd_env = os.environ.copy()
         if base_command in ("gh", "git", "python", "python3"):
-            gh_tok = None
-            if isinstance(user_ctx, dict):
-                gh_tok = user_ctx.get("github_token")
-            elif user_ctx is not None:
-                gh_tok = getattr(user_ctx, "github_token", None)
+            gh_tok = _resolve_gh_tok()
             if gh_tok:
                 cmd_env["GITHUB_TOKEN"] = gh_tok
                 cmd_env["GH_TOKEN"] = gh_tok
