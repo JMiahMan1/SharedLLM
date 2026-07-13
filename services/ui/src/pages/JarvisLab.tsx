@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle, FlaskConical, Shield } from 'lucide-react';
+import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle, FlaskConical, Shield, Activity } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { HealthStatus, LogEntry, SmokeTestResult, Workspace } from '../services/api';
@@ -387,11 +387,41 @@ const MissionsPane = () => {
   const [missionQuery, setMissionQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [liveMissionId, setLiveMissionId] = useState<number | null>(null);
+  const [detailedMission, setDetailedMission] = useState<any | null>(null);
+  const [refinePrompt, setRefinePrompt] = useState('');
+  const [loadingDetails, setLoadingDetails] = useState<number | null>(null);
+
   const { data: missions = [], refetch } = useQuery({
     queryKey: ['user-missions'],
     queryFn: () => api.getUserMissions(),
     refetchInterval: 5000,
   });
+
+  const refineMissionMutation = useMutation({
+    mutationFn: ({ id, prompt }: { id: number; prompt: string }) => api.refineRavenMission(id, prompt),
+    onSuccess: (resp) => {
+      toast.success('🎯 Refinement enqueued! Launching live monitor.');
+      setDetailedMission(null);
+      setRefinePrompt('');
+      if (resp && resp.mission_id) {
+        setLiveMissionId(resp.mission_id);
+      }
+      refetch();
+    },
+    onError: (err: unknown) => toast.error(err instanceof Error ? err.message : 'Failed to refine mission'),
+  });
+
+  const handleOpenDetails = async (id: number) => {
+    try {
+      setLoadingDetails(id);
+      const missionData = await api.getRavenMission(id);
+      setDetailedMission(missionData);
+    } catch (err) {
+      toast.error('Failed to load mission details');
+    } finally {
+      setLoadingDetails(null);
+    }
+  };
 
   const createMissionMutation = useMutation({
     mutationFn: () => api.createUserMission(missionQuery),
@@ -583,10 +613,11 @@ const MissionsPane = () => {
                   {(mission.status === 'completed' || mission.status === 'failed') && (
                     <>
                       <button
-                        onClick={() => setLiveMissionId(mission.id)}
-                        className="glass-button bg-indigo-500/10 border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest"
+                        onClick={() => handleOpenDetails(mission.id)}
+                        disabled={loadingDetails === mission.id}
+                        className="glass-button bg-indigo-500/10 border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
                       >
-                        <Eye size={12} /> View Logs
+                        <Terminal size={12} /> {loadingDetails === mission.id ? 'Loading...' : 'Inspect & Refine'}
                       </button>
                       <button
                         onClick={() => deleteMissionMutation.mutate(mission.id)}
@@ -627,8 +658,167 @@ const MissionsPane = () => {
         onClose={() => setLiveMissionId(null)}
         missionId={liveMissionId}
       />
+
+      {/* 🔍 Mission Details & Chat Refinement Modal */}
+      {detailedMission && (
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-white/10 rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl flex flex-col justify-between text-left">
+            <div>
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4 pb-4 border-b border-white/5">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Terminal size={18} className="text-indigo-400" />
+                  Mission #{detailedMission.id} Details & Refinement
+                </h3>
+                <button
+                  onClick={() => {
+                    setDetailedMission(null);
+                    setRefinePrompt('');
+                  }}
+                  className="p-1.5 hover:bg-white/5 rounded-lg text-slate-400 hover:text-white transition-colors"
+                >
+                  ✖️
+                </button>
+              </div>
+
+              {/* Grid Metadata */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6 bg-white/5 p-4 rounded-xl border border-white/5 text-xs">
+                <div>
+                  <span className="text-slate-500 uppercase font-black text-[9px] block">Status</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold inline-block uppercase mt-1 ${
+                    detailedMission.status === 'completed' ? 'bg-emerald-500/20 text-emerald-300' :
+                    detailedMission.status === 'failed' ? 'bg-red-500/20 text-red-300' : 'bg-slate-500/20 text-slate-300'
+                  }`}>
+                    {detailedMission.status}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 uppercase font-black text-[9px] block">Container</span>
+                  <span className="text-white font-semibold block mt-1 truncate">{detailedMission.target_container || 'System'}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 uppercase font-black text-[9px] block">Duration</span>
+                  <span className="text-white font-semibold block mt-1">
+                    {detailedMission.duration != null ? `${Math.floor(detailedMission.duration / 60)}m ${detailedMission.duration % 60}s` : '—'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 uppercase font-black text-[9px] block">Workspace ID</span>
+                  <span className="text-blue-300 font-mono block mt-1 truncate">{detailedMission.workspace_id || 'System Default'}</span>
+                </div>
+              </div>
+
+              {/* Sections */}
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Original Mission Directive</label>
+                  <div className="bg-black/30 border border-white/5 p-3 rounded-lg text-xs text-slate-300 max-h-24 overflow-y-auto">
+                    {detailedMission.proposed_mission}
+                  </div>
+                </div>
+
+                {detailedMission.result && (
+                  <div>
+                    <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Final Result Summary</label>
+                    <div className="bg-black/30 border border-white/5 p-3 rounded-lg text-xs text-emerald-300 max-h-24 overflow-y-auto">
+                      {detailedMission.result}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Audit Execution Timeline</label>
+                  {renderTimeline(detailedMission.output_log)}
+                </div>
+              </div>
+            </div>
+
+            {/* Chat Refinement Interface */}
+            <div className="mt-4 pt-4 border-t border-white/5 space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-300 mb-2 block flex items-center gap-1.5">
+                  <Activity size={14} className="text-indigo-400" />
+                  Tweak or Fix Results (Interactive Chat)
+                </label>
+                <p className="text-[10px] text-slate-500 mb-2 leading-relaxed">
+                  Provide follow-up instructions to resolve remaining errors. Raven will run in the exact same workspace, preserve history context, and update outputs/artifacts.
+                </p>
+                <div className="flex gap-2">
+                  <textarea
+                    value={refinePrompt}
+                    onChange={(e) => setRefinePrompt(e.target.value)}
+                    placeholder="💬 Enter follow-up instructions (e.g. 'Fix the syntax error on line 42', 'Add missing import sys')"
+                    rows={2}
+                    disabled={refineMissionMutation.isPending}
+                    className="flex-1 bg-black/50 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-600 focus:border-indigo-500/50 focus:outline-none transition-all resize-none"
+                  />
+                  <button
+                    onClick={() => refineMissionMutation.mutate({ id: detailedMission.id, prompt: refinePrompt })}
+                    disabled={!refinePrompt.trim() || refineMissionMutation.isPending}
+                    className="px-4 py-2 bg-gradient-to-r from-indigo-500/20 to-purple-500/20 border border-indigo-500/30 rounded-xl font-black text-[10px] uppercase tracking-widest text-indigo-300 hover:from-indigo-500/30 hover:to-purple-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+                  >
+                    {refineMissionMutation.isPending ? 'Sending...' : 'Refine'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
+};
+
+const renderTimeline = (outputLog: string | null | undefined) => {
+  if (!outputLog) return <p className="text-slate-500 text-xs italic">No audit trail logs recorded.</p>;
+  try {
+    const logs = JSON.parse(outputLog);
+    if (!Array.isArray(logs) || logs.length === 0) return <p className="text-slate-500 text-xs italic text-center p-2">No execution events captured.</p>;
+    
+    const displayedLogs = logs.slice(-500);
+    
+    return (
+      <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-2 font-mono text-[10px] text-slate-300 bg-black/40 p-3 rounded-lg border border-white/5">
+        {displayedLogs.map((logItem: any, idx: number) => {
+          const timeStr = logItem.timestamp ? new Date(logItem.timestamp * 1000).toLocaleTimeString() : '';
+          const itemType = logItem.raw_type || logItem.type;
+          let bgClass = 'bg-slate-800 text-slate-300';
+          let label = itemType;
+          
+          if (itemType === 'action') {
+            bgClass = 'bg-blue-500/20 text-blue-300 border border-blue-500/30';
+            label = '🔧 TOOL';
+          } else if (itemType === 'action_payload') {
+            return null; // Skip payload for clean view
+          } else if (itemType === 'result_success') {
+            bgClass = 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
+            label = '✅ SUCCESS';
+          } else if (itemType === 'result_error') {
+            bgClass = 'bg-red-500/20 text-red-300 border border-red-500/30';
+            label = '❌ ERROR';
+          } else if (itemType === 'system') {
+            bgClass = 'bg-purple-500/20 text-purple-300 border border-purple-500/30';
+            label = 'ℹ️ SYSTEM';
+          } else if (itemType === 'reasoning') {
+            bgClass = 'bg-slate-800/85 text-slate-400 border border-white/5';
+            label = '🧠 THOUGHT';
+          }
+          
+          return (
+            <div key={idx} className="flex gap-2 items-start border-b border-white/5 pb-1.5 last:border-0 last:pb-0">
+              <span className="text-[9px] text-slate-500 select-none">{timeStr}</span>
+              <span className={`px-1 rounded text-[8px] font-black uppercase tracking-wider select-none ${bgClass}`}>
+                {label}
+              </span>
+              <span className="break-all">{logItem.data}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  } catch (e) {
+    return <p className="text-red-400 text-xs italic text-center p-2">Failed to parse execution log: {String(e)}</p>;
+  }
 };
 
 export default JarvisLab;
