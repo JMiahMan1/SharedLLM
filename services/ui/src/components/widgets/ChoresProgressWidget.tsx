@@ -64,6 +64,13 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
         setCompletedOverrides((prev) => ({ ...prev, [chore.id]: !newStatus }));
         toast.error(resp.message || 'Failed to update chore');
       } else {
+        // Server is now authoritative; drop the optimistic override so the UI
+        // can't get stuck out of sync if the chore changes elsewhere.
+        setCompletedOverrides((prev) => {
+          const next = { ...prev };
+          delete next[chore.id];
+          return next;
+        });
         refetch();
       }
     } catch {
@@ -94,7 +101,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       icon="🧹"
       actions={
         <span className="text-xs text-slate-400">
-          {completedCount}/{totalCount}
+          {completedCount}/{totalCount} done · {Math.round(progress)}%
         </span>
       }
     >
