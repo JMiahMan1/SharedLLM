@@ -18,7 +18,7 @@ const MISSION_TEMPLATES = [
 // ─── User View ───────────────────────────────────────────────────────────────
 
 const JarvisLab = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'missions'>('missions');
+  const [activeTab, setActiveTab] = useState<'tests' | 'missions'>('missions');
   const { user } = useAuth();
   const isAdmin = user?.is_admin ?? false;
   const navigate = useNavigate();
@@ -33,7 +33,6 @@ const JarvisLab = () => {
         <div className="flex items-center gap-3">
           <div className="flex rounded-2xl border border-white/10 bg-white/5 p-1">
             {([
-              ['overview', 'Overview'],
               ['tests', 'Tests'],
               ['missions', 'Missions'],
             ] as const).map(([key, label]) => (
@@ -61,7 +60,6 @@ const JarvisLab = () => {
         </div>
       </header>
 
-      {activeTab === 'overview' && <OverviewPane />}
       {activeTab === 'tests' && <TestsPane />}
       {activeTab === 'missions' && <MissionsPane />}
     </div>
@@ -140,66 +138,6 @@ export const JarvisLabAdmin = () => {
 };
 
 // ─── Shared Panes ─────────────────────────────────────────────────────────────
-
-const OverviewPane = () => {
-  const { data: health } = useQuery<HealthStatus>({
-    queryKey: ['health'],
-    queryFn: () => api.getHealth(),
-    refetchInterval: 5000,
-  });
-
-  const { data: workspaces = [] } = useQuery<Workspace[]>({
-    queryKey: ['workspaces'],
-    queryFn: () => api.getWorkspaces(),
-  });
-
-  return (
-    <div className="grid gap-8 xl:grid-cols-[0.9fr_1.1fr]">
-      <section className="glass-panel p-6">
-        <div className="mb-6 flex items-center gap-3">
-          <CheckCircle2 size={20} className="text-emerald-300" />
-          <div>
-            <h3 className="text-xl font-bold text-white">Mesh Health</h3>
-            <p className="text-sm text-slate-400">Current readiness across the running stack.</p>
-          </div>
-        </div>
-        <div className="space-y-3">
-          {Object.entries(health?.services || {}).map(([service, status]) => (
-            <div key={service} className="glass-card flex items-center justify-between p-4 gap-4 overflow-hidden">
-              <span className="font-semibold text-white truncate">{service}</span>
-              <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${status === 'OK' ? 'text-emerald-300' : 'text-red-300'}`}>
-                {status}
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="glass-panel p-6">
-        <div className="mb-6 flex items-center gap-3">
-          <Wrench size={20} className="text-cyan-300" />
-          <div>
-            <h3 className="text-xl font-bold text-white">Workspace Runtime</h3>
-            <p className="text-sm text-slate-400">Registered workspaces exposed by the workspace runtime service.</p>
-          </div>
-        </div>
-        <div className="space-y-3">
-          {workspaces.map((workspace) => (
-            <div key={workspace.id} className="glass-card p-4">
-              <div className="flex items-center justify-between gap-4 overflow-hidden">
-                <p className="font-semibold text-white truncate">{workspace.display_name || workspace.id}</p>
-                <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${workspace.available ? 'text-emerald-300' : 'text-red-300'}`}>
-                  {workspace.available ? 'Available' : 'Unavailable'}
-                </span>
-              </div>
-              <p className="mt-2 font-mono text-xs text-slate-400 break-all">{workspace.resolved_path}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-};
 
 // Advanced overview adds faster polling and more runtime detail
 const AdvancedOverviewPane = () => {
