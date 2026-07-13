@@ -144,3 +144,82 @@ def test_extract_action_json_no_infinite_recursion_on_unparseable():
     text = '{"action": "WorkspaceShellRequest", "payload": {"command": "git push"'
     norm = extract_action_json(text)
     assert norm is None
+
+
+def _translate():
+    from services.gateway.agent_loop import _translate_shell_to_git_op
+    return _translate_shell_to_git_op
+
+
+def test_translate_git_status():
+    assert _translate()("git status") == {"action": "status"}
+
+
+def test_translate_git_add_path():
+    assert _translate()("git add game.py") == {"action": "add", "path": "game.py"}
+    assert _translate()("git add .") == {"action": "add", "path": "."}
+
+
+def test_translate_git_commit_message():
+    assert _translate()('git commit -m "feat: add game"') == {
+        "action": "commit",
+        "commit_message": "feat: add game",
+    }
+
+
+def test_translate_git_push_branch():
+    assert _translate()("git push origin main") == {"action": "push", "branch": "main"}
+    assert _translate()("git push -u origin HEAD:main") == {"action": "push", "branch": "main"}
+    assert _translate()("git push") == {"action": "push", "branch": "microservices"}
+
+
+def test_translate_git_pull_branch():
+    assert _translate()("git pull origin dev") == {"action": "pull", "branch": "dev"}
+
+
+def test_translate_git_log_count():
+    assert _translate()("git log --oneline -5") == {"action": "log", "log_count": 5}
+    assert _translate()("git log") == {"action": "log", "log_count": 10}
+
+
+def test_translate_git_fetch_branch_checkout_init():
+    assert _translate()("git fetch") == {"action": "fetch"}
+    assert _translate()("git branch feature-x") == {"action": "branch", "path": "feature-x"}
+    assert _translate()("git checkout main") == {"action": "checkout", "path": "main"}
+    assert _translate()("git init") == {"action": "init"}
+
+
+def test_translate_git_remote_add():
+    assert _translate()("git remote add origin https://github.com/u/r.git") == {
+        "action": "remote_add",
+        "remote_name": "origin",
+        "repo_url": "https://github.com/u/r.git",
+    }
+
+
+def test_translate_gh_repo_create():
+    assert _translate()("gh repo create my-repo --private") == {
+        "action": "repo_create",
+        "repo_name": "my-repo",
+        "private": True,
+        "description": None,
+    }
+    assert _translate()('gh repo create my-repo --description "My project"') == {
+        "action": "repo_create",
+        "repo_name": "my-repo",
+        "private": False,
+        "description": "My project",
+    }
+
+
+def test_translate_non_git_passthrough():
+    # Commands that are neither git nor gh must NOT be intercepted.
+    assert _translate()("ruff check .") is None
+    assert _translate()("npm test") is None
+    assert _translate()("ls -la") is None
+    assert _translate()("echo hello") is None
+
+
+def test_translate_unknown_git_subcommand_passthrough():
+    # An unsupported git subcommand is left to the shell rather than mis-routed.
+    assert _translate()("git mv a b") is None

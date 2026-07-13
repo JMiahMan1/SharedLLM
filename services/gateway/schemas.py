@@ -122,11 +122,17 @@ class WorkspaceShellRequest(BaseModel):
 
 class GitOperationRequest(BaseModel):
     workspace_id: str | None = Field(None, description="Workspace ID (uses default if not specified)")
-    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show"]
+    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show", "init", "remote_add", "repo_create"]
     path: str | None = "."
     message: str | None = None
     branch: str | None = "microservices"
     log_count: int | None = 10
+    remote_name: str | None = None
+    repo_url: str | None = None
+    repo_name: str | None = None
+    private: bool = False
+    description: str | None = None
+    source_path: str | None = None
 
 class ControlPlaneRequest(BaseModel):
     service_name: str
