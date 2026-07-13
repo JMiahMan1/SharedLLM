@@ -586,6 +586,13 @@ const MissionsPane = () => {
                         <Eye size={12} /> Watch Live
                       </button>
                       <button
+                        onClick={() => handleOpenDetails(mission.id)}
+                        disabled={loadingDetails === mission.id}
+                        className="glass-button bg-indigo-500/10 border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                      >
+                        <Terminal size={12} /> {loadingDetails === mission.id ? 'Loading...' : 'Inspect'}
+                      </button>
+                      <button
                         onClick={() => pauseMissionMutation.mutate(mission.id)}
                         disabled={pauseMissionMutation.isPending}
                         className="glass-button bg-yellow-500/10 border-yellow-500/20 text-yellow-300 hover:bg-yellow-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
@@ -602,13 +609,22 @@ const MissionsPane = () => {
                     </>
                   )}
                   {mission.status === 'paused' && (
-                    <button
-                      onClick={() => resumeMissionMutation.mutate(mission.id)}
-                      disabled={resumeMissionMutation.isPending}
-                      className="glass-button bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
-                    >
-                      <PlayCircle size={12} /> Resume
-                    </button>
+                    <>
+                      <button
+                        onClick={() => handleOpenDetails(mission.id)}
+                        disabled={loadingDetails === mission.id}
+                        className="glass-button bg-indigo-500/10 border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                      >
+                        <Terminal size={12} /> {loadingDetails === mission.id ? 'Loading...' : 'Inspect & Refine'}
+                      </button>
+                      <button
+                        onClick={() => resumeMissionMutation.mutate(mission.id)}
+                        disabled={resumeMissionMutation.isPending}
+                        className="glass-button bg-emerald-500/10 border-emerald-500/20 text-emerald-300 hover:bg-emerald-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                      >
+                        <PlayCircle size={12} /> Resume
+                      </button>
+                    </>
                   )}
                   {(mission.status === 'completed' || mission.status === 'failed') && (
                     <>
@@ -627,6 +643,15 @@ const MissionsPane = () => {
                         <Trash2 size={12} /> Delete
                       </button>
                     </>
+                  )}
+                  {(mission.status !== 'executing' && mission.status !== 'running' && mission.status !== 'paused' && mission.status !== 'completed' && mission.status !== 'failed') && (
+                    <button
+                      onClick={() => handleOpenDetails(mission.id)}
+                      disabled={loadingDetails === mission.id}
+                      className="glass-button bg-indigo-500/10 border-indigo-500/20 text-indigo-300 hover:bg-indigo-500/20 px-3 py-1.5 flex items-center gap-1 text-[10px] font-black uppercase tracking-widest disabled:opacity-50"
+                    >
+                      <Terminal size={12} /> {loadingDetails === mission.id ? 'Loading...' : 'Inspect'}
+                    </button>
                   )}
                 </div>
               </div>
