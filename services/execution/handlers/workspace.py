@@ -156,9 +156,10 @@ def _require_capability(workspace: dict, capability: str):
             detail=f"Workspace '{workspace.get('id')}' does not allow capability '{capability}'"
         )
 
-def resolve_safe_path(path: str, workspace_root: str = WORKSPACE_ROOT) -> str:
+def resolve_safe_path(path: str, workspace_root: str | None = None) -> str:
     """Ensure the path stays within workspace_root."""
-    workspace_root_abs = os.path.abspath(workspace_root)
+    actual_root = workspace_root or WORKSPACE_ROOT or "/workspace"
+    workspace_root_abs = os.path.abspath(actual_root)
 
     # If the path is already an absolute path inside the workspace root (agents often
     # write to the exact resolved_path they were told), use it directly.
@@ -174,7 +175,7 @@ def resolve_safe_path(path: str, workspace_root: str = WORKSPACE_ROOT) -> str:
     # agents sometimes prepend, e.g. "/workspace/game.py" when the real root is
     # "/workspaces/<repo>". This keeps relative paths landing at the workspace root.
     parts = rel_path.split("/")
-    if len(parts) > 1 and parts[0] in ("workspace", os.path.basename(workspace_root.rstrip("/"))):
+    if len(parts) > 1 and parts[0] in ("workspace", os.path.basename(actual_root.rstrip("/"))):
         parts = parts[1:]
         rel_path = "/".join(parts)
     abs_path = os.path.join(workspace_root_abs, rel_path)
@@ -210,8 +211,9 @@ async def _run_command_async(
 
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            return proc.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
-        except asyncio.TimeoutExpired:
+            ret_code = proc.returncode if proc.returncode is not None else 0
+            return ret_code, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+        except asyncio.TimeoutError:
             try:
                 proc.kill()
                 await proc.wait()
@@ -239,21 +241,100 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
             lines = f.readlines()
 
         # Strategy 3: Semantic Extraction (Signatures Only)
-        if req.summary_only and req.path.endswith(".py"):
-            import ast
-            try:
-                tree = ast.parse("".join(lines))
+        if req.summary_only:
+            ext = os.path.splitext(req.path)[1].lower()
+            if ext in (".py", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs"):
                 summary = []
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.ClassDef):
-                        summary.append(f"Class: {node.name} (line {node.lineno})")
-                    elif isinstance(node, ast.FunctionDef):
-                        summary.append(f"Function: {node.name}({[a.arg for a in node.args.args]}) (line {node.lineno})")
+                content_str = "".join(lines)
 
-                content = "\n".join(summary)
-                return _ok(f"Semantic map for {req.path} ({len(summary)} symbols found)", {"content": content, "path": req.path})
-            except Exception as e:
-                log.warning(f"AST parse failed for {req.path}, falling back to chunked read: {e}")
+                if ext == ".py":
+                    import ast
+                    try:
+                        tree = ast.parse(content_str)
+                        for node in ast.walk(tree):
+                            if isinstance(node, ast.ClassDef):
+                                summary.append(f"Class: {node.name} (line {node.lineno})")
+                            elif isinstance(node, ast.FunctionDef):
+                                summary.append(f"Function: {node.name}({[a.arg for a in node.args.args]}) (line {node.lineno})")
+                    except Exception as e:
+                        log.warning(f"AST parse failed for {req.path}: {e}")
+
+                if not summary:
+                    lines_with_numbers = list(enumerate(lines, 1))
+
+                    if ext in (".js", ".ts", ".jsx", ".tsx"):
+                        func_pat = re.compile(r'(?:export\s+)?(?:async\s+)?function\s+([a-zA-Z0-9_$]+)\s*\(([^)]*)\)')
+                        arrow_pat = re.compile(r'(?:export\s+)?const\s+([a-zA-Z0-9_$]+)\s*=\s*(?:async\s*)?\(([^)]*)\)\s*=>')
+                        class_pat = re.compile(r'(?:export\s+)?class\s+([a-zA-Z0-9_$]+)')
+                        interface_pat = re.compile(r'(?:export\s+)?(?:interface|type)\s+([a-zA-Z0-9_$]+)')
+
+                        for line_num, line in lines_with_numbers:
+                            line_strip = line.strip()
+                            m = func_pat.match(line_strip)
+                            if m:
+                                summary.append(f"Function: {m.group(1)}({m.group(2).strip()}) (line {line_num})")
+                                continue
+                            m = arrow_pat.match(line_strip)
+                            if m:
+                                summary.append(f"ArrowFunction: {m.group(1)}({m.group(2).strip()}) (line {line_num})")
+                                continue
+                            m = class_pat.match(line_strip)
+                            if m:
+                                summary.append(f"Class: {m.group(1)} (line {line_num})")
+                                continue
+                            m = interface_pat.match(line_strip)
+                            if m:
+                                summary.append(f"Interface/Type: {m.group(1)} (line {line_num})")
+
+                    elif ext == ".go":
+                        func_pat = re.compile(r'^func\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)')
+                        method_pat = re.compile(r'^func\s*\(\s*[^)]+\s*\)\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)')
+                        type_pat = re.compile(r'^type\s+([a-zA-Z0-9_]+)\s+(struct|interface)')
+
+                        for line_num, line in lines_with_numbers:
+                            line_strip = line.strip()
+                            m = func_pat.match(line_strip)
+                            if m:
+                                summary.append(f"Function: {m.group(1)}({m.group(2).strip()}) (line {line_num})")
+                                continue
+                            m = method_pat.match(line_strip)
+                            if m:
+                                summary.append(f"Method: {m.group(1)}({m.group(2).strip()}) (line {line_num})")
+                                continue
+                            m = type_pat.match(line_strip)
+                            if m:
+                                summary.append(f"Type ({m.group(2)}): {m.group(1)} (line {line_num})")
+
+                    elif ext == ".rs":
+                        fn_pat = re.compile(r'^(?:pub\s+)?(?:async\s+)?fn\s+([a-zA-Z0-9_]+)\s*(?:<[^>]*>)?\s*\(([^)]*)\)')
+                        type_pat = re.compile(r'^(?:pub\s+)?(?:struct|enum|trait)\s+([a-zA-Z0-9_]+)')
+
+                        for line_num, line in lines_with_numbers:
+                            line_strip = line.strip()
+                            m = fn_pat.match(line_strip)
+                            if m:
+                                summary.append(f"Function: {m.group(1)}({m.group(2).strip()}) (line {line_num})")
+                                continue
+                            m = type_pat.match(line_strip)
+                            if m:
+                                summary.append(f"Type/Trait: {m.group(1)} (line {line_num})")
+
+                    elif ext == ".py":
+                        func_pat = re.compile(r'^def\s+([a-zA-Z0-9_]+)\s*\(([^)]*)\)')
+                        class_pat = re.compile(r'^class\s+([a-zA-Z0-9_]+)')
+                        for line_num, line in lines_with_numbers:
+                            line_strip = line.strip()
+                            m = func_pat.match(line_strip)
+                            if m:
+                                summary.append(f"Function: {m.group(1)}({m.group(2).strip()}) (line {line_num})")
+                                continue
+                            m = class_pat.match(line_strip)
+                            if m:
+                                summary.append(f"Class: {m.group(1)} (line {line_num})")
+
+                if summary:
+                    content = "\n".join(summary)
+                    return _ok(f"Semantic map for {req.path} ({len(summary)} symbols found)", {"content": content, "path": req.path})
 
         # Chunked Reading (Windowing)
         start = max(0, req.offset_lines - 1) if req.offset_lines > 0 else 0
@@ -283,14 +364,15 @@ def _get_discovery_suggestion(path: str) -> str | None:
         if not filename:
             return None
 
+        root_dir = WORKSPACE_ROOT or "/workspace"
         matches = []
-        for root, _, files in os.walk(WORKSPACE_ROOT):
+        for root, _, files in os.walk(root_dir):
             # Skip hidden directories like .git
             if "/.git" in root:
                 continue
             for f in files:
                 if f.lower() == filename.lower():
-                    rel_path = os.path.relpath(os.path.join(root, f), WORKSPACE_ROOT)
+                    rel_path = os.path.relpath(os.path.join(root, f), root_dir)
                     matches.append(rel_path)
 
         if matches:

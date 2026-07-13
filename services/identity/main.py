@@ -159,6 +159,8 @@ def _ensure_schema_upgrades() -> None:
                 conn.execute(text("ALTER TABLE ravenmission ADD COLUMN completed_at VARCHAR"))
             if "duration" not in raven_columns:
                 conn.execute(text("ALTER TABLE ravenmission ADD COLUMN duration INTEGER"))
+            if "workspace_id" not in raven_columns:
+                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN workspace_id VARCHAR"))
             conn.commit()
 
     if "deviceassignment" in inspector.get_table_names():

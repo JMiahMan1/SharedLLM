@@ -1320,7 +1320,98 @@ async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials, 
         log.warning(f"[AgentLoop] Auto-wire repo failed for {workspace_id}: {e}")
 
 
-async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None) -> Any:
+def normalize_audit_log(audit_log: list[dict]) -> list[dict]:
+    normalized = []
+
+    current_action = None
+    current_action_payload = None
+
+    for ev in audit_log:
+        ev_type = ev.get("type")
+        ev_data = ev.get("data")
+        timestamp = ev.get("timestamp")
+
+        if ev_type == "action":
+            tool_name = str(ev_data).replace("Executing Tool: ", "").strip()
+            current_action = tool_name
+
+        elif ev_type == "action_payload":
+            try:
+                current_action_payload = json.loads(ev_data) if isinstance(ev_data, str) else ev_data
+            except Exception:
+                current_action_payload = ev_data
+
+        elif ev_type in ("result_success", "result_error"):
+            summary_msg = f"Executed {current_action}"
+
+            if current_action == "workspacefilewriterequest" and isinstance(current_action_payload, dict):
+                path = current_action_payload.get("path") or current_action_payload.get("relative_path") or "file"
+                content = current_action_payload.get("content") or ""
+                lines_count = len(str(content).splitlines())
+                summary_msg = f"Wrote {path} ({lines_count} lines)"
+
+            elif current_action == "workspaceshellrequest" and isinstance(current_action_payload, dict):
+                cmd = current_action_payload.get("command") or ""
+                summary_msg = f"Shell command: `{cmd[:60]}`"
+
+            elif current_action == "workspacegitcommitrequest" and isinstance(current_action_payload, dict):
+                msg = current_action_payload.get("message") or ""
+                summary_msg = f"Git commit: \"{msg[:50]}\""
+
+            elif current_action == "workspacegitpushrequest":
+                summary_msg = "Git push"
+
+            elif current_action == "workspacegitpullrequest":
+                summary_msg = "Git pull"
+
+            elif current_action == "workspacesearchrequest" and isinstance(current_action_payload, dict):
+                q = current_action_payload.get("query") or ""
+                summary_msg = f"Search Query: `{q}`"
+
+            is_success = (ev_type == "result_success")
+            res_str = str(ev_data).strip()
+            if not is_success:
+                summary_msg += f" (failed: {res_str[:120]})"
+            else:
+                try:
+                    res_json = json.loads(res_str)
+                    if isinstance(res_json, dict):
+                        if "lint" in res_json:
+                            passed = all(item.get("passed", True) for item in res_json["lint"])
+                            summary_msg += f" (Lint: {'passed' if passed else 'failed'})"
+                        elif "pytest" in res_json:
+                            passed = res_json["pytest"].get("passed", False)
+                            summary_msg += f" (Tests: {'passed' if passed else 'failed'})"
+                except Exception:
+                    pass
+
+            normalized.append({
+                "type": ev_type,
+                "data": summary_msg,
+                "timestamp": timestamp,
+                "raw_type": ev_type,
+                "raw_data": res_str[:400],
+                "tool": current_action,
+                "payload": str(current_action_payload)[:400] if current_action_payload else None
+            })
+
+            current_action = None
+            current_action_payload = None
+
+        elif ev_type == "system":
+            normalized.append({
+                "type": "system",
+                "data": ev_data,
+                "timestamp": timestamp
+            })
+
+        elif ev_type == "reasoning":
+            pass
+
+    return normalized
+
+
+async def AgentLoop(query: str, selected_model: str, full_system: str, short_term: list, rag_user: str, creds: ResolvedCredentials, mission_id: int | None = None, rag_context: str = "", show_thinking: bool = False, workspace_id: str | None = None, history_log: str | None = None) -> Any:
     full_audit_log = []
 
     async def stream_event(event_type: str, data: str):
@@ -1359,8 +1450,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "directive": directive,
                 "timestamp": _time.time(),
             }
-            await r.rpush(f"raven:mission:loopstate:{mission_id}", _json.dumps(rec))
-            await r.expire(f"raven:mission:loopstate:{mission_id}", 86400)
+            from collections.abc import Awaitable
+            from typing import cast
+            res1 = r.rpush(f"raven:mission:loopstate:{mission_id}", _json.dumps(rec))
+            await cast(Awaitable[Any], res1)
+            res2 = r.expire(f"raven:mission:loopstate:{mission_id}", 86400)
+            await cast(Awaitable[Any], res2)
         except Exception as e:
             log.warning(f"[AgentLoop] loop-probe record failed: {e}")
 
@@ -1647,6 +1742,66 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to clear checkpoint for mission {mission_id}: {e}")
 
+    # Reconstruct history if resuming/refining from output_log or history_log
+    prior_conversation_turns = []
+    if mission_id:
+        try:
+            output_log_raw = history_log
+            if not output_log_raw:
+                async with shared_http_client() as ws_client:
+                    resp = await ws_client.get(
+                        f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                        timeout=aiohttp.ClientTimeout(total=5.0),
+                    )
+                    if resp.status == 200:
+                        m_data = await resp.json()
+                        output_log_raw = m_data.get("output_log")
+
+            if output_log_raw and isinstance(output_log_raw, str):
+                try:
+                    audit_events = json.loads(output_log_raw)
+                except Exception:
+                    audit_events = []
+                if audit_events:
+                    log.info(f"[AgentLoop] Found existing output_log with {len(audit_events)} events for mission {mission_id}. Reconstructing history.")
+
+                    current_tool = None
+                    current_payload = None
+
+                    for ev in audit_events:
+                        ev_type = ev.get("raw_type") or ev.get("type")
+                        ev_data = ev.get("raw_data") or ev.get("data")
+
+                        if ev_type == "action":
+                            current_tool = str(ev_data).replace("Executing Tool: ", "").strip()
+                        elif ev_type == "action_payload":
+                            payload_val = ev.get("payload") or ev_data
+                            try:
+                                current_payload = json.loads(payload_val) if isinstance(payload_val, str) else payload_val
+                            except Exception:
+                                current_payload = payload_val
+                        elif ev_type in ("result_success", "result_error"):
+                            tool_name = ev.get("tool") or current_tool
+                            if tool_name:
+                                tool_json = {"action": tool_name, "payload": current_payload}
+                                prior_conversation_turns.append({"role": "assistant", "content": json.dumps(tool_json)})
+                                prior_conversation_turns.append({"role": "user", "content": f"LAST TOOL RESULT:\n{ev_data}"})
+                                # Also reconstruct action_log step
+                                step_num = len(action_log) + 1
+                                action_log.append(f"Step {step_num}: {tool_name} -> {str(ev_data)[:200]}")
+                            current_tool = None
+                            current_payload = None
+
+                    # Cap reconstructed history to the last 20 tool/result pairs (40 turns)
+                    if len(prior_conversation_turns) > 40:
+                        prior_conversation_turns = prior_conversation_turns[-40:]
+                    # Cap action_log too
+                    if len(action_log) > 20:
+                        action_log = action_log[-20:]
+        except Exception as e:
+            log.warning(f"[AgentLoop] Failed to reconstruct mission history: {e}")
+
     # Persistent, compacted conversation history. This lets the model retain learned
     # context (decisions, constraints, prior tool results) across a long mission
     # instead of only ever seeing the single most-recent tool result each turn.
@@ -1657,6 +1812,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             + (f"\n\nEXECUTION PLAN:\n{generated_plan}" if generated_plan else "")
         )},
     ]
+    if prior_conversation_turns:
+        conversation.extend(prior_conversation_turns)
 
     for agent_iter in range(start_iteration, max_iterations):
         iter_num = agent_iter + 1
@@ -2514,6 +2671,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                     workspace_id = str(_created)
                                     created_workspaces.add(workspace_id)
                                     log.info(f"[AgentLoop] Adopted newly created workspace: {workspace_id}")
+                                    if mission_id:
+                                        try:
+                                            async with shared_http_client() as ws_client:
+                                                await ws_client.patch(
+                                                    f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
+                                                    json={"workspace_id": workspace_id},
+                                                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                                    timeout=aiohttp.ClientTimeout(total=5.0),
+                                                )
+                                                log.info(f"[AgentLoop] Saved workspace_id {workspace_id} to mission {mission_id}")
+                                        except Exception as patch_ws_e:
+                                            log.warning(f"[AgentLoop] Failed to save workspace_id to mission {mission_id}: {patch_ws_e}")
 
                             # Auto-wire the new repo to the workspace settings after a
                             # successful `gh repo create` (best-effort, model-independent),
@@ -2805,10 +2974,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     if mission_id and full_audit_log:
         try:
+            summarized_log = normalize_audit_log(full_audit_log)
             async with shared_http_client() as client:
                 await client.patch(
                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                    json={"output_log": json.dumps(full_audit_log)},
+                    json={"output_log": json.dumps(summarized_log)},
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=aiohttp.ClientTimeout(total=10.0),
                 )

@@ -305,7 +305,8 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
         # Raven handles autonomous loops
         mission_id = job_payload.get("_mission_id")
         workspace_id = job_payload.get("workspace_id")
-        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id, rag_context=rag_context, show_thinking=show_thinking, workspace_id=workspace_id)
+        history_log = job_payload.get("history_log")
+        ans = await AgentLoop(query, model, full_system, short_term, user_id, creds, mission_id, rag_context=rag_context, show_thinking=show_thinking, workspace_id=workspace_id, history_log=history_log)
     else:
         # Librarian handles standard single-turn inference
         ans = await _single_turn_inference(query, model, full_system, rag_context, short_term, creds, chunk_callback, show_thinking=show_thinking)

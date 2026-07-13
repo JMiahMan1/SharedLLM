@@ -4899,6 +4899,81 @@ async def resume_mission(request: Request, id_or_slug: str):
 
         return {"status": "SUCCESS", "message": f"Mission {real_id} resumed. LLM access restored."}
 
+class MissionRefineRequest(BaseModel):
+    prompt: str
+
+@app.post("/api/raven/missions/{id_or_slug}/refine")
+async def refine_mission(request: Request, id_or_slug: str, body: MissionRefineRequest):
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not body.prompt.strip():
+        raise HTTPException(status_code=400, detail="Refinement prompt cannot be empty")
+
+    async with borrow_http_client() as client:
+        m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        if m_resp.status != 200:
+            raise HTTPException(status_code=m_resp.status, detail="Mission not found")
+        mission_data = await m_resp.json()
+        real_id = mission_data["id"]
+
+        # Ownership authorization check
+        is_admin = bool(creds.get("is_admin"))
+        user_id = creds.get("id")
+        mission_user_id = mission_data.get("user_id")
+        if not is_admin and mission_user_id is not None and mission_user_id != user_id:
+            raise HTTPException(status_code=403, detail="Forbidden: You are not the owner of this mission.")
+
+        # Capture history log before resetting database fields
+        history_log = mission_data.get("output_log")
+
+        new_proposed_mission = mission_data["proposed_mission"] + f"\n\n[USER REFINE DIRECTIVE]: {body.prompt}"
+
+        patch_resp = await client.patch(
+            f"{IDENTITY_SVC}/api/raven/missions/{real_id}",
+            json={
+                "proposed_mission": new_proposed_mission,
+                "status": "queued",
+                "output_log": None,
+                "result": None,
+                "completed_at": None,
+                "duration": None,
+            },
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        if patch_resp.status != 200:
+            raise HTTPException(status_code=patch_resp.status, detail="Failed to update mission for refinement")
+
+        system_prompt = ""
+        if mission_data.get("mission_type") == "admin_fix":
+            protocols = await fetch_autonomous_protocols()
+            system_prompt = f"{protocols}\n\n[ADMIN ROZ ACTIVE]\nYou are the Raven Sentinel operating in the Restricted Operating Zone. Your mission is to fix backend/frontend components. You have elevated access. Execute the following mission:\n{new_proposed_mission}"
+        else:
+            system_prompt = await _build_raven_system_prompt(new_proposed_mission)
+
+        # Fall back to default coding model if not set on the mission
+        model = mission_data.get("coding_model")
+        if not model:
+            try:
+                model = await get_coding_model()
+            except Exception:
+                model = ""
+
+        assert job_queue is not None, "Job queue not initialized"
+        await job_queue.enqueue_job("raven_admin", {
+            "query": new_proposed_mission,
+            "model": model,
+            "system": system_prompt,
+            "stream": False,
+            "creds": creds,
+            "_mission_id": real_id,
+            "workspace_id": mission_data.get("workspace_id"),
+            "history_log": history_log
+        })
+
+        return {"status": "SUCCESS", "message": f"Mission {real_id} refinement enqueued successfully.", "mission_id": real_id}
+
 @app.delete("/api/raven/missions/{id_or_slug}")
 async def delete_mission(request: Request, id_or_slug: str):
     creds = await _resolve_identity_from_request(request)

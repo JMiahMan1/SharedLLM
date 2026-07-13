@@ -181,12 +181,19 @@ def _recover_mission_id(query: str) -> int | None:
     """The gateway enqueues the Raven mission server-side but may be slow to
     return the 202 (the in-process worker saturates the event loop). Poll the
     queue for the newest mission whose prompt matches this submission.
+
+    IMPORTANT: the first ~80 chars of every language variant are identical
+    ("Raven, build a complete, fun, playable 3D SPACE SHOOTER called
+    "Starfall" in "), so the marker MUST extend past "in <Language> ..." to be
+    unique. A short prefix would match every mission and recover the wrong
+    (e.g. a stale) one, causing the wrong repo to be validated and the correct
+    language to be silently skipped.
     """
-    marker = query.strip()[:80]
+    marker = query.strip()[:220]
     best: int | None = None
     for m in _list_missions():
         proposed = (m.get("proposed_mission") or "").strip()
-        if proposed[:80] == marker or proposed.startswith(query.strip()[:40]):
+        if proposed[:220] == marker:
             mid = m.get("id")
             if isinstance(mid, int) and (best is None or mid > best):
                 best = mid
@@ -213,22 +220,29 @@ def _chat_submit(query: str, system: str | None = None) -> int:
     }
     if system:
         body["system"] = system
-    try:
-        with httpx.Client(headers=_chat_auth_headers(), timeout=60.0) as c:
-            resp = c.post(f"{GATEWAY_URL}/api/raven/missions", json=body)
-            assert resp.status_code in (200, 201, 202), (
-                f"mission submit failed ({resp.status_code}): {resp.text[:400]}"
-            )
-            data = resp.json()
-            mission = data.get("mission") or {}
-            mission_id = mission.get("id") or data.get("mission_id")
-            if mission_id is not None:
-                return int(mission_id)
-    except Exception as e:
-        print(f"[warn] mission submit error: {e}")
+    last_err: str | None = None
+    for attempt in range(3):
+        try:
+            with httpx.Client(headers=_chat_auth_headers(), timeout=60.0) as c:
+                resp = c.post(f"{GATEWAY_URL}/api/raven/missions", json=body)
+                if resp.status_code in (200, 201, 202):
+                    data = resp.json()
+                    mission = data.get("mission") or {}
+                    mission_id = mission.get("id") or data.get("mission_id")
+                    if mission_id is not None:
+                        return int(mission_id)
+                last_err = f"status {resp.status_code}: {resp.text[:200]}"
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
+        time.sleep(3 * (attempt + 1))
+    # Submit may have created the mission server-side but failed to return the
+    # id (the in-process Raven worker saturates the event loop). Recover the id
+    # by polling the queue. NOTE: recovery relies on _recover_mission_id using a
+    # language-unique marker (see that function) so it does not grab a stale
+    # mission from a previous run.
     recovered = _recover_mission_id(query)
     assert recovered is not None, (
-        "mission submit did not return a mission_id and none found in queue"
+        f"mission submit failed after 3 retries ({last_err}) and none found in queue"
     )
     return int(recovered)
 
