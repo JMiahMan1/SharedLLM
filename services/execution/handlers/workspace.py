@@ -655,18 +655,25 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # 1800s; anything higher is clamped here for safety.
         safe_timeout = min(req.timeout or 600, 1800)
 
-        # Inject GitHub auth for gh/git commands so Raven can manage repos without
-        # a pre-seeded credential store (mirrors services/execution/handlers/gh.py).
+        # Inject GitHub auth into the shell environment so Raven can manage repos
+        # and use token-aware tooling without a pre-seeded credential store. This
+        # mirrors services/execution/handlers/gh.py, but ALSO sets GITHUB_TOKEN
+        # (which PyGithub reads via os.environ['GITHUB_TOKEN']) and GIT_TOKEN, and
+        # applies to python scripts — models frequently shell out to
+        # `python3 <<'PYEOF' ... PyGithub ...` to drive git, and that path dies
+        # with KeyError('GITHUB_TOKEN') unless the env var is present.
         cmd_env = os.environ.copy()
-        if base_command in ("gh", "git"):
+        if base_command in ("gh", "git", "python", "python3"):
             gh_tok = None
             if isinstance(user_ctx, dict):
                 gh_tok = user_ctx.get("github_token")
             elif user_ctx is not None:
                 gh_tok = getattr(user_ctx, "github_token", None)
             if gh_tok:
+                cmd_env["GITHUB_TOKEN"] = gh_tok
                 cmd_env["GH_TOKEN"] = gh_tok
                 cmd_env["GH_ENTERPRISE_TOKEN"] = gh_tok
+                cmd_env["GIT_TOKEN"] = gh_tok
                 cmd_env["GH_PROMPT_DISABLED"] = "1"
                 if base_command == "git":
                     cmd_env["GIT_TERMINAL_PROMPT"] = "0"
