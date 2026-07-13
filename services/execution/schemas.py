@@ -659,11 +659,17 @@ class GitOperationRequest(BaseRequest):
     """
     user_context: UserContext
     workspace_id: str | None = Field(None, description="Workspace ID (uses default if not specified)")
-    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show"]
+    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show", "init", "remote_add", "repo_create"]
     path: str | None = Field(".", description="File path for 'add' action")
     commit_message: str | None = Field(None, description="Required for 'commit' action")
     branch: str | None = Field("microservices", description="Branch for pull/push")
     log_count: int | None = Field(10, ge=1, le=50, description="Number of commits for 'log'")
+    remote_name: str | None = Field(None, description="Remote name for 'remote_add' action")
+    repo_url: str | None = Field(None, description="Remote URL for 'remote_add' action")
+    repo_name: str | None = Field(None, description="Repository name for 'repo_create' action")
+    private: bool = Field(False, description="Create a private repo for 'repo_create' action")
+    description: str | None = Field(None, description="Description for 'repo_create' action")
+    source_path: str | None = Field(None, description="Local path to source for 'repo_create' action")
 
     model_config = ConfigDict(extra='ignore')
 

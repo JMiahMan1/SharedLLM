@@ -678,8 +678,158 @@ def detect_repetitive_action(recent: list[tuple[str, bool]], window: int = 8) ->
     return len({sig for sig, _ in last}) == 1
 
 
+def _translate_shell_to_git_op(cmd: str) -> dict | None:
+    """Intercept RAW workspace-shell git/gh commands and re-route them through the
+    credentialed, guard-railed ``GitOperationRequest`` tool.
+
+    Why: the autonomous loop's shell has NO git credentials, so a model that
+    forgets to use the git tool and instead runs ``git push`` (or ``gh repo
+    create``) in the shell can never authenticate and silently fails to publish.
+    This is the durable backstop: even a flailing model gets correct,
+    token-injected, per-workspace-scoped git behavior.
+
+    Returns a GitOperationRequest-compatible payload dict (the gateway fills in
+    ``user_context`` / ``workspace_id`` later), or ``None`` to let the command
+    run as an ordinary shell command.
+    """
+    if not isinstance(cmd, str) or not cmd.strip():
+        return None
+
+    work = re.sub(r"^\s*(sudo\s+)*", "", cmd.strip())
+    try:
+        parts = shlex.split(work)
+    except ValueError:
+        return None
+    if not parts:
+        return None
+
+    bin_name = parts[0]
+    sub = parts[1] if len(parts) > 1 else ""
+
+    # ── git subcommands ──────────────────────────────────────────────────────
+    if bin_name == "git":
+        if sub in ("status", "st", ""):
+            return {"action": "status"}
+        if sub == "diff":
+            path = parts[2] if len(parts) > 2 else "."
+            return {"action": "diff", "path": path}
+        if sub in ("add",):
+            path = " ".join(parts[2:]) if len(parts) > 2 else "."
+            return {"action": "add", "path": path}
+        if sub in ("commit", "ci"):
+            msg = _git_commit_message_from_parts(parts)
+            return {"action": "commit", "commit_message": msg or "chore: update"}
+        if sub == "push":
+            return {"action": "push", "branch": _git_branch_from_parts(parts, "push")}
+        if sub == "pull":
+            return {"action": "pull", "branch": _git_branch_from_parts(parts, "pull")}
+        if sub == "fetch":
+            return {"action": "fetch"}
+        if sub == "log":
+            return {"action": "log", "log_count": _git_log_count(parts)}
+        if sub in ("branch",):
+            name = parts[2] if len(parts) > 2 else "."
+            return {"action": "branch", "path": name}
+        if sub in ("checkout", "co"):
+            if len(parts) < 3:
+                return None
+            return {"action": "checkout", "path": parts[2]}
+        if sub == "show":
+            path = parts[2] if len(parts) > 2 else "."
+            return {"action": "show", "path": path}
+        if sub == "init":
+            return {"action": "init"}
+        if sub == "remote" and len(parts) > 2 and parts[2] == "add":
+            if len(parts) >= 5:
+                return {"action": "remote_add", "remote_name": parts[3], "repo_url": parts[4]}
+            return None
+        # Unknown git subcommand: don't mis-translate — let it run in the shell.
+        return None
+
+    # ── gh subcommands (only repo create is re-routed; the rest have no creds
+    #    in the shell and are better served by the dedicated gh/API tooling) ──
+    if bin_name == "gh" and sub == "repo" and len(parts) > 2 and parts[2] == "create":
+        repo_name = _gh_repo_create_name(parts)
+        if not repo_name:
+            return None
+        private = "--private" in parts and "--public" not in parts
+        description = _gh_flag_value(parts, "--description", "-d")
+        return {
+            "action": "repo_create",
+            "repo_name": repo_name,
+            "private": private,
+            "description": description,
+        }
+
+    return None
+
+
+def _git_commit_message_from_parts(parts: list[str]) -> str | None:
+    """Extract the message from ``git commit -m "msg"`` / ``--message "msg"``."""
+    for i, tok in enumerate(parts):
+        if tok in ("-m", "--message", "-F", "--file") and i + 1 < len(parts):
+            return parts[i + 1]
+    # Bare ``git commit <msg>`` (single token, no -m): treat remainder as message.
+    if len(parts) > 2:
+        return " ".join(parts[2:])
+    return None
+
+
+def _git_branch_from_parts(parts: list[str], verb: str) -> str:
+    """Extract the branch from ``git push/pull [options] [remote] [branch]``."""
+    # Drop leading options (-u, --set-upstream, --force, -f, --tags, etc.)
+    rest = [p for p in parts[2:] if not p.startswith("-")]
+    # Pattern: remote branch  OR  remote local:remote  OR  branch
+    if len(rest) >= 2:
+        # git push origin main  -> branch is last token (or right side of refspec)
+        last = rest[-1]
+        if ":" in last:
+            last = last.split(":")[-1]
+        return last
+    if len(rest) == 1:
+        return rest[0]
+    return "microservices"
+
+
+def _git_log_count(parts: list[str]) -> int:
+    for tok in parts:
+        m = re.match(r"-(\d+)$", tok)
+        if m:
+            return int(m.group(1))
+        m = re.match(r"--max-count=(\d+)$", tok)
+        if m:
+            return int(m.group(1))
+    return 10
+
+
+def _gh_repo_create_name(parts: list[str]) -> str | None:
+    """Extract the repo name from ``gh repo create <name> [flags]``."""
+    value_flags = {"--source", "-s", "--description", "-d", "--homepage", "-h",
+                   "--team", "-t", "--template", "--license", "-l", "--gitignore"}
+    i = 3  # skip ["repo", "create"]
+    while i < len(parts):
+        a = parts[i]
+        if a.startswith("-"):
+            if a in value_flags and i + 1 < len(parts):
+                i += 2
+                continue
+            i += 1
+            continue
+        return a
+    return None
+
+
+def _gh_flag_value(parts: list[str], *flags: str) -> str | None:
+    for i, tok in enumerate(parts):
+        if tok in flags and i + 1 < len(parts):
+            return parts[i + 1]
+    return None
+
+
 # How many identical-result shell runs in a row count as a stuck loop.
 NO_PROGRESS_WINDOW = 4
+
+
 
 
 def normalize_shell_goal(command: str) -> str:
@@ -2411,6 +2561,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             }
 
             lookup_action = action.lower().strip() if action else ""
+
+            # INTERCEPTION: route raw workspace-shell git/gh commands through the
+            # credentialed, guard-railed git tool. The shell has no git creds, so
+            # a model that forgets to use GitOperationRequest (and runs
+            # `git push` / `gh repo create` directly) would never authenticate.
+            # This is the durable backstop that makes "commit and push" reliable
+            # regardless of how the model phrased the request.
+            if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
+                _shell_cmd = payload.get("command") or ""
+                _routed = _translate_shell_to_git_op(_shell_cmd)
+                if _routed is not None:
+                    log.info(f"[AgentLoop] Intercepted shell git/gh command -> git tool: {_shell_cmd!r}")
+                    lookup_action = "gitoperationrequest"
+                    payload = _routed
 
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]

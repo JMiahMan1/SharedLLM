@@ -11,6 +11,9 @@ Supported actions:
     pull     — git pull origin <branch>
     push     — git push origin <branch>  [admin only]
     log      — git log --oneline -N
+    init     — git init
+    remote_add — git remote add <name> <url>  (token-aware for https)
+    repo_create — create a GitHub repo via API (token-aware) + wire origin remote
 
 Security:
     - push requires is_admin=True in UserContext.
@@ -296,6 +299,71 @@ async def _get_remote_url(remote_name: str = "origin", cwd: str = WORKSPACE_ROOT
     return r["stdout"].strip()
 
 
+async def _create_github_repo(
+    token: str, repo_name: str, private: bool = False, description: str | None = None
+) -> str | None:
+    """Create a GitHub repository via the REST API using a personal access
+    token. Returns the HTTPS clone URL on success, or None on failure.
+    """
+    import aiohttp
+
+    api_url = "https://api.github.com/user/repos"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    payload = {"name": repo_name, "private": bool(private)}
+    if description:
+        payload["description"] = description
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30.0)) as client:
+            async with client.post(api_url, json=payload, headers=headers) as resp:
+                if resp.status in (201, 200):
+                    data = await resp.json()
+                    return (data.get("clone_url") or data.get("ssh_url") or "").replace(".git", "")
+                body = await resp.text()
+                # 422 often means the repo already exists; try to resolve it.
+                if resp.status == 422:
+                    log.warning(f"[Git] repo_create 422 for {repo_name}: {body[:200]}")
+                    existing = await _resolve_github_repo_url(token, repo_name)
+                    if existing:
+                        return existing
+                log.warning(f"[Git] repo_create failed ({resp.status}): {body[:200]}")
+                return None
+    except Exception as e:
+        log.error(f"[Git] repo_create exception: {e}")
+        return None
+
+
+async def _resolve_github_repo_url(token: str, repo_name: str) -> str | None:
+    """Best-effort: resolve the clone URL of an existing repo owned by the token."""
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
+            async with client.get(
+                "https://api.github.com/user",
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                login = (await resp.json()).get("login")
+            if not login:
+                return None
+            async with client.get(
+                f"https://api.github.com/repos/{login}/{repo_name}",
+                headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+            ) as resp2:
+                if resp2.status != 200:
+                    return None
+                data = await resp2.json()
+                return (data.get("clone_url") or "").replace(".git", "")
+    except Exception as e:
+        log.warning(f"[Git] _resolve_github_repo_url failed: {e}")
+        return None
+
+
 def _ok(action: str, detail: dict) -> GitExecutionResult:
     return GitExecutionResult(status="SUCCESS", message=f"git {action} completed.", service="git", detail=detail)
 
@@ -530,6 +598,74 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         if r["returncode"] != 0:
             return _fail("log", r)
         return _ok("log", {"commits": r["stdout"].splitlines(), **r})
+
+    elif action == "init":
+        # Initialize a git repository in the workspace (idempotent for existing repos).
+        r = await _run_git(["init"], cwd=workspace_path)
+        if r["returncode"] != 0:
+            return _fail("init", r)
+        return _ok("init", r)
+
+    elif action == "remote_add":
+        remote_name = (getattr(req, "remote_name", None) or "origin").strip()
+        remote_url_raw = getattr(req, "repo_url", None) or getattr(req, "remote_url", None)
+        if not remote_url_raw:
+            return _fail("remote_add", {"error": "repo_url is required for 'remote_add' action."})
+        # Token-inject HTTPS remotes so the first push authenticates.
+        remote_url = remote_url_raw
+        token = getattr(user_context, "github_token", None) or getattr(user_context, "git_token", None)
+        from urllib.parse import urlparse
+        if token and remote_url.startswith("https://"):
+            parsed = urlparse(remote_url)
+            remote_url = f"https://{token}@{parsed.hostname}{parsed.path}"
+        # Replace existing remote if present (idempotent).
+        await _run_git(["remote", "remove", remote_name], cwd=workspace_path)
+        r = await _run_git(["remote", "add", remote_name, remote_url], cwd=workspace_path)
+        if r["returncode"] != 0:
+            return _fail("remote_add", r)
+        return _ok("remote_add", {"remote_name": remote_name, "repo_url": remote_url_raw, **r})
+
+    elif action == "repo_create":
+        # Create a GitHub repository via the REST API using the user's token
+        # (no gh CLI / shell credentials needed), then wire it as the origin
+        # remote so the subsequent git push (which injects the token) succeeds.
+        token = getattr(user_context, "github_token", None) or getattr(user_context, "git_token", None)
+        if not token:
+            return GitExecutionResult(
+                status="FAILURE",
+                message="repo_create requires a GitHub token in the user context.",
+                service="git",
+                detail={"error": "auth_required"},
+            )
+        repo_name = (getattr(req, "repo_name", None) or "").strip()
+        if not repo_name:
+            return _fail("repo_create", {"error": "repo_name is required for 'repo_create' action."})
+        created_url = await _create_github_repo(
+            token,
+            repo_name,
+            private=bool(getattr(req, "private", False)),
+            description=getattr(req, "description", None),
+        )
+        if not created_url:
+            return GitExecutionResult(
+                status="FAILURE",
+                message=f"Failed to create GitHub repository '{repo_name}'.",
+                service="git",
+                detail={"error": "repo_create_failed"},
+            )
+        # Token-inject the clone URL for the origin remote.
+        from urllib.parse import urlparse
+        parsed = urlparse(created_url)
+        auth_url = f"https://{token}@{parsed.hostname}{parsed.path}"
+        await _run_git(["remote", "remove", "origin"], cwd=workspace_path)
+        r = await _run_git(["remote", "add", "origin", auth_url], cwd=workspace_path)
+        if r["returncode"] != 0:
+            return _fail("repo_create", r)
+        # Bind repo_url to the workspace so the per-workspace push-scope
+        # guardrail permits the follow-up push.
+        if workspace_id:
+            await _bind_workspace_repo(workspace_id, created_url)
+        return _ok("repo_create", {"repo_name": repo_name, "repo_url": created_url, **r})
 
     else:
         return GitExecutionResult(status="FAILURE", message=f"Unknown git action '{action}'. Valid: status, diff, add, commit, pull, push, log.", service="git", detail={})
