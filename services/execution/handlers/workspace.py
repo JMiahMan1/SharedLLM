@@ -60,6 +60,26 @@ SYSTEM_BLOCKLIST_COMMANDS = {
     "fdisk", "parted", "losetup",
 }
 
+
+async def _bind_workspace_repo(workspace_id: str | None, repo_url: str | None) -> None:
+    """Best-effort: bind a repo_url to an (initially unbound) workspace after a
+    successful first push, so the per-workspace push-scope guardrail becomes
+    effective for subsequent pushes. Supports the create-repo-then-push flow
+    where the workspace has no designated repo until the first push succeeds.
+    """
+    if not workspace_id or not repo_url:
+        return
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+            await client.patch(
+                f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces/{workspace_id}",
+                json={"repo_url": repo_url},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+    except Exception as e:  # pragma: no cover - best effort
+        log.debug(f"[bind repo] failed for {workspace_id}: {e}")
+
 def _ok(message: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="SUCCESS", message=message, service="workspace", detail=detail)
 
@@ -598,8 +618,11 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                     )
 
         log.info(f"Executing shell command: {final_cmd} in {abs_cwd}")
-        # Enforce a max timeout of 300s
-        safe_timeout = min(req.timeout, 300)
+        # Enforce a max timeout. Builds (cargo build, npm install, go build),
+        # CI-equivalent runs, and dependency fetches routinely exceed 300s, so the
+        # ceiling is raised to 1800s. The schema also permits requesting up to
+        # 1800s; anything higher is clamped here for safety.
+        safe_timeout = min(req.timeout or 600, 1800)
 
         # Inject GitHub auth for gh/git commands so Raven can manage repos without
         # a pre-seeded credential store (mirrors services/execution/handlers/gh.py).
@@ -647,6 +670,14 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         }
 
         if rc == 0:
+            # After a successful push from a workspace that had no designated
+            # repo, bind the pushed URL so the per-workspace push-scope guardrail
+            # becomes effective for future pushes (create-then-push flow).
+            if base_command == "git" and len(parsed) > 1 and parsed[1] == "push" and _target_url:
+                try:
+                    await _bind_workspace_repo(workspace_id, _target_url)
+                except Exception:
+                    log.debug("best-effort repo_url bind after push failed", exc_info=True)
             cmd_prefix = req.command[:50] if req.command else "<unknown>"
             return _ok(f"Command executed successfully: {cmd_prefix}...", detail)
         else:
