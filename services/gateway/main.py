@@ -4057,8 +4057,9 @@ async def read_workspace_file_raw_proxy(request: Request):
         json=body,
         headers={"X-Internal-Secret": INTERNAL_SECRET},
     )
+    body_bytes = await resp.read()
     return Response(
-        content=resp.content,
+        content=body_bytes,
         status_code=resp.status,
         media_type=resp.headers.get("content-type", "application/octet-stream"),
     )
