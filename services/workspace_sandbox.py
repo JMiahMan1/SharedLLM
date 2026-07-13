@@ -81,12 +81,12 @@ def _detect_host_root() -> str:
             continue
         # mountinfo: ... <options> - <fstype> <source> <super-options>
         source = _unescape_mountinfo(cols[sep + 2])
-        if mountpoint == SANDBOX_MOUNT_ROOT or mountpoint.startswith(
-            SANDBOX_MOUNT_ROOT + "/"
-        ):
-            if len(mountpoint) > len(best_mountpoint):
-                best_mountpoint = mountpoint
-                best_source = source
+        if (
+            mountpoint == SANDBOX_MOUNT_ROOT
+            or mountpoint.startswith(SANDBOX_MOUNT_ROOT + "/")
+        ) and len(mountpoint) > len(best_mountpoint):
+            best_mountpoint = mountpoint
+            best_source = source
     return best_source
 
 
@@ -311,10 +311,10 @@ def _exec_blocking(
         try:
             client.images.get(img)
         except NotFound:
-            raise RuntimeError("sandbox-image-not-present")
+            raise RuntimeError("sandbox-image-not-present") from None
         c = ensure_workspace_container(workspace_id, host_path, image=image, uid=uid, gid=gid)
         if c is None:
-            raise RuntimeError("docker-unavailable")
+            raise RuntimeError("docker-unavailable") from None
 
     full_env = dict(os.environ)
     if env:
@@ -371,7 +371,7 @@ async def _host_exec(
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             rc = proc.returncode if proc.returncode is not None else 0
             return {"args": cmd, "returncode": rc, "stdout": stdout.decode(errors="replace"), "stderr": stderr.decode(errors="replace")}
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 proc.kill()
                 await proc.wait()
