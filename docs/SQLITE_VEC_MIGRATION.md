@@ -196,7 +196,37 @@ if __name__ == "__main__":
 
 ---
 
-## 5. Verification Plan
+## 6. Telemetry Semantic Summary Integration
+
+High-frequency, raw time-series telemetry data (e.g. power logs, battery volts) should remain in the **Identity Service** for rendering graphs. To allow Jarvis to search and recall telemetry events, we will ingest **processed semantic summaries** into the RAG database under a new collection.
+
+### A. Integration Roadmap
+1. **Define a New Collection:** Register `"telemetry_alerts"` in the active RAG collections list.
+2. **Generate Natural Language Alerts:**
+   When the telemetry worker in the execution or identity service detects a threshold crossing (e.g., connectivity loss, high power draw, fast battery drain), it compiles the event into a text summary:
+   * **Alert Content:** `"Telemetry Alert: robot_vacuum battery dropped 90% in 5 minutes at 2026-07-12T19:00:00Z."`
+   * **Metadata:** `{"entity_id": "vacuum.robot", "alert_type": "battery_drain", "severity": "high", "user_id": "admin"}`
+3. **Ingest to RAG:**
+   Call `/rag/ingest` with the generated alert text and metadata.
+
+### B. SQLite Relational Search Example
+Because SQLite is relational, we can easily join the alert search results with our device registry or run target lookups:
+```sql
+SELECT 
+    i.content, 
+    i.indexed_at,
+    v.distance
+FROM vec_rag_items v
+JOIN rag_items i ON v.id = i.id
+WHERE i.collection_name = 'telemetry_alerts'
+  AND (i.user_id = :user_id OR i.user_id = 'default')
+ORDER BY vec_distance_cosine(v.embedding, :query_vector)
+LIMIT :k;
+```
+
+---
+
+## 7. Verification Plan
 
 1. **Verify Extension Loading:**
    Verify `sqlite-vec` can be successfully loaded in the Python context of the `sharedllm_rag` container.
