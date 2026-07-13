@@ -115,6 +115,13 @@ services:
     container_name: sharedllm_execution
     restart: always
     network_mode: host
+    # Run as the same uid/gid as workspace_runtime so all git/shell operations
+    # in /workspaces produce files owned by uid 1000 (not root). The IDE commits
+    # via workspace_runtime (uid 1000), so a root-owned .git created by the
+    # execution service would otherwise cause "Permission denied" on index.lock.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    group_add:
+      - "${DOCKER_GID:-999}"
     env_file:
       - .env
     environment:
