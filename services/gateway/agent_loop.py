@@ -3167,6 +3167,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                         "message": lint_feedback,
                                         "file_path": file_path,
                                     }
+                                else:
+                                    # A clean post-write lint satisfies the
+                                    # static-check verification requirement for this
+                                    # file, so it no longer counts as "unverified"
+                                    # at the finish gate.
+                                    _verified_files.add(file_path)
 
                     # Checkpoint state after successful tool execution
                     await _save_checkpoint(iter_num)
