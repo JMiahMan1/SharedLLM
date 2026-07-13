@@ -9,7 +9,7 @@ interface BiometricAuthModalProps {
   onSuccess: () => void;
   title?: string;
   reason?: string;
-  fallbackPinSubmit?: (pin: string) => Promise<boolean>;
+  fallbackPinSubmit?: (pin: string) => Promise<boolean | string>;
 }
 
 const BiometricAuthModal = ({
@@ -60,16 +60,16 @@ const BiometricAuthModal = ({
     }
 
     setAuthenticating(true);
-    const success = await fallbackPinSubmit(pin);
+    const result = await fallbackPinSubmit(pin);
     setAuthenticating(false);
 
-    if (success) {
+    if (result === true) {
       trigger('success');
       onSuccess();
       onClose();
     } else {
       trigger('error');
-      setError('Invalid PIN');
+      setError(typeof result === 'string' ? result : 'Invalid PIN');
       setPin('');
     }
   };

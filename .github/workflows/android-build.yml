@@ -2,11 +2,11 @@ name: Android APK Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, microservices ]
     paths:
       - 'services/ui/**'
   pull_request:
-    branches: [ main ]
+    branches: [ main, microservices ]
     paths:
       - 'services/ui/**'
   workflow_dispatch:
