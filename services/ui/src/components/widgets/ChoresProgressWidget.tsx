@@ -1,25 +1,119 @@
 import { useMemo, useState } from 'react';
+import { Check, Star, Sun, Moon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useWidgetData } from '../../hooks/useWidgetData';
+import { useDarkModeSync } from '../../hooks/useDarkModeSync';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
 import type { ChoreItem, IWidgetProps } from '../../types/widget';
 import toast from 'react-hot-toast';
 
+type ChoresPayload = {
+  chores: ChoreItem[];
+  assignee_meta?: Record<string, string>;
+};
+
+/* OpenSkyLight "paper planner" palette — warm light (matches the screenshot)
+   and a sunset dark. Driven by the app's light/dark selection. */
+const OSK_LIGHT = `
+  --osk-paper:#f5efe3;
+  --osk-paper-deep:#ece4d2;
+  --osk-card:#fffdf8;
+  --osk-ink:#34302a;
+  --osk-ink-soft:#756d5f;
+  --osk-ink-faint:#a89f8d;
+  --osk-line:#e3dac6;
+  --osk-ember:#d95b3a;
+  --osk-ember-deep:#bf4526;
+  --osk-ember-soft:#f8ddd2;
+  --osk-sun:#ffd9a0;
+  --osk-sun-soft:#fdf0da;
+  --osk-shadow:0 1px 3px rgba(72,60,38,0.07),0 10px 28px -10px rgba(72,60,38,0.16);
+`;
+const OSK_DARK = `
+  --osk-paper:#17130e;
+  --osk-paper-deep:#241e16;
+  --osk-card:#262019;
+  --osk-ink:#ece4d4;
+  --osk-ink-soft:#b5a892;
+  --osk-ink-faint:#7e7260;
+  --osk-line:#3b332a;
+  --osk-ember:#d95b3a;
+  --osk-ember-deep:#f08a68;
+  --osk-ember-soft:#4a2c20;
+  --osk-sun:#6b5326;
+  --osk-sun-soft:#332a1a;
+  --osk-shadow:0 1px 3px rgba(0,0,0,0.3),0 10px 28px -10px rgba(0,0,0,0.5);
+`;
+
+/** Readable text color (ink or paper) for a given background hex. */
+function textOn(hex?: string): string {
+  if (!hex) return '#34302a';
+  const h = hex.replace('#', '');
+  if (h.length < 6) return '#34302a';
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#34302a' : '#fffdf8';
+}
+
+/** Deterministic fallback color when Skylight provides no category color. */
+function colorForName(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 62%, 55%)`;
+}
+
+function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase() ?? '')
+    .join('');
+}
+
+/** Heuristic routine grouping from the chore's start time (mirrors OpenSkyLight). */
+function routineOf(chore: ChoreItem): 'morning' | 'evening' | 'anytime' {
+  const t = chore.start_time;
+  if (!t) return 'anytime';
+  const h = parseInt(t.split(':')[0], 10);
+  if (Number.isNaN(h)) return 'anytime';
+  if (h < 12) return 'morning';
+  if (h >= 17) return 'evening';
+  return 'anytime';
+}
+
+function StarBadge({ count }: { count: number }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-sm font-extrabold"
+      style={{ background: 'var(--osk-sun-soft)', color: 'var(--osk-ember-deep)' }}
+    >
+      <Star size={14} aria-hidden />
+      {count}
+    </span>
+  );
+}
+
 const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
   const { user } = useAuth();
+  const { isDark } = useDarkModeSync();
   const [completedOverrides, setCompletedOverrides] = useState<Record<string, boolean>>({});
   const [completingIds, setCompletingIds] = useState<Set<string>>(new Set());
 
-  const fetchChores = async () => {
+  const fetchChores = async (): Promise<ChoresPayload> => {
     if (!user?.username) {
       throw new Error('No user logged in');
     }
 
-    const resp = await api.getSkylightChores(user.username, 'today') as {
+    const resp = (await api.getSkylightChores(user.username, 'today')) as {
       status: string;
       message?: string;
       chores?: ChoreItem[];
+      assignee_meta?: Record<string, string>;
     };
 
     if (resp.status !== 'SUCCESS') {
@@ -27,44 +121,40 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
     }
 
     // Each chore carries its assignee (the Skylight `category` label, i.e. the
-    // family member's name). The gateway scopes the result to the logged-in
-    // user (admins get the whole family frame), and any member can toggle.
-    return resp.chores || [];
+    // family member's name) and that category's color. The gateway scopes the
+    // result to the logged-in user (admins get the whole family frame), and any
+    // member can toggle.
+    return { chores: resp.chores || [], assignee_meta: resp.assignee_meta || {} };
   };
 
-  const { data: chores = [], isLoading, error, refetch } = useWidgetData<ChoreItem[]>(
-    ['skylight-chores', user?.username || ''],
-    fetchChores,
-    300000 // 5 minutes
-  );
+  const { data = { chores: [], assignee_meta: {} }, isLoading, error, refetch } =
+    useWidgetData<ChoresPayload>(['skylight-chores', user?.username || ''], fetchChores, 300000);
 
-
+  const assigneeMeta = data.assignee_meta ?? {};
 
   const localChores = useMemo(() => {
+    const chores = data.chores ?? [];
     return chores.map((chore) => {
       if (chore.id in completedOverrides) {
         return { ...chore, completed: completedOverrides[chore.id] };
       }
       return chore;
     });
-  }, [chores, completedOverrides]);
+  }, [data.chores, completedOverrides]);
 
-  // Group chores by their assignee (Skylight `category` label). When there is
-  // only a single assignee (or none), we render a flat list instead.
+  // Group chores by their assignee (Skylight `category` label).
   const assigneeGroups = useMemo(() => {
     const groups: Record<string, ChoreItem[]> = {};
     for (const chore of localChores) {
       const key =
-        chore.assignees && chore.assignees.length > 0
-          ? chore.assignees.join(', ')
-          : 'Unassigned';
+        chore.assignees && chore.assignees.length > 0 ? chore.assignees.join(', ') : 'Unassigned';
       if (!groups[key]) groups[key] = [];
       groups[key].push(chore);
     }
     return groups;
   }, [localChores]);
 
-  const shouldGroupByUser = Object.keys(assigneeGroups).length > 1;
+  const colorForAssignee = (name: string) => assigneeMeta[name] || colorForName(name);
 
   const handleToggleComplete = async (chore: ChoreItem) => {
     if (!user?.username) return;
@@ -108,7 +198,124 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
   const progress = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
   const allCompleted = totalCount > 0 && completedCount === totalCount;
 
-  const renderChoreButton = (chore: ChoreItem) => (
+  const renderExpandedChore = (chore: ChoreItem, color: string) => (
+    <button
+      key={chore.id}
+      type="button"
+      onClick={() => handleToggleComplete(chore)}
+      disabled={completingIds.has(chore.id)}
+      className="flex w-full items-center gap-3 rounded-2xl p-3 text-left shadow-[var(--osk-shadow)] transition disabled:opacity-60"
+      style={{ background: 'var(--osk-card)' }}
+    >
+      <span
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-[3px] transition-colors"
+        style={{ borderColor: color, backgroundColor: chore.completed ? color : 'transparent' }}
+      >
+        {chore.completed && <Check size={24} style={{ color: textOn(color) }} />}
+      </span>
+      <span
+        className={`min-w-0 flex-1 truncate text-lg font-bold ${chore.completed ? 'line-through' : ''}`}
+        style={{ color: chore.completed ? 'var(--osk-ink-faint)' : 'var(--osk-ink)' }}
+      >
+        {chore.emoji_icon ? `${chore.emoji_icon} ` : ''}
+        {chore.title}
+      </span>
+      {chore.reward ? <StarBadge count={chore.reward} /> : null}
+    </button>
+  );
+
+  const renderPersonColumn = (name: string, groupChores: ChoreItem[], color: string) => {
+    const doneCount = groupChores.filter((c) => c.completed).length;
+    const earned = groupChores
+      .filter((c) => c.completed)
+      .reduce((sum, c) => sum + (c.reward || 0), 0);
+    const groups = [
+      { key: 'morning', label: 'Morning', Icon: Sun, items: groupChores.filter((c) => routineOf(c) === 'morning') },
+      { key: 'anytime', label: null, Icon: null, items: groupChores.filter((c) => routineOf(c) === 'anytime') },
+      { key: 'evening', label: 'Evening', Icon: Moon, items: groupChores.filter((c) => routineOf(c) === 'evening') },
+    ].filter((g) => g.items.length > 0);
+
+    return (
+      <div
+        key={name}
+        className="flex w-full shrink-0 flex-col rounded-[1.25rem] p-3 md:w-80"
+        style={{ background: 'var(--osk-paper-deep)' }}
+      >
+        <div className="mb-3 flex items-center gap-3">
+          <span
+            className="flex h-12 w-12 items-center justify-center rounded-full text-base font-extrabold"
+            style={{ background: color, color: textOn(color) }}
+          >
+            {initials(name)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-xl font-bold" style={{ color: 'var(--osk-ink)' }}>
+              {name}
+            </div>
+            <div className="text-sm font-bold" style={{ color: 'var(--osk-ink-faint)' }}>
+              {doneCount}/{groupChores.length} done
+            </div>
+          </div>
+          <StarBadge count={earned} />
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+          {groups.map((g) => (
+            <div key={g.key} className="flex flex-col gap-2">
+              {g.label && (
+                <div
+                  className="mt-1 flex items-center gap-1.5 px-1 text-sm font-extrabold uppercase tracking-wide"
+                  style={{ color: 'var(--osk-ink-faint)' }}
+                >
+                  {g.Icon ? <g.Icon size={15} /> : null}
+                  {g.label}
+                </div>
+              )}
+              {g.items.map((c) => renderExpandedChore(c, color))}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderExpanded = () => {
+    if (totalCount === 0) {
+      return (
+        <div className="osk-chores flex h-full flex-col items-center justify-center text-center">
+          <p className="text-lg font-semibold" style={{ color: 'var(--osk-ink)' }}>
+            No chores assigned
+          </p>
+          <p className="text-sm" style={{ color: 'var(--osk-ink-faint)' }}>
+            All clear for today!
+          </p>
+        </div>
+      );
+    }
+
+    const names = Object.keys(assigneeGroups);
+    return (
+      <>
+        <style>{`.osk-overlay{${isDark ? OSK_DARK : OSK_LIGHT}--wc-ink:var(--osk-ink);--wc-ink-faint:var(--osk-ink-faint);--wc-ink-strong:var(--osk-ink);--wc-border:var(--osk-line);--wc-hover:var(--osk-paper-deep);background:var(--osk-paper)!important;}`}</style>
+        <div className="osk-chores flex h-full flex-col">
+          <div className="mb-4 flex shrink-0 items-end gap-4">
+            <div className="flex-1">
+              <div className="text-3xl font-bold" style={{ color: 'var(--osk-ink)' }}>
+                Today&apos;s Chores
+              </div>
+            </div>
+            <div className="text-sm font-bold" style={{ color: 'var(--osk-ink-faint)' }}>
+              {completedCount}/{totalCount} done
+            </div>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pb-2 md:flex-row md:items-start md:gap-4 md:overflow-x-auto">
+            {names.map((name) => renderPersonColumn(name, assigneeGroups[name], colorForAssignee(name)))}
+          </div>
+        </div>
+      </>
+    );
+  };
+
+  const renderCompactChore = (chore: ChoreItem) => (
     <button
       key={chore.id}
       onClick={() => handleToggleComplete(chore)}
@@ -132,11 +339,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       </div>
 
       <div className="flex-1 text-left min-w-0">
-        <p
-          className={`text-sm truncate ${
-            chore.completed ? 'text-slate-400 line-through' : 'text-white'
-          }`}
-        >
+        <p className={`text-sm truncate ${chore.completed ? 'text-slate-400 line-through' : 'text-white'}`}>
           {chore.emoji_icon ? `${chore.emoji_icon} ` : ''}
           {chore.title}
         </p>
@@ -149,7 +352,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
     </button>
   );
 
-  const renderContent = (expanded: boolean) =>
+  const renderCompact = () =>
     totalCount === 0 ? (
       <div className="flex flex-col items-center justify-center text-center h-full">
         <p className="text-sm text-slate-400">No chores assigned</p>
@@ -193,40 +396,9 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
           </div>
         )}
 
-        {/* Compact mode caps the list and scrolls internally; expanded (full-screen)
-             mode drops the cap so every chore is visible and the overlay scrolls.
-             When chores span multiple assignees, the expanded view groups them by
-             user so each person's progress is shown; a single assignee falls back
-             to the flat list. */}
-        {expanded && shouldGroupByUser ? (
-          <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-4">
-            {Object.entries(assigneeGroups).map(([label, groupChores]) => {
-              const done = groupChores.filter((c) => c.completed).length;
-              const pct = groupChores.length
-                ? Math.round((done / groupChores.length) * 100)
-                : 0;
-              return (
-                <div key={label}>
-                  <div className="flex items-center justify-between mb-2 px-1">
-                    <span className="text-sm font-semibold text-slate-200">{label}</span>
-                    <span className="text-xs text-slate-400">
-                      {done}/{groupChores.length} · {pct}%
-                    </span>
-                  </div>
-                  <div className="space-y-2 pr-1">{groupChores.map(renderChoreButton)}</div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div
-            className={`space-y-2 pr-1 flex-1 min-h-0 ${
-              expanded ? '' : 'max-h-48 overflow-y-auto'
-            }`}
-          >
-            {localChores.map(renderChoreButton)}
-          </div>
-        )}
+        <div className="space-y-2 pr-1 flex-1 min-h-0 max-h-48 overflow-y-auto">
+          {localChores.map(renderCompactChore)}
+        </div>
       </div>
     );
 
@@ -239,14 +411,15 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
       settingsButton={settingsButton}
       isExpandable={true}
       icon="🧹"
+      expandedClassName="osk-overlay"
       actions={
-        <span className="text-xs text-slate-400">
+        <span className="text-xs" style={{ color: 'var(--wc-ink-faint, #94a3b8)' }}>
           {completedCount}/{totalCount} done · {Math.round(progress)}%
         </span>
       }
-      expandedChildren={renderContent(true)}
+      expandedChildren={renderExpanded()}
     >
-      {renderContent(false)}
+      {renderCompact()}
     </WidgetCard>
   );
 };

@@ -30,11 +30,11 @@ def test_skylight_chores_missing_auth():
     assert "Skylight not configured" in data["message"]
 
 
-def _category_included(label):
+def _category_included(label, color="#ffcc00"):
     return {
         "id": f"cat-{label}",
         "type": "category",
-        "attributes": {"id": 0, "label": label, "linked_to_profile": True},
+        "attributes": {"id": 0, "label": label, "linked_to_profile": True, "color": color},
     }
 
 
@@ -330,7 +330,10 @@ def test_skylight_chores_user_filter():
         _raw_chore("1", "Clean Room", "pending", today, assignee="Jeremiah"),
         _raw_chore("2", "Do Dishes", "pending", today, assignee="Noah"),
     ]
-    included = [_category_included("Jeremiah"), _category_included("Noah")]
+    included = [
+        _category_included("Jeremiah", "#ff0000"),
+        _category_included("Noah", "#00ff00"),
+    ]
 
     async def mock_get_session(*args, **kwargs):
         return _mock_session()
@@ -352,6 +355,7 @@ def test_skylight_chores_user_filter():
             assert len(data["chores"]) == 1
             assert data["chores"][0]["id"] == "1"
             assert data["chores"][0]["assignees"] == ["Jeremiah"]
+            assert data["assignee_meta"] == {"Jeremiah": "#ff0000"}
 
             # No user (admin) sees every chore in the frame.
             resp = client.get(
@@ -363,6 +367,7 @@ def test_skylight_chores_user_filter():
             data = resp.json()
             assert data["status"] == "SUCCESS"
             assert len(data["chores"]) == 2
+            assert data["assignee_meta"] == {"Jeremiah": "#ff0000", "Noah": "#00ff00"}
 
 
 def test_skylight_calendar_events():

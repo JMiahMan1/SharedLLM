@@ -147,6 +147,18 @@ body {
     pointer-events: none;
   }
 
+  /* Expanded-overlay close button — themeable via --wc-* vars set by the
+     widget (defaults keep the existing dark look). */
+  .wc-overlay-close {
+    color: var(--wc-ink, #cbd5e1);
+    border-color: var(--wc-border, rgba(255, 255, 255, 0.1));
+    background: transparent;
+  }
+  .wc-overlay-close:hover {
+    color: var(--wc-ink-strong, #ffffff);
+    background: var(--wc-hover, rgba(255, 255, 255, 0.06));
+  }
+
   /* Sidebar */
   .glass-sidebar {
     background: rgba(3, 7, 17, 0.60);

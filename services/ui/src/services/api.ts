@@ -1186,6 +1186,7 @@ export const api = {
       start_time?: string | null;
       emoji_icon?: string | null;
     }>;
+    assignee_meta?: Record<string, string>;
   }> {
     const params = new URLSearchParams();
     if (username) params.set('user', username);

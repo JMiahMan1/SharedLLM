@@ -71,6 +71,8 @@ interface WidgetCardProps {
   children: ReactNode;
   expandedChildren?: ReactNode;
   accentColor?: string;
+  /** Overrides the expanded full-screen overlay background (e.g. for a light theme). */
+  expandedClassName?: string;
 }
 
 export const WidgetCard: React.FC<WidgetCardProps> = ({
@@ -85,6 +87,7 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
   children,
   expandedChildren,
   accentColor,
+  expandedClassName,
 }) => {
   const [isExpanded, setIsExpanded] = useState(false);
   const [resetKey, setResetKey] = useState(0);
@@ -183,7 +186,7 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
 
   if (isExpanded) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/98 backdrop-blur-xl p-4 md:p-8 animate-fade-up">
+      <div className={`fixed inset-0 z-50 flex flex-col p-4 md:p-8 animate-fade-up ${expandedClassName ?? 'bg-slate-950/98 backdrop-blur-xl'}`}>
         {/* Close strip */}
         <div className="flex items-center justify-between mb-6 max-w-7xl mx-auto w-full shrink-0">
           <div className="flex items-center gap-3">
@@ -195,14 +198,14 @@ export const WidgetCard: React.FC<WidgetCardProps> = ({
                 {icon}
               </span>
             )}
-            <h2 className="text-xl font-bold text-white">{title}</h2>
+            <h2 className="text-xl font-bold" style={{ color: 'var(--wc-ink, #ffffff)' }}>{title}</h2>
           </div>
 
           <div className="flex items-center gap-2">
             {actions}
             <button
               onClick={() => setIsExpanded(false)}
-              className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 border border-white/10 transition-colors"
+              className="wc-overlay-close p-2 rounded-xl border transition-colors"
               aria-label="Collapse widget"
             >
               <Minimize2 size={16} />
