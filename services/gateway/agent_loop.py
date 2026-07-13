@@ -1246,7 +1246,13 @@ async def _shell_out(workspace_id: str, uc: dict, command: str) -> str | None:
             )
             if res.status != 200:
                 return None
-            out = (await res.json()).get("message", "") or ""
+            # The shell result's actual command output lives in `detail.stdout`,
+            # NOT in `message` (which is just a status string like
+            # "Command executed successfully: ..."). Reading `message` would
+            # wire garbage into repo_url and break the workspace<->repo binding.
+            data = await res.json()
+            detail = data.get("detail") or {}
+            out = detail.get("stdout", "") or ""
             return "\n".join(ln.strip() for ln in out.splitlines() if ln.strip())
     except Exception:
         return None
