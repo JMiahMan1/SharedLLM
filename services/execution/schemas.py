@@ -518,7 +518,7 @@ class WorkspaceShellRequest(BaseRequest):
     command: str | None = Field(None, description="The shell command to execute")
     commands: list[str] | None = Field(None, description="A list of shell commands to execute (joined with &&)")
     cwd: str | None = Field(".", description="Working directory relative to root")
-    timeout: int = Field(60, ge=1, le=300, description="Command timeout in seconds")
+    timeout: int = Field(600, ge=1, le=1800, description="Command timeout in seconds (builds like cargo build / npm install / go build may need several minutes)")
 
 class WorkspaceSearchRequest(BaseRequest):
     """

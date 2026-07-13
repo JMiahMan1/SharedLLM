@@ -66,9 +66,14 @@ def push_allowed(workspace_repo_url: str | None, target_url: str | None) -> tupl
     """Return (allowed, reason).
 
     Allowed iff the target remote URL matches the workspace's designated repo.
-    If the workspace has no designated repo, pushes are refused — a workspace
-    must be bound to a repo (via its repo_url, or a `gh repo create`) before it
-    may push.
+    If the workspace has no designated repo (e.g. a freshly created "netnew"
+    workspace that just ran `gh repo create` and has not yet bound a repo_url),
+    the push is ALLOWED — the caller binds repo_url on success so the per-workspace
+    scope guardrail becomes effective for subsequent pushes. This supports the
+    create-repo-then-push flow without a hardcoded repo allow-list. The push is
+    still gated upstream by token/identity checks (shell path requires a GitHub
+    token in the user context; the git API requires is_admin), so an unbound
+    workspace can only push to repositories its credentials can write to.
     """
     target = normalize_repo_url(target_url)
     if not target:
@@ -76,12 +81,33 @@ def push_allowed(workspace_repo_url: str | None, target_url: str | None) -> tupl
     allowed = normalize_repo_url(workspace_repo_url)
     if allowed and target == allowed:
         return True, ""
+    if not allowed:
+        # Unbound workspace: allow the push; the caller binds repo_url on success.
+        return True, ""
     return False, (
         f"Refusing to push to '{target_url}': this workspace is only permitted to "
-        f"push to its designated repository"
-        + (f" ({workspace_repo_url})." if workspace_repo_url else " (none is set).")
+        f"push to its designated repository ({workspace_repo_url})."
         + " Create or bind the intended repository first."
     )
+
+
+async def _bind_workspace_repo(workspace_id: str | None, repo_url: str | None) -> None:
+    """Best-effort: bind a repo_url to an (initially unbound) workspace after a
+    successful first push, so the per-workspace push-scope guardrail becomes
+    effective for subsequent pushes (create-repo-then-push flow).
+    """
+    if not workspace_id or not repo_url:
+        return
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+            await client.patch(
+                f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces/{workspace_id}",
+                json={"repo_url": repo_url},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+            )
+    except Exception as e:  # pragma: no cover - best effort
+        log.warning(f"Failed to bind repo_url for workspace {workspace_id}: {e}")
 
 
 async def _get_workspace_repo_url(workspace_id: str | None) -> str | None:
@@ -476,6 +502,10 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
 
         if r["returncode"] != 0:
             return _fail(action, r)
+        # Bind repo_url on the first successful push from an unbound workspace so
+        # the per-workspace push-scope guardrail becomes effective going forward.
+        if action == "push" and not ws_repo_url and remote_url:
+            await _bind_workspace_repo(workspace_id, remote_url)
         return _ok(action, {"branch": branch, **r})
 
     elif action == "fetch":
