@@ -58,13 +58,13 @@ async def test_bulk_settings_proxy_forwards_post(monkeypatch):
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def post(self, url, json=None, headers=None):
+        async def post(self, url, json=None, headers=None, **kwargs):
             captured["url"] = url
             captured["json"] = json
             captured["headers"] = headers
             return MockResponse(payload={"status": "SUCCESS"})
 
-    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
+    monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
     class FakeRequest:
         def __init__(self):
@@ -226,7 +226,7 @@ async def test_list_ollama_tags(client: TestClient, monkeypatch):
                 })
             return MockResponse({})
 
-    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda *args, **kwargs: MockAsyncClient())
+    monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
     resp = client.get("/api/tags")
     assert resp.status_code == 200
@@ -254,7 +254,7 @@ async def test_proxy_show_embed_embeddings(client: TestClient, monkeypatch):
     class MockAsyncClient:
         async def __aenter__(self): return self
         async def __aexit__(self, exc_type, exc, tb): return False
-        async def post(self, url, json=None, headers=None):
+        async def post(self, url, json=None, headers=None, **kwargs):
             if "/api/show" in url:
                 return MockResponse({"modelfile": "FROM qwen3.6-35b-a3b:q4_k_m"})
             elif "/api/embeddings" in url:
@@ -263,7 +263,7 @@ async def test_proxy_show_embed_embeddings(client: TestClient, monkeypatch):
                 return MockResponse({"embeddings": [[0.1, 0.2, 0.3]]})
             return MockResponse({})
 
-    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda *args, **kwargs: MockAsyncClient())
+    monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
     # 1. /api/show
     resp_show = client.post("/api/show", json={"name": "qwen3.6-35b-a3b:q4_k_m"})
@@ -320,7 +320,7 @@ async def test_config_models_merges_tags_and_v1_endpoints(client, monkeypatch):
                 return MockResponse(payload={"data": [{"id": "qwen3:8b"}, {"id": "phi3:mini"}]})
             return MockResponse(status_code=404, payload={})
 
-    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
+    monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
     resp = client.get("/api/config/models")
     assert resp.status_code == 200
@@ -360,7 +360,7 @@ async def test_config_models_falls_back_to_v1_when_tags_empty(client, monkeypatc
                 return MockResponse(payload={"data": [{"id": "deepseek:7b"}]})
             return MockResponse(status_code=404, payload={})
 
-    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
+    monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
     resp = client.get("/api/config/models")
     assert resp.status_code == 200
@@ -409,7 +409,7 @@ def _patch_dns_storage(monkeypatch, initial_mappings="{}"):
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def patch(self, url, json=None, headers=None):
+        async def patch(self, url, json=None, headers=None, **kwargs):
             captured["url"] = url
             captured["json"] = json
             # Mirror what Identity would persist so subsequent reads reflect it.
@@ -417,8 +417,8 @@ def _patch_dns_storage(monkeypatch, initial_mappings="{}"):
                 state["mappings"] = json["value"]
             return MockResp()
 
-    monkeypatch.setattr("services.gateway.main.aiohttp.ClientSession",
-                        lambda timeout=None: MockAsyncClient())
+    monkeypatch.setattr("services.gateway.main.get_http_client",
+                        lambda: MockAsyncClient())
     return state, captured
 
 
@@ -500,13 +500,13 @@ async def test_run_sharedllm_tool_calls_execution_service(monkeypatch):
         async def __aexit__(self, *a):
             return False
 
-        def post(self, url, json=None, headers=None):
+        def post(self, url, json=None, headers=None, **kwargs):
             captured["url"] = url
             captured["json"] = json
             captured["headers"] = headers
             return MockResp()
 
-    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
+    monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
     result = await main.run_sharedllm_tool(resolved)
     assert result["status"] == 200
@@ -540,11 +540,11 @@ async def test_run_sharedllm_tool_gets_image_models(monkeypatch):
         async def __aexit__(self, *a):
             return False
 
-        def get(self, url, headers=None):
+        def get(self, url, headers=None, **kwargs):
             captured["url"] = url
             return MockResp()
 
-    monkeypatch.setattr(main.aiohttp, "ClientSession", lambda timeout=None: MockAsyncClient())
+    monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
     result = await main.run_sharedllm_tool(resolved)
     assert result["status"] == 200

@@ -51,15 +51,21 @@ async def test_gateway_skips_llm_on_high_confidence(mocker):
     # Mock fetch_ha_entities for the fast path
     mocker.patch("services.gateway.main.fetch_ha_entities", return_value=[])
 
-    # Mock httpx.AsyncClient.post to simulate execution service response
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"status": "SUCCESS", "message": "Lights on"}
+    # Mock shared_http_client to simulate execution service response
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.text = AsyncMock(return_value='{"status": "SUCCESS", "message": "Lights on"}')
+    mock_resp.json = AsyncMock(return_value={"status": "SUCCESS", "message": "Lights on"})
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(return_value=mock_resp)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-    mocker.patch("services.gateway.main.httpx.AsyncClient", return_value=mock_client)
+    mock_client.get = AsyncMock(return_value=mock_resp)
+
+    from contextlib import asynccontextmanager
+    @asynccontextmanager
+    async def mock_shared_client():
+        yield mock_client
+
+    mocker.patch("services.gateway.main.shared_http_client", side_effect=mock_shared_client)
 
     # Mock update_history
     mocker.patch("services.gateway.main.update_history", new_callable=AsyncMock)
