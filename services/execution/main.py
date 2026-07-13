@@ -2901,6 +2901,18 @@ def _skylight_assignees(raw: dict, included_map: dict) -> list[str]:
     return [label] if label else []
 
 
+def _skylight_assignee_color(raw: dict, included_map: dict) -> str | None:
+    """Resolve the assignee category color (used to tint each member's column)."""
+    rel = raw.get("relationships", {}) or {}
+    cat = (rel.get("category") or {}).get("data")
+    if not cat or not cat.get("id"):
+        return None
+    inc = included_map.get(("category", str(cat["id"])))
+    if not inc:
+        return None
+    return (inc.get("attributes", {}) or {}).get("color") or None
+
+
 def _skylight_chore_to_item(raw: dict, included_map: dict | None = None) -> dict:
     """Flatten a raw Skylight JSON:API chore object into the flat shape the UI
     widget expects. `assignees` is derived from the chore's `category`
@@ -2972,8 +2984,8 @@ async def get_skylight_chores(
     # assignee data, so we surface every chore and let the widget render them.
     day = window_end.isoformat()
     included_map = _skylight_included_map(result)
-    chores = [
-        _skylight_chore_to_item(c, included_map)
+    pairs = [
+        (c, _skylight_chore_to_item(c, included_map))
         for c in raw_chores
         if str((c.get("attributes", {}) or {}).get("start") or "").startswith(day)
     ]
@@ -2986,16 +2998,27 @@ async def get_skylight_chores(
     if user:
         uname = str(user).strip().lower()
         if uname:
-            chores = [
-                c
-                for c in chores
+            pairs = [
+                p
+                for p in pairs
                 if any(
                     uname == a.lower() or uname in a.lower() or a.lower() in uname
-                    for a in (c.get("assignees") or [])
+                    for a in (p[1].get("assignees") or [])
                 )
             ]
 
-    return {"status": "SUCCESS", "chores": chores}
+    chores = [p[1] for p in pairs]
+
+    # Surface each returned assignee's Skylight category color so the UI can
+    # tint that member's column.
+    assignee_meta: dict = {}
+    for raw, item in pairs:
+        color = _skylight_assignee_color(raw, included_map)
+        for name in item.get("assignees") or []:
+            if color:
+                assignee_meta[name] = color
+
+    return {"status": "SUCCESS", "chores": chores, "assignee_meta": assignee_meta}
 
 
 @app.post("/api/integrations/skylight/chores/{chore_id}/complete", dependencies=[Depends(require_internal)])
