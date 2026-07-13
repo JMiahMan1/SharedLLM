@@ -91,18 +91,25 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
   const [gitLog, setGitLog] = useState<GitLogEntry[]>([]);
   const [commitMsg, setCommitMsg] = useState('');
   const [gitBusy, setGitBusy] = useState(false);
+  const [branches, setBranches] = useState<string[]>([]);
+  const [branchBusy, setBranchBusy] = useState(false);
 
-  const [toolOutput, setToolOutput] = useState('');
-  const [toolBusy, setToolBusy] = useState(false);
-
-  const [missions, setMissions] = useState<RavenMission[]>([]);
-  const [missionsLoading, setMissionsLoading] = useState(false);
-  const [refineInput, setRefineInput] = useState('');
-  const [refineBusy, setRefineBusy] = useState(false);
-  const [chatInput, setChatInput] = useState('');
-  const [chatBusy, setChatBusy] = useState(false);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Root-relative file path -> short git status letter (M/?/A/D/...). Used to
+  // badge files with uncommitted changes in the explorer file chooser.
+  const modifiedPaths = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const line of gitStatus?.porcelain ?? []) {
+      if (line.length < 4) continue;
+      const x = line[0];
+      const y = line[1];
+      let path = line.slice(3);
+      if (path.includes(' -> ')) path = path.split(' -> ')[1];
+      const letter = x !== ' ' ? x : y;
+      if (letter === ' ') continue;
+      m.set(path, letter === '?' ? '?' : letter === 'M' ? 'M' : letter === 'A' ? 'A' : letter === 'D' ? 'D' : letter === 'R' ? 'R' : letter === 'U' ? 'U' : 'M');
+    }
+    return m;
+  }, [gitStatus]);
 
   const loadDir = useCallback(
     async (path: string) => {
@@ -122,11 +129,69 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     [workspace.id],
   );
 
+  const refreshGit = useCallback(async () => {
+    if (!hasGit) return;
+    setGitBusy(true);
+    try {
+      const [st, log] = await Promise.all([
+        api.workspaceGitStatus(workspace.id),
+        api.workspaceGitLog(workspace.id, 15),
+      ]);
+      setGitStatus(st);
+      setGitLog(log?.entries ?? []);
+    } catch (e: unknown) {
+      toast.error(`Git status failed: ${apiErr(e)}`);
+    } finally {
+      setGitBusy(false);
+    }
+  }, [hasGit, workspace.id]);
+
+  const refreshBranches = useCallback(async () => {
+    if (!hasGit) return;
+    try {
+      const res = await api.workspaceGitBranches(workspace.id);
+      setBranches(res?.local ?? []);
+    } catch {
+      /* branches optional */
+    }
+  }, [hasGit, workspace.id]);
+
+  const switchBranch = useCallback(
+    async (branch: string, create = false) => {
+      if (!branch) return;
+      setBranchBusy(true);
+      try {
+        await api.workspaceGitCheckout(workspace.id, branch, create);
+        toast.success(`Switched to ${branch}`);
+        await Promise.all([loadDir('.'), refreshGit(), refreshBranches()]);
+      } catch (e: unknown) {
+        toast.error(`Checkout failed: ${apiErr(e)}`);
+      } finally {
+        setBranchBusy(false);
+      }
+    },
+    [workspace.id, loadDir, refreshGit, refreshBranches],
+  );
+
+  const [toolOutput, setToolOutput] = useState('');
+  const [toolBusy, setToolBusy] = useState(false);
+
+  const [missions, setMissions] = useState<RavenMission[]>([]);
+  const [missionsLoading, setMissionsLoading] = useState(false);
+  const [refineInput, setRefineInput] = useState('');
+  const [refineBusy, setRefineBusy] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     void (async () => {
       await loadDir('.');
+      await refreshGit();
+      await refreshBranches();
     })();
-  }, [loadDir]);
+  }, [loadDir, refreshGit, refreshBranches]);
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -370,31 +435,6 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     },
     [workspace.id, currentPath, loadDir],
   );
-
-  const refreshGit = useCallback(async () => {
-    if (!hasGit) return;
-    setGitBusy(true);
-    try {
-      const [st, log] = await Promise.all([
-        api.workspaceGitStatus(workspace.id),
-        api.workspaceGitLog(workspace.id, 15),
-      ]);
-      setGitStatus(st);
-      setGitLog(log?.entries ?? []);
-    } catch (e: unknown) {
-      toast.error(`Git status failed: ${apiErr(e)}`);
-    } finally {
-      setGitBusy(false);
-    }
-  }, [hasGit, workspace.id]);
-
-  useEffect(() => {
-    if (activeView === 'git') {
-      void (async () => {
-        await refreshGit();
-      })();
-    }
-  }, [activeView, refreshGit]);
 
   const gitDiffView = useCallback(async () => {
     setGitBusy(true);
@@ -659,6 +699,14 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                         <FileIcon size={15} className="text-slate-400 shrink-0" />
                       )}
                       <span className="truncate flex-1">{entry.name}</span>
+                      {modifiedPaths.has(entry.path) && (
+                        <span
+                          className="shrink-0 text-[10px] font-bold px-1 rounded bg-amber-500/20 text-amber-300"
+                          title="Uncommitted changes"
+                        >
+                          {modifiedPaths.get(entry.path)}
+                        </span>
+                      )}
                       {!entry.is_dir && entry.size != null && (
                         <span className="text-[10px] text-slate-600">{formatBytes(entry.size)}</span>
                       )}
@@ -974,7 +1022,30 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
       <div className="h-7 shrink-0 bg-[#0d1222] border-t border-white/10 flex items-center gap-4 px-3 text-[11px] text-slate-400">
         <span className="flex items-center gap-1">
           <GitBranch size={12} />
-          {activeView === 'git' && gitStatus?.branch ? gitStatus.branch : (hasGit ? (gitStatus?.branch || 'git') : 'no git')}
+          {hasGit ? (
+            <select
+              value={gitStatus?.branch ?? ''}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === '__new__') {
+                  const name = prompt('New branch name:');
+                  if (name) void switchBranch(name.trim(), true);
+                } else if (v) {
+                  void switchBranch(v);
+                }
+              }}
+              disabled={branchBusy || (branches.length === 0 && !gitStatus?.branch)}
+              className="bg-transparent text-[11px] text-slate-200 outline-none cursor-pointer disabled:opacity-50 max-w-[140px]"
+              title="Switch branch"
+            >
+              {(branches.length ? branches : gitStatus?.branch ? [gitStatus.branch] : []).map((b) => (
+                <option key={b} value={b} className="bg-[#0d1222] text-slate-200">{b}</option>
+              ))}
+              <option value="__new__" className="bg-[#0d1222] text-slate-200">+ New branch…</option>
+            </select>
+          ) : (
+            'no git'
+          )}
         </span>
         <span className="truncate max-w-[40%]">{selectedPath ? `📄 ${selectedPath}` : 'No file open'}</span>
         <span className="ml-auto">{workspace.display_name}</span>

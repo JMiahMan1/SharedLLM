@@ -532,6 +532,19 @@ export interface GitStatusResponse {
   dirty: boolean;
 }
 
+export interface GitBranchesResponse {
+  status: string;
+  current?: string;
+  local: string[];
+  remote: string[];
+}
+
+export interface GitCheckoutResponse {
+  status: string;
+  branch?: string;
+  current_branch?: string;
+}
+
 export interface GitDiffResponse {
   status: string;
   diff: string;

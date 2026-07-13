@@ -48,6 +48,8 @@ import type {
   WorkspaceFileWriteResponse,
   WorkspaceFileListResponse,
   GitStatusResponse,
+  GitBranchesResponse,
+  GitCheckoutResponse,
   GitDiffResponse,
   GitCommitResponse,
   GitPushResponse,
@@ -1404,6 +1406,14 @@ export const api = {
   // Workspace git (tool panel)
   async workspaceGitStatus(workspaceId: string): Promise<GitStatusResponse> {
     const resp = await apiClient.post('/api/workspaces/git/status', { workspace_id: workspaceId });
+    return resp.data;
+  },
+  async workspaceGitBranches(workspaceId: string): Promise<GitBranchesResponse> {
+    const resp = await apiClient.post('/api/workspaces/git/branches', { workspace_id: workspaceId });
+    return resp.data;
+  },
+  async workspaceGitCheckout(workspaceId: string, branch: string, create = false, fromRef?: string): Promise<GitCheckoutResponse> {
+    const resp = await apiClient.post('/api/workspaces/git/checkout', { workspace_id: workspaceId, branch, create, from_ref: fromRef });
     return resp.data;
   },
   async workspaceGitDiff(workspaceId: string, ref = 'HEAD'): Promise<GitDiffResponse> {

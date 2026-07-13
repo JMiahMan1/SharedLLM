@@ -4000,10 +4000,8 @@ async def get_workspaces_proxy(request: Request):
 async def _proxy_workspace_runtime_json(method: str, path: str, request = None):
     body = await request.json() if request is not None else None
     if isinstance(body, dict) and not body.get("user_context"):
-        try:
+        with suppress(Exception):
             body = {**body, "user_context": await _resolve_user_context(request, body)}
-        except Exception:
-            pass
     resp = await get_http_client().request(
         method,
         f"{WORKSPACE_RUNTIME_SVC}{path}",
@@ -4044,14 +4042,17 @@ async def list_workspace_files_proxy(request: Request):
 async def write_workspace_file_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/files/write", request)
 
+
+@app.post("/api/workspaces/files/delete")
+async def delete_workspace_file_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/files/delete", request)
+
 @app.post("/api/workspaces/files/raw")
 async def read_workspace_file_raw_proxy(request: Request):
     body = await request.json()
     if isinstance(body, dict) and not body.get("user_context"):
-        try:
+        with suppress(Exception):
             body = {**body, "user_context": await _resolve_user_context(request, body)}
-        except Exception:
-            pass
     resp = await get_http_client().post(
         f"{WORKSPACE_RUNTIME_SVC}/files/raw",
         json=body,
@@ -4145,6 +4146,11 @@ async def git_log_workspace_proxy(request: Request):
 @app.post("/api/workspaces/git/fetch")
 async def git_fetch_workspace_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/git/fetch", request)
+
+
+@app.post("/api/workspaces/git/branches")
+async def git_branches_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/branches", request)
 
 @app.get("/api/workspaces/{workspace_id}/raven/missions")
 async def get_workspace_raven_missions_proxy(workspace_id: str, request: Request, limit: int = 50):
