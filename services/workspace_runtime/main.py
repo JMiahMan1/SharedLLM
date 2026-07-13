@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
@@ -42,7 +43,6 @@ from .models import Workspace
 log = logging.getLogger("workspace_runtime")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
 
-import threading
 WORKSPACE_SYNC_LOCKS: dict[str, threading.RLock] = {}
 WORKSPACE_LOCKS_MUTEX = threading.Lock()
 
@@ -652,7 +652,7 @@ def _ensure_workspace_recovered(workspace: dict[str, Any]) -> None:
                 raise HTTPException(
                     status_code=500,
                     detail=f"Workspace repository was missing and auto-recovery clone failed: {recovery_err}"
-                )
+                ) from recovery_err
     finally:
         with WORKSPACE_CLONING_MUTEX:
             WORKSPACE_CLONING_IN_PROGRESS.discard(ws_id)
@@ -1513,7 +1513,7 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
                 raise HTTPException(
                     status_code=500,
                     detail=f"Git repo is missing, and failed to back up existing directory to {backup_path}: {rename_err}"
-                )
+                ) from rename_err
 
     repo_url = str(req.repo_url or workspace.get("repo_url") or "").strip()
     branch_name = str(req.branch or workspace.get("default_branch") or "main").strip()
