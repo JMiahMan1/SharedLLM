@@ -32,16 +32,18 @@ export default function RavenAuditLog({ isOpen, onClose }: RavenAuditLogProps) {
      try {
        const parsed = JSON.parse(logData);
        if (Array.isArray(parsed)) {
+         const displayedLogs = parsed.slice(-500);
          return (
            <div className="space-y-2">
-             {parsed.map((entry, idx) => {
+             {displayedLogs.map((entry, idx) => {
                const timeStr = entry.timestamp ? new Date(entry.timestamp * 1000).toISOString().split('T')[1].slice(0,-1) : '';
+               const entryType = entry.raw_type || entry.type;
                let textColor = 'text-slate-400';
-               if (entry.type === 'action') textColor = 'text-yellow-400 font-bold';
-               else if (entry.type === 'action_payload') textColor = 'text-yellow-300/80';
-               else if (entry.type === 'result_success') textColor = 'text-emerald-400 font-bold';
-               else if (entry.type === 'result_error') textColor = 'text-red-400 font-bold';
-               else if (entry.type === 'reasoning') textColor = 'text-blue-400';
+               if (entryType === 'action') textColor = 'text-yellow-400 font-bold';
+               else if (entryType === 'action_payload') textColor = 'text-yellow-300/80';
+               else if (entryType === 'result_success') textColor = 'text-emerald-400 font-bold';
+               else if (entryType === 'result_error') textColor = 'text-red-400 font-bold';
+               else if (entryType === 'reasoning') textColor = 'text-blue-400';
                
                return (
                  <div key={idx} className={textColor}>

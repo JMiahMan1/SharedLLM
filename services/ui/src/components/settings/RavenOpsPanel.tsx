@@ -1000,28 +1000,32 @@ const renderTimeline = (outputLog: string | null | undefined) => {
     const logs = JSON.parse(outputLog);
     if (!Array.isArray(logs) || logs.length === 0) return <p className="text-slate-500 text-xs italic text-center p-2">No execution events captured.</p>;
     
+    // Slice to the last 500 events to prevent rendering overhead on extremely long runs
+    const displayedLogs = logs.slice(-500);
+    
     return (
       <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-2 font-mono text-[10px] text-slate-300 bg-black/40 p-3 rounded-lg border border-white/5">
-        {logs.map((logItem, idx) => {
+        {displayedLogs.map((logItem, idx) => {
           const timeStr = logItem.timestamp ? new Date(logItem.timestamp * 1000).toLocaleTimeString() : '';
+          const itemType = logItem.raw_type || logItem.type;
           let bgClass = 'bg-slate-800 text-slate-300';
-          let label = logItem.type;
+          let label = itemType;
           
-          if (logItem.type === 'action') {
+          if (itemType === 'action') {
             bgClass = 'bg-blue-500/20 text-blue-300 border border-blue-500/30';
             label = '🔧 TOOL';
-          } else if (logItem.type === 'action_payload') {
+          } else if (itemType === 'action_payload') {
             return null; // Skip payload for clean view
-          } else if (logItem.type === 'result_success') {
+          } else if (itemType === 'result_success') {
             bgClass = 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30';
             label = '✅ SUCCESS';
-          } else if (logItem.type === 'result_error') {
+          } else if (itemType === 'result_error') {
             bgClass = 'bg-red-500/20 text-red-300 border border-red-500/30';
             label = '❌ ERROR';
-          } else if (logItem.type === 'system') {
+          } else if (itemType === 'system') {
             bgClass = 'bg-purple-500/20 text-purple-300 border border-purple-500/30';
             label = 'ℹ️ SYSTEM';
-          } else if (logItem.type === 'reasoning') {
+          } else if (itemType === 'reasoning') {
             bgClass = 'bg-slate-800/85 text-slate-400 border border-white/5';
             label = '🧠 THOUGHT';
           }
