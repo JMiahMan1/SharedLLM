@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle, FlaskConical, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -18,10 +18,19 @@ const MISSION_TEMPLATES = [
 // ─── User View ───────────────────────────────────────────────────────────────
 
 const JarvisLab = () => {
-  const [activeTab, setActiveTab] = useState<'tests' | 'missions'>('missions');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabQuery = searchParams.get('tab');
+  const initialTab = tabQuery === 'tests' || tabQuery === 'missions' ? tabQuery : 'missions';
+  const [activeTab, setActiveTab] = useState<'tests' | 'missions'>(initialTab);
   const { user } = useAuth();
   const isAdmin = user?.is_admin ?? false;
   const navigate = useNavigate();
+
+  // Sync tab state to query parameter when changed
+  const handleTabChange = (tab: 'tests' | 'missions') => {
+    setActiveTab(tab);
+    setSearchParams({ tab });
+  };
 
   return (
     <div className="space-y-8 pb-12">
@@ -38,7 +47,7 @@ const JarvisLab = () => {
             ] as const).map(([key, label]) => (
               <button
                 key={key}
-                onClick={() => setActiveTab(key)}
+                onClick={() => handleTabChange(key)}
                 className={`rounded-xl px-4 py-2 text-[10px] font-black uppercase tracking-widest ${
                   activeTab === key ? 'bg-indigo-600/40 text-white' : 'text-slate-500 hover:text-white'
                 }`}
