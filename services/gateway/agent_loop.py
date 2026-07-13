@@ -678,90 +678,130 @@ def detect_repetitive_action(recent: list[tuple[str, bool]], window: int = 8) ->
     return len({sig for sig, _ in last}) == 1
 
 
-def _translate_shell_to_git_op(cmd: str) -> dict | None:
+# Shell commands that carry no git intent and are safe to drop when they appear
+# alongside intercepted git/gh ops (they only echo status / change dir).
+_SHELL_NOISE_CMDS = {
+    "true", "false", ":", "echo", "cat", "head", "tail", "less", "wc", "sort",
+    "tee", "printf", "pwd", "ls", "sleep", "cd", "touch", "mkdir", "test", "[",
+}
+
+
+def _translate_shell_to_git_op(cmd: str) -> list[dict] | None:
     """Intercept RAW workspace-shell git/gh commands and re-route them through the
     credentialed, guard-railed ``GitOperationRequest`` tool.
+
+    Returns a list of GitOperationRequest-compatible payload dicts (one per
+    git/gh sub-command, so ``&&``/``;``/``||``-chained pipelines like
+    ``git init && git remote add origin <url> && git fetch`` are fully honored),
+    or ``None`` to let the command run as an ordinary shell command.
 
     Why: the autonomous loop's shell has NO git credentials, so a model that
     forgets to use the git tool and instead runs ``git push`` (or ``gh repo
     create``) in the shell can never authenticate and silently fails to publish.
     This is the durable backstop: even a flailing model gets correct,
     token-injected, per-workspace-scoped git behavior.
-
-    Returns a GitOperationRequest-compatible payload dict (the gateway fills in
-    ``user_context`` / ``workspace_id`` later), or ``None`` to let the command
-    run as an ordinary shell command.
     """
     if not isinstance(cmd, str) or not cmd.strip():
         return None
 
-    work = re.sub(r"^\s*(sudo\s+)*", "", cmd.strip())
-    try:
-        parts = shlex.split(work)
-    except ValueError:
-        return None
-    if not parts:
-        return None
+    # Split compound commands; trailing `|| true` / `&& true` guards are dropped.
+    pieces = re.split(r"\s*(?:\|\||&&|;)\s*", cmd.strip())
+    routed: list[dict] = []
 
-    bin_name = parts[0]
-    sub = parts[1] if len(parts) > 1 else ""
+    for raw in pieces:
+        piece = re.sub(r"^\s*sudo\s+", "", raw).strip()
+        # Drop shell redirections (e.g. `2>&1`, `>/dev/null`) that would confuse
+        # the git CLI if passed through as positional arguments.
+        piece = re.sub(r"\s*2>&1|\s*2>/dev/null|\s*&>[\s\S]*|\s*>/dev/null", "", piece).strip()
+        if not piece:
+            continue
+        try:
+            parts = shlex.split(piece)
+        except ValueError:
+            return None
+        if not parts:
+            continue
+        bin_name = parts[0]
+        sub = parts[1] if len(parts) > 1 else ""
 
-    # ── git subcommands ──────────────────────────────────────────────────────
-    if bin_name == "git":
-        if sub in ("status", "st", ""):
-            return {"action": "status"}
-        if sub == "diff":
-            path = parts[2] if len(parts) > 2 else "."
-            return {"action": "diff", "path": path}
-        if sub in ("add",):
-            path = " ".join(parts[2:]) if len(parts) > 2 else "."
-            return {"action": "add", "path": path}
-        if sub in ("commit", "ci"):
-            msg = _git_commit_message_from_parts(parts)
-            return {"action": "commit", "commit_message": msg or "chore: update"}
-        if sub == "push":
-            return {"action": "push", "branch": _git_branch_from_parts(parts, "push")}
-        if sub == "pull":
-            return {"action": "pull", "branch": _git_branch_from_parts(parts, "pull")}
-        if sub == "fetch":
-            return {"action": "fetch"}
-        if sub == "log":
-            return {"action": "log", "log_count": _git_log_count(parts)}
-        if sub in ("branch",):
-            name = parts[2] if len(parts) > 2 else "."
-            return {"action": "branch", "path": name}
-        if sub in ("checkout", "co"):
-            if len(parts) < 3:
+        if bin_name == "git":
+            r = _translate_git_parts(parts, sub)
+            if r is None:
+                # Unknown git subcommand: don't mis-translate; bail so the
+                # original command runs (and fails loudly) in the shell.
                 return None
-            return {"action": "checkout", "path": parts[2]}
-        if sub == "show":
-            path = parts[2] if len(parts) > 2 else "."
-            return {"action": "show", "path": path}
-        if sub == "init":
-            return {"action": "init"}
-        if sub == "remote" and len(parts) > 2 and parts[2] == "add":
-            if len(parts) >= 5:
-                return {"action": "remote_add", "remote_name": parts[3], "repo_url": parts[4]}
+            routed.append(r)
+        elif bin_name == "gh" and sub == "repo" and len(parts) > 2 and parts[2] == "create":
+            r = _translate_gh_repo_create(parts)
+            if r is None:
+                return None
+            routed.append(r)
+        elif bin_name in _SHELL_NOISE_CMDS:
+            # Non-git noise (echo, ls, true, cat, ...) — safe to skip; irrelevant
+            # to the git pipeline.
+            continue
+        else:
+            # A real, non-git command mixed into the pipeline: we cannot run it
+            # through the git tool, so don't intercept at all.
             return None
-        # Unknown git subcommand: don't mis-translate — let it run in the shell.
+
+    return routed or None
+
+
+def _translate_git_parts(parts: list[str], sub: str) -> dict | None:
+    """Translate a single parsed ``git <sub> ...`` command into a git-op payload."""
+    if sub in ("status", "st", ""):
+        return {"action": "status"}
+    if sub == "diff":
+        path = parts[2] if len(parts) > 2 else "."
+        return {"action": "diff", "path": path}
+    if sub in ("add",):
+        path = " ".join(parts[2:]) if len(parts) > 2 else "."
+        return {"action": "add", "path": path}
+    if sub in ("commit", "ci"):
+        msg = _git_commit_message_from_parts(parts)
+        return {"action": "commit", "commit_message": msg or "chore: update"}
+    if sub == "push":
+        return {"action": "push", "branch": _git_branch_from_parts(parts, "push")}
+    if sub == "pull":
+        return {"action": "pull", "branch": _git_branch_from_parts(parts, "pull")}
+    if sub == "fetch":
+        return {"action": "fetch"}
+    if sub == "log":
+        return {"action": "log", "log_count": _git_log_count(parts)}
+    if sub in ("branch",):
+        name = parts[2] if len(parts) > 2 else "."
+        return {"action": "branch", "path": name}
+    if sub in ("checkout", "co"):
+        if len(parts) < 3:
+            return None
+        return {"action": "checkout", "path": parts[2]}
+    if sub == "show":
+        path = parts[2] if len(parts) > 2 else "."
+        return {"action": "show", "path": path}
+    if sub == "init":
+        return {"action": "init"}
+    if sub == "remote" and len(parts) > 2 and parts[2] == "add":
+        if len(parts) >= 5:
+            return {"action": "remote_add", "remote_name": parts[3], "repo_url": parts[4]}
         return None
-
-    # ── gh subcommands (only repo create is re-routed; the rest have no creds
-    #    in the shell and are better served by the dedicated gh/API tooling) ──
-    if bin_name == "gh" and sub == "repo" and len(parts) > 2 and parts[2] == "create":
-        repo_name = _gh_repo_create_name(parts)
-        if not repo_name:
-            return None
-        private = "--private" in parts and "--public" not in parts
-        description = _gh_flag_value(parts, "--description", "-d")
-        return {
-            "action": "repo_create",
-            "repo_name": repo_name,
-            "private": private,
-            "description": description,
-        }
-
+    # Unknown git subcommand: don't mis-translate — let it run in the shell.
     return None
+
+
+def _translate_gh_repo_create(parts: list[str]) -> dict | None:
+    """Translate ``gh repo create <name> [flags]`` into a repo_create payload."""
+    repo_name = _gh_repo_create_name(parts)
+    if not repo_name:
+        return None
+    private = "--private" in parts and "--public" not in parts
+    description = _gh_flag_value(parts, "--description", "-d")
+    return {
+        "action": "repo_create",
+        "repo_name": repo_name,
+        "private": private,
+        "description": description,
+    }
 
 
 def _git_commit_message_from_parts(parts: list[str]) -> str | None:
@@ -2569,12 +2609,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # This is the durable backstop that makes "commit and push" reliable
             # regardless of how the model phrased the request.
             if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
+                _git_batch = None
                 _shell_cmd = payload.get("command") or ""
                 _routed = _translate_shell_to_git_op(_shell_cmd)
-                if _routed is not None:
+                if _routed:  # non-empty list of git-op payloads
                     log.info(f"[AgentLoop] Intercepted shell git/gh command -> git tool: {_shell_cmd!r}")
                     lookup_action = "gitoperationrequest"
-                    payload = _routed
+                    _git_batch = _routed
+                    # The first op is posted through the normal dispatch below;
+                    # any additional ops (compound `&&`/`;` pipelines) are fanned
+                    # out after the first POST so the whole git pipeline runs.
+                    payload = _routed[0]
 
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
@@ -2627,7 +2672,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # (Skipped for WorkspaceCreateRequest — the runtime's Workspace model
                 # rejects the extra key, which would 422 and break adoption.)
                 if not _skip_user_context:
-                    payload["user_context"] = {
+                    _uc = {
                         "user": creds.user,
                         "is_admin": creds.is_admin,
                         "api_key": creds.api_key,
@@ -2640,6 +2685,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         "gitlab_token": creds.gitlab_token,
                         "git_token": creds.git_token,
                     }
+                    payload["user_context"] = _uc
+                    # Fan-out payloads (compound git pipelines) also need creds
+                    # and the mission workspace id so each step runs scoped.
+                    if _git_batch:
+                        for _b in _git_batch:
+                            if isinstance(_b, dict):
+                                _b.setdefault("user_context", _uc)
+
 
                 # Force workspace-scoped tool calls into the mission's CURRENT working
                 # workspace. Once Raven creates its own workspace (via
@@ -2660,6 +2713,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 }
                 if workspace_id and isinstance(payload, dict) and lookup_action in _ws_actions:
                     payload["workspace_id"] = workspace_id
+                    if _git_batch:
+                        for _b in _git_batch:
+                            if isinstance(_b, dict):
+                                _b.setdefault("workspace_id", workspace_id)
 
                 # GUARDRAIL: creating a NEW repository must happen in a dedicated
                 # workspace Raven acquired for itself — never the default/shared/system
@@ -2954,6 +3011,31 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             exec_data = {"status": "ERROR", "message": msg}
                         else:
                             exec_data = await resp.json()
+                            # Fan out any additional git ops from a compound
+                            # intercepted shell command (e.g.
+                            # `git init && git remote add origin <url> && git fetch`)
+                            # so the full git pipeline runs through the credentialed tool.
+                            if _git_batch and len(_git_batch) > 1:
+                                for _gp in _git_batch[1:]:
+                                    try:
+                                        async with shared_http_client() as _fclient:
+                                            _fr = await _fclient.post(
+                                                f"{EXECUTION_SVC}/execute/git",
+                                                json=_gp,
+                                                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                                timeout=aiohttp.ClientTimeout(total=120.0),
+                                            )
+                                            _fd = await _fr.json()
+                                    except Exception as _fe:
+                                        _fd = {"status": "ERROR", "message": f"git batch step failed: {_fe}"}
+                                    log.info(f"[AgentLoop] Git batch step {_gp.get('action')}: {_fd.get('status')}")
+                                    exec_data["message"] = (
+                                        exec_data.get("message", "") + " | " + _fd.get("message", "")
+                                    ).strip(" |")
+                                    if _fd.get("status") != "SUCCESS":
+                                        exec_data["status"] = _fd.get("status", "FAILURE")
+                                    if isinstance(_fd.get("detail"), dict):
+                                        exec_data.setdefault("detail", {})[_gp.get("action", "step")] = _fd["detail"]
                             # Adopt a freshly-created workspace as the mission's working
                             # workspace so later file/git tool calls run inside it.
                             if lookup_action == "workspacecreaterequest" and isinstance(exec_data, dict):
