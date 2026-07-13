@@ -1405,6 +1405,19 @@ def normalize_audit_log(audit_log: list[dict]) -> list[dict]:
                 except Exception:
                     pass
 
+            # Persist the tool payload as VALID JSON (not a Python `repr`, which
+            # uses single quotes and is un-parseable by json.loads). This is what
+            # the history-reconstruction path re-ingests; if it is stored as a
+            # repr (or dropped) the reconstruction emits `{"action": ...,
+            # "payload": null}` assistant turns that poison the model into
+            # mirroring the malformed `null` payload — the exact failure seen on
+            # "Tweak or Fix Results" refinements.
+            if current_action_payload is not None and not isinstance(current_action_payload, str):
+                _payload_store = json.dumps(current_action_payload)
+            elif current_action_payload is not None:
+                _payload_store = current_action_payload
+            else:
+                _payload_store = None
             normalized.append({
                 "type": ev_type,
                 "data": summary_msg,
@@ -1412,7 +1425,7 @@ def normalize_audit_log(audit_log: list[dict]) -> list[dict]:
                 "raw_type": ev_type,
                 "raw_data": res_str[:400],
                 "tool": current_action,
-                "payload": str(current_action_payload)[:400] if current_action_payload else None
+                "payload": _payload_store
             })
 
             current_action = None
@@ -1804,7 +1817,23 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         elif ev_type in ("result_success", "result_error"):
                             tool_name = ev.get("tool") or current_tool
                             if tool_name:
-                                tool_json = {"action": tool_name, "payload": current_payload}
+                                # The normalized audit log carries the tool payload
+                                # on the *result* event (action_payload events are
+                                # dropped during summarization). Prefer it so the
+                                # reconstructed "previous tool call" round-trips with
+                                # its real arguments instead of `null`, which would
+                                # otherwise teach the model to emit `payload: null`.
+                                _pv = ev.get("payload")
+                                if isinstance(_pv, str):
+                                    try:
+                                        _pv = json.loads(_pv)
+                                    except Exception:
+                                        _pv = current_payload
+                                elif _pv is None:
+                                    _pv = current_payload
+                                if not isinstance(_pv, dict):
+                                    _pv = current_payload if isinstance(current_payload, dict) else {}
+                                tool_json = {"action": tool_name, "payload": _pv}
                                 prior_conversation_turns.append({"role": "assistant", "content": json.dumps(tool_json)})
                                 prior_conversation_turns.append({"role": "user", "content": f"LAST TOOL RESULT:\n{ev_data}"})
                                 # Also reconstruct action_log step
