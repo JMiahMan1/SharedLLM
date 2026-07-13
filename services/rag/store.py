@@ -73,18 +73,24 @@ class SqliteVecAdapter(VectorStoreAdapter):
         self, collection: str, user_id: str, query_vector: list[float], k: int
     ) -> list[tuple[str, float]]:
         blob = serialize_vector(query_vector)
+        # vec0 requires the KNN LIMIT to be on the virtual-table scan itself;
+        # filter by collection/user via an outer JOIN so the planner sees the
+        # `LIMIT ?` constraint directly on vec_rag_items.
         rows = self.conn.execute(
             """
             SELECT i.id AS id, v.distance AS distance
-            FROM vec_rag_items v
+            FROM (
+                SELECT id, distance
+                FROM vec_rag_items
+                WHERE embedding MATCH ?
+                ORDER BY distance
+                LIMIT ?
+            ) v
             JOIN rag_items i ON i.id = v.id
-            WHERE v.embedding MATCH ?
-              AND i.collection_name = ?
+            WHERE i.collection_name = ?
               AND (i.user_id = ? OR i.user_id = 'default')
-            ORDER BY v.distance
-            LIMIT ?
             """,
-            [blob, collection, user_id, k],
+            [blob, k, collection, user_id],
         ).fetchall()
         return [(r["id"], float(r["distance"])) for r in rows]
 
