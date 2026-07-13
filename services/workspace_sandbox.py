@@ -49,6 +49,60 @@ SANDBOX_MOUNT_ROOT = os.getenv("SANDBOX_MOUNT_ROOT", "/workspaces")
 SANDBOX_HOST_ROOT = os.getenv("WORKSPACE_HOST_PATH", "")
 
 
+def _unescape_mountinfo(field: str) -> str:
+    # /proc/self/mountinfo encodes non-printables (e.g. spaces) as octal \NNN.
+    return re.sub(r"\\(\d{3})", lambda m: chr(int(m.group(1), 8)), field)
+
+
+def _detect_host_root() -> str:
+    """Best-effort detection of the Docker-host path backing SANDBOX_MOUNT_ROOT.
+
+    Used when WORKSPACE_HOST_PATH is unset/empty. The Docker daemon resolves
+    bind-mount SOURCES against the host filesystem, so we read
+    /proc/self/mountinfo to find the real host source of the /workspaces bind
+    mount instead of the container-internal path. Without this the sandbox binds
+    an empty, auto-created host directory and cannot see the workspace's files
+    or its .git — which breaks git status / branch operations inside the sandbox.
+    """
+    try:
+        with open("/proc/self/mountinfo") as fh:
+            rows = fh.read().splitlines()
+    except OSError:
+        return ""
+    best_mountpoint = ""
+    best_source = ""
+    for row in rows:
+        cols = row.split()
+        if len(cols) < 7 or "-" not in cols:
+            continue
+        mountpoint = _unescape_mountinfo(cols[4])
+        sep = cols.index("-")
+        if sep + 2 >= len(cols):
+            continue
+        # mountinfo: ... <options> - <fstype> <source> <super-options>
+        source = _unescape_mountinfo(cols[sep + 2])
+        if mountpoint == SANDBOX_MOUNT_ROOT or mountpoint.startswith(
+            SANDBOX_MOUNT_ROOT + "/"
+        ):
+            if len(mountpoint) > len(best_mountpoint):
+                best_mountpoint = mountpoint
+                best_source = source
+    return best_source
+
+
+# Resolve the host root: prefer the explicit override, otherwise detect the real
+# host source of the /workspaces bind mount so the sandbox sees actual data
+# (including .git) rather than an empty auto-created directory.
+if not SANDBOX_HOST_ROOT:
+    _detected = _detect_host_root()
+    if _detected:
+        SANDBOX_HOST_ROOT = _detected
+        log.info(
+            f"[Sandbox] WORKSPACE_HOST_PATH unset; detected host root "
+            f"{SANDBOX_HOST_ROOT} from mountinfo"
+        )
+
+
 def _under_mount_root(path: str) -> bool:
     """True when `path` lies within the sandbox mount root.
 
