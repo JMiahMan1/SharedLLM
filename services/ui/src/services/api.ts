@@ -855,6 +855,11 @@ export const api = {
     return resp.data;
   },
 
+  async getRavenMission(id: number | string): Promise<RavenMission> {
+    const resp = await apiClient.get(`/api/raven/missions/${id}`);
+    return resp.data;
+  },
+
   async getWorkspaceRavenMissions(workspaceId: string): Promise<RavenMission[]> {
     const resp = await apiClient.get(`/api/workspaces/${encodeURIComponent(workspaceId)}/raven/missions`);
     return resp.data;

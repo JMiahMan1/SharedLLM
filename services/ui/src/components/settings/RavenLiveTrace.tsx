@@ -94,8 +94,7 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
 
     // Poll mission status/result
     const pollInterval = setInterval(() => {
-      api.getUserMissions().then((missions) => {
-        const mission = missions.find((m: { id: number }) => m.id === missionId);
+      api.getRavenMission(missionId).then((mission) => {
         if (mission) {
           setMissionStatus(mission.status);
           if (mission.result) {
