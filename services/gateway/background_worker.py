@@ -932,9 +932,29 @@ class RavenWorker:
             if not username:
                 continue
 
-            ha_url = user.get("ha_url")
-            ha_token = user.get("ha_token")
+            # Resolve decrypted HA credentials for this user. UserRead (returned
+            # by /api/users) intentionally omits encrypted tokens, so we use
+            # /api/resolve — the system's source of truth for credentials,
+            # including any Config DB overrides. This is how the default system
+            # user (ID 1) picks up the HA account configured in the UI.
+            try:
+                async with _shared_http_client() as client:
+                    cred_resp = await client.post(
+                        f"{IDENTITY_SVC}/api/resolve",
+                        json={"rag_user": username},
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    )
+                    if cred_resp.status != 200:
+                        continue
+                    creds = await cred_resp.json()
+            except Exception as e:
+                log.warning(f"Cleanup: failed to resolve creds for {username}: {e}")
+                continue
+
+            ha_url = creds.get("ha_url")
+            ha_token = creds.get("ha_token")
             if not ha_url or not ha_token:
+                log.debug(f"Cleanup: no HA credentials for {username}, skipping sync.")
                 continue
 
             try:
