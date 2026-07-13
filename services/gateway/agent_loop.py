@@ -726,11 +726,14 @@ def _translate_shell_to_git_op(cmd: str) -> list[dict] | None:
 
         if bin_name == "git":
             r = _translate_git_parts(parts, sub)
-            if r is None:
-                # Unknown git subcommand: don't mis-translate; bail so the
-                # original command runs (and fails loudly) in the shell.
-                return None
-            routed.append(r)
+            if r is not None:
+                routed.append(r)
+            # Unknown git subcommands (e.g. `git remote -v`, `git branch -a`)
+            # are SKIPPED rather than aborting the whole pipeline, so a
+            # sibling `git push` is still intercepted and routed through the
+            # credentialed git tool. The skipped command's output is simply
+            # not produced (the model can re-issue it as a standalone call).
+            continue
         elif bin_name == "gh" and sub == "repo" and len(parts) > 2 and parts[2] == "create":
             r = _translate_gh_repo_create(parts)
             if r is None:
@@ -785,7 +788,11 @@ def _translate_git_parts(parts: list[str], sub: str) -> dict | None:
         if len(parts) >= 5:
             return {"action": "remote_add", "remote_name": parts[3], "repo_url": parts[4]}
         return None
-    # Unknown git subcommand: don't mis-translate — let it run in the shell.
+    if sub == "remote":
+        # `git remote -v` / `git remote get-url origin` etc. -> show remotes.
+        return {"action": "remote"}
+    # Unknown git subcommand: return None so the caller SKIPS it (rather than
+    # aborting the whole pipeline) — a sibling `git push` is still intercepted.
     return None
 
 

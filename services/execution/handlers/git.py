@@ -433,6 +433,13 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     if action in {"reset", "clean"}:
         return GitExecutionResult(status="FAILURE", message=f"git {action} is blocked for safety.", service="git", detail={"error": "unsafe_git_action_blocked"})
 
+    if action == "remote":
+        # Show configured remotes (mirrors `git remote -v`).
+        r = await _run_git(["remote", "-v"], cwd=workspace_path)
+        if r["returncode"] != 0:
+            return _fail("remote", r)
+        return _ok("remote", {"remotes": r["stdout"].splitlines(), **r})
+
     if action == "status":
         r = await _run_git(["status", "--porcelain", "--branch"], cwd=workspace_path)
         if r["returncode"] != 0:

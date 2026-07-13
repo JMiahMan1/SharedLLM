@@ -261,3 +261,30 @@ def test_translate_non_git_passthrough():
 def test_translate_unknown_git_subcommand_passthrough():
     # An unsupported git subcommand is left to the shell rather than mis-routed.
     assert _translate()("git mv a b") is None
+
+
+def test_translate_git_remote_shows():
+    assert _translate()("git remote -v") == [{"action": "remote"}]
+    assert _translate()("git remote get-url origin") == [{"action": "remote"}]
+
+
+def test_translate_unknown_git_does_not_abort_push():
+    # Regression: `git remote -v` is unknown, but it must NOT abort the whole
+    # pipeline — the sibling `git push` must still be intercepted and routed
+    # through the credentialed git tool (otherwise the push hits the raw shell
+    # with no credentials). This is exactly the failure that let mission 48's
+    # `git remote -v && git push origin HEAD` bypass the tool.
+    out = _translate()("git remote -v && git push origin HEAD")
+    assert out == [
+        {"action": "remote"},
+        {"action": "push", "branch": "HEAD"},
+    ]
+
+
+def test_translate_skip_unknown_git_subcommand():
+    # An unknown read-only git subcommand is skipped (not fatal); known ops in
+    # the same pipeline are still routed.
+    out = _translate()("git mv a b && git push origin main")
+    assert out == [
+        {"action": "push", "branch": "main"},
+    ]
