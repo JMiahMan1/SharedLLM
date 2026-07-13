@@ -42,8 +42,8 @@ const JarvisLab = () => {
         <div className="flex items-center gap-3">
           <div className="flex rounded-2xl border border-white/10 bg-white/5 p-1">
             {([
-              ['tests', 'Tests'],
               ['missions', 'Missions'],
+              ['tests', 'Tests'],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
