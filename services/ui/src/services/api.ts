@@ -1374,6 +1374,33 @@ export const api = {
     return resp.data;
   },
 
+  // Raw binary (e.g. images) served as a blob for in-browser preview.
+  async fetchWorkspaceFileRaw(workspaceId: string, relative_path: string): Promise<Blob> {
+    const resp = await apiClient.post('/api/workspaces/files/raw', { workspace_id: workspaceId, relative_path }, { responseType: 'blob' });
+    return resp.data;
+  },
+
+  async writeWorkspaceFileBase64(workspaceId: string, relative_path: string, content_base64: string): Promise<{ status: string; message?: string }> {
+    const resp = await apiClient.post('/api/workspaces/files/write', { workspace_id: workspaceId, relative_path, content_base64 });
+    return resp.data;
+  },
+
+  // Stable Diffusion image tasks (proxied to the alpaca SD backend).
+  async generateImage(payload: { prompt: string; model?: string; size?: string; n?: number }): Promise<{ status: string; data?: Array<{ url?: string; b64_json?: string }>; message?: string }> {
+    const resp = await apiClient.post('/api/images/generate', payload);
+    return resp.data;
+  },
+
+  async editImage(payload: { prompt: string; image: string; model?: string }): Promise<{ status: string; data?: Array<{ url?: string; b64_json?: string }>; message?: string }> {
+    const resp = await apiClient.post('/api/images/edit', payload);
+    return resp.data;
+  },
+
+  async listImageModels(): Promise<{ status: string; models?: string[]; message?: string }> {
+    const resp = await apiClient.get('/api/images/models');
+    return resp.data;
+  },
+
   // Workspace git (tool panel)
   async workspaceGitStatus(workspaceId: string): Promise<GitStatusResponse> {
     const resp = await apiClient.post('/api/workspaces/git/status', { workspace_id: workspaceId });
