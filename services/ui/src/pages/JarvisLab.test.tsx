@@ -7,6 +7,8 @@ describe('JarvisLab page', () => {
   it('shows overview health and workspace data', async () => {
     renderWithProviders(<JarvisLab />);
 
+    fireEvent.click(screen.getByText('Overview'));
+
     expect(await screen.findByText('Mesh Health')).toBeInTheDocument();
     expect(await screen.findByText('Workspace Runtime')).toBeInTheDocument();
     expect(await screen.findByText('SharedLLM')).toBeInTheDocument();
