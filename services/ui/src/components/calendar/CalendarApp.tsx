@@ -577,6 +577,19 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
 
       {view === 'month' && (
         <div className="flex flex-col">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            {integrations.filter((i) => i.enabled).map((i) => {
+              const meta = integrationMeta(i.type);
+              const hard = i.available === false && !i.soft;
+              const soft = i.available === false && i.soft;
+              return (
+                <span key={i.type} className="flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ background: 'var(--os-paper-deep)', color: hard || soft ? 'var(--os-ink-faint)' : 'var(--os-ink-soft)', opacity: soft ? 0.7 : 1 }}>
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: hard ? 'var(--os-ink-faint)' : meta.color }} />
+                  {meta.label}{soft ? ' · no data' : hard ? ' · unreachable' : ''}
+                </span>
+              );
+            })}
+          </div>
           <div className="grid grid-cols-7 gap-x-2 pb-1">
             {WEEKDAYS.map((w) => <div key={w} className="px-2 text-sm font-extrabold uppercase text-[#a89f8d]" style={{ color: 'var(--os-ink-faint)' }}>{w}</div>)}
           </div>
