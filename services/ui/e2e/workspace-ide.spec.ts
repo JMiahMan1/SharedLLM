@@ -29,7 +29,7 @@ async function openIdeFor(page: Page, index = 0) {
   return modal;
 }
 
-async function openIdeForName(page: Page, name: string): Promise<Page | null> {
+async function openIdeWithFile(page: Page, fileName: string): Promise<Page | null> {
   await page.goto(`${UI_URL}/workspaces`);
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(4000);
@@ -39,8 +39,15 @@ async function openIdeForName(page: Page, name: string): Promise<Page | null> {
     await btns.nth(i).click();
     const m = page.locator('div.fixed.inset-0.z-50').last();
     await expect(m).toBeVisible({ timeout: 15000 });
-    const title = await m.locator('span.font-semibold').first().textContent();
-    if (title && title.includes(name)) return m as unknown as Page;
+    // The file was written before opening, so it should be in the initial listing.
+    await m.locator('div.cursor-pointer').first().waitFor({ timeout: 8000 }).catch(() => {});
+    let entry = m.locator('div.cursor-pointer', { hasText: fileName });
+    if ((await entry.count()) === 0) {
+      await m.getByTitle('Refresh').click().catch(() => {});
+      await page.waitForTimeout(1500);
+      entry = m.locator('div.cursor-pointer', { hasText: fileName });
+    }
+    if ((await entry.count()) > 0) return m as unknown as Page;
     await m.getByLabel('Close').click().catch(() => {});
     await page.waitForTimeout(300);
   }
@@ -48,12 +55,13 @@ async function openIdeForName(page: Page, name: string): Promise<Page | null> {
 }
 
 test.describe('Workspace IDE', () => {
-  test('opens: activity bar + Source Control / Tools / Raven Chat panels all render', { timeout: 90000 }, async ({ page }) => {
+  test('opens: activity bar + Source Control / Tools / Raven Chat panels all render', async ({ page }) => {
+    test.setTimeout(90000);
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
 
     const modal = await openIdeFor(page);
-    await expect(modal.getByText('No file open')).toBeVisible({ timeout: 10000 });
+    await expect(modal.getByText('No file open').first()).toBeVisible({ timeout: 10000 });
 
     // Activity bar has 4 views
     await expect(modal.getByTitle('Explorer')).toBeVisible();
@@ -81,7 +89,8 @@ test.describe('Workspace IDE', () => {
     expect(errors).toEqual([]);
   });
 
-  test('file explorer lists files (no user-context error) and opens a file in the editor', { timeout: 90000 }, async ({ page }) => {
+  test('file explorer lists files (no user-context error) and opens a file in the editor', async ({ page }) => {
+    test.setTimeout(90000);
     // Try each workspace until one exposes file entries
     let opened = false;
     const ideButtons = 6;
@@ -109,7 +118,8 @@ test.describe('Workspace IDE', () => {
     expect(opened).toBe(true);
   });
 
-  test('image preview pane renders and Stable Diffusion panel is present', { timeout: 120000 }, async ({ page }) => {
+  test('image preview pane renders and Stable Diffusion panel is present', async ({ page }) => {
+    test.setTimeout(120000);
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
 
@@ -135,22 +145,19 @@ test.describe('Workspace IDE', () => {
     });
     expect(writeResp.ok()).toBe(true);
 
-    const modal = await openIdeForName(page, target.display_name);
-    expect(modal).not.toBeNull();
-    const m = modal as unknown as Page;
+    // Open whichever workspace IDE actually contains the written file
+    const m = await openIdeWithFile(page, fileName);
+    expect(m).not.toBeNull();
 
-    // Refresh explorer so the new image appears, then open it
-    await m.getByTitle('Refresh').click();
-    await page.waitForTimeout(1500);
-    const fileEntry = m.locator('div.cursor-pointer', { hasText: fileName });
+    const fileEntry = m!.locator('div.cursor-pointer', { hasText: fileName });
     await expect(fileEntry).toBeVisible({ timeout: 10000 });
     await fileEntry.click();
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
 
     // Preview image + SD task panel
-    await expect(m.locator('img').first()).toBeVisible({ timeout: 10000 });
-    await expect(m.getByText('Stable Diffusion')).toBeVisible();
-    await expect(m.getByRole('button', { name: /generate \(txt2img\)/i })).toBeVisible();
+    await expect(m!.locator('img').first()).toBeVisible({ timeout: 10000 });
+    await expect(m!.getByText('Stable Diffusion')).toBeVisible();
+    await expect(m!.getByRole('button', { name: /generate \(txt2img\)/i })).toBeVisible();
 
     // Cleanup
     await page.request

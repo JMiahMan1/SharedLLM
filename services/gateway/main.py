@@ -4079,8 +4079,12 @@ async def sd_image_generate_proxy(request: Request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     body = await request.json()
     base_url = resolve_service_base_url(SVC_ALPACA_SD)
-    resp = await get_http_client().post(f"{base_url}/v1/images/generations", json=body)
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    try:
+        resp = await get_http_client().post(f"{base_url}/v1/images/generations", json=body)
+        return JSONResponse(status_code=resp.status, content=await resp.json())
+    except Exception as exc:
+        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
+
 
 @app.post("/api/images/edit")
 async def sd_image_edit_proxy(request: Request):
@@ -4088,16 +4092,23 @@ async def sd_image_edit_proxy(request: Request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     body = await request.json()
     base_url = resolve_service_base_url(SVC_ALPACA_SD)
-    resp = await get_http_client().post(f"{base_url}/v1/images/edits", json=body)
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    try:
+        resp = await get_http_client().post(f"{base_url}/v1/images/edits", json=body)
+        return JSONResponse(status_code=resp.status, content=await resp.json())
+    except Exception as exc:
+        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
+
 
 @app.get("/api/images/models")
 async def sd_image_models_proxy(request: Request):
     if not _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     base_url = resolve_service_base_url(SVC_ALPACA_SD)
-    resp = await get_http_client().get(f"{base_url}/v1/images/models")
-    return JSONResponse(status_code=resp.status, content=await resp.json())
+    try:
+        resp = await get_http_client().get(f"{base_url}/v1/images/models")
+        return JSONResponse(status_code=resp.status, content=await resp.json())
+    except Exception as exc:
+        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
 
 @app.post("/api/workspaces/git/status")
 async def git_status_workspace_proxy(request: Request):
