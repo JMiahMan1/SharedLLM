@@ -1,7 +1,7 @@
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
-chromadb>=0.4.22
+sqlite-vec
 pydantic>=2.0.0
 fastembed
-sqlmodel
 cryptography
+numpy

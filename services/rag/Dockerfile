@@ -18,4 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     && rm -rf /var/lib/apt/lists/*
 
+# sqlite-vec provides the native vector-search extension (prebuilt wheel, no cargo needed).
+# numpy is required by the pure-Python fallback adapter.
+RUN pip install --no-cache-dir sqlite-vec numpy
+
 CMD ["uvicorn", "services.rag.main:app", "--host", "0.0.0.0", "--port", "8004"]

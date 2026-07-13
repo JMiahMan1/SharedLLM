@@ -28,6 +28,7 @@ from services.gateway.config import (
     SYSTEM_IDENTITY,
 )
 from services.gateway.intent_engine import is_raven_intent
+from services.shared.rag_client import push_mission
 
 
 @asynccontextmanager
@@ -630,6 +631,18 @@ class RavenWorker:
                             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
                             json={"status": status, "result": result_str, "completed_at": completed_iso, "duration": duration},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
+                        )
+                        # Best-effort: persist a mission post-mortem into RAG for
+                        # self-repair recall (Section 6: mission_history).
+                        task_desc = str(payload.get("query") or payload.get("prompt") or "")
+                        asyncio.ensure_future(
+                            push_mission(
+                                mission_id,
+                                task_desc,
+                                status,
+                                error_summary=result_str if status == "failed" else "",
+                                user_id=str(payload.get("user_id") or "default"),
+                            )
                         )
                 except Exception as patch_e:
                     log.error(f"Failed to update mission {mission_id} status: {patch_e}")
