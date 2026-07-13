@@ -430,6 +430,8 @@ services:
       - workspace_runtime_data:/data
       - ./config/workspaces.json:/app/config/workspaces.json:ro
       - /etc/localtime:/etc/localtime:ro
+      # Allow the runtime to spawn per-workspace sandbox containers.
+      - /var/run/docker.sock:/var/run/docker.sock
     dns:
       - 172.26.0.254
     networks:

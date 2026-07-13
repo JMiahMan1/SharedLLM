@@ -10,7 +10,6 @@ import tempfile
 import threading
 import time
 from contextlib import asynccontextmanager, suppress
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -1071,45 +1070,9 @@ def _is_protected_branch(branch_name: str, identity: dict[str, Any]) -> bool:
     return any(fnmatch.fnmatch(branch, pattern) for pattern in _protected_branch_patterns(identity))
 
 
-def _current_branch_name(workspace_path: Path) -> str:
-    result = _run_command(workspace_path, ["git", "branch", "--show-current"])
-    return result["stdout"].strip()
-
-
 def _slugify_branch_component(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", str(value or "").strip().lower()).strip("-./")
     return cleaned or "change"
-
-
-def _create_review_branch(
-    workspace_path: Path,
-    identity: dict[str, Any],
-    workspace: dict[str, Any],
-    relative_path: str,
-    prefix: str,
-) -> str:
-    base_branch = str(workspace.get("default_branch") or "main").strip() or "main"
-    base_ref = _validate_branch_name(base_branch)
-    prefix_clean = _slugify_branch_component(prefix)
-    user_fragment = _slugify_branch_component(identity.get("user") or "raven")
-    file_fragment = _slugify_branch_component(Path(relative_path).stem or "change")
-    timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-    branch_name = _validate_branch_name(f"{prefix_clean}/{user_fragment}/{file_fragment}-{timestamp}")
-
-    checkout_base = _run_command(workspace_path, ["git", "checkout", base_ref])
-    if checkout_base["returncode"] != 0:
-        raise HTTPException(
-            status_code=400,
-            detail=checkout_base["stderr"].strip() or checkout_base["stdout"].strip() or f"Unable to checkout base branch {base_ref}",
-        )
-
-    create_branch = _run_command(workspace_path, ["git", "checkout", "-b", branch_name, base_ref])
-    if create_branch["returncode"] != 0:
-        raise HTTPException(
-            status_code=400,
-            detail=create_branch["stderr"].strip() or create_branch["stdout"].strip() or "Unable to create review branch",
-        )
-    return branch_name
 
 
 def _build_review_metadata(
@@ -1304,6 +1267,13 @@ def _run_git_with_optional_askpass(
     remote_url: str,
     timeout_seconds: int = 60,
 ) -> dict[str, Any]:
+    """Host-based git runner with credential injection.
+
+    Used for SYSTEM-level git operations (workspace auto-recovery clones and
+    provider sync), which run in this runtime container rather than the
+    per-workspace sandbox. User-facing git (commit/push/...) is served from
+    git_ops.py and runs inside the sandbox container.
+    """
     credentials = _git_https_credentials(identity, remote_url)
     if not credentials:
         return _run_command(workspace_path, args, timeout_seconds=timeout_seconds)
@@ -2015,10 +1985,21 @@ async def provider_sync_directory(req: ProviderSyncDirectoryRequest, x_internal_
 
 
 @app.post("/workflow/write-sync-commit")
-def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_secret: str | None = Header(default=None)) -> dict:
+async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_secret: str | None = Header(default=None)) -> dict:
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "write")
+
+    # The git operations run inside the per-workspace sandbox container
+    # (services.workspace_sandbox) and are therefore async; the synchronous
+    # file/lint/pytest helpers are offloaded to a worker thread so the event
+    # loop is never blocked.
+    from services.workspace_runtime.git_ops import (
+        create_review_branch,
+        current_branch_name,
+        git_commit,
+        git_push,
+    )
 
     lock = get_workspace_lock(workspace["id"])
     lock.acquire()
@@ -2035,12 +2016,13 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
         workspace_path = Path(workspace["resolved_path"])
         identity = workspace.get("resolved_identity") or {}
         requested_branch = _validate_branch_name(req.branch) if req.branch else ""
-        branch_name = requested_branch or _current_branch_name(workspace_path)
+        branch_name = requested_branch or await current_branch_name(ws_id, workspace_path)
 
         if not requested_branch and req.auto_create_review_branch and (
             not branch_name or _is_protected_branch(branch_name, identity)
         ):
-            branch_name = _create_review_branch(
+            branch_name = await create_review_branch(
+                workspace_id=ws_id,
                 workspace_path=workspace_path,
                 identity=identity,
                 workspace=workspace,
@@ -2065,7 +2047,8 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
                     detail="pytest_targets are required before autonomous push so Raven can prove the branch is review-ready.",
                 )
 
-        write_result = write_file(
+        write_result = await asyncio.to_thread(
+            write_file,
             FileWriteRequest(
                 workspace_id=req.workspace_id,
                 local_path=req.local_path,
@@ -2083,7 +2066,7 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
         lint_targets = _sanitize_targets(req.lint_paths or [req.relative_path])
         lint_results = []
         for lint_target in lint_targets:
-            lint_result = _run_lint_for_file(workspace_path, lint_target)
+            lint_result = await asyncio.to_thread(_run_lint_for_file, workspace_path, lint_target)
             lint_results.append(lint_result)
             if not lint_result["passed"]:
                 failure_count = _record_verification_failure(req.relative_path)
@@ -2097,7 +2080,8 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
 
         pytest_result = None
         if req.pytest_targets:
-            pytest_result = run_pytest(
+            pytest_result = await asyncio.to_thread(
+                run_pytest,
                 PytestRequest(
                     workspace_id=req.workspace_id,
                     local_path=req.local_path,
@@ -2119,7 +2103,7 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
                     detail=f"Pytest failed for workflow request on {req.relative_path}",
                 )
 
-        commit_result = git_commit(
+        commit_result = await git_commit(
             GitCommitRequest(
                 workspace_id=req.workspace_id,
                 local_path=req.local_path,
@@ -2137,7 +2121,7 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
 
         push_result = None
         if req.push:
-            push_result = git_push(
+            push_result = await git_push(
                 GitPushRequest(
                     workspace_id=req.workspace_id,
                     local_path=req.local_path,
@@ -2153,7 +2137,8 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
 
         provider_sync_result = None
         if req.sync_to_provider:
-            provider_sync_result = provider_sync_file(
+            provider_sync_result = await asyncio.to_thread(
+                provider_sync_file,
                 ProviderSyncFileRequest(
                     workspace_id=req.workspace_id,
                     local_path=req.local_path,
@@ -2171,7 +2156,7 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
             workspace=workspace,
             relative_path=req.relative_path,
             commit_message=req.commit_message,
-            branch_name=branch_name or _current_branch_name(workspace_path),
+            branch_name=branch_name or await current_branch_name(ws_id, workspace_path),
             commit_result=commit_result,
             lint_results=lint_results,
             pytest_result=pytest_result,
@@ -2193,187 +2178,6 @@ def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_internal_s
         }
     finally:
         lock.release()
-
-
-@app.post("/git/status")
-def git_status(req: WorkspaceRef, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_status")
-    workspace_path = Path(workspace["resolved_path"])
-    branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
-    porcelain = _run_command(workspace_path, ["git", "status", "--short"])
-    upstream = _run_command(workspace_path, ["git", "rev-parse", "--abbrev-ref", "@{upstream}"])
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "branch": branch["stdout"].strip(),
-        "upstream": upstream["stdout"].strip() if upstream["returncode"] == 0 else None,
-        "porcelain": porcelain["stdout"].splitlines(),
-        "dirty": bool(porcelain["stdout"].strip()),
-    }
-
-
-@app.post("/git/diff")
-def git_diff(req: DiffRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_diff")
-    workspace_path = Path(workspace["resolved_path"])
-    pathspecs = _sanitize_targets(req.pathspecs)
-    result = _run_command(workspace_path, ["git", "diff", req.ref, "--", *pathspecs] if pathspecs else ["git", "diff", req.ref])
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or "git diff failed")
-    return {"status": "SUCCESS", "workspace": workspace, "diff": result["stdout"]}
-
-
-@app.post("/git/add")
-def git_add(req: GitAddRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_write")
-    workspace_path = Path(workspace["resolved_path"])
-    pathspecs = _sanitize_targets(req.pathspecs)
-    args = ["git", "add", "--", *pathspecs] if pathspecs else ["git", "add", "-A"]
-    result = _run_command(workspace_path, args)
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or "git add failed")
-    status_result = _run_command(workspace_path, ["git", "status", "--short"])
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "command": result["args"],
-        "porcelain": status_result["stdout"].splitlines(),
-    }
-
-
-@app.post("/git/commit")
-def git_commit(req: GitCommitRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_write")
-    workspace_path = Path(workspace["resolved_path"])
-    identity = workspace.get("resolved_identity") or {}
-    if req.pathspecs:
-        add_req = GitAddRequest(
-            workspace_id=req.workspace_id,
-            local_path=req.local_path,
-            rag_user=req.rag_user,
-            voice_id=req.voice_id,
-            device_id=req.device_id,
-            pathspecs=req.pathspecs,
-        )
-        git_add(add_req, x_internal_secret)
-
-    author_name, author_email = _derive_git_author(identity, req.author_name, req.author_email)
-    args = ["git", "commit", "-m", req.message]
-    if req.allow_empty:
-        args.append("--allow-empty")
-    result = _run_command(
-        workspace_path,
-        args,
-        env_overrides={
-            "GIT_AUTHOR_NAME": author_name,
-            "GIT_AUTHOR_EMAIL": author_email,
-            "GIT_COMMITTER_NAME": author_name,
-            "GIT_COMMITTER_EMAIL": author_email,
-        },
-    )
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git commit failed")
-    commit_ref = _run_command(workspace_path, ["git", "rev-parse", "HEAD"])
-    commit_sha = commit_ref["stdout"].strip() if commit_ref["returncode"] == 0 else None
-    if not commit_sha:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Commit verification failed: 'git commit' reported success but no HEAD commit could be read back ({commit_ref.get('stderr', '').strip()}).",
-        )
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "command": result["args"],
-        "stdout": result["stdout"],
-        "stderr": result["stderr"],
-        "commit": commit_sha,
-        "author_name": author_name,
-        "author_email": author_email,
-    }
-
-
-@app.post("/git/branch/create")
-def git_branch_create(req: GitBranchCreateRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_write")
-    workspace_path = Path(workspace["resolved_path"])
-    branch_name = _validate_branch_name(req.branch_name)
-    if req.checkout:
-        args = ["git", "checkout", "-b", branch_name]
-        if req.from_ref:
-            args.append(req.from_ref)
-    else:
-        args = ["git", "branch", branch_name]
-        if req.from_ref:
-            args.append(req.from_ref)
-    result = _run_command(workspace_path, args)
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git branch create failed")
-    current_branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "command": result["args"],
-        "stdout": result["stdout"],
-        "stderr": result["stderr"],
-        "branch": branch_name,
-        "current_branch": current_branch["stdout"].strip(),
-    }
-
-
-@app.post("/git/push")
-def git_push(req: GitPushRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_write")
-    workspace_path = Path(workspace["resolved_path"])
-    identity = workspace.get("resolved_identity") or {}
-    remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
-    branch_name = (req.branch or _current_branch_name(workspace_path)).strip()
-    if not branch_name:
-        raise HTTPException(status_code=400, detail="Unable to determine branch to push")
-
-    if _is_protected_branch(branch_name, identity):
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                f"Autonomous push to protected branch '{branch_name}' is blocked by policy. "
-                "Push to a review branch and open a Pull Request instead."
-            ),
-        )
-    remote_url = _git_remote_url(workspace_path, remote_name)
-    args = ["git", "push"]
-    if req.set_upstream:
-        args.append("-u")
-    args.extend([remote_name, branch_name])
-    result = _run_git_with_optional_askpass(
-        workspace_path,
-        args,
-        identity=identity,
-        remote_url=remote_url,
-    )
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git push failed")
-    upstream = _run_command(workspace_path, ["git", "rev-parse", "--abbrev-ref", "@{upstream}"])
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "command": args,
-        "stdout": result["stdout"],
-        "stderr": result["stderr"],
-        "remote": remote_name,
-        "branch": branch_name,
-        "upstream": upstream["stdout"].strip() if upstream["returncode"] == 0 else None,
-    }
 
 
 @app.post("/tests/pytest")
@@ -2424,464 +2228,6 @@ def run_unit_tests(x_internal_secret: str | None = Header(default=None)):
         "status": "SUCCESS",
         "passed": result["returncode"] == 0,
         "results": result["stdout"] + result["stderr"]
-    }
-
-
-@app.post("/git/fetch")
-def git_fetch(req: GitFetchRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_write")
-    workspace_path = Path(workspace["resolved_path"])
-    identity = workspace.get("resolved_identity") or {}
-    remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
-    remote_url = _git_remote_url(workspace_path, remote_name)
-
-    args = ["git", "fetch"]
-    if req.prune:
-        args.append("--prune")
-    args.append(remote_name)
-
-    result = _run_git_with_optional_askpass(
-        workspace_path,
-        args,
-        identity=identity,
-        remote_url=remote_url,
-    )
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git fetch failed")
-
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "command": args,
-        "stdout": result["stdout"],
-        "stderr": result["stderr"],
-    }
-
-
-@app.post("/git/pull")
-def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_write")
-    workspace_path = Path(workspace["resolved_path"])
-    identity = workspace.get("resolved_identity") or {}
-    remote_name = (req.remote or workspace.get("git_remote") or "origin").strip()
-
-    current_branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
-    # Fall back to the configured default branch (then "main") so a detached HEAD
-    # or a headless checkout does not produce an empty `git pull origin ""` refspec.
-    branch_name = (
-        req.branch
-        or current_branch["stdout"].strip()
-        or workspace.get("default_branch")
-        or "main"
-    ).strip()
-
-    if not branch_name:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot determine which branch to pull (detached HEAD and no default_branch configured).",
-        )
-
-    remote_url = _git_remote_url(workspace_path, remote_name)
-
-    args = ["git", "pull"]
-    if req.rebase:
-        args.append("--rebase")
-    args.extend([remote_name, branch_name])
-
-    result = _run_git_with_optional_askpass(
-        workspace_path,
-        args,
-        identity=identity,
-        remote_url=remote_url,
-    )
-
-    recovered = False
-    recovery_note = None
-
-    if result["returncode"] != 0:
-        stderr = (result["stderr"] or result["stdout"] or "").strip()
-        dirty_indicators = (
-            "would be overwritten",
-            "your local changes would be overwritten",
-            "local changes would be overwritten",
-            "would be overwritten by merge",
-            "commit your changes or stash them",
-            "not have locally. this is usually caused by another repository pushing",
-            "untracked working tree files",
-        )
-        if any(ind in stderr.lower() for ind in dirty_indicators):
-            # Local uncommitted (or untracked) changes are blocking the pull.
-            # Stash them, retry the pull, and leave the stash for the user to reapply.
-            stash_result = _run_git_with_optional_askpass(
-                workspace_path,
-                ["git", "stash", "push", "-u", "-m", "sharedllm-auto-pull"],
-                identity=identity,
-                remote_url=remote_url,
-            )
-            if stash_result["returncode"] == 0:
-                result = _run_git_with_optional_askpass(
-                    workspace_path,
-                    args,
-                    identity=identity,
-                    remote_url=remote_url,
-                )
-                if result["returncode"] == 0:
-                    recovered = True
-                    recovery_note = (
-                        "Local uncommitted changes were stashed to allow the pull. "
-                        "Reapply them with: git stash pop"
-                    )
-                else:
-                    # Pull still failed after stashing — restore the stash so no work is lost.
-                    _run_git_with_optional_askpass(
-                        workspace_path,
-                        ["git", "stash", "pop"],
-                        identity=identity,
-                        remote_url=remote_url,
-                    )
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            (result["stderr"] or result["stdout"] or "").strip()
-                            or "git pull failed after stashing local changes"
-                        ),
-                    )
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail=stderr or "git pull failed and automatic stash failed",
-                )
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail=stderr or "git pull failed",
-            )
-
-    if result["returncode"] == 0:
-        # Trigger automatic backup if enabled
-        with Session(engine) as session:
-            match = session.get(Workspace, workspace["id"])
-            if match and match.auto_backup_enabled and match.nextcloud_path:
-                background_tasks.add_task(
-                    _trigger_nextcloud_sync,
-                    match.id,
-                    match.owner_user or "default",
-                    str(workspace_path),
-                    match.nextcloud_path
-                )
-
-        return {
-            "status": "SUCCESS",
-            "workspace": workspace,
-            "command": args,
-            "stdout": result["stdout"],
-            "stderr": result["stderr"],
-            "branch": branch_name,
-            "recovered": recovered,
-            "recovery_note": recovery_note,
-        }
-
-    # Safety net: a non-zero result that escaped the branches above.
-    raise HTTPException(
-        status_code=400,
-        detail=(result["stderr"] or result["stdout"] or "").strip() or "git pull failed",
-    )
-
-
-@app.post("/git/revert")
-def git_revert(req: GitRevertRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace_data = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace_data, "git_write")
-    path = Path(workspace_data["resolved_path"])
-
-    if req.hard:
-        # Hard reset to HEAD~1 (destructive)
-        result = _run_command(path, ["git", "reset", "--hard", "HEAD~1"])
-        if result["returncode"] != 0:
-            return JSONResponse(status_code=400, content={"status": "ERROR", "message": result["stderr"] or result["stdout"]})
-    elif req.commit:
-        # Proper git revert of a specific commit
-        result = _run_command(path, ["git", "revert", "--no-edit", req.commit])
-        if result["returncode"] != 0:
-            return JSONResponse(status_code=400, content={"status": "ERROR", "message": result["stderr"] or result["stdout"]})
-    else:
-        # Default: revert HEAD (proper revert, not reset)
-        result = _run_command(path, ["git", "revert", "--no-edit", "HEAD"])
-        if result["returncode"] != 0:
-            return JSONResponse(status_code=400, content={"status": "ERROR", "message": result["stderr"] or result["stdout"]})
-
-    # Clear quarantine status in DB
-    with Session(engine) as session:
-        ws = session.get(Workspace, workspace_data["id"])
-        if ws:
-            ws.quarantined = False
-            session.add(ws)
-            session.commit()
-
-    return {"status": "SUCCESS", "message": "Git revert completed and quarantine lifted."}
-
-
-@app.post("/git/log")
-def git_log(req: GitLogRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_status")
-    workspace_path = Path(workspace["resolved_path"])
-
-    args = ["git", "log", f"-{req.max_count}"]
-    if req.oneline:
-        args.append("--oneline")
-    else:
-        args.extend(["--pretty=format:%H %an <%ae> %ai %s"])
-    if req.ref:
-        args.append(req.ref)
-    if req.file_path:
-        args.extend(["--", req.file_path])
-
-    result = _run_command(workspace_path, args)
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or "git log failed")
-
-    entries = []
-    for line in result["stdout"].strip().splitlines():
-        if not line.strip():
-            continue
-        if req.oneline:
-            parts = line.split(" ", 1)
-            entries.append({"commit": parts[0], "message": parts[1] if len(parts) > 1 else ""})
-        else:
-            parts = line.split(" ", 3)
-            if len(parts) >= 4:
-                entries.append({
-                    "commit": parts[0],
-                    "author": parts[1],
-                    "date": parts[2],
-                    "message": parts[3],
-                })
-
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "count": len(entries),
-        "entries": entries,
-    }
-
-
-@app.post("/git/checkout")
-def git_checkout(req: GitCheckoutRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_write")
-    workspace_path = Path(workspace["resolved_path"])
-
-    branch_name = _validate_branch_name(req.branch)
-
-    if req.create:
-        args = ["git", "checkout", "-b", branch_name]
-        if req.from_ref:
-            args.append(req.from_ref)
-    else:
-        args = ["git", "checkout", branch_name]
-
-    result = _run_command(workspace_path, args)
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git checkout failed")
-
-    current_branch = _run_command(workspace_path, ["git", "branch", "--show-current"])
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "command": result["args"],
-        "branch": branch_name,
-        "current_branch": current_branch["stdout"].strip(),
-    }
-
-
-@app.post("/git/stash")
-def git_stash(req: GitStashRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_write")
-    workspace_path = Path(workspace["resolved_path"])
-
-    if req.action == "save":
-        args = ["git", "stash", "push"]
-        if req.message:
-            args.extend(["-m", req.message])
-    elif req.action == "pop":
-        args = ["git", "stash", "pop"]
-        if req.stash_index > 0:
-            args.append(f"stash@{{{req.stash_index}}}")
-    elif req.action == "apply":
-        args = ["git", "stash", "apply"]
-        if req.stash_index > 0:
-            args.append(f"stash@{{{req.stash_index}}}")
-    elif req.action == "list":
-        args = ["git", "stash", "list"]
-    elif req.action == "drop":
-        args = ["git", "stash", "drop"]
-        if req.stash_index > 0:
-            args.append(f"stash@{{{req.stash_index}}}")
-    elif req.action == "clear":
-        args = ["git", "stash", "clear"]
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown stash action: {req.action}")
-
-    result = _run_command(workspace_path, args)
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or f"git stash {req.action} failed")
-
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "action": req.action,
-        "stdout": result["stdout"],
-        "stderr": result["stderr"],
-    }
-
-
-@app.post("/git/remote")
-def git_remote(req: GitRemoteRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_status")
-    workspace_path = Path(workspace["resolved_path"])
-
-    if req.action == "list":
-        args = ["git", "remote", "-v"]
-    elif req.action == "add":
-        if not req.name or not req.url:
-            raise HTTPException(status_code=400, detail="name and url are required for add action")
-        args = ["git", "remote", "add", req.name, req.url]
-    elif req.action == "remove":
-        if not req.name:
-            raise HTTPException(status_code=400, detail="name is required for remove action")
-        args = ["git", "remote", "remove", req.name]
-    elif req.action == "set_url":
-        if not req.name or not req.url:
-            raise HTTPException(status_code=400, detail="name and url are required for set_url action")
-        args = ["git", "remote", "set-url", req.name, req.url]
-    else:
-        raise HTTPException(status_code=400, detail=f"Unknown remote action: {req.action}")
-
-    result = _run_command(workspace_path, args)
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or f"git remote {req.action} failed")
-
-    remotes = []
-    if req.action == "list":
-        current_name = None
-        for line in result["stdout"].strip().splitlines():
-            parts = line.split()
-            if len(parts) >= 3:
-                name, url, direction = parts[0], parts[1], parts[2]
-                if name != current_name:
-                    remotes.append({"name": name, "fetch": None, "push": None})
-                    current_name = name
-                if direction == "(fetch)":
-                    remotes[-1]["fetch"] = url
-                elif direction == "(push)":
-                    remotes[-1]["push"] = url
-
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "action": req.action,
-        "remotes": remotes,
-        "stdout": result["stdout"],
-    }
-
-
-@app.post("/git/show")
-def git_show(req: GitShowRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_status")
-    workspace_path = Path(workspace["resolved_path"])
-
-    args = ["git", "show", f"{req.ref}:{req.file_path}"] if req.file_path else ["git", "show", "--stat", req.ref]
-
-    result = _run_command(workspace_path, args)
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git show failed")
-
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "ref": req.ref,
-        "file_path": req.file_path,
-        "content": result["stdout"],
-    }
-
-
-@app.post("/files/search")
-def file_search(req: FileSearchRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req)
-    _require_workspace_capability(workspace, "file_read")
-    workspace_path = Path(workspace["resolved_path"])
-
-    search_path = resolve_safe_path(workspace_path, req.relative_path, must_exist=True)
-
-    grep_args = ["grep", "-rn"]
-    if not req.case_sensitive:
-        grep_args.append("-i")
-    grep_args.extend(["--", req.query, str(search_path)])
-
-    result = _run_command(workspace_path, grep_args)
-
-    matches = []
-    if result["stdout"].strip():
-        for line in result["stdout"].strip().splitlines()[:req.max_results]:
-            parts = line.split(":", 2)
-            if len(parts) >= 3:
-                file_path = parts[0]
-                try:
-                    line_num = int(parts[1])
-                except ValueError:
-                    line_num = 0
-                content = parts[2]
-                matches.append({
-                    "file": file_path,
-                    "line": line_num,
-                    "content": content,
-                })
-
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "query": req.query,
-        "count": len(matches),
-        "matches": matches,
-    }
-
-
-@app.post("/git/rebase")
-def git_rebase(req: GitRebaseRequest, x_internal_secret: str | None = Header(default=None)):
-    _require_internal_secret(x_internal_secret)
-    workspace = _resolve_workspace(req, check_recovery=True)
-    _require_workspace_capability(workspace, "git_write")
-    workspace_path = Path(workspace["resolved_path"])
-
-    args = ["git", "rebase", req.upstream]
-    if req.branch:
-        args.append(req.branch)
-
-    result = _run_command(workspace_path, args)
-    if result["returncode"] != 0:
-        raise HTTPException(status_code=400, detail=result["stderr"].strip() or result["stdout"].strip() or "git rebase failed")
-
-    return {
-        "status": "SUCCESS",
-        "workspace": workspace,
-        "command": args,
-        "stdout": result["stdout"],
-        "stderr": result["stderr"],
     }
 
 
@@ -3079,3 +2425,12 @@ async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path
 
         except Exception as e:
             log.error(f"Error in _trigger_nextcloud_sync: {e}")
+
+
+# Git endpoints are served from the modularized, sandbox-backed router so that
+# every git command runs inside the workspace's dedicated container. This import
+# is placed at the very bottom so that all shared helpers referenced by
+# git_ops.py already exist on this module when it is imported (avoids a cycle).
+from services.workspace_runtime.git_ops import git_router  # noqa: E402
+
+app.include_router(git_router)

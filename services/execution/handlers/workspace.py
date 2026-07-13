@@ -243,6 +243,33 @@ async def _run_command_async(
     except FileNotFoundError as e:
         return -1, "", f"Executable or directory not found: {e}"
 
+
+async def _sandbox_run(
+    workspace_id: str | None,
+    host_path: str | None,
+    cmd: list[str] | str,
+    cwd: str | None = None,
+    timeout: float = 30.0,
+    shell: bool = False,
+    env: dict | None = None,
+) -> tuple[int, str, str]:
+    """Run a workspace command inside its dedicated sandbox container.
+
+    This is the containment boundary: instead of executing on the host (or in
+    the shared execution container), the command runs in the per-workspace
+    Docker container built by ``services.workspace_sandbox`` — only the
+    workspace directory is mounted, it runs as a non-root user on a private
+    network with resource limits. Falls back to a plain host subprocess only
+    when no resolvable workspace is available (legacy/Default-workspace paths).
+    """
+    if not workspace_id or not host_path:
+        return await _run_command_async(cmd, cwd=cwd, timeout=timeout, shell=shell, env=env)
+    from services.workspace_sandbox import run_workspace_cmd
+
+    res = await run_workspace_cmd(workspace_id, host_path, cmd, cwd=cwd, timeout=timeout, shell=shell, env=env)
+    return res["returncode"], res["stdout"], res["stderr"]
+
+
 async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResult:
     try:
         workspace_id = getattr(req, "workspace_id", None)
@@ -452,24 +479,25 @@ async def handle_workspace_search(req: WorkspaceSearchRequest) -> ExecutionResul
 
         abs_search_path = resolve_safe_path(req.path, ws_root)
 
-        # Build rg command
-        cmd = ["rg", "--json", "-i", "--max-count", "100", req.query, abs_search_path]
+        # Build rg command. Search relative to the resolved path (cwd), not an
+        # absolute arg, so it executes identically inside the sandbox container.
+        cmd = ["rg", "--json", "-i", "--max-count", "100", req.query, "."]
         if req.include:
             cmd.extend(["-g", req.include])
         if req.exclude:
             cmd.extend(["-g", f"!{req.exclude}"])
 
-        log.info(f"Running search: {' '.join(cmd)}")
+        log.info(f"Running search in {abs_search_path}: {' '.join(cmd)}")
         try:
-            rc, stdout, stderr = await _run_command_async(cmd, timeout=30.0)
+            rc, stdout, stderr = await _sandbox_run(workspace_id, ws_root, cmd, cwd=abs_search_path, timeout=30.0)
             if rc == -1 and "Executable or directory not found" in stderr:
                 raise FileNotFoundError()
         except FileNotFoundError:
             log.info("ripgrep (rg) not found, falling back to grep")
-            cmd = ["grep", "-rnI", "-e", req.query, abs_search_path]
+            cmd = ["grep", "-rnI", "-e", req.query, "."]
             if req.include:
-                cmd = ["grep", "-rnI", "--include", req.include, "-e", req.query, abs_search_path]
-            rc, stdout, stderr = await _run_command_async(cmd, timeout=30.0)
+                cmd = ["grep", "-rnI", "--include", req.include, "-e", req.query, "."]
+            rc, stdout, stderr = await _sandbox_run(workspace_id, ws_root, cmd, cwd=abs_search_path, timeout=30.0)
         except TimeoutError:
             return _fail("Search timed out after 30s")
 
@@ -532,9 +560,12 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         else:
             return _fail("Neither 'command' nor 'commands' provided")
 
-        # The workspace runs inside an isolated Docker container, so every command is
-        # already sandboxed. There is intentionally NO command allow/block list here —
-        # Raven may run any shell command (git, build tools, redirects, etc.).
+        # The command now executes inside the workspace's dedicated sandbox
+        # container (see services.workspace_sandbox): only this workspace's
+        # directory is mounted, it runs as a non-root user on a private network
+        # with CPU/memory/PID limits, so runaway or destructive commands are
+        # contained. The SYSTEM_BLOCKLIST below still hard-blocks commands that
+        # could escape the sandbox (sudo, reboot, mkfs, iptables, ...).
         parsed = shlex.split(final_cmd)
         if not parsed:
             return _fail("Shell command is empty")
@@ -601,8 +632,8 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                 _target_url = _url_m.group(1)
             if _target_url is None:
                 try:
-                    _rc, _out, _err = await _run_command_async(
-                        ["git", "remote", "get-url", "origin"], cwd=abs_cwd, timeout=10.0
+                    _rc, _out, _err = await _sandbox_run(
+                        workspace_id, ws_root, ["git", "remote", "get-url", "origin"], cwd=abs_cwd, timeout=10.0
                     )
                     if _rc == 0 and _out.strip():
                         _target_url = _out.strip()
@@ -646,7 +677,9 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                     )
 
         try:
-            rc, stdout, stderr = await _run_command_async(final_cmd, cwd=abs_cwd, timeout=safe_timeout, shell=True, env=cmd_env)
+            rc, stdout, stderr = await _sandbox_run(
+                workspace_id, ws_root, final_cmd, cwd=abs_cwd, timeout=safe_timeout, shell=True, env=cmd_env
+            )
         except TimeoutError:
             tb_str = traceback.format_exc()
             log.error(f"[WORKSPACE SHELL TIMEOUT] Command: {final_cmd}\n{tb_str}")
@@ -781,7 +814,22 @@ async def handle_workspace_patch(req: WorkspaceFilePatchRequest) -> ExecutionRes
 async def handle_workspace_lint(req) -> ExecutionResult:
     """Auto-detect and run the appropriate linter for the given file."""
     try:
-        abs_path = resolve_safe_path(req.path)
+        workspace_id = getattr(req, "workspace_id", None)
+        user_ctx = getattr(req, "user_context", None)
+        ws_root = None
+        ws_details = None
+        if workspace_id:
+            try:
+                ws_root, ws_details = await _resolve_workspace_info(workspace_id, user_ctx)
+            except HTTPException:
+                ws_root = None
+        if not ws_root:
+            ws_root = WORKSPACE_ROOT
+        else:
+            if ws_details:
+                _require_capability(ws_details, "read")
+
+        abs_path = resolve_safe_path(req.path, ws_root)
         if not os.path.exists(abs_path):
             return _fail(f"File not found: {req.path}")
 
@@ -792,7 +840,7 @@ async def handle_workspace_lint(req) -> ExecutionResult:
 
         async def _run(cmd):
             try:
-                rc, stdout, stderr = await _run_command_async(cmd, timeout=30.0)
+                rc, stdout, stderr = await _sandbox_run(workspace_id, ws_root, cmd, cwd=ws_root, timeout=30.0)
                 if rc == -1 and "Executable or directory not found" in stderr:
                     raise FileNotFoundError()
                 return rc, stdout.strip(), stderr.strip()
