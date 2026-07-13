@@ -52,6 +52,7 @@ export interface Workspace {
   quarantined?: boolean;
   last_raven_mission_id?: number | null;
   excludes?: string[];
+  created_at?: string | null;
 }
 
 export type WorkspaceListResponse =
