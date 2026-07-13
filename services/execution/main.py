@@ -263,6 +263,7 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import subprocess  # always available for startup shell setup (gh auth, git config)
     # Patch DNS resolver to route .local domains through dns-sync for live failover
     try:
         from dns_resolver import patch_dns_resolver
