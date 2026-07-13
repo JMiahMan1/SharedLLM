@@ -1386,7 +1386,7 @@ def normalize_audit_log(audit_log: list[dict]) -> list[dict]:
                     pass
             
             normalized.append({
-                "type": "summary",
+                "type": ev_type,
                 "data": summary_msg,
                 "timestamp": timestamp,
                 "raw_type": ev_type,
@@ -1450,12 +1450,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "directive": directive,
                 "timestamp": _time.time(),
             }
+            from typing import cast, Awaitable
             res1 = r.rpush(f"raven:mission:loopstate:{mission_id}", _json.dumps(rec))
-            if asyncio.iscoroutine(res1) or hasattr(res1, "__await__"):
-                await res1
+            await cast(Awaitable[Any], res1)
             res2 = r.expire(f"raven:mission:loopstate:{mission_id}", 86400)
-            if asyncio.iscoroutine(res2) or hasattr(res2, "__await__"):
-                await res2
+            await cast(Awaitable[Any], res2)
         except Exception as e:
             log.warning(f"[AgentLoop] loop-probe record failed: {e}")
 

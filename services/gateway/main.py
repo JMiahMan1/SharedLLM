@@ -4952,10 +4952,18 @@ async def refine_mission(request: Request, id_or_slug: str, body: MissionRefineR
         else:
             system_prompt = await _build_raven_system_prompt(new_proposed_mission)
 
+        # Fall back to default coding model if not set on the mission
+        model = mission_data.get("coding_model")
+        if not model:
+            try:
+                model = await get_coding_model()
+            except Exception:
+                model = ""
+
         assert job_queue is not None, "Job queue not initialized"
         await job_queue.enqueue_job("raven_admin", {
             "query": new_proposed_mission,
-            "model": mission_data["coding_model"],
+            "model": model,
             "system": system_prompt,
             "stream": False,
             "creds": creds,
