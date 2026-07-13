@@ -911,23 +911,37 @@ async def execute_inference_with_kill(
 
 
 _original_async_client = aiohttp.ClientSession
-_global_http_client: aiohttp.ClientSession | None = None
-_global_http_client_loop: asyncio.AbstractEventLoop | None = None
+# One HTTP client per event loop (see main.get_http_client for rationale). The
+# Raven worker runs on its own event loop, so this module's client must be
+# cached per-loop rather than as a single global that would thrash/leak when
+# both the API loop and the worker loop call in.
+_http_clients: dict[asyncio.AbstractEventLoop, aiohttp.ClientSession] = {}
+_fallback_http_client: aiohttp.ClientSession | None = None
+
 
 def get_http_client() -> aiohttp.ClientSession:
-    global _global_http_client, _global_http_client_loop
     try:
         current_loop = asyncio.get_running_loop()
     except RuntimeError:
         current_loop = None
 
-    if _global_http_client is None or _global_http_client_loop != current_loop:
-        _global_http_client = _original_async_client(
+    if current_loop is None:
+        global _fallback_http_client
+        if _fallback_http_client is None or _fallback_http_client.closed:
+            _fallback_http_client = _original_async_client(
+                timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
+                connector=aiohttp.TCPConnector(limit=100),
+            )
+        return _fallback_http_client
+
+    client = _http_clients.get(current_loop)
+    if client is None or client.closed:
+        client = _original_async_client(
             timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
             connector=aiohttp.TCPConnector(limit=100),
         )
-        _global_http_client_loop = current_loop
-    return _global_http_client
+        _http_clients[current_loop] = client
+    return client
 
 
 @contextlib.asynccontextmanager

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import traceback
 from contextlib import asynccontextmanager, suppress
@@ -453,29 +454,53 @@ HUMAN_READABLE_CAPABILITIES = {
 
 # --- Global Clients ---
 _original_async_client = aiohttp.ClientSession
-_global_http_client: aiohttp.ClientSession | None = None
-_global_http_client_loop: asyncio.AbstractEventLoop | None = None
-_dns_recovery_lock = asyncio.Lock()
+# One HTTP client per event loop. The Raven background worker now runs on its
+# OWN dedicated event loop (its own thread) so a long-running Raven mission
+# never competes with the FastAPI API loop for loop turns. Each loop therefore
+# needs its own aiohttp client: a single global keyed only by "the last loop
+# that touched it" would thrash and leak sessions whenever both loops call in.
+_http_clients: dict[asyncio.AbstractEventLoop, aiohttp.ClientSession] = {}
+_fallback_http_client: aiohttp.ClientSession | None = None
+# threading.Lock (not asyncio.Lock) so it is safe to acquire from BOTH the API
+# loop thread and the worker thread without "attached to a different loop" errors.
+_dns_recovery_lock = threading.Lock()
 _DNS_TTL = 60  # re-resolve DNS at most every 60s so pooled connectors don't go stale
 _CLIENT_RECREATE_COOLDOWN = 10.0  # s; avoid tearing down the shared pool on every DNS blip
 _last_client_recreate = 0.0
 
+
+def _new_http_client() -> aiohttp.ClientSession:
+    return _original_async_client(
+        headers={"X-Request-Source": "shared-llm/app"},
+        timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
+        connector=aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=_DNS_TTL),
+    )
+
+
 def get_http_client() -> aiohttp.ClientSession:
-    """Lazy initializer for the global aiohttp client to ensure test compatibility."""
-    global _global_http_client, _global_http_client_loop
+    """Return the aiohttp client for the CURRENT event loop (lazy, one per loop).
+
+    Caching per-loop is required now that the Raven worker runs on a separate
+    event loop from the FastAPI API loop. Each loop keeps a stable client; the
+    client is recreated on first use within a loop and reused thereafter.
+    """
     try:
         current_loop = asyncio.get_running_loop()
     except RuntimeError:
         current_loop = None
 
-    if _global_http_client is None or _global_http_client_loop != current_loop:
-        _global_http_client = _original_async_client(
-            headers={"X-Request-Source": "shared-llm/app"},
-            timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-            connector=aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=_DNS_TTL)
-        )
-        _global_http_client_loop = current_loop
-    return _global_http_client
+    if current_loop is None:
+        # No running loop (e.g. a synchronous context). Fall back to a module global.
+        global _fallback_http_client
+        if _fallback_http_client is None or _fallback_http_client.closed:
+            _fallback_http_client = _new_http_client()
+        return _fallback_http_client
+
+    client = _http_clients.get(current_loop)
+    if client is None or client.closed:
+        client = _new_http_client()
+        _http_clients[current_loop] = client
+    return client
 
 
 @asynccontextmanager
@@ -490,36 +515,42 @@ async def shared_http_client():
     yield get_http_client()
 
 async def recreate_http_client():
-    """Close the current client and create a new one with fresh DNS resolution.
-    This is needed when DNS changes (e.g., dns-sync restart) cause stale keepalive
-    connections to fail with empty aiohttp.ClientError messages.
+    """Close the current loop's client and mark it for recreation with fresh DNS
+    resolution. This is needed when DNS changes (e.g., dns-sync restart) cause
+    stale keepalive connections to fail with empty aiohttp.ClientError messages.
 
-    Softened: the connector now uses ``ttl_dns_cache`` so DNS is re-resolved
-    automatically, and a short cooldown prevents storms of DNS failures from
-    repeatedly tearing down the entire shared connection pool."""
-    async with _dns_recovery_lock:
-        global _global_http_client, _global_http_client_loop, _last_client_recreate
-        now = asyncio.get_running_loop().time()
-        # If the pool was already rebuilt recently, rely on the connector's
-        # ttl_dns_cache to refresh DNS instead of churning every connection.
-        if _global_http_client is not None and now - _last_client_recreate < _CLIENT_RECREATE_COOLDOWN:
-            log.debug("[DNSRecovery] Skipping client recreation (cooldown active); relying on ttl_dns_cache")
-            return
-        if _global_http_client is not None:
-            log.info("[DNSRecovery] Closing stale HTTP client to refresh DNS resolution")
-            await _global_http_client.close()
-            _global_http_client = None
+    Operates on the CURRENT event loop's client only (per-loop clients), so the
+    API loop and the Raven worker loop each refresh independently. A short
+    cooldown prevents storms of DNS failures from churning connections. The new
+    client is created lazily on the next ``get_http_client()`` call for that loop.
+    """
+    with _dns_recovery_lock:
+        global _last_client_recreate, _fallback_http_client
         try:
             current_loop = asyncio.get_running_loop()
         except RuntimeError:
             current_loop = None
-        _global_http_client = _original_async_client(
-            timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
-            connector=aiohttp.TCPConnector(limit=100, limit_per_host=20, ttl_dns_cache=_DNS_TTL)
-        )
-        _global_http_client_loop = current_loop
+        now = current_loop.time() if current_loop is not None else time.monotonic()
+        if current_loop is not None:
+            existing = _http_clients.get(current_loop)
+            if existing is not None and now - _last_client_recreate < _CLIENT_RECREATE_COOLDOWN:
+                log.debug("[DNSRecovery] Skipping client recreation (cooldown active); relying on ttl_dns_cache")
+                return
+            if existing is not None:
+                log.info("[DNSRecovery] Closing stale HTTP client (loop=%s) to refresh DNS resolution", id(current_loop))
+                # Close on the owning loop; we are already running on it here.
+                await existing.close()
+                _http_clients.pop(current_loop, None)
+        else:
+            if _fallback_http_client is not None and now - _last_client_recreate < _CLIENT_RECREATE_COOLDOWN:
+                return
+            if _fallback_http_client is not None:
+                log.info("[DNSRecovery] Closing stale fallback HTTP client to refresh DNS resolution")
+                with suppress(Exception):
+                    _fallback_http_client.close()
+                _fallback_http_client = None
         _last_client_recreate = now
-        log.info("[DNSRecovery] New HTTP client created with fresh DNS resolution")
+        log.info("[DNSRecovery] HTTP client marked for refresh (recreated on next use)")
 
 def _is_dns_failure(e: aiohttp.ClientError) -> bool:
     """Detect DNS-related failures that indicate stale DNS cache.
@@ -616,18 +647,24 @@ async def lifespan(app: FastAPI):
         log.critical(f"[ConfigValidation] Failed to validate config: {e}")
         _config_validation_result = None
     if raven_worker:
-        await raven_worker.start()
+        raven_worker.start()
 
     yield
 
     log.info("Gateway shutting down...")
     if raven_worker:
-        await raven_worker.stop()
+        raven_worker.stop()
 
-    global _global_http_client
-    if _global_http_client:
-        await _global_http_client.close()
-        _global_http_client = None
+    # Close every per-loop HTTP client we created (API loop + worker loop).
+    for _client in list(_http_clients.values()):
+        with suppress(Exception):
+            await _client.close()
+    _http_clients.clear()
+    global _fallback_http_client
+    if _fallback_http_client is not None:
+        with suppress(Exception):
+            await _fallback_http_client.close()
+        _fallback_http_client = None
 
 app = FastAPI(title="Jarvis OS Gateway", version="1.0.0", lifespan=lifespan)
 
