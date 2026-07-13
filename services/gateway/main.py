@@ -3902,42 +3902,75 @@ async def proxy_embed(request: Request):
         return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
 @app.get("/api/search")
 async def global_search(q: str, request: Request):
-    """Global semantic search proxying to RAG service."""
-    # Resolve user for multi-tenancy
-    auth_header = request.headers.get("Authorization")
-    user_id = "admin"
-    if auth_header and auth_header.startswith("Bearer "):
-        try:
-            # Simple identity check
-            resp = await get_http_client().post(
-                f"{IDENTITY_SVC}/api/resolve",
-                headers={"Authorization": auth_header, "X-Internal-Secret": INTERNAL_SECRET}
-            )
-            if resp.status == 200:
-                user_id = (await resp.json()).get("user", "admin")
-        except Exception:
-            pass
+    """Global semantic search proxying to RAG.
 
+    Searches *all* of the caller's collections (HA entities, Nextcloud files,
+    system capabilities/learnings, missions, conversations, network topology,
+    telemetry, etc.) — not just Nextcloud files — across both the resolved
+    Jarvis user and the linked Nextcloud user, then merges the best hits.
+    """
+    if not q or not q.strip():
+        return {"status": "SUCCESS", "answer": "No query provided.", "files": []}
+
+    # Resolve user(s) for multi-tenancy — mirror /api/storage/stats.
     try:
-        resp = await get_http_client().post(
-            f"{RAG_SVC}/rag/search",
-            json={"query": q, "user_id": user_id, "collection_name": "nextcloud_files", "k": 5},
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=aiohttp.ClientTimeout(total=10.0)
-        )
-        if resp.status != 200:
-            return JSONResponse({"status": "ERROR", "message": "Search failed"}, status_code=502)
+        creds = await _resolve_identity_from_request(request)
+        jarvis_user = creds.get("user") or ""
+        nc_user = creds.get("nextcloud_user") or jarvis_user
+    except Exception:
+        first = await resolve_first_user()
+        jarvis_user = first.get("user") or "admin"
+        nc_user = jarvis_user
 
-        data = await resp.json()
-        # Transform for UI
-        results = data.get("results", [])
-        return {
-            "answer": results[0]["content"] if results else "No specific context found.",
-            "files": [{"name": os.path.basename(r["metadata"].get("path", "unknown")), "path": r["metadata"].get("path", "unknown")} for r in results]
-        }
-    except Exception as e:
-        log.error(f"Search proxy failed: {e}")
-        return JSONResponse({"status": "ERROR", "message": str(e)}, status_code=500)
+    # Preserve order, de-dupe identical users.
+    users = list(dict.fromkeys([jarvis_user, nc_user]))
+
+    merged: dict[str, dict] = {}
+    for user_id in users:
+        try:
+            resp = await get_http_client().post(
+                f"{RAG_SVC}/rag/search",
+                json={"query": q, "user_id": user_id, "collection_name": "all", "k": 8},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            if resp.status != 200:
+                continue
+            data = await resp.json()
+            for r in data.get("results", []):
+                content = r.get("content", "")
+                if not content or content in merged:
+                    continue
+                merged[content] = r
+        except Exception as e:
+            log.error(f"Search proxy failed for user {user_id}: {e}")
+
+    results = list(merged.values())
+    results.sort(key=lambda r: (r.get("score") or 0.0), reverse=True)
+    results = results[:8]
+
+    if not results:
+        return {"status": "SUCCESS", "answer": "No specific context found.", "files": []}
+
+    files = []
+    for r in results:
+        meta = r.get("metadata", {}) or {}
+        name = (
+            meta.get("friendly_name")
+            or meta.get("name")
+            or meta.get("entity_id")
+            or meta.get("mission_id")
+            or meta.get("path")
+            or "Result"
+        )
+        path = meta.get("path") or meta.get("entity_id") or meta.get("source") or ""
+        files.append({"name": str(name), "path": str(path)})
+
+    return {
+        "status": "SUCCESS",
+        "answer": results[0]["content"],
+        "files": files,
+    }
 
 @app.get("/api/workspaces")
 async def get_workspaces_proxy(request: Request):
@@ -3966,6 +3999,11 @@ async def get_workspaces_proxy(request: Request):
 
 async def _proxy_workspace_runtime_json(method: str, path: str, request = None):
     body = await request.json() if request is not None else None
+    if isinstance(body, dict) and not body.get("user_context"):
+        try:
+            body = {**body, "user_context": await _resolve_user_context(request, body)}
+        except Exception:
+            pass
     resp = await get_http_client().request(
         method,
         f"{WORKSPACE_RUNTIME_SVC}{path}",

@@ -25,10 +25,13 @@ import {
   Wrench,
   Code2,
   AlertTriangle,
+  MessageSquare,
+  Send,
+  Bot,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, type Workspace } from '../../services/api';
-import type { GitLogEntry, GitStatusResponse, RavenMission, WorkspaceFileEntry } from '../../types/api';
+import { api, type RavenMission, type Workspace } from '../../services/api';
+import type { GitLogEntry, GitStatusResponse, WorkspaceFileEntry } from '../../types/api';
 import { detectLanguage } from '../../lib/editorLanguages';
 import { MonacoEditor } from '../editor/MonacoEditor';
 import { cn } from '../../lib/utils';
@@ -38,7 +41,7 @@ interface WorkspaceIDEProps {
   onClose: () => void;
 }
 
-type SideTab = 'git' | 'tools' | 'missions';
+type View = 'explorer' | 'git' | 'tools' | 'chat';
 
 function formatBytes(n?: number | null): string {
   if (n == null) return '';
@@ -55,7 +58,15 @@ function apiErr(e: unknown): string {
   return err?.response?.data?.detail || err?.message || 'Unknown error';
 }
 
+const ACTIVITY: { id: View; icon: typeof FolderOpen; label: string }[] = [
+  { id: 'explorer', icon: FolderOpen, label: 'Explorer' },
+  { id: 'git', icon: GitBranch, label: 'Source Control' },
+  { id: 'tools', icon: Wrench, label: 'Tools' },
+  { id: 'chat', icon: MessageSquare, label: 'Raven Chat' },
+];
+
 export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) {
+  const [activeView, setActiveView] = useState<View>('explorer');
   const hasGit = useMemo(
     () => workspace.capabilities.some((c) => c === 'git_status' || c === 'git_write' || c.startsWith('git')),
     [workspace.capabilities],
@@ -70,7 +81,6 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const [sideTab, setSideTab] = useState<SideTab>('git');
   const [gitStatus, setGitStatus] = useState<GitStatusResponse | null>(null);
   const [gitDiff, setGitDiff] = useState('');
   const [gitLog, setGitLog] = useState<GitLogEntry[]>([]);
@@ -84,6 +94,8 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
   const [missionsLoading, setMissionsLoading] = useState(false);
   const [refineInput, setRefineInput] = useState('');
   const [refineBusy, setRefineBusy] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -234,61 +246,18 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
   }, [hasGit, workspace.id]);
 
   useEffect(() => {
-    if (!hasGit) return;
-    void (async () => {
-      await refreshGit();
-    })();
-  }, [hasGit, refreshGit]);
-
-  const loadMissions = useCallback(async () => {
-    setMissionsLoading(true);
-    try {
-      const list = await api.getWorkspaceMissions(workspace.id, 25);
-      setMissions(Array.isArray(list) ? list : []);
-    } catch (e: unknown) {
-      toast.error(`Failed to load missions: ${apiErr(e)}`);
-    } finally {
-      setMissionsLoading(false);
-    }
-  }, [workspace.id]);
-
-  useEffect(() => {
-    if (sideTab === 'missions') {
+    if (activeView === 'git') {
       void (async () => {
-        await loadMissions();
+        await refreshGit();
       })();
     }
-  }, [sideTab, loadMissions]);
-
-  const refineLastMission = useCallback(async () => {
-    const last = missions[0];
-    if (!last) {
-      toast.error('No missions to refine');
-      return;
-    }
-    if (!refineInput.trim()) {
-      toast.error('Enter a refinement directive');
-      return;
-    }
-    setRefineBusy(true);
-    try {
-      const res = await api.refineRavenMission(last.id, refineInput.trim());
-      toast.success(`Refining mission #${res.mission_id}`);
-      setRefineInput('');
-      await loadMissions();
-    } catch (e: unknown) {
-      toast.error(`Refine failed: ${apiErr(e)}`);
-    } finally {
-      setRefineBusy(false);
-    }
-  }, [missions, refineInput, loadMissions]);
+  }, [activeView, refreshGit]);
 
   const gitDiffView = useCallback(async () => {
     setGitBusy(true);
     try {
       const res = await api.workspaceGitDiff(workspace.id);
       setGitDiff(res?.diff ?? '');
-      setSideTab('git');
     } catch (e: unknown) {
       toast.error(`Git diff failed: ${apiErr(e)}`);
     } finally {
@@ -347,7 +316,6 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     try {
       const res = await api.workspaceLint({ workspace_id: workspace.id, path: selectedPath ?? undefined });
       setToolOutput(res?.output ?? JSON.stringify(res));
-      setSideTab('tools');
     } catch (e: unknown) {
       setToolOutput(`Lint failed: ${apiErr(e)}`);
     } finally {
@@ -369,7 +337,6 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         excludes: workspace.excludes ?? [],
       });
       setToolOutput(JSON.stringify(res, null, 2));
-      setSideTab('tools');
       toast.success('NextCloud sync complete');
     } catch (e: unknown) {
       setToolOutput(`Sync failed: ${apiErr(e)}`);
@@ -378,125 +345,358 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     }
   }, [workspace]);
 
+  const loadMissions = useCallback(async () => {
+    setMissionsLoading(true);
+    try {
+      const list = await api.getWorkspaceMissions(workspace.id, 25);
+      setMissions(Array.isArray(list) ? list : []);
+    } catch (e: unknown) {
+      toast.error(`Failed to load missions: ${apiErr(e)}`);
+    } finally {
+      setMissionsLoading(false);
+    }
+  }, [workspace.id]);
+
+  useEffect(() => {
+    if (activeView === 'chat') {
+      void (async () => {
+        await loadMissions();
+      })();
+    }
+  }, [activeView, loadMissions]);
+
+  const sendChat = useCallback(async () => {
+    if (!chatInput.trim()) {
+      toast.error('Describe a task for Raven');
+      return;
+    }
+    setChatBusy(true);
+    try {
+      const res = await api.createWorkspaceMission(workspace.id, chatInput.trim(), 3);
+      toast.success(`Raven mission #${res.mission?.id ?? '?'} dispatched`);
+      setChatInput('');
+      await loadMissions();
+    } catch (e: unknown) {
+      toast.error(`Dispatch failed: ${apiErr(e)}`);
+    } finally {
+      setChatBusy(false);
+    }
+  }, [chatInput, workspace.id, loadMissions]);
+
+  const refineLastMission = useCallback(async () => {
+    const last = missions[0];
+    if (!last) {
+      toast.error('No missions to refine');
+      return;
+    }
+    if (!refineInput.trim()) {
+      toast.error('Enter a refinement directive');
+      return;
+    }
+    setRefineBusy(true);
+    try {
+      const res = await api.refineRavenMission(last.id, refineInput.trim());
+      toast.success(`Refining mission #${res.mission_id}`);
+      setRefineInput('');
+      await loadMissions();
+    } catch (e: unknown) {
+      toast.error(`Refine failed: ${apiErr(e)}`);
+    } finally {
+      setRefineBusy(false);
+    }
+  }, [missions, refineInput, loadMissions]);
+
   const language = selectedPath ? detectLanguage(selectedPath) : 'plaintext';
+  const statusMission = missions[0];
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-[#0a0e1a] text-slate-200">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2.5 border-b border-white/10 bg-[#0d1222]">
+      {/* Title bar */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-white/10 bg-[#0d1222]">
         <div className="flex items-center gap-2 min-w-0">
-          <Code2 size={18} className="text-indigo-400 shrink-0" />
+          <Code2 size={16} className="text-indigo-400 shrink-0" />
           <span className="font-semibold text-white truncate">{workspace.display_name}</span>
-          <span className="text-xs text-slate-500 truncate">{workspace.resolved_path ?? workspace.local_path}</span>
+          <span className="text-xs text-slate-500 truncate hidden sm:inline">
+            {workspace.resolved_path ?? workspace.local_path}
+          </span>
         </div>
         <button
           onClick={onClose}
-          className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+          className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
           aria-label="Close"
         >
-          <X size={20} />
+          <X size={18} />
         </button>
       </div>
 
-      {/* Body */}
       <div className="flex-1 min-h-0 flex">
-        {/* File explorer */}
-        <div className="w-72 shrink-0 border-r border-white/10 bg-[#0c1120] flex flex-col">
-          <div className="flex items-center gap-1 px-2 py-1.5 text-xs text-slate-400 border-b border-white/5 overflow-x-auto whitespace-nowrap custom-scrollbar">
-            {breadcrumbs.map((b, i) => (
-              <span key={i} className="flex items-center">
-                {i > 0 && <ChevronRight size={12} className="mx-0.5 text-slate-600" />}
-                <span className={i === breadcrumbs.length - 1 ? 'text-slate-200' : ''}>{b}</span>
-              </span>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5">
-            <button
-              onClick={() => loadDir(currentPath)}
-              className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded"
-              title="Refresh"
-            >
-              <RefreshCw size={15} className={loadingFiles ? 'animate-spin' : ''} />
-            </button>
-            <button
-              onClick={() => createNew('file')}
-              className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded"
-              title="New file"
-            >
-              <FilePlus size={15} />
-            </button>
-            <button
-              onClick={() => createNew('folder')}
-              className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded"
-              title="New folder"
-            >
-              <FolderPlus size={15} />
-            </button>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded"
-              title="Upload"
-            >
-              <Upload size={15} />
-            </button>
-            <input ref={fileInputRef} type="file" className="hidden" onChange={onUpload} />
-            {currentPath !== '.' && (
+        {/* Activity Bar */}
+        <div className="w-12 shrink-0 bg-[#0b0f1a] border-r border-white/10 flex flex-col items-center py-2 gap-1">
+          {ACTIVITY.map((a) => {
+            const Icon = a.icon;
+            const isActive = activeView === a.id;
+            return (
               <button
-                onClick={() => {
-                  const parent = currentPath.includes('/')
-                    ? currentPath.slice(0, currentPath.lastIndexOf('/'))
-                    : '.';
-                  loadDir(parent);
-                }}
-                className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded ml-auto"
-                title="Up one level"
+                key={a.id}
+                title={a.label}
+                onClick={() => setActiveView(a.id)}
+                className={cn(
+                  'relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors',
+                  isActive ? 'text-white bg-white/10' : 'text-slate-500 hover:text-slate-200',
+                )}
               >
-                <ChevronUp size={15} />
+                {isActive && <span className="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-indigo-400" />}
+                <Icon size={20} />
               </button>
-            )}
-          </div>
+            );
+          })}
+        </div>
 
-          <div className="flex-1 overflow-y-auto custom-scrollbar py-1">
-            {loadingFiles && entries.length === 0 ? (
-              <div className="flex items-center justify-center py-8 text-slate-500 text-sm">
-                <Loader2 size={16} className="animate-spin mr-2" /> Loading…
+        {/* Primary Side Bar (switches by view) */}
+        <div className="w-80 shrink-0 border-r border-white/10 bg-[#0c1120] flex flex-col min-h-0">
+          {activeView === 'explorer' && (
+            <>
+              <div className="flex items-center gap-1 px-2 py-1.5 text-xs text-slate-400 border-b border-white/5 overflow-x-auto whitespace-nowrap custom-scrollbar">
+                {breadcrumbs.map((b, i) => (
+                  <span key={i} className="flex items-center">
+                    {i > 0 && <ChevronRight size={12} className="mx-0.5 text-slate-600" />}
+                    <span className={i === breadcrumbs.length - 1 ? 'text-slate-200' : ''}>{b}</span>
+                  </span>
+                ))}
               </div>
-            ) : entries.length === 0 ? (
-              <div className="px-3 py-8 text-center text-slate-600 text-xs">Empty folder</div>
-            ) : (
-              entries.map((entry) => (
-                <div
-                  key={entry.path}
-                  className={cn(
-                    'group flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-white/5',
-                    selectedPath === entry.path && 'bg-indigo-500/15',
-                  )}
-                  onClick={() => openFile(entry)}
-                >
-                  {entry.is_dir ? (
-                    <Folder size={15} className="text-amber-400/80 shrink-0" />
-                  ) : (
-                    <FileIcon size={15} className="text-slate-400 shrink-0" />
-                  )}
-                  <span className="truncate flex-1">{entry.name}</span>
-                  {!entry.is_dir && entry.size != null && (
-                    <span className="text-[10px] text-slate-600">{formatBytes(entry.size)}</span>
-                  )}
+              <div className="flex items-center gap-1 px-2 py-1.5 border-b border-white/5">
+                <button onClick={() => loadDir(currentPath)} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded" title="Refresh">
+                  <RefreshCw size={15} className={loadingFiles ? 'animate-spin' : ''} />
+                </button>
+                <button onClick={() => createNew('file')} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded" title="New file">
+                  <FilePlus size={15} />
+                </button>
+                <button onClick={() => createNew('folder')} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded" title="New folder">
+                  <FolderPlus size={15} />
+                </button>
+                <button onClick={() => fileInputRef.current?.click()} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded" title="Upload">
+                  <Upload size={15} />
+                </button>
+                <input ref={fileInputRef} type="file" className="hidden" onChange={onUpload} />
+                {currentPath !== '.' && (
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteEntry(entry);
+                    onClick={() => {
+                      const parent = currentPath.includes('/')
+                        ? currentPath.slice(0, currentPath.lastIndexOf('/'))
+                        : '.';
+                      loadDir(parent);
                     }}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-400 rounded"
-                    title="Delete"
+                    className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded ml-auto"
+                    title="Up one level"
                   >
-                    <Trash2 size={13} />
+                    <ChevronUp size={15} />
+                  </button>
+                )}
+              </div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar py-1">
+                {loadingFiles && entries.length === 0 ? (
+                  <div className="flex items-center justify-center py-8 text-slate-500 text-sm">
+                    <Loader2 size={16} className="animate-spin mr-2" /> Loading…
+                  </div>
+                ) : entries.length === 0 ? (
+                  <div className="px-3 py-8 text-center text-slate-600 text-xs">Empty folder</div>
+                ) : (
+                  entries.map((entry) => (
+                    <div
+                      key={entry.path}
+                      className={cn(
+                        'group flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-white/5',
+                        selectedPath === entry.path && 'bg-indigo-500/15',
+                      )}
+                      onClick={() => openFile(entry)}
+                    >
+                      {entry.is_dir ? (
+                        <Folder size={15} className="text-amber-400/80 shrink-0" />
+                      ) : (
+                        <FileIcon size={15} className="text-slate-400 shrink-0" />
+                      )}
+                      <span className="truncate flex-1">{entry.name}</span>
+                      {!entry.is_dir && entry.size != null && (
+                        <span className="text-[10px] text-slate-600">{formatBytes(entry.size)}</span>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteEntry(entry);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-red-400 rounded"
+                        title="Delete"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+
+          {activeView === 'git' && (
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
+              <div className="text-[11px] uppercase tracking-wide text-slate-500">Source Control</div>
+              {!hasGit && (
+                <div className="flex items-start gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded p-2">
+                  <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                  This workspace has no git capability configured.
+                </div>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">
+                  {gitStatus?.branch ? `Branch: ${gitStatus.branch}` : 'Not a git repo'}
+                </span>
+                <button onClick={refreshGit} disabled={gitBusy || !hasGit} className="p-1 text-slate-400 hover:text-white disabled:opacity-30" title="Refresh">
+                  <RefreshCw size={14} className={gitBusy ? 'animate-spin' : ''} />
+                </button>
+              </div>
+              {(gitStatus?.porcelain?.length ?? 0) > 0 && (
+                <div className="text-xs font-mono bg-black/40 rounded p-2 max-h-40 overflow-y-auto custom-scrollbar">
+                  {gitStatus?.porcelain?.map((line: string, i: number) => (
+                    <div key={i} className="text-slate-300 whitespace-pre-wrap">{line}</div>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-1.5">
+                <button onClick={gitDiffView} disabled={gitBusy || !hasGit} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30">
+                  <GitPullRequest size={13} /> Diff
+                </button>
+                <button onClick={gitFetch} disabled={gitBusy || !hasGit} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30">
+                  <Terminal size={13} /> Fetch
+                </button>
+                <button onClick={gitCommit} disabled={gitBusy || !hasGit} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30">
+                  <GitCommit size={13} /> Commit
+                </button>
+                <button onClick={gitPush} disabled={gitBusy || !hasGit} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30">
+                  <UploadCloud size={13} /> Push
+                </button>
+              </div>
+              <input
+                value={commitMsg}
+                onChange={(e) => setCommitMsg(e.target.value)}
+                placeholder="Commit message…"
+                disabled={!hasGit}
+                className="w-full px-2 py-1.5 text-xs rounded bg-black/40 border border-white/10 focus:border-indigo-500 outline-none disabled:opacity-40"
+              />
+              {gitDiff && (
+                <pre className="text-[11px] font-mono bg-black/40 rounded p-2 max-h-48 overflow-y-auto custom-scrollbar whitespace-pre-wrap text-slate-300">
+                  {gitDiff}
+                </pre>
+              )}
+              {gitLog.length > 0 && (
+                <div>
+                  <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Recent commits</div>
+                  <div className="flex flex-col gap-1">
+                    {gitLog.map((c, i) => (
+                      <div key={i} className="text-[11px] font-mono text-slate-400 truncate" title={c.message}>
+                        <span className="text-indigo-400">{String(c.commit || '').slice(0, 7)}</span> {c.message}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeView === 'tools' && (
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
+              <div className="text-[11px] uppercase tracking-wide text-slate-500">Tools</div>
+              <button onClick={runLint} disabled={toolBusy} className="flex items-center justify-center gap-1.5 py-2 text-sm rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40">
+                {toolBusy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+                Lint {selectedPath ? 'file' : 'workspace'}
+              </button>
+              <button onClick={syncNextcloud} disabled={toolBusy || !workspace.nextcloud_path} className="flex items-center justify-center gap-1.5 py-2 text-sm rounded bg-white/5 hover:bg-white/10 disabled:opacity-40" title={workspace.nextcloud_path ? `→ ${workspace.nextcloud_path}` : 'No NextCloud path'}>
+                <CloudUpload size={14} /> Sync to NextCloud
+              </button>
+              {toolOutput && (
+                <pre className="text-[11px] font-mono bg-black/40 rounded p-2 max-h-[60vh] overflow-y-auto custom-scrollbar whitespace-pre-wrap text-slate-300">
+                  {toolOutput}
+                </pre>
+              )}
+            </div>
+          )}
+
+          {activeView === 'chat' && (
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="px-3 py-2 border-b border-white/5 flex items-center gap-2">
+                <Bot size={15} className="text-indigo-400" />
+                <span className="text-xs font-semibold text-slate-200">Raven Chat</span>
+                <span className="text-[10px] text-slate-500">tasks run in this workspace</span>
+              </div>
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+                {missionsLoading ? (
+                  <div className="flex items-center justify-center py-8 text-slate-500 text-sm">
+                    <Loader2 size={16} className="animate-spin mr-2" /> Loading…
+                  </div>
+                ) : missions.length === 0 ? (
+                  <div className="px-3 py-8 text-center text-slate-600 text-xs">
+                    No missions yet. Describe a task below to dispatch Raven.
+                  </div>
+                ) : (
+                  missions.map((m) => (
+                    <div key={m.id} className={cn('rounded border border-white/10 p-2 text-xs', m.id === statusMission?.id && 'border-indigo-500/40 bg-indigo-500/5')}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="font-semibold text-slate-200">#{m.id}</span>
+                        <span className="text-[10px] uppercase text-slate-500">{m.status}</span>
+                      </div>
+                      <div className="text-slate-400 line-clamp-2">{m.proposed_mission}</div>
+                      {m.last_llm_reply && (
+                        <div className="mt-1.5 text-[11px] text-slate-300 bg-black/30 rounded p-1.5 max-h-24 overflow-y-auto custom-scrollbar whitespace-pre-wrap">
+                          {m.last_llm_reply.slice(0, 400)}
+                          {m.last_llm_reply.length > 400 && '…'}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="border-t border-white/10 p-2 space-y-2">
+                <div className="flex gap-2">
+                  <textarea
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        void sendChat();
+                      }
+                    }}
+                    placeholder="Describe a task for Raven to run in this workspace…  (⌘/Ctrl+Enter to send)"
+                    rows={2}
+                    className="flex-1 bg-black/50 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none resize-none"
+                  />
+                  <button
+                    onClick={sendChat}
+                    disabled={chatBusy || !chatInput.trim()}
+                    className="px-3 self-stretch flex items-center justify-center rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white"
+                    title="Dispatch Raven mission"
+                  >
+                    {chatBusy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
                   </button>
                 </div>
-              ))
-            )}
-          </div>
+                {missions.length > 0 && (
+                  <div className="flex gap-2">
+                    <input
+                      value={refineInput}
+                      onChange={(e) => setRefineInput(e.target.value)}
+                      placeholder={`Refine last mission #${missions[0].id}…`}
+                      className="flex-1 bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none"
+                    />
+                    <button
+                      onClick={refineLastMission}
+                      disabled={refineBusy || !refineInput.trim()}
+                      className="px-3 rounded-lg bg-white/10 hover:bg-white/20 disabled:opacity-40 text-xs text-slate-200"
+                    >
+                      Refine
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Editor */}
@@ -514,264 +714,36 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
               )}
             </div>
             <div className="flex items-center gap-1.5">
-              <button
-                onClick={downloadFile}
-                disabled={!selectedPath}
-                className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30"
-                title="Download"
-              >
+              <button onClick={downloadFile} disabled={!selectedPath} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30" title="Download">
                 <Download size={15} />
               </button>
-              <button
-                onClick={saveFile}
-                disabled={!selectedPath || !dirty || saving}
-                className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40"
-                title="Save (Ctrl+S)"
-              >
+              <button onClick={saveFile} disabled={!selectedPath || !dirty || saving} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40" title="Save (Ctrl+S)">
                 {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
                 Save
               </button>
             </div>
           </div>
-
           <div className="flex-1 min-h-0">
             {selectedPath ? (
-              <MonacoEditor
-                value={fileContent}
-                onChange={(v) => {
-                  setFileContent(v ?? '');
-                  if (!dirty) setDirty(true);
-                }}
-                language={language}
-                height="100%"
-              />
+              <MonacoEditor value={fileContent} onChange={(v) => { setFileContent(v ?? ''); if (!dirty) setDirty(true); }} language={language} height="100%" />
             ) : (
               <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
                 <FolderOpen size={42} />
-                <p className="text-sm">Select a file from the explorer to edit</p>
+                <p className="text-sm">Select a file from the Explorer to edit</p>
               </div>
             )}
           </div>
         </div>
+      </div>
 
-        {/* Side: Git + Tools */}
-        <div className="w-80 shrink-0 border-l border-white/10 bg-[#0c1120] flex flex-col">
-          <div className="flex border-b border-white/10">
-            <button
-              onClick={() => setSideTab('git')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium',
-                sideTab === 'git' ? 'text-white border-b-2 border-indigo-500 bg-white/5' : 'text-slate-400',
-              )}
-            >
-              <GitBranch size={14} /> Git
-            </button>
-            <button
-              onClick={() => setSideTab('tools')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium',
-                sideTab === 'tools' ? 'text-white border-b-2 border-indigo-500 bg-white/5' : 'text-slate-400',
-              )}
-            >
-              <Wrench size={14} /> Tools
-            </button>
-            <button
-              onClick={() => setSideTab('missions')}
-              className={cn(
-                'flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium',
-                sideTab === 'missions' ? 'text-white border-b-2 border-indigo-500 bg-white/5' : 'text-slate-400',
-              )}
-            >
-              <Terminal size={14} /> Missions
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-3">
-            {sideTab === 'git' && (
-              <div className="flex flex-col gap-3">
-                {!hasGit && (
-                  <div className="flex items-start gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded p-2">
-                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                    This workspace has no git capability configured.
-                  </div>
-                )}
-
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-400">
-                    {gitStatus?.branch ? `Branch: ${gitStatus.branch}` : 'Not a git repo'}
-                  </span>
-                  <button
-                    onClick={refreshGit}
-                    disabled={gitBusy || !hasGit}
-                    className="p-1 text-slate-400 hover:text-white disabled:opacity-30"
-                    title="Refresh git"
-                  >
-                    <RefreshCw size={14} className={gitBusy ? 'animate-spin' : ''} />
-                  </button>
-                </div>
-
-                {(gitStatus?.porcelain?.length ?? 0) > 0 && (
-                  <div className="text-xs font-mono bg-black/40 rounded p-2 max-h-40 overflow-y-auto custom-scrollbar">
-                    {gitStatus?.porcelain?.map((line: string, i: number) => (
-                      <div key={i} className="text-slate-300 whitespace-pre-wrap">{line}</div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    onClick={gitDiffView}
-                    disabled={gitBusy || !hasGit}
-                    className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30"
-                  >
-                    <GitPullRequest size={13} /> Diff
-                  </button>
-                  <button
-                    onClick={gitFetch}
-                    disabled={gitBusy || !hasGit}
-                    className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30"
-                  >
-                    <Terminal size={13} /> Fetch
-                  </button>
-                  <button
-                    onClick={gitCommit}
-                    disabled={gitBusy || !hasGit}
-                    className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30"
-                  >
-                    <GitCommit size={13} /> Commit
-                  </button>
-                  <button
-                    onClick={gitPush}
-                    disabled={gitBusy || !hasGit}
-                    className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30"
-                  >
-                    <UploadCloud size={13} /> Push
-                  </button>
-                </div>
-
-                <input
-                  value={commitMsg}
-                  onChange={(e) => setCommitMsg(e.target.value)}
-                  placeholder="Commit message…"
-                  disabled={!hasGit}
-                  className="w-full px-2 py-1.5 text-xs rounded bg-black/40 border border-white/10 focus:border-indigo-500 outline-none disabled:opacity-40"
-                />
-
-                {gitDiff && (
-                  <pre className="text-[11px] font-mono bg-black/40 rounded p-2 max-h-48 overflow-y-auto custom-scrollbar whitespace-pre-wrap text-slate-300">
-                    {gitDiff}
-                  </pre>
-                )}
-
-                {gitLog.length > 0 && (
-                  <div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Recent commits</div>
-                    <div className="flex flex-col gap-1">
-                      {gitLog.map((c, i) => (
-                        <div key={i} className="text-[11px] font-mono text-slate-400 truncate" title={c.message}>
-                          <span className="text-indigo-400">{String(c.commit || '').slice(0, 7)}</span>{' '}
-                          {c.message}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {sideTab === 'tools' && (
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={runLint}
-                  disabled={toolBusy}
-                  className="flex items-center justify-center gap-1.5 py-2 text-sm rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40"
-                >
-                  {toolBusy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-                  Lint {selectedPath ? 'file' : 'workspace'}
-                </button>
-
-                <button
-                  onClick={syncNextcloud}
-                  disabled={toolBusy || !workspace.nextcloud_path}
-                  className="flex items-center justify-center gap-1.5 py-2 text-sm rounded bg-white/5 hover:bg-white/10 disabled:opacity-40"
-                  title={workspace.nextcloud_path ? `→ ${workspace.nextcloud_path}` : 'No NextCloud path'}
-                >
-                  <CloudUpload size={14} /> Sync to NextCloud
-                </button>
-
-                {toolOutput && (
-                  <pre className="text-[11px] font-mono bg-black/40 rounded p-2 max-h-[60vh] overflow-y-auto custom-scrollbar whitespace-pre-wrap text-slate-300">
-                    {toolOutput}
-                  </pre>
-                )}
-              </div>
-            )}
-
-            {sideTab === 'missions' && (
-              <div className="flex flex-col gap-3 h-full">
-                {missionsLoading ? (
-                  <div className="flex items-center justify-center py-8 text-slate-500 text-sm">
-                    <Loader2 size={16} className="animate-spin mr-2" /> Loading…
-                  </div>
-                ) : missions.length === 0 ? (
-                  <div className="px-3 py-8 text-center text-slate-600 text-xs">No missions for this workspace</div>
-                ) : (
-                  <>
-                    <div className="flex flex-col gap-2">
-                      {missions.map((m, i) => (
-                        <div
-                          key={m.id}
-                          className={cn(
-                            'rounded border border-white/10 p-2 text-xs',
-                            i === 0 && 'border-indigo-500/40 bg-indigo-500/5',
-                          )}
-                        >
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="font-semibold text-slate-200">#{m.id}</span>
-                            <span className="text-[10px] uppercase text-slate-500">{m.status}</span>
-                          </div>
-                          <div className="text-slate-400 line-clamp-2">{m.proposed_mission}</div>
-                          {i === 0 && m.last_llm_reply && (
-                            <div className="mt-2">
-                              <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">
-                                Last LLM reply
-                              </div>
-                              <div className="text-[11px] text-slate-300 bg-black/30 rounded p-2 max-h-40 overflow-y-auto custom-scrollbar whitespace-pre-wrap line-clamp-none">
-                                {m.last_llm_reply.slice(0, 600)}
-                                {m.last_llm_reply.length > 600 && '…'}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="mt-auto pt-2 border-t border-white/10">
-                      <div className="text-[11px] text-slate-500 mb-1">
-                        Refine last mission #{missions[0].id}
-                      </div>
-                      <textarea
-                        value={refineInput}
-                        onChange={(e) => setRefineInput(e.target.value)}
-                        placeholder="Describe changes for the agent to apply…"
-                        rows={3}
-                        className="w-full px-2 py-1.5 text-xs rounded bg-black/40 border border-white/10 focus:border-indigo-500 outline-none resize-none"
-                      />
-                      <button
-                        onClick={refineLastMission}
-                        disabled={refineBusy}
-                        className="mt-1.5 w-full flex items-center justify-center gap-1.5 py-2 text-sm rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40"
-                      >
-                        {refineBusy ? <Loader2 size={14} className="animate-spin" /> : <Terminal size={14} />}
-                        Send refinement
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Status bar */}
+      <div className="h-7 shrink-0 bg-[#0d1222] border-t border-white/10 flex items-center gap-4 px-3 text-[11px] text-slate-400">
+        <span className="flex items-center gap-1">
+          <GitBranch size={12} />
+          {activeView === 'git' && gitStatus?.branch ? gitStatus.branch : (hasGit ? (gitStatus?.branch || 'git') : 'no git')}
+        </span>
+        <span className="truncate max-w-[40%]">{selectedPath ? `📄 ${selectedPath}` : 'No file open'}</span>
+        <span className="ml-auto">{workspace.display_name}</span>
       </div>
     </div>
   );

@@ -876,6 +876,11 @@ export const api = {
     return resp.data;
   },
 
+  async createWorkspaceMission(workspaceId: string, query: string, priority = 3): Promise<{ status: string; mission: RavenMission }> {
+    const resp = await apiClient.post('/api/raven/missions', { query, priority, workspace_id: workspaceId });
+    return resp.data;
+  },
+
   async killRavenMission(id: number): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post(`/api/raven/missions/${id}/kill`);
     return resp.data;
