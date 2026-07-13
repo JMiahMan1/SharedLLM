@@ -6,7 +6,7 @@ const UI = process.env.UI_URL || 'http://192.168.2.205:8080';
 const USER = process.env.E2E_USER || 'default';
 const PASS = process.env.E2E_PASS || 'changeme';
 
-type Captured = { status: number; ok: boolean; body: any };
+type Captured = { status: number; ok: boolean; body: Record<string, unknown> | null };
 const calls: Record<string, Captured> = {};
 
 async function login(page: Page) {
@@ -37,7 +37,7 @@ function captureResponses(page: Page) {
     const url = response.url();
     const path = url.split('?')[0];
     if (path.includes('/api/communication/calendar/events') || path.includes('/api/calendar/settings')) {
-      let body: any = null;
+      let body: Record<string, unknown> | null = null;
       try { body = await response.json(); } catch { /* non-json */ }
       calls[path] = { status: response.status(), ok: response.ok(), body };
     }
