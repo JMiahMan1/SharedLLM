@@ -410,6 +410,11 @@ def _normalize_tool(obj: dict) -> dict | None:
     # OpenAI-style nested function call (fire whenever a 'function' key is present,
     # regardless of the surrounding 'type')
     func = obj.get("function")
+    if isinstance(func, list):
+        # Some clients emit "function": [...] (the tool_calls array shape); take
+        # the first element so we don't later call .get() on a list and crash
+        # with "'list' object has no attribute 'get'".
+        func = func[0] if func and isinstance(func[0], dict) else None
     if isinstance(func, dict):
         name = func.get("name") or func.get("action")
         args = func.get("arguments")
@@ -2018,6 +2023,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             return f"SYSTEM ERROR: Inference failed after multiple retries. Detail: {e}. Please check the LLM provider status."
 
         tool_data = extract_action_json(ans)
+
+        # ROBUSTNESS: extract_action_json is expected to return a dict or None, but
+        # guard against a non-dict (e.g. a bare JSON array of tool calls) so we fall
+        # through to the "no valid tool call" nudge instead of crashing on
+        # tool_data.get(...) with "'list' object has no attribute 'get'".
+        if not isinstance(tool_data, dict):
+            tool_data = None
 
         # Normalize alternative schemas: { "name": "...", "parameters": {...} } → { "action": "...", "payload": {...} }
         if tool_data:
