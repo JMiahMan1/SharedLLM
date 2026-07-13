@@ -80,6 +80,8 @@ jobs:
               - 'services/execution/**'
               - 'services/common/**'
               - 'services/config.py'
+              - 'services/workspace_sandbox.py'
+              - '.github/workflows/build-images.yml'
             storage:
               - 'services/storage/**'
               - 'services/common/**'
@@ -96,6 +98,8 @@ jobs:
               - 'services/workspace_runtime/**'
               - 'services/common/**'
               - 'services/config.py'
+              - 'services/workspace_sandbox.py'
+              - '.github/workflows/build-images.yml'
             control_plane:
               - 'services/control_plane/**'
               - 'services/common/**'
