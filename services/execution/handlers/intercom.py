@@ -4,11 +4,13 @@ Manages intercom sessions, broadcasts, and announcements.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import aiohttp
 
 from services.execution.schemas import ExecutionResult, UserContext
+from services.shared.rag_client import push_conversation
 
 log = logging.getLogger("execution/intercom")
 
@@ -121,6 +123,12 @@ async def handle_intercom_broadcast(req, user_context: UserContext) -> Execution
             "caller_user_id": user_context.user,
         }
         result = await _call_identity("POST", "/api/intercom/broadcast", payload)
+        # Best-effort: persist the spoken message into RAG conversational memory.
+        msg = getattr(req, "message", "") or ""
+        if msg:
+            asyncio.ensure_future(
+                push_conversation(user_context.user, msg, room_id="broadcast", user_id=user_context.user)
+            )
         return ExecutionResult(
             status="SUCCESS",
             message=f"Broadcast sent to {result.get('targets_count', 0)} devices",
@@ -144,6 +152,12 @@ async def handle_intercom_announcement(req, user_context: UserContext) -> Execut
             "caller_user_id": user_context.user,
         }
         result = await _call_identity("POST", "/api/intercom/announce", payload)
+        # Best-effort: persist the announcement into RAG conversational memory.
+        msg = getattr(req, "message", "") or ""
+        if msg:
+            asyncio.ensure_future(
+                push_conversation(user_context.user, msg, room_id="announcement", user_id=user_context.user)
+            )
         return ExecutionResult(
             status="SUCCESS",
             message=f"Announcement sent to {result.get('targets_count', 0)} devices",
