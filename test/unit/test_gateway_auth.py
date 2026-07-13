@@ -14,57 +14,65 @@ os.environ["IDENTITY_SVC_URL"] = "http://identity"
 os.environ["REDIS_URL"] = "redis://localhost:6379/0"
 os.environ["RAG_SVC"] = "http://localhost:8004"
 
-import json
+import json  # noqa: E402
 
-import httpx
-import respx
-from fastapi.testclient import TestClient
+from fastapi.testclient import TestClient  # noqa: E402
 
-from services.gateway.config import IDENTITY_SVC
-from services.gateway.main import STORAGE_SVC, app
+from services.gateway.main import app  # noqa: E402
 
 client = TestClient(app)
 
 # Use a mutable object to capture the request body across respx callbacks
 _capture = {"body": None}
 
-@respx.mock
-def test_gateway_extracts_bearer_token():
+def test_gateway_extracts_bearer_token(monkeypatch):
     """
     Test that the Gateway extracts the Bearer token from the Authorization header
     and passes it to the Identity service's /api/resolve endpoint.
     """
-    # Mock identity settings
-    respx.get(f"{IDENTITY_SVC}/api/settings").mock(
-        return_value=httpx.Response(200, json=[
-            {"key": "active_llm_provider", "value": "ollama"},
-            {"key": "assistant_model", "value": "qwen3:8b"},
-            {"key": "coding_model", "value": "qwen3:8b"},
-            {"key": "llm_local_url", "value": "http://localhost:11434"},
-            {"key": "embedding_model", "value": "nomic-ai/nomic-embed-text-v1.5"},
-            {"key": "redis_url", "value": "redis://localhost:6379/0"},
-            {"key": "fast_path_threshold", "value": "0.8"},
-        ])
-    )
+    from services.gateway import main
+    class MockIdentityResp:
+        def __init__(self, payload, status=200):
+            self._payload = payload
+            self.status = status
+        async def json(self):
+            return self._payload
+        async def text(self):
+            return json.dumps(self._payload)
 
-    # Mock identity resolve - capture the call
-    def capture_resolve(request):
-        _capture["body"] = json.loads(request.content)
-        return httpx.Response(200, json={
-            "user": "testuser",
-            "ha_url": "http://ha",
-            "ha_token": "token",
-            "nextcloud_url": "http://nc",
-            "nextcloud_user": "ncuser",
-            "nextcloud_pass": "ncpass"
-        })
+    class MockAsyncClient:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
 
-    respx.post(f"{IDENTITY_SVC}/api/resolve").mock(side_effect=capture_resolve)
+        async def get(self, url, **kwargs):
+            if "/api/settings" in url:
+                return MockIdentityResp([
+                    {"key": "active_llm_provider", "value": "ollama"},
+                    {"key": "assistant_model", "value": "qwen3:8b"},
+                    {"key": "coding_model", "value": "qwen3:8b"},
+                    {"key": "llm_local_url", "value": "http://localhost:11434"},
+                    {"key": "embedding_model", "value": "nomic-ai/nomic-embed-text-v1.5"},
+                    {"key": "redis_url", "value": "redis://localhost:6379/0"},
+                    {"key": "fast_path_threshold", "value": "0.8"},
+                ])
+            return MockIdentityResp({}, 404)
 
-    # Mock storage index (fast path for "index" query)
-    respx.post(f"{STORAGE_SVC}/index/full").mock(
-        return_value=httpx.Response(200, json={"message": "Indexing started"})
-    )
+        async def post(self, url, json=None, headers=None, **kwargs):
+            if "/api/resolve" in url:
+                _capture["body"] = json
+                return MockIdentityResp({
+                    "user": "testuser",
+                    "ha_url": "http://ha",
+                    "ha_token": "token",
+                    "nextcloud_url": "http://nc",
+                    "nextcloud_user": "ncuser",
+                    "nextcloud_pass": "ncpass"
+                })
+            if "/index/full" in url:
+                return MockIdentityResp({"message": "Indexing started"})
+            return MockIdentityResp({}, 404)
+
+    monkeypatch.setattr(main, "get_http_client", lambda: MockAsyncClient())
 
     # Query "index" triggers index_storage intent (confidence=1.0, fast path)
     resp = client.post(

@@ -360,7 +360,7 @@ async def get_resident_model() -> str | None:
         async with shared_http_client() as client:
             resp = await client.get(f"{ollama_url}/api/ps", timeout=aiohttp.ClientTimeout(total=1.0))
             if resp.status == 200:
-                models = await resp.json().get("models", [])
+                models = (await resp.json()).get("models", [])
                 if models:
                     return models[0]["name"]
     except Exception:
@@ -2811,7 +2811,7 @@ async def chat_handler(request: Request, background_tasks=None):
             fast_timeout=aiohttp.ClientTimeout(total=120.0) if intent == "play_media" else aiohttp.ClientTimeout(total=30.0)
             async with shared_http_client() as client:
                 exec_resp = await client.post(f"{svc_base}{endpoint}", json=exec_payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=fast_timeout)
-                ans = await exec_resp.json().get("message", "Action completed.")
+                ans = (await exec_resp.json()).get("message", "Action completed.")
 
             if resolved_entity and intent in ["play_media", "pause_media", "media_transport", "turn_on", "turn_off"]:
                 entity_map = {e.get("entity_id"): e for e in media_entities or []}
@@ -4373,7 +4373,7 @@ async def list_models(request: Request):
         async with borrow_http_client() as client:
             resp = await client.get(f"{provider.base_url}/api/tags")
             if resp.status == 200:
-                tags = await resp.json().get("models", [])
+                tags = (await resp.json()).get("models", [])
                 return {"status": "SUCCESS", "models": [m["name"] for m in tags]}
 
     # For OpenRouter or others, we might return the config models
@@ -4483,7 +4483,7 @@ async def list_openai_models(request: Request):
             async with borrow_http_client() as client:
                 resp = await client.get(f"{provider.base_url}/api/tags")
                 if resp.status == 200:
-                    tags = await resp.json().get("models", [])
+                    tags = (await resp.json()).get("models", [])
                     model_names = [m["name"] for m in tags]
         except Exception as e:
             log.error(f"Error querying Ollama models for OpenAI list: {e}")
