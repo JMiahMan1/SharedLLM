@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Activity, PowerOff, ShieldAlert, Play, Clock, AlertTriangle, Square, Terminal, Volume2, Search, Cpu, RefreshCw, List } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -17,6 +17,12 @@ export default function RavenOpsPanel() {
   // 🔍 Detailed mission inspection & chat refinement state
   const [detailedMission, setDetailedMission] = useState<RavenMission | null>(null);
   const [refinePrompt, setRefinePrompt] = useState('');
+
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const refineMissionMutation = useMutation({
     mutationFn: ({ id, prompt }: { id: number; prompt: string }) => api.refineRavenMission(id, prompt),
@@ -922,7 +928,16 @@ The agent will use this correction alongside its investigation prompt.`}
                 <div>
                   <span className="text-slate-500 uppercase font-black text-[9px] block">Duration</span>
                   <span className="text-white font-semibold block mt-1">
-                    {detailedMission.duration != null ? `${Math.floor(detailedMission.duration / 60)}m ${detailedMission.duration % 60}s` : '—'}
+                    {(() => {
+                      const running = ['executing', 'running', 'scheduled'].includes(detailedMission.status);
+                      const secs = running && detailedMission.started_at
+                        ? Math.max(0, Math.floor((now - new Date(detailedMission.started_at).getTime()) / 1000))
+                        : (detailedMission.duration ?? null);
+                      return secs != null ? `${Math.floor(secs / 60)}m ${secs % 60}s` : '—';
+                    })()}
+                    {['executing', 'running', 'scheduled'].includes(detailedMission.status) && (
+                      <span className="ml-1 text-[9px] text-emerald-400 animate-pulse">live</span>
+                    )}
                   </span>
                 </div>
                 <div>
@@ -945,6 +960,16 @@ The agent will use this correction alongside its investigation prompt.`}
                     <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Final Result Summary</label>
                     <div className="bg-black/30 border border-white/5 p-3 rounded-lg text-xs text-emerald-300 max-h-24 overflow-y-auto">
                       {detailedMission.result}
+                    </div>
+                  </div>
+                )}
+
+                {detailedMission.last_llm_reply && (
+                  <div>
+                    <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Last LLM Reply</label>
+                    <div className="bg-black/30 border border-white/5 p-3 rounded-lg text-xs text-slate-300 max-h-40 overflow-y-auto whitespace-pre-wrap">
+                      {detailedMission.last_llm_reply.slice(0, 800)}
+                      {detailedMission.last_llm_reply.length > 800 && '…'}
                     </div>
                   </div>
                 )}

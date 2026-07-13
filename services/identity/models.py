@@ -122,6 +122,7 @@ class RavenMission(SQLModel, table=True):  # type: ignore
     result: str | None = None
     user_id: int | None = Field(default=None, foreign_key="user.id")
     workspace_id: str | None = Field(default=None)
+    last_llm_reply: str | None = Field(default=None)
 
 class UserWidget(SQLModel, table=True):  # type: ignore
     """Per-user widget customization settings for the Bento Dashboard."""

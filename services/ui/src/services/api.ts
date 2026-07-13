@@ -44,9 +44,15 @@ import type {
   EmbeddingsResponse,
   TagsResponse,
   ShowRequest,
-  WorkspaceFilesListResponse,
   WorkspaceFileReadResponse,
   WorkspaceFileWriteResponse,
+  WorkspaceFileListResponse,
+  GitStatusResponse,
+  GitDiffResponse,
+  GitCommitResponse,
+  GitPushResponse,
+  GitLogResponse,
+  StorageMirrorResponse,
   PytestRequest,
   PytestResponse,
   WorkflowWriteSyncCommitRequest,
@@ -1342,19 +1348,66 @@ export const api = {
     return resp.data;
   },
 
-  // Workspace files
-  async getWorkspaceFiles(workspaceId: string, path: string = ''): Promise<WorkspaceFilesListResponse> {
-    const resp = await apiClient.get('/api/workspaces/files/list', { params: { workspace_id: workspaceId, path } });
+  // Workspace files (POST-backed; backend routes are POST)
+  async listWorkspaceFiles(workspaceId: string, relative_path = '.', recursive = false, max_depth = 3): Promise<WorkspaceFileListResponse> {
+    const resp = await apiClient.post('/api/workspaces/files/list', { workspace_id: workspaceId, relative_path, recursive, max_depth });
     return resp.data;
   },
 
-  async readWorkspaceFile(workspaceId: string, path: string): Promise<WorkspaceFileReadResponse> {
-    const resp = await apiClient.get('/api/workspaces/files/read', { params: { workspace_id: workspaceId, path } });
+  async readWorkspaceFile(workspaceId: string, relative_path: string): Promise<WorkspaceFileReadResponse> {
+    const resp = await apiClient.post('/api/workspaces/files/read', { workspace_id: workspaceId, relative_path });
     return resp.data;
   },
 
-  async writeWorkspaceFile(workspaceId: string, path: string, content: string): Promise<WorkspaceFileWriteResponse> {
-    const resp = await apiClient.post('/api/workspaces/files/write', { workspace_id: workspaceId, path, content });
+  async writeWorkspaceFile(workspaceId: string, relative_path: string, content: string): Promise<{ status: string; message?: string }> {
+    const resp = await apiClient.post('/api/workspaces/files/write', { workspace_id: workspaceId, relative_path, content });
+    return resp.data;
+  },
+
+  async deleteWorkspaceFile(workspaceId: string, relative_path: string): Promise<{ status: string; message?: string }> {
+    const resp = await apiClient.post('/api/workspaces/files/delete', { workspace_id: workspaceId, relative_path });
+    return resp.data;
+  },
+
+  // Workspace git (tool panel)
+  async workspaceGitStatus(workspaceId: string): Promise<GitStatusResponse> {
+    const resp = await apiClient.post('/api/workspaces/git/status', { workspace_id: workspaceId });
+    return resp.data;
+  },
+  async workspaceGitDiff(workspaceId: string, ref = 'HEAD'): Promise<GitDiffResponse> {
+    const resp = await apiClient.post('/api/workspaces/git/diff', { workspace_id: workspaceId, ref });
+    return resp.data;
+  },
+  async workspaceGitAdd(workspaceId: string, pathspecs: string[] = []): Promise<GitStatusResponse> {
+    const resp = await apiClient.post('/api/workspaces/git/add', { workspace_id: workspaceId, pathspecs });
+    return resp.data;
+  },
+  async workspaceGitCommit(workspaceId: string, message: string, pathspecs: string[] = []): Promise<GitCommitResponse> {
+    const resp = await apiClient.post('/api/workspaces/git/commit', { workspace_id: workspaceId, message, pathspecs });
+    return resp.data;
+  },
+  async workspaceGitPush(workspaceId: string, remote?: string, branch?: string): Promise<GitPushResponse> {
+    const resp = await apiClient.post('/api/workspaces/git/push', { workspace_id: workspaceId, remote, branch });
+    return resp.data;
+  },
+  async workspaceGitLog(workspaceId: string, max_count = 20): Promise<GitLogResponse> {
+    const resp = await apiClient.post('/api/workspaces/git/log', { workspace_id: workspaceId, max_count });
+    return resp.data;
+  },
+  async workspaceGitFetch(workspaceId: string): Promise<GitPushResponse> {
+    const resp = await apiClient.post('/api/workspaces/git/fetch', { workspace_id: workspaceId });
+    return resp.data;
+  },
+
+  // Workspace -> NextCloud sync (mirror local_path -> nextcloud remote_path)
+  async syncWorkspaceNextcloud(payload: { remote_path: string; local_path: string; excludes?: string[] }): Promise<StorageMirrorResponse> {
+    const resp = await apiClient.post('/api/storage/mirror', payload);
+    return resp.data;
+  },
+
+  // Missions for a workspace (edit-last-mission / inspect)
+  async getWorkspaceMissions(workspaceId: string, limit = 50): Promise<RavenMission[]> {
+    const resp = await apiClient.get(`/api/workspaces/${encodeURIComponent(workspaceId)}/raven/missions?limit=${limit}`);
     return resp.data;
   },
 

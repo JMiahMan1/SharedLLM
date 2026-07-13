@@ -2995,10 +2995,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     if mission_id and full_audit_log:
         try:
             summarized_log = normalize_audit_log(full_audit_log)
+            last_llm_reply = None
+            for ev in reversed(full_audit_log):
+                if ev.get("type") == "reasoning":
+                    txt = (ev.get("data") or "").strip()
+                    if txt:
+                        last_llm_reply = txt[:4000]
+                        break
+            patch_body = {"output_log": json.dumps(summarized_log)}
+            if last_llm_reply is not None:
+                patch_body["last_llm_reply"] = last_llm_reply
             async with shared_http_client() as client:
                 await client.patch(
                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                    json={"output_log": json.dumps(summarized_log)},
+                    json=patch_body,
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=aiohttp.ClientTimeout(total=10.0),
                 )

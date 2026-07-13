@@ -4018,6 +4018,64 @@ async def git_pull_proxy(request: Request):
 async def git_revert_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/git/revert", request)
 
+@app.post("/api/workspaces/git/diff")
+async def git_diff_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/diff", request)
+
+@app.post("/api/workspaces/git/add")
+async def git_add_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/add", request)
+
+@app.post("/api/workspaces/git/commit")
+async def git_commit_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/commit", request)
+
+@app.post("/api/workspaces/git/push")
+async def git_push_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/push", request)
+
+@app.post("/api/workspaces/git/log")
+async def git_log_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/log", request)
+
+@app.post("/api/workspaces/git/fetch")
+async def git_fetch_workspace_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/git/fetch", request)
+
+@app.get("/api/workspaces/{workspace_id}/raven/missions")
+async def get_workspace_raven_missions_proxy(workspace_id: str, request: Request, limit: int = 50):
+    resp = await get_http_client().get(
+        f"{IDENTITY_SVC}/api/raven/missions?workspace_id={workspace_id}&limit={limit}",
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    return await _proxy_json_response(resp)
+
+@app.post("/api/storage/mirror")
+async def mirror_storage(request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("nextcloud_url") or not creds.get("nextcloud_user") or not creds.get("nextcloud_pass"):
+        raise HTTPException(status_code=400, detail="NextCloud credentials not configured for this user.")
+    body = await request.json()
+    payload = {
+        "provider": {
+            "kind": "nextcloud",
+            "settings": {
+                "url": creds["nextcloud_url"],
+                "username": creds["nextcloud_user"],
+                "password": creds["nextcloud_pass"],
+            },
+        },
+        "remote_path": body.get("remote_path"),
+        "local_path": body.get("local_path"),
+        "excludes": body.get("excludes", []),
+    }
+    resp = await get_http_client().post(
+        f"{STORAGE_SVC}/providers/mirror",
+        json=payload,
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    return await _proxy_json_response(resp)
+
 @app.post("/api/workspaces/tests/pytest")
 async def pytest_workspace_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/tests/pytest", request)
