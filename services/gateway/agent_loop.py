@@ -2239,6 +2239,25 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         try:
             action = action_name
             payload = tool_data.get("payload", tool_data)
+            # ROBUSTNESS: the model sometimes emits a tool call whose payload is
+            # null/missing or a JSON *string* (e.g. {"action": "WorkspaceShellRequest",
+            # "payload": null}). Assigning into ``payload`` later (user_context,
+            # workspace_id, ...) then raises
+            #   TypeError: 'NoneType' object does not support item assignment
+            # which aborts the whole step. Coerce to a dict so the tool still
+            # dispatches (the execution service will return a clean schema error
+            # rather than crashing the loop).
+            if not isinstance(payload, dict):
+                if isinstance(payload, str):
+                    try:
+                        _parsed = json.loads(payload)
+                        payload = _parsed if isinstance(_parsed, dict) else {"value": payload}
+                    except (json.JSONDecodeError, ValueError):
+                        payload = {"value": payload}
+                elif payload is None:
+                    payload = {}
+                else:
+                    payload = {"value": payload}
 
             action_map = {
                 "lightcontrolrequest": (EXECUTION_SVC, "/execute/light"),
