@@ -18,7 +18,7 @@ const MISSION_TEMPLATES = [
 // ─── User View ───────────────────────────────────────────────────────────────
 
 const JarvisLab = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'missions'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'missions'>('missions');
   const { user } = useAuth();
   const isAdmin = user?.is_admin ?? false;
   const navigate = useNavigate();

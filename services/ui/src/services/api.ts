@@ -884,6 +884,11 @@ export const api = {
     return resp.data;
   },
 
+  async refineRavenMission(id: number, prompt: string): Promise<{ status: string; message: string; mission_id: number }> {
+    const resp = await apiClient.post(`/api/raven/missions/${id}/refine`, { prompt });
+    return resp.data;
+  },
+
   async getMissionLogs(id: number | string): Promise<{ logs: string[] }> {
     const resp = await apiClient.get(`/api/raven/missions/${id}/logs`);
     return resp.data;

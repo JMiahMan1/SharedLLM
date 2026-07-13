@@ -210,7 +210,7 @@ export default function RavenLiveTrace({ isOpen, onClose, missionId }: RavenLive
           ref={scrollRef}
           className="flex-1 overflow-y-auto p-4 space-y-1.5 custom-scrollbar"
         >
-          {logs.map((log, i) => (
+          {logs.slice(-500).map((log, i) => (
             <div key={i} className={`whitespace-pre-wrap ${getLogColor(log.type)}`}>
               <span className="opacity-50 select-none mr-2 text-xs">[{new Date().toISOString().split('T')[1].slice(0, -1)}]</span>
               {renderLogData(log)}
