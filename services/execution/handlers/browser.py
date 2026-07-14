@@ -1,7 +1,6 @@
 # services/execution/handlers/browser.py
 import logging
 import os
-import re
 import sys
 import time
 from urllib.parse import urlencode
@@ -57,16 +56,19 @@ DEFAULT_SAFESAFERCH = 0
 
 async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
     """
-    Performs a web search via SearXNG HTML with Playwright fallback.
+    Performs a web search via the SearXNG JSON API (fast, structured path),
+    with a Playwright DOM fallback for the rare case the JSON endpoint is
+    unavailable. The instance is configured via the `searxng_url` Identity
+    setting (the search instance's base URL).
     """
     log.info(f"[browser/search] query='{req.query}' category='{req.category or DEFAULT_CATEGORY}'")
 
     try:
-        result = await _searxng_html_search(req)
+        result = await _searxng_json_search(req)
         if result:
             return result
     except Exception as e:
-        log.warning(f"[browser/search] SearXNG HTML API failed, falling back to Playwright: {e}")
+        log.warning(f"[browser/search] SearXNG JSON API failed, falling back to Playwright: {e}")
 
     try:
         return await _playwright_fallback(req)
@@ -75,39 +77,46 @@ async def handle_web_search(req: WebSearchRequest) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message=f"Web search failed: {e!s}", service="web_search")
 
 
-async def _searxng_html_search(req: WebSearchRequest) -> ExecutionResult | None:
-    """Primary path: SearXNG HTML response parsed with regex."""
+async def _searxng_json_search(req: WebSearchRequest) -> ExecutionResult | None:
+    """Primary path: SearXNG JSON API. Fast, structured, no HTML scraping."""
     searxng_url = await _get_searxng_url()
     params = {
         "q": req.query,
-        "format": "html",
+        "format": "json",
         "categories": req.category or DEFAULT_CATEGORY,
         "language": req.language or DEFAULT_LANGUAGE,
         "safesearch": req.safesearch if req.safesearch is not None else DEFAULT_SAFESAFERCH,
+        "pageno": req.pageno or 1,
     }
     if req.engines:
         params["engines"] = req.engines
+    if req.time_range:
+        params["time_range"] = req.time_range
 
     url = f"{searxng_url}/search?{urlencode(params)}"
-    log.info(f"[browser/search] SearXNG HTML search: {url}")
+    log.info(f"[browser/search] SearXNG JSON search: {url}")
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client, client.get(url) as resp:
-        resp.raise_for_status()
-        html = await resp.text()
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12.0)) as client, client.get(url) as resp:
+            resp.raise_for_status()
+            data = await resp.json()
+    except Exception as e:
+        # Surface to the Playwright fallback — the JSON endpoint being down or
+        # returning non-JSON is exactly the rare case it exists for.
+        raise
 
     results = []
-    link_pattern = r'class="result__title"[^>]*>.*?<a[^>]*href="([^"]+)"[^>]*>(.*?)</a>'
-    for match in re.finditer(link_pattern, html, re.DOTALL):
-        url = match.group(1)
-        title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
-        results.append({"title": title, "url": url})
-
-    if not results:
-        title_pattern = r'<a[^>]*href="(https?://[^"]+)"[^>]*class="result__title"[^>]*>(.*?)</a>'
-        for match in re.finditer(title_pattern, html, re.DOTALL):
-            url = match.group(1)
-            title = re.sub(r'<[^>]+>', '', match.group(2)).strip()
-            results.append({"title": title, "url": url})
+    for r in data.get("results", []):
+        engines = r.get("engines")
+        if isinstance(engines, list):
+            engines = ", ".join(engines)
+        results.append({
+            "title": r.get("title", ""),
+            "url": r.get("url", ""),
+            "snippet": r.get("content", ""),
+            "engine": engines or "",
+            "publishedDate": r.get("publishedDate") or r.get("pubdate") or "",
+        })
 
     if not results:
         return None
@@ -120,6 +129,7 @@ async def _searxng_html_search(req: WebSearchRequest) -> ExecutionResult | None:
         status="SUCCESS",
         message=f"Search results for '{req.query}':\n{summary}",
         service="web_search",
+        detail={"results": results, "formatted_content": summary, "source": "searxng_json"},
     )
 
 
