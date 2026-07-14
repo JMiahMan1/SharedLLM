@@ -23,6 +23,7 @@ import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { HealthStatus, LogEntry, Workspace, SearchResult } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { Capacitor } from '@capacitor/core';
 import { useRavenMissions } from '../hooks/useRavenMissions';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDebounce } from '../hooks/useDebounce';
@@ -261,6 +262,12 @@ const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const { user } = useAuth();
   const { trigger } = useHaptics();
+  const isMobile = Capacitor.isNativePlatform();
+  const isAdmin = user?.is_admin;
+  // On mobile, normal users get a streamlined dashboard: the full Live Service
+  // Status / Recent Activity / Workspaces sections are hidden (admins keep
+  // them). Workspaces are still reachable via the toggleable Workspaces widget.
+  const showFullSections = !isMobile || isAdmin;
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -504,7 +511,7 @@ const Dashboard = () => {
         </section>
       </SectionErrorBoundary>
 
-      {/* ── Live Service Status ── */}
+      {showFullSections && (
       <SectionErrorBoundary label="Service Status">
         <section>
           <div className="mb-5 flex items-center justify-between">
@@ -538,12 +545,13 @@ const Dashboard = () => {
               ))}
             </div>
           )}
-        </section>
+          </section>
       </SectionErrorBoundary>
+      )}
 
       {/* ── Logs + Workspaces + Settings + Raven ── */}
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
-        {/* Recent Activity */}
+        {showFullSections && (
         <SectionErrorBoundary label="Recent Activity">
           <section className="glass-panel p-6">
             <div className="mb-5 flex items-center justify-between">
@@ -584,10 +592,12 @@ const Dashboard = () => {
             </div>
           </section>
         </SectionErrorBoundary>
+        )}
 
         {/* Right column */}
         <div className="space-y-6">
           {/* Workspaces */}
+          {showFullSections && (
           <SectionErrorBoundary label="Workspaces">
             <section className="glass-panel p-6">
               <div className="mb-5 flex items-center gap-3">
@@ -613,6 +623,7 @@ const Dashboard = () => {
               </div>
             </section>
           </SectionErrorBoundary>
+          )}
 
           {/* Raven Status (admin only) */}
           {user?.is_admin && (
