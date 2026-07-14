@@ -22,9 +22,21 @@ import os
 import re
 from typing import Any
 
-from docker.errors import NotFound
+# docker is a runtime-only dependency (used for sandbox container execution),
+# not needed at import time. Importing it lazily keeps modules that import this
+# one (e.g. git_ops) importable in environments without the docker SDK installed
+# (e.g. CI unit-test runners).
+try:
+    from docker.errors import NotFound
 
-import docker
+    import docker
+except Exception:  # pragma: no cover - only hit when docker SDK is absent
+    docker = None
+
+    class NotFound(Exception):  # placeholder so `except NotFound` stays valid
+        """Stub used only when the docker SDK is not installed."""
+
+        pass
 
 log = logging.getLogger("workspace_sandbox")
 
@@ -141,6 +153,8 @@ def _slug(workspace_id: str) -> str:
 
 
 def _docker_client() -> Any:
+    if docker is None:
+        raise RuntimeError("docker-unavailable")
     return docker.from_env(timeout=5)  # type: ignore[attr-defined]
 
 
