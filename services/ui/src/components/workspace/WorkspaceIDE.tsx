@@ -48,6 +48,18 @@ interface WorkspaceIDEProps {
 
 type View = 'explorer' | 'git' | 'tools' | 'chat';
 
+// A single open editor tab. Text tabs cache their buffer so switching tabs
+// preserves edits; image tabs cache an object URL for preview.
+interface OpenTab {
+  path: string;
+  kind: 'text' | 'image';
+  content: string;
+  imageUrl: string | null;
+  dirty: boolean;
+  language: string;
+  baseContent: string;
+}
+
 function formatBytes(n?: number | null): string {
   if (n == null) return '';
   if (n < 1024) return `${n} B`;
@@ -81,18 +93,29 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
   const [entries, setEntries] = useState<WorkspaceFileEntry[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
 
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [fileContent, setFileContent] = useState('');
-  const [dirty, setDirty] = useState(false);
+  // Tabbed editors: many files can be open at once; `activeTab` is the focused path.
+  const [tabs, setTabs] = useState<OpenTab[]>([]);
+  const [activeTab, setActiveTab] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const [gitStatus, setGitStatus] = useState<GitStatusResponse | null>(null);
-  const [gitDiff, setGitDiff] = useState('');
   const [gitLog, setGitLog] = useState<GitLogEntry[]>([]);
   const [commitMsg, setCommitMsg] = useState('');
   const [gitBusy, setGitBusy] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [branchBusy, setBranchBusy] = useState(false);
+
+  // In-editor diff view (replaces the cramped side-panel <pre>).
+  const [showDiff, setShowDiff] = useState(false);
+  const [diffText, setDiffText] = useState('');
+
+  // Editor power features: VIM keybindings, validation/problems panel, format.
+  const [vimMode, setVimMode] = useState(false);
+  const [problems, setProblems] = useState<{ open: boolean; text: string; count: number }>({
+    open: false,
+    text: '',
+    count: 0,
+  });
 
   // Root-relative file path -> short git status letter (M/?/A/D/...). Used to
   // badge files with uncommitted changes in the explorer file chooser.
@@ -193,8 +216,6 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     })();
   }, [loadDir, refreshGit, refreshBranches]);
 
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
   const [imageModels, setImageModels] = useState<string[]>([]);
   const [sdModel, setSdModel] = useState('');
   const [sdPrompt, setSdPrompt] = useState('');
@@ -210,42 +231,6 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     return path.replace(/\/$/, '') + '/';
   }, []);
 
-  const loadPreview = useCallback(
-    async (relPath: string) => {
-      setPreviewLoading(true);
-      try {
-        const blob = await api.fetchWorkspaceFileRaw(workspace.id, relPath);
-        const url = URL.createObjectURL(blob);
-        setPreviewUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
-          return url;
-        });
-      } catch (e: unknown) {
-        toast.error(`Preview failed: ${apiErr(e)}`);
-      } finally {
-        setPreviewLoading(false);
-      }
-    },
-    [workspace.id],
-  );
-
-  const fileToBase64 = useCallback(
-    async (relPath: string): Promise<string> => {
-      const blob = await api.fetchWorkspaceFileRaw(workspace.id, relPath);
-      return await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = String(reader.result || '');
-          const comma = result.indexOf(',');
-          resolve(comma >= 0 ? result.slice(comma + 1) : result);
-        };
-        reader.onerror = () => reject(reader.error);
-        reader.readAsDataURL(blob);
-      });
-    },
-    [workspace.id],
-  );
-
   const loadImageModels = useCallback(async () => {
     try {
       const res = await api.listImageModels();
@@ -257,127 +242,198 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     }
   }, [sdModel]);
 
-  const runImageTask = useCallback(
-    async (mode: 'txt2img' | 'img2img' | 'upscale' | 'inpaint') => {
-      if (mode !== 'txt2img' && !selectedPath) {
-        toast.error('Select a source image first');
-        return;
-      }
-      if (!sdPrompt.trim() && mode !== 'upscale' && mode !== 'inpaint') {
-        toast.error('Enter a prompt');
-        return;
-      }
-      setSdBusy(true);
-      try {
-        let b64: string | null = null;
-        if (mode === 'txt2img') {
-          const res = await api.generateImage({ prompt: sdPrompt.trim(), model: sdModel || undefined });
-          b64 = res?.data?.[0]?.b64_json ?? null;
-        } else {
-          const src = await fileToBase64(selectedPath as string);
-          const prompt =
-            mode === 'upscale'
-              ? sdPrompt.trim() || 'upscale to 2x higher resolution, enhance fine details'
-              : mode === 'inpaint'
-                ? sdPrompt.trim() || 'inpaint and seamlessly improve the masked region'
-                : sdPrompt.trim();
-          const res = await api.editImage({ prompt, image: src, model: sdModel || undefined });
-          b64 = res?.data?.[0]?.b64_json ?? null;
-        }
-        if (!b64) {
-          toast.error('Stable Diffusion returned no image');
-          return;
-        }
-        const fname = `${mode}_${Date.now()}.png`;
-        const rel = baseDirOf(currentPath) + fname;
-        await api.writeWorkspaceFileBase64(workspace.id, rel, b64);
-        toast.success(`Saved ${rel}`);
-        await loadDir(currentPath);
-        await loadPreview(rel);
-      } catch (e: unknown) {
-        toast.error(`SD task failed: ${apiErr(e)}`);
-      } finally {
-        setSdBusy(false);
-      }
-    },
-    [selectedPath, sdPrompt, sdModel, currentPath, workspace.id, fileToBase64, loadDir, loadPreview, baseDirOf],
-  );
+  const active = useMemo(() => tabs.find((t) => t.path === activeTab) ?? null, [tabs, activeTab]);
+  const language = active && active.kind === 'text' ? active.language : 'plaintext';
 
-  useEffect(
-    () => () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
-    },
-    [previewUrl],
-  );
-
-  const breadcrumbs = useMemo(() => {
-    if (currentPath === '.') return ['~'];
-    return ['~', ...currentPath.split('/')];
-  }, [currentPath]);
-
+  // Open a file from the explorer. Directories recurse into the listing; files
+  // open a (new) tab without re-fetching if already open.
   const openFile = useCallback(
     async (entry: WorkspaceFileEntry) => {
       if (entry.is_dir) {
         await loadDir(entry.path);
         return;
       }
-      try {
-        setSelectedPath(entry.path);
-        if (isImagePath(entry.path)) {
-          await Promise.all([loadPreview(entry.path), loadImageModels()]);
-          setFileContent('');
-          setDirty(false);
-          return;
+      if (tabs.some((t) => t.path === entry.path)) {
+        setActiveTab(entry.path);
+        return;
+      }
+      if (isImagePath(entry.path)) {
+        try {
+          const blob = await api.fetchWorkspaceFileRaw(workspace.id, entry.path);
+          const url = URL.createObjectURL(blob);
+          setTabs((prev) => [
+            ...prev,
+            { path: entry.path, kind: 'image', content: '', imageUrl: url, dirty: false, language: 'plaintext', baseContent: '' },
+          ]);
+          setActiveTab(entry.path);
+          await loadImageModels();
+        } catch (e: unknown) {
+          toast.error(`Failed to open image: ${apiErr(e)}`);
         }
+        return;
+      }
+      try {
         const res = await api.readWorkspaceFile(workspace.id, entry.path);
-        setFileContent(typeof res?.content === 'string' ? res.content : '');
-        setDirty(false);
+        const content = typeof res?.content === 'string' ? res.content : '';
+        setTabs((prev) => [
+          ...prev,
+          { path: entry.path, kind: 'text', content, imageUrl: null, dirty: false, language: detectLanguage(entry.path), baseContent: content },
+        ]);
+        setActiveTab(entry.path);
       } catch (e: unknown) {
         toast.error(`Failed to read file: ${apiErr(e)}`);
       }
     },
-    [workspace.id, loadDir, isImagePath, loadPreview, loadImageModels],
+    [workspace.id, loadDir, isImagePath, loadImageModels, tabs],
+  );
+
+  // Programmatic open by path (e.g. a freshly generated image from Stable Diffusion).
+  const openByPath = useCallback(
+    async (path: string) => {
+      if (tabs.some((t) => t.path === path)) {
+        setActiveTab(path);
+        return;
+      }
+      if (isImagePath(path)) {
+        try {
+          const blob = await api.fetchWorkspaceFileRaw(workspace.id, path);
+          const url = URL.createObjectURL(blob);
+          setTabs((prev) => [
+            ...prev,
+            { path, kind: 'image', content: '', imageUrl: url, dirty: false, language: 'plaintext', baseContent: '' },
+          ]);
+          setActiveTab(path);
+          await loadImageModels();
+        } catch {
+          /* preview optional */
+        }
+        return;
+      }
+      try {
+        const res = await api.readWorkspaceFile(workspace.id, path);
+        const content = typeof res?.content === 'string' ? res.content : '';
+        setTabs((prev) => [
+          ...prev,
+          { path, kind: 'text', content, imageUrl: null, dirty: false, language: detectLanguage(path), baseContent: content },
+        ]);
+        setActiveTab(path);
+      } catch {
+        /* open optional */
+      }
+    },
+    [workspace.id, isImagePath, loadImageModels, tabs],
+  );
+
+  // Close a tab (confirm if it has unsaved edits). Revokes image object URLs.
+  const closeTab = useCallback(
+    (path: string) => {
+      const tab = tabs.find((t) => t.path === path);
+      if (tab?.dirty && !confirm(`Discard unsaved changes to ${path}?`)) return;
+      if (tab?.kind === 'image' && tab.imageUrl) URL.revokeObjectURL(tab.imageUrl);
+      setTabs((prev) => {
+        const idx = prev.findIndex((t) => t.path === path);
+        const next = prev.filter((t) => t.path !== path);
+        if (activeTab === path) {
+          setActiveTab(next.length ? next[Math.min(idx, next.length - 1)].path : null);
+        }
+        return next;
+      });
+    },
+    [tabs, activeTab],
+  );
+
+  // Drop a tab without prompting (used after the underlying file is deleted).
+  const removeTab = useCallback(
+    (path: string) => {
+      setTabs((prev) => {
+        const idx = prev.findIndex((t) => t.path === path);
+        const next = prev.filter((t) => t.path !== path);
+        if (activeTab === path) {
+          setActiveTab(next.length ? next[Math.min(idx, next.length - 1)].path : null);
+        }
+        return next;
+      });
+    },
+    [activeTab],
+  );
+
+  const onEditorChange = useCallback(
+    (value: string | undefined) => {
+      const val = value ?? '';
+      setTabs((prev) =>
+        prev.map((t) => (t.path === activeTab ? { ...t, content: val, dirty: val !== t.baseContent } : t)),
+      );
+    },
+    [activeTab],
   );
 
   const saveFile = useCallback(async () => {
-    if (!selectedPath) return;
+    if (!active || active.kind !== 'text' || !active.dirty) return;
     setSaving(true);
     try {
-      await api.writeWorkspaceFile(workspace.id, selectedPath, fileContent);
-      setDirty(false);
-      toast.success(`Saved ${selectedPath}`);
+      await api.writeWorkspaceFile(workspace.id, active.path, active.content);
+      setTabs((prev) => prev.map((t) => (t.path === active.path ? { ...t, dirty: false, baseContent: t.content } : t)));
+      toast.success(`Saved ${active.path}`);
     } catch (e: unknown) {
       toast.error(`Save failed: ${apiErr(e)}`);
     } finally {
       setSaving(false);
     }
-  }, [workspace.id, selectedPath, fileContent]);
+  }, [active, workspace.id]);
+
+  // Run the workspace linter against the active file and surface the results
+  // in a VSCode-style Problems panel at the bottom of the editor.
+  const validateFile = useCallback(async () => {
+    if (!active || active.kind !== 'text') return;
+    setProblems((p) => ({ ...p, open: true, text: 'Running validation…', count: 0 }));
+    try {
+      const res = await api.workspaceLint({ workspace_id: workspace.id, path: active.path });
+      const text = res?.output ?? JSON.stringify(res);
+      const count = (text.match(/error|warning|issue|❌|⚠️/gi) ?? []).length;
+      setProblems({ open: true, text, count });
+      if (count === 0) toast.success(`No issues found in ${active.path}`);
+    } catch (e: unknown) {
+      setProblems({ open: true, text: `Validation failed: ${apiErr(e)}`, count: 0 });
+    }
+  }, [active, workspace.id]);
+
+  // Ctrl/Cmd+S saves the active tab.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        void saveFile();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [saveFile]);
 
   const downloadFile = useCallback(() => {
-    if (!selectedPath) return;
-    const blob = new Blob([fileContent], { type: 'text/plain;charset=utf-8' });
+    if (!active || active.kind !== 'text') return;
+    const blob = new Blob([active.content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = selectedPath.split('/').pop() || 'file';
+    a.download = active.path.split('/').pop() || 'file';
     a.click();
     URL.revokeObjectURL(url);
-  }, [selectedPath, fileContent]);
+  }, [active]);
 
   const downloadImage = useCallback(async () => {
-    if (!selectedPath) return;
+    if (!active || active.kind !== 'image') return;
     try {
-      const blob = await api.fetchWorkspaceFileRaw(workspace.id, selectedPath);
+      const blob = await api.fetchWorkspaceFileRaw(workspace.id, active.path);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = selectedPath.split('/').pop() || 'image';
+      a.download = active.path.split('/').pop() || 'image';
       a.click();
       URL.revokeObjectURL(url);
     } catch (e: unknown) {
       toast.error(`Download failed: ${apiErr(e)}`);
     }
-  }, [selectedPath, workspace.id]);
+  }, [active, workspace.id]);
 
   const deleteEntry = useCallback(
     async (entry: WorkspaceFileEntry) => {
@@ -385,17 +441,13 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
       try {
         await api.deleteWorkspaceFile(workspace.id, entry.path);
         toast.success(`Deleted ${entry.path}`);
-        if (selectedPath === entry.path) {
-          setSelectedPath(null);
-          setFileContent('');
-          setDirty(false);
-        }
+        removeTab(entry.path);
         await loadDir(currentPath);
       } catch (e: unknown) {
         toast.error(`Delete failed: ${apiErr(e)}`);
       }
     },
-    [workspace.id, selectedPath, currentPath, loadDir],
+    [workspace.id, currentPath, loadDir, removeTab],
   );
 
   const createNew = useCallback(
@@ -440,7 +492,8 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     setGitBusy(true);
     try {
       const res = await api.workspaceGitDiff(workspace.id);
-      setGitDiff(res?.diff ?? '');
+      setDiffText(res?.diff ?? '');
+      setShowDiff(true);
     } catch (e: unknown) {
       toast.error(`Git diff failed: ${apiErr(e)}`);
     } finally {
@@ -497,14 +550,14 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     setToolBusy(true);
     setToolOutput('Running lint...');
     try {
-      const res = await api.workspaceLint({ workspace_id: workspace.id, path: selectedPath ?? undefined });
+      const res = await api.workspaceLint({ workspace_id: workspace.id, path: activeTab ?? undefined });
       setToolOutput(res?.output ?? JSON.stringify(res));
     } catch (e: unknown) {
       setToolOutput(`Lint failed: ${apiErr(e)}`);
     } finally {
       setToolBusy(false);
     }
-  }, [workspace.id, selectedPath]);
+  }, [workspace.id, activeTab]);
 
   const syncNextcloud = useCallback(async () => {
     if (!workspace.nextcloud_path) {
@@ -589,7 +642,67 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     }
   }, [missions, refineInput, loadMissions]);
 
-  const language = selectedPath ? detectLanguage(selectedPath) : 'plaintext';
+  const runImageTask = useCallback(
+    async (mode: 'txt2img' | 'img2img' | 'upscale' | 'inpaint') => {
+      if (mode !== 'txt2img' && !active) {
+        toast.error('Select a source image first');
+        return;
+      }
+      if (!sdPrompt.trim() && mode !== 'upscale' && mode !== 'inpaint') {
+        toast.error('Enter a prompt');
+        return;
+      }
+      setSdBusy(true);
+      try {
+        let b64: string | null = null;
+        if (mode === 'txt2img') {
+          const res = await api.generateImage({ prompt: sdPrompt.trim(), model: sdModel || undefined });
+          b64 = res?.data?.[0]?.b64_json ?? null;
+        } else {
+          const src = await api.fetchWorkspaceFileRaw(workspace.id, active!.path);
+          const srcB64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              const result = String(reader.result || '');
+              const comma = result.indexOf(',');
+              resolve(comma >= 0 ? result.slice(comma + 1) : result);
+            };
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(src);
+          });
+          const prompt =
+            mode === 'upscale'
+              ? sdPrompt.trim() || 'upscale to 2x higher resolution, enhance fine details'
+              : mode === 'inpaint'
+                ? sdPrompt.trim() || 'inpaint and seamlessly improve the masked region'
+                : sdPrompt.trim();
+          const res = await api.editImage({ prompt, image: srcB64, model: sdModel || undefined });
+          b64 = res?.data?.[0]?.b64_json ?? null;
+        }
+        if (!b64) {
+          toast.error('Stable Diffusion returned no image');
+          return;
+        }
+        const fname = `${mode}_${Date.now()}.png`;
+        const rel = baseDirOf(currentPath) + fname;
+        await api.writeWorkspaceFileBase64(workspace.id, rel, b64);
+        toast.success(`Saved ${rel}`);
+        await loadDir(currentPath);
+        await openByPath(rel);
+      } catch (e: unknown) {
+        toast.error(`SD task failed: ${apiErr(e)}`);
+      } finally {
+        setSdBusy(false);
+      }
+    },
+    [active, sdPrompt, sdModel, currentPath, workspace.id, loadDir, openByPath, baseDirOf],
+  );
+
+  const breadcrumbs = useMemo(() => {
+    if (currentPath === '.') return ['~'];
+    return ['~', ...currentPath.split('/')];
+  }, [currentPath]);
+
   const statusMission = missions[0];
 
   return (
@@ -636,7 +749,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         </div>
 
         {/* Primary Side Bar (switches by view) */}
-        <div className="w-80 shrink-0 border-r border-white/10 bg-[#0c1120] flex flex-col min-h-0">
+        <div className="w-80 max-w-[78vw] shrink-0 border-r border-white/10 bg-[#0c1120] flex flex-col min-h-0">
           {activeView === 'explorer' && (
             <>
               <div className="flex items-center gap-1 px-2 py-1.5 text-xs text-slate-400 border-b border-white/5 overflow-x-auto whitespace-nowrap custom-scrollbar">
@@ -689,7 +802,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                       key={entry.path}
                       className={cn(
                         'group flex items-center gap-2 px-3 py-1.5 text-sm cursor-pointer hover:bg-white/5',
-                        selectedPath === entry.path && 'bg-indigo-500/15',
+                        activeTab === entry.path && 'bg-indigo-500/15',
                       )}
                       onClick={() => openFile(entry)}
                     >
@@ -772,11 +885,9 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                 disabled={!hasGit}
                 className="w-full px-2 py-1.5 text-xs rounded bg-black/40 border border-white/10 focus:border-indigo-500 outline-none disabled:opacity-40"
               />
-              {gitDiff && (
-                <pre className="text-[11px] font-mono bg-black/40 rounded p-2 max-h-48 overflow-y-auto custom-scrollbar whitespace-pre-wrap text-slate-300">
-                  {gitDiff}
-                </pre>
-              )}
+              <p className="text-[10px] text-slate-600 leading-relaxed">
+                Open the diff in the editor with the <span className="text-slate-400">Diff</span> button above — it renders full-size with syntax highlighting.
+              </p>
               {gitLog.length > 0 && (
                 <div>
                   <div className="text-[11px] uppercase tracking-wide text-slate-500 mb-1">Recent commits</div>
@@ -797,7 +908,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
               <div className="text-[11px] uppercase tracking-wide text-slate-500">Tools</div>
               <button onClick={runLint} disabled={toolBusy} className="flex items-center justify-center gap-1.5 py-2 text-sm rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40">
                 {toolBusy ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-                Lint {selectedPath ? 'file' : 'workspace'}
+                Lint {activeTab ? 'file' : 'workspace'}
               </button>
               <button onClick={syncNextcloud} disabled={toolBusy || !workspace.nextcloud_path} className="flex items-center justify-center gap-1.5 py-2 text-sm rounded bg-white/5 hover:bg-white/10 disabled:opacity-40" title={workspace.nextcloud_path ? `→ ${workspace.nextcloud_path}` : 'No NextCloud path'}>
                 <CloudUpload size={14} /> Sync to NextCloud
@@ -892,128 +1003,212 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
 
         {/* Editor / Preview */}
         <div className="flex-1 min-w-0 flex flex-col bg-[#0a0e1a]">
-          {selectedPath && isImagePath(selectedPath) ? (
-            <>
+          {showDiff ? (
+            <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
                 <div className="flex items-center gap-2 min-w-0">
-                  <ImageIcon size={14} className="text-indigo-400 shrink-0" />
-                  <span className="text-sm text-slate-300 truncate">{selectedPath}</span>
+                  <GitPullRequest size={14} className="text-indigo-400 shrink-0" />
+                  <span className="text-sm text-slate-300 truncate">Git Diff — working tree vs HEAD</span>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <button onClick={() => loadPreview(selectedPath)} disabled={previewLoading} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30" title="Reload preview">
-                    <RefreshCw size={15} className={previewLoading ? 'animate-spin' : ''} />
-                  </button>
-                  <button onClick={downloadImage} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded" title="Download">
-                    <Download size={15} />
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 min-h-0 flex">
-                <div className="flex-1 min-w-0 flex items-center justify-center bg-black/40 p-4 overflow-auto">
-                  {previewLoading ? (
-                    <Loader2 size={24} className="animate-spin text-slate-500" />
-                  ) : previewUrl ? (
-                    <img src={previewUrl} alt={selectedPath} className="max-w-full max-h-full object-contain rounded-lg" />
-                  ) : (
-                    <span className="text-sm text-slate-600">No preview</span>
-                  )}
-                </div>
-                <div className="w-80 shrink-0 border-l border-white/10 bg-[#0c1120] overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
-                  <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500">
-                    <Wand2 size={13} className="text-indigo-400" /> Stable Diffusion
-                  </div>
-                  <textarea
-                    value={sdPrompt}
-                    onChange={(e) => setSdPrompt(e.target.value)}
-                    placeholder="Prompt for generate / edit / inpaint…"
-                    rows={3}
-                    className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none resize-none"
-                  />
-                  {imageModels.length > 0 && (
-                    <select
-                      value={sdModel}
-                      onChange={(e) => setSdModel(e.target.value)}
-                      className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:border-indigo-500 outline-none"
-                    >
-                      {imageModels.map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                    </select>
-                  )}
-                  <button
-                    onClick={() => runImageTask('txt2img')}
-                    disabled={sdBusy || !sdPrompt.trim()}
-                    className="flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white"
-                  >
-                    <Wand2 size={13} /> Generate (txt2img)
-                  </button>
-                  <button
-                    onClick={() => runImageTask('img2img')}
-                    disabled={sdBusy}
-                    className="flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200"
-                  >
-                    <Brush size={13} /> Edit image (img2img)
-                  </button>
-                  <button
-                    onClick={() => runImageTask('upscale')}
-                    disabled={sdBusy}
-                    className="flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200"
-                  >
-                    <Maximize2 size={13} /> Upscale
-                  </button>
-                  <button
-                    onClick={() => runImageTask('inpaint')}
-                    disabled={sdBusy}
-                    className="flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200"
-                  >
-                    <Eye size={13} /> Inpaint
-                  </button>
-                  {sdBusy && (
-                    <div className="flex items-center gap-1.5 text-xs text-slate-400">
-                      <Loader2 size={13} className="animate-spin" /> Processing…
-                    </div>
-                  )}
-                  <p className="text-[10px] text-slate-600 leading-relaxed">
-                    Results are saved into the current folder and open automatically. Edit/Upscale/Inpaint use the selected image as the source.
-                  </p>
-                </div>
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
-                <div className="flex items-center gap-2 min-w-0">
-                  {selectedPath ? (
-                    <>
-                      <FileText size={14} className="text-indigo-400 shrink-0" />
-                      <span className="text-sm text-slate-300 truncate">{selectedPath}</span>
-                      {dirty && <span className="text-[10px] text-amber-400">● unsaved</span>}
-                    </>
-                  ) : (
-                    <span className="text-sm text-slate-500">No file open</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button onClick={downloadFile} disabled={!selectedPath} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30" title="Download">
-                    <Download size={15} />
-                  </button>
-                  <button onClick={saveFile} disabled={!selectedPath || !dirty || saving} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40" title="Save (Ctrl+S)">
-                    {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                    Save
-                  </button>
-                </div>
+                <button
+                  onClick={() => setShowDiff(false)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded bg-white/10 hover:bg-white/20 text-slate-200"
+                >
+                  <X size={13} /> Close
+                </button>
               </div>
               <div className="flex-1 min-h-0">
-                {selectedPath ? (
-                  <MonacoEditor value={fileContent} onChange={(v) => { setFileContent(v ?? ''); if (!dirty) setDirty(true); }} language={language} height="100%" />
+                {diffText ? (
+                  <MonacoEditor value={diffText} readOnly language="diff" height="100%" />
                 ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
-                    <FolderOpen size={42} />
-                    <p className="text-sm">Select a file from the Explorer to edit</p>
+                  <div className="flex items-center justify-center h-full text-slate-600 text-sm">
+                    No changes to show
                   </div>
                 )}
               </div>
+            </div>
+          ) : active ? (
+            <>
+              {/* Tab bar */}
+              <div className="flex items-stretch bg-[#0c1120] border-b border-white/10 overflow-x-auto custom-scrollbar shrink-0">
+                {tabs.map((t) => (
+                  <div
+                    key={t.path}
+                    onClick={() => setActiveTab(t.path)}
+                    className={cn(
+                      'group flex items-center gap-1.5 pl-3 pr-2 py-2 text-xs cursor-pointer border-r border-white/10 whitespace-nowrap',
+                      activeTab === t.path ? 'bg-[#0a0e1a] text-white' : 'text-slate-400 hover:bg-white/5',
+                    )}
+                    title={t.path}
+                  >
+                    {t.kind === 'image' ? (
+                      <ImageIcon size={13} className="text-indigo-400 shrink-0" />
+                    ) : (
+                      <FileText size={13} className="text-indigo-400 shrink-0" />
+                    )}
+                    <span className="truncate max-w-[160px]">{t.path.split('/').pop()}</span>
+                    {t.dirty && (
+                      <span className="text-amber-400 text-[10px] leading-none" title="Unsaved changes">
+                        ●
+                      </span>
+                    )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        closeTab(t.path);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-500 hover:text-red-400 rounded"
+                      title="Close tab"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {active.kind === 'image' ? (
+                <>
+                  <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <ImageIcon size={14} className="text-indigo-400 shrink-0" />
+                      <span className="text-sm text-slate-300 truncate">{active.path}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={downloadImage} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded" title="Download">
+                        <Download size={15} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-0 flex">
+                    <div className="flex-1 min-w-0 flex items-center justify-center bg-black/40 p-4 overflow-auto">
+                      {active.imageUrl ? (
+                        <img src={active.imageUrl} alt={active.path} className="max-w-full max-h-full object-contain rounded-lg" />
+                      ) : (
+                        <span className="text-sm text-slate-600">No preview</span>
+                      )}
+                    </div>
+                    <div className="w-80 shrink-0 border-l border-white/10 bg-[#0c1120] overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
+                      <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500">
+                        <Wand2 size={13} className="text-indigo-400" /> Stable Diffusion
+                      </div>
+                      <textarea
+                        value={sdPrompt}
+                        onChange={(e) => setSdPrompt(e.target.value)}
+                        placeholder="Prompt for generate / edit / inpaint…"
+                        rows={3}
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none resize-none"
+                      />
+                      {imageModels.length > 0 && (
+                        <select
+                          value={sdModel}
+                          onChange={(e) => setSdModel(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:border-indigo-500 outline-none"
+                        >
+                          {imageModels.map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                        </select>
+                      )}
+                      <button
+                        onClick={() => runImageTask('txt2img')}
+                        disabled={sdBusy || !sdPrompt.trim()}
+                        className="flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white"
+                      >
+                        <Wand2 size={13} /> Generate (txt2img)
+                      </button>
+                      <button
+                        onClick={() => runImageTask('img2img')}
+                        disabled={sdBusy}
+                        className="flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200"
+                      >
+                        <Brush size={13} /> Edit image (img2img)
+                      </button>
+                      <button
+                        onClick={() => runImageTask('upscale')}
+                        disabled={sdBusy}
+                        className="flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200"
+                      >
+                        <Maximize2 size={13} /> Upscale
+                      </button>
+                      <button
+                        onClick={() => runImageTask('inpaint')}
+                        disabled={sdBusy}
+                        className="flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200"
+                      >
+                        <Eye size={13} /> Inpaint
+                      </button>
+                      {sdBusy && (
+                        <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                          <Loader2 size={13} className="animate-spin" /> Processing…
+                        </div>
+                      )}
+                      <p className="text-[10px] text-slate-600 leading-relaxed">
+                        Results are saved into the current folder and open automatically. Edit/Upscale/Inpaint use the selected image as the source.
+                      </p>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText size={14} className="text-indigo-400 shrink-0" />
+                      <span className="text-sm text-slate-300 truncate">{active.path}</span>
+                      {active.dirty && <span className="text-[10px] text-amber-400">● unsaved</span>}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => setVimMode((v) => !v)} className={cn('px-2.5 py-1.5 text-xs font-medium rounded', vimMode ? 'bg-emerald-600/30 text-emerald-300 hover:bg-emerald-600/50' : 'bg-white/10 hover:bg-white/20 text-slate-200')} title="Toggle VIM keybindings">
+                        Vim
+                      </button>
+                      <button onClick={validateFile} className="px-2.5 py-1.5 text-xs font-medium rounded bg-white/10 hover:bg-white/20 text-slate-200" title="Validate / lint file">
+                        Validate
+                      </button>
+                      <button onClick={gitDiffView} disabled={gitBusy || !hasGit} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-white/10 hover:bg-white/20 text-slate-200 disabled:opacity-40" title="View diff in editor">
+                        <GitPullRequest size={13} /> Diff
+                      </button>
+                      <button onClick={downloadFile} disabled={!active} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30" title="Download">
+                        <Download size={15} />
+                      </button>
+                      <button onClick={saveFile} disabled={!active.dirty || saving} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40" title="Save (Ctrl+S)">
+                        {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-0 flex flex-col">
+                    <div className="flex-1 min-h-0">
+                      <MonacoEditor
+                        value={active.content}
+                        onChange={onEditorChange}
+                        language={language as never}
+                        vim={vimMode}
+                        height="100%"
+                      />
+                    </div>
+                    {problems.open && (
+                      <div className="shrink-0 h-44 border-t border-white/10 bg-[#0b0f1a] flex flex-col">
+                        <div className="flex items-center justify-between px-3 py-1 border-b border-white/5">
+                          <span className="text-[11px] uppercase tracking-wide text-slate-400">
+                            Problems {problems.count > 0 ? `(${problems.count})` : ''}
+                          </span>
+                          <button onClick={() => setProblems((p) => ({ ...p, open: false }))} className="p-1 text-slate-500 hover:text-white rounded" title="Close">
+                            <X size={12} />
+                          </button>
+                        </div>
+                        <pre className="flex-1 overflow-auto custom-scrollbar text-[11px] font-mono text-slate-300 p-2 whitespace-pre-wrap">
+                          {problems.text}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
             </>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
+              <FolderOpen size={42} />
+              <p className="text-sm">Select a file from the Explorer to edit</p>
+            </div>
           )}
         </div>
       </div>
@@ -1047,7 +1242,8 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
             'no git'
           )}
         </span>
-        <span className="truncate max-w-[40%]">{selectedPath ? `📄 ${selectedPath}` : 'No file open'}</span>
+        <span className="truncate max-w-[40%]">{activeTab ? `📄 ${activeTab}` : 'No file open'}</span>
+        {tabs.length > 1 && <span className="text-slate-600">{tabs.length} open</span>}
         <span className="ml-auto">{workspace.display_name}</span>
       </div>
     </div>

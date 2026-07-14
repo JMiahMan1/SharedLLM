@@ -1,23 +1,34 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { useRef, useEffect, useCallback } from 'react';
-import Editor from '@monaco-editor/react';
+import { useMemo } from 'react';
+import CodeMirror from '@uiw/react-codemirror';
+import { javascript } from '@codemirror/lang-javascript';
+import { python } from '@codemirror/lang-python';
+import { html } from '@codemirror/lang-html';
+import { css } from '@codemirror/lang-css';
+import { json } from '@codemirror/lang-json';
+import { markdown } from '@codemirror/lang-markdown';
+import { yaml } from '@codemirror/lang-yaml';
+import { vim as vimExtension } from '@replit/codemirror-vim';
+import { EditorView } from '@codemirror/view';
+import { diffHighlight, diffTheme } from './cmDiff';
 import { cn } from '../../lib/utils';
 import type { EditorLanguage } from '../../lib/editorLanguages';
 
 export type { EditorLanguage } from '../../lib/editorLanguages';
 
-const LANGUAGE_MAP: Record<EditorLanguage, string> = {
-  markdown: 'markdown',
-  python: 'python',
-  javascript: 'javascript',
-  typescript: 'typescript',
-  typescriptreact: 'typescriptreact',
-  json: 'json',
-  yaml: 'yaml',
-  html: 'html',
-  css: 'css',
-  shell: 'shell',
-  plaintext: 'plaintext',
+const LANG_EXT: Record<EditorLanguage, any> = {
+  markdown: markdown(),
+  python: python(),
+  javascript: javascript(),
+  typescript: javascript({ typescript: true }),
+  typescriptreact: javascript({ jsx: true }),
+  json: json(),
+  yaml: yaml(),
+  html: html(),
+  css: css(),
+  shell: [],
+  plaintext: [],
+  diff: [diffHighlight, diffTheme],
 };
 
 interface MonacoEditorProps {
@@ -30,7 +41,7 @@ interface MonacoEditorProps {
   minimap?: boolean;
   wordWrap?: 'on' | 'off';
   fontSize?: number;
-  onEditorMount?: (editor: any) => void;
+  vim?: boolean;
 }
 
 export const MonacoEditor = ({
@@ -40,85 +51,54 @@ export const MonacoEditor = ({
   readOnly = false,
   height = '100%',
   className,
-  minimap = false,
   wordWrap = 'on',
   fontSize = 14,
-  onEditorMount,
+  vim = false,
 }: MonacoEditorProps) => {
-  const editorRef = useRef<any>(null);
-
-  const handleEditorDidMount = useCallback((editor: any) => {
-    editorRef.current = editor;
-    onEditorMount?.(editor);
-  }, [onEditorMount]);
-
-  useEffect(() => {
-    if (editorRef.current) {
-      const model = editorRef.current.getModel();
-      if (model && model.getValue() !== value) {
-        const cursor = editorRef.current.getPosition();
-        editorRef.current.executeEdits('', [{
-          range: model.getFullModelRange(),
-          text: value,
-          forceMoveMarkers: true,
-        }]);
-        if (cursor) {
-          editorRef.current.setPosition(cursor);
-        }
-      }
-    }
-  }, [value]);
+  const extensions = useMemo(() => {
+    const ext: any[] = [LANG_EXT[language] ?? []];
+    if (vim) ext.push(vimExtension());
+    if (wordWrap === 'on') ext.push(EditorView.lineWrapping);
+    ext.push(
+      EditorView.theme({
+        '&': {
+          fontSize: `${fontSize}px`,
+          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+          height: '100%',
+        },
+        '.cm-scroller': {
+          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+          lineHeight: '1.6',
+        },
+        '.cm-gutters': { backgroundColor: 'transparent', border: 'none' },
+        '&.cm-focused': { outline: 'none' },
+      }),
+    );
+    return ext;
+  }, [language, vim, wordWrap, fontSize]);
 
   return (
-    <div className={cn('flex flex-col h-full', className)}>
-      <div className="flex-1 min-h-0">
-        <Editor
-          height={typeof height === 'number' ? height : height}
-          language={LANGUAGE_MAP[language]}
-          value={value}
-          onChange={(val) => onChange?.(val || '')}
-          onMount={handleEditorDidMount}
-          theme="vs-dark"
-          options={{
-            readOnly,
-            minimap: { enabled: minimap },
-            wordWrap,
-            fontSize,
-            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-            fontLigatures: true,
-            lineNumbers: 'on',
-            renderLineHighlight: 'all',
-            scrollBeyondLastLine: true,
-            smoothScrolling: true,
-            cursorBlinking: 'smooth',
-            cursorSmoothCaretAnimation: 'on',
-            bracketPairColorization: { enabled: true },
-            guides: { bracketPairs: true, indentation: true },
-            padding: { top: 12, bottom: 12 },
-            scrollbar: {
-              verticalScrollbarSize: 8,
-              horizontalScrollbarSize: 8,
-              useShadows: false,
-            },
-            overviewRulerLanes: 0,
-            hideCursorInOverviewRuler: true,
-            automaticLayout: true,
-            tabSize: 2,
-            insertSpaces: true,
-            detectIndentation: true,
-            formatOnPaste: true,
-            formatOnType: true,
-            suggestOnTriggerCharacters: true,
-            quickSuggestions: { other: 'on', comments: 'off', strings: 'off' },
-            wordBasedSuggestions: 'currentDocument',
-          }}
-          loading={
-            <div className="flex items-center justify-center h-full text-slate-500 text-sm">
-              Loading editor...
-            </div>
-          }
-        />
-      </div>
-    </div>
+    <CodeMirror
+      value={value}
+      height={typeof height === 'number' ? `${height}px` : height}
+      theme="dark"
+      extensions={extensions}
+      editable={!readOnly}
+      readOnly={readOnly}
+      onChange={(val) => onChange?.(val)}
+      className={cn('h-full text-sm', className)}
+      basicSetup={{
+        lineNumbers: true,
+        foldGutter: true,
+        highlightActiveLine: true,
+        highlightActiveLineGutter: true,
+        bracketMatching: true,
+        closeBrackets: true,
+        autocompletion: true,
+        highlightSelectionMatches: true,
+        indentOnInput: true,
+        syntaxHighlighting: true,
+      }}
+    />
   );
 };
