@@ -31,7 +31,7 @@ const LANG_EXT: Record<EditorLanguage, any> = {
   diff: [diffHighlight, diffTheme],
 };
 
-interface MonacoEditorProps {
+interface CodeEditorProps {
   value: string;
   onChange?: (value: string) => void;
   language?: EditorLanguage;
@@ -42,9 +42,10 @@ interface MonacoEditorProps {
   wordWrap?: 'on' | 'off';
   fontSize?: number;
   vim?: boolean;
+  onEditorMount?: (view: any) => void;
 }
 
-export const MonacoEditor = ({
+export const CodeEditor = ({
   value,
   onChange,
   language = 'markdown',
@@ -54,7 +55,8 @@ export const MonacoEditor = ({
   wordWrap = 'on',
   fontSize = 14,
   vim = false,
-}: MonacoEditorProps) => {
+  onEditorMount,
+}: CodeEditorProps) => {
   const extensions = useMemo(() => {
     const ext: any[] = [LANG_EXT[language] ?? []];
     if (vim) ext.push(vimExtension());
@@ -86,6 +88,7 @@ export const MonacoEditor = ({
       editable={!readOnly}
       readOnly={readOnly}
       onChange={(val) => onChange?.(val)}
+      onCreateEditor={onEditorMount}
       className={cn('h-full text-sm', className)}
       basicSetup={{
         lineNumbers: true,

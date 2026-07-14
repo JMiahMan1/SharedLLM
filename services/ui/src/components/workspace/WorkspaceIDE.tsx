@@ -38,7 +38,7 @@ import toast from 'react-hot-toast';
 import { api, type RavenMission, type Workspace } from '../../services/api';
 import type { GitLogEntry, GitStatusResponse, WorkspaceFileEntry } from '../../types/api';
 import { detectLanguage } from '../../lib/editorLanguages';
-import { MonacoEditor } from '../editor/MonacoEditor';
+import { CodeEditor } from '../editor/CodeEditor';
 import { cn } from '../../lib/utils';
 
 interface WorkspaceIDEProps {
@@ -1019,7 +1019,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
               </div>
               <div className="flex-1 min-h-0">
                 {diffText ? (
-                  <MonacoEditor value={diffText} readOnly language="diff" height="100%" />
+                  <CodeEditor value={diffText} readOnly language="diff" height="100%" />
                 ) : (
                   <div className="flex items-center justify-center h-full text-slate-600 text-sm">
                     No changes to show
@@ -1177,7 +1177,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                   </div>
                   <div className="flex-1 min-h-0 flex flex-col">
                     <div className="flex-1 min-h-0">
-                      <MonacoEditor
+                      <CodeEditor
                         value={active.content}
                         onChange={onEditorChange}
                         language={language as never}

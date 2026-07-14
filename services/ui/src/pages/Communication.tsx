@@ -38,7 +38,7 @@ import type {
   TalkMessage,
   TimerRecord,
 } from '../services/api';
-import { MonacoEditor } from '../components/editor';
+import { CodeEditor } from '../components/editor';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const EMPTY_ARRAY: any[] = [];
@@ -104,46 +104,35 @@ const Communication = () => {
   });
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const editorRef = useRef<{ editor: any } | null>(null);
+  const editorRef = useRef<any>(null);
 
   const insertMd = (before: string, after: string) => {
-    const editor = editorRef.current?.editor;
-    if (editor) {
-      const selection = editor.getSelection();
-      if (selection && !selection.isEmpty()) {
-        const text = editor.getModel().getValueInRange(selection);
-        editor.executeEdits('md-toolbar', [{
-          range: selection,
-          text: `${before}${text}${after}`,
-          forceMoveMarkers: true,
-        }]);
-      } else {
-        const pos = editor.getPosition();
-        if (pos) {
-          editor.executeEdits('md-toolbar', [{
-            range: { startLineNumber: pos.lineNumber, startColumn: pos.column, endLineNumber: pos.lineNumber, endColumn: pos.column },
-            text: `${before}${after}`,
-            forceMoveMarkers: true,
-          }]);
-          const newCol = pos.column + before.length;
-          editor.setPosition({ lineNumber: pos.lineNumber, column: newCol });
-        }
-      }
-      editor.focus();
-    } else {
-      const textarea = document.querySelector('textarea') as HTMLTextAreaElement | null;
-      if (textarea) {
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        const text = textarea.value;
-        const selected = text.substring(start, end);
-        const newText = text.substring(0, start) + before + selected + after + text.substring(end);
-        textarea.value = newText;
-        setNoteContent(newText);
-        textarea.selectionStart = start + before.length;
-        textarea.selectionEnd = start + before.length + selected.length;
-        textarea.focus();
-      }
+    const view = editorRef.current;
+    if (view) {
+      const { state } = view;
+      const sel = state.selection.main;
+      const selected = state.sliceDoc(sel.from, sel.to);
+      const insert = `${before}${selected}${after}`;
+      const cursor = sel.from + (selected ? insert.length : before.length);
+      view.dispatch({
+        changes: { from: sel.from, to: sel.to, insert },
+        selection: { anchor: cursor },
+      });
+      view.focus();
+      return;
+    }
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement | null;
+    if (textarea) {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = textarea.value;
+      const selected = text.substring(start, end);
+      const newText = text.substring(0, start) + before + selected + after + text.substring(end);
+      textarea.value = newText;
+      setNoteContent(newText);
+      textarea.selectionStart = start + before.length;
+      textarea.selectionEnd = start + before.length + selected.length;
+      textarea.focus();
     }
   };
 
@@ -901,13 +890,14 @@ const Communication = () => {
                 />
               </div>
               <div className="flex-1 min-h-0 rounded-xl border border-white/10 overflow-hidden">
-                <MonacoEditor
-                  value={noteContent}
-                  onChange={setNoteContent}
-                  language="markdown"
-                  height="100%"
-                  fontSize={14}
-                />
+                 <CodeEditor
+                   value={noteContent}
+                   onChange={setNoteContent}
+                   language="markdown"
+                   height="100%"
+                   fontSize={14}
+                   onEditorMount={(view) => { editorRef.current = view; }}
+                 />
               </div>
               <div className="mt-2 flex gap-2">
                 <button
@@ -1053,13 +1043,13 @@ const Communication = () => {
               </div>
 
               <div className="flex-1 min-h-0">
-                <MonacoEditor
+                <CodeEditor
                   value={noteContent}
                   onChange={setNoteContent}
                   language="markdown"
                   height="100%"
                   fontSize={14}
-                  onEditorMount={(editor) => { editorRef.current = { editor }; }}
+                  onEditorMount={(view) => { editorRef.current = view; }}
                 />
               </div>
             </div>
