@@ -9,7 +9,8 @@ export type EditorLanguage =
   | 'html'
   | 'css'
   | 'shell'
-  | 'plaintext';
+  | 'plaintext'
+  | 'diff';
 
 const LANGUAGE_BY_EXT: Record<string, EditorLanguage> = {
   '.py': 'python',
