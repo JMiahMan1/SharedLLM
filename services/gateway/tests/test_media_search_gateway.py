@@ -67,7 +67,7 @@ async def test_gateway_search_ma_library_only_default_not_found(monkeypatch, cli
             _called_url, called_kwargs = mock_http_get.call_args
             called_params = called_kwargs.get("params")
             assert called_params["query"] == "Miles Davis"
-            assert called_params["library_only"] is True
+            assert called_params["library_only"] == "True"
 
 
 @pytest.mark.asyncio
@@ -94,7 +94,7 @@ async def test_gateway_search_ma_not_library_only_found(monkeypatch, client):
 
             _called_url, called_kwargs = mock_http_get.call_args
             called_params = called_kwargs.get("params")
-            assert called_params["library_only"] is False
+            assert called_params["library_only"] == "False"
 
 
 @pytest.mark.asyncio
