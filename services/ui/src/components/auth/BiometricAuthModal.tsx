@@ -43,7 +43,6 @@ const BiometricAuthModal = ({
     if (result.success) {
       trigger('success');
       onSuccess();
-      onClose();
     } else {
       trigger('error');
       setError(result.error || 'Authentication failed');
@@ -66,7 +65,6 @@ const BiometricAuthModal = ({
     if (result === true) {
       trigger('success');
       onSuccess();
-      onClose();
     } else {
       trigger('error');
       setError(typeof result === 'string' ? result : 'Invalid PIN');
