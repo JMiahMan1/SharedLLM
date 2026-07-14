@@ -150,16 +150,20 @@ class MissionKilledError(Exception):
 
 
 class OllamaProvider(BaseLLMProvider):
-    def __init__(self, base_url: str, timeout: float | aiohttp.ClientTimeout = 600.0):
+    def __init__(self, base_url: str, timeout: float | aiohttp.ClientTimeout = 300.0):
         self.base_url = base_url.rstrip("/")
         # `total` caps the whole request; `sock_read` caps the gap between
         # successive chunks so a stream that stops producing data (e.g. a
-        # wedged upstream) raises instead of blocking forever.
+        # wedged upstream) raises instead of blocking for minutes. `connect`
+        # fails fast if the host is briefly unreachable so callers can retry.
         if isinstance(timeout, aiohttp.ClientTimeout):
             self.timeout = timeout
         else:
-            read_to = min(float(timeout), 120.0) if timeout else 120.0
-            self.timeout = aiohttp.ClientTimeout(total=timeout or None, sock_read=read_to)
+            to = float(timeout) if timeout else 300.0
+            read_to = min(to, 60.0)
+            self.timeout = aiohttp.ClientTimeout(
+                total=to, connect=10.0, sock_connect=15.0, sock_read=read_to
+            )
 
     async def generate(
         self,
@@ -237,30 +241,54 @@ class OllamaProvider(BaseLLMProvider):
                     return ""
 
             # Streaming path (used by AgentLoop)
-            async with client.post(f"{self.base_url}/api/chat", json=payload, headers={"X-Request-Source": "shared-llm/app"}, timeout=self.timeout) as response:
-                response.raise_for_status()
-                async for raw_line in response.content:
-                    clean_line = raw_line.decode("utf-8", errors="replace").strip()
-                    if not clean_line:
-                        continue
-                    try:
-                        chunk_json = json.loads(clean_line)
-                        if "error" in chunk_json:
-                            raise RuntimeError(f"Provider error: {chunk_json['error']}")
-                        content = chunk_json.get("message", {}).get("content") or ""
-                        # Only include thinking if explicitly requested
-                        if not content and show_thinking:
-                            content = chunk_json.get("message", {}).get("thinking") or ""
-                        if content:
-                            full_content += content
-                            await chunk_callback(content)
-                        if chunk_json.get("done"):
-                            break
-
-                    except RuntimeError:
-                        raise  # Let provider errors propagate to AgentLoop retry logic
-                    except Exception as e:
-                        log.error(f"Error parsing streaming chunk: {e} | Raw line: {clean_line!r}")
+            # Streaming path (used by AgentLoop). Retry transient connection
+            # errors (e.g. a brief upstream flap) before handing off to the
+            # AgentLoop's own retry, so one blip doesn't burn a whole
+            # attempt waiting on the 300s timeout.
+            last_err: Exception | None = None
+            for _attempt in range(3):
+                buf = ""
+                try:
+                    async with client.post(
+                        f"{self.base_url}/api/chat", json=payload,
+                        headers={"X-Request-Source": "shared-llm/app"},
+                        timeout=self.timeout,
+                    ) as response:
+                        response.raise_for_status()
+                        async for raw_line in response.content:
+                            clean_line = raw_line.decode("utf-8", errors="replace").strip()
+                            if not clean_line:
+                                continue
+                            try:
+                                chunk_json = json.loads(clean_line)
+                                if "error" in chunk_json:
+                                    raise RuntimeError(f"Provider error: {chunk_json['error']}")
+                                content = chunk_json.get("message", {}).get("content") or ""
+                                if not content and show_thinking:
+                                    content = chunk_json.get("message", {}).get("thinking") or ""
+                                if content:
+                                    buf += content
+                                    await chunk_callback(content)
+                                if chunk_json.get("done"):
+                                    break
+                            except RuntimeError:
+                                raise
+                            except Exception as e:
+                                log.error(f"Error parsing streaming chunk: {e} | Raw line: {clean_line!r}")
+                    full_content = buf
+                    break  # success
+                except RuntimeError:
+                    raise  # provider errors are fatal -> AgentLoop retry
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    last_err = e
+                    log.warning(
+                        f"[OllamaProvider-Hardened] stream attempt "
+                        f"{_attempt + 1}/3 failed: {e}; retrying"
+                    )
+                    await asyncio.sleep(3 * (_attempt + 1))
+            else:
+                if last_err:
+                    raise last_err
         # Strip thinking blocks from final content unless explicitly requested
         if not show_thinking:
             full_content = strip_thinking_blocks(full_content)

@@ -197,6 +197,7 @@ services:
       start_period: 120s
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "jeremiah-home-desktop.local:${OLLAMA_HOST_IP}"
     dns:
       - 172.26.0.254
     networks:
@@ -250,6 +251,7 @@ services:
         condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "jeremiah-home-desktop.local:${OLLAMA_HOST_IP}"
     environment:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - FERNET_KEY=${FERNET_KEY}
@@ -307,6 +309,7 @@ services:
       - redis
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "jeremiah-home-desktop.local:${OLLAMA_HOST_IP}"
     dns:
       - 172.26.0.254
     networks:
@@ -350,6 +353,7 @@ services:
       - execution
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "jeremiah-home-desktop.local:${OLLAMA_HOST_IP}"
     dns:
       - 172.26.0.254
     networks:
@@ -387,6 +391,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "jeremiah-home-desktop.local:${OLLAMA_HOST_IP}"
     dns:
       - 172.26.0.254
     networks:
@@ -511,6 +516,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "jeremiah-home-desktop.local:${OLLAMA_HOST_IP}"
     dns:
       - 172.26.0.254
     networks:
