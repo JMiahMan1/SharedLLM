@@ -4,7 +4,14 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle, FlaskConical, Shield, Activity } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
-import type { HealthStatus, LogEntry, SmokeTestResult, Workspace } from '../services/api';
+import type { HealthStatus, LogEntry, RavenMission, SmokeTestResult, Workspace } from '../services/api';
+
+interface ExecutionLogItem {
+  timestamp?: number;
+  raw_type?: string;
+  type?: string;
+  data?: unknown;
+}
 import RavenLiveTrace from '../components/settings/RavenLiveTrace';
 import { useAuth } from '../context/AuthContext';
 
@@ -387,7 +394,7 @@ const MissionsPane = () => {
   const [missionQuery, setMissionQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [liveMissionId, setLiveMissionId] = useState<number | null>(null);
-  const [detailedMission, setDetailedMission] = useState<any | null>(null);
+  const [detailedMission, setDetailedMission] = useState<RavenMission | null>(null);
   const [refinePrompt, setRefinePrompt] = useState('');
   const [loadingDetails, setLoadingDetails] = useState<number | null>(null);
 
@@ -416,7 +423,7 @@ const MissionsPane = () => {
       setLoadingDetails(id);
       const missionData = await api.getRavenMission(id);
       setDetailedMission(missionData);
-    } catch (err) {
+    } catch {
       toast.error('Failed to load mission details');
     } finally {
       setLoadingDetails(null);
@@ -804,7 +811,7 @@ const renderTimeline = (outputLog: string | null | undefined) => {
     
     return (
       <div className="space-y-2.5 max-h-[160px] overflow-y-auto pr-2 font-mono text-[10px] text-slate-300 bg-black/40 p-3 rounded-lg border border-white/5">
-        {displayedLogs.map((logItem: any, idx: number) => {
+        {displayedLogs.map((logItem: ExecutionLogItem, idx: number) => {
           const timeStr = logItem.timestamp ? new Date(logItem.timestamp * 1000).toLocaleTimeString() : '';
           const itemType = logItem.raw_type || logItem.type;
           let bgClass = 'bg-slate-800 text-slate-300';
@@ -835,7 +842,7 @@ const renderTimeline = (outputLog: string | null | undefined) => {
               <span className={`px-1 rounded text-[8px] font-black uppercase tracking-wider select-none ${bgClass}`}>
                 {label}
               </span>
-              <span className="break-all">{logItem.data}</span>
+              <span className="break-all">{logItem.data == null ? '' : String(logItem.data)}</span>
             </div>
           );
         })}
