@@ -6065,7 +6065,7 @@ async def search_ma(request: Request, query: str = "", media_type: str = "", lim
         async with shared_http_client() as client:
             resp = await client.get(
                 f"{EXECUTION_SVC}/execute/media/music-assistant/search",
-                params={"user_id": creds.get("user") or "", "query": query, "media_type": media_type, "limit": limit, "artist": artist, "album": album, "library_only": library_only},
+                params={"user_id": creds.get("user") or "", "query": query, "media_type": media_type, "limit": limit, "artist": artist, "album": album, "library_only": str(library_only)},
                 headers={"X-Internal-Secret": INTERNAL_SECRET}
                 , timeout=aiohttp.ClientTimeout(total=15.0),
             )
