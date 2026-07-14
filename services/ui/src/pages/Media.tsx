@@ -952,6 +952,10 @@ const Media = () => {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mediaStatus, setMediaStatus] = useState<MediaStatus | null>(null);
+  // Players reported by the (always-working) media/status poll. Used as the
+  // device source of truth so devices appear even when the HA entity list or
+  // the MA WebSocket are unavailable for this user.
+  const [availablePlayers, setAvailablePlayers] = useState<MediaStatus[]>([]);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
   const [localMode, setLocalMode] = useState(true);
@@ -1292,6 +1296,7 @@ const Media = () => {
         };
         const allPlayers = detail.all_players || [];
         const active = detail.active;
+        setAvailablePlayers(allPlayers);
         
         if (active) {
           if (active.entity_id === 'web_player') {
@@ -1827,6 +1832,23 @@ const Media = () => {
 
   /* ── render ───────────────────────────────────────────────────── */
 
+  // Merge the HA entity list with the players reported by media/status so that
+  // devices always appear for the user even when the HA entity list or the MA
+  // WebSocket are unavailable. media/status is the reliable source of truth.
+  const deviceEntities = useMemo(() => {
+    const seen = new Set((entities || []).map((e) => e.entity_id));
+    const fromStatus: MediaEntity[] = (availablePlayers || [])
+      .filter((p) => p.entity_id)
+      .map((p) => ({
+        entity_id: p.entity_id as string,
+        friendly_name: p.friendly_name || (p.entity_id as string),
+        state: p.state || 'unknown',
+        domain: (p.entity_id as string).split('.')[0],
+      }))
+      .filter((p) => !seen.has(p.entity_id));
+    return [...(entities || []), ...fromStatus];
+  }, [entities, availablePlayers]);
+
   return (
     <div className="space-y-6 max-w-4xl mx-auto pb-24">
       <h1 className="text-2xl font-bold text-white">Media</h1>
@@ -1841,7 +1863,7 @@ const Media = () => {
       {/* 1. Device Selector */}
       <DeviceSelector
         selectedTarget={selectedTarget}
-        entities={entities}
+        entities={deviceEntities}
         onDeviceSelect={handleDeviceSelect}
         localMode={localMode}
         onLocalToggle={handleLocalToggle}
