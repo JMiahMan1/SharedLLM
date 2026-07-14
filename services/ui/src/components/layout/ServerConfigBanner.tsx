@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { AlertCircle, WifiOff, Wifi, X, Server } from 'lucide-react';
+import { AlertCircle, WifiOff, Wifi, X, Server, Check } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { checkConnectivity } from '../../lib/connectivity';
 import { storageGet, storageSet } from '../../lib/storage';
@@ -10,6 +10,8 @@ const ServerConfigBanner = () => {
   const [status, setStatus] = useState<'checking' | 'disconnected' | 'connected' | 'no-config'>('checking');
   const [dismissed, setDismissed] = useState(false);
   const [serverUrl, setServerUrl] = useState('');
+  const [serverInput, setServerInput] = useState('');
+  const [saving, setSaving] = useState(false);
   const intervalRef = useRef<number | null>(null);
   const mountedRef = useRef(false);
 
@@ -34,6 +36,18 @@ const ServerConfigBanner = () => {
       setStatus(result.ok ? 'connected' : 'disconnected');
     }
   }, []);
+
+  const handleSave = useCallback(async () => {
+    const raw = serverInput.trim();
+    if (!raw) return;
+    const normalized = raw.startsWith('http://') || raw.startsWith('https://')
+      ? raw
+      : 'http://' + raw;
+    setSaving(true);
+    await storageSet('jarvis_server_url', normalized.replace(/\/+$/, ''));
+    setSaving(false);
+    check();
+  }, [serverInput, check]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -89,7 +103,22 @@ const ServerConfigBanner = () => {
           <WifiOff size={16} className="text-red-400 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-red-400">Server not configured</p>
-            <p className="text-[11px] text-red-400/70 mt-0.5">Server URL is not set. Please configure it on the login screen.</p>
+            <p className="text-[11px] text-red-400/70 mt-0.5">Enter your server URL (the gateway, e.g. http://192.168.2.205:11435).</p>
+            <div className="flex items-center gap-2 mt-2">
+              <input
+                value={serverInput}
+                onChange={(e) => setServerInput(e.target.value)}
+                placeholder="http://host:11435"
+                className="flex-1 min-w-0 px-2 py-1.5 rounded bg-black/30 border border-red-500/30 text-xs text-white placeholder-red-400/40 outline-none focus:border-red-400"
+              />
+              <button
+                onClick={handleSave}
+                disabled={saving || !serverInput.trim()}
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-red-500/30 border border-red-500/40 rounded text-[11px] text-red-200 hover:bg-red-500/40 transition-colors disabled:opacity-50"
+              >
+                <Check size={11} /> {saving ? 'Saving' : 'Save'}
+              </button>
+            </div>
           </div>
           <button onClick={handleDismiss} className="text-red-500 hover:text-red-300 shrink-0">
             <X size={14} />
@@ -105,9 +134,24 @@ const ServerConfigBanner = () => {
         <AlertCircle size={16} className="text-red-400 shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-red-400">Server unreachable</p>
-          <p className="text-[11px] text-red-400/70 mt-0.5">Cannot connect to the Identity API service at {serverUrl}. Check your network connection or that the service is running.</p>
+          <p className="text-[11px] text-red-400/70 mt-0.5">Cannot connect to {serverUrl}. Check the URL or your network, then save.</p>
+          <div className="flex items-center gap-2 mt-2">
+            <input
+              value={serverInput}
+              onChange={(e) => setServerInput(e.target.value)}
+              placeholder={serverUrl || 'http://host:11435'}
+              className="flex-1 min-w-0 px-2 py-1.5 rounded bg-black/30 border border-red-500/30 text-xs text-white placeholder-red-400/40 outline-none focus:border-red-400"
+            />
+            <button
+              onClick={handleSave}
+              disabled={saving || !serverInput.trim()}
+              className="flex items-center gap-1 px-2.5 py-1.5 bg-red-500/30 border border-red-500/40 rounded text-[11px] text-red-200 hover:bg-red-500/40 transition-colors disabled:opacity-50"
+            >
+              <Check size={11} /> {saving ? 'Saving' : 'Save'}
+            </button>
+          </div>
         </div>
-        <div className="flex gap-1.5 shrink-0">
+        <div className="flex flex-col gap-1.5 shrink-0">
           <button
             onClick={check}
             className="flex items-center gap-1 px-2 py-1 bg-red-500/20 border border-red-500/30 rounded text-[10px] text-red-300 hover:bg-red-500/30 transition-colors"

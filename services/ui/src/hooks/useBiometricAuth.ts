@@ -37,6 +37,7 @@ export function useBiometricAuth() {
         reason,
         androidTitle: 'Jarvis OS',
         androidSubtitle: reason,
+        allowDeviceCredential: true,
       });
       return { success: true };
     } catch (err) {
