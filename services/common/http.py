@@ -29,10 +29,22 @@ def _make(verify: bool) -> aiohttp.ClientSession:
     )
 
 
+def _session_dead(client: aiohttp.ClientSession | None) -> bool:
+    """A session can report ``closed == False`` while its underlying connector
+    has been closed (e.g. after a transient upstream disconnect). Reusing such a
+    session raises ``AssertionError: Connector is closed`` on the next request,
+    which is not a ``ClientError`` and escapes normal error handling. Treat a
+    closed/missing connector as a dead session so it gets recreated."""
+    if client is None or client.closed:
+        return True
+    connector = client.connector
+    return connector is None or getattr(connector, "closed", False)
+
+
 def get_client() -> aiohttp.ClientSession:
     """Return a process-wide pooled aiohttp client (verifies TLS)."""
     global _client
-    if _client is None or _client.closed:
+    if _session_dead(_client):
         _client = _make(True)
     return _client
 
@@ -44,6 +56,6 @@ def get_client_insecure() -> aiohttp.ClientSession:
     webOS, etc.). Do NOT use for public endpoints — use ``get_client()``.
     """
     global _client_insecure
-    if _client_insecure is None or _client_insecure.closed:
+    if _session_dead(_client_insecure):
         _client_insecure = _make(False)
     return _client_insecure

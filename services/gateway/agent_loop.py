@@ -1166,6 +1166,18 @@ _http_clients: dict[asyncio.AbstractEventLoop, aiohttp.ClientSession] = {}
 _fallback_http_client: aiohttp.ClientSession | None = None
 
 
+def _http_client_dead(client: "aiohttp.ClientSession | None") -> bool:
+    """A session can report ``closed == False`` while its underlying connector
+    has been closed (e.g. after a transient upstream disconnect). Reusing such a
+    session raises ``AssertionError: Connector is closed`` on the next request,
+    which is not a ``ClientError`` and therefore escapes normal error handling.
+    Treat a closed/missing connector as a dead client so it gets recreated."""
+    if client is None or client.closed:
+        return True
+    connector = client.connector
+    return connector is None or getattr(connector, "closed", False)
+
+
 def get_http_client() -> aiohttp.ClientSession:
     try:
         current_loop = asyncio.get_running_loop()
@@ -1174,7 +1186,7 @@ def get_http_client() -> aiohttp.ClientSession:
 
     if current_loop is None:
         global _fallback_http_client
-        if _fallback_http_client is None or _fallback_http_client.closed:
+        if _http_client_dead(_fallback_http_client):
             _fallback_http_client = _original_async_client(
                 timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
                 connector=aiohttp.TCPConnector(limit=100),
@@ -1182,7 +1194,7 @@ def get_http_client() -> aiohttp.ClientSession:
         return _fallback_http_client
 
     client = _http_clients.get(current_loop)
-    if client is None or client.closed:
+    if _http_client_dead(client):
         client = _original_async_client(
             timeout=aiohttp.ClientTimeout(300.0, connect=30.0),
             connector=aiohttp.TCPConnector(limit=100),
