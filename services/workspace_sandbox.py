@@ -92,7 +92,10 @@ def _detect_host_root() -> str:
         if sep + 2 >= len(cols):
             continue
         # mountinfo: ... <options> - <fstype> <source> <super-options>
-        source = _unescape_mountinfo(cols[sep + 2])
+        # For a BIND mount the real source path lives in cols[3] (the "root"
+        # field), not the post-dash <source> (which is the backing device,
+        # e.g. /dev/nvme0n1p3). Reading the device would yield a wrong path.
+        source = _unescape_mountinfo(cols[3])
         if (
             mountpoint == SANDBOX_MOUNT_ROOT
             or mountpoint.startswith(SANDBOX_MOUNT_ROOT + "/")
@@ -237,8 +240,12 @@ def ensure_workspace_container(
         working_dir=host_path,
         # Mount the workspace at its IDENTICAL absolute path inside the container.
         # Only this directory is visible — the agent cannot reach any other
-        # workspace or host path.
-        volumes={mount_source: {"bind": host_path, "mode": "rw"}},
+        # workspace or host path. The trailing ",z" applies the shared SELinux
+        # relabel so a non-privileged sandbox container (container_t) can read
+        # the host workspace when the host enforces SELinux — without it, ls/git
+        # inside the sandbox fail with "Permission denied" even as root because
+        # the source lives under /home (user_home_t). Ignored on non-SELinux hosts.
+        volumes={mount_source: {"bind": host_path, "mode": "rw,z"}},
         mem_limit=SANDBOX_MEM,
         memswap_limit=SANDBOX_MEM,
         pids_limit=SANDBOX_PIDS,
