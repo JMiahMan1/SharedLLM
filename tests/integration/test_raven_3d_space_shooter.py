@@ -122,33 +122,80 @@ Execution order:
    `workspace_id` for EVERY file/shell/git call. NEVER use the Default Workspace.
 2. `gh repo create raven-3d-shooter-{lang} --private -d "Starfall 3D space shooter ({human})"`.
    If it already exists, `gh repo clone raven-3d-shooter-{lang} .` and overwrite all project files.
-3. Write the game, a README.md (install/run/controls), and `.github/workflows/build.yml`.
+3. Write the game, a README.md (install/run/controls/design), and `.github/workflows/build.yml`.
    Commit and push (only to this repo).
 4. Verify with `gh repo view raven-3d-shooter-{lang}` that everything is on GitHub before done.
 
-Game design (implement all):
-- 3D perspective camera follows the player ship; player moves on a 2D plane (WASD/arrows).
-- Endless starfield/asteroid field scrolling in 3D; enemy drones spawn and approach the player.
-- Fire with SPACE/click; projectiles spawn AT the ship and travel FORWARD toward the incoming
-   enemies (the +Z / spawn direction), colliding with enemies to award score; enemies and asteroids
-   spawn AHEAD of the player and approach it. Ensure your headless selftest feeds synthetic
-   fire/movement input that actually lets projectiles meet enemies so the score increases (otherwise
-   the game is unwinnable).
-- 3 lives; GAME OVER with "PRESS R TO RESTART" (R restarts).
-- Lighting + 3D meshes (cube/cone/sphere) for ship, enemies, projectiles, asteroids.
+================================================================================
+GAME DESIGN PHILOSOPHY  (you are the lead designer + combat programmer — honor this)
+================================================================================
+Draw on the design wisdom of Star Fox 64, Rogue Squadron and Panzer Dragoon, but DO
+NOT clone them. Steal the *principles* that made them timeless and make something new.
 
-Headless self-test (automated grading):
+Player must ALWAYS feel: FAST, POWERFUL, SKILLED, IN CONTROL, UNDER PRESSURE,
+REWARDED FOR MASTERY. Favor readability over simulation, responsiveness over physical
+accuracy. Every mechanic must reinforce the fantasy of piloting an elite space fighter.
+
+Design priorities (in order): (1) exceptional game feel, (2) responsive controls,
+(3) constant engagement, (4) memorable encounters, (5) replayability, (6) technical
+simplicity, (7) high polish. For every feature ask: "Does this make the game more fun
+within the next 30 seconds?" If not, simplify it. Build VERTICALLY — start from one
+polished, playable slice and expand; never build systems you can't immediately test.
+
+CORE MECHANICS (implement all of these):
+- 3D perspective camera trails the player ship; ship moves on a 2D plane (WASD/arrows).
+- Endless scrolling starfield/asteroid field in 3D; enemy drones + hazards spawn AHEAD
+  of the player and approach it.
+- Fire with SPACE/click; projectiles spawn AT the ship and travel FORWARD toward the
+  incoming enemies, colliding to award score. Enemies/asteroids spawn ahead and close in.
+- COMBAT LAYER (the fun): strafing, precision shooting, a LOCK-ON (target reticle that
+  boosts aim/score on confirmed hits), a CHARGE attack (hold to release a big shot),
+  BOOST (burst speed) + BRAKE (snap slowdown for precision), BARREL ROLL (i-frames +
+  dodge), and an ENERGY meter that gates boost/charge/lock so every action is a
+  risk/reward decision.
+- 3 lives; GAME OVER with "PRESS R TO RESTART" (R restarts).
+- ENEMY DESIGN: every enemy has a unique ROLE (fighter = strafes, bomber = tanky + telegraphed
+  heavy shot, turret = static pressure, interceptor = flanks). ALL enemy attacks are heavily
+  TELEGRAPHED (wind-up + clear tell) so the player always understands WHY they were hit.
+- BOSS: at least one boss with a readable silhouette, multiple phases, destructible
+  components / optional weak point, and a cinematic entrance. It should adapt to player behavior.
+- PACING: every ~20-40s introduce something new (enemy, hazard, environmental change, mini-boss,
+  or decision). Escalate continuously, then give brief breaths. NO repetitive waves.
+- REPLAYABILITY: score-attack + time-attack modes, hidden objectives, branching route choices,
+  difficulty scaling, and unlockables (ships/weapons/paint schemes/modifiers). Keep it data-driven.
+- 3D meshes (cube/cone/sphere or equivalent) + LIGHTING for ship, enemies, projectiles, asteroids.
+- AUDIO/UI/GRAPHICS: minimal, instantly-readable HUD; satisfying weapon/engine/explosion SFX +
+  adaptive music + warning alarms; stylized visuals that prioritize silhouette, lighting, particles
+  and motion over realism. Every action gets clear audio+visual feedback.
+
+ARCHITECTURE (keep it clean + simple so it stays shippable):
+- Component / ECS-style or clear modular systems: modular weapons, modular AI, an EVENT system,
+  STATE MACHINES for entities/boss, OBJECT POOLING for projectiles/enemies, and DATA-DRIVEN enemy
+  definitions (a config/struct per enemy type) so new enemies are data, not code.
+- Deterministic, headless-runnable simulation core (update(dt, input) -> state) separated from
+  rendering, so the self-test below can drive it with synthetic input. Add a save + (optional) replay.
+
+IMPORTANT: every headless selftest must feed synthetic fire/movement input that actually lets
+projectiles meet enemies so the SCORE INCREASES (otherwise the game is unwinnable). The concrete
+self-test contract below is NON-NEGOTIABLE — do not let the richer design break it.
+
+================================================================================
+HEADLESS SELF-TEST (automated grading — exact contract, must keep working)
+================================================================================
 - Support `--selftest` (or `SELFTEST=1`): run the PURE game-logic update loop for ~120 frames with
    synthetic input and NO window, print EXACTLY `GAME_OK`, exit 0. The selftest must NOT open a window
    or read input (no {stack} window/init/input calls) — only your update/movement/collision/scoring
    logic, then `print("GAME_OK")`. Module-level imports of the render lib are fine.
+- The selftest MUST prove the score rises (synthetic fire + movement that connects with enemies).
 
-Platform + packaging (important):
+================================================================================
+PLATFORM + PACKAGING (important — exact requirements)
+================================================================================
 - It MUST run on modern Linux with Wayland (e.g. Fedora 42). Python: `SDL_VIDEODRIVER=wayland` (or
    dummy); native builds: rely on GLFW/winit Wayland support; web: any browser.
 - Ship an easy run path: a single binary for Go/Rust (`go build` / `cargo build --release`),
    `pip install -r requirements.txt && python main.py` for Python, `npm install && npm run dev` for
-   web. Document it clearly in README.md.
+   web. Document it clearly in README.md (include controls + the design philosophy summary).
 - Linux CI (`.github/workflows/build.yml`, `runs-on: ubuntu-latest`): install the {human} toolchain
    AND required system libs (xvfb, libgl1-mesa-dev, libglu1-mesa-dev, pkg-config), build, run the
    headless `--selftest` (fail the job if stdout lacks `GAME_OK`), then do a short real-launch smoke

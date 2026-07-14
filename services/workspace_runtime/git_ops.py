@@ -62,6 +62,18 @@ git_router = APIRouter()
 
 
 # ── Sandbox-backed git command runner ────────────────────────────────────────
+def _git_repo_present(workspace_path: str | Path) -> bool:
+    """True when the workspace directory is a git repository (has a .git).
+
+    A workspace is not required to be a git repo; read-only git endpoints must
+    return a clean "no repo" response instead of erroring in that case.
+    """
+    try:
+        return (Path(workspace_path) / ".git").is_dir()
+    except OSError:
+        return False
+
+
 async def run_git(
     workspace_id: str,
     workspace_path: str | Path,
@@ -167,6 +179,16 @@ async def git_status(req: WorkspaceRef, x_internal_secret: str | None = Header(d
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
     ws_id = workspace["id"]
+    if not _git_repo_present(workspace_path):
+        return {
+            "status": "SUCCESS",
+            "is_git_repo": False,
+            "workspace": workspace,
+            "branch": None,
+            "upstream": None,
+            "porcelain": [],
+            "dirty": False,
+        }
     branch = await run_git(ws_id, workspace_path, ["git", "branch", "--show-current"])
     porcelain = await run_git(ws_id, workspace_path, ["git", "status", "--short"])
     upstream = await run_git(ws_id, workspace_path, ["git", "rev-parse", "--abbrev-ref", "@{upstream}"])
@@ -187,6 +209,15 @@ async def git_branches(req: WorkspaceRef, x_internal_secret: str | None = Header
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
     ws_id = workspace["id"]
+    if not _git_repo_present(workspace_path):
+        return {
+            "status": "SUCCESS",
+            "is_git_repo": False,
+            "workspace": workspace,
+            "current": None,
+            "local": [],
+            "remote": [],
+        }
     local_res = await run_git(ws_id, workspace_path, ["git", "branch", "--format=%(refname:short)"])
     current_res = await run_git(ws_id, workspace_path, ["git", "branch", "--show-current"])
     remote_res = await run_git(ws_id, workspace_path, ["git", "branch", "-r", "--format=%(refname:short)"])
@@ -555,6 +586,13 @@ async def git_log(req: GitLogRequest, x_internal_secret: str | None = Header(def
     workspace = _resolve_workspace(req, check_recovery=True)
     _require_workspace_capability(workspace, "git_status")
     workspace_path = Path(workspace["resolved_path"])
+    if not _git_repo_present(workspace_path):
+        return {
+            "status": "SUCCESS",
+            "is_git_repo": False,
+            "workspace": workspace,
+            "entries": [],
+        }
 
     args = ["git", "log", f"-{req.max_count}"]
     if req.oneline:
