@@ -1,14 +1,7 @@
 import { Capacitor } from '@capacitor/core';
+import { storageGetSync } from './storage';
 
 const SERVER_URL_KEY = 'jarvis_server_url';
-
-function storageGetSync(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Resolves the origin the app should talk to for API/WebSocket calls.
