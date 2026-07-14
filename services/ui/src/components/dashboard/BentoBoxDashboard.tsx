@@ -23,7 +23,8 @@ const LazyWidgets: Record<WidgetKey, React.LazyExoticComponent<React.ComponentTy
   chores_progress:  lazy(() => import('../widgets/ChoresProgressWidget')),
   upcoming_events:  lazy(() => import('../widgets/UpcomingEventsWidget')),
   quick_assistant:  lazy(() => import('../widgets/QuickAssistantWidget')),
-  device_control:   lazy(() => import('../widgets/DeviceControlWidget')),
+  device_control:    lazy(() => import('../widgets/DeviceControlWidget')),
+  workspaces:        lazy(() => import('../widgets/WorkspacesWidget')),
 };
 
 // ── Widget-level error boundary ──────────────────────────────────────────────

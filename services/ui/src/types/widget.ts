@@ -6,7 +6,8 @@ export type WidgetKey =
   | 'chores_progress'
   | 'upcoming_events'
   | 'quick_assistant'
-  | 'device_control';
+  | 'device_control'
+  | 'workspaces';
 
 export type WidgetVisibility = 'visible' | 'hidden' | 'removed';
 export type WidgetSize = 'small' | 'medium' | 'wide' | 'tall';

@@ -27,6 +27,7 @@ const defaultSizes: Record<WidgetKey, WidgetSize> = {
   upcoming_events: 'wide',
   quick_assistant: 'medium',
   device_control: 'tall',
+  workspaces: 'medium',
 };
 
 function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSettings {
@@ -52,6 +53,7 @@ export const defaultWidgetDefs: WidgetDef[] = [
   { key: 'upcoming_events', label: 'Upcoming Events', icon: () => null, minSize: 'small', defaultSize: 'wide' },
   { key: 'quick_assistant', label: 'Quick Assistant', icon: () => null, minSize: 'small', defaultSize: 'medium', requiresQuickAssistantEnabled: true },
   { key: 'device_control', label: 'Device Control', icon: () => null, minSize: 'small', defaultSize: 'tall' },
+  { key: 'workspaces', label: 'Workspaces', icon: () => null, minSize: 'small', defaultSize: 'medium' },
 ];
 
 interface WidgetState {

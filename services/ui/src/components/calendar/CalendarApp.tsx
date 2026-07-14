@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Capacitor } from '@capacitor/core';
 import {
   Calendar as CalIcon,
   Plus,
@@ -73,6 +74,140 @@ interface CalendarDetail {
   needs_default_choice?: boolean;
   available_defaults?: string[];
 }
+
+// Today highlight styles (shared look; colors come from the active theme vars)
+const todayCell = (radius: string) => ({
+  background: 'var(--os-sun-soft)',
+  boxShadow: '0 0 0 2px var(--os-sun)',
+  borderRadius: radius,
+});
+const todayNum = { background: 'var(--os-ember)', color: '#fffdf8' };
+
+// Mobile detection: native app, or a narrow viewport (web responsive)
+function useIsMobile(): boolean {
+  const [mobile, setMobile] = useState(
+    () => Capacitor.isNativePlatform() || (typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches)
+  );
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const handler = () => setMobile(Capacitor.isNativePlatform() || mq.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
+  return mobile;
+}
+
+// Mobile-friendly vertical day list used for the Week view (research favours an
+// agenda/list over a cramped 7-column timegrid below ~360px). Each day header is
+// tappable to open the full Day view; events remain tappable to edit.
+const MobileDayList = ({
+  days, byDay, todayKey, people, onSelect, onSelectDay,
+}: {
+  days: Date[];
+  byDay: Map<string, CalendarEvent[]>;
+  todayKey: string;
+  people?: CalendarPerson[];
+  onSelect: (ev: CalendarEvent) => void;
+  onSelectDay: (key: string) => void;
+}) => {
+  const items = days.map((day) => {
+    const key = ymd(day);
+    const evs = byDay.get(key) ?? [];
+    return { day, key, evs };
+  });
+
+  if (items.every(({ evs }) => evs.length === 0)) {
+    return <div className="mt-10 text-center os-display text-2xl" style={{ color: 'var(--os-ink-faint)' }}>Nothing scheduled</div>;
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {items.map(({ day, key, evs }) => {
+        const isToday = key === todayKey;
+        return (
+          <div key={key} className="rounded-2xl p-3" style={isToday ? todayCell('1rem') : { background: 'var(--os-card)', boxShadow: 'var(--os-shadow)' }}>
+            <button
+              onClick={() => onSelectDay(key)}
+              className="mb-2 flex w-full items-baseline gap-2 text-left"
+            >
+              <span className="os-display text-lg font-bold" style={{ color: isToday ? 'var(--os-ember-deep)' : 'var(--os-ink)' }}>{day.getDate()}</span>
+              <span className="text-xs font-extrabold uppercase" style={{ color: isToday ? 'var(--os-ember-deep)' : 'var(--os-ink-faint)' }}>{day.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+              <span className="text-xs font-bold" style={{ color: 'var(--os-ink-soft)' }}>{day.toLocaleDateString('en-US', { month: 'short' })}</span>
+              <span className="ml-auto text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--os-ink-faint)' }}>Open ›</span>
+            </button>
+            <div className="flex flex-col gap-2">
+              {evs.length === 0 ? (
+                <p className="text-xs" style={{ color: 'var(--os-ink-faint)' }}>No events</p>
+              ) : (
+                evs.map((ev, idx) => <EventCard key={`${ev.summary}-${idx}`} ev={ev} size="md" onSelect={onSelect} people={people} />)
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// Mobile-friendly Month grid: a compact, Apple/Google-style dot overview. Each day
+// shows its number plus up to 3 color-coded event dots (with a "+N" overflow),
+// tapping a day opens the full Day view. This keeps the month scannable on a
+// narrow screen instead of cramming unreadable event text into ~50px cells.
+const WEEKDAY_LETTERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const MobileMonthGrid = ({
+  days, byDay, focused, todayKey, people, onSelectDay,
+}: {
+  days: Date[];
+  byDay: Map<string, CalendarEvent[]>;
+  focused: Date;
+  todayKey: string;
+  people?: CalendarPerson[];
+  onSelectDay: (key: string) => void;
+}) => {
+  return (
+    <div className="rounded-2xl p-2" style={{ background: 'var(--os-card)', boxShadow: 'var(--os-shadow)' }}>
+      <div className="mb-1 grid grid-cols-7 gap-1">
+        {WEEKDAY_LETTERS.map((w, i) => (
+          <div key={i} className="text-center text-[10px] font-extrabold uppercase" style={{ color: 'var(--os-ink-faint)' }}>{w}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {days.map((day) => {
+          const key = ymd(day);
+          const evs = byDay.get(key) ?? [];
+          const isToday = key === todayKey;
+          const inMonth = day.getMonth() === focused.getMonth();
+          const dots = evs.slice(0, 3);
+          const overflow = evs.length - dots.length;
+          return (
+            <button
+              key={key}
+              onClick={() => onSelectDay(key)}
+              className="flex flex-col items-center gap-1 rounded-xl py-1.5"
+              style={isToday ? todayCell('0.75rem') : inMonth ? { background: 'var(--os-paper-deep)' } : { opacity: 0.4 }}
+            >
+              <span
+                className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold ${isToday ? 'text-[#fffdf8]' : ''}`}
+                style={isToday ? todayNum : { color: inMonth ? 'var(--os-ink)' : 'var(--os-ink-faint)' }}
+              >
+                {day.getDate()}
+              </span>
+              <span className="flex h-2 items-center gap-0.5">
+                {dots.map((ev, idx) => {
+                  const c = calendarColor(ev.calendar, people);
+                  return <span key={idx} className="h-1.5 w-1.5 rounded-full" style={{ background: c }} aria-hidden="true" />;
+                })}
+                {overflow > 0 && (
+                  <span className="text-[8px] font-extrabold" style={{ color: 'var(--os-ink-faint)' }}>+{overflow}</span>
+                )}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 
 // Build a map of dayKey -> events that overlap that day (within [rangeStart, rangeEnd))
 const buildByDay = (events: CalendarEvent[], rangeStart: Date, rangeEnd: Date) => {
@@ -293,6 +428,7 @@ const EditEventModal = ({ event, onClose, people }: { event: CalendarEvent; onCl
 
 const CalendarApp = () => {
   const { isDark } = useDarkModeSync();
+  const isMobile = useIsMobile();
   const queryClient = useQueryClient();
   const [view, setView] = useState<ViewKind>('agenda');
   const [focused, setFocused] = useState<Date>(() => new Date());
@@ -429,13 +565,7 @@ const CalendarApp = () => {
     </button>
   );
 
-  // Today highlight styles (shared look; colors come from the active theme vars)
-  const todayCell = (radius: string) => ({
-    background: 'var(--os-sun-soft)',
-    boxShadow: '0 0 0 2px var(--os-sun)',
-    borderRadius: radius,
-  });
-  const todayNum = { background: 'var(--os-ember)', color: '#fffdf8' };
+  // Today highlight styles are defined at module scope (todayCell / todayNum).
 
   return (
     <section className="os-calendar rounded-[1.25rem] p-4 md:p-6" style={{ background: 'var(--os-paper)' }}>
@@ -555,6 +685,9 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
       )}
 
       {view === 'week' && (
+        isMobile ? (
+          <MobileDayList days={days} byDay={byDay} todayKey={todayKey} people={people} onSelect={setEditing} onSelectDay={(key) => openDay(key)} />
+        ) : (
         <div className="grid grid-cols-7 gap-3">
           {days.map((day) => {
             const key = ymd(day);
@@ -573,9 +706,13 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
             );
           })}
         </div>
+        )
       )}
 
       {view === 'month' && (
+        isMobile ? (
+          <MobileMonthGrid days={days} byDay={byDay} focused={focused} todayKey={todayKey} people={people} onSelectDay={(key) => openDay(key)} />
+        ) : (
         <div className="flex flex-col">
           <div className="mb-2 flex flex-wrap items-center gap-2">
             {integrations.filter((i) => i.enabled).map((i) => {
@@ -621,6 +758,7 @@ ${isDark ? DARK_VARS : LIGHT_VARS}
             })}
           </div>
         </div>
+        )
       )}
 
       {isLoading && <p className="text-sm" style={{ color: 'var(--os-ink-soft)' }}>Loading your agenda…</p>}
