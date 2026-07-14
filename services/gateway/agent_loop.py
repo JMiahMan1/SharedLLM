@@ -1331,6 +1331,34 @@ def should_persist_learning(result: str) -> bool:
     if "schema error (422)" in result_lower:
         return False
 
+    # Reject summaries that explicitly report the mission did NOT complete.
+    # A build/implementation mission that ends with "Status: Incomplete -
+    # interrupted by time limit" or "❌ Game code not written" / "❌ repo
+    # creation not completed" is a failure report, not meaningful success
+    # output, and must NOT be reported as a `completed` mission (false
+    # positive). Genuine successes describe what was built/pushed, not what
+    # was not.
+    incompletion_indicators = [
+        "incomplete",
+        "interrupted by time limit",
+        "hit the time limit",
+        "time limit exceeded",
+        "timed out",
+        "not completed",
+        "was not completed",
+        "not written",
+        "not implemented",
+        "not created",
+        "not committed",
+        "not pushed",
+        "did not complete",
+        "did not produce",
+        "no code was",
+        "no files were",
+    ]
+    if any(ind in result_lower for ind in incompletion_indicators):
+        return False
+
     read_only_patterns = ["read ", "lines from"]
     if all(p in result_lower for p in read_only_patterns):
         return False
@@ -2615,8 +2643,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # `git push` / `gh repo create` directly) would never authenticate.
             # This is the durable backstop that makes "commit and push" reliable
             # regardless of how the model phrased the request.
+            _git_batch = None
             if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
-                _git_batch = None
                 _shell_cmd = payload.get("command") or ""
                 _routed = _translate_shell_to_git_op(_shell_cmd)
                 if _routed:  # non-empty list of git-op payloads
