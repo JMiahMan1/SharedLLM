@@ -527,6 +527,7 @@ export interface WorkspaceFileListResponse {
 
 export interface GitStatusResponse {
   status: string;
+  is_git_repo?: boolean;
   branch?: string;
   upstream?: string | null;
   porcelain: string[];
@@ -535,6 +536,7 @@ export interface GitStatusResponse {
 
 export interface GitBranchesResponse {
   status: string;
+  is_git_repo?: boolean;
   current?: string;
   local: string[];
   remote: string[];
@@ -569,6 +571,7 @@ export interface GitLogEntry {
 
 export interface GitLogResponse {
   status: string;
+  is_git_repo?: boolean;
   entries: GitLogEntry[];
 }
 

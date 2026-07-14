@@ -39,6 +39,12 @@ import { api, type RavenMission, type Workspace } from '../../services/api';
 import type { GitLogEntry, GitStatusResponse, WorkspaceFileEntry } from '../../types/api';
 import { detectLanguage } from '../../lib/editorLanguages';
 import { CodeEditor } from '../editor/CodeEditor';
+import { MarkdownViewer } from './viewers/MarkdownViewer';
+import { ImageViewer } from './viewers/ImageViewer';
+import { PdfViewer } from './viewers/PdfViewer';
+import { DocxViewer } from './viewers/DocxViewer';
+import { ExcelViewer } from './viewers/ExcelViewer';
+import { TerminalPane } from './viewers/TerminalPane';
 import { cn } from '../../lib/utils';
 
 interface WorkspaceIDEProps {
@@ -46,15 +52,16 @@ interface WorkspaceIDEProps {
   onClose: () => void;
 }
 
-type View = 'explorer' | 'git' | 'tools' | 'chat';
+type View = 'explorer' | 'git' | 'tools' | 'chat' | 'terminal';
 
 // A single open editor tab. Text tabs cache their buffer so switching tabs
 // preserves edits; image tabs cache an object URL for preview.
 interface OpenTab {
   path: string;
-  kind: 'text' | 'image';
+  kind: 'text' | 'image' | 'markdown' | 'pdf' | 'docx' | 'xlsx' | 'terminal';
   content: string;
   imageUrl: string | null;
+  blobUrl?: string | null;
   dirty: boolean;
   language: string;
   baseContent: string;
@@ -65,6 +72,15 @@ function formatBytes(n?: number | null): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function downloadBlob(url: string, filename: string) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename.split('/').pop() || 'download';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 function apiErr(e: unknown): string {
@@ -79,6 +95,7 @@ const ACTIVITY: { id: View; icon: typeof FolderOpen; label: string }[] = [
   { id: 'explorer', icon: FolderOpen, label: 'Explorer' },
   { id: 'git', icon: GitBranch, label: 'Source Control' },
   { id: 'tools', icon: Wrench, label: 'Tools' },
+  { id: 'terminal', icon: Terminal, label: 'Terminal' },
   { id: 'chat', icon: MessageSquare, label: 'Raven Chat' },
 ];
 
@@ -104,6 +121,10 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
   const [gitBusy, setGitBusy] = useState(false);
   const [branches, setBranches] = useState<string[]>([]);
   const [branchBusy, setBranchBusy] = useState(false);
+  // A workspace may have the git capability but not actually be a git repo on
+  // disk (e.g. the default user workspace). Gate actions on a real repo so we
+  // don't surface scary errors for non-repo workspaces.
+  const gitEnabled = hasGit && gitStatus?.is_git_repo !== false;
 
   // In-editor diff view (replaces the cramped side-panel <pre>).
   const [showDiff, setShowDiff] = useState(false);
@@ -226,6 +247,26 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p);
   }, []);
 
+  const isMarkdownPath = useCallback((p: string | null): boolean => {
+    if (!p) return false;
+    return /\.(md|markdown|mdx)$/i.test(p);
+  }, []);
+
+  const isPdfPath = useCallback((p: string | null): boolean => {
+    if (!p) return false;
+    return /\.pdf$/i.test(p);
+  }, []);
+
+  const isDocxPath = useCallback((p: string | null): boolean => {
+    if (!p) return false;
+    return /\.docx?$/i.test(p);
+  }, []);
+
+  const isExcelPath = useCallback((p: string | null): boolean => {
+    if (!p) return false;
+    return /\.(xlsx?|csv)$/i.test(p);
+  }, []);
+
   const baseDirOf = useCallback((path: string) => {
     if (path === '.' || !path.includes('/')) return '';
     return path.replace(/\/$/, '') + '/';
@@ -272,6 +313,35 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         }
         return;
       }
+      if (isPdfPath(entry.path) || isDocxPath(entry.path) || isExcelPath(entry.path)) {
+        const kind = isPdfPath(entry.path) ? 'pdf' : isDocxPath(entry.path) ? 'docx' : 'xlsx';
+        try {
+          const blob = await api.fetchWorkspaceFileRaw(workspace.id, entry.path);
+          const url = URL.createObjectURL(blob);
+          setTabs((prev) => [
+            ...prev,
+            { path: entry.path, kind, content: '', imageUrl: null, blobUrl: url, dirty: false, language: 'plaintext', baseContent: '' },
+          ]);
+          setActiveTab(entry.path);
+        } catch (e: unknown) {
+          toast.error(`Failed to open ${kind} file: ${apiErr(e)}`);
+        }
+        return;
+      }
+      if (isMarkdownPath(entry.path)) {
+        try {
+          const res = await api.readWorkspaceFile(workspace.id, entry.path);
+          const content = typeof res?.content === 'string' ? res.content : '';
+          setTabs((prev) => [
+            ...prev,
+            { path: entry.path, kind: 'markdown', content, imageUrl: null, dirty: false, language: 'markdown', baseContent: content },
+          ]);
+          setActiveTab(entry.path);
+        } catch (e: unknown) {
+          toast.error(`Failed to read file: ${apiErr(e)}`);
+        }
+        return;
+      }
       try {
         const res = await api.readWorkspaceFile(workspace.id, entry.path);
         const content = typeof res?.content === 'string' ? res.content : '';
@@ -284,7 +354,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         toast.error(`Failed to read file: ${apiErr(e)}`);
       }
     },
-    [workspace.id, loadDir, isImagePath, loadImageModels, tabs],
+    [workspace.id, loadDir, isImagePath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, loadImageModels, tabs],
   );
 
   // Programmatic open by path (e.g. a freshly generated image from Stable Diffusion).
@@ -309,6 +379,35 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         }
         return;
       }
+      if (isPdfPath(path) || isDocxPath(path) || isExcelPath(path)) {
+        const kind = isPdfPath(path) ? 'pdf' : isDocxPath(path) ? 'docx' : 'xlsx';
+        try {
+          const blob = await api.fetchWorkspaceFileRaw(workspace.id, path);
+          const url = URL.createObjectURL(blob);
+          setTabs((prev) => [
+            ...prev,
+            { path, kind, content: '', imageUrl: null, blobUrl: url, dirty: false, language: 'plaintext', baseContent: '' },
+          ]);
+          setActiveTab(path);
+        } catch {
+          /* preview optional */
+        }
+        return;
+      }
+      if (isMarkdownPath(path)) {
+        try {
+          const res = await api.readWorkspaceFile(workspace.id, path);
+          const content = typeof res?.content === 'string' ? res.content : '';
+          setTabs((prev) => [
+            ...prev,
+            { path, kind: 'markdown', content, imageUrl: null, dirty: false, language: 'markdown', baseContent: content },
+          ]);
+          setActiveTab(path);
+        } catch {
+          /* open optional */
+        }
+        return;
+      }
       try {
         const res = await api.readWorkspaceFile(workspace.id, path);
         const content = typeof res?.content === 'string' ? res.content : '';
@@ -321,7 +420,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         /* open optional */
       }
     },
-    [workspace.id, isImagePath, loadImageModels, tabs],
+    [workspace.id, isImagePath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, loadImageModels, tabs],
   );
 
   // Close a tab (confirm if it has unsaved edits). Revokes image object URLs.
@@ -329,7 +428,8 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     (path: string) => {
       const tab = tabs.find((t) => t.path === path);
       if (tab?.dirty && !confirm(`Discard unsaved changes to ${path}?`)) return;
-      if (tab?.kind === 'image' && tab.imageUrl) URL.revokeObjectURL(tab.imageUrl);
+      if (tab?.imageUrl) URL.revokeObjectURL(tab.imageUrl);
+      if (tab?.blobUrl) URL.revokeObjectURL(tab.blobUrl);
       setTabs((prev) => {
         const idx = prev.findIndex((t) => t.path === path);
         const next = prev.filter((t) => t.path !== path);
@@ -368,7 +468,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
   );
 
   const saveFile = useCallback(async () => {
-    if (!active || active.kind !== 'text' || !active.dirty) return;
+    if (!active || (active.kind !== 'text' && active.kind !== 'markdown') || !active.dirty) return;
     setSaving(true);
     try {
       await api.writeWorkspaceFile(workspace.id, active.path, active.content);
@@ -410,7 +510,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
   }, [saveFile]);
 
   const downloadFile = useCallback(() => {
-    if (!active || active.kind !== 'text') return;
+    if (!active || (active.kind !== 'text' && active.kind !== 'markdown')) return;
     const blob = new Blob([active.content], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -843,17 +943,17 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
           {activeView === 'git' && (
             <div className="flex-1 overflow-y-auto custom-scrollbar p-3 flex flex-col gap-3">
               <div className="text-[11px] uppercase tracking-wide text-slate-500">Source Control</div>
-              {!hasGit && (
+              {!gitEnabled && (
                 <div className="flex items-start gap-2 text-xs text-amber-400 bg-amber-500/10 border border-amber-500/20 rounded p-2">
                   <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-                  This workspace has no git capability configured.
+                  {hasGit ? 'This workspace is not a Git repository.' : 'This workspace has no git capability configured.'}
                 </div>
               )}
               <div className="flex items-center justify-between">
                 <span className="text-xs text-slate-400">
                   {gitStatus?.branch ? `Branch: ${gitStatus.branch}` : 'Not a git repo'}
                 </span>
-                <button onClick={refreshGit} disabled={gitBusy || !hasGit} className="p-1 text-slate-400 hover:text-white disabled:opacity-30" title="Refresh">
+                <button onClick={refreshGit} disabled={gitBusy || !gitEnabled} className="p-1 text-slate-400 hover:text-white disabled:opacity-30" title="Refresh">
                   <RefreshCw size={14} className={gitBusy ? 'animate-spin' : ''} />
                 </button>
               </div>
@@ -865,16 +965,16 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                 </div>
               )}
               <div className="grid grid-cols-2 gap-1.5">
-                <button onClick={gitDiffView} disabled={gitBusy || !hasGit} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30">
+                <button onClick={gitDiffView} disabled={gitBusy || !gitEnabled} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30">
                   <GitPullRequest size={13} /> Diff
                 </button>
-                <button onClick={gitFetch} disabled={gitBusy || !hasGit} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30">
+                <button onClick={gitFetch} disabled={gitBusy || !gitEnabled} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30">
                   <Terminal size={13} /> Fetch
                 </button>
-                <button onClick={gitCommit} disabled={gitBusy || !hasGit} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30">
+                <button onClick={gitCommit} disabled={gitBusy || !gitEnabled} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30">
                   <GitCommit size={13} /> Commit
                 </button>
-                <button onClick={gitPush} disabled={gitBusy || !hasGit} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30">
+                <button onClick={gitPush} disabled={gitBusy || !gitEnabled} className="flex items-center justify-center gap-1 py-1.5 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-30">
                   <UploadCloud size={13} /> Push
                 </button>
               </div>
@@ -882,7 +982,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                 value={commitMsg}
                 onChange={(e) => setCommitMsg(e.target.value)}
                 placeholder="Commit message…"
-                disabled={!hasGit}
+                disabled={!gitEnabled}
                 className="w-full px-2 py-1.5 text-xs rounded bg-black/40 border border-white/10 focus:border-indigo-500 outline-none disabled:opacity-40"
               />
               <p className="text-[10px] text-slate-600 leading-relaxed">
@@ -901,6 +1001,10 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                 </div>
               )}
             </div>
+          )}
+
+          {activeView === 'terminal' && (
+            <TerminalPane workspace={workspace} />
           )}
 
           {activeView === 'tools' && (
@@ -1082,7 +1186,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                   <div className="flex-1 min-h-0 flex">
                     <div className="flex-1 min-w-0 flex items-center justify-center bg-black/40 p-4 overflow-auto">
                       {active.imageUrl ? (
-                        <img src={active.imageUrl} alt={active.path} className="max-w-full max-h-full object-contain rounded-lg" />
+                        <ImageViewer url={active.imageUrl} />
                       ) : (
                         <span className="text-sm text-slate-600">No preview</span>
                       )}
@@ -1148,6 +1252,38 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                     </div>
                   </div>
                 </>
+              ) : active.kind === 'markdown' ? (
+                <>
+                  <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText size={14} className="text-indigo-400 shrink-0" />
+                      <span className="text-sm text-slate-300 truncate">{active.path}</span>
+                      {active.dirty && <span className="text-[10px] text-amber-400">● unsaved</span>}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={downloadFile} disabled={!active} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30" title="Download"><Download size={15} /></button>
+                      <button onClick={saveFile} disabled={!active.dirty || saving} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40" title="Save (Ctrl+S)">{saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Save</button>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-0"><MarkdownViewer value={active.content} onChange={onEditorChange} height="100%" /></div>
+                </>
+              ) : active.kind === 'pdf' || active.kind === 'docx' || active.kind === 'xlsx' ? (
+                <>
+                  <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText size={14} className="text-indigo-400 shrink-0" />
+                      <span className="text-sm text-slate-300 truncate">{active.path}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => active.blobUrl && downloadBlob(active.blobUrl, active.path)} disabled={!active.blobUrl} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30" title="Download"><Download size={15} /></button>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-0">
+                    {active.kind === 'pdf' && <PdfViewer url={active.blobUrl ?? ''} />}
+                    {active.kind === 'docx' && <DocxViewer url={active.blobUrl ?? ''} />}
+                    {active.kind === 'xlsx' && <ExcelViewer url={active.blobUrl ?? ''} />}
+                  </div>
+                </>
               ) : (
                 <>
                   <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
@@ -1163,7 +1299,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                       <button onClick={validateFile} className="px-2.5 py-1.5 text-xs font-medium rounded bg-white/10 hover:bg-white/20 text-slate-200" title="Validate / lint file">
                         Validate
                       </button>
-                      <button onClick={gitDiffView} disabled={gitBusy || !hasGit} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-white/10 hover:bg-white/20 text-slate-200 disabled:opacity-40" title="View diff in editor">
+                      <button onClick={gitDiffView} disabled={gitBusy || !gitEnabled} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-white/10 hover:bg-white/20 text-slate-200 disabled:opacity-40" title="View diff in editor">
                         <GitPullRequest size={13} /> Diff
                       </button>
                       <button onClick={downloadFile} disabled={!active} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30" title="Download">
@@ -1217,7 +1353,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
       <div className="h-7 shrink-0 bg-[#0d1222] border-t border-white/10 flex items-center gap-4 px-3 text-[11px] text-slate-400">
         <span className="flex items-center gap-1">
           <GitBranch size={12} />
-          {hasGit ? (
+          {gitEnabled ? (
             <select
               value={gitStatus?.branch ?? ''}
               onChange={(e) => {
@@ -1239,7 +1375,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
               <option value="__new__" className="bg-[#0d1222] text-slate-200">+ New branch…</option>
             </select>
           ) : (
-            'no git'
+            'no git repo'
           )}
         </span>
         <span className="truncate max-w-[40%]">{activeTab ? `📄 ${activeTab}` : 'No file open'}</span>
