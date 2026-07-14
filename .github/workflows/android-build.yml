@@ -39,9 +39,7 @@ jobs:
         npm ci
 
     - name: Install Capacitor Android platform
-      run: |
-        npx cap add android || true
-        npx cap sync android
+      run: npx cap add android || true
 
     - name: Build web assets
       run: npm run build
