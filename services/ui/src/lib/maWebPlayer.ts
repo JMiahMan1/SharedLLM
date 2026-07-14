@@ -14,6 +14,7 @@ import { getPlayerId, savePlayerId, setState } from './webPlayer';
 import { SendspinPlayer, type PlayerState } from '@sendspin/sendspin-js';
 import type { ConnectionState } from './wsManager';
 import { getServerOrigin, getWsProtocolFor } from './serverUrl';
+import { storageGetSync } from './storage';
 
 const STORAGE_KEY = 'sendspin_webplayer_id';
 
@@ -36,14 +37,6 @@ interface MAWebPlayerState {
 
 const API_KEY_STORAGE = 'jarvis_api_key' as const;
 const MAX_RECONNECT_ATTEMPTS = 10;
-
-function storageGetSync(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
 
 // Extract a usable image reference from a Music Assistant image payload.
 // MA sends several shapes and we must handle ALL of them, otherwise the
