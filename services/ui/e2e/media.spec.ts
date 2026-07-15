@@ -32,14 +32,13 @@ test.describe('Device Selector — Rendering', () => {
   test('shows online device count next to header', async ({ page }) => {
     const heading = page.getByRole('heading', { name: 'Select Device' });
     await expect(heading).toBeVisible();
-    // The "X online" badge is next to the heading in the same flex row
-    const deviceSection = page.locator('.glass-panel').first();
-    await expect(deviceSection).toBeVisible();
+    const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');
+    await expect(panel).toBeVisible();
   });
 
   test('renders device cards for media player entities', async ({ page }) => {
-    const deviceSection = page.locator('.glass-panel').first();
-    await expect(deviceSection).toBeVisible();
+    const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');
+    await expect(panel).toBeVisible();
 
     // Check for at least one device card button
     const deviceCards = page.locator(
@@ -65,14 +64,16 @@ test.describe('Device Selector — Rendering', () => {
   test('device cards show device name and room', async ({ page }) => {
     // Each device card has a name + room name derived from entity_id
     // e.g. "master_bedroom_tv" → room = "master bedroom"
-    const cards = page.locator('.glass-panel button').first();
-    await expect(cards).toBeVisible();
+    const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');
+    const cards = panel.locator('button');
+    await expect(cards.first()).toBeVisible();
   });
 
   test('device cards have online/offline visual indicators', async ({ page }) => {
     // Online devices get bg-green-400, offline get bg-slate-600
     // These are small colored dots (w-2.5 h-2.5 rounded-full)
-    const dots = page.locator('.glass-panel .rounded-full');
+    const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');
+    const dots = panel.locator('.rounded-full');
     const count = await dots.count();
     // At least one indicator dot should exist (one per card)
     expect(count).toBeGreaterThan(0);
@@ -1013,10 +1014,10 @@ test.describe('Media Page — Mobile', () => {
   test('device selector card list scrolls horizontally on mobile', async ({
     page,
   }) => {
-    const deviceSection = page.locator('.glass-panel').first();
-    await expect(deviceSection).toBeVisible();
+    const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');
+    await expect(panel).toBeVisible();
     // Horizontal scroll container should have overflow-x-auto
-    const scrollContainer = page.locator('.glass-panel .overflow-x-auto').first();
+    const scrollContainer = panel.locator('.overflow-x-auto');
     if (await scrollContainer.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(scrollContainer).toBeVisible();
     }
