@@ -9,7 +9,6 @@ ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
 RUN mkdir -p /home/sharedllm && chown 1000:1000 /home/sharedllm
-COPY . .
 EXPOSE 8007
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
@@ -28,8 +27,7 @@ RUN npm install -g \
     typescript \
     typescript-language-server \
     vscode-langservers-extracted \
-    shfmt \
-    shellcheck
+    shfmt
 
 # Install Docker CLI for container management
 RUN     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-29.6.1.tgz | \
@@ -66,9 +64,12 @@ RUN pip install --no-cache-dir \
 # sandbox environment at command time — never from a .env file.
 # ===========================================================================
 
-# --- Google Cloud SDK apt repository ---
+# --- Google Cloud SDK + GitHub CLI apt repositories ---
 RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud-google.gpg \
- && echo "deb [signed-by=/usr/share/keyrings/cloud-google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" > /etc/apt/sources.list.d/google-cloud-sdk.list
+ && echo "deb [signed-by=/usr/share/keyrings/cloud-google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" > /etc/apt/sources.list.d/google-cloud-sdk.list \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
 
 # --- System packages: language runtimes, linters, media/CLI tooling ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -91,6 +92,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gradle \
     ruby-full \
     google-cloud-sdk \
+    gh \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Python linters / checkers ---
@@ -109,19 +111,6 @@ RUN npm install -g \
     stylelint \
     markdownlint-cli \
     yaml-language-server
-
-# --- GitHub CLI (gh): runs NATIVELY in the sandbox with injected GITHUB_TOKEN ---
-# Version pinned (no api.github.com lookup) to avoid GitHub API rate-limit 404s
-# in CI image builds.
-RUN set -eux; \
-    ARCH="$(uname -m)"; \
-    if [ "$ARCH" = "x86_64" ]; then GH_ARCH="amd64"; else GH_ARCH="$ARCH"; fi; \
-    GH_VERSION="2.96.0"; \
-    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz" -o /tmp/gh.tar.gz; \
-    tar -xzf /tmp/gh.tar.gz -C /tmp; \
-    mv "/tmp/gh_${GH_VERSION}_linux_${GH_ARCH}/bin/gh" /usr/local/bin/gh; \
-    rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${GH_ARCH}"; \
-    gh --version
 
 # --- Terraform + OpenTofu (IaC) ---
 # Versions pinned to well-propagated releases for reproducible, rate-limit-free
@@ -217,4 +206,7 @@ RUN git config --file /home/sharedllm/.gitconfig credential.helper /usr/local/bi
  && git config --file /home/sharedllm/.gitconfig init.defaultBranch main \
  && chown 1000:1000 /home/sharedllm/.gitconfig
 
+# Copy service source LAST so the (source-independent) toolchain layers above
+# stay cached across code changes — only this layer rebuilds on each push.
+COPY . .
 CMD ["uvicorn", "services.workspace_runtime.main:app", "--host", "0.0.0.0", "--port", "8007"]
