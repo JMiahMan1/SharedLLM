@@ -13,6 +13,7 @@ services:
       args:
         - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_identity
+    image: ghcr.io/jmiahman1/sharedllm-identity:latest
     ports:
       - "8011:8001"
     environment:
@@ -32,6 +33,7 @@ services:
       args:
         - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_execution
+    image: ghcr.io/jmiahman1/sharedllm-execution:latest
     ports:
       - "8012:8003"
     environment:
@@ -64,6 +66,7 @@ services:
       args:
         - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_rag
+    image: ghcr.io/jmiahman1/sharedllm-rag:latest
     ports:
       - "8013:8004"
     environment:
@@ -88,6 +91,7 @@ services:
       args:
         - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_storage
+    image: ghcr.io/jmiahman1/sharedllm-storage:latest
     ports:
       - "8014:8005"
     environment:
@@ -110,6 +114,7 @@ services:
       args:
         - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_logging
+    image: ghcr.io/jmiahman1/sharedllm-logging:latest
     ports:
       - "8015:8006"
     environment:
@@ -134,6 +139,7 @@ services:
       args:
         - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_gateway
+    image: ghcr.io/jmiahman1/sharedllm-gateway:latest
     ports:
       - "8016:11435"
     environment:
@@ -165,6 +171,7 @@ services:
       args:
         - BASE_IMAGE=sharedllm-base:local
     container_name: sharedllm_test_workspace_runtime
+    image: ghcr.io/jmiahman1/sharedllm-workspace_runtime:latest
     ports:
       - "8007:8007"
     environment:

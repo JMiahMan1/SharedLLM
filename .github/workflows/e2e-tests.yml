@@ -151,9 +151,13 @@ jobs:
       - name: Generate test.env from example
         run: cp test.env.example test.env
 
+      - name: Pull prebuilt test images (skip rebuilds)
+        run: |
+          docker compose -f docker-compose.test.yml pull --ignore-pull-failures
+
       - name: Start test services
         run: |
-          docker compose -f docker-compose.test.yml up -d --build
+          docker compose -f docker-compose.test.yml up -d
           echo "Waiting for services to be ready..."
           for i in $(seq 1 30); do
             if curl -s http://localhost:8011/health | grep -q ok; then
@@ -272,9 +276,13 @@ jobs:
       - name: Generate test.env from example
         run: cp test.env.example test.env
 
+      - name: Pull prebuilt test images (full stack, skip rebuilds)
+        run: |
+          docker compose -f docker-compose.test.yml pull --ignore-pull-failures
+
       - name: Start full test stack
         run: |
-          docker compose -f docker-compose.test.yml up -d --build
+          docker compose -f docker-compose.test.yml up -d
           echo "Waiting for full stack readiness..."
           for i in $(seq 1 60); do
             ready=true
