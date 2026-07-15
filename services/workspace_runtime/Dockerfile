@@ -36,7 +36,7 @@ RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.
     tar xz --strip-components=1 -C /usr/local/bin docker/docker
 
 # Install deno
-RUN wget -q https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip -O /tmp/deno.zip && \
+RUN curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip -o /tmp/deno.zip && \
     unzip -o /tmp/deno.zip -d /usr/local/bin && \
     chmod +x /usr/local/bin/deno && \
     rm /tmp/deno.zip
@@ -117,29 +117,28 @@ RUN set -eux; \
     ARCH="$(uname -m)"; \
     if [ "$ARCH" = "x86_64" ]; then GH_ARCH="amd64"; else GH_ARCH="$ARCH"; fi; \
     GH_VERSION="2.96.0"; \
-    curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz" -o /tmp/gh.tar.gz; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz" -o /tmp/gh.tar.gz; \
     tar -xzf /tmp/gh.tar.gz -C /tmp; \
     mv "/tmp/gh_${GH_VERSION}_linux_${GH_ARCH}/bin/gh" /usr/local/bin/gh; \
     rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_${GH_ARCH}"; \
     gh --version
 
 # --- Terraform + OpenTofu (IaC) ---
-# Versions pinned (no api.github.com lookup) to avoid GitHub API rate-limit 404s
-# in CI image builds.
+# terraform version pinned to a well-propagated release; OpenTofu installed via
+# the official install script (handles asset/version detection robustly).
 RUN set -eux; \
-    TERRAFORM_VERSION="1.9.8"; \
-    curl -fsSL "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -o /tmp/tf.zip; \
+    TERRAFORM_VERSION="1.9.5"; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -o /tmp/tf.zip; \
     unzip -o /tmp/tf.zip -d /usr/local/bin; \
     rm -f /tmp/tf.zip; \
-    TOFU_VERSION="1.9.0"; \
-    curl -fsSL "https://github.com/opentofu/tofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip; \
-    unzip -o /tmp/tofu.zip -d /usr/local/bin; \
-    rm -f /tmp/tofu.zip; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://get.opentofu.org/install-opentofu.sh -o /tmp/install-opentofu.sh; \
+    sh /tmp/install-opentofu.sh; \
+    rm -f /tmp/install-opentofu.sh; \
     terraform version; tofu version
 
 # --- AWS CLI v2 ---
 RUN set -eux; \
-    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/aws.zip; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/aws.zip; \
     unzip -o /tmp/aws.zip -d /tmp; \
     /tmp/aws/install --update; \
     rm -rf /tmp/aws /tmp/aws.zip; \
@@ -148,14 +147,14 @@ RUN set -eux; \
 # --- Go (language + linters) ---
 RUN set -eux; \
     GO_VERSION="$(curl -fsSL https://go.dev/VERSION?m=text | head -1 | sed 's/^go//')"; \
-    curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz; \
     tar -C /usr/local -xzf /tmp/go.tgz; \
     rm -f /tmp/go.tgz; \
     go version
 ENV PATH="/usr/local/go/bin:${PATH}"
 RUN set -eux; \
     GL_VERSION="2.12.2"; \
-    curl -fsSL "https://github.com/golangci/golangci-lint/releases/download/v${GL_VERSION}/golangci-lint-${GL_VERSION}-linux-amd64.tar.gz" -o /tmp/gl.tgz; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/golangci/golangci-lint/releases/download/v${GL_VERSION}/golangci-lint-${GL_VERSION}-linux-amd64.tar.gz" -o /tmp/gl.tgz; \
     tar -xzf /tmp/gl.tgz -C /tmp; \
     mv "/tmp/golangci-lint-${GL_VERSION}-linux-amd64/golangci-lint" /usr/local/bin/; \
     rm -rf /tmp/gl.tgz "/tmp/golangci-lint-${GL_VERSION}-linux-amd64"; \
@@ -164,7 +163,7 @@ RUN set -eux; \
 # --- Rust (cargo/rustc/rustfmt/clippy) ---
 ENV CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup
 RUN set -eux; \
-    curl -fsSL https://sh.rustup.rs -o /tmp/rustup.sh; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://sh.rustup.rs -o /tmp/rustup.sh; \
     sh /tmp/rustup.sh -y --profile minimal --component rustfmt clippy --default-toolchain stable; \
     ln -sf /usr/local/cargo/bin/* /usr/local/bin/; \
     rm -f /tmp/rustup.sh; \
@@ -173,7 +172,7 @@ RUN set -eux; \
 # --- Terraform linter (tflint) ---
 RUN set -eux; \
     TFL_VERSION="0.54.0"; \
-    curl -fsSL "https://github.com/terraform-linters/tflint/releases/download/v${TFL_VERSION}/tflint_linux_amd64.zip" -o /tmp/tflint.zip; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/terraform-linters/tflint/releases/download/v${TFL_VERSION}/tflint_linux_amd64.zip" -o /tmp/tflint.zip; \
     unzip -o /tmp/tflint.zip -d /usr/local/bin; \
     rm -f /tmp/tflint.zip; \
     tflint --version
@@ -181,18 +180,18 @@ RUN set -eux; \
 # --- Dockerfile linter (hadolint) ---
 RUN set -eux; \
     HL_VERSION="2.12.0"; \
-    curl -fsSL "https://github.com/hadolint/hadolint/releases/download/v${HL_VERSION}/hadolint-Linux-x86_64" -o /usr/local/bin/hadolint; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/hadolint/hadolint/releases/download/v${HL_VERSION}/hadolint-Linux-x86_64" -o /usr/local/bin/hadolint; \
     chmod +x /usr/local/bin/hadolint; \
     hadolint --version
 
 # --- GitHub Actions linting/running (actionlint + act) ---
 RUN set -eux; \
     AL_VERSION="1.7.4"; \
-    curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v${AL_VERSION}/actionlint_${AL_VERSION}_linux_amd64.tar.gz" -o /tmp/al.tgz; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/rhysd/actionlint/releases/download/v${AL_VERSION}/actionlint_${AL_VERSION}_linux_amd64.tar.gz" -o /tmp/al.tgz; \
     tar -xzf /tmp/al.tgz -C /usr/local/bin; \
     rm -f /tmp/al.tgz; \
     ACT_VERSION="0.2.64"; \
-    curl -fsSL "https://github.com/nektos/act/releases/download/v${ACT_VERSION}/act_Linux_x86_64.tar.gz" -o /tmp/act.tgz; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/nektos/act/releases/download/v${ACT_VERSION}/act_Linux_x86_64.tar.gz" -o /tmp/act.tgz; \
     tar -xzf /tmp/act.tgz -C /usr/local/bin; \
     rm -f /tmp/act.tgz; \
     actionlint --version; act --version
