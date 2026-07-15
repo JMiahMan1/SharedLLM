@@ -106,36 +106,52 @@ async def _resolve_workspace_info(workspace_id: str | None, user_context: dict |
         )
 
     workspace_details: dict = {}
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
-            user_ctx = user_context or {"user": "system", "is_admin": True}
-            if hasattr(user_ctx, "model_dump"):
-                user_ctx = user_ctx.model_dump()
-            elif hasattr(user_ctx, "dict"):
-                user_ctx = user_ctx.dict()
-            async with client.post(
-                f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
-                json={"workspace_id": workspace_id, "user_context": user_ctx},
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("status") == "SUCCESS":
-                        workspace_details = data.get("workspace", {})
-                        resolved_path = str(workspace_details.get("resolved_path") or WORKSPACE_ROOT)
-                        return resolved_path, workspace_details
-                try:
-                    err_detail = (await resp.json()).get("detail", await resp.text())
-                except Exception:
-                    err_detail = await resp.text()
-                raise HTTPException(status_code=resp.status, detail=err_detail)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to resolve workspace '{workspace_id}': {e}",
-        )
+    last_err: str | None = None
+    # The workspace_runtime /workspace/resolve call can momentarily return
+    # non-200 (e.g. a 404/502 during a concurrent metadata write or a
+    # just-created workspace that hasn't been read back yet). A single miss
+    # must NOT stall an autonomous Raven mission, so retry a couple of
+    # times with a short backoff before treating it as a hard failure.
+    for _attempt in range(3):
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client:
+                user_ctx = user_context or {"user": "system", "is_admin": True}
+                if hasattr(user_ctx, "model_dump"):
+                    user_ctx = user_ctx.model_dump()
+                elif hasattr(user_ctx, "dict"):
+                    user_ctx = user_ctx.dict()
+                async with client.post(
+                    f"{WORKSPACE_RUNTIME_SVC_URL}/workspace/resolve",
+                    json={"workspace_id": workspace_id, "user_context": user_ctx},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        if data.get("status") == "SUCCESS":
+                            workspace_details = data.get("workspace", {})
+                            resolved_path = str(workspace_details.get("resolved_path") or WORKSPACE_ROOT)
+                            return resolved_path, workspace_details
+                    try:
+                        err_detail = (await resp.json()).get("detail", await resp.text())
+                    except Exception:
+                        err_detail = await resp.text()
+                    last_err = f"{resp.status}: {err_detail}"
+                    # Only retry on transient server/resolve misses, not
+                    # permanent client errors (400/404 for a truly unknown ws).
+                    if resp.status in (404, 502, 503, 504):
+                        await asyncio.sleep(1.0 * (_attempt + 1))
+                        continue
+                    raise HTTPException(status_code=resp.status, detail=err_detail)
+            break
+        except HTTPException:
+            raise
+        except Exception as e:
+            last_err = str(e)
+            await asyncio.sleep(1.0 * (_attempt + 1))
+    raise HTTPException(
+        status_code=502,
+        detail=f"Failed to resolve workspace '{workspace_id}': {last_err}",
+    )
 
 
 def _strip_workspace_path_prefix(relative_path: str, workspace: dict | None) -> str:
