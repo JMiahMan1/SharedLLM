@@ -1960,7 +1960,7 @@ const Media = () => {
                       playLocal(item.id.replace('ma-', ''), item.title, item.subtitle, 'music', 'ma');
                       return;
                     }
-                    playMedia(item.title, 'music');
+                    playMedia(item.id.replace('ma-', ''), 'music');
                   };
               return (
                 <QuickResumeItem
