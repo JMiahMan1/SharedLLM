@@ -2333,12 +2333,33 @@ def get_telemetry_summary(entity_id: str, x_internal_secret: str = Header(...)):
 
         peak_power_w = max(power_values) if power_values else None
         peak_point = None
+        peak_duration = 0.0
         if peak_power_w is not None:
-            peak_point = next((p for p in reversed(data_points) if p.get("power_w") == peak_power_w), None)
-            if peak_point:
-                peak_timestamp = peak_point.get("recorded_at")
-                first_timestamp = data_points[0].get("recorded_at") if data_points else None
-                peak_duration = peak_timestamp - first_timestamp if peak_timestamp and first_timestamp else 0
+            peak_indices = [i for i, p in enumerate(data_points) if p.get("power_w") == peak_power_w]
+            if peak_indices:
+                peak_idx = peak_indices[-1]
+                peak_point = data_points[peak_idx]
+                if peak_power_w > 0.0:
+                    # Scan backwards and forwards around this peak point to measure consecutive high power draw (>=95% of peak)
+                    threshold = 0.95 * peak_power_w
+                    start_idx = peak_idx
+                    while start_idx > 0:
+                        prev_p = data_points[start_idx - 1].get("power_w")
+                        if prev_p is not None and prev_p >= threshold:
+                            start_idx -= 1
+                        else:
+                            break
+                    end_idx = peak_idx
+                    while end_idx < len(data_points) - 1:
+                        next_p = data_points[end_idx + 1].get("power_w")
+                        if next_p is not None and next_p >= threshold:
+                            end_idx += 1
+                        else:
+                            break
+                    start_ts = data_points[start_idx].get("recorded_at")
+                    end_ts = data_points[end_idx].get("recorded_at")
+                    if start_ts and end_ts:
+                        peak_duration = end_ts - start_ts
 
         summary = {
             "entity_id": entity_id,
