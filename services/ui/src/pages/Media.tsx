@@ -127,7 +127,7 @@ const DeviceSelector = ({
         <button
           onClick={handleLocalSelect}
           className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] relative overflow-hidden ${
-            localMode
+            selectedTarget === 'web_player'
               ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
               : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
           }`}
@@ -210,7 +210,7 @@ const DeviceSelector = ({
             ))}
           </>
         )}
-        {!localMode && !hasHaDevices && (!maPlayers || maPlayers.length === 0) && (
+        {!hasHaDevices && (!maPlayers || maPlayers.length === 0) && (
           <div className="flex items-center justify-center px-4 py-2.5 rounded-xl border border-dashed border-white/5 text-slate-600 text-xs shrink-0">
             Tap a device to start
           </div>
@@ -1300,39 +1300,54 @@ const Media = () => {
         
         if (active) {
           if (active.entity_id === 'web_player') {
-            setLocalMode(true);
-            setSelectedTarget('');
-            
-            // Sync local player states
-            if (active.media_content_id && (!localTrack || localTrack.id !== active.media_content_id)) {
-              const idClean = active.media_content_id;
-              const title = active.media_title || 'Unknown Title';
-              const subtitle = active.media_artist || 'Unknown Artist';
-              const type = active.media_type as 'audiobook' | 'music';
-              const source = active.media_type === 'audiobook' ? 'abs' : 'ma';
+            if (!selectedTarget) {
+              setLocalMode(true);
+              setSelectedTarget('');
               
-              setLocalTrack({ id: idClean, title, subtitle, type, source });
-              setLocalIsPlaying(active.state === 'playing');
-              setLocalCurrentTime(active.position || 0);
-            } else if (localTrack) {
-              const backendPlaying = active.state === 'playing';
-              if (backendPlaying !== localIsPlaying) {
-                setLocalIsPlaying(backendPlaying);
-                if (maPlayer.isConnected) {
-                  if (backendPlaying) {
-                    maPlayer.cmdPlay().catch(() => {});
-                  } else {
-                    maPlayer.cmdPause();
+              // Sync local player states
+              if (active.media_content_id && (!localTrack || localTrack.id !== active.media_content_id)) {
+                const idClean = active.media_content_id;
+                const title = active.media_title || 'Unknown Title';
+                const subtitle = active.media_artist || 'Unknown Artist';
+                const type = active.media_type as 'audiobook' | 'music';
+                const source = active.media_type === 'audiobook' ? 'abs' : 'ma';
+                
+                setLocalTrack({ id: idClean, title, subtitle, type, source });
+                setLocalIsPlaying(active.state === 'playing');
+                setLocalCurrentTime(active.position || 0);
+              } else if (localTrack) {
+                const backendPlaying = active.state === 'playing';
+                if (backendPlaying !== localIsPlaying) {
+                  setLocalIsPlaying(backendPlaying);
+                  if (maPlayer.isConnected) {
+                    if (backendPlaying) {
+                      maPlayer.cmdPlay().catch(() => {});
+                    } else {
+                      maPlayer.cmdPause();
+                    }
                   }
                 }
               }
-            }
-            
-            if (active.volume_level !== undefined && active.volume_level !== null) {
-              setLocalVolume(Math.round(active.volume_level * 100));
-            }
-            if (active.is_volume_muted !== undefined) {
-              setLocalMuted(active.is_volume_muted);
+              
+              if (active.volume_level !== undefined && active.volume_level !== null) {
+                setLocalVolume(Math.round(active.volume_level * 100));
+              }
+              if (active.is_volume_muted !== undefined) {
+                setLocalMuted(active.is_volume_muted);
+              }
+            } else {
+              // User has selected a device; backend still reports web_player as active.
+              // Find the selected device in the all_players list to update mediaStatus.
+              const targetPlayer = allPlayers.find(p => p.entity_id === selectedTarget);
+              if (targetPlayer) {
+                setMediaStatus(targetPlayer);
+                if (targetPlayer.volume_level !== undefined && targetPlayer.volume_level !== null) {
+                  setVolume(Math.round(Number(targetPlayer.volume_level) * 100));
+                }
+                if (targetPlayer.is_volume_muted !== undefined) {
+                  setMuted(Boolean(targetPlayer.is_volume_muted));
+                }
+              }
             }
           } else {
             setMediaStatus(active);

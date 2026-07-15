@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
 
 async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.goto(`${UI_URL}/login`);
   await page.getByPlaceholder('Enter username').fill('default');
-  await page.getByPlaceholder('Enter password').fill('admin');
+  await page.getByPlaceholder('Enter password').fill(ADMIN_PASSWORD);
   await page.getByRole('button', { name: /sign in/i }).click();
   await page.waitForTimeout(3000);
 }
@@ -106,17 +107,13 @@ test.describe('Device Selector — Selection', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('no device is selected initially', async ({ page }) => {
-    // No cyan highlight should be visible
+  test('Web Player card is selected by default', async ({ page }) => {
+    // Web Player is auto-selected since localMode starts as true
     const selected = page.locator(
       '.glass-panel button.bg-cyan-500\\/15',
     ).first();
-    await expect(selected).not.toBeVisible();
-    // If no card is selected and no devices exist, the prompt should be visible
-    const prompt = page.getByText('Tap a device to start');
-    if (await prompt.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await expect(prompt).toBeVisible();
-    }
+    await expect(selected).toBeVisible();
+    await expect(selected).toContainText('Web Player');
   });
 
   test('clicking a device card selects it', async ({ page }) => {

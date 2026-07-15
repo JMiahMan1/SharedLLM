@@ -106,6 +106,15 @@ def client_fixture(monkeypatch):
     monkeypatch.setattr(app.router, "lifespan_context", noop_lifespan)
     main.background_tasks = None  # pyright: ignore[reportAttributeAccessIssue]
 
+    def mock_get_http_client():
+        import aiohttp
+        session = aiohttp.ClientSession()
+        if hasattr(session, "__aenter__") and hasattr(session.__aenter__, "return_value"):
+            return session.__aenter__.return_value
+        return session
+
+    monkeypatch.setattr(main, "get_http_client", mock_get_http_client)
+
     return TestClient(app)
 
 

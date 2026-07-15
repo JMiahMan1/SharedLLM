@@ -79,11 +79,13 @@ class TestDynamicModelSelection:
 
         mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
 
-        with patch("services.gateway.orchestrator.get_all_settings", mock_settings), patch("aiohttp.ClientSession") as mock_client:
-            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
-            mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
 
+        with patch("services.gateway.orchestrator.get_all_settings", mock_settings), patch("services.gateway.background_worker._shared_http_client", return_value=mock_ctx):
             result = await self.worker._get_upgrade_model("qwen3:8b")
             assert result == "qwen3.6-35b-a3b:q4_k_m"
 
@@ -98,11 +100,13 @@ class TestDynamicModelSelection:
 
         mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
 
-        with patch("services.gateway.orchestrator.get_all_settings", mock_settings), patch("aiohttp.ClientSession") as mock_client:
-            mock_client.return_value.__aenter__ = AsyncMock(return_value=mock_client.return_value)
-            mock_client.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_client.return_value.get = AsyncMock(return_value=mock_resp)
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
 
+        with patch("services.gateway.orchestrator.get_all_settings", mock_settings), patch("services.gateway.background_worker._shared_http_client", return_value=mock_ctx):
             result = await self.worker._get_upgrade_model("qwen3.6-35b-a3b:q4_k_m")
             assert result == "qwen3:8b"
 

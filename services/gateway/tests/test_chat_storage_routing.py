@@ -24,6 +24,22 @@ os.environ.setdefault("LIBRARIAN_MODEL", "qwen3:8b")
 os.environ.setdefault("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
 
 
+class MockRequestContextManager:
+    def __init__(self, response):
+        self.response = response
+
+    def __await__(self):
+        async def _async_func():
+            return self.response
+        return _async_func().__await__()
+
+    async def __aenter__(self):
+        return self.response
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
 def _aio_resp(status=200, json_data=None, text=None):
     if json_data is None:
         json_data = {"status": "SUCCESS"}
@@ -114,32 +130,32 @@ def _make_session(settings, ollama_iter):
     """Mock aiohttp session; monkeypatch get_http_client to return it."""
     settings_list = [{"key": k, "value": v} for k, v in settings.items()]
 
-    async def post_side_effect(url, **kwargs):
+    def post_side_effect(url, **kwargs):
         if "/api/resolve" in url:
-            return _aio_resp(200, {
+            return MockRequestContextManager(_aio_resp(200, {
                 "user": "testuser", "is_admin": True,
                 "ha_url": "http://ha.local", "ha_token": "token",
                 "nextcloud_url": "http://nc.local",
                 "nextcloud_user": "ncuser", "nextcloud_pass": "ncpass",
-            })
+            }))
         if "/rag/search" in url:
-            return _aio_resp(200, {"results": []})
+            return MockRequestContextManager(_aio_resp(200, {"results": []}))
         if "/api/chat" in url:
-            return _aio_resp(200, next(ollama_iter))
+            return MockRequestContextManager(_aio_resp(200, next(ollama_iter)))
         if "/index/full" in url:
-            return _aio_resp(200, {"message": "Indexing started"})
-        return _aio_resp(200, {})
+            return MockRequestContextManager(_aio_resp(200, {"message": "Indexing started"}))
+        return MockRequestContextManager(_aio_resp(200, {}))
 
-    async def get_side_effect(url, **kwargs):
+    def get_side_effect(url, **kwargs):
         if "/api/settings" in url:
-            return _aio_resp(200, settings_list)
-        return _aio_resp(200, {})
+            return MockRequestContextManager(_aio_resp(200, settings_list))
+        return MockRequestContextManager(_aio_resp(200, {}))
 
-    sess = AsyncMock()
-    sess.post.side_effect = post_side_effect
-    sess.get.side_effect = get_side_effect
-    sess.__aenter__.return_value = sess
-    sess.__aexit__.return_value = False
+    sess = MagicMock()
+    sess.post = MagicMock(side_effect=post_side_effect)
+    sess.get = MagicMock(side_effect=get_side_effect)
+    sess.__aenter__ = AsyncMock(return_value=sess)
+    sess.__aexit__ = AsyncMock(return_value=False)
     return sess
 
 
@@ -150,6 +166,32 @@ async def test_chat_storage_routing(auth_headers, monkeypatch):
     # Mock system instruction loading to avoid real Identity service calls
     gateway_main.select_system_instruction_for_query = lambda q, m: "# System instruction mock"
     gateway_main.load_prompt = AsyncMock(return_value="# Raven protocol mock")
+    import services.gateway.orchestrator as orchestrator
+    monkeypatch.setattr(orchestrator, "load_prompt_sync", lambda k: "# Single turn guide mock")
+
+    mock_job_queue = MagicMock()
+    mock_job_queue._jobs = {}
+
+    async def mock_enqueue_job(user_id, job_payload):
+        from services.gateway.orchestrator import process_full_orchestration
+        ans = await process_full_orchestration(job_payload)
+        mock_job_queue._jobs["test-job-123"] = {
+            "status": "completed",
+            "result": ans
+        }
+        return "test-job-123"
+
+    async def mock_get_job_status(job_id):
+        return mock_job_queue._jobs.get(job_id, {"status": "pending"})
+
+    async def mock_get_chunks(job_id):
+        job = mock_job_queue._jobs.get(job_id)
+        return [job["result"]] if job else []
+
+    mock_job_queue.enqueue_job = mock_enqueue_job
+    mock_job_queue.get_job_status = mock_get_job_status
+    mock_job_queue.get_chunks = mock_get_chunks
+    monkeypatch.setattr(gateway_main, "job_queue", mock_job_queue)
 
     # Simulate a generated JSON tool block from LLM, then a conversational response.
     responses = [
