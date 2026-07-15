@@ -226,6 +226,55 @@ def seed_from_env(session: Session, force: bool = False) -> int:
     else:
         log.info("[seed] Users already exist — skipping user seeding.")
 
+    # ── Reconcile default system user's integration secrets from .env ──────────
+    # The default user is created only once. If the .env token wasn't present in
+    # the container PROCESS environment at first-seed time (it usually isn't —
+    # `os.getenv` is empty inside containers), the credentials stay blank and
+    # downstream services can't resolve them at runtime. Backfill any empty
+    # integration secrets directly from the .env FILE so Identity is the single
+    # source of truth for runtime secrets. Non-destructive: only fills blanks.
+    _default_user = session.exec(select(User).where(User.username == "default")).first()
+    if _default_user:
+        _env_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            ".env",
+        )
+        _env_vals = dotenv_values(_env_path) if os.path.exists(_env_path) else {}
+        _secret_map = {
+            "github_token_enc": "GITHUB_TOKEN",
+            "github_user": "GITHUB_USER",
+            "github_url": "GITHUB_URL",
+            "gitlab_token_enc": "GITLAB_TOKEN",
+            "gitlab_user": "GITLAB_USER",
+            "gitlab_url": "GITLAB_URL",
+            "ha_token_enc": "HA_TOKEN",
+            "ha_url": "HA_URL",
+            "nextcloud_pass_enc": "NEXTCLOUD_PASS",
+            "nextcloud_user": "NEXTCLOUD_USER",
+            "nextcloud_url": "NEXTCLOUD_URL",
+            "mass_token_enc": "MA_TOKEN",
+            "mass_url": "MA_URL",
+            "huggingface_token_enc": "HF_TOKEN",
+        }
+        _reconciled = False
+        for _field, _envkey in _secret_map.items():
+            _val = _env_vals.get(_envkey)
+            if not _val:
+                continue
+            _val = _val.strip()
+            if _field.endswith("_enc"):
+                if not getattr(_default_user, _field):
+                    setattr(_default_user, _field, encrypt(_val))
+                    _reconciled = True
+            else:
+                if not getattr(_default_user, _field):
+                    setattr(_default_user, _field, _val)
+                    _reconciled = True
+        if _reconciled:
+            session.add(_default_user)
+            session.commit()
+            log.info("[seed] Reconciled default system user integration secrets from .env")
+
     # ── Seed Global Settings ──────────────────────────────────────────────────
     for ds in DEFAULT_GLOBAL_SETTINGS:
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == ds["key"])).first()

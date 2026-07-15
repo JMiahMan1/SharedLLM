@@ -85,3 +85,35 @@ def test_create_user_stores_git_provider_credentials(test_client: TestClient, se
     # Verify via resolution
     data = resolve_identity(ResolveRequest(rag_user="bob"), session)
     assert data.github_token == "bob-gh-token"
+
+
+def test_seed_reconciles_default_user_token_from_env_file(session: Session):
+    from unittest.mock import patch
+
+    from services.identity.crypto import decrypt
+    from services.identity.seed import seed_from_env
+
+    default = session.exec(select(User).where(User.username == "default")).first()
+    assert default is not None
+
+    # Simulate a first seed that captured no GitHub token (container process env
+    # is empty inside containers), leaving the credentials blank:
+    default.github_token_enc = None
+    default.github_user = None
+    session.add(default)
+    session.commit()
+
+    fake_env = {
+        "GITHUB_TOKEN": "ghp_RECONCILE_TEST_TOKEN",
+        "GITHUB_USER": "reconcile-user",
+        "GITHUB_URL": "https://github.com",
+    }
+    with patch("services.identity.seed.dotenv_values", return_value=fake_env), patch(
+        "services.identity.seed.os.path.exists", return_value=True
+    ):
+        seed_from_env(session, force=False)
+
+    default = session.exec(select(User).where(User.username == "default")).first()
+    assert default.github_token_enc is not None
+    assert decrypt(default.github_token_enc) == "ghp_RECONCILE_TEST_TOKEN"
+    assert default.github_user == "reconcile-user"
