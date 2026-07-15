@@ -7159,7 +7159,8 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                     log.info("[ma-jsonrpc] STEP 4.8: Forwarded MA auth response to browser")
                 except Exception as send_err:
                     log.error(f"[ma-jsonrpc] STEP 4.8 FAILED: Could not forward MA auth response: {send_err}", exc_info=True)
-                    await websocket.close(code=1011, reason="Failed to forward MA auth response")
+                    with suppress(Exception):
+                        await websocket.close(code=1011, reason="Failed to forward MA auth response")
                     return
             else:
                 log.info(f"[ma-jsonrpc] STEP 4.7: MA auth response received as binary ({len(auth_response)} bytes)")
