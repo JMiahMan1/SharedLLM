@@ -430,6 +430,35 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
 
     log_count: int = int(getattr(req, "log_count", 10) or 10)
     user_context = getattr(req, "user_context", None)
+
+    # The workspace is created EMPTY and is NOT necessarily a git repository
+    # until the `gh repo create` step initializes it. Read-only git
+    # inspection (e.g. the IDE's `git status`) must NOT hard-error in
+    # that state, and write ops must steer the model to initialize first
+    # instead of surfacing a raw "not a git repository" fatal.
+    _is_repo = os.path.isdir(os.path.join(workspace_path, ".git"))
+    if not _is_repo and action not in ("init", "repo_create", "repo_clone", "gh_noop"):
+        if action in ("status", "diff", "log", "branch", "remote", "show", "fetch"):
+            return GitExecutionResult(
+                status="SUCCESS",
+                message=(
+                    "Workspace is not yet a git repository. Initialize it with "
+                    "`gh repo create <name> --private` (intercepted and wired for "
+                    "you) before committing/pushing."
+                ),
+                service="git",
+                detail={"note": "not_a_git_repo", "action": action},
+            )
+        return GitExecutionResult(
+            status="FAILURE",
+            message=(
+                f"Cannot run `git {action}` — the workspace is not yet a git "
+                "repository. Run `gh repo create <name> --private` first (it is "
+                "intercepted and initializes + wires git for you)."
+            ),
+            service="git",
+            detail={"error": "not_a_git_repo", "action": action},
+        )
     is_admin: bool = getattr(user_context, "is_admin", False) if user_context else False
 
     if action in {"reset", "clean"}:
@@ -662,6 +691,13 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
                 service="git",
                 detail={"error": "repo_create_failed"},
             )
+        # The workspace directory may not yet be a git repository (it is created
+        # empty). Initialize it so the origin remote can be wired and later
+        # `git add/commit/push` succeed. `git init` is idempotent on an
+        # existing repo.
+        init_r = await _run_git(["init"], cwd=workspace_path)
+        if init_r["returncode"] != 0:
+            return _fail("repo_create", init_r)
         # Token-inject the clone URL for the origin remote.
         from urllib.parse import urlparse
         parsed = urlparse(created_url)
@@ -677,11 +713,23 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         return _ok("repo_create", {"repo_name": repo_name, "repo_url": created_url, **r})
 
     elif action == "repo_clone":
-        # The sandbox has no `gh` CLI and no need for one: the workspace is
-        # ALREADY a git repository bound to its GitHub remote (wired by
-        # `repo_create` / auto-wire). A `gh repo clone` would therefore be
-        # redundant — and would otherwise fail because `gh` isn't installed.
-        # Report the existing origin so the model proceeds to write + push.
+        # The sandbox has no `gh` CLI and no need for one. The model's
+        # `gh repo clone` almost always means "set up my repository" — which
+        # is done by the `gh repo create` step (wires git + GitHub for the
+        # workspace). If that step hasn't run yet the workspace isn't a git
+        # repo, so steer the model there instead of lying that it's present.
+        if not _is_repo:
+            return GitExecutionResult(
+                status="SUCCESS",
+                message=(
+                    "Workspace is not yet a git repository. Run "
+                    "`gh repo create <name> --private` first (it is intercepted and "
+                    "initializes + wires git for you); the workspace then BECOMES "
+                    "the repository, so no separate clone is needed."
+                ),
+                service="git",
+                detail={"note": "not_a_git_repo", "action": "repo_clone"},
+            )
         remote_url = await _get_remote_url("origin", cwd=workspace_path)
         if remote_url:
             return GitExecutionResult(
