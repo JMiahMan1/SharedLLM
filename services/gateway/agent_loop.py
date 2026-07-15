@@ -3090,7 +3090,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         if not _rid:
                             exec_data = {"status": "ERROR", "message": "RavenRecallRequest requires an active mission_id."}
                         else:
-                            _rr = redis.from_url(REDIS_URL, decode_responses=True)
+                            _rr = await _get_redis_cmd()
                             _raw = await _rr.lrange(f"raven:mission:history:{_rid}", -60, -1)
                             _recall_steps: list[dict] = []
                             _recall_cur: dict | None = None
