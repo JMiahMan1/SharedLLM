@@ -87,6 +87,7 @@ async def get_playlists(mass_url: str, mass_token: str) -> list[dict[str, Any]]:
                 "name": item.get("name", ""),
                 "items": item.get("num_tracks", item.get("track_count", 0)),
                 "uri": item.get("uri", ""),
+                "type": item.get("media_type", "playlist"),
             }
             for item in raw
         ]
@@ -106,6 +107,7 @@ async def get_recent(mass_url: str, mass_token: str) -> list[dict[str, Any]]:
                 "uri": mi.get("uri", ""),
                 "last_played": mi.get("timestamp_played", mi.get("added_at", mi.get("last_played", mi.get("timestamp", "")))),
                 "image": mi.get("image", {}).get("path", "") if isinstance(mi.get("image"), dict) else (mi.get("image", "") or ""),
+                "type": mi.get("media_type", "track"),
             }
             for item in raw
             for mi in [item.get("media_item") or item]
