@@ -132,7 +132,7 @@ class _RedactSecretsMiddleware(BaseHTTPMiddleware):
         if "application/json" not in response.headers.get("content-type", ""):
             return response
         try:
-            body = b"".join([chunk async for chunk in response.body_iterator])
+            body = response.body
         except Exception:
             return response
         try:
