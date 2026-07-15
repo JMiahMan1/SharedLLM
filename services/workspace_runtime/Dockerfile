@@ -131,9 +131,10 @@ RUN set -eux; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -o /tmp/tf.zip; \
     unzip -o /tmp/tf.zip -d /usr/local/bin; \
     rm -f /tmp/tf.zip; \
-    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://get.opentofu.org/install-opentofu.sh -o /tmp/install-opentofu.sh; \
-    sh /tmp/install-opentofu.sh; \
-    rm -f /tmp/install-opentofu.sh; \
+    TOFU_VERSION="1.9.0"; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip; \
+    unzip -o /tmp/tofu.zip -d /usr/local/bin; \
+    rm -f /tmp/tofu.zip; \
     terraform version; tofu version
 
 # --- AWS CLI v2 ---
