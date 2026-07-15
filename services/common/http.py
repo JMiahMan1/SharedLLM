@@ -21,6 +21,20 @@ _client: aiohttp.ClientSession | None = None
 _client_insecure: aiohttp.ClientSession | None = None
 
 
+class NonClosingSessionWrapper:
+    """Delegation wrapper that prevents a shared ClientSession from being closed
+    when exited as an asynchronous context manager.
+    """
+    def __init__(self, session: aiohttp.ClientSession):
+        self._session = session
+    async def __aenter__(self) -> NonClosingSessionWrapper:
+        return self
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        pass
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+
 def _make(verify: bool) -> aiohttp.ClientSession:
     return aiohttp.ClientSession(
         connector=aiohttp.TCPConnector(
@@ -46,7 +60,7 @@ def get_client() -> aiohttp.ClientSession:
     global _client
     if _session_dead(_client):
         _client = _make(True)
-    return _client
+    return NonClosingSessionWrapper(_client)
 
 
 def get_client_insecure() -> aiohttp.ClientSession:
@@ -58,4 +72,4 @@ def get_client_insecure() -> aiohttp.ClientSession:
     global _client_insecure
     if _session_dead(_client_insecure):
         _client_insecure = _make(False)
-    return _client_insecure
+    return NonClosingSessionWrapper(_client_insecure)
