@@ -43,6 +43,7 @@ class TelemetryEnrollment(BaseModel):
     usage_tracking: bool
     offline_alert_threshold_minutes: int
     group_id: str | None = None
+    power_attribute: str | None = None
     enrolled_at: str
 
 
@@ -57,6 +58,8 @@ class TelemetrySummary(BaseModel):
     entity_id: str
     current_power_w: float | None = None
     peak_power_w: float | None = None
+    peak_at: float | None = None
+    peak_duration_seconds: float | None = None
     avg_power_w: float | None = None
     availability_pct: float = 100.0
     total_activations: int = 0
