@@ -207,7 +207,7 @@ if [ "$1" = "get" ]; then
   echo password="${GITHUB_TOKEN:-$GH_TOKEN}"
 fi
 EOF
-chmod +x /usr/local/bin/git-credential-github-token
+RUN chmod +x /usr/local/bin/git-credential-github-token
 RUN git config --file /home/sharedllm/.gitconfig credential.helper /usr/local/bin/git-credential-github-token \
  && git config --file /home/sharedllm/.gitconfig --add safe.directory '*' \
  && git config --file /home/sharedllm/.gitconfig init.defaultBranch main \
