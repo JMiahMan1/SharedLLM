@@ -1834,6 +1834,60 @@ def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(def
 class FileDeleteRequest(WorkspaceRef):
     relative_path: str
 
+
+class FileMoveRequest(WorkspaceRef):
+    relative_path: str
+    new_relative_path: str
+
+
+@app.post("/files/move")
+def move_file(req: FileMoveRequest, x_internal_secret: str | None = Header(default=None)):
+    """Rename or move a file/directory within a workspace (atomic rename)."""
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req, check_recovery=True)
+    _require_workspace_capability(workspace, "write")
+    req.relative_path = _strip_workspace_path_prefix(req.relative_path, workspace)
+    req.new_relative_path = _strip_workspace_path_prefix(req.new_relative_path, workspace)
+    workspace_path = Path(workspace["resolved_path"])
+
+    lock = get_workspace_lock(workspace["id"])
+    lock.acquire()
+    try:
+        src = resolve_safe_path(workspace_path, req.relative_path, must_exist=True)
+        dst = resolve_safe_path(workspace_path, req.new_relative_path, must_exist=False)
+
+        if not src.exists():
+            raise HTTPException(status_code=404, detail=f"Source not found: {req.relative_path}")
+        if dst.exists():
+            raise HTTPException(status_code=409, detail=f"Destination already exists: {req.new_relative_path}")
+
+        # Reject moving a directory into its own subtree.
+        try:
+            dst.resolve().relative_to(src.resolve())
+            raise HTTPException(status_code=400, detail="Cannot move a directory into itself")
+        except ValueError:
+            pass
+
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        src.rename(dst)
+
+        if src.exists():
+            raise HTTPException(
+                status_code=500,
+                detail=f"Move verification failed for {req.relative_path}: source still present.",
+            )
+
+        return {
+            "status": "SUCCESS",
+            "workspace": workspace,
+            "relative_path": req.relative_path,
+            "new_relative_path": req.new_relative_path,
+            "message": f"Moved {req.relative_path} -> {req.new_relative_path}",
+        }
+    finally:
+        lock.release()
+
+
 @app.post("/files/delete")
 def delete_file(req: FileDeleteRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)

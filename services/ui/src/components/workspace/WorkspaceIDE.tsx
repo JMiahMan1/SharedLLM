@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   X,
   Folder,
@@ -24,6 +24,8 @@ import {
   ChevronUp,
   Wrench,
   Code2,
+  Copy,
+  Pencil,
   AlertTriangle,
   MessageSquare,
   Send,
@@ -99,6 +101,29 @@ const ACTIVITY: { id: View; icon: typeof FolderOpen; label: string }[] = [
   { id: 'chat', icon: MessageSquare, label: 'Raven Chat' },
 ];
 
+interface FileCtxMenuItemProps {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+}
+
+function FileCtxMenuItem({ icon, label, onClick, danger }: FileCtxMenuItemProps) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-white/10',
+        danger ? 'text-red-400 hover:bg-red-500/10' : 'text-slate-200',
+      )}
+    >
+      <span className="shrink-0 opacity-70">{icon}</span>
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
 export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) {
   const [activeView, setActiveView] = useState<View>('explorer');
   const hasGit = useMemo(
@@ -109,6 +134,10 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
   const [currentPath, setCurrentPath] = useState('.');
   const [entries, setEntries] = useState<WorkspaceFileEntry[]>([]);
   const [loadingFiles, setLoadingFiles] = useState(false);
+
+  // Right-click context menu for the Explorer file pane. `entry` is null for
+  // pane-level actions (new file/folder, upload, refresh) invoked on empty space.
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; entry: WorkspaceFileEntry | null } | null>(null);
 
   // Tabbed editors: many files can be open at once; `activeTab` is the focused path.
   const [tabs, setTabs] = useState<OpenTab[]>([]);
@@ -570,6 +599,56 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     [workspace.id, currentPath, loadDir],
   );
 
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  const copyPath = useCallback(
+    (entry: WorkspaceFileEntry) => {
+      void navigator.clipboard?.writeText(entry.path);
+      toast.success(`Copied path: ${entry.path}`);
+      closeCtxMenu();
+    },
+    [closeCtxMenu],
+  );
+
+  const downloadEntry = useCallback(
+    async (entry: WorkspaceFileEntry) => {
+      closeCtxMenu();
+      try {
+        const blob = await api.fetchWorkspaceFileRaw(workspace.id, entry.path);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = entry.name;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch (e: unknown) {
+        toast.error(`Download failed: ${apiErr(e)}`);
+      }
+    },
+    [workspace.id, closeCtxMenu],
+  );
+
+  const renameEntry = useCallback(
+    async (entry: WorkspaceFileEntry) => {
+      closeCtxMenu();
+      const idx = entry.path.lastIndexOf('/');
+      const parent = idx >= 0 ? entry.path.slice(0, idx) : '.';
+      const base = idx >= 0 ? entry.path.slice(idx + 1) : entry.path;
+      const name = prompt(`Rename ${entry.path} to:`, base);
+      if (!name || name === base) return;
+      const newPath = parent === '.' ? name : `${parent}/${name}`;
+      try {
+        await api.moveWorkspaceFile(workspace.id, entry.path, newPath);
+        toast.success(`Renamed to ${newPath}`);
+        removeTab(entry.path);
+        await loadDir(currentPath);
+      } catch (e: unknown) {
+        toast.error(`Rename failed: ${apiErr(e)}`);
+      }
+    },
+    [workspace.id, currentPath, loadDir, removeTab, closeCtxMenu],
+  );
+
   const onUpload = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -889,7 +968,13 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                   </button>
                 )}
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar py-1">
+              <div
+                className="flex-1 overflow-y-auto custom-scrollbar py-1"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setCtxMenu({ x: e.clientX, y: e.clientY, entry: null });
+                }}
+              >
                 {loadingFiles && entries.length === 0 ? (
                   <div className="flex items-center justify-center py-8 text-slate-500 text-sm">
                     <Loader2 size={16} className="animate-spin mr-2" /> Loading…
@@ -905,6 +990,11 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                         activeTab === entry.path && 'bg-indigo-500/15',
                       )}
                       onClick={() => openFile(entry)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setCtxMenu({ x: e.clientX, y: e.clientY, entry });
+                      }}
                     >
                       {entry.is_dir ? (
                         <Folder size={15} className="text-amber-400/80 shrink-0" />
@@ -1382,6 +1472,100 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         {tabs.length > 1 && <span className="text-slate-600">{tabs.length} open</span>}
         <span className="ml-auto">{workspace.display_name}</span>
       </div>
+
+      {ctxMenu && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={closeCtxMenu}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              closeCtxMenu();
+            }}
+          />
+          <div
+            className="fixed z-50 min-w-[190px] rounded-md border border-white/10 bg-[#0d1222] shadow-xl py-1 text-sm"
+            style={{
+              top: Math.min(ctxMenu.y, window.innerHeight - 230),
+              left: Math.min(ctxMenu.x, window.innerWidth - 210),
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {ctxMenu.entry ? (
+              <>
+                <FileCtxMenuItem
+                  icon={ctxMenu.entry.is_dir ? <Folder size={14} /> : <FileIcon size={14} />}
+                  label={ctxMenu.entry.is_dir ? 'Open' : 'Open'}
+                  onClick={() => {
+                    closeCtxMenu();
+                    void openFile(ctxMenu.entry!);
+                  }}
+                />
+                {!ctxMenu.entry.is_dir && (
+                  <FileCtxMenuItem
+                    icon={<Download size={14} />}
+                    label="Download"
+                    onClick={() => void downloadEntry(ctxMenu.entry!)}
+                  />
+                )}
+                <FileCtxMenuItem
+                  icon={<Copy size={14} />}
+                  label="Copy path"
+                  onClick={() => copyPath(ctxMenu.entry!)}
+                />
+                <FileCtxMenuItem
+                  icon={<Pencil size={14} />}
+                  label="Rename"
+                  onClick={() => void renameEntry(ctxMenu.entry!)}
+                />
+                <div className="my-1 h-px bg-white/10" />
+                <FileCtxMenuItem
+                  icon={<Trash2 size={14} />}
+                  label="Delete"
+                  danger
+                  onClick={() => void deleteEntry(ctxMenu.entry!)}
+                />
+              </>
+            ) : (
+              <>
+                <FileCtxMenuItem
+                  icon={<FilePlus size={14} />}
+                  label="New file here"
+                  onClick={() => {
+                    closeCtxMenu();
+                    void createNew('file');
+                  }}
+                />
+                <FileCtxMenuItem
+                  icon={<FolderPlus size={14} />}
+                  label="New folder here"
+                  onClick={() => {
+                    closeCtxMenu();
+                    void createNew('folder');
+                  }}
+                />
+                <FileCtxMenuItem
+                  icon={<Upload size={14} />}
+                  label="Upload here"
+                  onClick={() => {
+                    closeCtxMenu();
+                    fileInputRef.current?.click();
+                  }}
+                />
+                <div className="my-1 h-px bg-white/10" />
+                <FileCtxMenuItem
+                  icon={<RefreshCw size={14} />}
+                  label="Refresh"
+                  onClick={() => {
+                    closeCtxMenu();
+                    void loadDir(currentPath);
+                  }}
+                />
+              </>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

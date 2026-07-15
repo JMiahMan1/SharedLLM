@@ -1377,6 +1377,11 @@ export const api = {
     return resp.data;
   },
 
+  async moveWorkspaceFile(workspaceId: string, relative_path: string, new_relative_path: string): Promise<{ status: string; message?: string }> {
+    const resp = await apiClient.post('/api/workspaces/files/move', { workspace_id: workspaceId, relative_path, new_relative_path });
+    return resp.data;
+  },
+
   // Raw binary (e.g. images) served as a blob for in-browser preview.
   async fetchWorkspaceFileRaw(workspaceId: string, relative_path: string): Promise<Blob> {
     const resp = await apiClient.post('/api/workspaces/files/raw', { workspace_id: workspaceId, relative_path }, { responseType: 'blob' });
