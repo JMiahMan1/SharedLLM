@@ -4821,7 +4821,25 @@ async def execute_raven_mission(id: int, request: Request):
             protocols = await fetch_autonomous_protocols()
             system_prompt = f"{protocols}\n\n[ADMIN ROZ ACTIVE]\nYou are the Raven Sentinel operating in the Restricted Operating Zone. Your mission is to fix backend/frontend components. You have elevated access. Execute the following mission:\n{target['proposed_mission']}"
         else:
-            system_prompt = f"You are Raven, an autonomous agent executing a user-assigned background mission. Execute the following task to the best of your ability:\n{target['proposed_mission']}"
+            system_prompt = (
+                "You are Raven, an autonomous agent executing a user-assigned background mission. "
+                "Execute the following task to the best of your ability.\n\n"
+                f"{target['proposed_mission']}\n\n"
+                "=== OPERATING DISCIPLINE (follow strictly) ===\n"
+                "- WRITE FILES DIRECTLY with WorkspaceFileWriteRequest (one call per file). "
+                "Do NOT pre-inspect the sandbox with read-only shell commands (id, stat, ls, "
+                "find, which, sudo, pwd, git status, cat of system files) — those waste turns "
+                "and tell you nothing useful. Assume the workspace is empty and just write the project.\n"
+                "- Produce the COMPLETE project in as few turns as possible: write every source "
+                "file, README.md, and .github/workflows/build.yml, then validate, then commit & push.\n"
+                "- VALIDATE before pushing: run `python main.py --selftest` (or the language's "
+                "headless self-test) via WorkspaceShellRequest and FIX any errors it reports by "
+                "editing the relevant file (WorkspaceFileWriteRequest/WorkspaceFilePatchRequest).\n"
+                "- COMMIT & PUSH with WorkspaceShellRequest: `git add -A && git commit -m \"...\" "
+                "&& git push`. The git/gh tools are pre-authenticated for this workspace's repo.\n"
+                "- Every turn MUST either write/edit a file or run a build/validation command. "
+                "Never spend a turn only on exploration."
+            )
 
         # Push job
         assert job_queue is not None, "Job queue not initialized"
