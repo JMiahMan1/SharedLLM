@@ -364,7 +364,17 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
                                 break
 
                             if not coll_added:
-                                rag_context += f"\n[{coll.upper()}]\n"
+                                if coll == "system_learnings":
+                                    # Surface Raven's own past lessons prominently so
+                                    # the model actually applies them (not buried in generic
+                                    # "Retrieved Context"). These are verified wins from
+                                    # prior missions.
+                                    rag_context += (
+                                        "\n[SYSTEM_LEARNINGS — PAST LESSONS: read and APPLY "
+                                        "these to avoid repeating past mistakes]\n"
+                                    )
+                                else:
+                                    rag_context += f"\n[{coll.upper()}]\n"
                                 coll_added = True
 
                             rag_context += f"- {content}\n"

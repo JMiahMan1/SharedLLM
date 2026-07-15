@@ -279,7 +279,7 @@ class OllamaProvider(BaseLLMProvider):
                     break  # success
                 except RuntimeError:
                     raise  # provider errors are fatal -> AgentLoop retry
-                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                except (TimeoutError, aiohttp.ClientError) as e:
                     last_err = e
                     log.warning(
                         f"[OllamaProvider-Hardened] stream attempt "
@@ -3371,20 +3371,38 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 break
 
 
-    async def _persist_learning(summary: str) -> None:
+    async def _persist_learning(summary: str, reflection: str = "") -> None:
         try:
-            tags = ["raven", "autonomous", "repair"]
-            if "workspace" in query.lower():
+            ql = query.lower()
+            tags = ["raven", "autonomous", "learning"]
+            if "workspace" in ql:
                 tags.append("workspace")
-            if "git" in query.lower():
+            if "git" in ql:
                 tags.append("git")
-            if "deployment" in query.lower() or "restart" in query.lower():
+            if "python" in ql:
+                tags.append("python")
+            if "javascript" in ql or "typescript" in ql or "node" in ql:
+                tags.append("javascript")
+            if "go" in ql:
+                tags.append("go")
+            if "rust" in ql:
+                tags.append("rust")
+            if "deploy" in ql or "restart" in ql:
                 tags.append("deployment")
+            if "fix" in ql or "repair" in ql or "bug" in ql:
+                tags.append("repair")
+
+            # Prefer the structured reflection (the actual lesson) as the persisted
+            # content; fall back to the raw query+actions+answer dump only if the
+            # model produced no reflection. This is what future missions retrieve
+            # and apply, so it must be the *lesson*, not a transcript.
+            content = reflection.strip() or summary.strip()
+            topic = f"Raven lesson: {query[:80]}"
 
             payload = {
                 "user_context": creds.model_dump(),
-                "topic": f"Raven repair: {query[:80]}",
-                "content": summary,
+                "topic": topic,
+                "content": content,
                 "tags": list(dict.fromkeys(tags)),
             }
 
@@ -3474,7 +3492,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 f"Actions: {' | '.join(action_log)}",
                 f"Final answer: {ans}",
             ])
-            await _persist_learning(learning_summary)
+            await _persist_learning(learning_summary, reflection=reflection_summary)
         else:
             log.info(f"[AgentLoop] Skipping RAG learning persistence — result appears meaningless: {ans[:100]}")
 
