@@ -266,6 +266,7 @@ export interface TelemetryEnrollment {
   power_tracking: boolean;
   availability_tracking: boolean;
   offline_alert_threshold_minutes: number;
+  power_attribute?: string | null;
 }
 
 export interface IntercomSessionData {

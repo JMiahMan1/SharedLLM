@@ -40,6 +40,7 @@ async def handle_telemetry_enroll(req, user_context: UserContext) -> ExecutionRe
             "usage_tracking": getattr(req, "usage_tracking", True),
             "offline_alert_threshold_minutes": getattr(req, "offline_alert_threshold_minutes", 30),
             "group_id": getattr(req, "group_id", None),
+            "power_attribute": getattr(req, "power_attribute", None),
             "owner_user_id": user_context.user,
         }
         await _call_identity("POST", "/api/telemetry/enroll", payload)
