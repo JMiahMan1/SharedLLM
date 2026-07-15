@@ -122,7 +122,7 @@ class WorkspaceShellRequest(BaseModel):
 
 class GitOperationRequest(BaseModel):
     workspace_id: str | None = Field(None, description="Workspace ID (uses default if not specified)")
-    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show", "init", "remote", "remote_add", "repo_create"]
+    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show", "init", "remote", "remote_add", "repo_create", "repo_clone", "gh_noop"]
     path: str | None = "."
     message: str | None = None
     branch: str | None = "microservices"

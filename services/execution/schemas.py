@@ -659,7 +659,7 @@ class GitOperationRequest(BaseRequest):
     """
     user_context: UserContext
     workspace_id: str | None = Field(None, description="Workspace ID (uses default if not specified)")
-    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show", "init", "remote", "remote_add", "repo_create"]
+    action: Literal["status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset", "branch", "checkout", "clean", "show", "init", "remote", "remote_add", "repo_create", "repo_clone", "gh_noop"]
     path: str | None = Field(".", description="File path for 'add' action")
     commit_message: str | None = Field(None, description="Required for 'commit' action")
     branch: str | None = Field("microservices", description="Branch for pull/push")
