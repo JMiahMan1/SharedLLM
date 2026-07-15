@@ -762,11 +762,16 @@ def _translate_shell_to_git_op(cmd: str) -> list[dict] | None:
             # credentialed git tool. The skipped command's output is simply
             # not produced (the model can re-issue it as a standalone call).
             continue
-        elif bin_name == "gh" and sub == "repo" and len(parts) > 2 and parts[2] == "create":
-            r = _translate_gh_repo_create(parts)
-            if r is None:
-                return None
-            routed.append(r)
+        elif bin_name == "gh":
+            # Intercept ALL `gh` subcommands. The sandbox has NO `gh` CLI, so
+            # any `gh ...` the model runs there would fail and can send the loop
+            # into a `pip install gh-cli` spiral. We route the safe subset
+            # through the credentialed git tool and turn the rest into
+            # informational no-ops.
+            r = _translate_gh_parts(parts, sub)
+            if r is not None:
+                routed.append(r)
+            continue
         elif bin_name in _SHELL_NOISE_CMDS:
             # Non-git noise (echo, ls, true, cat, ...) — safe to skip; irrelevant
             # to the git pipeline.
@@ -837,6 +842,35 @@ def _translate_gh_repo_create(parts: list[str]) -> dict | None:
         "private": private,
         "description": description,
     }
+
+
+def _translate_gh_parts(parts: list[str], sub: str) -> dict | None:
+    """Translate a single parsed ``gh <sub> ...`` command into a git-op payload.
+
+    The sandbox has no ``gh`` CLI, so every ``gh`` command the model issues
+    there would fail. We honor the credentialed-safe subset and turn the rest
+    into informational no-ops:
+
+      - ``gh repo create <name>``  -> repo_create (existing behavior)
+      - ``gh repo clone <url>``    -> repo_clone (the workspace is ALREADY a
+            git repo bound to its GitHub remote, so cloning is redundant; the
+            git handler reports the existing origin instead of failing)
+      - any other ``gh ...``        -> gh_noop (informational no-op that tells
+            the model to use GitOperationRequest / WorkspaceFileWriteRequest)
+    """
+    if sub == "repo" and len(parts) > 2 and parts[2] == "create":
+        return _translate_gh_repo_create(parts)
+    if sub == "repo" and len(parts) > 2 and parts[2] == "clone":
+        # First positional arg after `clone` is the clone target (url or owner/repo).
+        target = ""
+        for tok in parts[3:]:
+            if tok.startswith("-"):
+                continue
+            target = tok
+            break
+        return {"action": "repo_clone", "repo_url": target}
+    # `gh repo view`, `gh auth status`, `gh pr`, `gh api`, ...: no-op.
+    return {"action": "gh_noop", "gh_command": " ".join(parts[1:])}
 
 
 def _git_commit_message_from_parts(parts: list[str]) -> str | None:

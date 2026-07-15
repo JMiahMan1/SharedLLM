@@ -14,6 +14,8 @@ Supported actions:
     init     — git init
     remote_add — git remote add <name> <url>  (token-aware for https)
     repo_create — create a GitHub repo via API (token-aware) + wire origin remote
+    repo_clone  — no-op: workspace is already the repo (sandbox has no `gh` CLI)
+    gh_noop     — no-op: intercepted `gh` command with no git-tool equivalent
 
 Security:
     - push requires is_admin=True in UserContext.
@@ -674,5 +676,53 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
             await _bind_workspace_repo(workspace_id, created_url)
         return _ok("repo_create", {"repo_name": repo_name, "repo_url": created_url, **r})
 
+    elif action == "repo_clone":
+        # The sandbox has no `gh` CLI and no need for one: the workspace is
+        # ALREADY a git repository bound to its GitHub remote (wired by
+        # `repo_create` / auto-wire). A `gh repo clone` would therefore be
+        # redundant — and would otherwise fail because `gh` isn't installed.
+        # Report the existing origin so the model proceeds to write + push.
+        remote_url = await _get_remote_url("origin", cwd=workspace_path)
+        if remote_url:
+            return GitExecutionResult(
+                status="SUCCESS",
+                message=(
+                    "Repository already present: the workspace is already a git "
+                    f"repository with origin = {remote_url}. No clone needed — "
+                    "write files with WorkspaceFileWriteRequest and commit/push via "
+                    "GitOperationRequest."
+                ),
+                service="git",
+                detail={"remote_url": remote_url, "note": "clone-noop"},
+            )
+        return GitExecutionResult(
+            status="SUCCESS",
+            message=(
+                "Workspace is ready. No `gh repo clone` needed — the workspace is "
+                "already a git repository bound to its GitHub remote. Write files "
+                "and commit/push via GitOperationRequest."
+            ),
+            service="git",
+            detail={"note": "clone-noop"},
+        )
+
+    elif action == "gh_noop":
+        # Intercepted `gh` command that has no safe git-tool equivalent
+        # (e.g. `gh repo view`, `gh auth status`, `gh pr`, `gh api`). The
+        # sandbox has no `gh` CLI, so this keeps the loop from stalling on a
+        # missing binary while steering the model back to the proper tools.
+        return GitExecutionResult(
+            status="SUCCESS",
+            message=(
+                "The `gh` CLI is not available in the sandbox; this command was "
+                "intercepted. The workspace is already a git repository bound to "
+                "its GitHub remote. Use GitOperationRequest for git operations "
+                "(status, add, commit, push, repo_create) and "
+                "WorkspaceFileWriteRequest to write files."
+            ),
+            service="git",
+            detail={"intercepted_gh": getattr(req, "gh_command", None)},
+        )
+
     else:
-        return GitExecutionResult(status="FAILURE", message=f"Unknown git action '{action}'. Valid: status, diff, add, commit, pull, push, log.", service="git", detail={})
+        return GitExecutionResult(status="FAILURE", message=f"Unknown git action '{action}'. Valid: status, diff, add, commit, pull, push, log, repo_create, repo_clone, gh_noop.", service="git", detail={})
