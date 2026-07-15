@@ -627,6 +627,13 @@ async def lifespan(app: FastAPI):
 
     log.info("Gateway starting up...")
     engine.load()
+    # Patch DNS resolver so .local hosts (e.g. Ollama) resolve via dns-sync
+    # instead of the flaky container DNS path. No hardcoded LAN IPs in compose.
+    try:
+        from services.common.dns_resolver import patch_dns_resolver
+        patch_dns_resolver()
+    except Exception as e:
+        log.warning(f"[dns-sync] Gateway DNS resolver patch failed: {e}")
     # Initialize the client explicitly on startup
     get_http_client()
     jq = await get_job_queue()

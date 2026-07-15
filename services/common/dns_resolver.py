@@ -1,15 +1,20 @@
-"""DNS resolver patch for execution service.
-Patches socket.getaddrinfo to resolve .local domains via dns-sync,
-enabling live failover without restarts when using network_mode: host.
+"""Shared DNS resolver patch for services that need reliable .local resolution.
+
+Patches socket.getaddrinfo so that `.local` hostnames are resolved through
+the app's dns-sync service (loopback forwarder) instead of the flaky
+container DNS path. This is the in-app DNS handling required by policy
+(NO hardcoded LAN IPs in compose/.env) and mirrors what the execution
+service already does at startup.
 """
 import logging
 import socket
 
-log = logging.getLogger("execution.dns_resolver")
+log = logging.getLogger("sharedllm.dns_resolver")
 
 _DNS_SYNC_IP = "127.0.0.1"
 _DNS_SYNC_PORT = 5353
 _original_getaddrinfo = socket.getaddrinfo
+
 
 def _resolve_via_dns_sync(hostname: str, family: int = socket.AF_INET):
     """Resolve hostname via dns-sync server using Python's built-in DNS."""
@@ -21,7 +26,7 @@ def _resolve_via_dns_sync(hostname: str, family: int = socket.AF_INET):
         resolver.timeout = 2.0
         resolver.lifetime = 2.0
 
-        answers = resolver.resolve(hostname, 'A')
+        answers = resolver.resolve(hostname, "A")
         for rdata in answers:
             ip = str(rdata)
             log.debug(f"[dns-sync] Resolved {hostname} -> {ip}")
@@ -33,17 +38,21 @@ def _resolve_via_dns_sync(hostname: str, family: int = socket.AF_INET):
         log.debug(f"[dns-sync] Resolution failed for {hostname}: {e}")
         return None
 
+
 def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
     """Patched getaddrinfo that routes .local domains through dns-sync."""
-    if host and host.endswith('.local'):
+    if host and host.endswith(".local"):
         ip = _resolve_via_dns_sync(host)
         if ip:
-            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (ip, port))]
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, port))]
         log.warning(f"[dns-sync] Failed to resolve {host}, falling back to system DNS")
 
     return _original_getaddrinfo(host, port, family, type, proto, flags)
 
+
 def patch_dns_resolver():
     """Apply DNS resolver patch. Call once at startup."""
     socket.getaddrinfo = _patched_getaddrinfo
-    log.info(f"[dns-sync] DNS resolver patched - .local domains will resolve via {_DNS_SYNC_IP}:{_DNS_SYNC_PORT}")
+    log.info(
+        f"[dns-sync] DNS resolver patched - .local domains will resolve via {_DNS_SYNC_IP}:{_DNS_SYNC_PORT}"
+    )
