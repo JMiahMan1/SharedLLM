@@ -629,6 +629,64 @@ def extract_action_json(text: str, _depth: int = 0) -> dict | None:
     return None
 
 
+def extract_action_batch(text: str) -> list[dict] | None:
+    """Extract a *batch* of tool calls (a JSON array) from model output.
+
+    When Raven emits an array of tool-call objects — e.g. a proven multi-step
+    command chain assembled from its memory/history — the whole batch is executed
+    from a SINGLE inference, which is the core lever that keeps autonomous builds
+    from burning 1800s re-deriving every individual step. Returns the list of
+    normalized tool dicts, or ``None`` when the response is not a tool-call array.
+    """
+    if not text:
+        return None
+
+    candidates: list[str] = []
+
+    # Priority 1: fenced JSON array (```json [ ... ] ``` or ``` [ ... ] ```)
+    for m in re.finditer(r"```(?:json)?\s*(\[.*?\])\s*```", text, re.DOTALL):
+        candidates.append(m.group(1))
+
+    # Priority 2: a bare top-level JSON array (first '[' .. last ']')
+    first = text.find("[")
+    last = text.rfind("]")
+    if first != -1 and last != -1 and last > first:
+        candidates.append(text[first : last + 1])
+
+    for raw in candidates:
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            try:
+                parsed = json.loads(re.sub(r",\s*([\]}])", r"\1", raw))
+            except Exception:
+                continue
+        if not isinstance(parsed, list) or not parsed:
+            continue
+        batch = []
+        for item in parsed:
+            norm = _normalize_tool(item)
+            if norm and (norm.get("action") or norm.get("@type")):
+                batch.append(norm)
+        if batch:
+            return batch
+    return None
+
+
+def _next_batch_step(pending_batch: list[dict]) -> tuple[bool, dict | None]:
+    """Pop the next step of an in-flight batched command chain.
+
+    Returns ``(skip_inference, tool_data)``. When the queue is non-empty the next
+    tool is dequeued and the caller must SKIP the LLM inference — the whole chain
+    is driven by a single reasoning cycle. When empty, ``(False, None)`` signals a
+    normal inference turn. Extracted from the agent loop so the queue semantics are
+    unit-testable without standing up the full loop.
+    """
+    if pending_batch:
+        return True, pending_batch.pop(0)
+    return False, None
+
+
 def _repair_json_control_chars(text: str) -> str:
     """Escape raw newlines/tabs/carriage-returns that leaked inside JSON string
     values so ``json.loads`` can parse otherwise-valid tool-call payloads.
@@ -1986,6 +2044,11 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     exec_data = None
     ans = ""
     successful_tool_calls = 0
+    # Queue of tool calls remaining from a batched inference (a proven command
+    # chain). One LLM inference can enqueue many steps; each subsequent turn runs
+    # one queued step WITHOUT a new inference, so the whole chain costs a single
+    # reasoning cycle instead of one per step.
+    pending_batch: list[dict] = []
     generated_plan = ""
 
     # --- VRAM-SAFE SCRATCHPAD ---
@@ -2039,7 +2102,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 exec_data = cp.get("last_exec_data")
                 successful_tool_calls = cp.get("successful_tool_calls", 0)
                 log.info(f"[AgentLoop] Resuming mission {mission_id} from iteration {start_iteration} (restored {len(action_log)} action log entries)")
-            await r_cp.close()
+            # NOTE: do NOT close r_cp — it is the module-level shared singleton
+            # returned by _get_redis_cmd(). Closing it here would set the
+            # connection dead while _redis_cmd still points to it (no None
+            # reset), causing all subsequent Redis ops to fail.
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to load checkpoint for mission {mission_id}: {e}")
 
@@ -2051,6 +2117,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         max_iterations = MAX_TOOL_ITERATIONS
     if max_iterations < 1:
         max_iterations = MAX_TOOL_ITERATIONS
+
+    # Runtime hard wall-clock cap for a single mission. Operational config MUST be
+    # read from the Config DB (GlobalSetting `raven_max_total_seconds`), NOT from
+    # .env/env — the runtime only reads .env during seeding. Falls back to the
+    # module default if the setting is absent. Mirrors `raven_max_iterations` above.
+    try:
+        raven_max_total = int(str((settings or {}).get("raven_max_total_seconds", RAVEN_MAX_TOTAL_SECONDS)).strip())
+    except (ValueError, TypeError):
+        raven_max_total = RAVEN_MAX_TOTAL_SECONDS
+    if raven_max_total < 1:
+        raven_max_total = RAVEN_MAX_TOTAL_SECONDS
 
     async def _compress_context() -> tuple[str, str]:
         """Compress action_log into a summary + recent entries to prevent context bloat.
@@ -2133,10 +2210,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             }
             await r_cp.setex(
                 f"raven:checkpoint:{mission_id}",
-                RAVEN_MAX_TOTAL_SECONDS + 60,
+                raven_max_total + 60,
                 json.dumps(cp_data),
             )
-            await r_cp.close()
+            # NOTE: do NOT close r_cp — shared singleton; see checkpoint-load comment.
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to save checkpoint at iter {iter_num}: {e}")
 
@@ -2146,6 +2223,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         try:
             r_cp = await _get_redis_cmd()
             await r_cp.delete(f"raven:checkpoint:{mission_id}")
+            # NOTE: do NOT close r_cp — shared singleton; see checkpoint-load comment.
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to clear checkpoint for mission {mission_id}: {e}")
 
@@ -2244,9 +2322,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         # --- HARD TIMEOUT CHECK ---
         elapsed_total = iter_start - loop_start
-        if elapsed_total > RAVEN_MAX_TOTAL_SECONDS:
+        if elapsed_total > raven_max_total:
             log.error(f"[AgentLoop] HARD TIMEOUT after {elapsed_total:.0f}s at iteration {iter_num}")
-            ans = f"ERROR: Raven job exceeded time limit of {RAVEN_MAX_TOTAL_SECONDS}s. Partial result: {ans or 'No output yet'}"
+            ans = f"ERROR: Raven job exceeded time limit of {raven_max_total}s. Partial result: {ans or 'No output yet'}"
             await _clear_checkpoint()
             break
 
@@ -2270,6 +2348,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     return "MISSION TERMINATED: User requested cancellation via control plane."
             except Exception as e:
                 log.error(f"[AgentLoop] Error in mission pause/resume handling: {e}")
+
+        # ── Batched command-chain continuation ──────────────────────────────────
+        # If a previous inference returned an array of tool calls (a proven
+        # command chain), the remainder lives in `pending_batch`. Execute the next
+        # queued step WITHOUT a new LLM inference — the whole chain is driven by a
+        # single reasoning cycle instead of one per step.
+        skip_inference, tool_data = _next_batch_step(pending_batch)
+        if skip_inference:
+            log.info(f"[AgentLoop] Batch continuation: executing queued tool {tool_data.get('action')!r} ({len(pending_batch)} remaining)")
 
         await stream_event("system", f"Agent loop iteration {iter_num}/{max_iterations} started.")
         log.info(f"[AgentLoop] Iteration {iter_num}/{max_iterations} | total elapsed {elapsed_total:.0f}s")
@@ -2342,14 +2429,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     inference_options = ollama_payload.get("options", {})
                     if not isinstance(inference_options, dict):
                         inference_options = {}
-                    data = await execute_inference_with_kill(
-                        provider,
-                        selected_model,
-                        cast(list, ollama_payload["messages"]),
-                        inference_options,
-                        mission_id=mission_id,
-                        chunk_callback=chunk_logger
-                    )
+                    if skip_inference:
+                        # Continue a batched command chain: the next step is already
+                        # dequeued into `tool_data`. No new LLM inference is performed.
+                        data = {"message": {"content": f"[batch] {tool_data.get('action')}"}}
+                    else:
+                        data = await execute_inference_with_kill(
+                            provider,
+                            selected_model,
+                            cast(list, ollama_payload["messages"]),
+                            inference_options,
+                            mission_id=mission_id,
+                            chunk_callback=chunk_logger
+                        )
 
                     # Handle thinking-capable models: some models put their entire response
                     # in the thinking/reasoning block when content is empty.
@@ -2376,7 +2468,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.info(f"[AgentLoop] Inference completed in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms — iter {agent_iter + 1}")
             log.info(f"[AgentLoop] Response content: {ans[:200]}...")
             # Record this turn so the model retains context in subsequent iterations.
-            if ans and ans.strip():
+            if ans and ans.strip() and not skip_inference:
                 conversation.append({"role": "assistant", "content": ans})
         except MissionKilledError:
             heartbeat_stop.set()
@@ -2392,14 +2484,24 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await _clear_checkpoint()
             return f"SYSTEM ERROR: Inference failed after multiple retries. Detail: {e}. Please check the LLM provider status."
 
-        tool_data = extract_action_json(ans)
-
-        # ROBUSTNESS: extract_action_json is expected to return a dict or None, but
-        # guard against a non-dict (e.g. a bare JSON array of tool calls) so we fall
-        # through to the "no valid tool call" nudge instead of crashing on
-        # tool_data.get(...) with "'list' object has no attribute 'get'".
-        if not isinstance(tool_data, dict):
-            tool_data = None
+        if skip_inference:
+            # tool_data was already dequeued from pending_batch at iteration start;
+            # it is the next step of an in-flight proven-command chain.
+            pass
+        else:
+            # A single inference may return a *batch* of tool calls (a proven command
+            # chain assembled from memory/history). Execute the first immediately and
+            # queue the rest — the whole chain runs from THIS one inference instead of
+            # burning a reasoning cycle per step.
+            batch = extract_action_batch(ans)
+            if batch:
+                tool_data = batch.pop(0)
+                pending_batch.extend(batch)
+                log.info(f"[AgentLoop] Batching {len(batch) + 1} tool calls from one inference.")
+            else:
+                tool_data = extract_action_json(ans)
+            if not isinstance(tool_data, dict):
+                tool_data = None
 
         # Normalize alternative schemas: { "name": "...", "parameters": {...} } → { "action": "...", "payload": {...} }
         if tool_data:
@@ -3273,20 +3375,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             # A verification run clears the "unverified" state for
                             # every written file (language-agnostic lint/test).
                             _verified_files.update(_written_files)
-                    else:
-                        sig = action_signature(action_name, payload)
-                        _recent_actions.append((sig, False))
-                        if len(_recent_actions) > 12:
-                            _recent_actions = _recent_actions[-12:]
-                        if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
-                            _recent_shell_runs.append(
-                                (normalize_shell_goal(str(payload.get("command", ""))),
-                                 outcome_digest(exec_data))
-                            )
-                            if len(_recent_shell_runs) > 16:
-                                _recent_shell_runs = _recent_shell_runs[-16:]
 
                         # --- POST-WRITE LINT HOOK ---
+                        # MUST be in the success branch: lint only makes sense when
+                        # the write itself succeeded. Running it in the `else`
+                        # (failure) branch was a bug — lint never fired after a
+                        # clean write. Re-run here immediately after tracking the
+                        # write; if lint fails we retroactively downgrade the result
+                        # so the success counter / stagnation logic see it correctly.
                         lintable_actions = {"workspacefilewriterequest", "workspacefilepatchrequest"}
                         if lookup_action in lintable_actions and isinstance(payload, dict):
                             file_path = payload.get("file_path") or payload.get("path", "")
@@ -3299,12 +3395,31 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                         "message": lint_feedback,
                                         "file_path": file_path,
                                     }
+                                    # Retroactively un-count this write: it produced lint
+                                    # errors so it is not a successful tool execution.
+                                    successful_tool_calls -= 1
+                                    sig2 = action_signature(action_name, payload)
+                                    _recent_actions.append((sig2, False))
+                                    if len(_recent_actions) > 12:
+                                        _recent_actions = _recent_actions[-12:]
                                 else:
                                     # A clean post-write lint satisfies the
                                     # static-check verification requirement for this
                                     # file, so it no longer counts as "unverified"
                                     # at the finish gate.
                                     _verified_files.add(file_path)
+                    else:
+                        sig = action_signature(action_name, payload)
+                        _recent_actions.append((sig, False))
+                        if len(_recent_actions) > 12:
+                            _recent_actions = _recent_actions[-12:]
+                        if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
+                            _recent_shell_runs.append(
+                                (normalize_shell_goal(str(payload.get("command", ""))),
+                                 outcome_digest(exec_data))
+                            )
+                            if len(_recent_shell_runs) > 16:
+                                _recent_shell_runs = _recent_shell_runs[-16:]
 
                     # Checkpoint state after successful tool execution
                     await _save_checkpoint(iter_num)
@@ -3456,11 +3571,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         log.info("[AgentLoop] Finalizing with clean summarization phase...")
 
         if ans_is_empty:
-            # LLM response was empty — build summary from action log only
+            # LLM response was empty — build summary from action log only.
+            # BUG FIX: previously execute_inference was never called in this branch;
+            # summary_prompt was built and silently discarded, always falling through
+            # to the static fallback. Now we actually call inference here too.
             summary_prompt = [
                 {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. State what was accomplished based on the actions taken."},
                 {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{bounded_log}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished. Output the summary directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
             ]
+            try:
+                data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.0, "enable_thinking": False})
+                ans = data.get("message", {}).get("content", "").strip() or ans
+            except Exception as e:
+                log.warning(f"[AgentLoop] Summarization phase (empty-ans path) failed: {e}")
         else:
             summary_prompt = [
                 {"role": "system", "content": "You are Raven. Summarize the mission result for the user in clean, natural language. Do NOT use JSON. Do NOT repeat yourself. Be concise. Do NOT say the mission failed unless the tool execution itself reported an error."},

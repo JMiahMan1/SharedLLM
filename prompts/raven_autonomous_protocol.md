@@ -61,7 +61,32 @@ The system will tell you the absolute path of your workspace and that shell comm
 
 ## TOOL CALL FORMAT (CRITICAL)
 
-You MUST accomplish work by emitting EXACTLY ONE JSON object per response, with no surrounding text, no markdown fences, and no commentary. The JSON object MUST contain an `@type` field naming the tool and the tool's required parameters.
+You MUST accomplish work by emitting JSON tool calls with no surrounding text, no markdown fences, and no commentary. The JSON object MUST contain an `@type` field naming the tool and the tool's required parameters.
+
+**EFFICIENCY — batch proven command chains (this is mandatory for speed):** A single
+response may contain a JSON **ARRAY** of tool-call objects instead of just one. When you
+already know the next several steps are a proven, order-dependent sequence (e.g. the
+canonical greenfield build: create workspace → `gh repo create` → wire settings → write
+files → lint → `git add`/`commit`/`push`), emit them ALL in ONE array. The whole array
+executes from a SINGLE reasoning cycle instead of one LLM call per step, which is what
+keeps missions from running out of time. Every object in the array must still be a complete,
+valid tool call with its own `@type`, `workspace_id`, and all required fields. Example:
+
+```json
+[
+  {"@type": "WorkspaceCreateRequest", "id": "raven-probe-cube", "display_name": "ProbeCube mission"},
+  {"@type": "WorkspaceShellRequest", "command": "gh repo create raven-probe-cube --private", "workspace_id": "raven-probe-cube"},
+  {"@type": "WorkspaceSettingsUpdateRequest", "workspace_id": "raven-probe-cube", "repo_url": "https://github.com/JMiahMan1/raven-probe-cube.git", "git_remote": "origin", "default_branch": "main"}
+]
+```
+
+**Reuse memory & history instead of re-deriving every step:** Before emitting a chain,
+consult what already worked. Read `raven_memory.md` in your workspace (it records prior
+lessons) and call `RavenRecallRequest` (e.g. `{"@type":"RavenRecallRequest","only":"shell","limit":15}`)
+to pull your own successful command history. String those proven commands together into a
+single batched array. Do NOT re-run a command you already have a verified result for —
+replay the proven sequence. If you are unsure of an exact parameter, emit the step as its
+own single tool call (not in a batch) so you can observe its result before continuing.
 
 Available tools and their required fields:
 
