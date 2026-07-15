@@ -151,6 +151,7 @@ RUN set -eux; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go.tgz; \
     tar -C /usr/local -xzf /tmp/go.tgz; \
     rm -f /tmp/go.tgz; \
+    export PATH="/usr/local/go/bin:$PATH"; \
     go version
 ENV PATH="/usr/local/go/bin:${PATH}"
 RUN set -eux; \
