@@ -17,10 +17,9 @@ from urllib.parse import urlparse
 import aiohttp
 import redis
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from services.common.http import get_client
 from services.config import (
@@ -110,11 +109,13 @@ app = FastAPI(title="SharedLLM Workspace Runtime")
 
 # --- Response sanitization: never leak secrets to clients ---
 # The workspace dict carries a `resolved_identity` block (plaintext provider
-# tokens: nextcloud / ha / github / mass / audiobookshelf / skylight / ...) that
-# is only used internally (git auth, provider sync). It must never reach the API
-# or the browser. Strip it (plus decrypted webhook tokens) from every JSON
-# response body. Internal callers read secrets from the in-memory dict before
-# the response is serialized, so this is purely an output boundary.
+# tokens: nextcloud / ha / github / mass / audiobookshelf / skylight / ...)
+# that is only used internally (git auth, provider sync). It must never reach
+# the API or the browser. Strip it (plus decrypted webhook tokens) from every
+# JSON response body. Internal callers read secrets from the in-memory dict
+# before the response is serialized, so this is purely an output boundary.
+# Implemented as a raw ASGI middleware (not BaseHTTPMiddleware) to avoid the
+# known body-streaming quirks that prevent rewriting the response body.
 _STRIP_RESPONSE_KEYS = {"resolved_identity", "webhook_token", "webhook_token_enc"}
 
 
@@ -126,26 +127,57 @@ def _redact_secrets(obj: Any) -> Any:
     return obj
 
 
-class _RedactSecretsMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
-        if "application/json" not in response.headers.get("content-type", ""):
-            return response
-        try:
-            body = response.body
-        except Exception:
-            return response
-        try:
-            data = json.loads(body)
-        except (ValueError, UnicodeDecodeError):
-            return response
-        redacted = _redact_secrets(data)
-        return Response(
-            content=json.dumps(redacted).encode("utf-8"),
-            status_code=response.status_code,
-            media_type="application/json",
-            headers={k: v for k, v in response.headers.items() if k.lower() != "content-length"},
-        )
+class _RedactSecretsMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        start_message: dict = {}
+        body_chunks: list[bytes] = []
+        content_type = ""
+
+        async def send_wrapper(message: dict):
+            nonlocal start_message, content_type
+            if message["type"] == "http.response.start":
+                start_message = message
+                for raw_k, raw_v in message.get("headers", []):
+                    if raw_k.lower() == b"content-type":
+                        content_type = raw_v.decode("latin-1", "replace")
+                return
+            if message["type"] == "http.response.body":
+                body_chunks.append(message.get("body") or b"")
+                if message.get("more_body"):
+                    return
+                # Full body received; rewrite JSON responses.
+                body = b"".join(body_chunks)
+                if "application/json" in content_type:
+                    try:
+                        data = json.loads(body)
+                        body = json.dumps(_redact_secrets(data)).encode("utf-8")
+                    except (ValueError, UnicodeDecodeError):
+                        pass
+                    new_headers = [
+                        (k, v) for k, v in start_message.get("headers", [])
+                        if k.lower() != b"content-length"
+                    ]
+                    new_headers.append((b"content-length", str(len(body)).encode()))
+                    await send(
+                        {
+                            "type": "http.response.start",
+                            "status": start_message.get("status", 200),
+                            "headers": new_headers,
+                        }
+                    )
+                else:
+                    await send(start_message)
+                await send({"type": "http.response.body", "body": body, "more_body": False})
+                return
+
+        await self.app(scope, receive, send_wrapper)
 
 
 
