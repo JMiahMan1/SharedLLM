@@ -166,7 +166,7 @@ RUN set -eux; \
 ENV CARGO_HOME=/usr/local/cargo RUSTUP_HOME=/usr/local/rustup
 RUN set -eux; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 https://sh.rustup.rs -o /tmp/rustup.sh; \
-    sh /tmp/rustup.sh -y --profile minimal --component rustfmt clippy --default-toolchain stable; \
+    sh /tmp/rustup.sh -y --profile minimal --component rustfmt --component clippy --default-toolchain stable; \
     ln -sf /usr/local/cargo/bin/* /usr/local/bin/; \
     rm -f /tmp/rustup.sh; \
     rustc --version
