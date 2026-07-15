@@ -3306,6 +3306,17 @@ async def proxy_discover(request: Request):
         )
         return await _proxy_json_response(resp)
 
+@app.get("/api/users/me")
+async def proxy_get_me(request: Request):
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/users/me",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
 @app.patch("/api/users/me")
 async def proxy_update_me(request: Request):
     body = await request.json()
