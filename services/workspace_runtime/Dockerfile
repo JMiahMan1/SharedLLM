@@ -105,7 +105,6 @@ RUN pip install --no-cache-dir \
 RUN npm install -g \
     eslint \
     prettier \
-    @typescript-eslint/cli \
     @typescript-eslint/parser \
     stylelint \
     markdownlint-cli \
