@@ -31,6 +31,7 @@ import {
   Send,
   Bot,
   Image as ImageIcon,
+  KeyRound,
   Wand2,
   Maximize2,
   Brush,
@@ -47,6 +48,7 @@ import { PdfViewer } from './viewers/PdfViewer';
 import { DocxViewer } from './viewers/DocxViewer';
 import { ExcelViewer } from './viewers/ExcelViewer';
 import { TerminalPane } from './viewers/TerminalPane';
+import { WorkspaceSecrets } from './WorkspaceSecrets';
 import { cn } from '../../lib/utils';
 
 interface WorkspaceIDEProps {
@@ -142,6 +144,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
   // Tabbed editors: many files can be open at once; `activeTab` is the focused path.
   const [tabs, setTabs] = useState<OpenTab[]>([]);
   const [activeTab, setActiveTab] = useState<string | null>(null);
+  const [showSecrets, setShowSecrets] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const [gitStatus, setGitStatus] = useState<GitStatusResponse | null>(null);
@@ -895,17 +898,30 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
             {workspace.resolved_path ?? workspace.local_path}
           </span>
         </div>
-        <button
-          onClick={onClose}
-          className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
-          aria-label="Close"
-        >
-          <X size={18} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowSecrets(true)}
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+            aria-label="Secrets & Environment"
+            title="Secrets & Environment"
+          >
+            <KeyRound size={16} />
+          </button>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 flex">
         {/* Activity Bar */}
+        {showSecrets && (
+          <WorkspaceSecrets workspace={workspace} onClose={() => setShowSecrets(false)} />
+        )}
         <div className="w-12 shrink-0 bg-[#0b0f1a] border-r border-white/10 flex flex-col items-center py-2 gap-1">
           {ACTIVITY.map((a) => {
             const Icon = a.icon;

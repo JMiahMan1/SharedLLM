@@ -441,6 +441,20 @@ def _workspace_to_dict(item: Workspace) -> dict[str, Any]:
     data["webhook_token"] = decrypt(item.webhook_token_enc) if item.webhook_token_enc else item.webhook_token
     data.pop("webhook_token_enc", None)
 
+    # Expose only the NAMES of per-workspace env/secret keys in public responses
+    # (never the values). The decrypted values are only returned by the trusted
+    # internal POST /workspace/resolve endpoint for sandbox env injection.
+    _env_enc = getattr(item, "env_enc", None)
+    if _env_enc:
+        try:
+            _env = json.loads(decrypt(_env_enc) or "{}")
+            data["env_keys"] = sorted(_env.keys()) if isinstance(_env, dict) else []
+        except Exception:
+            data["env_keys"] = []
+    else:
+        data["env_keys"] = []
+    data.pop("env_enc", None)
+
     # Ensure excludes is a parsed list of strings
     excludes = data.get("excludes")
     if isinstance(excludes, str):
@@ -1456,6 +1470,15 @@ def list_workspaces(
 def resolve_workspace(req: WorkspaceRef, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
+    # Trusted internal endpoint: attach the DECRYPTED per-workspace env/secret
+    # map so the execution layer can inject it into the sandbox. Public list
+    # endpoints only receive masked key names (see _workspace_to_dict).
+    _env_enc = workspace.pop("env_enc", None)
+    try:
+        _env = json.loads(decrypt(_env_enc) or "{}") if _env_enc else {}
+    except Exception:
+        _env = {}
+    workspace["env"] = _env if isinstance(_env, dict) else {}
     return {"status": "SUCCESS", "workspace": workspace}
 
 
@@ -1717,6 +1740,41 @@ def update_workspace(workspace_id: str, updates: dict, x_internal_secret: str | 
         for key, value in updates.items():
             if hasattr(ws, key):
                 setattr(ws, key, value)
+
+        # Merge per-workspace env/secret overrides. `env` (dict) adds/overwrites
+        # keys; `env_delete` (list of keys) removes them. Keys not mentioned are
+        # preserved, so a client can update one secret without resending all
+        # others (their (encrypted) values never leave the server). Re-encrypted
+        # at rest.
+        if "env" in updates or "env_delete" in updates:
+            _current_env: dict = {}
+            if ws.env_enc:
+                try:
+                    _current_env = json.loads(decrypt(ws.env_enc) or "{}") or {}
+                except Exception:
+                    _current_env = {}
+            _delete = updates.get("env_delete") or []
+            if isinstance(_delete, list):
+                for _k in _delete:
+                    _current_env.pop(str(_k), None)
+            _add = updates.get("env")
+            if isinstance(_add, dict):
+                for _k, _v in _add.items():
+                    _k = str(_k)
+                    if _v is None:
+                        _current_env.pop(_k, None)
+                    else:
+                        _current_env[_k] = str(_v)
+            elif isinstance(_add, str) and _add.strip():
+                try:
+                    _parsed = json.loads(_add)
+                    if isinstance(_parsed, dict):
+                        for _k, _v in _parsed.items():
+                            _current_env[str(_k)] = str(_v)
+                except Exception:
+                    pass
+            ws.env_enc = encrypt(json.dumps(_current_env)) if _current_env else None
+
         _store_workspace_secret_fields(ws, updates)
 
         session.add(ws)

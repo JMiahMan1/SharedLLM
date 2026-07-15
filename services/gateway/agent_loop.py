@@ -732,6 +732,24 @@ def _translate_shell_to_git_op(cmd: str) -> list[dict] | None:
     if not isinstance(cmd, str) or not cmd.strip():
         return None
 
+    # `gh` runs NATIVELY inside the workspace sandbox. The sandbox has the `gh`
+    # CLI installed and receives the user's GITHUB_TOKEN (and GIT_TOKEN) injected
+    # into its environment at exec time, so `gh repo create`, `gh pr`, `gh api`,
+    # etc. work directly in the shell. We must NOT intercept/route `gh` — the old
+    # backstop assumed no `gh` binary and no-op'd every `gh` command, which broke
+    # agent git/GitHub workflows. If the pipeline contains any `gh` command, run
+    # the WHOLE pipeline as a native shell command (git, if present alongside,
+    # authenticates via the injected token + git-credential helper).
+    _gh_norm = re.sub(r"^\s*sudo\s+", "", cmd).strip()
+    for _gh_piece in re.split(r"\s*(?:\|\||&&|;)\s*", _gh_norm):
+        _gh_p = re.sub(r"^\s*sudo\s+", "", _gh_piece).strip()
+        try:
+            _gh_parts = shlex.split(_gh_p)
+        except ValueError:
+            continue
+        if _gh_parts and _gh_parts[0] == "gh":
+            return None
+
     # Split compound commands; trailing `|| true` / `&& true` guards are dropped.
     pieces = re.split(r"\s*(?:\|\||&&|;)\s*", cmd.strip())
     routed: list[dict] = []
@@ -763,11 +781,11 @@ def _translate_shell_to_git_op(cmd: str) -> list[dict] | None:
             # not produced (the model can re-issue it as a standalone call).
             continue
         elif bin_name == "gh":
-            # Intercept ALL `gh` subcommands. The sandbox has NO `gh` CLI, so
-            # any `gh ...` the model runs there would fail and can send the loop
-            # into a `pip install gh-cli` spiral. We route the safe subset
-            # through the credentialed git tool and turn the rest into
-            # informational no-ops.
+            # NOTE: `gh` is handled NATIVELY above (the whole pipeline is run as
+            # a shell command when any `gh` is present, since the sandbox has the
+            # `gh` CLI + injected GITHUB_TOKEN). This branch is only reachable if
+            # a pipeline somehow contained `gh` without tripping the early
+            # return — treated as a no-op so it cannot break the git pipeline.
             r = _translate_gh_parts(parts, sub)
             if r is not None:
                 routed.append(r)

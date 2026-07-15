@@ -61,6 +61,77 @@ SYSTEM_BLOCKLIST_COMMANDS = {
 }
 
 
+def _identity_secrets_to_env(user_ctx) -> dict[str, str]:
+    """Map a user's Identity integration secrets (already decrypted inside
+    ``user_context``) to standard environment variable names. This is the
+    DEFAULT layer injected into every workspace sandbox command.
+
+    Secrets are ALWAYS sourced from the Identity service (``user_context``) and
+    never from ``.env``/``os.environ`` — so they reflect what the user actually
+    connected, and a missing integration simply yields no variable instead of
+    falling back to a server-side dotenv secret.
+    """
+    env: dict[str, str] = {}
+    if not user_ctx:
+        return env
+    uc = user_ctx
+    if hasattr(uc, "model_dump"):
+        uc = uc.model_dump()
+    elif hasattr(uc, "dict"):
+        uc = uc.dict()
+    if not isinstance(uc, dict):
+        return env
+
+    def _get(k: str) -> str | None:
+        return uc.get(k) if isinstance(uc.get(k), str) and uc.get(k) else None
+
+    gh = _get("github_token")
+    if gh:
+        env["GITHUB_TOKEN"] = gh
+        env["GH_TOKEN"] = gh
+        env["GH_ENTERPRISE_TOKEN"] = gh
+    gt = _get("git_token")
+    if gt:
+        env["GIT_TOKEN"] = gt
+    gl = _get("gitlab_token")
+    if gl:
+        env["GITLAB_TOKEN"] = gl
+    nc = _get("nextcloud_pass")
+    if nc:
+        env["NEXTCLOUD_PASSWORD"] = nc
+        env["NEXTCLOUD_PASS"] = nc
+    ncu = _get("nextcloud_url")
+    if ncu:
+        env["NEXTCLOUD_URL"] = ncu
+    ha = _get("ha_token")
+    if ha:
+        env["HA_TOKEN"] = ha
+        env["HOME_ASSISTANT_TOKEN"] = ha
+    hau = _get("ha_url")
+    if hau:
+        env["HA_URL"] = hau
+    ak = _get("api_key")
+    if ak:
+        env["API_KEY"] = ak
+    return env
+
+
+def build_sandbox_env(user_ctx, ws_env_overrides) -> dict[str, str]:
+    """Merge Identity integration secrets (defaults) with a workspace's own
+    per-workspace env/secret overrides. The workspace layer wins; a ``None``
+    value in the override map clears the inherited default.
+    """
+    merged = _identity_secrets_to_env(user_ctx)
+    if isinstance(ws_env_overrides, dict):
+        for k, v in ws_env_overrides.items():
+            key = str(k)
+            if v is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = str(v)
+    return merged
+
+
 async def _bind_workspace_repo(workspace_id: str | None, repo_url: str | None) -> None:
     """Best-effort: bind a repo_url to an (initially unbound) workspace after a
     successful first push, so the per-workspace push-scope guardrail becomes
@@ -623,21 +694,16 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
                 required_cap = "read"
             _require_capability(ws_details, required_cap)
 
-        # Resolve GitHub auth for this command. Prefer an explicit per-user token
-        # from the user context; fall back to the runtime-injected container token
-        # (GITHUB_TOKEN/GH_TOKEN sourced from .env) so `gh`/`git` are authenticated
-        # even when the agent's user_context does not carry a github_token (the
-        # common case). Without this fallback, raw `gh`/`git push` shells are
-        # unauthenticated and every push is hard-blocked with auth_required.
+        # Resolve GitHub auth for this command. Secrets are sourced ONLY from the
+        # Identity service via user_context (already decrypted) — never from
+        # .env/os.environ, so a missing integration yields no fallback token.
         def _resolve_gh_tok() -> str | None:
             tok = None
             if isinstance(user_ctx, dict):
                 tok = user_ctx.get("github_token")
             elif user_ctx is not None:
                 tok = getattr(user_ctx, "github_token", None)
-            if not tok:
-                tok = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-            return tok
+            return tok if isinstance(tok, str) and tok else None
 
         # Proactive auth check: git push requires an authenticated remote.
         if base_command == "git" and len(parsed) > 1 and parsed[1] == "push":
@@ -687,29 +753,27 @@ async def handle_workspace_shell(req: WorkspaceShellRequest) -> ExecutionResult:
         # 1800s; anything higher is clamped here for safety.
         safe_timeout = min(req.timeout or 600, 1800)
 
-        # Inject GitHub auth into the shell environment so Raven can manage repos
-        # and use token-aware tooling without a pre-seeded credential store. This
-        # mirrors services/execution/handlers/gh.py, but ALSO sets GITHUB_TOKEN
-        # (which PyGithub reads via os.environ['GITHUB_TOKEN']) and GIT_TOKEN, and
-        # applies to python scripts — models frequently shell out to
-        # `python3 <<'PYEOF' ... PyGithub ...` to drive git, and that path dies
-        # with KeyError('GITHUB_TOKEN') unless the env var is present.
+        # Build the sandbox environment. Start from the user's Identity
+        # integration secrets (github_token, git_token, gitlab_token,
+        # nextcloud_*, ha_token, api_key) mapped to standard env names, then
+        # overlay the workspace's own env/secret overrides. Secrets come ONLY
+        # from the Identity service (user_context) — never .env/os.environ.
+        # This is injected for EVERY command (not just gh/git/python) so all
+        # tools (terraform, aws, gcloud, node, rust, ...) see the user's creds.
+        ws_env = (ws_details or {}).get("env") or {}
         cmd_env = os.environ.copy()
-        if base_command in ("gh", "git", "python", "python3"):
-            gh_tok = _resolve_gh_tok()
-            if gh_tok:
-                cmd_env["GITHUB_TOKEN"] = gh_tok
-                cmd_env["GH_TOKEN"] = gh_tok
-                cmd_env["GH_ENTERPRISE_TOKEN"] = gh_tok
-                cmd_env["GIT_TOKEN"] = gh_tok
-                cmd_env["GH_PROMPT_DISABLED"] = "1"
-                if base_command == "git":
-                    cmd_env["GIT_TERMINAL_PROMPT"] = "0"
-                    cmd_env["GIT_CONFIG_COUNT"] = "1"
-                    cmd_env["GIT_CONFIG_KEY_0"] = "credential.helper"
-                    cmd_env["GIT_CONFIG_VALUE_0"] = (
-                        f"!f() {{ echo username=x-access-token; echo password={gh_tok}; }}; f"
-                    )
+        cmd_env.update(build_sandbox_env(user_ctx, ws_env))
+        cmd_env["HOME"] = "/home/sharedllm"
+        cmd_env["GH_PROMPT_DISABLED"] = "1"
+        _gh_tok = cmd_env.get("GITHUB_TOKEN")
+        if _gh_tok and base_command == "git":
+            # Native git over HTTPS authenticates via the injected token.
+            cmd_env["GIT_TERMINAL_PROMPT"] = "0"
+            cmd_env["GIT_CONFIG_COUNT"] = "1"
+            cmd_env["GIT_CONFIG_KEY_0"] = "credential.helper"
+            cmd_env["GIT_CONFIG_VALUE_0"] = (
+                f"!f() {{ echo username=x-access-token; echo password={_gh_tok}; }}; f"
+            )
 
         try:
             rc, stdout, stderr = await _sandbox_run(
