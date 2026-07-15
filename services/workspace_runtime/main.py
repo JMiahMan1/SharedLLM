@@ -148,7 +148,6 @@ class _RedactSecretsMiddleware(BaseHTTPMiddleware):
         )
 
 
-app.add_middleware(_RedactSecretsMiddleware)
 
 # --- Auto-Quarantine Configuration ---
 def _safe_int_env(key: str, default: int) -> int:
@@ -518,6 +517,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Jarvis Workspace Runtime", version="1.0.0", lifespan=lifespan)
 
+app.add_middleware(_RedactSecretsMiddleware)
 app.include_router(info_router)
 
 
