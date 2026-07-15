@@ -104,7 +104,7 @@ async def get_recent(mass_url: str, mass_token: str) -> list[dict[str, Any]]:
                 "name": mi.get("name", ""),
                 "artist": mi.get("artist", (mi.get("artists", [{}])[0].get("name", "") if mi.get("artists") else "")),
                 "uri": mi.get("uri", ""),
-                "last_played": item.get("timestamp_played", item.get("added_at", item.get("last_played", item.get("timestamp", "")))),
+                "last_played": mi.get("timestamp_played", mi.get("added_at", mi.get("last_played", mi.get("timestamp", "")))),
                 "image": mi.get("image", {}).get("path", "") if isinstance(mi.get("image"), dict) else (mi.get("image", "") or ""),
             }
             for item in raw
