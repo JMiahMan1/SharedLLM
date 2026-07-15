@@ -3514,6 +3514,60 @@ async def proxy_ingest_telemetry_snapshot(request: Request):
         )
         return await _proxy_json_response(resp)
 
+@app.post("/api/telemetry/snapshot/{entity_id:path}")
+async def proxy_trigger_telemetry_snapshot(entity_id: str, request: Request):
+    """Trigger a manual snapshot for a specific entity (UI calls this for instant updates)."""
+    await _resolve_identity_from_request(request)
+    creds = await resolve_identity_from_request(request)
+    ha_url = creds.get("ha_url") if creds else None
+    ha_token = creds.get("ha_token") if creds else None
+    if not ha_url or not ha_token:
+        return {"status": "ERROR", "message": "Home Assistant credentials not configured"}
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{EXECUTION_SVC}/discovery/entities",
+            params={"ha_url": ha_url, "ha_token": ha_token},
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status != 200:
+            return {"status": "ERROR", "message": f"Failed to fetch HA entities: {resp.status}"}
+        data = await resp.json()
+        entities = data.get("entities", []) if isinstance(data, dict) else []
+        target_entity = next((e for e in entities if e.get("entity_id") == entity_id), None)
+        if not target_entity:
+            return {"status": "ERROR", "message": f"Entity {entity_id} not found in Home Assistant"}
+        state = target_entity.get("state")
+        attrs = target_entity.get("attributes", {})
+        is_available = state not in (None, "unavailable", "unknown", "none", "")
+        power_w = None
+        if state not in (None, "unavailable", "unknown"):
+            try:
+                power_w = float(state)
+            except (TypeError, ValueError):
+                pass
+        if power_w is None and "current_power_w" in attrs:
+            try:
+                power_w = float(attrs.get("current_power_w"))
+            except (TypeError, ValueError):
+                pass
+        snapshot = {
+            "entity_id": entity_id,
+            "power_w": power_w,
+            "is_available": is_available,
+            "state": state,
+            "source": "manual-trigger",
+        }
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/telemetry/snapshot",
+            json=snapshot,
+            headers=headers
+        )
+        if resp.status != 200:
+            return {"status": "ERROR", "message": f"Snapshot failed: {resp.status}"}
+        return await resp.json()
+
 @app.get("/api/telemetry/insights")
 async def proxy_get_telemetry_insights(request: Request):
     await _resolve_identity_from_request(request)

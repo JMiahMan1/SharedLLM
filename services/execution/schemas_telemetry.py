@@ -13,6 +13,7 @@ class TelemetryEnrollmentRequest(BaseModel):
     usage_tracking: bool = True
     offline_alert_threshold_minutes: int = 30
     group_id: str | None = None
+    power_attribute: str | None = None
 
 
 class TelemetrySnapshot(BaseModel):

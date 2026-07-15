@@ -210,6 +210,7 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
 
             for e in power_enrollments:
                 entity_id = e.get("entity_id")
+                power_attr = e.get("power_attribute")
                 if not entity_id:
                     continue
                 try:
@@ -217,11 +218,29 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
                     if not state:
                         continue
                     raw = state.get("state")
+                    attrs = state.get("attributes", {})
                     is_available = raw not in (None, "unavailable", "unknown", "none", "")
-                    try:
-                        power_w = float(raw) if raw not in (None, "unavailable", "unknown") else None
-                    except (TypeError, ValueError):
-                        power_w = None
+                    power_w = None
+
+                    if power_attr:
+                        attr_value = attrs.get(power_attr)
+                        if attr_value is not None:
+                            try:
+                                power_w = float(attr_value)
+                            except (TypeError, ValueError):
+                                pass
+
+                    if power_w is None:
+                        if raw not in (None, "unavailable", "unknown"):
+                            try:
+                                power_w = float(raw)
+                            except (TypeError, ValueError):
+                                pass
+                        if power_w is None and "current_power_w" in attrs:
+                            try:
+                                power_w = float(attrs.get("current_power_w"))
+                            except (TypeError, ValueError):
+                                pass
                     snapshot = {
                         "entity_id": entity_id,
                         "power_w": power_w,
