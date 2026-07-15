@@ -3071,7 +3071,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
                         await stream_event("action_payload", json.dumps(log_payload, indent=2))
                         log.info(f"[AgentLoop] Sending payload to {endpoint}: {json.dumps(log_payload)}")
-                        resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=120.0))
+                        # WorkspaceSettingsUpdateRequest must PATCH the existing
+                        # workspace (workspace_runtime only exposes PATCH /workspaces/{id},
+                        # not POST) — POSTing there returns 405. Every other
+                        # action is a POST.
+                        _http_method = (
+                            "patch" if lookup_action == "workspacesettingsupdaterequest" else "post"
+                        )
+                        resp = await getattr(client, _http_method)(
+                            f"{svc_base}{endpoint}",
+                            json=payload,
+                            headers={"X-Internal-Secret": INTERNAL_SECRET},
+                            timeout=aiohttp.ClientTimeout(total=120.0),
+                        )
                         log.info(f"[AgentLoop] Tool response: {resp.status}")
 
                         if resp.status == 422:
