@@ -568,6 +568,21 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
             payload = tool_data.get("payload", tool_data)
             payload["user_context"] = creds.model_dump()
 
+            if action == "storageindexrequest":
+                payload = {
+                    "provider": {
+                        "kind": "nextcloud",
+                        "settings": {
+                            "url": creds.nextcloud_url,
+                            "username": creds.nextcloud_user,
+                            "password": creds.nextcloud_pass
+                        }
+                    },
+                    "path": payload.get("path") or payload.get("relative_path") or payload.get("file_path") or "/",
+                    "recursive": True,
+                    "user_context": creds.model_dump()
+                }
+
             if action == "contextsearchrequest":
                 payload["user_id"] = creds.user or "default"
 

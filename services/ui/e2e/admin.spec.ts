@@ -6,10 +6,9 @@ test.describe('Admin Page - System Matrix', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(`${UI_URL}/login`);
     await page.getByPlaceholder('Enter username').fill('default');
-    await page.getByPlaceholder('Enter password').fill('admin');
+    await page.getByPlaceholder('Enter password').fill(process.env.ADMIN_PASSWORD || 'changeme');
     await page.getByRole('button', { name: /sign in/i }).click();
-    await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
   });
 
   test('loads admin page with all tabs', async ({ page }) => {
