@@ -127,7 +127,7 @@ const DeviceSelector = ({
         <button
           onClick={handleLocalSelect}
           className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border shrink-0 transition-all text-left min-w-[160px] relative overflow-hidden ${
-            selectedTarget === 'web_player'
+            !selectedTarget
               ? 'bg-cyan-500/15 border-cyan-500/40 shadow-lg shadow-cyan-500/5'
               : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
           }`}
