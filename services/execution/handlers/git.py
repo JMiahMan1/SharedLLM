@@ -432,32 +432,25 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     user_context = getattr(req, "user_context", None)
 
     # The workspace is created EMPTY and is NOT necessarily a git repository
-    # until the `gh repo create` step initializes it. Read-only git
+    # until the `gh repo create` step initializes it. The read-only git
     # inspection (e.g. the IDE's `git status`) must NOT hard-error in
-    # that state, and write ops must steer the model to initialize first
-    # instead of surfacing a raw "not a git repository" fatal.
+    # that state. Write ops (commit/push/add/...) are intentionally
+    # NOT guarded here: they fall through to their normal handling
+    # (reset/clean are blocked; commit/push fail naturally with a clear
+    # "not a git repository" so the model is steered to `gh repo
+    # create` first, which inits + wires git). This keeps the
+    # existing unit-test expectations intact.
     _is_repo = os.path.isdir(os.path.join(workspace_path, ".git"))
-    if not _is_repo and action not in ("init", "repo_create", "repo_clone", "gh_noop"):
-        if action in ("status", "diff", "log", "branch", "remote", "show", "fetch"):
-            return GitExecutionResult(
-                status="SUCCESS",
-                message=(
-                    "Workspace is not yet a git repository. Initialize it with "
-                    "`gh repo create <name> --private` (intercepted and wired for "
-                    "you) before committing/pushing."
-                ),
-                service="git",
-                detail={"note": "not_a_git_repo", "action": action},
-            )
+    if not _is_repo and action in ("status", "diff", "log", "branch", "remote", "show", "fetch"):
         return GitExecutionResult(
-            status="FAILURE",
+            status="SUCCESS",
             message=(
-                f"Cannot run `git {action}` — the workspace is not yet a git "
-                "repository. Run `gh repo create <name> --private` first (it is "
-                "intercepted and initializes + wires git for you)."
+                "Workspace is not yet a git repository. Initialize it with "
+                "`gh repo create <name> --private` (intercepted and wired for "
+                "you) before committing/pushing."
             ),
             service="git",
-            detail={"error": "not_a_git_repo", "action": action},
+            detail={"note": "not_a_git_repo", "action": action},
         )
     is_admin: bool = getattr(user_context, "is_admin", False) if user_context else False
 
