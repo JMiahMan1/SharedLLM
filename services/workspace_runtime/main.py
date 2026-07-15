@@ -17,9 +17,10 @@ from urllib.parse import urlparse
 import aiohttp
 import redis
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from services.common.http import get_client
 from services.config import (
@@ -106,6 +107,48 @@ DEFAULT_PROTECTED_BRANCH_PATTERNS = [
 ]
 
 app = FastAPI(title="SharedLLM Workspace Runtime")
+
+# --- Response sanitization: never leak secrets to clients ---
+# The workspace dict carries a `resolved_identity` block (plaintext provider
+# tokens: nextcloud / ha / github / mass / audiobookshelf / skylight / ...) that
+# is only used internally (git auth, provider sync). It must never reach the API
+# or the browser. Strip it (plus decrypted webhook tokens) from every JSON
+# response body. Internal callers read secrets from the in-memory dict before
+# the response is serialized, so this is purely an output boundary.
+_STRIP_RESPONSE_KEYS = {"resolved_identity", "webhook_token", "webhook_token_enc"}
+
+
+def _redact_secrets(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return {k: _redact_secrets(v) for k, v in obj.items() if k not in _STRIP_RESPONSE_KEYS}
+    if isinstance(obj, list):
+        return [_redact_secrets(v) for v in obj]
+    return obj
+
+
+class _RedactSecretsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        if "application/json" not in response.headers.get("content-type", ""):
+            return response
+        try:
+            body = b"".join([chunk async for chunk in response.body_iterator])
+        except Exception:
+            return response
+        try:
+            data = json.loads(body)
+        except (ValueError, UnicodeDecodeError):
+            return response
+        redacted = _redact_secrets(data)
+        return Response(
+            content=json.dumps(redacted).encode("utf-8"),
+            status_code=response.status_code,
+            media_type="application/json",
+            headers={k: v for k, v in response.headers.items() if k.lower() != "content-length"},
+        )
+
+
+app.add_middleware(_RedactSecretsMiddleware)
 
 # --- Auto-Quarantine Configuration ---
 def _safe_int_env(key: str, default: int) -> int:
