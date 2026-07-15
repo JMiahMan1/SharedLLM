@@ -19,7 +19,7 @@ ENV PYTHONUNBUFFERED=1
 RUN update-alternatives --install /usr/bin/fd fd /usr/bin/fd-find 100 2>/dev/null || true
 
 # Install Node.js for frontend/tooling support (npm packages)
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+RUN     curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
     apt-get install -y nodejs && \
     npm install -g npm@latest
 
@@ -32,7 +32,7 @@ RUN npm install -g \
     shellcheck
 
 # Install Docker CLI for container management
-RUN curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz | \
+RUN     curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-29.6.1.tgz | \
     tar xz --strip-components=1 -C /usr/local/bin docker/docker
 
 # Install deno
@@ -124,14 +124,14 @@ RUN set -eux; \
     gh --version
 
 # --- Terraform + OpenTofu (IaC) ---
-# terraform version pinned to a well-propagated release; OpenTofu installed via
-# the official install script (handles asset/version detection robustly).
+# Versions pinned to well-propagated releases for reproducible, rate-limit-free
+# image builds. OpenTofu binary is downloaded directly from opentofu/opentofu.
 RUN set -eux; \
-    TERRAFORM_VERSION="1.9.5"; \
+    TERRAFORM_VERSION="1.15.8"; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" -o /tmp/tf.zip; \
     unzip -o /tmp/tf.zip -d /usr/local/bin; \
     rm -f /tmp/tf.zip; \
-    TOFU_VERSION="1.9.0"; \
+    TOFU_VERSION="1.12.0"; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.zip" -o /tmp/tofu.zip; \
     unzip -o /tmp/tofu.zip -d /usr/local/bin; \
     rm -f /tmp/tofu.zip; \
@@ -172,7 +172,7 @@ RUN set -eux; \
 
 # --- Terraform linter (tflint) ---
 RUN set -eux; \
-    TFL_VERSION="0.54.0"; \
+    TFL_VERSION="0.63.1"; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/terraform-linters/tflint/releases/download/v${TFL_VERSION}/tflint_linux_amd64.zip" -o /tmp/tflint.zip; \
     unzip -o /tmp/tflint.zip -d /usr/local/bin; \
     rm -f /tmp/tflint.zip; \
@@ -180,18 +180,18 @@ RUN set -eux; \
 
 # --- Dockerfile linter (hadolint) ---
 RUN set -eux; \
-    HL_VERSION="2.12.0"; \
+    HL_VERSION="2.14.0"; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/hadolint/hadolint/releases/download/v${HL_VERSION}/hadolint-Linux-x86_64" -o /usr/local/bin/hadolint; \
     chmod +x /usr/local/bin/hadolint; \
     hadolint --version
 
 # --- GitHub Actions linting/running (actionlint + act) ---
 RUN set -eux; \
-    AL_VERSION="1.7.4"; \
+    AL_VERSION="1.7.12"; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/rhysd/actionlint/releases/download/v${AL_VERSION}/actionlint_${AL_VERSION}_linux_amd64.tar.gz" -o /tmp/al.tgz; \
     tar -xzf /tmp/al.tgz -C /usr/local/bin; \
     rm -f /tmp/al.tgz; \
-    ACT_VERSION="0.2.64"; \
+    ACT_VERSION="0.2.89"; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://github.com/nektos/act/releases/download/v${ACT_VERSION}/act_Linux_x86_64.tar.gz" -o /tmp/act.tgz; \
     tar -xzf /tmp/act.tgz -C /usr/local/bin; \
     rm -f /tmp/act.tgz; \
