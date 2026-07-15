@@ -22,6 +22,11 @@ class Workspace(SQLModel, table=True):
     auto_backup_enabled: bool = Field(default=False)
     webhook_token: str | None = Field(default=None)
     webhook_token_enc: str | None = Field(default=None)
+    # Per-workspace environment variables / secrets, encrypted at rest (Fernet).
+    # Merged OVER the user's Identity integration secrets at sandbox-exec time,
+    # so a workspace can override (e.g. a different GITHUB_TOKEN) or add new
+    # environment variables available to every command run in its sandbox.
+    env_enc: str | None = Field(default=None)
     quarantined: bool = Field(default=False)
     last_raven_mission_id: int | None = Field(default=None)
     excludes: list[str] = Field(default_factory=list, sa_column=Column(JSON))
