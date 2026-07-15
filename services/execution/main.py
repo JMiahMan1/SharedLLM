@@ -266,7 +266,7 @@ async def lifespan(app: FastAPI):
     import subprocess  # always available for startup shell setup (gh auth, git config)
     # Patch DNS resolver to route .local domains through dns-sync for live failover
     try:
-        from dns_resolver import patch_dns_resolver
+        from services.common.dns_resolver import patch_dns_resolver
         patch_dns_resolver()
     except Exception as e:
         log.warning(f"DNS resolver patch failed: {e}")
