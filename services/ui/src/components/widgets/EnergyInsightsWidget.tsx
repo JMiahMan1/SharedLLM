@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Zap, TrendingUp } from 'lucide-react';
+import { Zap, TrendingUp, Calendar, Clock } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import type { IWidgetProps } from '../../types/widget';
 import { api } from '../../services/api';
@@ -14,6 +14,8 @@ interface EnergyDataPoint {
 interface TelemetrySummary {
   current_power_w: number | null;
   peak_power_w: number | null;
+  peak_at: number | null;
+  peak_duration_seconds: number | null;
   avg_power_w: number | null;
   availability_pct: number;
   total_activations: number;
@@ -106,12 +108,20 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
   const metrics = useMemo(() => {
     let currentPower = 0;
     let peakPower = 0;
+    let peakAt: number | null = null;
+    let peakDuration = 0;
     let totalPower = 0;
     let powerCount = 0;
 
     for (const summary of Object.values(summaries)) {
       if (summary.current_power_w != null) currentPower += summary.current_power_w;
-      if (summary.peak_power_w != null) peakPower = Math.max(peakPower, summary.peak_power_w);
+      if (summary.peak_power_w != null) {
+        peakPower = Math.max(peakPower, summary.peak_power_w);
+        if (summary.peak_at != null && (peakAt == null || summary.peak_at > peakAt)) {
+          peakAt = summary.peak_at;
+          peakDuration = summary.peak_duration_seconds ?? 0;
+        }
+      }
       if (summary.avg_power_w != null) {
         totalPower += summary.avg_power_w;
         powerCount++;
@@ -122,8 +132,23 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
       current: Math.round(currentPower),
       avg: powerCount > 0 ? Math.round(totalPower / powerCount) : 0,
       peak: Math.round(peakPower),
+      peakAt,
+      peakDuration,
     };
   }, [summaries]);
+
+  const formatPeakTime = (timestamp: number | null) => {
+    if (!timestamp) return '--';
+    return new Date(timestamp * 1000).toLocaleString();
+  };
+
+  const formatPeakDuration = (seconds: number | null) => {
+    if (!seconds || seconds === 0) return '--';
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    if (hrs > 0) return `${hrs}h ${mins}m`;
+    return `${mins}m`;
+  };
 
   const hasData = data.length > 0;
 
@@ -166,6 +191,18 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
             <div className="glass-card p-2.5 text-center">
               <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Peak</p>
               <p className="text-base font-bold text-red-400">{metrics.peak}<span className="text-[10px] ml-0.5 text-slate-500">W</span></p>
+              {metrics.peakAt && (
+                <div className="flex items-center justify-center gap-1 mt-1">
+                  <Calendar size={10} className="text-red-400" />
+                  <span className="text-[9px] text-slate-400">{formatPeakTime(metrics.peakAt)}</span>
+                </div>
+              )}
+              {metrics.peakDuration && metrics.peakDuration > 0 && (
+                <div className="flex items-center justify-center gap-1 mt-0.5">
+                  <Clock size={10} className="text-slate-400" />
+                  <span className="text-[9px] text-slate-500">Duration: {formatPeakDuration(metrics.peakDuration)}</span>
+                </div>
+              )}
             </div>
           </div>
 

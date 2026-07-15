@@ -3517,8 +3517,7 @@ async def proxy_ingest_telemetry_snapshot(request: Request):
 @app.post("/api/telemetry/snapshot/{entity_id:path}")
 async def proxy_trigger_telemetry_snapshot(entity_id: str, request: Request):
     """Trigger a manual snapshot for a specific entity (UI calls this for instant updates)."""
-    await _resolve_identity_from_request(request)
-    creds = await resolve_identity_from_request(request)
+    creds = await _resolve_identity_from_request(request)
     ha_url = creds.get("ha_url") if creds else None
     ha_token = creds.get("ha_token") if creds else None
     if not ha_url or not ha_token:
@@ -3538,20 +3537,45 @@ async def proxy_trigger_telemetry_snapshot(entity_id: str, request: Request):
         target_entity = next((e for e in entities if e.get("entity_id") == entity_id), None)
         if not target_entity:
             return {"status": "ERROR", "message": f"Entity {entity_id} not found in Home Assistant"}
+
         state = target_entity.get("state")
         attrs = target_entity.get("attributes", {})
         is_available = state not in (None, "unavailable", "unknown", "none", "")
         power_w = None
-        if state not in (None, "unavailable", "unknown"):
-            try:
-                power_w = float(state)
-            except (TypeError, ValueError):
-                pass
-        if power_w is None and "current_power_w" in attrs:
-            try:
-                power_w = float(attrs.get("current_power_w"))
-            except (TypeError, ValueError):
-                pass
+
+        try:
+            enroll_resp = await client.get(
+                f"{IDENTITY_SVC}/api/telemetry/enroll",
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            if enroll_resp.status == 200:
+                enrollments = (await enroll_resp.json()).get("enrollments", [])
+                enrollment = next((e for e in enrollments if e.get("entity_id") == entity_id), None)
+                if enrollment:
+                    power_attr = enrollment.get("power_attribute")
+                    if power_attr:
+                        attr_value = attrs.get(power_attr)
+                        if attr_value is not None:
+                            try:
+                                power_w = float(attr_value)
+                            except (TypeError, ValueError):
+                                pass
+        except Exception:
+            pass
+
+        if power_w is None:
+            if state not in (None, "unavailable", "unknown"):
+                try:
+                    power_w = float(state)
+                except (TypeError, ValueError):
+                    pass
+            if power_w is None and "current_power_w" in attrs:
+                try:
+                    power_w = float(attrs.get("current_power_w"))
+                except (TypeError, ValueError):
+                    pass
+
         snapshot = {
             "entity_id": entity_id,
             "power_w": power_w,

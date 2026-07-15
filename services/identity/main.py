@@ -2330,10 +2330,22 @@ def get_telemetry_summary(entity_id: str, x_internal_secret: str = Header(...)):
         total = len(data_points)
         unavailable_points = [p for p in data_points if not p.get("is_available", True)]
         last_outage = unavailable_points[-1] if unavailable_points else None
+
+        peak_power_w = max(power_values) if power_values else None
+        peak_point = None
+        if peak_power_w is not None:
+            peak_point = next((p for p in reversed(data_points) if p.get("power_w") == peak_power_w), None)
+            if peak_point:
+                peak_timestamp = peak_point.get("recorded_at")
+                first_timestamp = data_points[0].get("recorded_at") if data_points else None
+                peak_duration = peak_timestamp - first_timestamp if peak_timestamp and first_timestamp else 0
+
         summary = {
             "entity_id": entity_id,
             "current_power_w": power_values[-1] if power_values else None,
-            "peak_power_w": max(power_values) if power_values else None,
+            "peak_power_w": peak_power_w,
+            "peak_at": peak_point.get("recorded_at") if peak_point else None,
+            "peak_duration_seconds": peak_duration if peak_point else 0,
             "avg_power_w": sum(power_values) / len(power_values) if power_values else None,
             "availability_pct": (available_count / total * 100) if total > 0 else 100.0,
             "total_activations": total,

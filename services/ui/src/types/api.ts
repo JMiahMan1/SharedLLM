@@ -415,9 +415,12 @@ export interface TelemetrySummary {
   summary: {
     current_power_w: number | null;
     peak_power_w: number | null;
+    peak_at: number | null;
+    peak_duration_seconds: number | null;
     avg_power_w: number | null;
     availability_pct: number;
     total_activations: number;
+    last_outage_at: number | null;
     data_points: TelemetryDataPoint[];
   } | null;
 }
