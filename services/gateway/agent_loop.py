@@ -860,6 +860,69 @@ def _translate_shell_to_git_op(cmd: str) -> list[dict] | None:
     return routed or None
 
 
+# Git subcommands the execution git handler understands. Used to alias bare
+# subcommand tool names (e.g. "branch") AND to recognize a git-op-shaped
+# WorkspaceShellRequest payload so it can be re-routed through the
+# credentialed git tool instead of failing at the raw shell (which has no git
+# credentials and requires a `command` string).
+_GIT_OP_SUBCOMMANDS = {
+    "status", "st", "add", "commit", "ci", "push", "pull", "fetch", "log",
+    "branch", "checkout", "co", "show", "init", "merge", "rebase", "stash",
+    "reset", "clean", "tag", "clone", "switch", "restore", "mv", "rm",
+    "remote", "diff",
+}
+
+
+def _is_git_op_shell_payload(payload) -> dict | None:
+    """Detect a ``workspaceshellrequest`` whose payload is actually a mis-emitted
+    git operation (e.g. ``{"action": "branch", "path": "-M"}`` with no ``command``).
+
+    Such calls would otherwise be POSTed to the raw shell, which has no git
+    credentials and lacks a ``command`` key, so the step fails. Re-routing them
+    through the credentialed ``gitoperationrequest`` tool (which understands the
+    ``action``/``path``/``commit_message`` shape) makes them authenticate + succeed.
+
+    Returns a normalized git-op dict, or ``None`` when the payload is a real shell
+    command / a legitimate WorkspaceShellRequest / not git-shaped.
+    """
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("command") or payload.get("commands"):
+        return None
+    if str(payload.get("@type") or "").lower() == "workspaceshellrequest":
+        return None
+    act = str(payload.get("action") or "").strip().lower()
+    if act in _GIT_OP_SUBCOMMANDS:
+        _norm = dict(payload)
+        _norm["action"] = act
+        return _norm
+    return None
+
+
+def _route_workspace_shell_to_git(lookup_action: str, payload):
+    """Apply the workspace-shell -> git interception.
+
+    Returns ``(lookup_action, payload, git_batch)``.
+
+    - A raw shell ``git``/``gh`` command is translated into one or more
+      credentialed ``gitoperationrequest`` ops (``git_batch`` carries the
+      extra ops to fan out after the first POST).
+    - A git-op-shaped payload mis-emitted as a shell call (e.g.
+      ``{"action": "branch", "path": "-M"}`` with no ``command``) is also
+      re-routed to the credentialed git tool so it authenticates + succeeds.
+    """
+    if lookup_action != "workspaceshellrequest" or not isinstance(payload, dict):
+        return lookup_action, payload, None
+    _shell_cmd = payload.get("command") or ""
+    _routed = _translate_shell_to_git_op(_shell_cmd)
+    if _routed:  # non-empty list of git-op payloads
+        return "gitoperationrequest", _routed[0], _routed
+    _git_op = _is_git_op_shell_payload(payload)
+    if _git_op:
+        return "gitoperationrequest", _git_op, None
+    return lookup_action, payload, None
+
+
 def _translate_git_parts(parts: list[str], sub: str) -> dict | None:
     """Translate a single parsed ``git <sub> ...`` command into a git-op payload."""
     if sub in ("status", "st", ""):
@@ -2643,6 +2706,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "pull": "gitoperationrequest",
                 "diff": "gitoperationrequest",
                 "log": "gitoperationrequest",
+                "branch": "gitoperationrequest",
+                "remote": "gitoperationrequest",
+                "checkout": "gitoperationrequest",
+                "fetch": "gitoperationrequest",
+                "merge": "gitoperationrequest",
+                "rebase": "gitoperationrequest",
+                "stash": "gitoperationrequest",
+                "reset": "gitoperationrequest",
+                "tag": "gitoperationrequest",
+                "clone": "gitoperationrequest",
+                "switch": "gitoperationrequest",
+                "restore": "gitoperationrequest",
+                "show": "gitoperationrequest",
+                "init": "gitoperationrequest",
                 "restart_service": "controlplanerequest",
                 "recall": "ravenrecallrequest",
                 "ravenrecall": "ravenrecallrequest",
@@ -2839,16 +2916,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # regardless of how the model phrased the request.
             _git_batch = None
             if lookup_action == "workspaceshellrequest" and isinstance(payload, dict):
-                _shell_cmd = payload.get("command") or ""
-                _routed = _translate_shell_to_git_op(_shell_cmd)
-                if _routed:  # non-empty list of git-op payloads
-                    log.info(f"[AgentLoop] Intercepted shell git/gh command -> git tool: {_shell_cmd!r}")
-                    lookup_action = "gitoperationrequest"
-                    _git_batch = _routed
-                    # The first op is posted through the normal dispatch below;
-                    # any additional ops (compound `&&`/`;` pipelines) are fanned
-                    # out after the first POST so the whole git pipeline runs.
-                    payload = _routed[0]
+                _new_action, payload, _git_batch = _route_workspace_shell_to_git(lookup_action, payload)
+                if _new_action != lookup_action:
+                    log.info("[AgentLoop] Intercepted shell git/gh command -> git tool")
 
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
@@ -2914,7 +2984,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         "gitlab_token": creds.gitlab_token,
                         "git_token": creds.git_token,
                     }
-                    payload["user_context"] = _uc
+                    if isinstance(payload, dict):
+                        payload["user_context"] = _uc
                     # Fan-out payloads (compound git pipelines) also need creds
                     # and the mission workspace id so each step runs scoped.
                     if _git_batch:

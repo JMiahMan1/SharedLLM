@@ -199,22 +199,18 @@ def test_translate_git_remote_add():
 
 
 def test_translate_gh_repo_create():
-    assert _translate()("gh repo create my-repo --private") == [
-        {
-            "action": "repo_create",
-            "repo_name": "my-repo",
-            "private": True,
-            "description": None,
-        }
-    ]
-    assert _translate()('gh repo create my-repo --description "My project"') == [
-        {
-            "action": "repo_create",
-            "repo_name": "my-repo",
-            "private": False,
-            "description": "My project",
-        }
-    ]
+    # `gh` runs NATIVELY inside the workspace sandbox (which has the `gh` CLI
+    # plus the injected GITHUB_TOKEN), so the shell->git interception must NOT
+    # rewrite `gh repo create ...` into a git-op payload — it returns None so the
+    # command executes as an ordinary (credentialed) shell command.
+    assert _translate()("gh repo create my-repo --private") is None
+    assert _translate()('gh repo create my-repo --description "My project"') is None
+
+
+def test_translate_git_repo_create():
+    # A raw `git` repo-create-style command IS intercepted and translated into a
+    # git-op payload (the sandbox shell has no git creds without the tool).
+    assert _translate()("git init") == [{"action": "init"}]
 
 
 def test_translate_compound_pipeline_fans_out():

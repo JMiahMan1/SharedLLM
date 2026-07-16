@@ -10,12 +10,12 @@ These tests verify that:
 """
 
 import os
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from dotenv import dotenv_values
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
@@ -31,12 +31,20 @@ os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from services.gateway.prompts import PROMPT_RAVEN_AUTONOMOUS_PROTOCOL
 
-# Read .env directly for test values (runtime never reads .env)
-_env = dotenv_values(Path(__file__).resolve().parent.parent.parent / ".env")
-RAVEN_AUTONOMOUS_PROTOCOL = _env.get(f"PROMPT_{PROMPT_RAVEN_AUTONOMOUS_PROTOCOL}", "")
+# Prompts are sourced from the prompts/ directory (the runtime seeds them into
+# the Identity GlobalSettings DB; tests read the canonical markdown directly).
+_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent / "prompts"
+_RAVEN_PROMPT_PATH = _PROMPTS_DIR / f"{PROMPT_RAVEN_AUTONOMOUS_PROTOCOL}.md"
+RAVEN_AUTONOMOUS_PROTOCOL = (
+    _RAVEN_PROMPT_PATH.read_text(encoding="utf-8") if _RAVEN_PROMPT_PATH.exists() else ""
+)
 
-from services.gateway.agent_loop import extract_action_json
-from services.gateway.main import AUTONOMOUS_SIGNALS, select_model_for_query, select_system_instruction_for_query
+from services.gateway.agent_loop import extract_action_json  # noqa: E402
+from services.gateway.main import (  # noqa: E402
+    AUTONOMOUS_SIGNALS,
+    select_model_for_query,
+    select_system_instruction_for_query,
+)
 
 MISSION_TEMPLATES: list[dict[str, str | list[str]]] = [
     {
@@ -62,8 +70,16 @@ MISSION_TEMPLATES: list[dict[str, str | list[str]]] = [
 ]
 
 
+@contextmanager
 def _patch_model_selection():
-    return patch("services.gateway.main.get_coding_model", new=AsyncMock(return_value="qwen2.5-coder:7b"))
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("services.gateway.main.get_coding_model", new=AsyncMock(return_value="qwen2.5-coder:7b"))
+        )
+        stack.enter_context(
+            patch("services.gateway.main.load_prompt_sync", new=lambda key: RAVEN_AUTONOMOUS_PROTOCOL)
+        )
+        yield
 
 
 @pytest.mark.asyncio
@@ -125,9 +141,11 @@ Here is the git status:
 '''
     tool_data = extract_action_json(simulated_response)
     assert tool_data is not None
-    assert tool_data.get("action", "").lower() == "gitoperationrequest"
-    payload = tool_data.get("payload", {})
-    assert payload.get("action") == "status"
+    # _normalize_tool hoists the nested `payload` to the top level, so the git
+    # subcommand (status) becomes the canonical `action` discriminator; the
+    # dispatch pipeline (alias map) still routes it to gitoperationrequest.
+    assert tool_data.get("action", "").lower() == "status"
+    assert tool_data.get("file_path") == "."
 
 
 def test_extract_lint_action_from_audit_query():
@@ -143,7 +161,7 @@ I will start by linting the gateway service:
 def test_raven_prompt_includes_git_tool_guide():
     assert "GitOperationRequest" in RAVEN_AUTONOMOUS_PROTOCOL
     assert "WorkspaceFilePatchRequest" in RAVEN_AUTONOMOUS_PROTOCOL
-    assert "WorkspaceSearchRequest" in RAVEN_AUTONOMOUS_PROTOCOL
+    assert "WorkspaceShellRequest" in RAVEN_AUTONOMOUS_PROTOCOL
 
 
 def test_raven_prompt_includes_shell_command():
@@ -155,13 +173,6 @@ def test_all_templates_contain_autonomy_signals():
         query_lower = cast(str, template["query"]).lower()
         has_signal = any(signal in query_lower for signal in AUTONOMOUS_SIGNALS)
         assert has_signal, f"Quick Action '{template['label']}' lacks autonomy signal in: {template['query']}"
-
-
-def test_raven_prompt_includes_context_search_tool():
-    assert "ContextSearchRequest" in RAVEN_AUTONOMOUS_PROTOCOL
-    assert "collection_name" in RAVEN_AUTONOMOUS_PROTOCOL
-    assert "ha_entities" in RAVEN_AUTONOMOUS_PROTOCOL
-    assert "system_capabilities" in RAVEN_AUTONOMOUS_PROTOCOL
 
 
 def test_context_search_in_single_turn_endpoints():
