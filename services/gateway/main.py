@@ -4096,30 +4096,35 @@ async def global_search(q: str, request: Request):
 async def get_workspaces_proxy(request: Request):
     """Proxy to workspace runtime."""
     try:
-        creds = await _resolve_identity_from_request(request)
-    except Exception as exc:  # TEMP DEBUG
-        log.exception(f"[DEBUG] workspace identity resolve failed: {exc}")
-        raise
-    params = {}
-    if creds:
-        if creds.get("user"):
-            params["rag_user"] = creds["user"]
-        if creds.get("voice_id"):
-            params["voice_id"] = creds["voice_id"]
-        if creds.get("device_id"):
-            params["device_id"] = creds["device_id"]
+        try:
+            creds = await _resolve_identity_from_request(request)
+        except BaseException as exc:  # TEMP DEBUG
+            log.exception(f"[DEBUG] workspace identity resolve failed: {type(exc).__name__}: {exc}")
+            raise
+        params = {}
+        if creds:
+            if creds.get("user"):
+                params["rag_user"] = creds["user"]
+            if creds.get("voice_id"):
+                params["voice_id"] = creds["voice_id"]
+            if creds.get("device_id"):
+                params["device_id"] = creds["device_id"]
 
-    try:
-        async with borrow_http_client() as client:
-            resp = await client.get(
-                f"{WORKSPACE_RUNTIME_SVC}/workspaces",
-                params=params,
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-            )
-            return await _proxy_json_response(resp)
-    except Exception as e:
-        log.error(f"Workspaces proxy failed: {e}")
-        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+        try:
+            async with borrow_http_client() as client:
+                resp = await client.get(
+                    f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+                    params=params,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                )
+                log.error(f"[DEBUG] ws resp status {resp.status}")
+                return await _proxy_json_response(resp)
+        except BaseException as e:
+            log.exception(f"[DEBUG] Workspaces proxy failed: {type(e).__name__}: {e}")
+            return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+    except BaseException as outer:
+        log.exception(f"[DEBUG] outer workspaces handler: {type(outer).__name__}: {outer}")
+        raise
 
 async def _proxy_workspace_runtime_json(method: str, path: str, request = None):
     body = await request.json() if request is not None else None
