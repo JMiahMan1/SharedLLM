@@ -48,7 +48,10 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
             if expires_at == now:
                 return ExecutionResult(status="FAILURE", message="Could not determine timer duration/time.", service="timer_add")
 
-            # 2. Save to Redis
+            # 2. Calculate duration in seconds for progress display
+            duration_sec = int((expires_at - now).total_seconds())
+
+            # 3. Save to Redis
             user_id = req.user_context.user
             timer_id = str(uuid.uuid4())
             timer_obj = {
@@ -59,7 +62,8 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 "expires_at": expires_at.isoformat(),
                 "active": True,
                 "recurrence": req.recurrence,
-                "target_device": req.target_device
+                "target_device": req.target_device,
+                "duration_sec": duration_sec,
             }
 
             await r.set(f"timer:{user_id}:{timer_id}", json.dumps(timer_obj))

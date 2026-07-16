@@ -161,6 +161,7 @@ export interface TimerRecord {
   active: boolean;
   recurrence?: string | null;
   target_device?: string | null;
+  duration_sec?: number;
 }
 
 export interface TalkConversation {
