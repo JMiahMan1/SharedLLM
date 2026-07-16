@@ -584,8 +584,18 @@ _IDENTITY_SESSION: aiohttp.ClientSession | None = None
 _IDENTITY_LOCK = threading.Lock()
 
 
+async def _ensure_identity_session() -> aiohttp.ClientSession:
+    global _IDENTITY_SESSION
+    if _IDENTITY_SESSION is None or _IDENTITY_SESSION.closed:
+        # Created inside the loop thread so it binds to _IDENTITY_LOOP
+        # (creating aiohttp.ClientSession() from a worker thread with no
+        # running loop raises "RuntimeError: no running event loop").
+        _IDENTITY_SESSION = aiohttp.ClientSession()
+    return _IDENTITY_SESSION
+
+
 def _get_identity_loop() -> asyncio.AbstractEventLoop:
-    global _IDENTITY_LOOP, _IDENTITY_SESSION
+    global _IDENTITY_LOOP
     with _IDENTITY_LOCK:
         if _IDENTITY_LOOP is None or _IDENTITY_LOOP.is_closed():
             _IDENTITY_LOOP = asyncio.new_event_loop()
@@ -597,8 +607,6 @@ def _get_identity_loop() -> asyncio.AbstractEventLoop:
             threading.Thread(target=_run, daemon=True).start()
             # Give the loop thread a moment to start.
             _IDENTITY_LOOP.call_soon_threadsafe(lambda: None)
-        if _IDENTITY_SESSION is None or _IDENTITY_SESSION.closed:
-            _IDENTITY_SESSION = aiohttp.ClientSession()
         return _IDENTITY_LOOP
 
 
@@ -617,13 +625,14 @@ def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
         return None
 
     loop = _get_identity_loop()
+    session = asyncio.run_coroutine_threadsafe(_ensure_identity_session(), loop).result(timeout=30.0)
     future = asyncio.run_coroutine_threadsafe(
         _http_post_async(
             f"{IDENTITY_SVC_URL}/api/resolve",
             json=payload,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=45.0,
-            session=_IDENTITY_SESSION,
+            session=session,
         ),
         loop,
     )
