@@ -589,12 +589,31 @@ def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
         return None
 
     try:
-        data = asyncio.run(_http_post_async(
-            f"{IDENTITY_SVC_URL}/api/resolve",
-            json=payload,
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=45.0,
-        ))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            # Use a transient session bound to THIS loop. The shared
+            # get_client() session is bound to the app's main loop; reusing it
+            # from a worker thread raises "Event loop is closed".
+            async def _resolve_once() -> Any:
+                async with aiohttp.ClientSession(
+                    connector=aiohttp.TCPConnector(limit=10, ttl_dns_cache=300, ssl=True),
+                ) as session:
+                    return await _http_post_async(
+                        f"{IDENTITY_SVC_URL}/api/resolve",
+                        json=payload,
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                        timeout=45.0,
+                        session=session,
+                    )
+
+            data = loop.run_until_complete(_resolve_once())
+        finally:
+            loop.close()
+            # Drop the reference to the closed loop so a later asyncio.run()
+            # in this same worker thread creates a fresh loop instead of
+            # reusing the closed one (which raises "Event loop is closed").
+            asyncio.set_event_loop(None)
     except aiohttp.ClientError as exc:
         raise HTTPException(status_code=503, detail=f"Identity service unreachable: {exc}") from exc
 
@@ -608,10 +627,19 @@ def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
 
 
 async def _http_post_async(url: str, **kwargs) -> Any:
-    """Async HTTP POST helper using aiohttp."""
+    """Async HTTP POST helper using aiohttp.
+
+    If ``session`` is provided it is used directly (so callers can bind the
+    request to a specific event loop); otherwise the shared ``get_client()``
+    session is used.
+    """
     timeout = kwargs.pop("timeout", 30.0)
-    async with get_client() as client:
-        resp = await client.post(url, timeout=aiohttp.ClientTimeout(total=timeout), **kwargs)
+    session = kwargs.pop("session", None)
+    if session is not None:
+        resp = await session.post(url, timeout=aiohttp.ClientTimeout(total=timeout), **kwargs)
+    else:
+        async with get_client() as client:
+            resp = await client.post(url, timeout=aiohttp.ClientTimeout(total=timeout), **kwargs)
         if resp.status != 200:
             text = await resp.text()
             raise HTTPException(status_code=resp.status, detail=f"Request failed: {text}")
