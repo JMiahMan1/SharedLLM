@@ -574,6 +574,34 @@ def _workspace_access_policy(entry: dict[str, Any]) -> str:
     return policy
 
 
+# Dedicated event loop + aiohttp session for synchronous identity resolution.
+# FastAPI runs endpoint handlers in a threadpool; calling async HTTP there
+# requires its own loop. A single long-lived loop (run in a daemon thread)
+# with one session avoids the "Event loop is closed" errors that occur when
+# creating/closing a loop per call.
+_IDENTITY_LOOP: asyncio.AbstractEventLoop | None = None
+_IDENTITY_SESSION: aiohttp.ClientSession | None = None
+_IDENTITY_LOCK = threading.Lock()
+
+
+def _get_identity_loop() -> asyncio.AbstractEventLoop:
+    global _IDENTITY_LOOP, _IDENTITY_SESSION
+    with _IDENTITY_LOCK:
+        if _IDENTITY_LOOP is None or _IDENTITY_LOOP.is_closed():
+            _IDENTITY_LOOP = asyncio.new_event_loop()
+
+            def _run() -> None:
+                asyncio.set_event_loop(_IDENTITY_LOOP)
+                _IDENTITY_LOOP.run_forever()
+
+            threading.Thread(target=_run, daemon=True).start()
+            # Give the loop thread a moment to start.
+            _IDENTITY_LOOP.call_soon_threadsafe(lambda: None)
+        if _IDENTITY_SESSION is None or _IDENTITY_SESSION.closed:
+            _IDENTITY_SESSION = aiohttp.ClientSession()
+        return _IDENTITY_LOOP
+
+
 def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
     if ref.user_context:
         return ref.user_context
@@ -588,32 +616,23 @@ def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
     if not payload:
         return None
 
+    loop = _get_identity_loop()
+    future = asyncio.run_coroutine_threadsafe(
+        _http_post_async(
+            f"{IDENTITY_SVC_URL}/api/resolve",
+            json=payload,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=45.0,
+            session=_IDENTITY_SESSION,
+        ),
+        loop,
+    )
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            # Create a transient aiohttp session bound to THIS loop. The shared
-            # get_client() session is bound to the app's main loop; reusing it
-            # from a worker thread raises "Event loop is closed".
-            async def _resolve_once() -> Any:
-                async with aiohttp.ClientSession() as session:
-                    return await _http_post_async(
-                        f"{IDENTITY_SVC_URL}/api/resolve",
-                        json=payload,
-                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                        timeout=45.0,
-                        session=session,
-                    )
-
-            data = loop.run_until_complete(_resolve_once())
-        finally:
-            loop.close()
-            # Drop the reference to the closed loop so a later asyncio.run()
-            # in this same worker thread creates a fresh loop instead of
-            # reusing the closed one (which raises "Event loop is closed").
-            asyncio.set_event_loop(None)
+        data = future.result(timeout=60.0)
     except aiohttp.ClientError as exc:
         raise HTTPException(status_code=503, detail=f"Identity service unreachable: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 - surface any resolution failure clearly
+        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {exc}") from exc
 
     if not isinstance(data, dict):
         log.error(f"[DEBUG ws] identity resolve returned non-dict: type={type(data).__name__} repr={repr(data)[:200]}")
