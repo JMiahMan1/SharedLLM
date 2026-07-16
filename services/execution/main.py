@@ -768,17 +768,31 @@ async def execute_trigger(payload: dict[str, Any]):
             message = "Timer " + str(timer_data.get("title", "")) + " is done"
             log.info(f"Dispatching TTS alert to {target_device}: '{message}'")
 
-            # Use HA built-in TTS
+            # Generate local Kokoro TTS (no cloud)
+            audio_bytes = await _text_to_speech(message)
+            if not audio_bytes:
+                log.error("Kokoro returned empty audio for timer alert")
+                return _ok(f"Triggered {timer_data.get('title')} but TTS failed", "automation_trigger")
+
+            from uuid import uuid4
+            import time
+            audio_key = f"tts-timer-{uuid4().hex[:8]}"
+            TEMP_AUDIO_CACHE[audio_key] = audio_bytes
+
+            from services.config import EXECUTION_EXTERNAL_HOST
+            media_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{audio_key}"
+
+            full_entity_id = ha_client.sanitize_entity_id("media_player", target_device)
+
+            state = await ha_client.get_state(ha_url, ha_token, full_entity_id)
+            if state and state.get("state") == "off":
+                await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", full_entity_id)
+                await asyncio.sleep(2)
+
             result = await ha_client.call_service(
-                ha_url, ha_token, "tts", "cloud_say", target_device,
-                {"message": message},
+                ha_url, ha_token, "media_player", "play_media", full_entity_id,
+                {"media_content_id": media_url, "media_content_type": "audio/wav"},
             )
-            if not result.get("ok"):
-                log.info(f"cloud_say failed, trying piper: {result}")
-                result = await ha_client.call_service(
-                    ha_url, ha_token, "tts", "piper", target_device,
-                    {"message": message},
-                )
 
             log.info(f"TTS result: {result}")
 
