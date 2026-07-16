@@ -19,6 +19,7 @@ interface BackendTimer {
   title: string;
   expires_at?: string;
   active?: boolean;
+  duration_sec?: number;
 }
 
 interface MediaPlayer {
@@ -60,12 +61,14 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
           const expiresAt = new Date(bt.expires_at).getTime();
           const remaining = expiresAt - Date.now();
           if (remaining > 0) {
+            const createdAt = expiresAt - remaining;
+            const durationMs = bt.duration_sec ? bt.duration_sec * 1000 : remaining;
             mapped.push({
               id: bt.id,
               title: bt.title || 'Untitled',
-              durationMs: Math.max(0, expiresAt - (bt.id ? Date.now() : Date.now())),
+              durationMs,
               remainingMs: remaining,
-              createdAt: expiresAt - remaining,
+              createdAt,
               isRemote: true,
             });
           }
