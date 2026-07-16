@@ -4095,7 +4095,11 @@ async def global_search(q: str, request: Request):
 @app.get("/api/workspaces")
 async def get_workspaces_proxy(request: Request):
     """Proxy to workspace runtime."""
-    creds = await _resolve_identity_from_request(request)
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except Exception as exc:  # TEMP DEBUG
+        log.exception(f"[DEBUG] workspace identity resolve failed: {exc}")
+        raise
     params = {}
     if creds:
         if creds.get("user"):
