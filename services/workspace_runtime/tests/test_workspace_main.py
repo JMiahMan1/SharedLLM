@@ -31,6 +31,31 @@ def test_health_check(client: TestClient):
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
+
+@pytest.mark.asyncio
+async def test_http_post_async_returns_json_with_provided_session():
+    import services.workspace_runtime.main as main
+    from services.config import IDENTITY_SVC_URL
+
+    class Response:
+        status = 200
+
+        async def json(self):
+            return {"user": "default"}
+
+    class Session:
+        async def post(self, *args, **kwargs):
+            return Response()
+
+    result = await main._http_post_async(
+        f"{IDENTITY_SVC_URL}/api/resolve",
+        json={"rag_user": "default"},
+        session=Session(),
+    )
+
+    assert result == {"user": "default"}
+
+
 def test_workspace_crud(client: TestClient):
     # 1. Create
     ws_data = {

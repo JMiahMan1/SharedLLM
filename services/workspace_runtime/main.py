@@ -638,10 +638,10 @@ async def _http_post_async(url: str, **kwargs) -> Any:
     else:
         async with get_client() as client:
             resp = await client.post(url, timeout=aiohttp.ClientTimeout(total=timeout), **kwargs)
-        if resp.status != 200:
-            text = await resp.text()
-            raise HTTPException(status_code=resp.status, detail=f"Request failed: {text}")
-        return await resp.json()
+    if resp.status != 200:
+        text = await resp.text()
+        raise HTTPException(status_code=resp.status, detail=f"Request failed: {text}")
+    return await resp.json()
 
 
 def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Path:
