@@ -756,25 +756,31 @@ async def execute_trigger(payload: dict[str, Any]):
 
     # Execute the actual alert via Home Assistant
     try:
-        # Construct a fake UserContext for the handler
-        context = UserContext(**creds)
         target_device = timer_data.get("target_device")
 
         if target_device:
-            log.info(f"Dispatching media alert to {target_device}")
-            await media.handle_media_play(
-                MediaPlayRequest(
-                    user_context=context,
-                    entity_id=target_device,
-                    query="Timer " + str(timer_data.get("title", "")) + " is done",
-                    media_type="announcement",
-                    device_name=target_device,
-                    media_content_id=None,
-                    media_content_type=None,
-                    enqueue="replace",
-                    volume=None,
-                )
+            ha_url = creds.get("ha_url")
+            ha_token = creds.get("ha_token")
+            if not ha_url or not ha_token:
+                log.error(f"Trigger failed: no HA credentials for user {user_id}")
+                return _ok(f"Triggered {timer_data.get('title')} (no HA credentials)", "automation_trigger")
+
+            message = "Timer " + str(timer_data.get("title", "")) + " is done"
+            log.info(f"Dispatching TTS alert to {target_device}: '{message}'")
+
+            # Use HA built-in TTS
+            result = await ha_client.call_service(
+                ha_url, ha_token, "tts", "cloud_say", target_device,
+                {"message": message},
             )
+            if not result.get("ok"):
+                log.info(f"cloud_say failed, trying piper: {result}")
+                result = await ha_client.call_service(
+                    ha_url, ha_token, "tts", "piper", target_device,
+                    {"message": message},
+                )
+
+            log.info(f"TTS result: {result}")
 
         return _ok(f"Triggered {timer_data.get('title')} on {target_device}", "automation_trigger")
     except Exception as e:
