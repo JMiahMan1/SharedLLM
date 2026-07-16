@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Timer, X, Plus, Loader2 } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { Timer, X, Plus, Loader2, Bell, BellOff } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
 import { api } from '../../services/api';
 import toast from 'react-hot-toast';
@@ -21,11 +21,35 @@ interface BackendTimer {
   active?: boolean;
 }
 
+interface MediaPlayer {
+  entity_id: string;
+  friendly_name: string;
+  state: string;
+}
+
 const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidgetProps) => {
   const [timers, setTimers] = useState<ActiveTimer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [newDuration, setNewDuration] = useState(300);
   const [newTitle, setNewTitle] = useState('');
+  const [mediaPlayers, setMediaPlayers] = useState<MediaPlayer[]>([]);
+  const [selectedDevice, setSelectedDevice] = useState('');
+  const [expiredIds, setExpiredIds] = useState<Set<string>>(new Set());
+  const notifiedRef = useRef<Set<string>>(new Set());
+
+  // Fetch HA media players
+  useEffect(() => {
+    api.getEntities().then((entities) => {
+      const players = (entities || [])
+        .filter((e: Record<string, unknown>) => e.domain === 'media_player')
+        .map((e: Record<string, unknown>) => ({
+          entity_id: e.entity_id as string,
+          friendly_name: (e.friendly_name as string) || (e.entity_id as string),
+          state: e.state as string,
+        }));
+      setMediaPlayers(players);
+    }).catch(() => {});
+  }, []);
 
   const fetchTimers = useCallback(async () => {
     try {
@@ -56,21 +80,50 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- polling on mount is intentional
     fetchTimers();
     const interval = setInterval(fetchTimers, 10000);
     return () => clearInterval(interval);
   }, [fetchTimers]);
 
+  // Local countdown + expiry detection
   useEffect(() => {
     const interval = setInterval(() => {
-      setTimers((prev) =>
-        prev
-          .map((t) => ({ ...t, remainingMs: Math.max(0, t.remainingMs - 1000) }))
-          .filter((t) => t.remainingMs > 0)
-      );
+      setTimers((prev) => {
+        const next: ActiveTimer[] = [];
+        for (const t of prev) {
+          const newRemaining = Math.max(0, t.remainingMs - 1000);
+          // Detect transition to expired
+          if (newRemaining <= 0 && t.remainingMs > 0 && !notifiedRef.current.has(t.id)) {
+            notifiedRef.current.add(t.id);
+            setExpiredIds((prevExpired) => new Set(prevExpired).add(t.id));
+            setTimeout(() => {
+              setExpiredIds((prevExpired) => {
+                const s = new Set(prevExpired);
+                s.delete(t.id);
+                return s;
+              });
+            }, 3000);
+
+            // Browser notification
+            if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+              new Notification('Timer Expired', { body: `"${t.title}" is done!` });
+            }
+          }
+          if (newRemaining > 0) {
+            next.push({ ...t, remainingMs: newRemaining });
+          }
+        }
+        return next;
+      });
     }, 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Request notification permission
+  useEffect(() => {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      Notification.requestPermission().catch(() => {});
+    }
   }, []);
 
   const formatTime = (ms: number) => {
@@ -95,15 +148,15 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
         title: newTitle || `Timer ${timers.length + 1}`,
         duration_str: `${durationSec}s`,
         type: 'timer',
+        target_device: selectedDevice || undefined,
       });
       if (remote.status === 'SUCCESS') {
-        const now = Date.now();
         const timer: ActiveTimer = {
           id: `local-${Date.now()}`,
           title: newTitle || `Timer ${timers.length + 1}`,
           durationMs: durationSec * 1000,
           remainingMs: durationSec * 1000,
-          createdAt: now,
+          createdAt: Date.now(),
           isRemote: false,
         };
         setTimers((prev) => [...prev, timer]);
@@ -116,13 +169,12 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
       // Fall back to local-only timer
     }
 
-    const now = Date.now();
     const timer: ActiveTimer = {
       id: `local-${Date.now()}`,
       title: newTitle || `Timer ${timers.length + 1}`,
       durationMs: newDuration * 1000,
       remainingMs: newDuration * 1000,
-      createdAt: now,
+      createdAt: Date.now(),
       isRemote: false,
     };
     setTimers((prev) => [...prev, timer]);
@@ -172,7 +224,12 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
           </div>
         ) : timers.length > 0 ? (
           timers.map((timer) => (
-            <div key={timer.id} className="glass-card p-3 shrink-0">
+            <div
+              key={timer.id}
+              className={`glass-card p-3 shrink-0 transition-all duration-500 ${
+                expiredIds.has(timer.id) ? 'ring-2 ring-purple-400/60 bg-purple-500/10' : ''
+              }`}
+            >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-semibold text-white truncate">{timer.title}</span>
                 <button
@@ -222,6 +279,24 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
             <Plus size={16} />
           </button>
         </div>
+
+        {mediaPlayers.length > 0 && (
+          <div className="flex items-center gap-2">
+            {selectedDevice ? <Bell size={14} className="text-purple-400 shrink-0" /> : <BellOff size={14} className="text-slate-500 shrink-0" />}
+            <select
+              value={selectedDevice}
+              onChange={(e) => setSelectedDevice(e.target.value)}
+              className="glass-input flex-1 px-3 py-2 text-sm min-w-0"
+            >
+              <option value="">No alert (silent)</option>
+              {mediaPlayers.map((p) => (
+                <option key={p.entity_id} value={p.entity_id}>
+                  {p.friendly_name} {p.state !== 'playing' ? `(${p.state})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {timers.length > 0 && (
           <div className="space-y-1">

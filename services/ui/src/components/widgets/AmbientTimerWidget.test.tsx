@@ -11,6 +11,7 @@ vi.mock('../../services/api', () => ({
     getTimers: vi.fn(),
     createTimer: vi.fn(),
     deleteTimer: vi.fn(),
+    getEntities: vi.fn().mockResolvedValue([]),
     getMe: vi.fn().mockResolvedValue({ username: 'test', role: 'admin' }),
   },
 }));
@@ -21,6 +22,7 @@ import { api } from '../../services/api';
 const mockGetTimers = api.getTimers as ReturnType<typeof vi.fn>;
 const mockCreateTimer = api.createTimer as ReturnType<typeof vi.fn>;
 const mockDeleteTimer = api.deleteTimer as ReturnType<typeof vi.fn>;
+const mockGetEntities = api.getEntities as ReturnType<typeof vi.fn>;
 
 // Render helper that completely bypasses AuthProvider
 function renderWithProviders(ui: ReactElement) {
@@ -246,5 +248,53 @@ describe('AmbientTimerWidget', () => {
 
     expect(screen.queryByText('Short Timer')).not.toBeInTheDocument();
     expect(screen.getByText('No active timers')).toBeInTheDocument();
+  });
+
+  it('shows device picker when media players are available', async () => {
+    mockGetEntities.mockResolvedValue([
+      { entity_id: 'media_player.kitchen', friendly_name: 'Kitchen Speaker', state: 'playing', domain: 'media_player' },
+      { entity_id: 'media_player.living_room', friendly_name: 'Living Room', state: 'idle', domain: 'media_player' },
+    ]);
+    renderWithProviders(
+      <AmbientTimerWidget
+        userSettings={{ is_pinned: false }}
+        onTogglePin={vi.fn()}
+        settingsButton={null}
+      />
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
+    });
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(select.options.length).toBe(3);
+    expect(select.options[0].text).toBe('No alert (silent)');
+    expect(select.options[1].text).toMatch(/^Kitchen Speaker\s*$/);
+    expect(select.options[2].text).toBe('Living Room (idle)');
+  });
+
+  it('passes target_device when creating timer with device selected', async () => {
+    mockGetEntities.mockResolvedValue([
+      { entity_id: 'media_player.kitchen', friendly_name: 'Kitchen Speaker', state: 'idle', domain: 'media_player' },
+    ]);
+    renderWithProviders(
+      <AmbientTimerWidget
+        userSettings={{ is_pinned: false }}
+        onTogglePin={vi.fn()}
+        settingsButton={null}
+      />
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('combobox')).toBeInTheDocument();
+    });
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'media_player.kitchen' } });
+    const durationInput = screen.getByPlaceholderText('Sec') as HTMLInputElement;
+    fireEvent.change(durationInput, { target: { value: '30' } });
+    const buttons = screen.getAllByRole('button');
+    const addButton = buttons[buttons.length - 1];
+    fireEvent.click(addButton);
+    expect(mockCreateTimer).toHaveBeenCalledWith(
+      expect.objectContaining({ target_device: 'media_player.kitchen' })
+    );
   });
 });
