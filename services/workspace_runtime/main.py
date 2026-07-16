@@ -592,17 +592,18 @@ def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            # Call get_client() INSIDE the loop we own, so the (lazily created)
-            # aiohttp session binds to this loop instead of the app's main loop
-            # -- reusing the main-loop session from a worker thread raised
-            # "Event loop is closed".
+            # Create a transient aiohttp session bound to THIS loop. The shared
+            # get_client() session is bound to the app's main loop; reusing it
+            # from a worker thread raises "Event loop is closed".
             async def _resolve_once() -> Any:
-                return await _http_post_async(
-                    f"{IDENTITY_SVC_URL}/api/resolve",
-                    json=payload,
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=45.0,
-                )
+                async with aiohttp.ClientSession() as session:
+                    return await _http_post_async(
+                        f"{IDENTITY_SVC_URL}/api/resolve",
+                        json=payload,
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                        timeout=45.0,
+                        session=session,
+                    )
 
             data = loop.run_until_complete(_resolve_once())
         finally:
