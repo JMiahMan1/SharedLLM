@@ -1319,13 +1319,6 @@ const Media = () => {
                 const backendPlaying = active.state === 'playing';
                 if (backendPlaying !== localIsPlaying) {
                   setLocalIsPlaying(backendPlaying);
-                  if (maPlayer.isConnected) {
-                    if (backendPlaying) {
-                      maPlayer.cmdPlay().catch(() => {});
-                    } else {
-                      maPlayer.cmdPause();
-                    }
-                  }
                 }
               }
               
