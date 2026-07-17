@@ -2505,7 +2505,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "terminal": "WorkspaceShellRequest",
                 "command": "WorkspaceShellRequest",
                 "exec": "WorkspaceShellRequest",
-                "run": "WorkspaceShellRequest"
+                "run": "WorkspaceShellRequest",
+                # Note CRUD hallucinations -> NoteRequest
+                "note_create": "NoteRequest",
+                "note_delete": "NoteRequest",
+                "note_list": "NoteRequest",
+                "note_update": "NoteRequest",
+                "create_note": "NoteRequest",
+                "delete_note": "NoteRequest"
             }
             if action in action_map_aliases:
                 action = action_map_aliases[action]

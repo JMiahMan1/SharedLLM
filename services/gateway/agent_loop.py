@@ -343,6 +343,7 @@ ALLOWED_TOOLS = {
     "ha_call_service", "ha_get_state", "ha_set_state", "ha_get_entities",
     # Note variations
     "note_create", "note_delete", "note_list", "note_update",
+    "create_note", "delete_note",
     # Calendar variations
     "calendar_create", "calendar_delete", "calendar_list", "calendar_update",
     # Security variations
@@ -2804,6 +2805,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "recall": "ravenrecallrequest",
                 "ravenrecall": "ravenrecallrequest",
                 "missionhistory": "ravenrecallrequest",
+                # Note CRUD hallucinations -> NoteRequest (the only note tool)
+                "note_create": "noterequest",
+                "note_delete": "noterequest",
+                "note_list": "noterequest",
+                "note_update": "noterequest",
+                "create_note": "noterequest",
+                "delete_note": "noterequest",
             }
             if short_action in action_map_aliases:
                 action_name = action_map_aliases[short_action]
