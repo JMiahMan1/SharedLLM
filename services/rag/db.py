@@ -103,7 +103,9 @@ def init_schema(conn: sqlite3.Connection, dim: int) -> None:
             content TEXT NOT NULL,
             metadata TEXT NOT NULL,
             created_at INTEGER NOT NULL,
-            indexed_at TEXT NOT NULL
+            indexed_at TEXT NOT NULL,
+            usage_count INTEGER NOT NULL DEFAULT 0,
+            last_used_at TEXT
         )
         """
     )
@@ -111,6 +113,13 @@ def init_schema(conn: sqlite3.Connection, dim: int) -> None:
         "CREATE INDEX IF NOT EXISTS idx_rag_items_lookup "
         "ON rag_items(collection_name, user_id)"
     )
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_rag_items_usage "
+        "ON rag_items(collection_name, usage_count DESC)"
+    )
+
+    # ── Incremental migration: older DBs lack the usage-tracking columns. ──
+    _migrate_rag_items_usage_columns(cur)
 
     # Vector table. Dimension is dynamic, never hardcoded. Created only when the
     # sqlite-vec extension is available; otherwise the numpy fallback adapter
@@ -248,3 +257,18 @@ def get_stored_dimension(conn: sqlite3.Connection) -> int | None:
         return int(row["value"]) if row else None
     except Exception:
         return None
+
+
+def _migrate_rag_items_usage_columns(cur: sqlite3.Cursor) -> None:
+    """Add usage-tracking columns to ``rag_items`` without recreating the table.
+
+    Older databases were created before reuse tracking existed. ``CREATE TABLE``
+    only runs on first creation, so we must add the columns explicitly here.
+    """
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(rag_items)").fetchall()}
+    if "usage_count" not in existing:
+        cur.execute(
+            "ALTER TABLE rag_items ADD COLUMN usage_count INTEGER NOT NULL DEFAULT 0"
+        )
+    if "last_used_at" not in existing:
+        cur.execute("ALTER TABLE rag_items ADD COLUMN last_used_at TEXT")

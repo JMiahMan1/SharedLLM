@@ -813,6 +813,21 @@ export const api = {
     return resp.data;
   },
 
+  async getRavenLearnings(limit: number = 200, sort: 'recent' | 'reuse' = 'recent'): Promise<RavenLearningsResponse> {
+    const resp = await apiClient.get(`/api/storage/learning?limit=${limit}&sort=${sort}`);
+    return resp.data;
+  },
+
+  async editRavenLearning(docId: string, payload: { content?: string; metadata?: Record<string, unknown> }): Promise<{ status: string; id: string }> {
+    const resp = await apiClient.patch(`/api/storage/learning/${docId}`, payload);
+    return resp.data;
+  },
+
+  async deleteRavenLearning(docId: string): Promise<{ status: string; id: string }> {
+    const resp = await apiClient.delete(`/api/storage/learning/${docId}`);
+    return resp.data;
+  },
+
   async changePassword(newPassword: string): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post('/api/auth/change-password', { new_password: newPassword });
     return resp.data;
@@ -1570,3 +1585,18 @@ export const api = {
     return resp.data;
   },
 };
+
+export interface RavenLearningItem {
+  id: string;
+  content: string;
+  metadata: Record<string, unknown>;
+  created_at: number;
+  usage_count: number;
+  last_used_at: string | null;
+}
+
+export interface RavenLearningsResponse {
+  status: string;
+  count: number;
+  items: RavenLearningItem[];
+}

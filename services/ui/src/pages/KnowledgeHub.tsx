@@ -14,6 +14,11 @@ import {
   Clock,
   ShieldAlert,
   AlertTriangle,
+  Sparkles,
+  Brain,
+  Trash2,
+  Pencil,
+  ArrowUpDown,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type StorageEntry, type RagStats } from '../services/api';
@@ -32,6 +37,11 @@ const KnowledgeHub = () => {
   const [ragResults, setRagResults] = useState<{ answer?: string; files?: { name: string; path: string }[] } | null>(null);
   const [ragLoading, setRagLoading] = useState(false);
   const [ragError, setRagError] = useState<string | null>(null);
+
+  const [learningSort, setLearningSort] = useState<'recent' | 'reuse'>('recent');
+  const [editLearning, setEditLearning] = useState<{ id: string; content: string } | null>(null);
+  const [editDraft, setEditDraft] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
 
   const runRagSearch = async (e: FormEvent) => {
     e.preventDefault();
@@ -62,6 +72,34 @@ const KnowledgeHub = () => {
   const { data: files = [], isLoading: filesLoading, isFetching: filesFetching } = useQuery<StorageEntry[]>({
     queryKey: ['storage-files', currentPath],
     queryFn: () => api.getStorageFiles(currentPath),
+  });
+
+  const {
+    data: learnings,
+    isLoading: learningsLoading,
+  } = useQuery({
+    queryKey: ['raven-learnings', learningSort],
+    queryFn: () => api.getRavenLearnings(200, learningSort),
+  });
+
+  const deleteLearningMutation = useMutation({
+    mutationFn: (id: string) => api.deleteRavenLearning(id),
+    onSuccess: () => {
+      toast.success('Lesson deleted');
+      queryClient.invalidateQueries({ queryKey: ['raven-learnings'] });
+    },
+    onError: () => toast.error('Failed to delete lesson'),
+  });
+
+  const saveLearningMutation = useMutation({
+    mutationFn: (payload: { id: string; content: string }) =>
+      api.editRavenLearning(payload.id, { content: payload.content }),
+    onSuccess: () => {
+      toast.success('Lesson updated');
+      setEditLearning(null);
+      queryClient.invalidateQueries({ queryKey: ['raven-learnings'] });
+    },
+    onError: () => toast.error('Failed to update lesson'),
   });
 
   const indexMutation = useMutation({
@@ -503,6 +541,124 @@ const KnowledgeHub = () => {
       </section>
 
       <section className="mt-12 pt-12 border-t border-white/5">
+         <div className="flex items-center justify-between gap-4 mb-8">
+            <div className="flex items-center gap-3">
+               <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400">
+                  <Brain size={24} />
+               </div>
+               <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                     Raven Lessons
+                     <Sparkles size={16} className="text-indigo-400" />
+                  </h3>
+                  <p className="text-sm text-slate-500">
+                     Successful knowledge Raven has learned on past missions. Reuse count tracks how often a lesson was applied.
+                  </p>
+               </div>
+            </div>
+            <button
+               onClick={() => setLearningSort(learningSort === 'recent' ? 'reuse' : 'recent')}
+               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/10 transition-colors"
+            >
+               <ArrowUpDown size={14} />
+               {learningSort === 'reuse' ? 'Most Reused' : 'Newest'}
+            </button>
+         </div>
+
+         {learningsLoading ? (
+            <div className="glass-panel p-10 text-center text-slate-500">
+               <RefreshCw size={24} className="animate-spin mx-auto mb-3 text-indigo-400" />
+               Loading Raven lessons…
+            </div>
+         ) : !learnings || learnings.items.length === 0 ? (
+            <div className="glass-panel p-12 text-center border-white/5">
+               <Brain size={48} className="mx-auto mb-4 text-slate-700" />
+               <p className="text-slate-400 font-medium">No Raven lessons yet</p>
+               <p className="text-xs text-slate-600 mt-1">
+                  Lessons appear here once Raven successfully completes missions and persists what it learned.
+               </p>
+            </div>
+         ) : (
+            <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
+               {learnings.items.map((item) => {
+                  const meta = item.metadata || {};
+                  const tags: string[] = Array.isArray(meta.tags) ? meta.tags : [];
+                  const topic = typeof meta.topic === 'string' ? meta.topic : '';
+                  const created = item.created_at
+                     ? new Date(item.created_at * 1000).toLocaleDateString()
+                     : '';
+                  const lastUsed = item.last_used_at
+                     ? new Date(item.last_used_at).toLocaleDateString()
+                     : 'never';
+                  return (
+                     <div
+                        key={item.id}
+                        className="glass-panel p-5 border-white/5 hover:border-indigo-500/30 transition-colors flex flex-col"
+                     >
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                           <div className="min-w-0">
+                              <p className="text-sm font-bold text-white truncate">
+                                 {topic || 'Untitled lesson'}
+                              </p>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                 Created {created}
+                              </p>
+                           </div>
+                           <span
+                              className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                                 item.usage_count > 0
+                                    ? 'bg-emerald-500/15 text-emerald-400'
+                                    : 'bg-white/5 text-slate-500'
+                              }`}
+                              title={`Last reused: ${lastUsed}`}
+                           >
+                              ♻ {item.usage_count}
+                           </span>
+                        </div>
+
+                        <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap line-clamp-6 flex-1">
+                           {item.content}
+                        </p>
+
+                        {tags.length > 0 && (
+                           <div className="flex flex-wrap gap-1.5 mt-3">
+                              {tags.map((t) => (
+                                 <span
+                                    key={t}
+                                    className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 text-[10px] font-medium"
+                                 >
+                                    {t}
+                                 </span>
+                              ))}
+                           </div>
+                        )}
+
+                        <div className="flex items-center gap-2 mt-4 pt-3 border-t border-white/5">
+                           <button
+                              onClick={() => {
+                                 setEditLearning({ id: item.id, content: item.content });
+                                 setEditDraft(item.content);
+                              }}
+                              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-300 transition-colors"
+                           >
+                              <Pencil size={13} /> Edit
+                           </button>
+                           <button
+                              onClick={() => deleteLearningMutation.mutate(item.id)}
+                              disabled={deleteLearningMutation.isPending}
+                              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-400 transition-colors ml-auto"
+                           >
+                              <Trash2 size={13} /> Delete
+                           </button>
+                        </div>
+                     </div>
+                  );
+               })}
+            </div>
+         )}
+      </section>
+
+      <section className="mt-12 pt-12 border-t border-white/5">
          <div className="flex items-center gap-3 mb-8">
             <div className="p-3 rounded-2xl bg-red-500/10 text-red-400">
                <ShieldAlert size={24} />
@@ -617,6 +773,43 @@ const KnowledgeHub = () => {
                 {purgeMutation.isPending ? 'Purging...' : 'Confirm Purge'}
               </button>
            </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(editLearning)}
+        onClose={() => setEditLearning(null)}
+        title="Edit Raven Lesson"
+      >
+        <div className="space-y-5">
+          <textarea
+            value={editDraft}
+            onChange={(e) => setEditDraft(e.target.value)}
+            rows={12}
+            className="w-full bg-black/20 border border-white/10 rounded-lg p-3 text-sm text-white font-mono focus:outline-none focus:border-indigo-500 transition-colors resize-y"
+          />
+          <div className="flex gap-3">
+            <button
+              onClick={() => setEditLearning(null)}
+              className="glass-button flex-1 py-3 font-bold text-[10px] uppercase tracking-widest"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                if (!editLearning) return;
+                setEditSaving(true);
+                saveLearningMutation.mutate(
+                  { id: editLearning.id, content: editDraft },
+                  { onSettled: () => setEditSaving(false) },
+                );
+              }}
+              disabled={editSaving || !editDraft.trim()}
+              className="glass-button flex-1 py-3 bg-indigo-600/30 border-indigo-500/30 text-indigo-300 font-bold text-[10px] uppercase tracking-widest"
+            >
+              {editSaving ? 'Saving…' : 'Save Lesson'}
+            </button>
+          </div>
         </div>
       </Modal>
     </div>
