@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type Workspace } from '../services/api';
-import { formatDate } from '../lib/utils';
+import { formatDateTime } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import WorkspaceIDE from '../components/workspace/WorkspaceIDE';
 
@@ -350,7 +350,7 @@ const Workspaces = () => {
                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Created</p>
                       <div className="flex items-center gap-2 text-sm text-slate-300">
                         <Calendar size={14} className="text-slate-600" />
-                        <span>{formatDate(ws.created_at) ?? 'Unknown'}</span>
+                        <span>{formatDateTime(ws.created_at) ?? 'Unknown'}</span>
                       </div>
                     </div>
                     {ws.repo_url && (
