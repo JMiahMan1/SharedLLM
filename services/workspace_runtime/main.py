@@ -644,7 +644,6 @@ def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
         raise HTTPException(status_code=500, detail=f"Identity resolution failed: {exc}") from exc
 
     if not isinstance(data, dict):
-        log.error(f"[DEBUG ws] identity resolve returned non-dict: type={type(data).__name__} repr={repr(data)[:200]}")
         raise HTTPException(status_code=500, detail="Identity resolution returned invalid response")
 
     user = str(data.get("user") or "").strip()
