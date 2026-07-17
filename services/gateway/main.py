@@ -4477,6 +4477,46 @@ async def purge_storage_collection(collection_name: str, request: Request):
         return await _proxy_json_response(resp)
 
 
+@app.get("/api/storage/learning")
+async def get_raven_learnings(request: Request, limit: int = 200, sort: str = "recent"):
+    """List Raven lessons (system_learnings) with reuse stats for the UI."""
+    try:
+        creds_data = await _resolve_identity_from_request(request)
+        user_id = creds_data.get("user") or "default"
+    except Exception:
+        first_user = await resolve_first_user()
+        user_id = first_user.get("user") or "default"
+
+    resp = await get_http_client().get(
+        f"{RAG_SVC}/rag/learning?user_id={user_id}&limit={limit}&sort={sort}",
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    return await _proxy_json_response(resp)
+
+
+@app.patch("/api/storage/learning/{doc_id}")
+async def edit_raven_learning(doc_id: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    resp = await get_http_client().patch(
+        f"{RAG_SVC}/rag/learning/{doc_id}",
+        json=body,
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    return await _proxy_json_response(resp)
+
+
+@app.delete("/api/storage/learning/{doc_id}")
+async def delete_raven_learning(doc_id: str):
+    resp = await get_http_client().delete(
+        f"{RAG_SVC}/rag/learning/{doc_id}",
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    return await _proxy_json_response(resp)
+
+
 @app.post("/api/admin/tests/smoke")
 async def proxy_smoke_test(request: Request):
     client = get_http_client()

@@ -162,11 +162,23 @@ def _add_item(
 ):
     """Insert/replace a document into rag_items + vector store + FTS5."""
     user_id = user_id.lower()
+    # Carry usage tracking into metadata for backward-visible reuse stats.
+    stored_metadata = dict(metadata or {})
+    stored_metadata.setdefault("usage_count", 0)
     _conn().execute(
         "INSERT OR REPLACE INTO rag_items"
-        "(id, collection_name, user_id, content, metadata, created_at, indexed_at) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?)",
-        [doc_id, collection, user_id, content, json.dumps(metadata), created_at, indexed_at],
+        "(id, collection_name, user_id, content, metadata, created_at, indexed_at, "
+        " usage_count, last_used_at) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, 0, NULL)",
+        [
+            doc_id,
+            collection,
+            user_id,
+            content,
+            json.dumps(stored_metadata),
+            created_at,
+            indexed_at,
+        ],
     )
     vector = embed([content])[0]
     _adapter().add(doc_id, vector, collection, user_id)
@@ -256,17 +268,52 @@ def _hybrid_search(
     results: list[SearchResultItem] = []
     for doc_id, score in ranked:
         row = _conn().execute(
-            "SELECT content, metadata FROM rag_items WHERE id = ?", [doc_id]
+            "SELECT content, metadata, usage_count, last_used_at FROM rag_items WHERE id = ?",
+            [doc_id],
         ).fetchone()
         if row:
+            meta = json.loads(row["metadata"])
+            # Surface usage tracking in the result metadata so callers (and the
+            # UI) can see how often a lesson has been reused.
+            meta["usage_count"] = row["usage_count"] or 0
+            meta["last_used_at"] = row["last_used_at"]
             results.append(
                 SearchResultItem(
                     content=row["content"],
-                    metadata=json.loads(row["metadata"]),
+                    metadata=meta,
                     score=score,
                 )
             )
+    # Bump reuse counters for system_learnings hits — this is exactly when a
+    # Raven lesson was actually applied during a mission.
+    if collection == "system_learnings" and results:
+        _bump_usage([doc_id for doc_id, _ in ranked if _item_exists(doc_id)])
     return results
+
+
+def _item_exists(doc_id: str) -> bool:
+    row = _conn().execute("SELECT 1 FROM rag_items WHERE id = ?", [doc_id]).fetchone()
+    return row is not None
+
+
+def _bump_usage(doc_ids: list[str]) -> None:
+    """Atomically increment ``usage_count`` and stamp ``last_used_at``."""
+    if not doc_ids:
+        return
+    now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    try:
+        _conn().execute("BEGIN")
+        for doc_id in doc_ids:
+            _conn().execute(
+                "UPDATE rag_items SET usage_count = usage_count + 1, "
+                "last_used_at = ? WHERE id = ?",
+                [now, doc_id],
+            )
+        _conn().commit()
+    except Exception as e:  # pragma: no cover - best effort counters
+        log.debug(f"Usage bump failed: {e}")
+        with suppress(Exception):
+            _conn().rollback()
 
 
 def _search_all_collections(
@@ -427,6 +474,93 @@ async def list_collection_documents(collection_name: str, user_id: str = "defaul
     except Exception as e:
         log.error(f"Failed to list collection {collection_name}: {e}")
         return {"status": "ERROR", "message": str(e)}
+
+
+@app.get("/rag/learning", dependencies=[Depends(require_internal)])
+async def list_learnings(user_id: str = "default", limit: int = 200, sort: str = "recent"):
+    """List Raven lessons (system_learnings) with reuse stats.
+
+    ``sort`` may be ``recent`` (newest first) or ``reuse`` (most-reused first).
+    """
+    try:
+        target_user = "default"
+        order = "usage_count DESC, created_at DESC" if sort == "reuse" else "created_at DESC"
+        rows = _conn().execute(
+            f"SELECT id, content, metadata, created_at, usage_count, last_used_at "
+            f"FROM rag_items WHERE collection_name = ? AND user_id = ? "
+            f"ORDER BY {order} LIMIT ?",
+            ["system_learnings", target_user, limit],
+        ).fetchall()
+        items = [
+            {
+                "id": r["id"],
+                "content": r["content"],
+                "metadata": json.loads(r["metadata"]),
+                "created_at": r["created_at"],
+                "usage_count": r["usage_count"] or 0,
+                "last_used_at": r["last_used_at"],
+            }
+            for r in rows
+        ]
+        return {
+            "status": "SUCCESS",
+            "collection": "system_learnings",
+            "user_id": target_user,
+            "count": len(items),
+            "items": items,
+        }
+    except Exception as e:
+        log.error(f"Failed to list learnings: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.patch("/rag/learning/{doc_id}", dependencies=[Depends(require_internal)])
+async def edit_learning(doc_id: str, payload: dict):
+    """Edit a Raven lesson's content and/or metadata."""
+    try:
+        row = _conn().execute(
+            "SELECT content, metadata FROM rag_items WHERE id = ?", [doc_id]
+        ).fetchone()
+        if not row:
+            return JSONResponse(status_code=404, content={"status": "ERROR", "message": "Learning not found"})
+        meta = json.loads(row["metadata"])
+        new_content = payload.get("content", row["content"])
+        if payload.get("metadata") is not None:
+            meta.update(payload["metadata"])
+        if new_content != row["content"]:
+            meta["indexed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        _conn().execute(
+            "UPDATE rag_items SET content = ?, metadata = ? WHERE id = ?",
+            [new_content, json.dumps(meta), doc_id],
+        )
+        # Re-embed on content change so future retrieval stays accurate.
+        if new_content != row["content"]:
+            try:
+                vector = embed([new_content])[0]
+                _adapter().add(doc_id, vector, "system_learnings", meta.get("user_id", "default"))
+                _conn().execute("DELETE FROM rag_fts WHERE id = ?", [doc_id])
+                _conn().execute(
+                    "INSERT INTO rag_fts(id, content, collection_name, user_id) VALUES(?, ?, ?, ?)",
+                    [doc_id, new_content, "system_learnings", meta.get("user_id", "default").lower()],
+                )
+            except Exception as e:  # pragma: no cover - embedding best effort
+                log.warning(f"Re-embed on edit failed for {doc_id}: {e}")
+        _conn().commit()
+        return {"status": "SUCCESS", "id": doc_id}
+    except Exception as e:
+        log.error(f"Failed to edit learning {doc_id}: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.delete("/rag/learning/{doc_id}", dependencies=[Depends(require_internal)])
+async def delete_learning(doc_id: str):
+    """Delete a single Raven lesson."""
+    try:
+        _delete_items([doc_id])
+        return {"status": "SUCCESS", "id": doc_id}
+    except Exception as e:
+        log.error(f"Failed to delete learning {doc_id}: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
 
 @app.get("/rag/indexed-paths", dependencies=[Depends(require_internal)])
