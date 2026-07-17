@@ -15,3 +15,16 @@ export function formatDate(value?: string | null): string | null {
     day: 'numeric',
   });
 }
+
+export function formatDateTime(value?: string | null): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value;
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
