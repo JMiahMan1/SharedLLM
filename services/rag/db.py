@@ -113,13 +113,15 @@ def init_schema(conn: sqlite3.Connection, dim: int) -> None:
         "CREATE INDEX IF NOT EXISTS idx_rag_items_lookup "
         "ON rag_items(collection_name, user_id)"
     )
+
+    # ── Incremental migration: older DBs lack the usage-tracking columns. ──
+    # Must run BEFORE any index referencing those columns is created.
+    _migrate_rag_items_usage_columns(cur)
+
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_rag_items_usage "
         "ON rag_items(collection_name, usage_count DESC)"
     )
-
-    # ── Incremental migration: older DBs lack the usage-tracking columns. ──
-    _migrate_rag_items_usage_columns(cur)
 
     # Vector table. Dimension is dynamic, never hardcoded. Created only when the
     # sqlite-vec extension is available; otherwise the numpy fallback adapter
