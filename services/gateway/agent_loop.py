@@ -505,6 +505,86 @@ def _normalize_tool(obj: dict) -> dict | None:
     return obj if obj.get("action") else None
 
 
+# Valid git verbs accepted by the GitOperationRequest schema (both the gateway
+# and execution copies share this exact set).
+_GIT_VALID_ACTIONS = {
+    "status", "diff", "add", "commit", "pull", "push", "log", "fetch",
+    "reset", "branch", "checkout", "clean", "show", "init", "remote",
+    "remote_add", "repo_create", "repo_clone", "gh_noop",
+}
+
+# Tool-type names that should never be forwarded as the git `action` verb.
+_GIT_TOOL_TYPE_NAMES = {"gitoperationrequest", "gitoperation", "gitop", "git"}
+
+
+def _normalize_git_payload_action(payload: dict) -> dict:
+    """Guarantee a GitOperationRequest payload carries a VALID git verb.
+
+    The model sometimes emits the tool call with the `action` field set to the
+    tool *type* name (``"GitOperationRequest"``) instead of the actual git verb
+    (``add``/``commit``/...). That produces a 422 from the execution service.
+
+    This resolves it by:
+      1. accepting any verb already present and valid,
+      2. promoting an explicit verb carried in ``git_action``/``operation``/outer
+         ``action`` when the current value is only the tool type name,
+      3. inferring the verb from payload shape (commit_message -> commit, etc.),
+      4. falling back to a harmless ``status`` (read-only) when nothing else fits,
+         so the call never 422s and the model gets real feedback instead of a
+         schema crash.
+    """
+    if not isinstance(payload, dict):
+        return payload
+
+    raw = payload.get("action")
+    current = str(raw).strip().lower() if raw is not None else ""
+    outer_action = str(payload.get("_outer_action") or "").strip().lower()
+
+    # Already a valid verb — nothing to do.
+    if current in _GIT_VALID_ACTIONS:
+        return payload
+
+    # The current value is the tool type name (or empty). Try to find the real
+    # verb from other fields the model may have used.
+    candidates = [
+        payload.get("git_action"),
+        payload.get("operation"),
+        outer_action,
+    ]
+    for cand in candidates:
+        cand = str(cand).strip().lower() if cand is not None else ""
+        if cand in _GIT_VALID_ACTIONS:
+            payload["action"] = cand
+            return payload
+        # e.g. "git_commit" / "GitOperationRequest:commit"
+        if cand and ":" in cand:
+            tail = cand.rsplit(":", 1)[-1]
+            if tail in _GIT_VALID_ACTIONS:
+                payload["action"] = tail
+                return payload
+        if cand.startswith("git_") and cand[4:] in _GIT_VALID_ACTIONS:
+            payload["action"] = cand[4:]
+            return payload
+
+    # Infer from payload shape.
+    if payload.get("commit_message") or payload.get("message"):
+        payload["action"] = "commit"
+    elif payload.get("source_path") or (payload.get("repo_url") and payload.get("repo_name")):
+        payload["action"] = "repo_create"
+    elif payload.get("remote_name") and payload.get("repo_url"):
+        payload["action"] = "remote_add"
+    elif payload.get("log_count") is not None:
+        payload["action"] = "log"
+    elif payload.get("repo_url") and not payload.get("repo_name"):
+        payload["action"] = "remote_add"
+    else:
+        # Safe read-only default so the step still executes and the model can
+        # self-correct rather than the whole mission aborting on a 422.
+        payload["action"] = "status"
+
+    return payload
+
+
 def _extract_tool_candidates(text: str) -> list:
     """Collect all plausible tool-call dicts from arbitrary model output."""
     candidates: list = []
@@ -2923,15 +3003,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
 
-                # RECOVERY: If the LLM sent a nested payload for a GitOperationRequest but forgot the inner 'action',
-                # we inject it here using the original action name (e.g. 'status', 'add', etc.)
-                if lookup_action == "gitoperationrequest" and isinstance(payload, dict) and "action" not in payload:
-                    # 'action' variable at this point is likely "GitOperationRequest" (mapped)
-                    # We want the original one from the tool call
-                    orig_action = str(tool_data.get("action") or tool_data.get("operation") or "").lower()
-                    if orig_action.startswith("git_"):
-                        orig_action = orig_action.replace("git_", "")
-                    payload["action"] = orig_action
+                # RECOVERY: The model sometimes sends a GitOperationRequest whose
+                # `action` field holds the *tool type name* ("GitOperationRequest")
+                # instead of the actual git verb (add/commit/...). That 422s at the
+                # execution service. Normalize it to a valid verb before dispatch.
+                if lookup_action == "gitoperationrequest" and isinstance(payload, dict):
+                    if "_outer_action" not in payload:
+                        payload["_outer_action"] = tool_data.get("action") or tool_data.get("operation") or ""
+                    _normalize_git_payload_action(payload)
+                    payload.pop("_outer_action", None)
 
                 # Special handling: WorkspaceSettingsUpdateRequest PATCHes an existing
                 # workspace's settings (repo_url, git_remote, default_branch, display_name,

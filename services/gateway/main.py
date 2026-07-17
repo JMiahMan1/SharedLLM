@@ -2548,6 +2548,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
+
+                # Normalize a GitOperationRequest whose `action` field wrongly
+                # holds the tool type name ("GitOperationRequest") instead of the
+                # git verb — otherwise the execution service 422s. Mirrors the
+                # guard in agent_loop.py. Lazy import avoids a circular dep.
+                if lookup_action == "gitoperationrequest" and isinstance(payload, dict):
+                    from services.gateway.agent_loop import _normalize_git_payload_action as _norm_git
+                    if "_outer_action" not in payload:
+                        payload["_outer_action"] = tool_data.get("action") or tool_data.get("operation") or ""
+                    _norm_git(payload)
+                    payload.pop("_outer_action", None)
+
                 payload["user_context"] = {
                     "user": creds.user,
                     "is_admin": creds.is_admin,
