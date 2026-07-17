@@ -120,7 +120,7 @@ if ssh $SSH_OPTS "$HOST" << EOF
 
     echo "Pulling latest images from GHCR and starting Docker containers..."
     docker compose pull
-    docker compose up -d
+    docker compose up -d --force-recreate --remove-orphans
 
     echo "Waiting for application startup..."
     # Monitor logs for success or failure
@@ -130,7 +130,7 @@ if ssh $SSH_OPTS "$HOST" << EOF
     SUCCESS=0
 
     # Check logs until success message or timeout
-    GATEWAY_CONTAINER=\$(docker ps --filter 'name=sharedllm_gateway' --format '{{.Names}}' | head -100 || echo "sharedllm_gateway")
+    GATEWAY_CONTAINER=\$(docker ps --filter 'name=sharedllm_gateway' --format '{{.Names}}' | head -1 || echo "sharedllm_gateway")
     while [ \$ELAPSED -lt \$TIMEOUT ]; do
         if docker logs --tail 200 \$GATEWAY_CONTAINER 2>&1 | grep -q "Application startup complete"; then
             echo "[OK] Application started successfully!"
@@ -157,6 +157,15 @@ if ssh $SSH_OPTS "$HOST" << EOF
         docker logs --tail 20 \$GATEWAY_CONTAINER
         exit 1
     fi
+
+    # Verify execution container is running (not stuck in Created)
+    EXEC_CONTAINER=\$(docker ps --filter 'name=sharedllm_execution' --format '{{.Names}}' | head -1)
+    if [ -z "\$EXEC_CONTAINER" ]; then
+        echo "[FAIL] Execution container not found! Compose may have left it in Created state."
+        docker ps -a --filter 'name=execution' --format '{{.Names}} {{.Status}}'
+        exit 1
+    fi
+    echo "[OK] Execution container (\$EXEC_CONTAINER) is running."
 EOF
 then
     echo "[OK] Deployment Verification Successful."

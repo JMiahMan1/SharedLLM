@@ -278,7 +278,7 @@ const NowPlayingCard = ({
   maPlayer?: { isConnected: boolean; connectionState: string; reconnect: () => void; mediaTitle?: string | null; mediaArtist?: string | null; mediaImage?: string | null };
 }) => {
   const nowPlaying = mediaStatus?.state === 'playing' || mediaStatus?.state === 'paused';
-  const isWebPlayer = selectedTarget === 'web_player';
+  const isWebPlayer = !selectedTarget;
 
   const formatTime = (seconds: number) => {
     if (!seconds || isNaN(seconds)) return '0:00';
@@ -959,7 +959,7 @@ const Media = () => {
   const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
   const [localMode, setLocalMode] = useState(true);
-  const isWebPlayer = selectedTarget === 'web_player';
+  const isWebPlayer = !selectedTarget;
   const [maPlayers, setMaPlayers] = useState<Array<{ player_id: string; name: string; available: boolean; state: string; powered: boolean }>>([]);
 
   // Local player states
@@ -1452,8 +1452,7 @@ const Media = () => {
   }, [selectedTarget, trigger, fetchMediaStatus]);
 
   const playMedia = useCallback(async (query: string, mediaType?: string) => {
-    if (!selectedTarget) { setError('Select a device first'); return; }
-    if (selectedTarget === 'web_player') {
+    if (!selectedTarget) {
       trigger('heavy');
       setLoading('play');
       setError(null);
@@ -1507,8 +1506,7 @@ const Media = () => {
   }, [selectedTarget, trigger, fetchMediaStatus, maPlayer, localVolume, localMuted]);
 
   const playAudiobook = useCallback(async (bookId: string) => {
-    if (!selectedTarget) { setError('Select a device first'); return; }
-    if (selectedTarget === 'web_player') {
+    if (!selectedTarget) {
       trigger('heavy');
       setLoading('play');
       setError(null);
@@ -1566,8 +1564,7 @@ const Media = () => {
   }, [selectedTarget, trigger, fetchMediaStatus, maPlayer, localVolume, localMuted]);
 
   const playPlaylist = useCallback(async (uri: string) => {
-    if (!selectedTarget) { setError('Select a device first'); return; }
-    if (selectedTarget === 'web_player') {
+    if (!selectedTarget) {
       trigger('heavy');
       setLoading('play');
       setError(null);
