@@ -1928,7 +1928,14 @@ def delete_workspace(workspace_id: str, x_internal_secret: str | None = Header(d
             raise HTTPException(status_code=404, detail="Workspace not found")
         session.delete(ws)
         session.commit()
-        return {"status": "SUCCESS", "message": f"Workspace {workspace_id} deleted"}
+    # Tear down the sandbox container + private network so deletion does not leak
+    # a wsbox-* container (and its wsnet-* subnet) that would otherwise exhaust
+    # Docker's predefined address pools over time. Best-effort: a missing
+    # container/network is not an error.
+    from services.workspace_sandbox import remove_workspace_container
+
+    remove_workspace_container(workspace_id)
+    return {"status": "SUCCESS", "message": f"Workspace {workspace_id} deleted"}
 
 
 @app.post("/files/read")
