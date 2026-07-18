@@ -91,6 +91,29 @@ def test_workspace_crud(client: TestClient):
     assert not any(ws["id"] == "test_ws" for ws in data["workspaces"])
 
 
+def test_delete_workspace_tears_down_sandbox(client: TestClient):
+    """Deleting a workspace must also tear down its sandbox container + network
+    so the wsbox-* container is not leaked (which previously exhausted Docker's
+    predefined address pools)."""
+    from unittest.mock import patch
+
+    ws_data = {
+        "id": "teardown_ws",
+        "display_name": "Teardown Workspace",
+        "local_path": "/tmp/teardown_ws",
+        "sync_mode": "git",
+        "scope": "user",
+        "capabilities": ["read", "write"],
+    }
+    resp = client.post("/workspaces", json=ws_data, headers={"X-Internal-Secret": "test-secret"})
+    assert resp.status_code == 200
+
+    with patch("services.workspace_sandbox.remove_workspace_container") as rm:
+        resp = client.delete("/workspaces/teardown_ws", headers={"X-Internal-Secret": "test-secret"})
+        assert resp.status_code == 200
+        rm.assert_called_once_with("teardown_ws")
+
+
 def test_create_workspace_rejects_empty_id(client: TestClient):
     """An empty/whitespace id must be rejected, not stored as an undeletable row."""
     headers = {"X-Internal-Secret": "test-secret"}

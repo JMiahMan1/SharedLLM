@@ -1,11 +1,16 @@
 import logging
+import os
 import re
+import threading
+import time
+from contextlib import asynccontextmanager
 
+import requests
 from docker.errors import NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 import docker
-from services.config import INTERNAL_SECRET
+from services.config import INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
@@ -14,7 +19,87 @@ from services.shared.info_endpoint import info_router
 
 TRACEBACK_RE = re.compile(r"^Traceback \(most recent call last\)|^\s+File ", re.MULTILINE)
 
-app = FastAPI(title="Control Plane Service")
+CONTAINER_PREFIX = "wsbox-"
+NETWORK_PREFIX = "wsnet-"
+# How often (seconds) the reaper sweeps for orphaned sandbox containers.
+SANDBOX_REAP_INTERVAL = int(__import__("os").getenv("SANDBOX_REAP_INTERVAL", "3600"))
+
+
+def _workspace_exists(workspace_id: str) -> bool:
+    """Return True if the workspace DB record still exists in workspace_runtime."""
+    try:
+        resp = requests.get(
+            f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces/{workspace_id}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=10.0,
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        log.warning(f"[reap] workspace lookup failed for {workspace_id}: {e}")
+        return True  # assume alive on error to avoid destroying a live workspace
+
+
+def _reap_orphan_sandboxes() -> int:
+    """Remove wsbox-* containers (and wsnet-* networks) with no DB workspace.
+
+    Catches sandboxes leaked by deletes that happened before teardown was wired
+    into delete_workspace, plus any container the runtime failed to clean up.
+    """
+    if client is None:
+        return 0
+    removed = 0
+    try:
+        containers = client.containers.list(all=True, filters={"name": CONTAINER_PREFIX})
+    except Exception as e:
+        log.warning(f"[reap] list failed: {e}")
+        return 0
+    for c in containers:
+        name = c.name
+        if not name.startswith(CONTAINER_PREFIX):
+            continue
+        ws_id = name[len(CONTAINER_PREFIX):]
+        if _workspace_exists(ws_id):
+            continue
+        log.info(f"[reap] removing orphaned sandbox container {name}")
+        try:
+            with __import__("contextlib").suppress(Exception):
+                if c.status == "running":
+                    c.stop(timeout=5)
+            c.remove(force=True)
+        except Exception as e:
+            log.warning(f"[reap] failed to remove {name}: {e}")
+            continue
+        try:
+            net = client.networks.get(f"{NETWORK_PREFIX}{ws_id}")
+            net.remove()
+        except NotFound:
+            pass
+        except Exception as e:
+            log.warning(f"[reap] failed to remove network for {ws_id}: {e}")
+        removed += 1
+    if removed:
+        log.info(f"[reap] removed {removed} orphaned sandbox container(s)")
+    return removed
+
+
+def _reaper_loop() -> None:
+    while True:
+        time.sleep(SANDBOX_REAP_INTERVAL)
+        try:
+            _reap_orphan_sandboxes()
+        except Exception as e:  # never let the reaper thread die
+            log.error(f"[reap] unexpected error: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    t = threading.Thread(target=_reaper_loop, name="sandbox-reaper", daemon=True)
+    t.start()
+    log.info(f"Sandbox reaper started (interval={SANDBOX_REAP_INTERVAL}s)")
+    yield
+
+
+app = FastAPI(title="Control Plane Service", lifespan=lifespan)
 app.include_router(info_router)
 
 # Initialize Docker client
@@ -38,8 +123,6 @@ def verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Interna
 
 # ─── Health ────────────────────────────────────────────────────────────────────
 
-import os
-import time
 
 START_TIME = time.time()
 
