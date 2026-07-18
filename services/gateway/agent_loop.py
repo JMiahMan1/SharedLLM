@@ -1629,6 +1629,27 @@ async def _await_mission_resume(
         with contextlib.suppress(Exception):
             await r_ps.close()
 
+# Phrases that indicate the model believes the mission is genuinely done. When a
+# no-tool text reply contains one of these AND the mission has already produced
+# successful tool calls, the runtime terminates cleanly instead of nudging the
+# (correctly-finished) agent to keep emitting tool calls for up to
+# MAX_IDLE_NUDGES turns — which wastes iterations and confuses the model into a
+# "complete -> re-prompt -> complete" loop.
+COMPLETION_INDICATORS = [
+    "mission complete",
+    "mission is complete",
+    "task complete",
+    "task is complete",
+    "i have completed",
+    "the mission is done",
+    "mission accomplished",
+    "successfully created",
+    "has been successfully created",
+    "has been completed",
+    "the task is complete",
+]
+
+
 def should_persist_learning(result: str) -> bool:
     """
     Prevent meaningless results from being added to RAG.
@@ -2746,6 +2767,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # If it's just yapping without a JSON block
             log.warning(f"[AgentLoop] No valid tool call found in textual response (iter {iter_num})")
             _consecutive_no_tool += 1
+
+            # EARLY COMPLETION: the model has already produced successful tool
+            # calls and now replies with a clear "I'm done" statement (e.g.
+            # "mission complete", "successfully created <repo>"). Treat this as a
+            # genuine completion signal and terminate cleanly — do NOT keep
+            # nudging a correctly-finished agent to emit more tool calls, which
+            # would loop it into "complete → re-prompt → complete" for
+            # MAX_IDLE_NUDGES turns.
+            if successful_tool_calls > 0 and ans:
+                _ans_l = ans.lower()
+                if any(ind in _ans_l for ind in COMPLETION_INDICATORS):
+                    log.info(f"[AgentLoop] Completion signal detected in text reply after {successful_tool_calls} tool call(s). Terminating mission as complete.")
+                    await _clear_checkpoint()
+                    break
 
             if agent_iter > 0 and successful_tool_calls > 0:
                 # OpenCode-orchestrator idle-boundary rule: the RUNTIME decides
