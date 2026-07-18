@@ -298,7 +298,49 @@ def ensure_workspace_container(
         auto_remove=False,
     )
     log.info(f"[Sandbox] Created container {cname} for workspace {workspace_id} (mount {mount_source} -> {host_path})")
+    _configure_git_credentials(c)
     return c
+
+
+def _configure_git_credentials(container: Any) -> None:
+    """Install a git credential helper that authenticates with the inherited
+    ``GH_TOKEN``/``GITHUB_TOKEN`` so raw ``git push``/``git ls-remote`` over HTTPS
+    work inside the sandbox (not just the ``gh`` CLI). Without this, ``git`` over
+    HTTPS cannot read the token from ``GH_TOKEN`` and fails with
+    "could not read Username".
+
+    A system-wide ``/etc/gitconfig`` is used (not ``~/.gitconfig``) because the
+    sandbox user's HOME may be unset, and ``/etc/gitconfig`` is honoured
+    regardless of HOME. Files are written via an in-container Python one-liner to
+    avoid shell-heredoc quoting pitfalls inside ``docker exec``.
+    """
+    helper = (
+        "#!/bin/sh\n"
+        "case \"$1\" in\n"
+        "  get)\n"
+        "    tok=\"${GH_TOKEN:-${GITHUB_TOKEN:-}}\"\n"
+        "    if [ -n \"$tok\" ]; then\n"
+        "      echo protocol=https\n"
+        "      echo host=github.com\n"
+        "      echo username=token\n"
+        "      echo password=$tok\n"
+        "    fi\n"
+        "    ;;\n"
+        "esac\n"
+    )
+    gitconfig = (
+        "[credential \"https://github.com\"]\n"
+        "  helper = /usr/local/bin/git-credential-gh-token\n"
+    )
+    writer = (
+        "import os;"
+        "os.makedirs('/usr/local/bin', exist_ok=True);"
+        f"open('/usr/local/bin/git-credential-gh-token','w').write({helper!r});"
+        "os.chmod('/usr/local/bin/git-credential-gh-token', 0o755);"
+        f"open('/etc/gitconfig','w').write({gitconfig!r})"
+    )
+    with contextlib.suppress(Exception):
+        container.exec_run(["python3", "-c", writer], user="0:0")
 
 
 def remove_workspace_container(workspace_id: str) -> None:
