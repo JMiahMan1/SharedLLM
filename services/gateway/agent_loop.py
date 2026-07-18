@@ -934,6 +934,23 @@ def _translate_shell_to_git_op(cmd: str) -> list[dict] | None:
         if _gh_parts and _gh_parts[0] == "gh":
             return None
 
+    # `git branch` (incl. rename `git branch -m master main`, `-M`, `-a`, `-v`)
+    # is a LOCAL operation that does NOT need push credentials and, critically,
+    # the git-op translator mangles it (it reads `parts[2]` as the branch name,
+    # so `git branch -m master main` becomes action 'branch' path '-m' and the
+    # real `command` is dropped — see mission 7). Run the WHOLE pipeline natively
+    # in the shell so the branch rename (and any sibling git steps) execute as
+    # written against the injected-token environment.
+    _branch_norm = re.sub(r"^\s*sudo\s+", "", cmd).strip()
+    for _br_piece in re.split(r"\s*(?:\|\||&&|;)\s*", _branch_norm):
+        _br_p = re.sub(r"^\s*sudo\s+", "", _br_piece).strip()
+        try:
+            _br_parts = shlex.split(_br_p)
+        except ValueError:
+            continue
+        if _br_parts and _br_parts[0] == "git" and len(_br_parts) > 1 and _br_parts[1] == "branch":
+            return None
+
     # Split compound commands; trailing `|| true` / `&& true` guards are dropped.
     pieces = re.split(r"\s*(?:\|\||&&|;)\s*", cmd.strip())
     routed: list[dict] = []
