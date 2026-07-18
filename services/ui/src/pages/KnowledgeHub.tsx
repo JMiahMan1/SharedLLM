@@ -596,43 +596,40 @@ const KnowledgeHub = () => {
         </div>
       </section>
 
-      <section className="mt-12 pt-12 border-t border-white/5">
-         <div className="flex items-center justify-between gap-4 mb-8">
-            <div className="flex items-center gap-3">
-               <div className="p-3 rounded-2xl bg-indigo-500/10 text-indigo-400">
-                  <Brain size={24} />
+      <section className="mt-8 pt-8 border-t border-white/5">
+         <div className="flex items-center justify-between gap-4 mb-4">
+            <div className="flex items-center gap-2.5">
+               <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400">
+                  <Brain size={18} />
                </div>
                <div>
-                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <h3 className="text-base font-bold text-white flex items-center gap-1.5">
                      Raven Lessons
-                     <Sparkles size={16} className="text-indigo-400" />
+                     <Sparkles size={13} className="text-indigo-400" />
                   </h3>
-                  <p className="text-sm text-slate-500">
-                     Successful knowledge Raven has learned on past missions. Reuse count tracks how often a lesson was applied.
+                  <p className="text-[11px] text-slate-500 leading-tight">
+                     Knowledge Raven learned · ♻ = times reused
                   </p>
                </div>
             </div>
             <button
                onClick={() => setLearningSort(learningSort === 'recent' ? 'reuse' : 'recent')}
-               className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/10 transition-colors"
+               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-300 hover:bg-white/10 transition-colors"
             >
-               <ArrowUpDown size={14} />
+               <ArrowUpDown size={12} />
                {learningSort === 'reuse' ? 'Most Reused' : 'Newest'}
             </button>
          </div>
 
          {learningsLoading ? (
-            <div className="glass-panel p-10 text-center text-slate-500">
-               <RefreshCw size={24} className="animate-spin mx-auto mb-3 text-indigo-400" />
+            <div className="glass-panel p-6 text-center text-slate-500 text-sm">
+               <RefreshCw size={18} className="animate-spin mx-auto mb-2 text-indigo-400" />
                Loading Raven lessons…
             </div>
          ) : !learnings || learnings.items.length === 0 ? (
-            <div className="glass-panel p-12 text-center border-white/5">
-               <Brain size={48} className="mx-auto mb-4 text-slate-700" />
-               <p className="text-slate-400 font-medium">No Raven lessons yet</p>
-               <p className="text-xs text-slate-600 mt-1">
-                  Lessons appear here once Raven successfully completes missions and persists what it learned.
-               </p>
+            <div className="glass-panel p-6 text-center border-white/5">
+               <Brain size={28} className="mx-auto mb-2 text-slate-700" />
+               <p className="text-slate-400 text-sm font-medium">No Raven lessons yet</p>
             </div>
           ) : (
             <div className="flex flex-col gap-2">
