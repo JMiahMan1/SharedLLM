@@ -11,6 +11,9 @@ export default defineConfig({
     baseURL: process.env.UI_URL || 'http://192.168.2.205:8080',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+    launchOptions: {
+      args: ['--no-sandbox', '--disable-dev-shm-usage'],
+    },
   },
   projects: [
     {
