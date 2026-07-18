@@ -49,6 +49,37 @@ DEFAULT_ADMIN_PASSWORD = os.getenv(
     "RAVEN_ADMIN_PASSWORD", ENV.get("DEFAULT_ADMIN_PASSWORD", "")
 )
 
+
+def _resolve_github_user() -> str:
+    """Resolve the authenticated GitHub login from the token.
+
+    The .env GITHUB_USER value can disagree with the token's actual owner
+    (e.g. 'jeremiah@sumemail.com' vs the token's 'JMiahMan1'), which makes the
+    zero-trust GitHub verification check the wrong namespace and fail even when
+    the repo was created. Always verify against the token's real login.
+    """
+    if os.getenv("RAVEN_GH_USER"):
+        return os.getenv("RAVEN_GH_USER")
+    try:
+        resp = requests.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {GITHUB_TOKEN}"},
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            login = resp.json().get("login")
+            if login:
+                return login
+    except Exception:
+        pass
+    return GITHUB_USER
+
+
+# Resolve the real GitHub owner from the token so zero-trust checks target the
+# correct namespace (the .env GITHUB_USER may not match the token's owner).
+GITHUB_USER = _resolve_github_user()
+
+
 MISSION_POLL_INTERVAL = 15          # seconds
 MISSION_TIMEOUT = 25 * 60           # seconds (Raven can be slow)
 # Coding model is intentionally NOT sent in the payload — Raven must rely on its
@@ -178,13 +209,30 @@ def _gh_default_branch_has_commit(repo: str) -> bool:
     return bool(data.get("pushed_at"))  # non-null once something is pushed
 
 
-def _gh_delete_repo(repo: str) -> None:
+def _gh_delete_repo(repo: str) -> bool:
+    """Delete a GitHub repo created during the test.
+
+    Returns True if deleted, False if deletion is not permitted (the infra token
+    often lacks the ``delete_repo`` scope, so DELETE returns 403 even though the
+    ``repo`` scope allows creation). In that case we log and leave the repo for
+    manual cleanup rather than failing the whole curriculum test.
+    """
     resp = requests.delete(
         f"https://api.github.com/repos/{GITHUB_USER}/{repo}",
         headers={"Authorization": f"Bearer {GITHUB_TOKEN}"},
         timeout=30,
     )
-    _log(f"GitHub repo delete {repo}: {resp.status_code}")
+    if resp.status_code in (200, 204):
+        _log(f"GitHub repo delete {repo}: OK")
+        return True
+    if resp.status_code == 403:
+        _log(
+            f"GitHub repo delete {repo}: 403 (token lacks delete_repo scope) — "
+            f"left for manual cleanup"
+        )
+        return False
+    _log(f"GitHub repo delete {repo}: unexpected {resp.status_code}")
+    return False
 
 
 def _delete_workspace_via_api(api_key: str, workspace_id: str) -> None:
