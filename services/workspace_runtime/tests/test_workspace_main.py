@@ -89,3 +89,21 @@ def test_workspace_crud(client: TestClient):
     resp = client.get("/workspaces", headers={"X-Internal-Secret": "test-secret"})
     data = resp.json()
     assert not any(ws["id"] == "test_ws" for ws in data["workspaces"])
+
+
+def test_create_workspace_rejects_empty_id(client: TestClient):
+    """An empty/whitespace id must be rejected, not stored as an undeletable row."""
+    headers = {"X-Internal-Secret": "test-secret"}
+    for bad_id in ["", "   ", None]:
+        ws_data = {
+            "id": bad_id,
+            "display_name": "Broken",
+            "local_path": "/tmp/broken_ws",
+            "scope": "user",
+        }
+        resp = client.post("/workspaces", json=ws_data, headers=headers)
+        assert resp.status_code == 400, f"empty id {bad_id!r} should be rejected"
+        # Confirm nothing was persisted with an empty id.
+        listing = client.get("/workspaces", headers=headers).json()
+        assert not any((ws.get("id") or "") == "" for ws in listing["workspaces"])
+
