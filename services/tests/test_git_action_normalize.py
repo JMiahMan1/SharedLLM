@@ -89,3 +89,32 @@ def test_visibility_not_applied_for_non_repo_action():
     p = {"action": "push", "isPrivate": True}
     _normalize_git_payload_action(p)
     assert "private" not in p
+
+
+def test_repo_create_never_normalized_to_note_create():
+    # User reported: "repo_create failed because it tried to use an unknown
+    # action 'note_create'". Verify no path turns a repo_create payload into a
+    # note action — the verb must stay a valid git op.
+    for p in [
+        {"action": "repo_create", "repo_name": "my-repo", "private": True},
+        {"action": "GitOperationRequest", "repo_name": "my-repo", "repo_url": "https://x/y.git"},
+        {"action": "gitoperationrequest", "source_path": "/src"},
+    ]:
+        out = _normalize_git_payload_action(p.copy())
+        assert out["action"] == "repo_create", out
+        assert "note" not in out["action"]
+
+
+def test_status_action_is_valid_and_kept():
+    # User reported "status returned Unknown action". status is a documented
+    # valid verb and must pass through untouched.
+    p = {"action": "status"}
+    out = _normalize_git_payload_action(p.copy())
+    assert out["action"] == "status"
+
+
+def test_repo_create_with_isPrivate_normalizes_to_private_true():
+    p = {"action": "repo_create", "repo_name": "my-repo", "isPrivate": True}
+    out = _normalize_git_payload_action(p.copy())
+    assert out["action"] == "repo_create"
+    assert out["private"] is True
