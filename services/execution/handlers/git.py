@@ -818,4 +818,13 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         )
 
     else:
-        return GitExecutionResult(status="FAILURE", message=f"Unknown git action '{action}'. Valid: status, diff, add, commit, pull, push, log, repo_create, repo_clone, gh_noop.", service="git", detail={})
+        return GitExecutionResult(
+            status="FAILURE",
+            message=(
+                f"Unknown git action '{action}'. Valid: status, diff, add, commit, "
+                f"pull, push, log, fetch, init, remote, remote_add, branch, checkout, "
+                f"show, clean, reset, repo_create, repo_clone, gh_noop."
+            ),
+            service="git",
+            detail={},
+        )
