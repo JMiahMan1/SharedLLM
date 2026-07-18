@@ -10,9 +10,11 @@ import tempfile
 import threading
 import time
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import redis
@@ -93,7 +95,74 @@ def get_workspace_root() -> Path:
         return _DEFAULT_WORKSPACE_ROOT
 
 
+async def _get_config_timezone_async() -> str:
+    """Return the Config DB `timezone` value (e.g. "America/Phoenix"), or UTC."""
+    try:
+        async with get_client() as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC_URL}/api/settings/timezone",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=2.0),
+            )
+            if resp.status == 200:
+                data = await resp.json()
+                val = (data.get("value") or "").strip()
+                if val:
+                    return val
+    except Exception as e:
+        log.debug(f"Failed to fetch timezone from identity: {e}")
+    return "UTC"
+
+
+def get_config_timezone() -> str:
+    """Synchronously resolve the configured timezone name (falls back to UTC)."""
+    try:
+        return asyncio.run(_get_config_timezone_async())
+    except Exception as e:
+        log.debug(f"Failed to resolve config timezone: {e}")
+        return "UTC"
+
+
+def _now_in_config_tz() -> datetime:
+    """Current time as a timezone-aware datetime in the configured Config DB tz."""
+    tz_name = get_config_timezone()
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("UTC")
+    return datetime.now(tz)
+
+
 WORKSPACE_ROOT = _DEFAULT_WORKSPACE_ROOT
+
+
+# Cache the configured timezone (Config DB `timezone` setting) so per-workspace
+# serialization doesn't hit identity on every request. Refreshed hourly.
+_CONFIG_TZ_CACHE: dict[str, float] = {"tz": "UTC", "ts": 0.0}
+
+
+def _cached_config_tz() -> str:
+    now = time.time()
+    if now - _CONFIG_TZ_CACHE["ts"] > 3600:
+        _CONFIG_TZ_CACHE["tz"] = get_config_timezone()
+        _CONFIG_TZ_CACHE["ts"] = now
+    return _CONFIG_TZ_CACHE["tz"]
+
+
+def _created_at_in_config_tz(value: "datetime | None") -> "str | None":
+    """Render a stored (UTC) created_at as an offset-aware ISO string in the
+    configured Config DB timezone, so the UI shows the operator's local time."""
+    if not value:
+        return None
+    # SQLite TIMESTAMP columns return naive datetimes; treat them as UTC.
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    try:
+        tz = ZoneInfo(_cached_config_tz())
+    except Exception:
+        tz = timezone.utc
+    return value.astimezone(tz).isoformat()
+
 DEFAULT_PYTEST_TIMEOUT_SECONDS = WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS
 DEFAULT_FILE_READ_LIMIT = WORKSPACE_RUNTIME_FILE_READ_LIMIT
 DEFAULT_PROTECTED_BRANCH_PATTERNS = [
@@ -438,6 +507,9 @@ def _load_registry() -> list[dict[str, Any]]:
 
 def _workspace_to_dict(item: Workspace) -> dict[str, Any]:
     data = item.model_dump()
+    # Emit created_at as an offset-aware ISO string in the configured timezone
+    # so the UI "Created" label renders in the operator's local time.
+    data["created_at"] = _created_at_in_config_tz(getattr(item, "created_at", None))
     data["webhook_token"] = decrypt(item.webhook_token_enc) if item.webhook_token_enc else item.webhook_token
     data.pop("webhook_token_enc", None)
 
@@ -1748,6 +1820,10 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
                 "message": f"Workspace {existing.id} already existed; adopted as working sandbox.",
             }
         _store_workspace_secret_fields(ws)
+        # Stamp creation time in UTC (unambiguous at rest). It is converted to
+        # the configured Config DB timezone at serialization time so the
+        # "Created" label renders in the operator's local time.
+        ws.created_at = datetime.now(timezone.utc)
         session.add(ws)
         session.commit()
         session.refresh(ws)
