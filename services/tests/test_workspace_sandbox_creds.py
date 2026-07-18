@@ -85,3 +85,27 @@ def test_ensure_workspace_container_injects_creds(monkeypatch):
 
     ws.ensure_workspace_container("test-ws", "/tmp/test-ws")
     assert created.get("environment", {}).get("GH_TOKEN") == "ghp_injected"
+
+
+def test_configure_git_credentials_writes_helper_and_gitconfig(monkeypatch):
+    """_configure_git_credentials must install a git credential helper that reads
+    GH_TOKEN/GITHUB_TOKEN and a system-wide /etc/gitconfig pointing at it, so raw
+    `git push`/`git ls-remote` over HTTPS authenticate inside the sandbox."""
+    import services.workspace_sandbox as ws
+
+    calls = {}
+
+    class FakeContainer:
+        def exec_run(self, cmd, user=None):
+            calls.setdefault("cmds", []).append((cmd, user))
+            return None
+
+    ws._configure_git_credentials(FakeContainer())
+    assert "cmds" in calls, "expected exec_run to write credential files"
+    joined = " ".join(str(c[0]) for c in calls["cmds"])
+    # helper reads GH_TOKEN and is made executable
+    assert "git-credential-gh-token" in joined
+    assert "GH_TOKEN" in joined
+    assert "/etc/gitconfig" in joined
+    # the gitconfig must reference the helper by absolute path (no leading '!')
+    assert "helper = /usr/local/bin/git-credential-gh-token" in joined
