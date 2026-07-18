@@ -45,6 +45,49 @@ os.system(f"git config --global --add safe.directory {WORKSPACE_ROOT}")
 os.system(f"git config --global --add safe.directory '{WORKSPACE_ROOT}/*'")
 log.info(f"Marked {WORKSPACE_ROOT} and subdirectories as safe.directory")
 
+# Default .gitignore seeded into every workspace on repo creation. Keeps
+# training-repo noise (local journals, venvs, caches, model artifacts) out of
+# GitHub pushes. Only written when the workspace has no .gitignore yet, so a
+# model-authored one is never clobbered.
+DEFAULT_GITIGNORE = """\
+# Raven local training journal (per-workspace learning, not repo content)
+raven_memory.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / JS / TS
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.next/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+
+# Model artifacts / caches
+*.bin
+*.gguf
+models/
+checkpoints/
+"""
+
 
 # ---------------------------------------------------------------------------
 # Repo-write guardrail: a workspace may ONLY push to its OWN designated repository.
@@ -699,6 +742,15 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
         r = await _run_git(["remote", "add", "origin", auth_url], cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("repo_create", r)
+        # Seed a default .gitignore (idempotent: never overwrites a model's own).
+        _gi_path = os.path.join(workspace_path, ".gitignore")
+        if not os.path.exists(_gi_path):
+            try:
+                with open(_gi_path, "w", encoding="utf-8") as _gf:
+                    _gf.write(DEFAULT_GITIGNORE)
+                log.info(f"[Git] Seeded default .gitignore at {_gi_path}")
+            except Exception as _gie:
+                log.warning(f"[Git] .gitignore seed skipped: {_gie}")
         # Bind repo_url to the workspace so the per-workspace push-scope
         # guardrail permits the follow-up push.
         if workspace_id:

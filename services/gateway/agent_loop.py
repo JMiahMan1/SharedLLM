@@ -3821,6 +3821,38 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 )
                 if resp.status != 200:
                     log.warning(f"[AgentLoop] Learning persistence failed: {resp.status} {resp.text}")
+
+            # BRIDGE: keep the workspace's local raven_memory.md journal in sync
+            # with the global system_learnings store. system_learnings is what
+            # cross-workspace missions retrieve, but raven_memory.md is the
+            # human-readable, auditable journal for THIS workspace — and the
+            # training curriculum's success criteria checks it. Persisting here
+            # (not relying on the model's prompt instruction) guarantees the two
+            # layers never diverge, and gives repeatable tasks in the same
+            # workspace a durable, file-backed memory.
+            if workspace_id and reflection:
+                try:
+                    _entry = (
+                        f"\n## {datetime.now().isoformat(timespec='seconds')}\n\n"
+                        f"{reflection.strip()}\n"
+                    )
+                    async with shared_http_client() as client:
+                        _wr = await client.post(
+                            f"{EXECUTION_SVC}/execute/workspace_file_write",
+                            json={
+                                "workspace_id": workspace_id,
+                                "path": "raven_memory.md",
+                                "content": _entry,
+                                "append": True,
+                                "user_context": creds.model_dump(),
+                            },
+                            headers={"X-Internal-Secret": INTERNAL_SECRET},
+                            timeout=aiohttp.ClientTimeout(total=30.0),
+                        )
+                        if _wr.status != 200:
+                            log.warning(f"[AgentLoop] raven_memory.md append failed: {_wr.status} {_wr.text}")
+                except Exception as _me:
+                    log.warning(f"[AgentLoop] raven_memory.md append skipped: {_me}")
         except Exception as e:
             log.warning(f"[AgentLoop] Learning persistence skipped: {e}")
 

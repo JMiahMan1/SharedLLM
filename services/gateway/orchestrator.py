@@ -289,8 +289,9 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     # 1. Retrieve Memory
     short_term: list = [] # Placeholder
 
-    # 2. Context Injection (RAG + live HA state)
-    rag_context = await _fetch_rag_context(query, user_id, creds)
+    # 2. Context Injection (RAG + live HA state + workspace memory)
+    workspace_id = job_payload.get("workspace_id")
+    rag_context = await _fetch_rag_context(query, user_id, creds, workspace_id=workspace_id)
 
     # Hardened intent: only flag a Raven mission when the prompt explicitly
     # invokes Raven AND issues a command. Bare action verbs (e.g. "fix the
@@ -313,7 +314,7 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
 
     return ans
 
-async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredentials | None = None) -> str:
+async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredentials | None = None, workspace_id: str | None = None) -> str:
     rag_context = ""
     settings = await get_all_settings()
     rag_svc = _get(settings, "rag_svc_url")
@@ -385,6 +386,34 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
                                 break
     except Exception as e:
         log.error(f"RAG search failed: {e}")
+
+    # BRIDGE (read path): surface THIS workspace's own raven_memory.md journal so
+    # repeatable tasks in the same workspace start from accumulated experience,
+    # not just the global system_learnings store. system_learnings covers
+    # cross-workspace reuse; this covers same-workspace reinforcement. Reads are
+    # best-effort and never block the mission if the file is missing/unreadable.
+    if workspace_id:
+        try:
+            from services.gateway.main import shared_http_client
+            async with shared_http_client() as client:
+                _wr = await client.post(
+                    f"{EXECUTION_SVC}/execute/workspace_file_read",
+                    json={"workspace_id": workspace_id, "path": "raven_memory.md"},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                if _wr.status == 200:
+                    _data = await _wr.json()
+                    _mem = (_data.get("result") or {}).get("content") or _data.get("content") or ""
+                    if _mem and _mem.strip():
+                        rag_context += (
+                            "\n[WORKSPACE_MEMORY — this workspace's prior lessons: read and "
+                            "APPLY these to avoid repeating past work]\n"
+                            + _mem.strip()[:8000]
+                            + "\n"
+                        )
+        except Exception as _me:
+            log.warning(f"[Orchestrator] raven_memory.md read skipped: {_me}")
 
     # Proactively inject weather context for weather-related queries
     weather_keywords = ["weather", "forecast", "rain", "snow", "temperature", "outside", "humid", "wind", "storm", "sunny", "cloudy", "cold", "hot", "warm"]
