@@ -3466,6 +3466,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             exec_data = {"status": "ERROR", "message": msg}
                         else:
                             exec_data = await resp.json()
+                            # The execution service may return an empty body or a
+                            # literal `null` (e.g. 204 / no content). Coerce that to
+                            # a safe dict so the downstream git-batch merge (which
+                            # assigns into exec_data["message"]/@"status") cannot
+                            # raise `TypeError: 'NoneType' object does not support
+                            # item assignment`.
+                            if not isinstance(exec_data, dict):
+                                exec_data = {"status": "SUCCESS", "message": "", "detail": {}}
                             # Fan out any additional git ops from a compound
                             # intercepted shell command (e.g.
                             # `git init && git remote add origin <url> && git fetch`)
