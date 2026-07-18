@@ -537,11 +537,16 @@ def _normalize_git_payload_action(payload: dict) -> dict:
     if not isinstance(payload, dict):
         return payload
 
+    # Normalize repo-visibility flags regardless of verb resolution below:
+    # models routinely emit `isPrivate`/`public`/`visibility` and the schema
+    # silently ignores unknown keys, which would otherwise create a PUBLIC repo.
+    _normalize_git_visibility(payload)
+
     raw = payload.get("action")
     current = str(raw).strip().lower() if raw is not None else ""
     outer_action = str(payload.get("_outer_action") or "").strip().lower()
 
-    # Already a valid verb — nothing to do.
+    # Already a valid verb — nothing more to do.
     if current in _GIT_VALID_ACTIONS:
         return payload
 
@@ -584,6 +589,46 @@ def _normalize_git_payload_action(payload: dict) -> dict:
         payload["action"] = "status"
 
     return payload
+
+
+# Field names (besides the canonical `private`) the model may use to express
+# repository visibility.
+_VISIBILITY_KEYS = ("isPrivate", "is_private", "isPublic", "is_public", "public", "visibility")
+
+
+def _normalize_git_visibility(payload: dict) -> None:
+    """Coerce repo-visibility variants into the handler's ``private`` bool."""
+    if not isinstance(payload, dict):
+        return
+    action = str(payload.get("action") or "").strip().lower()
+    if action not in ("repo_create", "remote_add"):
+        return
+
+    # Canonical `private` already present and not None -> respect it.
+    if "private" in payload and payload["private"] is not None:
+        explicit = payload["private"]
+        payload["private"] = bool(explicit) if not isinstance(explicit, str) else explicit.strip().lower() not in ("false", "0", "no", "public")
+        return
+
+    # `public: true` => private False; `public: false` => private True.
+    if "public" in payload and payload["public"] is not None:
+        pub = payload["public"]
+        is_public = bool(pub) if not isinstance(pub, str) else pub.strip().lower() not in ("false", "0", "no")
+        payload["private"] = not is_public
+        return
+
+    # `isPrivate` / `is_private` => direct bool.
+    for key in ("isPrivate", "is_private"):
+        if key in payload and payload[key] is not None:
+            val = payload[key]
+            payload["private"] = bool(val) if not isinstance(val, str) else val.strip().lower() not in ("false", "0", "no")
+            return
+
+    # `visibility`: "private"|"internal"|"public".
+    if "visibility" in payload and payload["visibility"] is not None:
+        vis = str(payload["visibility"]).strip().lower()
+        payload["private"] = vis != "public"
+        return
 
 
 def _extract_tool_candidates(text: str) -> list:
@@ -1841,18 +1886,22 @@ async def _shell_out(workspace_id: str, uc: dict, command: str) -> str | None:
         return None
 
 
-async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials, repo_cmd: str | None = None) -> None:
+async def _autowire_created_repo(
+    workspace_id: str,
+    creds: ResolvedCredentials,
+    repo_cmd: str | None = None,
+    exec_data: dict | None = None,
+) -> None:
     """After a successful ``gh repo create`` inside a workspace, fetch the new
     remote and bind it to the workspace settings (repo_url / git_remote /
     default_branch). This guarantees the workspace's "Source Repository" is
     populated even if the model forgets to call WorkspaceSettingsUpdateRequest.
 
-    The repo URL is resolved from the ``gh repo create <name>`` command itself
-    (via ``gh repo view <name> --json url``), NOT from ``git remote get-url
-    origin`` — at ``gh repo create`` time the workspace git remote has NOT been
-    added yet (that happens later, right before ``git push``), so reading the
-    remote would return nothing and the bind would silently no-op, leaving every
-    later ``git push`` refused by the per-workspace guardrail.
+    The repo URL is taken from the ``repo_create`` tool RESULT first (the git
+    handler returns the created clone URL), which is authoritative and avoids a
+    second GitHub round-trip. Only if that is missing do we fall back to
+    ``gh repo view <name>`` (retry once to absorb propagation lag), and finally
+    to the workspace's configured git remote.
 
     Best-effort: any failure is logged and ignored so it never blocks the mission.
     """
@@ -1878,19 +1927,25 @@ async def _autowire_created_repo(workspace_id: str, creds: ResolvedCredentials, 
         }
 
         url: str | None = None
-        name = _extract_repo_name_from_cmd(repo_cmd)
-        if name:
-            # Resolve the freshly-created repo's HTTPS URL via gh (the repo now
-            # exists on GitHub). Retry once to absorb GitHub propagation lag.
-            out = await _shell_out(workspace_id, uc, f"gh repo view {name} --json url -q .url")
-            if not out:
-                import asyncio
-                await asyncio.sleep(2.0)
-                out = await _shell_out(workspace_id, uc, f"gh repo view {name} --json url -q .url")
-            if out:
-                url = out.strip().strip('"').strip("'")
+        # 1) Prefer the URL the repo_create tool already returned.
+        if isinstance(exec_data, dict):
+            _ed = exec_data.get("detail") if isinstance(exec_data.get("detail"), dict) else exec_data
+            url = (_ed or {}).get("repo_url") or exec_data.get("repo_url")
+
+        # 2) Fallback: resolve via gh repo view (retry once for propagation lag).
         if not url:
-            # Fallback: read whatever remote is configured now.
+            name = _extract_repo_name_from_cmd(repo_cmd)
+            if name:
+                out = await _shell_out(workspace_id, uc, f"gh repo view {name} --json url -q .url")
+                if not out:
+                    import asyncio
+                    await asyncio.sleep(2.0)
+                    out = await _shell_out(workspace_id, uc, f"gh repo view {name} --json url -q .url")
+                if out:
+                    url = out.strip().strip('"').strip("'")
+
+        # 3) Last resort: whatever remote is configured now.
+        if not url:
             out = await _shell_out(workspace_id, uc, "git remote get-url origin 2>/dev/null")
             if out:
                 url = out.strip().strip('"').strip("'")
@@ -3475,7 +3530,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             ):
                                 _repo_cmd = " ".join(str(payload.get(k, "")) for k in ("command", "args", "action", "repo_url"))
                                 if "gh repo create" in _repo_cmd or "repo create" in _repo_cmd or "repo_create" in _repo_cmd:
-                                    await _autowire_created_repo(workspace_id, creds, _repo_cmd)
+                                    await _autowire_created_repo(workspace_id, creds, _repo_cmd, exec_data)
 
                     # Sanitize execution results before any downstream use
                     exec_data = sanitize_for_llm(exec_data)

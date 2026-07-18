@@ -41,3 +41,51 @@ def test_git_action_field_variant():
 def test_repo_create_inference():
     p = _normalize_git_payload_action({"action": "GitOperationRequest", "source_path": "/x", "repo_name": "r"})
     assert p["action"] == "repo_create"
+
+
+def test_visibility_isprivate_true():
+    p = {"action": "repo_create", "isPrivate": True}
+    _normalize_git_payload_action(p)
+    assert p["private"] is True
+
+
+def test_visibility_isprivate_false():
+    p = {"action": "repo_create", "isPrivate": False}
+    _normalize_git_payload_action(p)
+    assert p["private"] is False
+
+
+def test_visibility_public_true_means_private_false():
+    p = {"action": "repo_create", "public": True}
+    _normalize_git_payload_action(p)
+    assert p["private"] is False
+
+
+def test_visibility_public_false_means_private_true():
+    p = {"action": "repo_create", "public": False}
+    _normalize_git_payload_action(p)
+    assert p["private"] is True
+
+
+def test_visibility_visibility_field_private():
+    p = {"action": "repo_create", "visibility": "private"}
+    _normalize_git_payload_action(p)
+    assert p["private"] is True
+
+
+def test_visibility_visibility_field_public():
+    p = {"action": "repo_create", "visibility": "public"}
+    _normalize_git_payload_action(p)
+    assert p["private"] is False
+
+
+def test_visibility_canonical_private_respected():
+    p = {"action": "repo_create", "private": False}
+    _normalize_git_payload_action(p)
+    assert p["private"] is False
+
+
+def test_visibility_not_applied_for_non_repo_action():
+    p = {"action": "push", "isPrivate": True}
+    _normalize_git_payload_action(p)
+    assert "private" not in p
