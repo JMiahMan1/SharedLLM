@@ -159,3 +159,38 @@ def test_compound_git_shell_routes_to_gitoperationrequest_with_batch():
     assert gb[0]["action"] == "add"
     assert gb[1]["action"] == "commit"
 
+
+def test_prose_git_calls_resolve_real_verb():
+    # Regression (mission 13): the 35B model emits numbered-prose tool calls.
+    # The prose parser used to clobber the inner git verb with the wrapper type
+    # (`GitOperationRequest`), so every git op dispatched as read-only `status`
+    # and the mission hung at progress 0. The real verb (`repo_create`/`add`/
+    # `commit`/`push`) carried in `action '...'` must become the routing action,
+    # and stray backticks the model adds must be stripped.
+    from services.gateway.prose_tools import extract_action_prose
+
+    text = """
+    1. GitOperationRequest action 'repo_create' repo_name 'raven-test-1' private true
+    2. GitOperationRequest action 'add' path '.'
+    3. GitOperationRequest action 'commit' commit_message 'feat: init'
+    4. GitOperationRequest action 'push' branch 'main'
+    """
+    calls = extract_action_prose(text)
+    assert calls is not None
+    actions = [c["action"] for c in calls]
+    assert actions[0] == "repo_create" and calls[0].get("repo_name") == "raven-test-1"
+    assert actions[1] == "add" and calls[1].get("path") == "."
+    assert actions[2] == "commit" and calls[2].get("commit_message") == "feat: init"
+    assert actions[3] == "push" and calls[3].get("branch") == "main"
+
+
+def test_prose_git_strips_backticks():
+    # Model wraps values in backticks; ensure they are normalized away.
+    from services.gateway.prose_tools import extract_action_prose
+
+    text = "GitOperationRequest action `repo_create` repo_name `raven-test-bt`"
+    calls = extract_action_prose(text)
+    assert calls is not None
+    assert calls[0]["action"] == "repo_create"
+    assert calls[0].get("repo_name") == "raven-test-bt"
+

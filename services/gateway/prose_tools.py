@@ -105,6 +105,12 @@ def _parse_pairs(segment: str) -> dict:
             value: str | bool | None = qm.group(1)
         else:
             value = raw
+        # The 35B model frequently wraps values in backticks (e.g. `repo_create`).
+        # Strip them so downstream verb/name matching works.
+        if isinstance(value, str):
+            value = value.strip("`").strip()
+            if value == "":
+                value = None
             low = value.lower()
             if low in ("true", "false"):
                 value = low == "true"
@@ -121,6 +127,33 @@ def _parse_pairs(segment: str) -> dict:
     return pairs
 
 
+# Recognized Raven git verbs. When the model emits a `GitOperationRequest`
+# wrapper in prose, the real verb usually sits in an `action`/`git_action` pair
+# (e.g. `GitOperationRequest action 'repo_create' ...`). Prefer that over the
+# wrapper type so the right handler dispatches.
+_GIT_VERBS = {
+    "status", "diff", "add", "commit", "pull", "push", "log", "fetch", "reset",
+    "branch", "checkout", "clean", "show", "init", "remote", "remote_add",
+    "repo_create", "repo_clone", "gh_noop",
+}
+
+
+def _resolve_prose_action(canonical: str, payload: dict) -> str:
+    """Pick the routing `action` for a prose-recovered tool call.
+
+    Prefer an explicit verb the model named inside the call (``action`` /
+    ``git_action``) over the bare wrapper type. Strip stray backticks the model
+    sometimes adds around values.
+    """
+    for key in ("action", "git_action", "gitaction", "operation"):
+        v = payload.get(key)
+        if isinstance(v, str):
+            v = v.strip("`").strip().lower()
+            if v in _GIT_VERBS:
+                return v
+    return canonical
+
+
 def _normalize_segment(segment: str) -> dict | None:
     """Convert one prose tool segment into a normalized tool dict."""
     tm = _TYPE_PATTERN.search(segment)
@@ -129,10 +162,11 @@ def _normalize_segment(segment: str) -> dict | None:
     raw_type = tm.group("type")
     canonical = _TYPE_ALIASES.get(raw_type.lower(), raw_type)
     payload = _parse_pairs(segment)
+    action = _resolve_prose_action(canonical, payload)
     tool = {"@type": canonical, **payload}
-    # Mirror the JSON path: surface @type as `action` so downstream
-    # normalization treats it uniformly.
-    tool["action"] = canonical
+    # Mirror the JSON path: surface the resolved verb as `action` so downstream
+    # normalization/routing treats it uniformly.
+    tool["action"] = action
     tool["payload"] = payload
     return tool
 
