@@ -19,13 +19,15 @@ import {
   AlertTriangle,
   Star,
   Brain,
-  Calendar
+  Calendar,
+  KeyRound
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type Workspace } from '../services/api';
 import { formatDateTime } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import WorkspaceIDE from '../components/workspace/WorkspaceIDE';
+import { WorkspaceSecrets } from '../components/workspace/WorkspaceSecrets';
 
 const generateWebhookToken = () =>
   Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
@@ -37,6 +39,7 @@ const Workspaces = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingWs, setEditingWs] = useState<Workspace | null>(null);
   const [ideWs, setIdeWs] = useState<Workspace | null>(null);
+  const [secretsWs, setSecretsWs] = useState<Workspace | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   const [form, setForm] = useState<Partial<Workspace>>({
@@ -302,6 +305,13 @@ const Workspaces = () => {
                         >
                           <FolderOpen size={18} />
                         </button>
+                        <button
+                          onClick={() => setSecretsWs(ws)}
+                          className="p-2 rounded-xl text-slate-500 hover:text-indigo-400 hover:bg-white/5 transition-colors"
+                          title="Secrets & Environment"
+                        >
+                          <KeyRound size={18} />
+                        </button>
                         <button 
                           onClick={() => openEdit(ws)}
                           className="p-2 rounded-xl text-slate-500 hover:text-white hover:bg-white/5 transition-colors"
@@ -470,6 +480,9 @@ const Workspaces = () => {
 
       {ideWs && (
         <WorkspaceIDE workspace={ideWs} onClose={() => setIdeWs(null)} />
+      )}
+      {secretsWs && (
+        <WorkspaceSecrets workspace={secretsWs} onClose={() => setSecretsWs(null)} />
       )}
 
       <Modal
