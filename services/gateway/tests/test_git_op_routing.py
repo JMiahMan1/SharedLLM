@@ -141,3 +141,21 @@ def test_translate_shell_does_not_route_git_branch():
     assert _translate_shell_to_git_op("git push origin main") is not None
     assert _translate_shell_to_git_op("git commit -m 'msg'") is not None
 
+
+def test_compound_git_shell_routes_to_gitoperationrequest_with_batch():
+    # Regression (mission 8): a valid `git add X && git commit -m '...'` shell
+    # command was intercepted and translated to a git batch, BUT the dispatcher
+    # never assigned the returned action back to lookup_action, so the PRIMARY
+    # step was POSTed to /execute/workspace_shell (no `command`) and rejected,
+    # while only the secondary batch steps fanned out to /execute/git. The
+    # interceptor MUST return 'gitoperationrequest' (not 'workspaceshellrequest')
+    # so the primary step is dispatched to the git endpoint.
+    na, pl, gb = _route_workspace_shell_to_git(
+        "workspaceshellrequest",
+        {"command": "git add README.md && git commit -m 'feat: x'", "workspace_id": "w"},
+    )
+    assert na == "gitoperationrequest"
+    assert gb is not None and len(gb) == 2
+    assert gb[0]["action"] == "add"
+    assert gb[1]["action"] == "commit"
+

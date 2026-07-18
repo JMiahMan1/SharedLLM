@@ -3142,6 +3142,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 _new_action, payload, _git_batch = _route_workspace_shell_to_git(lookup_action, payload)
                 if _new_action != lookup_action:
                     log.info("[AgentLoop] Intercepted shell git/gh command -> git tool")
+                    # Route the PRIMARY step through the git endpoint (not the
+                    # shell endpoint). Without this, `lookup_action` stays
+                    # `workspaceshellrequest`, the first git op is POSTed to
+                    # /execute/workspace_shell with no `command`, and the shell
+                    # handler rejects it ("Neither command nor commands
+                    # provided"). Only the secondary batch steps fanned out to
+                    # /execute/git, so `add`/`commit` silently broke.
+                    lookup_action = _new_action
 
             if lookup_action in action_map:
                 svc_base, endpoint = action_map[lookup_action]
