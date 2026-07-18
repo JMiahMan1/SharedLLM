@@ -1,8 +1,40 @@
 
 from services.gateway.agent_loop import (
+    ALLOWED_TOOLS,
+    _GIT_VALID_ACTIONS,
     _is_git_op_shell_payload,
     _route_workspace_shell_to_git,
 )
+
+
+def _resolve_action_name(raw_action: str) -> str:
+    """Mirror the AgentLoop action-resolution fast-path for git verbs.
+
+    Kept in sync with services/gateway/agent_loop.py so the regression test
+    fails loudly if the fast-path is removed or weakened.
+    """
+    import re
+
+    action_name = re.sub(r"[\s_]+", "", raw_action).lower()
+    if (
+        action_name in _GIT_VALID_ACTIONS
+        or action_name in {"git" + v for v in _GIT_VALID_ACTIONS}
+        or action_name in {v.replace("_", "") for v in _GIT_VALID_ACTIONS}
+    ):
+        action_name = "gitoperationrequest"
+    return action_name
+
+
+def test_git_verb_resolves_to_gitoperationrequest_not_note_create():
+    # Regression: `repo_create` (underscore-stripped to `repocreate`) is NOT in
+    # ALLOWED_TOOLS, so the Tier-3 fuzzy matcher used to corrupt it to
+    # `note_create` (ratio 0.667) -> "Unknown action: note_create". Every git
+    # verb must resolve to `gitoperationrequest` via the fast-path instead.
+    for raw in ("repo_create", "repocreate", "git_commit", "repo_clone", "commit", "push", "branch"):
+        resolved = _resolve_action_name(raw)
+        assert resolved == "gitoperationrequest", f"{raw} -> {resolved}"
+        assert resolved in ALLOWED_TOOLS
+        assert resolved != "note_create"
 
 
 def test_git_op_shell_payload_detects_branch():

@@ -2882,6 +2882,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         raw_action = str(tool_data.get("action") or tool_data.get("operation") or "")
         action_name = re.sub(r'[\s_]+', '', raw_action).lower()
 
+        # ── Git verb fast-path ──
+        # The model emits git verbs like `repo_create` / `git_commit`; after
+        # underscore-stripping these become `repocreate` / `gitcommit`, which are
+        # NOT in ALLOWED_TOOLS. The Tier-3 fuzzy matcher would then corrupt them
+        # (e.g. `repocreate` fuzzy-matches `note_create` at ratio 0.667 and the
+        # call fails as "Unknown action: note_create"). Route any recognized git
+        # verb to `gitoperationrequest` up front so it is never fuzzy-hijacked.
+        if action_name in _GIT_VALID_ACTIONS or action_name in {
+            "git" + v for v in _GIT_VALID_ACTIONS
+        } or action_name in {v.replace("_", "") for v in _GIT_VALID_ACTIONS}:
+            action_name = "gitoperationrequest"
+
         if action_name not in ALLOWED_TOOLS:
             short_action = raw_action.lower().strip()
 
