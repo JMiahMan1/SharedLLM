@@ -5,6 +5,7 @@ import {
   Folder,
   File,
   ChevronRight,
+  ChevronDown,
   ChevronLeft,
   Search,
   RefreshCw,
@@ -39,6 +40,7 @@ const KnowledgeHub = () => {
   const [ragError, setRagError] = useState<string | null>(null);
 
   const [learningSort, setLearningSort] = useState<'recent' | 'reuse'>('recent');
+  const [expandedLearning, setExpandedLearning] = useState<string | null>(null);
   const [editLearning, setEditLearning] = useState<{ id: string; content: string } | null>(null);
   const [editDraft, setEditDraft] = useState('');
   const [editSaving, setEditSaving] = useState(false);
@@ -81,6 +83,60 @@ const KnowledgeHub = () => {
     queryKey: ['raven-learnings', learningSort],
     queryFn: () => api.getRavenLearnings(200, learningSort),
   });
+
+  interface LearningGroup {
+    key: string;
+    topic: string;
+    items: NonNullable<typeof learnings>['items'];
+    totalUsage: number;
+    maxUsage: number;
+    topTags: string[];
+    latestUsed: string;
+  }
+
+  // Group lessons by topic so related lessons share one collapsible header,
+  // drastically cutting page real-estate versus one card per lesson.
+  const groupedLearnings = useMemo<LearningGroup[]>(() => {
+    if (!learnings || learnings.items.length === 0) return [];
+    const byTopic = new Map<string, NonNullable<typeof learnings>['items']>();
+    for (const item of learnings.items) {
+      const topic =
+        typeof (item.metadata as Record<string, unknown> | undefined)?.topic === 'string'
+          ? ((item.metadata as Record<string, unknown>).topic as string)
+          : 'Untitled lesson';
+      const list = byTopic.get(topic) ?? [];
+      list.push(item);
+      byTopic.set(topic, list);
+    }
+    const groups: LearningGroup[] = [];
+    for (const [topic, items] of byTopic.entries()) {
+      const usages = items.map((i) => i.usage_count || 0);
+      const totalUsage = usages.reduce((a, b) => a + b, 0);
+      const maxUsage = usages.reduce((a, b) => Math.max(a, b), 0);
+      const tagCounts = new Map<string, number>();
+      for (const i of items) {
+        const tags = (i.metadata as Record<string, unknown> | undefined)?.tags;
+        if (Array.isArray(tags)) {
+          for (const t of tags as string[]) {
+            tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+          }
+        }
+      }
+      const topTags = [...tagCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([t]) => t);
+      const usedDates = items
+        .map((i) => i.last_used_at)
+        .filter((d): d is string => typeof d === 'string' && d.length > 0)
+        .sort();
+      const latestUsed = usedDates.length
+        ? new Date(usedDates[usedDates.length - 1]).toLocaleDateString()
+        : 'never';
+      groups.push({ key: topic, topic, items, totalUsage, maxUsage, topTags, latestUsed });
+    }
+    return groups;
+  }, [learnings]);
 
   const deleteLearningMutation = useMutation({
     mutationFn: (id: string) => api.deleteRavenLearning(id),
@@ -578,84 +634,114 @@ const KnowledgeHub = () => {
                   Lessons appear here once Raven successfully completes missions and persists what it learned.
                </p>
             </div>
-         ) : (
-            <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
-               {learnings.items.map((item) => {
-                  const meta = item.metadata || {};
-                  const tags: string[] = Array.isArray(meta.tags) ? meta.tags : [];
-                  const topic = typeof meta.topic === 'string' ? meta.topic : '';
-                  const created = item.created_at
-                     ? new Date(item.created_at * 1000).toLocaleDateString()
-                     : '';
-                  const lastUsed = item.last_used_at
-                     ? new Date(item.last_used_at).toLocaleDateString()
-                     : 'never';
+          ) : (
+            <div className="flex flex-col gap-2">
+               {groupedLearnings.map((group) => {
+                  const isOpen = expandedLearning === group.key;
                   return (
-                     <div
-                        key={item.id}
-                        className="glass-panel p-5 border-white/5 hover:border-indigo-500/30 transition-colors flex flex-col"
-                     >
-                        <div className="flex items-start justify-between gap-3 mb-3">
-                           <div className="min-w-0">
-                              <p className="text-sm font-bold text-white truncate">
-                                 {topic || 'Untitled lesson'}
-                              </p>
-                              <p className="text-[11px] text-slate-500 mt-0.5">
-                                 Created {created}
-                              </p>
+                           <div
+                              key={group.key}
+                              className="glass-panel border-white/5 overflow-hidden"
+                           >
+                              <button
+                                 onClick={() => setExpandedLearning(isOpen ? null : group.key)}
+                                 className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/5 transition-colors"
+                              >
+                                 {isOpen ? (
+                                    <ChevronDown size={16} className="text-slate-500 shrink-0" />
+                                 ) : (
+                                    <ChevronRight size={16} className="text-slate-500 shrink-0" />
+                                 )}
+                                 <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-semibold text-white truncate">
+                                       {group.topic || 'Untitled lesson'}
+                                    </p>
+                                    <p className="text-[11px] text-slate-500 mt-0.5">
+                                       {group.items.length} lesson{group.items.length > 1 ? 's' : ''}
+                                       {group.latestUsed !== 'never' ? ` · last reused ${group.latestUsed}` : ''}
+                                    </p>
+                                 </div>
+                                 <div className="flex items-center gap-2 shrink-0">
+                                    {group.topTags.slice(0, 3).map((t) => (
+                                       <span
+                                          key={t}
+                                          className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 text-[10px] font-medium hidden sm:inline"
+                                       >
+                                          {t}
+                                       </span>
+                                    ))}
+                                    <span
+                                       className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                                          group.maxUsage > 0
+                                             ? 'bg-emerald-500/15 text-emerald-400'
+                                             : 'bg-white/5 text-slate-500'
+                                       }`}
+                                       title="Total reuse across this topic"
+                                    >
+                                       ♻ {group.totalUsage}
+                                    </span>
+                                 </div>
+                              </button>
+
+                              {isOpen && (
+                                 <div className="border-t border-white/5 divide-y divide-white/5">
+                                    {group.items.map((item) => {
+                                       const meta = item.metadata || {};
+                                       const tags: string[] = Array.isArray(meta.tags) ? meta.tags : [];
+                                       const created = item.created_at
+                                          ? new Date(item.created_at * 1000).toLocaleDateString()
+                                          : '';
+                                       return (
+                                          <div key={item.id} className="px-4 py-3 pl-9">
+                                             <div className="flex items-center justify-between gap-3 mb-1.5">
+                                                <p className="text-[11px] text-slate-500">
+                                                   Created {created}
+                                                   {item.usage_count > 0 ? ` · ♻ ${item.usage_count}` : ''}
+                                                </p>
+                                                <div className="flex items-center gap-3 shrink-0">
+                                                   <button
+                                                      onClick={() => {
+                                                         setEditLearning({ id: item.id, content: item.content });
+                                                         setEditDraft(item.content);
+                                                      }}
+                                                      className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-300 transition-colors"
+                                                   >
+                                                      <Pencil size={13} /> Edit
+                                                   </button>
+                                                   <button
+                                                      onClick={() => deleteLearningMutation.mutate(item.id)}
+                                                      disabled={deleteLearningMutation.isPending}
+                                                      className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-400 transition-colors"
+                                                   >
+                                                      <Trash2 size={13} /> Delete
+                                                   </button>
+                                                </div>
+                                             </div>
+                                             <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
+                                                {item.content}
+                                             </p>
+                                             {tags.length > 0 && (
+                                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                                   {tags.map((t) => (
+                                                      <span
+                                                         key={t}
+                                                         className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 text-[10px] font-medium"
+                                                      >
+                                                         {t}
+                                                      </span>
+                                                   ))}
+                                                </div>
+                                             )}
+                                          </div>
+                                       );
+                                    })}
+                                 </div>
+                              )}
                            </div>
-                           <span
-                              className={`shrink-0 px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                                 item.usage_count > 0
-                                    ? 'bg-emerald-500/15 text-emerald-400'
-                                    : 'bg-white/5 text-slate-500'
-                              }`}
-                              title={`Last reused: ${lastUsed}`}
-                           >
-                              ♻ {item.usage_count}
-                           </span>
-                        </div>
-
-                        <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap line-clamp-6 flex-1">
-                           {item.content}
-                        </p>
-
-                        {tags.length > 0 && (
-                           <div className="flex flex-wrap gap-1.5 mt-3">
-                              {tags.map((t) => (
-                                 <span
-                                    key={t}
-                                    className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 text-[10px] font-medium"
-                                 >
-                                    {t}
-                                 </span>
-                              ))}
-                           </div>
-                        )}
-
-                        <div className="flex items-center gap-2 mt-4 pt-3 border-t border-white/5">
-                           <button
-                              onClick={() => {
-                                 setEditLearning({ id: item.id, content: item.content });
-                                 setEditDraft(item.content);
-                              }}
-                              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-300 transition-colors"
-                           >
-                              <Pencil size={13} /> Edit
-                           </button>
-                           <button
-                              onClick={() => deleteLearningMutation.mutate(item.id)}
-                              disabled={deleteLearningMutation.isPending}
-                              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-400 transition-colors ml-auto"
-                           >
-                              <Trash2 size={13} /> Delete
-                           </button>
-                        </div>
-                     </div>
-                  );
-               })}
-            </div>
-         )}
+                        );
+                     })}
+                  </div>
+          )}
       </section>
 
       <section className="mt-12 pt-12 border-t border-white/5">
