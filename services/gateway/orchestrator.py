@@ -685,6 +685,15 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
         tool_data = extract_action_json(ans)
         if not tool_data:
+            # FALLBACK: recover a tool call from numbered-prose model output
+            # (the local 35B model often emits that instead of JSON).
+            from services.gateway.prose_tools import extract_action_prose
+
+            _prose = extract_action_prose(ans)
+            if _prose:
+                tool_data = _prose[0]
+                log.info(f"[_single_turn_inference] Recovered prose tool call: {tool_data.get('action')}")
+        if not tool_data:
             # No tool call — this is our final answer
             break
 
