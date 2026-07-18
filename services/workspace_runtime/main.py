@@ -1789,6 +1789,16 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
 def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
 
+    # Guard: a workspace MUST have a non-empty id. Storing an empty string id
+    # creates an un-deletable, un-referenceable row (session.get(Workspace, "")
+    # cannot locate it and the DELETE route redirects on the trailing slash).
+    # Reject up front with a clear error instead of persisting a broken record.
+    if not ws.id or not str(ws.id).strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Workspace 'id' is required and must be a non-empty string.",
+        )
+
     # Reserved name validation
     slug = _normalize_workspace_slug(ws.id)
     if slug in RESERVED_WORKSPACE_NAMES:
