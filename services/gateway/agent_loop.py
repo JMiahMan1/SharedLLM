@@ -2723,6 +2723,22 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if not isinstance(tool_data, dict):
                 tool_data = None
 
+            # FALLBACK: the local 35B model frequently emits a numbered prose
+            # plan ("1. WorkspaceCreateRequest ... 2. GitOperationRequest action
+            # 'push' ...") instead of JSON. Recover those tool calls so Raven
+            # actually executes work instead of "completing" with 0 tool calls.
+            if not tool_data:
+                from services.gateway.prose_tools import extract_action_prose
+
+                prose = extract_action_prose(ans)
+                if prose:
+                    tool_data = prose.pop(0)
+                    pending_batch.extend(prose)
+                    log.info(
+                        f"[AgentLoop] Recovered {len(prose) + 1} prose tool call(s) "
+                        f"from non-JSON model output."
+                    )
+
         # Normalize alternative schemas: { "name": "...", "parameters": {...} } → { "action": "...", "payload": {...} }
         if tool_data:
             # Handle "tool", "operation", or "command" keys used as "action"
