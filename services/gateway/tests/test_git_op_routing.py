@@ -80,3 +80,32 @@ def test_route_workspace_shell_non_shell_passthrough():
     assert new_action == "workspacefilewriterequest"
     assert new_payload == payload
     assert git_batch is None
+
+
+def test_route_workspace_shell_keeps_git_branch_rename_command():
+    # Regression (mission 7): a valid `git branch -m master main` shell command
+    # must run NATIVELY in the shell. The old interceptor dropped the `command`
+    # and replaced it with a broken git-op dict (action 'branch', path '-m'),
+    # which the shell handler rejected as "no command" and triggered a no-progress
+    # loop. The real `command` must be preserved untouched.
+    payload = {
+        "command": "cd /workspaces/users/default/w && git branch -m master main",
+        "workspace_id": "w",
+    }
+    new_action, new_payload, git_batch = _route_workspace_shell_to_git(
+        "workspaceshellrequest", payload
+    )
+    assert new_action == "workspaceshellrequest"
+    assert new_payload == payload
+    assert git_batch is None
+
+
+def test_translate_shell_does_not_route_git_branch():
+    from services.gateway.agent_loop import _translate_shell_to_git_op
+
+    assert _translate_shell_to_git_op("git branch -m master main") is None
+    assert _translate_shell_to_git_op("cd /w && git branch -M old new") is None
+    # Credentialed ops still route correctly.
+    assert _translate_shell_to_git_op("git push origin main") is not None
+    assert _translate_shell_to_git_op("git commit -m 'msg'") is not None
+
