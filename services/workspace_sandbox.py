@@ -199,6 +199,35 @@ def ensure_workspace_network(workspace_id: str) -> None:
         )
 
 
+# Integration credentials the sandbox must inherit so `gh`/`git`/etc. inside the
+# container can authenticate as the owning user. Sourced from the execution
+# service's environment (which holds the resolved integration tokens) and passed
+# into every sandbox container at creation time. Without these, git push / gh
+# commands inside the sandbox fail with rc=128 / "not logged in".
+_SANDBOX_CRED_ENV_KEYS = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GIT_TOKEN",
+    "GITLAB_TOKEN",
+    "NEXTCLOUD_PASSWORD",
+    "NEXTCLOUD_PASS",
+    "NEXTCLOUD_URL",
+    "HA_TOKEN",
+    "HOME_ASSISTANT_TOKEN",
+    "HA_URL",
+)
+
+
+def _sandbox_credential_env() -> dict[str, str]:
+    """Collect integration credentials from the host env to inject into sandboxes."""
+    return {
+        k: os.environ[k]
+        for k in _SANDBOX_CRED_ENV_KEYS
+        if os.environ.get(k)
+    }
+
+
 def ensure_workspace_container(
     workspace_id: str,
     host_path: str,
@@ -206,11 +235,17 @@ def ensure_workspace_container(
     image: str | None = None,
     uid: int = SANDBOX_UID,
     gid: int = SANDBOX_GID,
+    env: dict[str, str] | None = None,
 ) -> Any:
     """Create/start the dedicated sandbox container for ``workspace_id``.
 
     Only ``host_path`` is mounted (read-write) at ``/workspace``; the container
     cannot see any other workspace or host directory.
+
+    The container inherits the user's integration credentials (GitHub token,
+    etc.) from ``env`` (or, when not supplied, from the execution service's
+    environment) so that `gh`/`git push` and other integration CLIs inside the
+    sandbox can authenticate.
     """
     client = _get_client()
     if client is None:
@@ -225,6 +260,10 @@ def ensure_workspace_container(
     except NotFound:
         pass
     img = image or SANDBOX_IMAGE
+    # Merge inherited integration credentials so the sandbox can authenticate.
+    cred_env = _sandbox_credential_env()
+    if env:
+        cred_env.update({k: str(v) for k, v in env.items()})
     # The SOURCE must be the real Docker-host path (e.g. /home/jeremiah/workspaces/...),
     # not the container-internal /workspaces/... path, or the daemon would bind an
     # unrelated empty host directory. The TARGET stays host_path so the agent's
@@ -238,6 +277,7 @@ def ensure_workspace_container(
         user=f"{uid}:{gid}",
         network=_network_name(workspace_id),
         working_dir=host_path,
+        environment=cred_env or None,
         # Mount the workspace at its IDENTICAL absolute path inside the container.
         # Only this directory is visible — the agent cannot reach any other
         # workspace or host path. The trailing ",z" applies the shared SELinux
@@ -338,6 +378,10 @@ def _exec_blocking(
             raise RuntimeError("docker-unavailable") from None
 
     full_env = dict(os.environ)
+    # Guarantee the sandbox shell inherits integration credentials even when the
+    # caller did not explicitly pass them, so `gh`/`git push` always authenticate.
+    for _k, _v in _sandbox_credential_env().items():
+        full_env.setdefault(_k, _v)
     if env:
         full_env.update({k: str(v) for k, v in env.items()})
 
