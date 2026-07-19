@@ -188,30 +188,55 @@ class OllamaProvider(BaseLLMProvider):
                     await response.read()
                     raise RuntimeError(f"Ollama stream HTTP {response.status}: {await response.text()}")
                 response.raise_for_status()
+                # Ollama streams newline-delimited JSON (NDJSON). iter_any() yields
+                # arbitrary byte chunks that may contain MULTIPLE JSON objects (or a
+                # partial one) per read. Buffer across reads and parse per complete
+                # line, otherwise json.loads() throws "Extra data" and silently drops
+                # tokens -> garbled/truncated tool-call JSON (real mission failure).
+                buffer = ""
+                stream_done = False
                 async for chunk in response.content.iter_any():
-                    line = chunk.decode("utf-8")
-                    clean_line = line.strip()
-                    if not clean_line:
-                        continue
+                    buffer += chunk.decode("utf-8", errors="replace")
+                    while "\n" in buffer:
+                        raw_line, buffer = buffer.split("\n", 1)
+                        clean_line = raw_line.strip()
+                        if not clean_line:
+                            continue
+                        try:
+                            chunk_json = json.loads(clean_line)
+                            if "error" in chunk_json:
+                                raise RuntimeError(f"Provider error: {chunk_json['error']}")
+                            msg = chunk_json.get("message", {})
+                            piece = msg.get("content") or ""
+                            # Only include thinking if explicitly requested
+                            if not piece and show_thinking:
+                                piece = msg.get("thinking") or ""
+                            if piece:
+                                full_content += piece
+                                await chunk_callback(piece)
+                            if chunk_json.get("done"):
+                                stream_done = True
+                                break
+                        except RuntimeError:
+                            raise  # Let provider errors propagate to AgentLoop retry logic
+                        except Exception as e:
+                            log.error(f"Error parsing streaming chunk: {e} | Raw line: {clean_line!r}")
+                    if stream_done:
+                        break
+                # Flush any trailing complete object left without a newline terminator.
+                tail = buffer.strip()
+                if tail and not stream_done:
                     try:
-                        chunk_json = json.loads(clean_line)
-                        if "error" in chunk_json:
-                            raise RuntimeError(f"Provider error: {chunk_json['error']}")
+                        chunk_json = json.loads(tail)
                         msg = chunk_json.get("message", {})
-                        chunk = msg.get("content") or ""
-                        # Only include thinking if explicitly requested
-                        if not chunk and show_thinking:
-                            chunk = msg.get("thinking") or ""
-                        if chunk:
-                            full_content += chunk
-                            await chunk_callback(chunk)
-                        if chunk_json.get("done"):
-                            break
-
-                    except RuntimeError:
-                        raise  # Let provider errors propagate to AgentLoop retry logic
+                        piece = msg.get("content") or ""
+                        if not piece and show_thinking:
+                            piece = msg.get("thinking") or ""
+                        if piece:
+                            full_content += piece
+                            await chunk_callback(piece)
                     except Exception as e:
-                        log.error(f"Error parsing streaming chunk: {e} | Raw line: {line!r}")
+                        log.error(f"Error parsing trailing streaming chunk: {e} | Raw: {tail!r}")
         # Strip thinking blocks from final content unless explicitly requested
         if not show_thinking:
             full_content = strip_thinking_blocks(full_content)
