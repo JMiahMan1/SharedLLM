@@ -31,6 +31,47 @@ from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider
 from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION, load_prompt
 from services.gateway.schemas import ResolvedCredentials
 
+_LESSON_MARKERS = ("RULE:", "ROOT CAUSE:", "OUTCOME:", "CONFIDENCE:", "SUPERSEDES:")
+
+
+def _parse_lesson_marker(text: str) -> dict:
+    """Best-effort parse of structured lesson fields from free-form text.
+
+    Accepts either `KEY: value` on one line or a `**KEY:** value` markdown
+    form. Used so a model that returns prose with our conventional
+    markers still yields a structured, reusable lesson.
+    """
+    out: dict = {}
+    if not text:
+        return out
+    lowered = text.lower()
+    import re as _re
+    for key in ("supersedes",):
+        m = _re.search(rf"{key}\s*[:\-]\s*([^\n]+)", lowered)
+        if m:
+            ids = _re.findall(r"[A-Za-z0-9_\-]+", m.group(1))
+            out[key] = [i for i in ids if i not in ("none", "n/a", "na")]
+    for key in ("rule", "root_cause", "outcome", "confidence"):
+        # Marker may appear as RULE / ROOT CAUSE / ROOT_CAUSE (case + space/underscore
+        # tolerant), optionally wrapped in markdown bold (**RULE:**).
+        marker = key.replace("_", r"[ _]")
+        m = _re.search(
+            r"(?:^|\n)\s*\*{{0,2}}\s*{marker}\s*[:\-]\s*\*{{0,2}}\s*([^\n]+)".format(marker=marker),
+            text,
+            _re.IGNORECASE,
+        )
+        if m:
+            val = m.group(1).strip().strip("*").strip()
+            if key == "confidence":
+                try:
+                    out[key] = float(_re.search(r"[0-9]*\.?[0-9]+", val).group(0))
+                except (TypeError, ValueError, AttributeError):
+                    pass
+            else:
+                out[key] = val
+    return out
+
+
 CREDENTIAL_PATTERNS = [
     re.compile(r'(?:api[_-]?key|apikey)\s*[:=]\s*["\']?([A-Za-z0-9_\-]{8,})["\']?', re.IGNORECASE),
     re.compile(r'(?:token|auth[_-]?token|access[_-]?token)\s*[:=]\s*["\']?([A-Za-z0-9_\-\.]{8,})["\']?', re.IGNORECASE),
@@ -3814,7 +3855,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 break
 
 
-    async def _persist_learning(summary: str, reflection: str = "") -> None:
+    async def _persist_learning(
+            summary: str,
+            reflection: str = "",
+            rule: str = "",
+            root_cause: str = "",
+            outcome: str = "success",
+            confidence: float = 0.5,
+            supersedes: list[str] | None = None,
+        ) -> None:
         try:
             ql = query.lower()
             tags = ["raven", "autonomous", "learning"]
@@ -3835,18 +3884,34 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             if "fix" in ql or "repair" in ql or "bug" in ql:
                 tags.append("repair")
 
-            # Prefer the structured reflection (the actual lesson) as the persisted
-            # content; fall back to the raw query+actions+answer dump only if the
-            # model produced no reflection. This is what future missions retrieve
-            # and apply, so it must be the *lesson*, not a transcript.
-            content = reflection.strip() or summary.strip()
-            topic = f"Raven lesson: {query[:80]}"
+            # Parse structured fields out of a free-form reflection when the
+            # model did not fill them explicitly.
+            parsed = _parse_lesson_marker(reflection or summary)
+            rule = (rule or parsed.get("rule") or "").strip()
+            root_cause = (root_cause or parsed.get("root_cause") or "").strip()
+            if not outcome or outcome not in ("success", "failure", "partial"):
+                outcome = parsed.get("outcome") or "success"
+            try:
+                confidence = float(confidence if confidence else parsed.get("confidence") or 0.5)
+            except (TypeError, ValueError):
+                confidence = 0.5
+            confidence = max(0.0, min(1.0, confidence))
+            supersedes = supersedes or parsed.get("supersedes") or []
 
+            # The persisted `content` is the evidence/narrative; the
+            # transferable takeaway lives in `rule` as a first-class field.
+            content = (reflection.strip() or summary.strip())
+            topic = f"Raven lesson: {query[:80]}"
             payload = {
                 "user_context": creds.model_dump(),
                 "topic": topic,
                 "content": content,
+                "rule": rule,
+                "root_cause": root_cause,
+                "outcome": outcome,
+                "confidence": confidence,
                 "tags": list(dict.fromkeys(tags)),
+                "supersedes": list(dict.fromkeys(supersedes)),
             }
 
             async with shared_http_client() as client:
@@ -3867,11 +3932,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             # (not relying on the model's prompt instruction) guarantees the two
             # layers never diverge, and gives repeatable tasks in the same
             # workspace a durable, file-backed memory.
-            if workspace_id and reflection:
+            if workspace_id and (reflection or rule):
                 try:
+                    _rule_line = f"\n**RULE:** {rule}" if rule else ""
+                    _cause_line = f"\n**ROOT CAUSE:** {root_cause}" if root_cause else ""
+                    _outcome_line = f"\n**OUTCOME:** {outcome} (conf {confidence:.2f})"
                     _entry = (
                         f"\n## {datetime.now().isoformat(timespec='seconds')}\n\n"
-                        f"{reflection.strip()}\n"
+                        f"{reflection.strip() or summary.strip()}"
+                        f"{_rule_line}{_cause_line}{_outcome_line}\n"
                     )
                     async with shared_http_client() as client:
                         _wr = await client.post(
@@ -3958,11 +4027,36 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             raven_reflection = await load_prompt(get_http_client(), PROMPT_RAVEN_REFLECTION)
             reflection_prompt = [
                 {"role": "system", "content": raven_reflection},
-                {"role": "user", "content": f"Mission: {query}\n\nPlan:\n{generated_plan}\n\nActions taken:\n{bounded_log}\n\nFinal result: {ans}\n\nProvide your reflection: Output it directly as your response — do not draft, plan, or repeat phrases like 'I will write' or 'I'll write it now'."}
+                {"role": "user", "content": (
+                    f"Mission: {query}\n\nPlan:\n{generated_plan}\n\n"
+                    f"Actions taken:\n{bounded_log}\n\nFinal result: {ans}\n\n"
+                    "Reflect and EXTRACT A REUSABLE LESSON. Reply ONLY with these "
+                    "fields, one per line, no preamble:\n"
+                    "RULE: <when <situation>, do <action> — the transferable takeaway>\n"
+                    "ROOT CAUSE: <why the naive/previous approach failed or what was misunderstood>\n"
+                    "OUTCOME: <success | partial | failure>\n"
+                    "CONFIDENCE: <0.0-1.0; 1.0 = verified-applied, 0.5 = plausible, 0.2 = uncertain>\n"
+                    "Then, after a blank line, write 1-3 sentences of evidence/context."
+                )},
             ]
             reflection_data = await execute_inference(provider, selected_model, reflection_prompt, {"temperature": 0.1, "enable_thinking": False})
             reflection_summary = reflection_data.get("message", {}).get("content", "").strip()
+            _lesson_rule = ""
+            _lesson_cause = ""
+            _lesson_outcome = "success"
+            _lesson_confidence = 0.5
             if reflection_summary:
+                _parsed = _parse_lesson_marker(reflection_summary)
+                _lesson_rule = _parsed.get("rule", "")
+                _lesson_cause = _parsed.get("root_cause", "")
+                _lesson_outcome = _parsed.get("outcome") or "success"
+                if _lesson_outcome not in ("success", "partial", "failure"):
+                    _lesson_outcome = "success"
+                try:
+                    _lesson_confidence = float(_parsed.get("confidence") or 0.5)
+                except (TypeError, ValueError):
+                    _lesson_confidence = 0.5
+                _lesson_confidence = max(0.0, min(1.0, _lesson_confidence))
                 action_log.append(f"REFLECTION:\n{reflection_summary}")
                 log.info(f"[AgentLoop] Mission reflection:\n{reflection_summary[:500]}")
         except Exception as e:
@@ -3970,14 +4064,58 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     if action_log and not (isinstance(exec_data, dict) and exec_data.get("status") == "ERROR"):
         if should_persist_learning(ans):
-            learning_summary = "\n".join([
-                f"Query: {query}",
-                f"Actions: {' | '.join(action_log)}",
-                f"Final answer: {ans}",
-            ])
-            await _persist_learning(learning_summary, reflection=reflection_summary)
+                learning_summary = "\n".join([
+                    f"Query: {query}",
+                    f"Actions: {' | '.join(action_log)}",
+                    f"Final answer: {ans}",
+                ])
+                # Honest outcome: a mission whose final answer still reports a
+                # failure/incomplete is a negative lesson, not a win.
+                _honest_outcome = _lesson_outcome
+                _low = (ans or "").lower()
+                if re.search(r"\b(failed|error|incomplete|cannot|unable)\b", _low) and "success" not in _low:
+                    _honest_outcome = "failure"
+                await _persist_learning(
+                    learning_summary,
+                    reflection=reflection_summary,
+                    rule=_lesson_rule,
+                    root_cause=_lesson_cause,
+                    outcome=_honest_outcome,
+                    confidence=_lesson_confidence,
+                )
         else:
             log.info(f"[AgentLoop] Skipping RAG learning persistence — result appears meaningless: {ans[:100]}")
+
+        # --- APPLY ENFORCEMENT (honest reuse signal) ---
+        # The mission prompt instructs the model to cite lesson ids it applies
+        # via `Apply: [id]`. If it did, bump applied_count on those
+        # lessons — the real "this lesson was useful" metric, distinct
+        # from mere retrieval (usage_count).
+        try:
+            import re as _re
+            _cited = _re.findall(
+                r"apply\s*[:=]?\s*\[([^\]]+)\]",
+                (ans or "") + "\n" + "\n".join(action_log[-15:]),
+                _re.IGNORECASE,
+            )
+            _ids: set[str] = set()
+            for _chunk in _cited:
+                for _id in _re.findall(r"[A-Za-z0-9_\-]{6,}", _chunk):
+                    _ids.add(_id)
+            if _ids:
+                async with shared_http_client() as client:
+                    for _id in _ids:
+                        try:
+                            await client.patch(
+                                f"{RAG_SVC}/rag/learning/{_id}/applied",
+                                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                timeout=aiohttp.ClientTimeout(total=10.0),
+                            )
+                        except Exception as _me:
+                            log.debug(f"[AgentLoop] applied-bump failed for {_id}: {_me}")
+                log.info(f"[AgentLoop] Marked lessons applied: {sorted(_ids)}")
+        except Exception as e:
+            log.debug(f"[AgentLoop] Apply-citation parse skipped: {e}")
 
     if mission_id and full_audit_log:
         try:

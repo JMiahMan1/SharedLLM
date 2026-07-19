@@ -88,6 +88,19 @@ test.describe('Knowledge Hub - Raven Lessons (grouped compact list)', () => {
     ).toHaveCount(0).catch(async () => {});
   });
 
+  test('expanded lesson shows structured Rule / outcome fields', async ({ page }) => {
+    const first = groupRows(page).first();
+    await first.waitFor({ state: 'visible', timeout: 45000 });
+    await first.click();
+
+    // The redesigned panel must expose the honest, structured lesson fields
+    // (Rule + outcome pill + applied-vs-retrieved honesty), not just free prose.
+    await expect(page.getByText(/rule/i).first()).toBeVisible({ timeout: 10000 });
+    // Each structured lesson shows the honest "applied N / retrieved M" line.
+    await expect(page.getByText(/applied/i).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/retrieved/i).first()).toBeVisible({ timeout: 10000 });
+  });
+
   test('sort toggle switches between Newest and Most Reused', async ({ page }) => {
     const sortBtn = page.getByRole('button', { name: /newest|most reused/i });
     await expect(sortBtn).toBeVisible({ timeout: 45000 });

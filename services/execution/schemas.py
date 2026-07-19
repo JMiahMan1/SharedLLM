@@ -730,13 +730,25 @@ class CapabilityIndexRequest(BaseRequest):
 
 class SystemLearningRequest(BaseRequest):
     """
-    Persists a successful solution or architectural insight to the System Learnings RAG.
-    This helps the agent 'remember' how to solve similar problems in the future.
+    Persists a verified lesson to the System Learnings RAG — a true source of truth
+    the agent applies on future missions.
+
+    A lesson is NOT a narrative journal entry. It is a structured, reusable rule:
+    ``rule`` is the transferable "when X -> do Y", ``root_cause`` is WHY the
+    old approach failed, ``outcome`` is an honest success/failure/partial flag, and
+    ``confidence`` reflects how verified the lesson is. ``supersedes`` links a
+    newer lesson to an older one it replaces, so retrieval can prefer the current
+    truth instead of returning contradictory entries.
     """
     user_context: UserContext
     topic: str = Field(..., description="Subject of the learning (e.g. 'Fixing 502 error in Gateway')")
-    content: str = Field(..., description="Detailed description of the root cause and the fix applied.")
+    content: str = Field(..., description="Detailed description / evidence of the root cause and the fix applied.")
+    rule: str = Field(default="", description="Reusable rule: 'When <situation>, do <action>'. The transferable takeaway.")
+    root_cause: str = Field(default="", description="WHY the previous approach failed or what was misunderstood.")
+    outcome: str = Field(default="success", description="Honest outcome: 'success' | 'failure' | 'partial'.")
+    confidence: float = Field(default=0.5, ge=0.0, le=1.0, description="How verified the lesson is (0..1). 1.0 = applied-and-confirmed.")
     tags: list[str] = Field(default_factory=list, description="Keywords for retrieval (e.g. ['gateway', 'bugfix'])")
+    supersedes: list[str] = Field(default_factory=list, description="IDs of older lessons this one replaces (conflict resolution).")
 
 class TTSRequest(BaseRequest):
     """

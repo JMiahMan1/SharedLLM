@@ -168,8 +168,9 @@ def _add_item(
     _conn().execute(
         "INSERT OR REPLACE INTO rag_items"
         "(id, collection_name, user_id, content, metadata, created_at, indexed_at, "
-        " usage_count, last_used_at) "
-        "VALUES(?, ?, ?, ?, ?, ?, ?, 0, NULL)",
+        " usage_count, last_used_at, rule, root_cause, outcome, confidence, "
+        " applied_count, supersedes) "
+        "VALUES(?, ?, ?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, 0, ?)",
         [
             doc_id,
             collection,
@@ -178,6 +179,11 @@ def _add_item(
             json.dumps(stored_metadata),
             created_at,
             indexed_at,
+            (metadata or {}).get("rule", ""),
+            (metadata or {}).get("root_cause", ""),
+            (metadata or {}).get("outcome", "success"),
+            float((metadata or {}).get("confidence", 0.5)),
+            json.dumps((metadata or {}).get("supersedes", [])),
         ],
     )
     vector = embed([content])[0]
@@ -284,10 +290,13 @@ def _hybrid_search(
                     score=score,
                 )
             )
-    # Bump reuse counters for system_learnings hits — this is exactly when a
-    # Raven lesson was actually applied during a mission.
+    # Honest reuse accounting:
+    #  - usage_count  = times RETRIEVED (seen by a mission). Bumped here.
+    #  - applied_count = times ACTUALLY APPLIED (model cited the lesson id).
+    #    Bumped separately via /rag/learning/{id}/applied so the ♻-style
+    #    metric reflects real usefulness, not just search frequency.
     if collection == "system_learnings" and results:
-        _bump_usage([doc_id for doc_id, _ in ranked if _item_exists(doc_id)])
+        _bump_retrieved([doc_id for doc_id, _ in ranked if _item_exists(doc_id)])
     return results
 
 
@@ -296,8 +305,22 @@ def _item_exists(doc_id: str) -> bool:
     return row is not None
 
 
-def _bump_usage(doc_ids: list[str]) -> None:
-    """Atomically increment ``usage_count`` and stamp ``last_used_at``."""
+def _bump_retrieved(doc_ids: list[str]) -> None:
+    """Increment ``usage_count`` — the lesson was retrieved/seen by a mission."""
+    _bump_columns(doc_ids, "usage_count = usage_count + 1")
+
+
+def _bump_applied(doc_ids: list[str]) -> None:
+    """Increment ``applied_count`` — the lesson was genuinely applied by a mission.
+
+    Separated from retrieval so we can tell "frequently searched" from
+    "frequently useful". Called only when the model cites a lesson id.
+    """
+    _bump_columns(doc_ids, "applied_count = applied_count + 1")
+
+
+def _bump_columns(doc_ids: list[str], set_clause: str) -> None:
+    """Atomically increment one or more counter columns for the given doc ids."""
     if not doc_ids:
         return
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -305,8 +328,7 @@ def _bump_usage(doc_ids: list[str]) -> None:
         _conn().execute("BEGIN")
         for doc_id in doc_ids:
             _conn().execute(
-                "UPDATE rag_items SET usage_count = usage_count + 1, "
-                "last_used_at = ? WHERE id = ?",
+                f"UPDATE rag_items SET {set_clause}, last_used_at = ? WHERE id = ?",
                 [now, doc_id],
             )
         _conn().commit()
@@ -486,7 +508,8 @@ async def list_learnings(user_id: str = "default", limit: int = 200, sort: str =
         target_user = "default"
         order = "usage_count DESC, created_at DESC" if sort == "reuse" else "created_at DESC"
         rows = _conn().execute(
-            f"SELECT id, content, metadata, created_at, usage_count, last_used_at "
+            f"SELECT id, content, metadata, created_at, usage_count, last_used_at, "
+            f"rule, root_cause, outcome, confidence, applied_count, supersedes "
             f"FROM rag_items WHERE collection_name = ? AND user_id = ? "
             f"ORDER BY {order} LIMIT ?",
             ["system_learnings", target_user, limit],
@@ -499,6 +522,12 @@ async def list_learnings(user_id: str = "default", limit: int = 200, sort: str =
                 "created_at": r["created_at"],
                 "usage_count": r["usage_count"] or 0,
                 "last_used_at": r["last_used_at"],
+                "rule": r["rule"] or "",
+                "root_cause": r["root_cause"] or "",
+                "outcome": r["outcome"] or "success",
+                "confidence": float(r["confidence"]) if r["confidence"] is not None else 0.5,
+                "applied_count": r["applied_count"] or 0,
+                "supersedes": json.loads(r["supersedes"]) if r["supersedes"] else [],
             }
             for r in rows
         ]
@@ -560,6 +589,26 @@ async def delete_learning(doc_id: str):
         return {"status": "SUCCESS", "id": doc_id}
     except Exception as e:
         log.error(f"Failed to delete learning {doc_id}: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.patch("/rag/learning/{doc_id}/applied", dependencies=[Depends(require_internal)])
+async def mark_learning_applied(doc_id: str):
+    """Record that a mission ACTUALLY APPLIED this lesson (honest reuse signal).
+
+    Distinct from retrieval: the model must cite the lesson id in its plan
+    for this to fire. Drives ``applied_count`` (the real usefulness metric).
+    """
+    try:
+        if not _item_exists(doc_id):
+            return JSONResponse(
+                status_code=404,
+                content={"status": "ERROR", "message": "Learning not found"},
+            )
+        _bump_applied([doc_id])
+        return {"status": "SUCCESS", "id": doc_id}
+    except Exception as e:
+        log.error(f"Failed to mark learning applied {doc_id}: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
 

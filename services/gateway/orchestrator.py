@@ -358,6 +358,7 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
                         coll_added = False
                         for h in hits:
                             content = h["content"]
+                            _meta = h.get("metadata") or {}
                             if len(content) > MAX_CHARS_PER_HIT:
                                 content = content[:MAX_CHARS_PER_HIT] + "... [TRUNCATED]"
 
@@ -366,19 +367,37 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
 
                             if not coll_added:
                                 if coll == "system_learnings":
-                                    # Surface Raven's own past lessons prominently so
-                                    # the model actually applies them (not buried in generic
-                                    # "Retrieved Context"). These are verified wins from
-                                    # prior missions.
+                                    # Surface Raven's own past lessons prominently, but
+                                    # COMPACTLY: the transferable RULE + id + confidence,
+                                    # NOT the full prose (which would bloat the 15k-char
+                                    # budget). The model applies the rule, not the story.
                                     rag_context += (
-                                        "\n[SYSTEM_LEARNINGS — PAST LESSONS: read and APPLY "
-                                        "these to avoid repeating past mistakes]\n"
+                                        "\n[SYSTEM_LEARNINGS — PAST LESSONS: each is a "
+                                        "reusable rule. When you apply one, cite it once as "
+                                        "`Apply: [id]` in your plan so it is recorded as used.]\n"
                                     )
                                 else:
                                     rag_context += f"\n[{coll.upper()}]\n"
                                 coll_added = True
 
-                            rag_context += f"- {content}\n"
+                            # Compact lesson rendering: prefer the structured RULE
+                            # (the reusable takeaway) over verbose content. Falls
+                            # back to content when no rule was captured.
+                            _meta = {}
+                            try:
+                                _meta = json.loads(content) if isinstance(content, str) and content.strip().startswith("{") else (content if isinstance(content, dict) else {})
+                            except Exception:
+                                _meta = {}
+                            if coll == "system_learnings":
+                                _lid = _meta.get("id") or ""
+                                _rule = _meta.get("rule") or content
+                                _conf = _meta.get("confidence", _meta.get("confidence", ""))
+                                _conf_s = f" (conf {_conf})" if _conf != "" else ""
+                                _out = _meta.get("outcome", "")
+                                _out_s = f" [{_out}]" if _out else ""
+                                rag_context += f"- [{_lid}]{_out_s}{_conf_s} {_rule}\n"
+                            else:
+                                rag_context += f"- {content}\n"
                             total_chars += len(content)
                             total_hits += 1
 

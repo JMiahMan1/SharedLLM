@@ -1593,6 +1593,13 @@ export interface RavenLearningItem {
   created_at: number;
   usage_count: number;
   last_used_at: string | null;
+  // Structured, honest lesson fields (true source of truth).
+  rule: string;
+  root_cause: string;
+  outcome: string; // 'success' | 'partial' | 'failure'
+  confidence: number;
+  applied_count: number;
+  supersedes: string[];
 }
 
 export interface RavenLearningsResponse {

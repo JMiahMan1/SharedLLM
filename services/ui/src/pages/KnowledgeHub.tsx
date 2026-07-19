@@ -683,54 +683,108 @@ const KnowledgeHub = () => {
                               {isOpen && (
                                  <div className="border-t border-white/5 divide-y divide-white/5">
                                     {group.items.map((item) => {
-                                       const meta = item.metadata || {};
-                                       const tags: string[] = Array.isArray(meta.tags) ? meta.tags : [];
-                                       const created = item.created_at
-                                          ? new Date(item.created_at * 1000).toLocaleDateString()
-                                          : '';
-                                       return (
-                                          <div key={item.id} className="px-4 py-3 pl-9">
-                                             <div className="flex items-center justify-between gap-3 mb-1.5">
-                                                <p className="text-[11px] text-slate-500">
-                                                   Created {created}
-                                                   {item.usage_count > 0 ? ` · ♻ ${item.usage_count}` : ''}
-                                                </p>
-                                                <div className="flex items-center gap-3 shrink-0">
-                                                   <button
-                                                      onClick={() => {
-                                                         setEditLearning({ id: item.id, content: item.content });
-                                                         setEditDraft(item.content);
-                                                      }}
-                                                      className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-300 transition-colors"
-                                                   >
-                                                      <Pencil size={13} /> Edit
-                                                   </button>
-                                                   <button
-                                                      onClick={() => deleteLearningMutation.mutate(item.id)}
-                                                      disabled={deleteLearningMutation.isPending}
-                                                      className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-400 transition-colors"
-                                                   >
-                                                      <Trash2 size={13} /> Delete
-                                                   </button>
-                                                </div>
-                                             </div>
-                                             <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">
-                                                {item.content}
-                                             </p>
-                                             {tags.length > 0 && (
-                                                <div className="flex flex-wrap gap-1.5 mt-2">
-                                                   {tags.map((t) => (
-                                                      <span
-                                                         key={t}
-                                                         className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 text-[10px] font-medium"
-                                                      >
-                                                         {t}
-                                                      </span>
-                                                   ))}
-                                                </div>
-                                             )}
-                                          </div>
-                                       );
+                                        const meta = item.metadata || {};
+                                        const tags: string[] = Array.isArray(meta.tags) ? meta.tags : [];
+                                        const created = item.created_at
+                                           ? new Date(item.created_at * 1000).toLocaleDateString()
+                                           : '';
+                                        const outcome = (item.outcome || (meta.outcome as string) || '').toString().toLowerCase();
+                                        const outcomeColor =
+                                           outcome === 'failure'
+                                              ? 'bg-red-500/15 text-red-300'
+                                              : outcome === 'partial'
+                                                ? 'bg-amber-500/15 text-amber-300'
+                                                : outcome === 'success'
+                                                  ? 'bg-emerald-500/15 text-emerald-300'
+                                                  : 'bg-slate-500/15 text-slate-400';
+                                        const confidence =
+                                           typeof item.confidence === 'number'
+                                              ? item.confidence
+                                              : typeof meta.confidence === 'number'
+                                                ? meta.confidence
+                                                : null;
+                                        return (
+                                           <div key={item.id} className="px-4 py-3 pl-9">
+                                              <div className="flex items-center justify-between gap-3 mb-2">
+                                                 <p className="text-[11px] text-slate-500">
+                                                    Created {created}
+                                                 </p>
+                                                 <div className="flex items-center gap-3 shrink-0">
+                                                    <button
+                                                       onClick={() => {
+                                                          setEditLearning({ id: item.id, content: item.content });
+                                                          setEditDraft(item.content);
+                                                       }}
+                                                       className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-300 transition-colors"
+                                                    >
+                                                       <Pencil size={13} /> Edit
+                                                    </button>
+                                                    <button
+                                                       onClick={() => deleteLearningMutation.mutate(item.id)}
+                                                       disabled={deleteLearningMutation.isPending}
+                                                       className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-red-400 transition-colors"
+                                                    >
+                                                       <Trash2 size={13} /> Delete
+                                                    </button>
+                                                 </div>
+                                              </div>
+
+                                              {item.rule && (
+                                                 <div className="mb-2">
+                                                    <p className="text-[10px] uppercase tracking-wide text-indigo-400/80 mb-0.5">Rule</p>
+                                                    <p className="text-xs text-slate-200 leading-relaxed whitespace-pre-wrap">{item.rule}</p>
+                                                 </div>
+                                              )}
+                                              {item.root_cause && (
+                                                 <div className="mb-2">
+                                                    <p className="text-[10px] uppercase tracking-wide text-amber-400/80 mb-0.5">Why / Root cause</p>
+                                                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{item.root_cause}</p>
+                                                 </div>
+                                              )}
+
+                                              <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                 {outcome && (
+                                                    <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${outcomeColor}`}>
+                                                       {outcome}
+                                                    </span>
+                                                 )}
+                                                 {confidence !== null && (
+                                                    <span className="px-2 py-0.5 rounded bg-slate-500/10 text-slate-400 text-[10px] font-medium">
+                                                       confidence {confidence.toFixed(2)}
+                                                    </span>
+                                                 )}
+                                                 {Array.isArray(item.supersedes) && item.supersedes.length > 0 && (
+                                                    <span className="px-2 py-0.5 rounded bg-slate-500/10 text-slate-500 text-[10px] font-medium">
+                                                       supersedes {item.supersedes.length}
+                                                    </span>
+                                                 )}
+                                              </div>
+
+                                              {item.content && (
+                                                 <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap mb-2">
+                                                    {item.content}
+                                                 </p>
+                                              )}
+
+                                              <p className="text-[11px] text-slate-500">
+                                                 ♻ retrieved {item.usage_count}
+                                                 <span className="text-emerald-400/80"> · ✓ applied {item.applied_count}</span>
+                                              </p>
+
+                                              {tags.length > 0 && (
+                                                 <div className="flex flex-wrap gap-1.5 mt-2">
+                                                    {tags.map((t) => (
+                                                       <span
+                                                          key={t}
+                                                          className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 text-[10px] font-medium"
+                                                       >
+                                                          {t}
+                                                       </span>
+                                                    ))}
+                                                 </div>
+                                              )}
+                                           </div>
+                                        );
                                     })}
                                  </div>
                               )}
