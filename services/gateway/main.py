@@ -4536,6 +4536,16 @@ async def delete_raven_learning(doc_id: str):
     return await _proxy_json_response(resp)
 
 
+@app.patch("/api/storage/learning/{doc_id}/applied")
+async def mark_raven_learning_applied(doc_id: str):
+    """Record that a mission actually APPLIED this lesson (honest reuse signal)."""
+    resp = await get_http_client().patch(
+        f"{RAG_SVC}/rag/learning/{doc_id}/applied",
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    return await _proxy_json_response(resp)
+
+
 @app.post("/api/admin/tests/smoke")
 async def proxy_smoke_test(request: Request):
     client = get_http_client()

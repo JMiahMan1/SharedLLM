@@ -274,3 +274,17 @@ def _migrate_rag_items_usage_columns(cur: sqlite3.Cursor) -> None:
         )
     if "last_used_at" not in existing:
         cur.execute("ALTER TABLE rag_items ADD COLUMN last_used_at TEXT")
+    # Structured-lesson columns: a true source of truth, not a prose journal.
+    # `rule`/`root_cause`/`outcome`/`confidence` are the reusable, honest
+    # fields; `applied_count` is bumped ONLY when a lesson is actually
+    # applied (vs `usage_count`, which counts mere retrievals).
+    for col, ddl in (
+        ("rule", "TEXT"),
+        ("root_cause", "TEXT"),
+        ("outcome", "TEXT DEFAULT 'success'"),
+        ("confidence", "REAL DEFAULT 0.5"),
+        ("applied_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("supersedes", "TEXT"),
+    ):
+        if col not in existing:
+            cur.execute(f"ALTER TABLE rag_items ADD COLUMN {col} {ddl}")
