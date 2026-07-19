@@ -194,3 +194,22 @@ def test_prose_git_strips_backticks():
     assert calls[0]["action"] == "repo_create"
     assert calls[0].get("repo_name") == "raven-test-bt"
 
+
+def test_prose_git_empty_value_does_not_crash():
+    # Regression: a prose tool call whose final key has an EMPTY value
+    # (e.g. `branch ''`) used to make _parse_pairs call None.lower() and
+    # crash the whole mission finalization (mission 1: "'NoneType' object
+    # has no attribute 'lower'") even though the real git work already
+    # succeeded. The empty value must be preserved as None, not crash.
+    from services.gateway.prose_tools import extract_action_prose
+
+    text = (
+        "1. GitOperationRequest action 'push' branch ''\n"
+        "2. GitOperationRequest action 'commit' commit_message 'feat: x'"
+    )
+    calls = extract_action_prose(text)
+    assert calls is not None
+    assert calls[0]["action"] == "push"
+    assert calls[0].get("branch") is None
+    assert calls[1]["action"] == "commit"
+
