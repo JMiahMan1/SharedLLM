@@ -114,6 +114,17 @@ WORKSPACE_TOOL_ACTIONS = {
     "workspacesettingsupdaterequest",
 }
 
+
+def _has_valid_workspace_id(value: object) -> bool:
+    """True only for a non-empty, non-whitespace workspace id.
+
+    A blank/whitespace id (``""``, ``"   "``, ``None``) must be treated as
+    "unassigned" — the execution service rejects it with a 400
+    ("No workspace_id provided"), so the agent-loop guard must catch it before
+    the request is sent.
+    """
+    return bool(value is not None and str(value).strip())
+
 # Heuristics that identify a *system-maintenance* mission — i.e. one that edits or
 # fixes SharedLLM's own source/logs (e.g. "Raven fix the errors appearing in the
 # logs"). These run in the Default Workspace. Anything that builds or creates a
@@ -3516,7 +3527,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # workspace-scoped operation until Raven acquires a dedicated workspace via
                 # WorkspaceCreateRequest, so it never silently operates in the Default
                 # Workspace or WORKSPACE_ROOT. Only the create request itself is allowed.
-                if workspace_id is None and lookup_action in WORKSPACE_TOOL_ACTIONS and lookup_action != "workspacecreaterequest":
+                #
+                # Treat a blank/whitespace workspace_id the same as unassigned: the model
+                # sometimes emits its own `"workspace_id": ""` before a workspace exists,
+                # which would otherwise slip past a `is None` check and 400 at the
+                # execution service ("No workspace_id provided"). Strip such blanks from
+                # the payload so this guard reliably catches them.
+                _loop_ws_ok = _has_valid_workspace_id(workspace_id)
+                if isinstance(payload, dict):
+                    _pl_ws = payload.get("workspace_id")
+                    if _pl_ws is not None and not str(_pl_ws).strip():
+                        payload.pop("workspace_id", None)
+                _pl_ws_ok = isinstance(payload, dict) and _has_valid_workspace_id(payload.get("workspace_id"))
+                if (not _loop_ws_ok and not _pl_ws_ok) and lookup_action in WORKSPACE_TOOL_ACTIONS and lookup_action != "workspacecreaterequest":
                     exec_data = {
                         "status": "ERROR",
                         "message": (
