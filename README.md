@@ -35,6 +35,7 @@ Jarvis operates using a three-tier request handling hierarchy to balance speed a
 | **Storage**           | 8005  | Shared persistence for documents and configuration.                                                        |
 | **Logging**           | 8006  | Centralized observability hub for all microservices.                                                       |
 | **Workspace Runtime** | 8007  | Sandboxed workspace inspection for Raven's coding and system repair tasks.                                 |
+| **Geo**               | 8009  | Life360-style family location service wrapping Home Assistant (person/device_tracker/zone + history).     |
 | **Automation**        | -     | Background task processor for polling and scheduled events.                                                |
 | **Redis**             | 6379  | High-speed cache for session state and history.                                                            |
 

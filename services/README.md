@@ -44,6 +44,14 @@ This directory contains the microservices refactor of the SharedLLM system.
   code state rather than provider-synced snapshots, while provider sync is done
   explicitly through the Storage provider abstraction.
 
+### 6. Geo Service (`services/geo`)
+- **Role**: Life360-style family location / mapping layer. Self-hosted, privacy-respecting replacement for Google Maps location history and Life360 sharing on the de-Googled phone.
+- **Backend**: Wraps **Home Assistant** (already running) — reads `person`, `device_tracker`, and `zone` entity states over the HA REST API (HA_URL / HA_TOKEN resolved at boot from Identity), exposes them as GeoJSON for a MapLibre client, and accepts location pushes via the HA `device_tracker.see` service.
+- **Map rendering**: OSM is the map *data* (no serious FOSS rival); **MapLibre GL JS** is the open *renderer*. Tile/style source: Protomaps (PMTiles) or OpenMapTiles, self-hostable.
+- **Endpoints**: `GET /people` (GeoJSON of people/trackers), `GET /zones` (geofences), `GET /people/{id}/history` (trip replay from HA Recorder), `POST /people/{id}/see` (push location, internal-secret guarded).
+- **Upgrade path**: Traccar (Apache-2) is the documented drop-in if HA's sharing/geofence UX proves insufficient (HA has a `traccar_server` integration).
+- **Design doc**: `docs/GEO_SERVICE.md` (and `S26-Setup/geo-service/README.md`).
+
 ## Credential Resolution Architecture
 
 The `.env` file is a **seed-only** artifact. It must NEVER be read directly by any service, test, or script at runtime.

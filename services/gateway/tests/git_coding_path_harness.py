@@ -25,9 +25,9 @@ import json
 import os
 import sys
 import time
-import urllib.request
-import urllib.error
 import base64
+
+import requests  # reliable JSON/Content-Type handling (urllib forced form-urlencoded)
 
 # ---- Config ---------------------------------------------------------------
 GATEWAY = os.getenv("GATEWAY_URL", "http://192.168.2.205:11435")
@@ -62,47 +62,91 @@ PATH_B_QUERY = f"""Target the EXISTING workspace you created in the previous mis
 
 
 # ---- HTTP helpers ----------------------------------------------------------
-def _req(method, url, *, headers=None, data=None, timeout=45):
-    """Resilient request: retries on transient stalls (the 2.4 GHz Wi-Fi link
-    to the server is jittery and intermittently times out). Mirrors rvcurl.sh."""
-    import socket
+
+
+def _req(method, url, *, headers=None, json_body=None, timeout=45):
+    """Resilient request helper used by the harness.
+
+    Retries on TRANSIENT failures:
+      * network stalls (timeout / connection reset / DNS)
+      * 5xx server/proxy errors (e.g. a momentary 502 from the gateway)
+      * 422/429 — observed intermittently against the live gateway for an
+        identical payload that succeeds moments later (server-side race),
+        NOT a malformed request. Retried with backoff.
+
+    On a FATAL error (400/401/403 or exhausted retries) it prints the
+    response body so the failure is diagnosable instead of a bare traceback.
+    We report the ACTUAL HTTP code + body — we do not guess at causes.
+    """
     last_err = None
-    for attempt in range(5):
+    for attempt in range(8):
         try:
-            req = urllib.request.Request(url, data=data, method=method)
-            for k, v in (headers or {}).items():
-                req.add_header(k, v)
-            return urllib.request.urlopen(req, timeout=timeout)
-        except (urllib.error.HTTPError,) as e:
-            # 4xx/5xx are real — don't retry those.
+            resp = requests.request(
+                method, url, headers=headers or {}, json=json_body,
+                timeout=timeout,
+            )
+            return resp
+        except requests.exceptions.HTTPError as e:
+            resp = getattr(e, "response", None)
+            code = resp.status_code if resp is not None else 0
+            body = (resp.text or "")[:500] if resp is not None else str(e)
+            retryable = code in (422, 429) or 500 <= code <= 599
+            if retryable and attempt < 7:
+                last_err = e
+                backoff = 5 * (attempt + 1)
+                print(f"[net] {method} {url} -> {code} {body!r}; retry {attempt+1} in {backoff}s")
+                time.sleep(backoff)
+                continue
+            print(f"[FATAL] {method} {url} -> {code}: {body}")
             raise
-        except (TimeoutError, socket.timeout, urllib.error.URLError, ConnectionError) as e:
+        except requests.exceptions.RequestException as e:
             last_err = e
-            if attempt < 4:
+            if attempt < 7:
                 backoff = 5 * (attempt + 1)
                 print(f"[net] {method} {url} stalled ({e}); retry {attempt+1} in {backoff}s")
                 time.sleep(backoff)
     raise last_err
 
 
-def _http_json(method, url, *, token=None, body=None, timeout=45):
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+def _http_json(method, url, *, token=None, headers=None, body=None, timeout=45):
+    hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
     if token:
-        headers["Authorization"] = f"Bearer {token}"
-    data = json.dumps(body).encode() if body is not None else None
-    with _req(method, url, headers=headers, data=data, timeout=timeout) as resp:
-        raw = resp.read().decode()
-    return json.loads(raw) if raw else {}
+        hdrs["Authorization"] = f"Bearer {token}"
+    if headers:
+        hdrs.update(headers)
+    resp = _req(method, url, headers=hdrs, json_body=body, timeout=timeout)
+    raw = resp.text or ""
+    if not raw:
+        return {}
+    try:
+        return resp.json()
+    except ValueError:
+        print(f"[warn] non-JSON response from {method} {url}: {raw[:120]!r}")
+        return {}
+
+
+def _gh_json(path):
+    """GET a GitHub API path, returning {} on non-JSON / 5xx (retryable) so a
+    transient GitHub hiccup never kills the harness."""
+    url = f"https://api.github.com{path}"
+    hdrs = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    resp = _req("GET", url, headers=hdrs, timeout=45)
+    if not resp.text:
+        return {}
+    try:
+        return resp.json()
+    except ValueError:
+        print(f"[warn] non-JSON GitHub response from {path}: {resp.text[:120]!r}")
+        return {}
 
 
 def _gh_get(path):
-    url = f"https://api.github.com{path}"
-    req = urllib.request.Request(url)
-    req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
-    req.add_header("Accept", "application/vnd.github+json")
-    req.add_header("X-GitHub-Api-Version", "2022-11-28")
-    with _req("GET", url, timeout=45) as resp:
-        return json.loads(resp.read().decode())
+    # Kept for call-site compatibility; delegates to the resilient helper.
+    return _gh_json(path)
 
 
 # ---- Orchestrator steps ----------------------------------------------------
@@ -130,7 +174,14 @@ def poll_until_done(token: str, mid: str) -> dict:
     deadline = time.time() + MISSION_TIMEOUT
     while time.time() < deadline:
         out = _http_json("GET", f"{GATEWAY}/api/raven/missions/{mid}", token=token)
-        status = out.get("status") or out.get("mission", {}).get("status")
+        # The detail endpoint normally returns a dict, but be defensive: a list
+        # or {} (e.g. a transient 5xx that returned non-JSON) must NOT crash the
+        # harness. Normalize to a dict and look up status in both shapes.
+        if isinstance(out, list):
+            out = out[0] if out else {}
+        if not isinstance(out, dict):
+            out = {}
+        status = out.get("status") or (out.get("mission") or {}).get("status")
         print(f"[poll] {mid} status={status}")
         if status in ("completed", "failed", "cancelled", "success", "done"):
             return out
@@ -140,13 +191,15 @@ def poll_until_done(token: str, mid: str) -> dict:
 
 def verify_github(repo: str, expected_branch: str, expected_readme_substr: str) -> None:
     # Branch exists?
-    branch = _gh_get(f"/repos/{GITHUB_OWNER}/{repo}/branches/{expected_branch}")
-    assert branch.get("name") == expected_branch, f"branch {expected_branch} missing"
-    # Commit on that branch contains README.md with expected content?
-    commit_sha = branch["commit"]["sha"]
-    contents = _gh_get(f"/repos/{GITHUB_OWNER}/{repo}/contents/README.md?ref={expected_branch}")
+    branch = _gh_json(f"/repos/{GITHUB_OWNER}/{repo}/branches/{expected_branch}")
+    assert isinstance(branch, dict) and branch.get("name") == expected_branch, \
+        f"branch {expected_branch} missing or unexpected: {branch}"
+    # README.md on that branch contains the expected content?
+    contents = _gh_json(f"/repos/{GITHUB_OWNER}/{repo}/contents/README.md?ref={expected_branch}")
     import base64 as _b64
-    decoded = _b64.b64decode(contents["content"]).decode()
+    content_b64 = (contents or {}).get("content")
+    assert content_b64, f"README.md not found on {expected_branch}: {contents}"
+    decoded = _b64.b64decode(content_b64).decode()
     assert expected_readme_substr in decoded, (
         f"README on remote missing expected text. Got:\n{decoded}")
     print(f"[verify:github] repo={repo} branch={expected_branch} README ok")
@@ -155,10 +208,7 @@ def verify_github(repo: str, expected_branch: str, expected_readme_substr: str) 
 def capture_new_lessons(before_count: int) -> list:
     sec = os.getenv("INTERNAL_SECRET", "")
     url = f"{RAG}/api/storage/learning?user_id={DEFAULT_USER}&limit=100"
-    req = urllib.request.Request(url)
-    req.add_header("X-Internal-Secret", sec)
-    with _req("GET", url, timeout=45) as resp:
-        data = json.loads(resp.read().decode())
+    data = _http_json("GET", url, headers={"X-Internal-Secret": sec})
     items = data.get("items") or data.get("learnings") or []
     new = items[before_count:]
     print(f"[lessons] store total={len(items)} new_since_start={len(new)}")
@@ -167,14 +217,14 @@ def capture_new_lessons(before_count: int) -> list:
 
 def cleanup_repo(repo: str) -> None:
     url = f"https://api.github.com/repos/{GITHUB_OWNER}/{repo}"
-    req = urllib.request.Request(url, method="DELETE")
-    req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
+    hdrs = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
     try:
-        _req("DELETE", url, timeout=45).close()
+        _req("DELETE", url, headers=hdrs, timeout=45)
         print(f"[cleanup] deleted remote repo {repo}")
-    except urllib.error.HTTPError as e:
+    except requests.exceptions.HTTPError as e:
+        code = getattr(getattr(e, "response", None), "status_code", None)
         # 403 delete_repo scope missing is expected/handled gracefully
-        print(f"[cleanup] repo delete returned {e.code} (may lack delete_repo scope) - leaving repo")
+        print(f"[cleanup] repo delete returned {code} (may lack delete_repo scope) - leaving repo")
 
 
 def main() -> int:

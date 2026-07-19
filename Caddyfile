@@ -49,6 +49,10 @@
     reverse_proxy control_plane:8008
 }
 
+:8009 {
+    reverse_proxy geo:8009
+}
+
 # Standard Routes
 :80 {
     log {
