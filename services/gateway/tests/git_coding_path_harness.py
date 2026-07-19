@@ -62,14 +62,30 @@ PATH_B_QUERY = f"""Target the EXISTING workspace you created in the previous mis
 
 
 # ---- HTTP helpers ----------------------------------------------------------
-def _req(method, url, *, headers=None, data=None, timeout=30):
-    req = urllib.request.Request(url, data=data, method=method)
-    for k, v in (headers or {}).items():
-        req.add_header(k, v)
-    return urllib.request.urlopen(req, timeout=timeout)
+def _req(method, url, *, headers=None, data=None, timeout=45):
+    """Resilient request: retries on transient stalls (the 2.4 GHz Wi-Fi link
+    to the server is jittery and intermittently times out). Mirrors rvcurl.sh."""
+    import socket
+    last_err = None
+    for attempt in range(5):
+        try:
+            req = urllib.request.Request(url, data=data, method=method)
+            for k, v in (headers or {}).items():
+                req.add_header(k, v)
+            return urllib.request.urlopen(req, timeout=timeout)
+        except (urllib.error.HTTPError,) as e:
+            # 4xx/5xx are real — don't retry those.
+            raise
+        except (TimeoutError, socket.timeout, urllib.error.URLError, ConnectionError) as e:
+            last_err = e
+            if attempt < 4:
+                backoff = 5 * (attempt + 1)
+                print(f"[net] {method} {url} stalled ({e}); retry {attempt+1} in {backoff}s")
+                time.sleep(backoff)
+    raise last_err
 
 
-def _http_json(method, url, *, token=None, body=None, timeout=30):
+def _http_json(method, url, *, token=None, body=None, timeout=45):
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -85,7 +101,7 @@ def _gh_get(path):
     req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
     req.add_header("Accept", "application/vnd.github+json")
     req.add_header("X-GitHub-Api-Version", "2022-11-28")
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with _req("GET", url, timeout=45) as resp:
         return json.loads(resp.read().decode())
 
 
@@ -100,11 +116,13 @@ def login() -> str:
 
 
 def dispatch_mission(token: str, query: str, slug: str) -> str:
+    # Slugs must be unique; prior failed runs leave records behind.
+    unique_slug = f"{slug}-{int(time.time())}"
     out = _http_json("POST", f"{GATEWAY}/api/raven/missions", token=token,
-                     body={"query": query, "slug": slug, "priority": 1})
+                     body={"query": query, "slug": unique_slug, "priority": 1})
     mid = out.get("mission", {}).get("id") or out.get("id")
     assert mid, f"dispatch failed: {out}"
-    print(f"[dispatch] {slug} -> mission {mid}")
+    print(f"[dispatch] {unique_slug} -> mission {mid}")
     return mid
 
 
@@ -139,7 +157,7 @@ def capture_new_lessons(before_count: int) -> list:
     url = f"{RAG}/api/storage/learning?user_id={DEFAULT_USER}&limit=100"
     req = urllib.request.Request(url)
     req.add_header("X-Internal-Secret", sec)
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with _req("GET", url, timeout=45) as resp:
         data = json.loads(resp.read().decode())
     items = data.get("items") or data.get("learnings") or []
     new = items[before_count:]
@@ -152,7 +170,7 @@ def cleanup_repo(repo: str) -> None:
     req = urllib.request.Request(url, method="DELETE")
     req.add_header("Authorization", f"Bearer {GITHUB_TOKEN}")
     try:
-        urllib.request.urlopen(req, timeout=30).close()
+        _req("DELETE", url, timeout=45).close()
         print(f"[cleanup] deleted remote repo {repo}")
     except urllib.error.HTTPError as e:
         # 403 delete_repo scope missing is expected/handled gracefully
