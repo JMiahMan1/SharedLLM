@@ -62,6 +62,10 @@ class RavenWorker:
         self.job_queue = InferenceJobQueue(REDIS_URL)
     def _is_autonomous_job(self, payload: dict[str, Any], user_id: str) -> bool:
         """Determine if a job requires Tier-3 (Raven) exclusive lock."""
+        # A job carrying a `_mission_id` was submitted through the Raven mission
+        # pipeline and is autonomous by definition, regardless of query prose.
+        if payload.get("_mission_id"):
+            return True
         query = str(payload.get("query", "")).lower()
         if is_raven_intent(query):
             return True

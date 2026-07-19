@@ -297,7 +297,15 @@ async def process_full_orchestration(job_payload: dict[str, Any], chunk_callback
     # invokes Raven AND issues a command. Bare action verbs (e.g. "fix the
     # app") without the Raven keyword no longer auto-route to the autonomous
     # queue / AgentLoop.
-    is_autonomous = is_raven_intent(query)
+    #
+    # BUT: a job carrying a `_mission_id` was explicitly submitted through the
+    # Raven mission pipeline (POST /api/raven/missions). Such jobs MUST run the
+    # autonomous AgentLoop regardless of the query prose — otherwise an
+    # open-ended mission whose text lacks the literal "raven" keyword is
+    # misrouted to the single-turn Librarian path, which cannot create
+    # workspaces (observed: WorkspaceCreateRequest "not supported in the
+    # standard path" -> 502/404 workspace-not-found).
+    is_autonomous = bool(job_payload.get("_mission_id")) or is_raven_intent(query)
 
     # 4. Final Inference
     full_system = job_payload.get("system", "")
