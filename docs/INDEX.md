@@ -17,8 +17,8 @@
 - **docs/DNS_RESOLVER.md** - DNS resolver patch
 - **docs/MEDIA_PLAYER.md** - Media pipeline (see MA_STREAMING_FIX.md)
 - **docs/MA_STREAMING_FIX.md** - Current MA streaming
- - **docs/LOGGING_SERVICE.md** - Observability
- - **docs/GEO_SERVICE.md** - Life360-style family location (wraps Home Assistant)
+- **docs/LOGGING_SERVICE.md** - Observability
+- **docs/GEO_SERVICE.md** - Life360-style family location (wraps Home Assistant)
 - **docs/DEBUGGING_DECISION_TREES.md** - Troubleshooting
 - **docs/CI_VALIDATION.md** - CI/CD integration
 - **docs/SCRIPTS.md** - Test scripts
