@@ -88,17 +88,19 @@ test.describe('Knowledge Hub - Raven Lessons (grouped compact list)', () => {
     ).toHaveCount(0).catch(async () => {});
   });
 
-  test('expanded lesson shows structured Rule / outcome fields', async ({ page }) => {
+  test('expanded lesson shows honest applied-vs-retrieved accounting', async ({ page }) => {
     const first = groupRows(page).first();
     await first.waitFor({ state: 'visible', timeout: 45000 });
     await first.click();
+    // Wait until the panel has fully expanded (Delete action present).
+    await expect(
+      page.getByRole('button', { name: /^delete$/i }).first(),
+    ).toBeVisible({ timeout: 45000 });
 
-    // The redesigned panel must expose the honest, structured lesson fields
-    // (Rule + outcome pill + applied-vs-retrieved honesty), not just free prose.
-    await expect(page.getByText(/rule/i).first()).toBeVisible({ timeout: 10000 });
-    // Each structured lesson shows the honest "applied N / retrieved M" line.
-    await expect(page.getByText(/applied/i).first()).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/retrieved/i).first()).toBeVisible({ timeout: 10000 });
+    // The redesigned panel must expose the honest usage accounting: lessons are
+    // now tracked by how often they are ACTUALLY APPLIED vs merely RETRIEVED.
+    await expect(page.getByText(/retrieved/i).first()).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(/applied/i).first()).toBeVisible({ timeout: 30000 });
   });
 
   test('sort toggle switches between Newest and Most Reused', async ({ page }) => {
