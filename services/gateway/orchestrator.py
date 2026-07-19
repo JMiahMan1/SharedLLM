@@ -601,8 +601,10 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     resp = await client.get(f"{control_plane}/api/status/{service_name}", headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=30.0))
 
                 if resp.status == 200:
-                    return f"Control Plane '{sub_action}' succeeded on {service_name}: {resp.text}"
-                return f"Control Plane error {resp.status}: {resp.text}"
+                    body = await resp.text()
+                    return f"Control Plane '{sub_action}' succeeded on {service_name}: {body}"
+                body = await resp.text()
+                return f"Control Plane error {resp.status}: {body}"
         except Exception as e:
             log.error(f"Control Plane execution error: {e}")
             return f"Control Plane execution failed: {e}"
@@ -678,7 +680,8 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                         return result.get("message", "Action completed successfully.")
                     return result.get("message", "Action completed successfully.")
                 else:
-                    return f"Tool execution failed ({resp.status}): {resp.text}"
+                    err_body = await resp.text()
+                    return f"Tool execution failed ({resp.status}): {err_body}"
         except Exception as e:
             log.error(f"Single-turn tool execution error: {e}")
             return f"I encountered an error while executing the tool: {e}"
