@@ -457,6 +457,44 @@ services:
     networks:
       - sharedllm
 
+  geo:
+    image: ghcr.io/jmiahman1/sharedllm-geo:latest
+    build:
+      context: .
+      dockerfile: services/geo/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_geo
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - OLLAMA_URL=${OLLAMA_URL}
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
+      - EXECUTION_SVC_URL=${BRIDGE_EXECUTION_SVC_URL}
+      - RAG_SVC_URL=${BRIDGE_RAG_SVC_URL}
+      - STORAGE_SVC_URL=${BRIDGE_STORAGE_SVC_URL}
+      - LOGGING_SVC_URL=${BRIDGE_LOGGING_SVC_URL}
+      - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
+      - GEO_SVC_URL=${BRIDGE_GEO_SVC_URL}
+      - REDIS_URL=${BRIDGE_REDIS_URL}
+      - TZ=America/Phoenix
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 172.26.0.254
+    networks:
+      - sharedllm
+
   redis:
     image: redis:7-alpine
     container_name: sharedllm_redis

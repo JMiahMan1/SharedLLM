@@ -69,6 +69,7 @@ RAG_SVC_URL = _net_url("RAG", "http://rag:8004")
 STORAGE_SVC_URL = _net_url("STORAGE", "http://storage:8005")
 LOGGING_SVC_URL = _net_url("LOGGING", "http://logging:8006")
 WORKSPACE_RUNTIME_SVC_URL = _net_url("WORKSPACE_RUNTIME", "http://workspace_runtime:8007")
+GEO_SVC_URL = _net_url("GEO", "http://geo:8009")
 CONTROL_PLANE_URL = os.getenv("CONTROL_PLANE_URL")
 SEARXNG_URL = os.getenv(f"{NETWORK_MODE}_SEARXNG_URL") or os.getenv("SEARXNG_URL", "")
 HA_URL = os.getenv("HA_URL")
@@ -159,6 +160,7 @@ async def resolve_runtime_config():
         "storage_svc_url": "STORAGE_SVC_URL",
         "logging_svc_url": "LOGGING_SVC_URL",
         "workspace_runtime_svc_url": "WORKSPACE_RUNTIME_SVC_URL",
+        "geo_svc_url": "GEO_SVC_URL",
         "control_plane_url": "CONTROL_PLANE_URL",
         "searxng_url": "SEARXNG_URL",
         "ha_url": "HA_URL",
@@ -239,6 +241,7 @@ async def resolve_runtime_config():
                 globals()["STORAGE_SVC"] = globals()["STORAGE_SVC_URL"]
                 globals()["LOGGING_SVC"] = globals()["LOGGING_SVC_URL"]
                 globals()["WORKSPACE_RUNTIME_SVC"] = globals()["WORKSPACE_RUNTIME_SVC_URL"]
+                globals()["GEO_SVC"] = globals()["GEO_SVC_URL"]
 
                 # Check if special variables were updated in UI and sync to .env
                 _sync_special_vars_to_env()
