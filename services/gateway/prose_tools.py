@@ -111,6 +111,11 @@ def _parse_pairs(segment: str) -> dict:
             value = value.strip("`").strip()
             if value == "":
                 value = None
+        # Normalize bool/null ONLY when a real string value exists. A bare key
+        # with no value (e.g. `GitOperationRequest action 'push' branch ''`) yields
+        # None here — calling None.lower() used to crash the whole mission
+        # finalization even when the real work already succeeded.
+        if isinstance(value, str) and value:
             low = value.lower()
             if low in ("true", "false"):
                 value = low == "true"
