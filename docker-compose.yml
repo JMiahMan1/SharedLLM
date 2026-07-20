@@ -54,6 +54,7 @@ services:
       - "8006:8006"  # Host:8006 -> Caddy -> logging:8006
       - "8007:8007"  # Host:8007 -> Caddy -> workspace_runtime:8007
       - "8008:8008"  # Host:8008 -> Caddy -> control_plane:8008
+      - "8009:8009"  # Host:8009 -> Caddy -> geo:8009
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
