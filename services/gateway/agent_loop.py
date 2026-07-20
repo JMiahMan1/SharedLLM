@@ -320,11 +320,25 @@ class OllamaProvider(BaseLLMProvider):
         # successive chunks so a stream that stops producing data (e.g. a
         # wedged upstream) raises instead of blocking for minutes. `connect`
         # fails fast if the host is briefly unreachable so callers can retry.
+        #
+        # BUGFIX (observed live): a hard sock_read=60 cap is WRONG for
+        # large-context inference. During the prompt-eval / prefill phase the
+        # model legitimately emits NO chunks for a long time (prefilling tens of
+        # thousands of tokens on num_ctx=32k–64k can take well over a minute
+        # before the first token streams). The old `min(to, 60)` fired sock_read
+        # mid-prefill, the inner streaming loop retried (range(3)), and each retry
+        # RESTARTED the whole request → re-prefilled → timed out again. This is
+        # exactly why raising num_ctx made missions *slower* and produced the
+        # tell-tale 30s-quantised "inference completed in 150006ms / 240011ms"
+        # stalls: they were stacked prefill timeouts + retries, not real
+        # generation. `total` already bounds the whole request, so sock_read only
+        # needs to catch a *truly* wedged stream — make it a large fraction of
+        # total (min 180s) instead of a tiny fixed cap.
         if isinstance(timeout, aiohttp.ClientTimeout):
             self.timeout = timeout
         else:
             to = float(timeout) if timeout else 300.0
-            read_to = min(to, 60.0)
+            read_to = max(180.0, to * 0.8)
             self.timeout = aiohttp.ClientTimeout(
                 total=to, connect=10.0, sock_connect=15.0, sock_read=read_to
             )
