@@ -126,15 +126,19 @@ def init_schema(conn: sqlite3.Connection, dim: int) -> None:
     # Vector table. Dimension is dynamic, never hardcoded. Created only when the
     # sqlite-vec extension is available; otherwise the numpy fallback adapter
     # (which uses the regular `vec_store` table) is used and this is skipped.
+    #
+    # The vec0 table carries the collection/user as metadata columns so the KNN
+    # can be filtered per-collection directly in the WHERE clause (the documented
+    # sqlite-vec pattern). Older databases created the table as
+    # ``vec0(id, embedding)`` with NO metadata columns — a global KNN there had to
+    # be JOIN-filtered afterwards, which dropped in-collection hits once other
+    # collections crowded the top-k (semantic lesson search returned 0). Migrate
+    # such tables by dropping and recreating with the metadata columns; the
+    # startup reindex repopulates every vector from ``rag_items`` (source of
+    # truth), so no data is lost.
     try:
-        cur.execute(
-            f"""
-            CREATE VIRTUAL TABLE IF NOT EXISTS vec_rag_items USING vec0(
-                id TEXT PRIMARY KEY,
-                embedding float[{dim}]
-            )
-            """
-        )
+        _migrate_vec_rag_items_schema(cur, dim)
+        create_vec_table(cur, dim)
     except Exception as e:  # pragma: no cover - environment dependent
         logging.getLogger("rag").warning(
             f"vec0 extension unavailable; skipping vec_rag_items (using numpy fallback): {e}"
@@ -259,6 +263,98 @@ def get_stored_dimension(conn: sqlite3.Connection) -> int | None:
         return int(row["value"]) if row else None
     except Exception:
         return None
+
+
+def create_vec_table(cur: sqlite3.Connection | sqlite3.Cursor, dim: int) -> None:
+    """Create the ``vec_rag_items`` vec0 table with metadata columns.
+
+    Single source of truth for the vector table DDL so every call site (schema
+    init and dimension-mismatch rebuild) uses the same metadata-column shape.
+    """
+    cur.execute(
+        f"""
+        CREATE VIRTUAL TABLE IF NOT EXISTS vec_rag_items USING vec0(
+            embedding float[{dim}],
+            collection_name text,
+            user_id text,
+            id text
+        )
+        """
+    )
+
+
+def _migrate_vec_rag_items_schema(cur: sqlite3.Cursor, dim: int) -> bool:
+    """Migrate a legacy ``vec_rag_items`` table to the metadata-column schema,
+    PRESERVING the existing vectors (no re-embedding).
+
+    The current schema is ``vec0(embedding, collection_name, user_id, id)``.
+    Older databases created ``vec0(id, embedding)`` with no metadata columns, so
+    the KNN could not be scoped per-collection. Those legacy vectors are the same
+    model/dimension and are perfectly valid — we simply move them into the new
+    table with their collection/user copied from ``rag_items`` (the source of
+    truth). This is fast (a blob copy, no model inference) and lossless.
+
+    Returns True if a migration was performed.
+    """
+    log = logging.getLogger("rag")
+    exists = cur.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vec_rag_items'"
+    ).fetchone()
+    if not exists:
+        return False
+    try:
+        cols = {row[1] for row in cur.execute("PRAGMA table_info(vec_rag_items)").fetchall()}
+    except Exception:
+        return False
+    if "collection_name" in cols:
+        return False  # already on the new schema
+
+    log.info("Migrating legacy vec_rag_items to metadata-column schema (preserving vectors)...")
+    # Read legacy (id, embedding) blobs and the id -> (collection, user) map.
+    legacy = list(cur.execute("SELECT id, embedding FROM vec_rag_items"))
+    meta = {
+        r["id"]: (r["collection_name"], r["user_id"])
+        for r in cur.execute("SELECT id, collection_name, user_id FROM rag_items")
+    }
+    cur.execute("DROP TABLE vec_rag_items")
+    create_vec_table(cur, dim)
+    preserved = 0
+    for r in legacy:
+        m = meta.get(r["id"])
+        if m is None:
+            continue  # orphan vector with no rag_items row — drop it
+        cur.execute(
+            "INSERT INTO vec_rag_items(embedding, collection_name, user_id, id) "
+            "VALUES(?, ?, ?, ?)",
+            [r["embedding"], m[0], m[1], r["id"]],
+        )
+        preserved += 1
+    log.info(f"Migrated vec_rag_items: preserved {preserved}/{len(legacy)} vectors")
+    return True
+
+
+def get_stored_model(conn: sqlite3.Connection) -> str | None:
+    """Return the embedding model name last used to build the vector index.
+
+    Used to detect when the active model changed so the index can be rebuilt
+    (stale vectors from a previous model silently break semantic search).
+    """
+    try:
+        row = conn.execute(
+            "SELECT value FROM rag_meta WHERE key='embedding_model'"
+        ).fetchone()
+        return row["value"] if row else None
+    except Exception:
+        return None
+
+
+def set_stored_model(conn: sqlite3.Connection, model: str) -> None:
+    conn.execute(
+        "INSERT INTO rag_meta(key, value) VALUES('embedding_model', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        [model],
+    )
+    conn.commit()
 
 
 def _migrate_rag_items_usage_columns(cur: sqlite3.Cursor) -> None:

@@ -94,6 +94,36 @@ async def lifespan(app: FastAPI):
     _ensure_dimension_consistent(conn)
 
     adapter = build_adapter(conn)
+
+    # Rebuild the vector index ONLY when it is genuinely out of sync — either the
+    # vector count no longer matches rag_items (missing/orphaned vectors) or the
+    # embedding model actually changed to a DIFFERENT known model. A first run
+    # (stored_model is None) does NOT force a re-embed: the legacy migration above
+    # preserves the existing same-dimension vectors, so we trust them and just
+    # record the model. This keeps existing data intact and startup fast; a real
+    # model change is caught by _ensure_dimension_consistent (dim change -> empty
+    # table -> count mismatch -> reindex) or by the model comparison below.
+    try:
+        total_docs = _conn().execute("SELECT COUNT(*) FROM rag_items").fetchone()[0]
+        vec_count = adapter.count() if adapter else 0
+        stored_model = db.get_stored_model(conn)
+        model_changed = stored_model is not None and stored_model != EMBEDDING_MODEL
+        if vec_count != total_docs or model_changed:
+            reason = "model change" if model_changed else "vector count mismatch"
+            log.info(
+                f"[RAG] Reindexing vector store ({reason}: stored={stored_model!r} "
+                f"current={EMBEDDING_MODEL!r}, vec={vec_count}/{total_docs})"
+            )
+            reindex_all()
+        else:
+            log.info(
+                f"[RAG] Vector store in sync ({vec_count}/{total_docs} vectors, "
+                f"model={EMBEDDING_MODEL!r}); no reindex needed"
+            )
+        db.set_stored_model(conn, EMBEDDING_MODEL)
+    except Exception as e:
+        log.warning(f"[RAG] startup reindex check failed (non-fatal): {e}")
+
     BACKEND = "sqlite-vec" if type(adapter).__name__ == "SqliteVecAdapter" else "numpy"
     log.info("RAG Service Ready.")
     yield
@@ -120,10 +150,7 @@ def _ensure_dimension_consistent(connection):
             "rebuilding vec_rag_items (vectors will be re-created on next sync)."
         )
         connection.execute("DROP TABLE IF EXISTS vec_rag_items")
-        connection.execute(
-            f"CREATE VIRTUAL TABLE vec_rag_items USING vec0("
-            f"id TEXT PRIMARY KEY, embedding float[{EMBEDDING_DIM}])"
-        )
+        db.create_vec_table(connection, EMBEDDING_DIM)
         connection.commit()
 
 
@@ -200,6 +227,30 @@ def _add_item(
         log.debug(f"FTS5 index skip for {doc_id}: {e}")
 
     _conn().commit()
+
+
+def reindex_all() -> int:
+    """Re-embed every document in ``rag_items`` with the CURRENT model and rebuild
+    the vector store.
+
+    Stale vectors (indexed with a previous embedding model) silently break
+    semantic search — the KNN returns 0 hits even though documents exist. This
+    guarantees the index always matches the active model. Embedding is batched
+    into a single call so it stays fast even for thousands of documents, and it
+    also warms the embedder so the first live search is fast.
+    """
+    rows = _conn().execute(
+        "SELECT id, content, collection_name, user_id FROM rag_items"
+    ).fetchall()
+    if not rows:
+        return 0
+    contents = [r["content"] or "" for r in rows]
+    vectors = embed(contents)  # batched; uses/warms the current model
+    for r, vec in zip(rows, vectors, strict=False):
+        _adapter().add(r["id"], vec, r["collection_name"], r["user_id"])
+    _conn().commit()
+    log.info(f"[RAG] reindexed {len(rows)} documents into the vector store")
+    return len(rows)
 
 
 def _delete_items(ids: list[str]):

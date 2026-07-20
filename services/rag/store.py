@@ -69,32 +69,27 @@ class SqliteVecAdapter(VectorStoreAdapter):
         # instead of raising "UNIQUE constraint failed on primary key".
         self.conn.execute("DELETE FROM vec_rag_items WHERE id = ?", [doc_id])
         self.conn.execute(
-            "INSERT INTO vec_rag_items(id, embedding) VALUES(?, ?)",
-            [doc_id, blob],
+            "INSERT INTO vec_rag_items(embedding, collection_name, user_id, id) "
+            "VALUES(?, ?, ?, ?)",
+            [blob, collection, user_id, doc_id],
         )
 
     def search(
         self, collection: str, user_id: str, query_vector: list[float], k: int
     ) -> list[tuple[str, float]]:
         blob = serialize_vector(query_vector)
-        # vec0 requires the KNN LIMIT to be on the virtual-table scan itself;
-        # filter by collection/user via an outer JOIN so the planner sees the
-        # `LIMIT ?` constraint directly on vec_rag_items.
+        # Documented sqlite-vec KNN-with-metadata pattern: the collection/user
+        # metadata live in the vec0 table and are filtered directly in the WHERE
+        # alongside `embedding MATCH`, so the KNN is correctly scoped per
+        # collection (a global KNN + JOIN used to drop in-collection hits once
+        # other collections crowded the top-k, returning 0 for lesson retrieval).
+        # `user_id IN (?, 'default')` also surfaces shared ("default") lessons.
         rows = self.conn.execute(
-            """
-            SELECT i.id AS id, v.distance AS distance
-            FROM (
-                SELECT id, distance
-                FROM vec_rag_items
-                WHERE embedding MATCH ?
-                ORDER BY distance
-                LIMIT ?
-            ) v
-            JOIN rag_items i ON i.id = v.id
-            WHERE i.collection_name = ?
-              AND (i.user_id = ? OR i.user_id = 'default')
-            """,
-            [blob, k, collection, user_id],
+            "SELECT id, distance FROM vec_rag_items "
+            "WHERE embedding MATCH ? AND collection_name = ? "
+            "AND user_id IN (?, 'default') "
+            "ORDER BY distance LIMIT ?",
+            [blob, collection, user_id, k],
         ).fetchall()
         return [(r["id"], float(r["distance"])) for r in rows]
 
