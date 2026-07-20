@@ -942,13 +942,26 @@ def extract_action_batch(text: str) -> list[dict] | None:
         candidates.append(text[first : last + 1])
 
     for raw in candidates:
-        try:
-            parsed = json.loads(raw)
-        except Exception:
+        parsed = None
+        # Attempt 1: strict parse. Attempt 2: strip trailing commas.
+        # Attempt 3: repair raw control chars (newlines/tabs) that leaked inside
+        # string values — REAL file content always contains literal newlines, so
+        # without this repair every batch of file-writes silently fails to parse
+        # and the loop falls back to a single tool call. This mirrors the repair
+        # already applied on the single-object path (extract_action_json).
+        for attempt in (
+            lambda s: s,
+            lambda s: re.sub(r",\s*([\]}])", r"\1", s),
+            lambda s: _repair_json_control_chars(s),
+            lambda s: _repair_json_control_chars(re.sub(r",\s*([\]}])", r"\1", s)),
+        ):
             try:
-                parsed = json.loads(re.sub(r",\s*([\]}])", r"\1", raw))
+                candidate_parsed = json.loads(attempt(raw))
             except Exception:
                 continue
+            if isinstance(candidate_parsed, list) and candidate_parsed:
+                parsed = candidate_parsed
+                break
         if not isinstance(parsed, list) or not parsed:
             continue
         batch = []

@@ -88,6 +88,46 @@ def test_extract_action_batch_prose_is_not_a_batch():
     assert extract_action_batch("First I will create the workspace, then write files.") is None
 
 
+def test_extract_action_batch_real_file_content_with_newlines():
+    # REGRESSION: real file content always contains literal newlines/tabs inside
+    # the JSON string values. The batch extractor previously used strict json.loads
+    # (no control-char repair), so ANY batch of real file writes silently returned
+    # None and the loop fell back to a single tool call per turn. This masqueraded
+    # as "the model refuses to batch" when the parser was actually dropping it.
+    text = (
+        "[ "
+        '{"@type": "WorkspaceFileWriteRequest", "file_path": "core.py", '
+        '"content": "import os\n\ndef main():\n\treturn os.getcwd()\n"}, '
+        '{"@type": "WorkspaceFileWriteRequest", "file_path": "test_core.py", '
+        '"content": "from core import main\n\ndef test_main():\n\tassert main()\n"} '
+        "]"
+    )
+    batch = extract_action_batch(text)
+    assert batch is not None, "batch with real newlines in content must parse"
+    assert len(batch) == 2
+    # Content must be preserved intact, including its newlines.
+    assert "\n" in batch[0]["content"]
+    assert batch[0]["file_path"] == "core.py"
+    assert batch[1]["file_path"] == "test_core.py"
+
+
+def test_extract_action_batch_fenced_with_newlines_and_tabs():
+    # Same repair path, but wrapped in a ```json fence like the model emits.
+    text = (
+        "```json\n"
+        "[ "
+        '{"@type": "WorkspaceFileWriteRequest", "file_path": "m.py", '
+        '"content": "def f():\n\treturn 1\n"}, '
+        '{"@type": "WorkspaceShellRequest", "command": "python -m pytest -q"} '
+        "]\n"
+        "```"
+    )
+    batch = extract_action_batch(text)
+    assert batch is not None
+    assert len(batch) == 2
+    assert batch[0]["file_path"] == "m.py"
+
+
 def test_batch_drain_semantics_on_failure():
     # Simulate the loop's drain-on-failure invariant: when a batched step fails,
     # the remaining queued steps must be discarded so the model re-plans.
