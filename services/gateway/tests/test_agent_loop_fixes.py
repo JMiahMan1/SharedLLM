@@ -163,7 +163,9 @@ def _guidance(**kw):
 def test_guidance_no_workspace_says_create_first():
     g = _guidance(workspace_id=None, files_written=0)
     assert "WorkspaceCreateRequest" in g
-    assert "cannot batch before it exists" in g
+    # No workspace yet -> guidance should still push a batched setup chain,
+    # consistent with the protocol (create -> repo -> settings in one array).
+    assert "JSON ARRAY" in g
 
 
 def test_guidance_pushes_batching_when_building():

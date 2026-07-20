@@ -188,8 +188,10 @@ def build_adaptive_guidance(
     if not parts:
         if not (workspace_id and str(workspace_id).strip()):
             parts.append(
-                "Step 0: create your workspace with a SINGLE WorkspaceCreateRequest "
-                "(you cannot batch before it exists)."
+                "Start the mission: emit a JSON ARRAY that begins with "
+                "WorkspaceCreateRequest and chains the known setup steps "
+                "(create workspace -> gh repo create -> WorkspaceSettingsUpdateRequest), "
+                "so the whole setup runs from ONE turn."
             )
         else:
             parts.append(
@@ -2904,6 +2906,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             await hb_task
             log.info(f"[AgentLoop] Inference completed in {(asyncio.get_event_loop().time() - iter_start)*1000:.0f}ms — iter {agent_iter + 1}")
             log.info(f"[AgentLoop] Response content: {ans[:200]}...")
+            # Structural preview: the first non-whitespace char reveals whether the
+            # model returned an object ('{') or a batch array ('['). Honest signal
+            # for diagnosing batching without dumping full (huge) file content.
+            _stripped = ans.lstrip()
+            _shape = _stripped[:1] if _stripped else ""
+            log.info(
+                f"[AgentLoop] Reply shape: first_char={_shape!r} "
+                f"len={len(ans)} has_json_array={'[' in ans[:50]}"
+            )
             # Record this turn so the model retains context in subsequent iterations.
             if ans and ans.strip() and not skip_inference:
                 conversation.append({"role": "assistant", "content": ans})
