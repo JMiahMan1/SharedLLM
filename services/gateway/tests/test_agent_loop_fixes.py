@@ -84,6 +84,37 @@ def test_normalize_tool_rejects_malformed_file_write():
     assert "class EnvDiff" in good["content"]
 
 
+def test_valid_structured_tool_gate():
+    """The shared gate must accept valid calls and reject the live garbage shape."""
+    from services.gateway.agent_loop import _valid_structured_tool
+
+    # valid write
+    assert _valid_structured_tool(
+        {"action": "WorkspaceFileWriteRequest", "file_path": "envdiff/core.py",
+         "content": "class EnvDiff:\n    pass\n"}
+    ) is True
+
+    # the exact bag-of-words garbage seen at mission 3 iters 10-12
+    garbage = {
+        "@type": "WorkspaceFileWriteRequest", "file_path": ":",
+        "envdiff": ".core", "content": ":",
+        "workspace_id": "raven-envdiff-run3", "type": ":",
+        "action": "WorkspaceFileWriteRequest",
+        "payload": {"file_path": ":", "content": ":"},
+    }
+    assert _valid_structured_tool(garbage) is False
+
+    # read with a stub path is rejected
+    assert _valid_structured_tool(
+        {"action": "WorkspaceFileReadRequest", "file_path": ":"}
+    ) is False
+
+    # non-structured actions are never gated (shell/git pass through)
+    assert _valid_structured_tool(
+        {"action": "WorkspaceShellRequest", "command": "ls"}
+    ) is True
+
+
 def test_next_batch_step_logic():
     # Empty batch
     skip, tool = _next_batch_step([])

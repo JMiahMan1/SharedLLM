@@ -593,6 +593,45 @@ def _deep_find(node: object, key: str) -> object:
     return None
 
 
+# File/workspace tool types whose payloads MUST carry a real path + (for writes)
+# real content. These are the calls most often emitted as a truncated bag-of-words
+# dict when generation is cut mid-file-write; executing such garbage poisons the
+# workspace, so every extraction path funnels through this gate.
+_STRUCTURED_TOOL_ACTIONS = (
+    "WorkspaceFileWriteRequest",
+    "WorkspaceFilePatchRequest",
+    "WorkspaceFileReadRequest",
+)
+
+
+def _valid_structured_tool(obj: dict) -> bool:
+    """Return True only if a file-write/read/patch call has a usable payload.
+
+    Rejects the live-observed failure mode where a truncated generation emits a
+    flat bag-of-words dict like {"file_path":":", "envdiff":"/core.py",
+    "content":":"} — file_path is a stub (":"/"."/"/") and content is a 1-char
+    stub or a dict of words. Such calls must never be executed; the caller should
+    steer the model to re-emit a well-formed call instead.
+    """
+    if not isinstance(obj, dict):
+        return False
+    action = obj.get("action") or obj.get("@type")
+    if action not in _STRUCTURED_TOOL_ACTIONS:
+        return True
+    fp = obj.get("file_path")
+    if not isinstance(fp, str) or not fp.strip() or fp.strip() in (":", ".", "/"):
+        return False
+    if action in ("WorkspaceFileWriteRequest", "WorkspaceFilePatchRequest"):
+        content = obj.get("content")
+        if content is None:
+            return False
+        if isinstance(content, dict) or not isinstance(content, str):
+            return False
+        if len(content.strip()) < 5:
+            return False
+    return True
+
+
 def _normalize_tool(obj: dict) -> dict | None:
     """Ensure a tool-call dict carries an 'action' discriminator, inferring it when absent."""
     if not isinstance(obj, dict):
@@ -690,23 +729,8 @@ def _normalize_tool(obj: dict) -> dict | None:
     #   looped re-emitting garbage instead of converging. A tool call this broken
     #   must be rejected (return None) so the agent loop steers the model to
     #   re-emit a well-formed call rather than acting on nonsense.
-    action = obj.get("action")
-    if action in ("WorkspaceFileWriteRequest", "WorkspaceFilePatchRequest"):
-        fp = obj.get("file_path")
-        if not isinstance(fp, str) or not fp.strip() or fp.strip() in (":", ".", "/"):
-            return None
-        content = obj.get("content")
-        # content must be a real (non-trivial) string, not a dict/None/stub
-        if content is None:
-            return None
-        if isinstance(content, dict) or not isinstance(content, str):
-            return None
-        if len(content.strip()) < 5:
-            return None
-    elif action == "WorkspaceFileReadRequest":
-        fp = obj.get("file_path")
-        if not isinstance(fp, str) or not fp.strip() or fp.strip() in (":", ".", "/"):
-            return None
+    if not _valid_structured_tool(obj):
+        return None
 
     return obj if obj.get("action") else None
 
@@ -3097,7 +3121,30 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 tool_data["action"] = tool_data["function"].get("name", "")
                 tool_data["payload"] = tool_data["function"].get("arguments", {})
 
-            log.info(f"[AgentLoop] Normalized Tool Data: {tool_data}")
+            # Structural gate: every extraction path (batch, single, prose
+            # recovery, pending_batch continuation) must funnel through the same
+            # validation. A malformed file-write/read/patch call (e.g. a
+            # truncated bag-of-words dict with file_path ":" and content ":") is
+            # REJECTED here so it is never dispatched to the execution service.
+            # We steer the model to re-emit a well-formed call instead.
+            if not _valid_structured_tool(tool_data):
+                log.warning(
+                    f"[AgentLoop] Rejected malformed tool call (action="
+                    f"{tool_data.get('action') or tool_data.get('@type')}, "
+                    f"file_path={tool_data.get('file_path')!r}): re-prompting for "
+                    f"a well-formed call."
+                )
+                action_log.append(
+                    f"ITERATION {iter_num}: Your tool call was malformed "
+                    f"(missing/invalid file_path or content). Emit a single valid "
+                    f"JSON object with a real file_path and complete content, e.g. "
+                    f'{{"@type":"WorkspaceFileWriteRequest","file_path":"envdiff/core.py",'
+                    f'"content":"..."}}.'
+                )
+                tool_data = None
+
+            if tool_data:
+                log.info(f"[AgentLoop] Normalized Tool Data: {tool_data}")
 
         # Validation: If we don't have a valid action at this point, we MUST re-prompt.
         if not tool_data or not tool_data.get("action"):
