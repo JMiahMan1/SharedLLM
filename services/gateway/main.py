@@ -656,6 +656,13 @@ async def lifespan(app: FastAPI):
     if raven_worker:
         raven_worker.start()
 
+    # Warm RAG's embedding model in the background so the FIRST Raven mission's
+    # lesson injection doesn't hit RAG's ~25s cold start and silently skip lessons.
+    try:
+        asyncio.create_task(_warm_rag_lesson_cache())
+    except Exception as e:  # non-fatal
+        log.warning(f"[Raven] RAG warmup scheduling failed (non-fatal): {e}")
+
     yield
 
     log.info("Gateway shutting down...")
@@ -5052,7 +5059,7 @@ async def _fetch_relevant_lessons(query: str, client=None, limit: int = 5) -> st
                     "k": limit,
                 },
                 headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
-                timeout=aiohttp.ClientTimeout(total=60.0),
+                timeout=aiohttp.ClientTimeout(total=120.0),
             )
 
         if client is not None:
@@ -5087,6 +5094,30 @@ async def _fetch_relevant_lessons(query: str, client=None, limit: int = 5) -> st
     except Exception as e:  # never block mission start on a learning lookup failure
         log.warning(f"[Raven] relevant-lesson retrieval failed (skipping injection): {e}")
         return ""
+
+
+async def _warm_rag_lesson_cache() -> None:
+    """Best-effort background warmup of RAG's embedding model.
+
+    RAG's first /rag/search per process is a one-time ~25s cold start (embedding
+    model + sqlite-vec first query); later calls are <100ms. If the first Raven
+    mission after a gateway/rag restart hits that cold start inside lesson
+    injection, it can blow past even a generous timeout and the learning loop
+    silently drops. Warming it at gateway startup (before any mission runs)
+    keeps the injection fast and reliable. Fails safe — never raises.
+    """
+    try:
+        await asyncio.sleep(2)  # let startup settle before hammering RAG
+        async with aiohttp.ClientSession() as c:
+            await c.post(
+                f"{RAG_SVC}/rag/search",
+                json={"collection_name": "system_learnings", "query": "warmup", "user_id": "default", "k": 1},
+                headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
+                timeout=aiohttp.ClientTimeout(total=120.0),
+            )
+        log.info("[Raven] RAG lesson cache warmed (first mission injection will be fast)")
+    except Exception as e:  # non-fatal
+        log.warning(f"[Raven] RAG warmup failed (non-fatal): {e}")
 
 
 async def _build_raven_system_prompt(query: str) -> str:
