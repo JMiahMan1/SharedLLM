@@ -14,10 +14,14 @@ upgrade path if HA's sharing/geofence UX proves insufficient.
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import aiohttp
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+_STATIC = Path(__file__).resolve().parent / "static"
 
 from services.config import HA_TOKEN, HA_URL, INTERNAL_SECRET
 from services.common.http import get_client_insecure
@@ -38,6 +42,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="SOA Geo Service", lifespan=lifespan)
 app.include_router(info_router)
+
+
+@app.get("/")
+def index():
+    """Serve the MapLibre family-location web client."""
+    return FileResponse(_STATIC / "index.html")
 
 
 def _ha_headers() -> dict:

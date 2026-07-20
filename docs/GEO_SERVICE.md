@@ -73,12 +73,17 @@ Registered in `config.py` as `GEO_SVC_URL` (default `http://geo:8009`),
 exposed in compose as `BRIDGE_GEO_SVC_URL`, routed via Caddy `:8009`, and added
 to the build matrix in `.github/workflows/build-images.yml`.
 
-## Client (not in this repo)
+## Client
 
-The SharedLLM Android app renders a MapLibre map (Protomaps/OSM vector tiles)
-from `/people` + `/zones`, and either relies on the HA companion app for
-push or calls `POST /people/{id}/see`. This is the P1 build item from the
-S26-Setup service audit.
+A self-contained MapLibre web client is served at `GET /` (file
+`services/geo/static/index.html`) — no build step, loads MapLibre GL JS from
+CDN and OSM raster tiles (no API key). It renders `/people` + `/zones`, lets
+you tap a person to replay their `/people/{id}/history` trail, and auto-refreshes
+every 15s. Open `http://<host>:8009/` in any browser (or Brave on the phone).
+It works as a PWA-style target and is the stopgap until a native Android view
+is built into the SharedLLM app. The native client would render the same
+endpoints via MapLibre (Protomaps/OSM vector tiles) and call
+`POST /people/{id}/see` for push (requires `X-Internal-Secret`).
 
 ## License notes
 MapLibre GL JS: BSD-2 · OSM data: ODbL · Protomaps: see their license · HA

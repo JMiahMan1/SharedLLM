@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>SharedLLM · Family Location</title>
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --txt:#e6edf3; --muted:#8b949e; --accent:#2f81f7; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--txt); }
+  #map { position:absolute; inset:0; }
+  #panel { position:absolute; top:10px; left:10px; right:10px; z-index:5; display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  .card { background:var(--panel); border:1px solid #30363d; border-radius:10px; padding:8px 10px; font-size:13px; }
+  .person { cursor:pointer; display:flex; gap:6px; align-items:center; }
+  .person:hover { border-color:var(--accent); }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--accent); }
+  #status { margin-left:auto; color:var(--muted); }
+  #banner { position:absolute; bottom:10px; left:10px; right:10px; z-index:5; display:none; }
+  .ml-popup { background:var(--panel); color:var(--txt); border-radius:8px; padding:6px 8px; font-size:12px; }
+  .maplibregl-popup-content { background:var(--panel); color:var(--txt); }
+  .maplibregl-popup-tip { border-top-color:var(--panel)!important; border-bottom-color:var(--panel)!important; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="panel"><div class="card" id="people">Loading…</div><div id="status" class="card">—</div></div>
+<div id="banner"><div class="card" style="border-color:#d29922;color:#d29922">Home Assistant not configured — location data unavailable.</div></div>
+<script>
+const REFRESH_MS = 15000;
+let map, peopleCache = {}, zoneLayerReady = false;
+
+const OSM_STYLE = {
+  version: 8,
+  sources: {
+    osm: {
+      type: "raster",
+      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+      tileSize: 256,
+      attribution: "© OpenStreetMap contributors"
+    }
+  },
+  layers: [{ id: "osm", type: "raster", source: "osm" }]
+};
+
+async function api(path) {
+  const r = await fetch(path, { cache: "no-store" });
+  if (!r.ok) throw new Error(path + " -> " + r.status);
+  return r.json();
+}
+
+function initMap() {
+  map = new maplibregl.Map({
+    container: "map",
+    style: OSM_STYLE,
+    center: [-111.56466, 33.1667],
+    zoom: 13
+  });
+  map.addControl(new maplibregl.NavigationControl(), "bottom-right");
+  map.on("load", () => { zoneLayerReady = true; drawAll(); });
+}
+
+function colorFor(name) {
+  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `hsl(${h},70%,55%)`;
+}
+
+function drawZones(zones) {
+  if (!map || !zoneLayerReady) return;
+  const feats = (zones.features || []).map(f => {
+    const r = (f.properties.state || 50) / 111320; // degrees ~ meters
+    return { type:"Feature", geometry:{type:"Point",coordinates:f.geometry.coordinates}, properties:{...f.properties, radius:r} };
+  });
+  const src = map.getSource("zones");
+  if (src) { src.setData({ type:"FeatureCollection", features:feats }); return; }
+  map.addSource("zones", { type:"geojson", data:{ type:"FeatureCollection", features:feats } });
+  map.addLayer({ id:"zone-fill", type:"fill", source:"zones", paint:{ "fill-color":"#2f81f7", "fill-opacity":0.12 } });
+  map.addLayer({ id:"zone-outline", type:"line", source:"zones", paint:{ "line-color":"#2f81f7", "line-width":2, "line-opacity":0.5 } });
+}
+
+function drawPeople(people) {
+  if (!map || !zoneLayerReady) return;
+  const feats = (people.features || []).map(f => ({
+    type:"Feature", geometry:f.geometry,
+    properties:{ ...f.properties, color: colorFor(f.properties.friendly_name || f.properties.entity_id) }
+  }));
+  const src = map.getSource("people");
+  if (src) { src.setData({ type:"FeatureCollection", features:feats }); return; }
+  map.addSource("people", { type:"geojson", data:{ type:"FeatureCollection", features:feats } });
+  map.addLayer({
+    id:"people-pts", type:"circle", source:"people",
+    paint:{ "circle-radius":8, "circle-color":["get","color"], "circle-stroke-width":2, "circle-stroke-color":"#fff" }
+  });
+  map.on("click", "people-pts", e => {
+    const p = e.features[0].properties;
+    showHistory(p.entity_id, p.friendly_name);
+    new maplibregl.Popup().setLngLat(e.features[0].geometry.coordinates)
+      .setHTML(`<b>${p.friendly_name}</b><br>state: ${p.state||"?"}<br>accuracy: ${p.gps_accuracy??"?"} m`).addTo(map);
+  });
+  map.on("mouseenter", "people-pts", () => map.getCanvas().style.cursor = "pointer");
+  map.on("mouseleave", "people-pts", () => map.getCanvas().style.cursor = "");
+}
+
+function drawAll() {
+  if (!map || !zoneLayerReady) return;
+  drawZones(zonesCache);
+  drawPeople(peopleCache);
+}
+
+let zonesCache = { type:"FeatureCollection", features:[] };
+
+async function showHistory(entityId, name) {
+  try {
+    const h = await api("/people/" + encodeURIComponent(entityId) + "/history?samples=300");
+    const pts = (h.points || []).map(p => [p.lon, p.lat]).filter(c => c[0] && c[1]);
+    if (!pts.length) return;
+    const src = map.getSource("trail");
+    const fc = { type:"FeatureCollection", features:[{ type:"Feature", geometry:{type:"LineString", coordinates:pts}, properties:{} }] };
+    if (src) { src.setData(fc); } else {
+      map.addSource("trail", { type:"geojson", data:fc });
+      map.addLayer({ id:"trail-line", type:"line", source:"trail", paint:{ "line-color":"#f78166", "line-width":3, "line-opacity":0.8 } });
+    }
+    const b = new maplibregl.LngLatBounds(pts[0], pts[0]);
+    pts.forEach(c => b.extend(c));
+    map.fitBounds(b, { padding:60, maxZoom:15, duration:800 });
+  } catch (e) { console.warn("history failed", e); }
+}
+
+async function refresh() {
+  try {
+    const health = await api("/health");
+    document.getElementById("banner").style.display = health.ha_configured ? "none" : "block";
+    const [people, zones] = await Promise.all([api("/people"), api("/zones")]);
+    peopleCache = people; zonesCache = zones;
+    drawAll();
+    const list = (people.features || []).map(f => {
+      const p = f.properties;
+      return `<div class="card person" onclick="showHistory('${p.entity_id}','${p.friendly_name}')"><span class="dot" style="background:${colorFor(p.friendly_name||p.entity_id)}"></span>${p.friendly_name} · ${p.state||"?"}</div>`;
+    }).join("");
+    document.getElementById("people").innerHTML = list || "No people";
+    document.getElementById("status").textContent = new Date().toLocaleTimeString() + " · " + (people.features||[]).length + " tracked";
+  } catch (e) {
+    document.getElementById("status").textContent = "error: " + e.message;
+  }
+}
+
+initMap();
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>
