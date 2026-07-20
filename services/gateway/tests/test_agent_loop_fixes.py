@@ -1,5 +1,6 @@
 
 from services.gateway.agent_loop import (
+    OllamaProvider,
     _has_valid_workspace_id,
     _next_batch_step,
     action_signature,
@@ -9,6 +10,35 @@ from services.gateway.agent_loop import (
     is_verification_action,
     outcome_digest,
 )
+
+
+def test_ollama_sock_read_not_capped_at_60_for_large_context_prefill():
+    """Regression: sock_read must NOT be a tiny fixed cap.
+
+    The prompt-eval/prefill phase on a large num_ctx legitimately streams NO
+    chunks for over a minute. The old ``min(total, 60)`` fired sock_read
+    mid-prefill and triggered request-restart retries, which was the root
+    cause of the 30s-quantised inference stalls (150006ms/240011ms). sock_read
+    must be a large fraction of total (>= 180s) so it only catches a truly
+    wedged stream, never a normal long prefill.
+    """
+    p = OllamaProvider("http://example:11434", timeout=600.0)
+    assert p.timeout.sock_read is not None
+    assert p.timeout.sock_read >= 180.0, "sock_read too small; would kill long prefills"
+    assert p.timeout.sock_read >= 0.8 * 600.0
+    assert p.timeout.total == 600.0
+
+    # Even for a modest total, sock_read has a sane floor of 180s.
+    p2 = OllamaProvider("http://example:11434", timeout=120.0)
+    assert p2.timeout.sock_read >= 180.0
+
+    # An explicit ClientTimeout is passed through untouched.
+    import aiohttp
+
+    explicit = aiohttp.ClientTimeout(total=42.0, sock_read=7.0)
+    p3 = OllamaProvider("http://example:11434", timeout=explicit)
+    assert p3.timeout.sock_read == 7.0
+    assert p3.timeout.total == 42.0
 
 
 def test_next_batch_step_logic():
