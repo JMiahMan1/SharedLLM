@@ -1625,16 +1625,16 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         # see a test file and its implementation together to fix import mismatches.
         # 4096 still fits a full file write and doubles the input budget for free
         # (no VRAM cost — num_predict does not change resident VRAM).
-        # num_predict=4096 was chosen to free the INPUT budget (it is carved out
-        # of num_ctx). With num_ctx now 65536 the input budget is enormous, so the
-        # binding constraint is WALL-CLOCK, not context: at Q4 on a 35B model a
-        # 4096-token generation takes 180-270s, so only ~17 iterations fit the
-        # 1920s mission cap — not enough to converge (mission got stuck in the
-        # budget/verify loop). 2048 still writes a full module in one turn but
-        # roughly halves per-infer time (~90-135s), doubling iterations and
-        # giving the mission room to reach the push phase. Revisit if the model
-        # starts truncating long files.
-        "num_predict": 2048,
+        # num_predict=4096 + 65536 ctx: a 4096-token gen took 180-270s, so only
+        # ~17 iters fit the 1920s mission cap -> timeout before converging. 2048
+        # halved per-infer time (~90-135s) but OBSERVED LIVE: 2048 is too small to
+        # finish writing a real module in ONE generation, so the model truncated
+        # mid-file, fell back to prose garbage (rejected by the malformed-call
+        # gate), and looped until the wall-clock cap. 3072 is the measured
+        # compromise: large enough that cli.py/tests/core.py complete in one turn
+        # (no truncation -> no prose fallback), but per-infer stays ~120-180s so
+        # ~10-12 iters fit the cap — enough to write the lib, test, and push.
+        "num_predict": 3072,
         "temperature": 0.1,
         "top_p": 0.9,
         "repeat_penalty": 1.1,
