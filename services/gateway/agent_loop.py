@@ -2606,7 +2606,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         log.info(f"[AgentLoop] Context compressed: {len(older)} older entries summarized, {len(recent)} recent kept")
         return summary, recent_joined
 
-    def _compact_conversation(conv: list[dict], keep_last: int = 6, threshold: int = 12000) -> list[dict]:
+    def _compact_conversation(conv: list[dict], keep_last: int = 10, threshold: int = 48000) -> list[dict]:
         """Keep a running, compacted conversation so the model retains learned context
         across a long mission instead of only seeing the last tool result each turn.
 
@@ -2833,20 +2833,33 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 user_content += ctx_summary + "\n\n"
             user_content += "RECENT ACTIONS:\n" + ctx_recent
             if exec_data:
-                # Truncate detail, stdout, and stderr to save VRAM if they are massive
+                # Keep tool output large enough that the model can actually SEE full
+                # test failures / tracebacks — the whole point of a big context. The
+                # old 500/2000-char caps hid the exact pytest error lines the model
+                # needed to fix, which caused endless "run tests -> can't see the
+                # failure -> guess -> re-run" loops. Bounded, but generous.
+                _PER_FIELD_CAP = 6000
+                _TOTAL_CAP = 12000
                 safe_exec_data = exec_data.copy() if isinstance(exec_data, dict) else {"result": str(exec_data)}
                 if "detail" in safe_exec_data and isinstance(safe_exec_data["detail"], dict):
                     for key in ["content", "stdout", "stderr"]:
-                        if key in safe_exec_data["detail"] and safe_exec_data["detail"][key] and len(str(safe_exec_data["detail"][key])) > 500:
-                            safe_exec_data["detail"][key] = str(safe_exec_data["detail"][key])[:500] + "\n...[TRUNCATED]..."
+                        val = safe_exec_data["detail"].get(key)
+                        if val and len(str(val)) > _PER_FIELD_CAP:
+                            # Keep the TAIL: pytest prints the failing assertions and
+                            # the short summary at the END, which is what we need.
+                            s = str(val)
+                            safe_exec_data["detail"][key] = (
+                                "...[TRUNCATED HEAD]...\n" + s[-_PER_FIELD_CAP:]
+                            )
 
                 # Sanitize credentials from execution results before feeding to LLM
                 safe_exec_data = sanitize_for_llm(safe_exec_data)
 
-                # Hard limit on total exec_data size
+                # Hard limit on total exec_data size (bounded, but large enough for
+                # a full traceback).
                 exec_json = json.dumps(safe_exec_data)
-                if len(exec_json) > 2000:
-                    exec_json = exec_json[:2000] + "\n...[TRUNCATED FOR CONTEXT WINDOW]..."
+                if len(exec_json) > _TOTAL_CAP:
+                    exec_json = exec_json[:_TOTAL_CAP] + "\n...[TRUNCATED FOR CONTEXT WINDOW]..."
 
                 user_content += f"\n\nLAST TOOL RESULT:\n{exec_json}"
             # PIPELINE-DRIVEN ADAPTIVE GUIDANCE: steer the LLM toward the efficient
