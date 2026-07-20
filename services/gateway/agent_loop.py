@@ -125,6 +125,92 @@ def _has_valid_workspace_id(value: object) -> bool:
     """
     return bool(value is not None and str(value).strip())
 
+
+# The static batching example the model is shown when it should plan ahead.
+_BATCH_EXAMPLE = (
+    "```json\n"
+    '[ {"@type": "WorkspaceFileWriteRequest", "file_path": "a.py", "content": "..."}, '
+    '{"@type": "WorkspaceFileWriteRequest", "file_path": "b.py", "content": "..."}, '
+    '{"@type": "WorkspaceShellRequest", "command": "python -m pytest -q"} ]\n'
+    "```"
+)
+
+
+def build_adaptive_guidance(
+    *,
+    workspace_id: object,
+    files_written: int,
+    last_status: str | None,
+    elapsed_frac: float,
+    repeating: bool,
+) -> str:
+    """Build the per-iteration guidance the PIPELINE injects to steer the LLM.
+
+    This is state-aware (not a single static instruction): the pipeline knows
+    what phase the mission is in and nudges the model toward the efficient next
+    move. Pure function so it is unit-testable with plain inputs.
+
+    Args:
+        workspace_id: current adopted workspace id (blank/None => not created yet).
+        files_written: how many files have been written so far.
+        last_status: status of the previous tool result ("ERROR"/"LINT_ERRORS"/...).
+        elapsed_frac: fraction of the time budget consumed (0.0-1.0+).
+        repeating: True when the pipeline detected a no-progress repeat.
+    """
+    parts: list[str] = []
+
+    # 1) A step just FAILED — highest priority: diagnose, don't blindly retry.
+    if last_status in ("ERROR", "LINT_ERRORS"):
+        parts.append(
+            "The previous step FAILED (see LAST TOOL RESULT). Read the actual "
+            "error, fix the ROOT CAUSE, and do NOT re-run the same command "
+            "unchanged. If you have tried the same fix twice, call "
+            "RavenRecallRequest(only='failed') to review what you already tried."
+        )
+
+    # 2) Detected no-progress loop — escalate to a different route.
+    if repeating:
+        parts.append(
+            "You appear to be REPEATING a step with no new progress. Change "
+            "approach: inspect the source, or call RavenRecallRequest to recall "
+            "what worked before. Another identical attempt will fail the same way."
+        )
+
+    # 3) Budget awareness — past 70% of the time budget, converge and ship.
+    if elapsed_frac >= 0.7:
+        parts.append(
+            "You are past 70% of your time budget. STOP polishing: commit and "
+            "PUSH what already works to GitHub now, then emit your LEARNED "
+            "lesson. A working pushed repo beats an unfinished perfect one."
+        )
+
+    # 4) Phase-based batching push (only when not failing/looping/out-of-time).
+    if not parts:
+        if not (workspace_id and str(workspace_id).strip()):
+            parts.append(
+                "Step 0: create your workspace with a SINGLE WorkspaceCreateRequest "
+                "(you cannot batch before it exists)."
+            )
+        else:
+            parts.append(
+                "Plan several INDEPENDENT steps ahead and emit them as ONE ordered "
+                "JSON ARRAY of tool-call objects so they run in a single cycle "
+                "(this is how you stay inside the time budget):\n"
+                f"{_BATCH_EXAMPLE}\n"
+                "Batch what does not depend on another step's OUTPUT (e.g. write "
+                "all the source + test files at once). Only emit a SINGLE tool "
+                "call when the next action needs a result you must read first "
+                "(e.g. run tests, THEN fix the reported failure)."
+            )
+            if files_written == 0:
+                parts.append(
+                    "You have written NO files yet — batch your initial project "
+                    "files (source, tests, README, pyproject/config) in one array."
+                )
+
+    return "\n\n".join(parts)
+
+
 # Heuristics that identify a *system-maintenance* mission — i.e. one that edits or
 # fixes SharedLLM's own source/logs (e.g. "Raven fix the errors appearing in the
 # logs"). These run in the Default Workspace. Anything that builds or creates a
@@ -2690,29 +2776,24 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     exec_json = exec_json[:2000] + "\n...[TRUNCATED FOR CONTEXT WINDOW]..."
 
                 user_content += f"\n\nLAST TOOL RESULT:\n{exec_json}"
-            # Encourage BATCHING: emit an ordered JSON array of the independent
-            # steps you can plan ahead (e.g. writing several known files, then a
-            # build+test command), not one call per turn. The whole array runs
-            # from a single reasoning cycle, which is what keeps long builds
-            # inside the time budget. Only batch steps that do NOT depend on
-            # another step's runtime OUTPUT; when the next action depends on a
-            # result you must inspect (e.g. read a test failure, then fix), emit
-            # a single tool call and wait.
-            user_content += (
-                "\n\nExecute the next step(s) now. When you can plan several "
-                "INDEPENDENT steps ahead (e.g. create the workspace, then write "
-                "multiple files, then run the build), emit them as ONE ordered "
-                "JSON ARRAY of tool-call objects so they run in a single cycle:\n"
-                "```json\n"
-                "[ {\"@type\": \"WorkspaceFileWriteRequest\", ...}, "
-                "{\"@type\": \"WorkspaceFileWriteRequest\", ...}, "
-                "{\"@type\": \"WorkspaceShellRequest\", ...} ]\n"
-                "```\n"
-                "Do NOT batch a step whose input depends on a PRIOR step's "
-                "output you must read first (e.g. run tests, then fix the "
-                "reported error) — for those, emit a single tool call and wait "
-                "for the result."
+            # PIPELINE-DRIVEN ADAPTIVE GUIDANCE: steer the LLM toward the efficient
+            # next move based on live mission state (phase, last failure, budget,
+            # repetition) instead of a single static instruction. This is what
+            # makes long autonomous builds converge inside the time budget.
+            try:
+                _last_status = (exec_data.get("status") if isinstance(exec_data, dict) else None)
+            except Exception:
+                _last_status = None
+            _elapsed_frac = (elapsed_total / raven_max_total) if raven_max_total else 0.0
+            _guidance = build_adaptive_guidance(
+                workspace_id=workspace_id,
+                files_written=len(_written_files),
+                last_status=_last_status,
+                elapsed_frac=_elapsed_frac,
+                repeating=detect_no_progress(_recent_shell_runs, window=NO_PROGRESS_WINDOW),
             )
+            if _guidance:
+                user_content += "\n\n" + _guidance
 
             # Maintain a running, compacted conversation so the model retains learned
             # context across the mission instead of only seeing the last tool result.
