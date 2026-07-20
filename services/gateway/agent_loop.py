@@ -2515,6 +2515,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 action_log = cp.get("action_log", [])
                 exec_data = cp.get("last_exec_data")
                 successful_tool_calls = cp.get("successful_tool_calls", 0)
+                # Restore adopted workspace + written files so guidance/phase and
+                # payload workspace_id survive a resume (see _save_checkpoint).
+                _cp_ws = cp.get("workspace_id")
+                if _cp_ws:
+                    workspace_id = _cp_ws
+                _cp_files = cp.get("written_files")
+                if isinstance(_cp_files, list):
+                    _written_files.update(_cp_files)
                 log.info(f"[AgentLoop] Resuming mission {mission_id} from iteration {start_iteration} (restored {len(action_log)} action log entries)")
             # NOTE: do NOT close r_cp — it is the module-level shared singleton
             # returned by _get_redis_cmd(). Closing it here would set the
@@ -2620,6 +2628,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "action_log": action_log[-20:],
                 "last_exec_data": exec_data,
                 "successful_tool_calls": successful_tool_calls,
+                # Persist the adopted workspace + files-written so a RESUMED mission
+                # keeps its build phase. Without this, workspace_id reset to None on
+                # resume and the adaptive guidance wrongly reported the 'create_ws'
+                # phase forever (never giving batch/budget guidance), and blank
+                # workspace_id could leak into payloads.
+                "workspace_id": workspace_id,
+                "written_files": sorted(_written_files),
                 "updated_at": asyncio.get_event_loop().time(),
             }
             await r_cp.setex(
