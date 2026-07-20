@@ -41,6 +41,49 @@ def test_ollama_sock_read_not_capped_at_60_for_large_context_prefill():
     assert p3.timeout.total == 42.0
 
 
+def test_normalize_tool_rejects_malformed_file_write():
+    """Regression: a truncated/bag-of-words file-write call must be REJECTED
+    (return None), never normalized into an executable write to path ':'.
+
+    Observed live (mission 2): the model emitted
+      {"file_path":":", "envdiff":"/core.py", "content":":"}
+    after a 2048-token truncation. The old code accepted it and executed a
+    write to ':' — poisoning the workspace so the mission looped on garbage.
+    """
+    from services.gateway.agent_loop import _normalize_tool
+
+    # bag-of-words stub with garbage file_path + stub content
+    bag = {
+        "file_path": ":",
+        "envdiff": "/core.py",
+        "content": ":",
+        "core": "parsing",
+        "and": "value[-1]",
+    }
+    assert _normalize_tool(bag) is None
+
+    # content is a dict of words (not a string) -> reject
+    dict_content = {"file_path": "envdiff/core.py", "content": {"foo": "bar"}}
+    assert _normalize_tool(dict_content) is None
+
+    # content too short -> reject
+    short = {"file_path": "envdiff/core.py", "content": "x"}
+    assert _normalize_tool(short) is None
+
+    # empty / dot / slash file path -> reject
+    for fp in ("", ".", "/", ":"):
+        assert _normalize_tool({"file_path": fp, "content": "def f():\n    return 1\n"}) is None
+
+    # a WELL-FORMED write is accepted
+    good = _normalize_tool(
+        {"file_path": "envdiff/core.py", "content": "class EnvDiff:\n    pass\n"}
+    )
+    assert good is not None
+    assert good["action"] == "WorkspaceFileWriteRequest"
+    assert good["file_path"] == "envdiff/core.py"
+    assert "class EnvDiff" in good["content"]
+
+
 def test_next_batch_step_logic():
     # Empty batch
     skip, tool = _next_batch_step([])
@@ -87,8 +130,8 @@ def test_extract_action_batch_fenced_json_array():
     text = (
         "Here is my plan:\n"
         "```json\n"
-        '[{"@type": "WorkspaceFileWriteRequest", "file_path": "a.py", "content": "x"},'
-        ' {"@type": "WorkspaceFileWriteRequest", "file_path": "b.py", "content": "y"},'
+        '[{"@type": "WorkspaceFileWriteRequest", "file_path": "a.py", "content": "def a():\n    return 1\n"},'
+        ' {"@type": "WorkspaceFileWriteRequest", "file_path": "b.py", "content": "def b():\n    return 2\n"},'
         ' {"@type": "WorkspaceShellRequest", "command": "pytest -q"}]\n'
         "```\n"
     )

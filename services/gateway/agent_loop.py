@@ -681,6 +681,33 @@ def _normalize_tool(obj: dict) -> dict | None:
         elif "query" in obj and ("repo_url" in obj or "workspace_id" in obj):
             obj["action"] = "GitOperationRequest"
 
+    # --- STRUCTURAL VALIDATION (RC: reject malformed tool calls, do NOT execute) ---
+    # Observed live: with a truncated generation the model emitted e.g.
+    #   {"file_path":":", "envdiff":"/core.py", "content":":", ...}  (a flat bag-of-
+    #   words dict). The old code accepted it (content is truthy; file_path is a
+    #   non-empty string) and executed a write to path ":" — poisoning the
+    #   workspace with garbage and never producing a real file, so the mission
+    #   looped re-emitting garbage instead of converging. A tool call this broken
+    #   must be rejected (return None) so the agent loop steers the model to
+    #   re-emit a well-formed call rather than acting on nonsense.
+    action = obj.get("action")
+    if action in ("WorkspaceFileWriteRequest", "WorkspaceFilePatchRequest"):
+        fp = obj.get("file_path")
+        if not isinstance(fp, str) or not fp.strip() or fp.strip() in (":", ".", "/"):
+            return None
+        content = obj.get("content")
+        # content must be a real (non-trivial) string, not a dict/None/stub
+        if content is None:
+            return None
+        if isinstance(content, dict) or not isinstance(content, str):
+            return None
+        if len(content.strip()) < 5:
+            return None
+    elif action == "WorkspaceFileReadRequest":
+        fp = obj.get("file_path")
+        if not isinstance(fp, str) or not fp.strip() or fp.strip() in (":", ".", "/"):
+            return None
+
     return obj if obj.get("action") else None
 
 
