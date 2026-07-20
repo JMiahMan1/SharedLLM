@@ -3937,6 +3937,43 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             # item assignment`.
                             if not isinstance(exec_data, dict):
                                 exec_data = {"status": "SUCCESS", "message": "", "detail": {}}
+                            # Auto-wire the git 'origin' remote whenever a repo_url is
+                            # bound via WorkspaceSettingsUpdateRequest. workspace_runtime
+                            # only STORES repo_url — it never runs `git remote add` — so
+                            # without this the workspace has no origin and a later
+                            # `git push` fails with "Cannot determine the push target
+                            # repository". The model had been shell-hacking this (observed
+                            # live, mission 6: it wrote a raven_memory.md lesson about it).
+                            # Reuse the proven GitOperationRequest remote_add handler
+                            # (idempotent, token-injected) so the create-repo -> push flow
+                            # is reliable without the model remembering to wire it.
+                            if _http_method == "patch" and resp.status < 400 and isinstance(payload, dict):
+                                _new_repo = (payload.get("repo_url") or "").strip()
+                                if _new_repo:
+                                    try:
+                                        async with shared_http_client() as _rclient:
+                                            _rr = await _rclient.post(
+                                                f"{EXECUTION_SVC}/execute/git",
+                                                json={
+                                                    "action": "remote_add",
+                                                    "remote_name": "origin",
+                                                    "repo_url": _new_repo,
+                                                    "workspace_id": workspace_id,
+                                                    "user_context": payload.get("user_context") or {},
+                                                },
+                                                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                                timeout=aiohttp.ClientTimeout(total=60.0),
+                                            )
+                                            _rj = await _rr.json()
+                                            log.info(
+                                                f"[AgentLoop] Auto-wired git origin for "
+                                                f"{workspace_id}: {_rj.get('status')}"
+                                            )
+                                    except Exception as _re:
+                                        log.warning(
+                                            f"[AgentLoop] Auto remote_add failed "
+                                            f"(model can still wire via shell): {_re}"
+                                        )
                             # Fan out any additional git ops from a compound
                             # intercepted shell command (e.g.
                             # `git init && git remote add origin <url> && git fetch`)
