@@ -116,6 +116,6 @@ async def test_fetch_relevant_lessons_production_path_uses_retry_and_60s_timeout
     assert "Use gh repo create before pushing" in out
     assert captured["service"] == "RAG lesson retrieval"
     assert captured["max_retries"] == 2
-    # 60s timeout clears the RAG cold-start warmup (was 10s -> always timed out)
+    # 120s timeout clears RAG's cold-start warmup (was 10s -> always timed out)
     assert fake_client.last_timeout is not None
-    assert abs(fake_client.last_timeout.total - 60.0) < 1e-6
+    assert abs(fake_client.last_timeout.total - 120.0) < 1e-6
