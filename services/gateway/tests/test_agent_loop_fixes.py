@@ -3,6 +3,7 @@ from services.gateway.agent_loop import (
     _has_valid_workspace_id,
     _next_batch_step,
     action_signature,
+    build_adaptive_guidance,
     extract_action_batch,
     is_verification_action,
     outcome_digest,
@@ -104,3 +105,52 @@ def test_batch_continues_on_success():
         pending.clear()
     # On success the queue is untouched (next step dequeued elsewhere).
     assert len(pending) == 2
+
+
+def _guidance(**kw):
+    base = dict(
+        workspace_id="ws-1",
+        files_written=2,
+        last_status=None,
+        elapsed_frac=0.1,
+        repeating=False,
+    )
+    base.update(kw)
+    return build_adaptive_guidance(**base)
+
+
+def test_guidance_no_workspace_says_create_first():
+    g = _guidance(workspace_id=None, files_written=0)
+    assert "WorkspaceCreateRequest" in g
+    assert "cannot batch before it exists" in g
+
+
+def test_guidance_pushes_batching_when_building():
+    g = _guidance(workspace_id="ws-1", files_written=0)
+    assert "JSON ARRAY" in g
+    # No files yet -> explicitly tell it to batch the initial files.
+    assert "written NO files yet" in g
+
+
+def test_guidance_failure_takes_priority_over_batching():
+    g = _guidance(last_status="ERROR")
+    assert "FAILED" in g
+    # Must not also spam the generic batch push when a failure needs attention.
+    assert "JSON ARRAY" not in g
+
+
+def test_guidance_lint_errors_treated_as_failure():
+    g = _guidance(last_status="LINT_ERRORS")
+    assert "FAILED" in g
+
+
+def test_guidance_budget_warning_when_low_on_time():
+    g = _guidance(elapsed_frac=0.85)
+    assert "time budget" in g
+    assert "PUSH" in g
+
+
+def test_guidance_repeating_redirects():
+    g = _guidance(repeating=True)
+    assert "REPEATING" in g
+    assert "RavenRecallRequest" in g
