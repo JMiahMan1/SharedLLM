@@ -5040,7 +5040,10 @@ async def _build_raven_system_prompt(query: str) -> str:
         f"{protocol}\n\n{protocols}\n\n"
         f"[Raven Mission]\n{query}\n\n"
         f"Execute the mission above using the tool-call format defined in your protocol. "
-        f"Emit exactly one tool-call JSON object per turn and drive the mission to completion."
+        f"Every turn must be tool calls only (never prose): emit a JSON ARRAY of tool-call "
+        f"objects when the next steps are a known, order-dependent sequence (preferred for "
+        f"speed), or a single tool-call JSON object when the next action needs a result you "
+        f"must read first. Drive the mission to completion."
     )
 
 
