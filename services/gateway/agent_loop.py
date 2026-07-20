@@ -1554,7 +1554,13 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
     # default context (context starvation -> 40-60 iterations). Now num_ctx is
     # set up front and only scaled DOWN when VRAM pressure is confirmed.
     params = {
-        "num_predict": 8192,  # large enough for full file writes, not just JSON tool calls
+        # num_predict is carved OUT of num_ctx by Ollama, so an oversized output
+        # reservation starves the INPUT budget. 8192 left only ~3k tokens for the
+        # code+history after the ~5k-token system prompt, so the model could not
+        # see a test file and its implementation together to fix import mismatches.
+        # 4096 still fits a full file write and doubles the input budget for free
+        # (no VRAM cost — num_predict does not change resident VRAM).
+        "num_predict": 4096,
         "temperature": 0.1,
         "top_p": 0.9,
         "repeat_penalty": 1.1,
