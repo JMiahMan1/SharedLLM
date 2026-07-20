@@ -211,6 +211,30 @@ def build_adaptive_guidance(
     return "\n\n".join(parts)
 
 
+def guidance_branch(
+    *,
+    workspace_id: object,
+    last_status: str | None,
+    elapsed_frac: float,
+    repeating: bool,
+) -> str:
+    """Return a short tag naming which guidance branch is active this turn.
+
+    Mirrors the priority order in build_adaptive_guidance() so logs can honestly
+    report what the pipeline told the model, making batching/convergence effects
+    measurable instead of inferred. Pure + unit-testable.
+    """
+    if last_status in ("ERROR", "LINT_ERRORS"):
+        return "fail"
+    if repeating:
+        return "repeat"
+    if elapsed_frac >= 0.7:
+        return "budget"
+    if not (workspace_id and str(workspace_id).strip()):
+        return "create_ws"
+    return "batch"
+
+
 # Heuristics that identify a *system-maintenance* mission — i.e. one that edits or
 # fixes SharedLLM's own source/logs (e.g. "Raven fix the errors appearing in the
 # logs"). These run in the Default Workspace. Anything that builds or creates a
@@ -2730,6 +2754,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         # queued step WITHOUT a new LLM inference — the whole chain is driven by a
         # single reasoning cycle instead of one per step.
         skip_inference, tool_data = _next_batch_step(pending_batch)
+        _guidance_branch = "batch_continuation" if skip_inference else "unknown"
         if skip_inference:
             log.info(f"[AgentLoop] Batch continuation: executing queued tool {tool_data.get('action')!r} ({len(pending_batch)} remaining)")
 
@@ -2785,12 +2810,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             except Exception:
                 _last_status = None
             _elapsed_frac = (elapsed_total / raven_max_total) if raven_max_total else 0.0
+            _repeating = detect_no_progress(_recent_shell_runs, window=NO_PROGRESS_WINDOW)
             _guidance = build_adaptive_guidance(
                 workspace_id=workspace_id,
                 files_written=len(_written_files),
                 last_status=_last_status,
                 elapsed_frac=_elapsed_frac,
-                repeating=detect_no_progress(_recent_shell_runs, window=NO_PROGRESS_WINDOW),
+                repeating=_repeating,
+            )
+            _guidance_branch = guidance_branch(
+                workspace_id=workspace_id,
+                last_status=_last_status,
+                elapsed_frac=_elapsed_frac,
+                repeating=_repeating,
             )
             if _guidance:
                 user_content += "\n\n" + _guidance
@@ -2894,6 +2926,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 tool_data = extract_action_json(ans)
             if not isinstance(tool_data, dict):
                 tool_data = None
+
+            # Honest per-iteration observability: which guidance branch the pipeline
+            # showed the model this turn, and how many tool calls it returned. Makes
+            # batching/convergence measurable from logs instead of inferred.
+            _returned_calls = (len(batch) + 1) if batch else (1 if tool_data else 0)
+            log.info(
+                f"[AgentLoop] Guidance branch={_guidance_branch!r} | "
+                f"model returned {_returned_calls} tool call(s)"
+            )
 
             # FALLBACK: the local 35B model frequently emits a numbered prose
             # plan ("1. WorkspaceCreateRequest ... 2. GitOperationRequest action

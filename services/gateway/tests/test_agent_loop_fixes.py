@@ -5,6 +5,7 @@ from services.gateway.agent_loop import (
     action_signature,
     build_adaptive_guidance,
     extract_action_batch,
+    guidance_branch,
     is_verification_action,
     outcome_digest,
 )
@@ -154,3 +155,29 @@ def test_guidance_repeating_redirects():
     g = _guidance(repeating=True)
     assert "REPEATING" in g
     assert "RavenRecallRequest" in g
+
+
+def _branch(**kw):
+    base = dict(
+        workspace_id="ws-1",
+        last_status=None,
+        elapsed_frac=0.1,
+        repeating=False,
+    )
+    base.update(kw)
+    return guidance_branch(**base)
+
+
+def test_branch_tags_match_guidance_priority():
+    # Failure beats everything.
+    assert _branch(last_status="ERROR", repeating=True, elapsed_frac=0.9) == "fail"
+    assert _branch(last_status="LINT_ERRORS") == "fail"
+    # Repeat beats budget + phase.
+    assert _branch(repeating=True, elapsed_frac=0.9) == "repeat"
+    # Budget beats phase.
+    assert _branch(elapsed_frac=0.7) == "budget"
+    # No workspace yet -> create.
+    assert _branch(workspace_id="") == "create_ws"
+    assert _branch(workspace_id=None) == "create_ws"
+    # Healthy building phase -> batch.
+    assert _branch() == "batch"
