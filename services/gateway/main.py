@@ -5024,7 +5024,7 @@ class UserMissionRequest(BaseModel):
     workspace_id: str | None = None
 
 
-async def _fetch_relevant_lessons(query: str, client, limit: int = 5) -> str:
+async def _fetch_relevant_lessons(query: str, client=None, limit: int = 5) -> str:
     """Retrieve the top-K lessons RELEVANT to THIS mission (smart, not a dumb dump).
 
     Uses the RAG service's hybrid semantic search over the ``system_learnings``
@@ -5035,18 +5035,30 @@ async def _fetch_relevant_lessons(query: str, client, limit: int = 5) -> str:
     never bloated with irrelevant history. Fails safe: any error returns '' and
     the mission prompt is unchanged.
     """
+    # NOTE: RAG /rag/search has a one-time per-process warmup (embedding model /
+    # sqlite-vec first query) that can take ~25s; subsequent calls are <100ms.
+    # The timeout must clear that cold start, and we route through retry_http_request
+    # so a stale/closed pooled connection (which surfaces as an empty-str ClientError)
+    # is transparently recreated instead of silently dropping the injection.
     try:
-        resp = await client.post(
-            f"{RAG_SVC}/rag/search",
-            json={
-                "collection_name": "system_learnings",
-                "query": query,
-                "user_id": "default",
-                "k": limit,
-            },
-            headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
-            timeout=aiohttp.ClientTimeout(total=10.0),
-        )
+        async def _do_search() -> aiohttp.ClientResponse:
+            cl = client or get_http_client()
+            return await cl.post(
+                f"{RAG_SVC}/rag/search",
+                json={
+                    "collection_name": "system_learnings",
+                    "query": query,
+                    "user_id": "default",
+                    "k": limit,
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
+                timeout=aiohttp.ClientTimeout(total=60.0),
+            )
+
+        if client is not None:
+            resp = await _do_search()
+        else:
+            resp = await retry_http_request(_do_search, "RAG lesson retrieval", max_retries=2, base_delay=0.2)
         if resp.status != 200:
             return ""
         data = await resp.json()
@@ -5070,6 +5082,7 @@ async def _fetch_relevant_lessons(query: str, client, limit: int = 5) -> str:
             lines.append(f"- {rule_one}{tag}")
         if not lines:
             return ""
+        log.info(f"[Raven] injected {len(lines)} relevant lesson(s) into mission prompt")
         return "\n".join(lines)
     except Exception as e:  # never block mission start on a learning lookup failure
         log.warning(f"[Raven] relevant-lesson retrieval failed (skipping injection): {e}")
@@ -5092,7 +5105,7 @@ async def _build_raven_system_prompt(query: str) -> str:
     async with borrow_http_client() as client:
         protocol = await load_prompt(client, PROMPT_RAVEN_AUTONOMOUS_PROTOCOL)
         protocols = await fetch_autonomous_protocols()
-        lessons_block = await _fetch_relevant_lessons(query, client)
+        lessons_block = await _fetch_relevant_lessons(query)
     lesson_section = (
         f"[Raven Lessons — learned from PAST missions, most relevant to THIS task]\n"
         f"{lessons_block}\n\n"

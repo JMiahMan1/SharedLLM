@@ -20,6 +20,7 @@ class _FakeClient:
 
     async def post(self, url, json=None, headers=None, timeout=None):
         self.last_json = json
+        self.last_timeout = timeout
         return _FakeResp(self._status, self._payload)
 
 
@@ -89,3 +90,32 @@ async def test_fetch_relevant_lessons_fails_safe():
 
     # no hits -> empty
     assert await _fetch_relevant_lessons("anything", _FakeClient(200, {"results": []})) == ""
+
+
+async def test_fetch_relevant_lessons_production_path_uses_retry_and_60s_timeout(monkeypatch):
+    """The production call (no client passed) must route through retry_http_request
+    with a 60s timeout so RAG's one-time ~25s cold-start warmup does not kill the
+    injection (the original 10s timeout caused every mission to silently skip lessons)."""
+    import services.gateway.main as m
+
+    captured = {}
+
+    async def _fake_retry(func, service_name, max_retries=2, base_delay=0.1, dns_recovery=True):
+        captured["service"] = service_name
+        captured["max_retries"] = max_retries
+        return await func()
+
+    fake_client = _FakeClient(
+        200,
+        {"results": [_hit("Use gh repo create before pushing to avoid a missing-origin failure", "success", 0.9)]},
+    )
+    monkeypatch.setattr(m, "retry_http_request", _fake_retry)
+    monkeypatch.setattr(m, "get_http_client", lambda: fake_client)
+
+    out = await m._fetch_relevant_lessons("build a python library and push it to github")
+    assert "Use gh repo create before pushing" in out
+    assert captured["service"] == "RAG lesson retrieval"
+    assert captured["max_retries"] == 2
+    # 60s timeout clears the RAG cold-start warmup (was 10s -> always timed out)
+    assert fake_client.last_timeout is not None
+    assert abs(fake_client.last_timeout.total - 60.0) < 1e-6
