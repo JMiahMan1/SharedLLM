@@ -1,6 +1,8 @@
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
-sqlite-vec
+# >=0.1.6 required: the vector store uses vec0 metadata columns
+# (collection_name/user_id) to scope the KNN per-collection in the WHERE clause.
+sqlite-vec>=0.1.6
 pydantic>=2.0.0
 fastembed
 cryptography
