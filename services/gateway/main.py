@@ -5024,6 +5024,58 @@ class UserMissionRequest(BaseModel):
     workspace_id: str | None = None
 
 
+async def _fetch_relevant_lessons(query: str, client, limit: int = 5) -> str:
+    """Retrieve the top-K lessons RELEVANT to THIS mission (smart, not a dumb dump).
+
+    Uses the RAG service's hybrid semantic search over the ``system_learnings``
+    collection keyed on the mission text, so as the lesson store grows into the
+    hundreds only the few lessons actually pertinent to the current task are
+    surfaced. Results are compacted to a one-line transferable ``rule`` each
+    (plus outcome/confidence for credibility) and count-capped, so the prompt is
+    never bloated with irrelevant history. Fails safe: any error returns '' and
+    the mission prompt is unchanged.
+    """
+    try:
+        resp = await client.post(
+            f"{RAG_SVC}/rag/search",
+            json={
+                "collection_name": "system_learnings",
+                "query": query,
+                "user_id": "default",
+                "k": limit,
+            },
+            headers={"X-Internal-Secret": INTERNAL_SECRET, "Authorization": f"Bearer {INTERNAL_SECRET}"},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status != 200:
+            return ""
+        data = await resp.json()
+        hits = data.get("results") or []
+        if not hits:
+            return ""
+        lines: list[str] = []
+        for h in hits[:limit]:
+            rule = (h.get("rule") or h.get("content") or "").strip()
+            if not rule:
+                continue
+            outcome = h.get("outcome") or ""
+            conf = h.get("confidence")
+            tag = ""
+            if outcome:
+                tag = f" [{outcome}{', conf ' + format(conf, '.2f') if isinstance(conf, (int, float)) else ''}]"
+            # one compact line — the transferable takeaway only, not the narrative
+            rule_one = rule.split("\n")[0].strip()
+            if len(rule_one) > 260:
+                rule_one = rule_one[:257] + "..."
+            lines.append(f"- {rule_one}{tag}")
+        if not lines:
+            return ""
+        return "\n".join(lines)
+    except Exception as e:  # never block mission start on a learning lookup failure
+        log.warning(f"[Raven] relevant-lesson retrieval failed (skipping injection): {e}")
+        return ""
+
+
 async def _build_raven_system_prompt(query: str) -> str:
     """Build the single, self-contained system prompt used for Raven missions.
 
@@ -5032,12 +5084,24 @@ async def _build_raven_system_prompt(query: str) -> str:
     and the execution loop) plus the global autonomous protocols and the mission
     itself. It depends on no test-harness scaffolding or runtime-injected context,
     so the same prompt can be copied and run standalone against any capable model.
+
+    Relevant PAST LESSONS are injected (smart, relevance-ranked, capped) so Raven
+    starts each mission informed by what worked/failed before — closing the
+    learning loop. The model no longer has to remember to call RavenRecallRequest.
     """
     async with borrow_http_client() as client:
         protocol = await load_prompt(client, PROMPT_RAVEN_AUTONOMOUS_PROTOCOL)
         protocols = await fetch_autonomous_protocols()
+        lessons_block = await _fetch_relevant_lessons(query, client)
+    lesson_section = (
+        f"[Raven Lessons — learned from PAST missions, most relevant to THIS task]\n"
+        f"{lessons_block}\n\n"
+        if lessons_block
+        else ""
+    )
     return (
         f"{protocol}\n\n{protocols}\n\n"
+        f"{lesson_section}"
         f"[Raven Mission]\n{query}\n\n"
         f"Execute the mission above using the tool-call format defined in your protocol. "
         f"Every turn must be tool calls only (never prose): emit a JSON ARRAY of tool-call "
