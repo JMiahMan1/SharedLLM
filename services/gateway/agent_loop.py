@@ -2690,7 +2690,29 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     exec_json = exec_json[:2000] + "\n...[TRUNCATED FOR CONTEXT WINDOW]..."
 
                 user_content += f"\n\nLAST TOOL RESULT:\n{exec_json}"
-            user_content += "\n\nExecute the next step immediately using a JSON tool call block."
+            # Encourage BATCHING: emit an ordered JSON array of the independent
+            # steps you can plan ahead (e.g. writing several known files, then a
+            # build+test command), not one call per turn. The whole array runs
+            # from a single reasoning cycle, which is what keeps long builds
+            # inside the time budget. Only batch steps that do NOT depend on
+            # another step's runtime OUTPUT; when the next action depends on a
+            # result you must inspect (e.g. read a test failure, then fix), emit
+            # a single tool call and wait.
+            user_content += (
+                "\n\nExecute the next step(s) now. When you can plan several "
+                "INDEPENDENT steps ahead (e.g. create the workspace, then write "
+                "multiple files, then run the build), emit them as ONE ordered "
+                "JSON ARRAY of tool-call objects so they run in a single cycle:\n"
+                "```json\n"
+                "[ {\"@type\": \"WorkspaceFileWriteRequest\", ...}, "
+                "{\"@type\": \"WorkspaceFileWriteRequest\", ...}, "
+                "{\"@type\": \"WorkspaceShellRequest\", ...} ]\n"
+                "```\n"
+                "Do NOT batch a step whose input depends on a PRIOR step's "
+                "output you must read first (e.g. run tests, then fix the "
+                "reported error) — for those, emit a single tool call and wait "
+                "for the result."
+            )
 
             # Maintain a running, compacted conversation so the model retains learned
             # context across the mission instead of only seeing the last tool result.
@@ -3794,6 +3816,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             )
                             if len(_recent_shell_runs) > 16:
                                 _recent_shell_runs = _recent_shell_runs[-16:]
+                        # A step FAILED. If we are mid-batch, abandon the rest of
+                        # the queued chain: later steps were planned assuming this
+                        # one succeeded, so running them blindly would compound the
+                        # error. Draining forces a fresh inference next iteration so
+                        # the model re-plans from the actual failure.
+                        if pending_batch:
+                            log.warning(
+                                f"[AgentLoop] Batched step failed; discarding "
+                                f"{len(pending_batch)} queued step(s) to force re-plan."
+                            )
+                            pending_batch.clear()
 
                     # Checkpoint state after successful tool execution
                     await _save_checkpoint(iter_num)
