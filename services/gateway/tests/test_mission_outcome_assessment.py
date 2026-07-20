@@ -51,6 +51,36 @@ class TestMissionOutcomeAssessment:
     def test_single_char_result(self):
         assert should_persist_learning("x") is False
 
+    def test_push_interrupted_by_system_timeout_is_not_complete(self):
+        # REGRESSION (Bug 5 false-GREEN): mission 7 was marked 'completed' with
+        # this exact result even though the GitHub repo was never created/pushed.
+        # A build mission that says the push was interrupted MUST NOT be a success.
+        result = (
+            "The `tz` timezone CLI was successfully built with passing tests, but "
+            "the final step of pushing to GitHub was interrupted by a system "
+            "timeout. The core logic and verification are complete; only the "
+            "repository sync remains."
+        )
+        assert should_persist_learning(result) is False
+
+    def test_various_incompletion_phrasings(self):
+        for r in [
+            "Built the code but the push was interrupted.",
+            "Everything works; only the repository sync remains.",
+            "Pushing to GitHub was interrupted by the timeout.",
+            "Code complete but repo creation was not completed.",
+            "The commit was not pushed before the deadline.",
+            "Did not finish: ran out of time during git push.",
+        ]:
+            assert should_persist_learning(r) is False, r
+
+    def test_genuine_push_success_still_counts(self):
+        # Guard against over-broadening: a real, fully-shipped mission must remain True.
+        assert should_persist_learning(
+            "Built the tz CLI, all tests pass, committed and pushed to "
+            "https://github.com/JMiahMan1/raven-timezone-cli (main)."
+        ) is True
+
     def test_standalone_status_code_422(self):
         assert should_persist_learning("422") is False
 
