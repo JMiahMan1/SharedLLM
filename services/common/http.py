@@ -14,6 +14,8 @@ certificates (e.g. Home Assistant, Roku, webOS) must use their own
 
 from __future__ import annotations
 
+import asyncio
+
 import aiohttp
 
 _DNS_TTL = 60
@@ -52,7 +54,20 @@ def _session_dead(client: aiohttp.ClientSession | None) -> bool:
     if client is None or client.closed:
         return True
     connector = client.connector
-    return connector is None or getattr(connector, "closed", False)
+    if connector is None or getattr(connector, "closed", False):
+        return True
+
+    # Treat the session as dead if its associated event loop is closed or different
+    # from the current active event loop context.
+    try:
+        if client.loop.is_closed():
+            return True
+        current_loop = asyncio.get_running_loop()
+        if client.loop is not current_loop:
+            return True
+    except RuntimeError:
+        pass
+    return False
 
 
 def get_client() -> aiohttp.ClientSession:
