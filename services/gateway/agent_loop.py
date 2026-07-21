@@ -2070,7 +2070,7 @@ async def resolve_mission_workspace(
             log.warning(f"[workspace] bootstrap {assigned_workspace_id} failed: {e}")
         return None
 
-    # No assigned_workspace_id explicitly passed. Check if mission query mentions an existing workspace.
+    # No assigned_workspace_id explicitly passed. Check if mission query mentions an existing workspace or requests a specific workspace ID.
     if query:
         try:
             async with shared_http_client() as client:
@@ -2090,6 +2090,31 @@ async def resolve_mission_workspace(
                                 return item
         except Exception as e:
             log.warning(f"[workspace] Auto-detect mentioned workspace failed: {e}")
+
+        # Extract explicitly specified workspace ID candidate (e.g. raven-curriculum-12345) from prompt text
+        import re
+        matches = re.findall(r"\b(raven-[a-zA-Z0-9_-]+)\b", query)
+        for cand in matches:
+            if cand != "default" and len(cand) >= 5:
+                ws = await _resolve_one(cand)
+                if ws:
+                    log.info(f"[workspace] Auto-detected workspace '{cand}' from query regex match")
+                    return ws
+                try:
+                    async with shared_http_client() as client:
+                        boot = await client.post(
+                            f"{WORKSPACE_RUNTIME_SVC}/workspaces/bootstrap",
+                            json={"workspace_id": cand, "rag_user": user_id},
+                            headers={"X-Internal-Secret": INTERNAL_SECRET},
+                            timeout=aiohttp.ClientTimeout(total=20.0),
+                        )
+                        if boot.status == 200:
+                            ws = (await boot.json()).get("workspace")
+                            if ws:
+                                log.info(f"[workspace] Auto-bootstrapped workspace '{cand}' from query regex match")
+                                return ws
+                except Exception as e:
+                    log.warning(f"[workspace] Auto-bootstrap candidate '{cand}' failed: {e}")
 
     # No assigned workspace. System-maintenance missions (fixing SharedLLM's own
     # code/logs) run in the user's Default Workspace. Everything else (building or
@@ -2456,6 +2481,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         _ws = None
     if _ws:
         workspace_id = _ws.get("id") or workspace_id
+        if mission_id and workspace_id:
+            try:
+                async with shared_http_client() as client:
+                    await client.patch(
+                        f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
+                        json={"workspace_id": workspace_id},
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                        timeout=aiohttp.ClientTimeout(total=5.0),
+                    )
+            except Exception as e:
+                log.warning(f"[AgentLoop] Failed to patch workspace_id to mission {mission_id}: {e}")
         _ws_path = _ws.get("resolved_path") or ""
         if _ws_path:
             full_system += (
