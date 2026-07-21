@@ -358,55 +358,60 @@ def test_raven_comprehensive_curriculum():
         _log(f"Port 9099 inside container: {blocker_check.strip()}")
         assert "9099" in blocker_check, "Failed to block port 9099 inside execution container"
 
-        # Dispatch Mission 1 to trigger port failure, alternative selection, and learning persistence
+        # D1: Generic server task — Raven discovers the blocked port organically.
+        # We do NOT tell Raven which port to use or that anything is blocked.
+        # The blocker is an external environmental condition, just like production.
         query_d1 = (
-            f"In workspace '{workspace_id}', write a small Python HTTP server script called "
-            f"'server.py'. Try binding to port 9099 first — if the port is already in use, "
-            f"fall back to port 9098. Start the server in the background, then write ONLY the "
-            f"port number you successfully bound to into a file called 'port_result.txt' "
-            f"(e.g. just the text '9098'). Save a lesson about which port was blocked."
+            f"In workspace '{workspace_id}', write a Python script called 'server.py' that "
+            f"starts a simple HTTP server and serves a 200 OK response. Start it in the "
+            f"background, confirm it's listening, then write ONLY the port number it bound "
+            f"to into a file called 'port_result.txt'."
         )
         mid_d1 = _dispatch_mission(api_key, query_d1)
         _wait_for_mission(api_key, mid_d1)
 
-        # Verify Mission 1 results
+        # Verify Mission 1 results: Raven should have avoided 9099 (blocked) and picked something else
         assert _remote_path_exists(workspace_id, "port_result.txt"), "port_result.txt missing in workspace"
         port_out = _remote_read(workspace_id, "port_result.txt").strip()
-        assert "9098" in port_out, f"Unexpected working port: {port_out}"
-        _log(f"D1 Verification: Raven fell back to port {port_out} as expected.")
+        assert "9099" not in port_out, f"Raven bound to the blocked port 9099: {port_out}"
+        assert port_out.isdigit(), f"port_result.txt does not contain a plain port number: {port_out!r}"
+        d1_port = port_out
+        _log(f"D1 Verification: Raven avoided 9099 and bound to port {d1_port}.")
 
         # Clean up blocker and any background server started by Mission 1
         _ssh("docker exec sharedllm_execution sh -c 'pkill -f \"http.server 9099\" 2>/dev/null; true'")
         _ssh("docker exec sharedllm_execution sh -c 'pkill -f server.py 2>/dev/null; true'")
         time.sleep(1)
 
-        # Dispatch Mission 2: must bypass port 9099 autonomously using the saved lesson
+        # D2: Completely generic — Raven must recall the lesson from D1 autonomously.
+        # The gateway injects relevant past lessons into the system prompt via _fetch_relevant_lessons.
+        # Raven should NOT attempt 9099 again because it now has a lesson about it.
         query_d2 = (
-            f"In workspace '{workspace_id}', start another Python HTTP server. "
-            f"Check what you've learned from previous missions about port availability "
-            f"and pick the right port from the start without trying 9099. Write ONLY the "
-            f"port number you used into 'port2_result.txt' and confirm the server is running."
+            f"In workspace '{workspace_id}', write a second Python HTTP server script called "
+            f"'server2.py'. Start it in the background and write ONLY the port it bound to "
+            f"into 'port2_result.txt'."
         )
         mid_d2 = _dispatch_mission(api_key, query_d2)
         _wait_for_mission(api_key, mid_d2)
 
-        # Zero-trust verification (D)
+        # Zero-trust verification (D2): Raven must NOT have used port 9099 again.
+        # We don't mandate a specific port — the lesson should guide the choice.
         assert _remote_path_exists(workspace_id, "port2_result.txt"), "port2_result.txt missing in workspace"
         port2_out = _remote_read(workspace_id, "port2_result.txt").strip()
-        assert "9098" in port2_out, f"Mission 2 did not start on the correct port: {port2_out}"
+        assert "9099" not in port2_out, f"Raven used the blocked port 9099 in Mission 2: {port2_out}"
+        assert port2_out.isdigit(), f"port2_result.txt does not contain a plain port number: {port2_out!r}"
 
-        # Verify that the mission system injected past lessons into the prompt
+        # Verify that the gateway injected past lessons into the D2 prompt
         redis_client = redis.from_url(REDIS_URL, decode_responses=True)
         redis_key = f"raven:mission:history:{mid_d2}"
         history_logs = redis_client.lrange(redis_key, 0, -1)
-        # History may be empty (telemetry is best-effort) — skip if unavailable
+        # History is best-effort telemetry — skip hard assert if unavailable
         if history_logs:
             log_text = "".join(history_logs).lower()
-            assert "lesson" in log_text or "9099" in log_text or "9098" in log_text, \
-                "Learning memory was not retrieved or utilized"
+            assert "lesson" in log_text or "9099" in log_text, \
+                "Learning memory was not retrieved or utilized in D2"
 
-        # Assert port 9099 was not written to the result file in Mission 2
-        assert "9099" not in port2_out, "Mission 2 improperly used port 9099"
+        _log(f"D2 Verification: Raven avoided 9099 autonomously and bound to port {port2_out}.")
         _log("PATH D Verification: SUCCESS")
 
         success = True
