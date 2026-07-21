@@ -277,11 +277,10 @@ def test_raven_comprehensive_curriculum():
         # ===================================================================
         _log("=== PATH B: Existing Path (Modify) ===")
         query_b = (
-            f"Target the EXISTING workspace with id '{workspace_id}' that was created earlier "
-            f"(it already has a .git directory and remote origin pointing at GitHub repo '{repo_name}').\n"
-            f"Use workspace_id='{workspace_id}' in EVERY tool call.\n"
-            f"1. Write a file named 'MODIFY.md' inside workspace '{workspace_id}' with content 'Modify Phase Verification'.\n"
-            f"2. Add the file, commit with message 'feat: add modify verification log', and push to the remote 'main' branch."
+            f"Re-use the existing workspace '{workspace_id}' — it already has a git repo "
+            f"wired to GitHub as '{repo_name}'. Add a new file called 'MODIFY.md' with the "
+            f"content 'Modify Phase Verification', commit it with the message "
+            f"'feat: add modify verification log', and push to main."
         )
         mid_b = _dispatch_mission(api_key, query_b)
         _wait_for_mission(api_key, mid_b)
@@ -318,12 +317,10 @@ def test_raven_comprehensive_curriculum():
         _ingest_to_rag(f"{workspace_id}/docs/mock_api.md", api_spec_content)
 
         query_c = (
-            f"Target the EXISTING workspace with id '{workspace_id}'. "
-            f"Use workspace_id='{workspace_id}' in EVERY tool call.\n"
-            f"Write a Python script named 'query_api.py' inside that workspace that calls the Antigravity "
-            f"Quantum API described in 'docs/mock_api.md'. Retrieve the exact "
-            f"auth token, headers, endpoint, payload keys, and method from that specification document "
-            f"(the file already exists in the workspace at docs/mock_api.md)."
+            f"Open workspace '{workspace_id}'. There is a file at 'docs/mock_api.md' that "
+            f"describes the Antigravity Quantum API. Read it and write a Python script called "
+            f"'query_api.py' that makes the exact API call described — using the real endpoint, "
+            f"auth header, token, and payload from the spec."
         )
         mid_c = _dispatch_mission(api_key, query_c)
         _wait_for_mission(api_key, mid_c)
@@ -352,13 +349,10 @@ def test_raven_comprehensive_curriculum():
 
         # Dispatch Mission 1 to trigger port failure, alternative selection, and learning persistence
         query_d1 = (
-            f"Target the EXISTING workspace with id '{workspace_id}'. "
-            f"Use workspace_id='{workspace_id}' in EVERY tool call.\n"
-            f"Write a Python HTTP server script and try to start it in the background. "
-            f"Try to bind it to port 9099 first. If that fails (since it is blocked), modify the code "
-            f"to use port 9098, start it on 9098, and record the working port in 'port_result.txt'. "
-            f"Finally, save a learning lesson explaining that port 9099 is blocked and port 9098 should "
-            f"be used instead."
+            f"In workspace '{workspace_id}', write a small Python HTTP server and start it "
+            f"in the background. Try port 9099 first — if it's already in use, fall back to "
+            f"port 9098, start the server there, and write the port you ended up using into "
+            f"'port_result.txt'. Save a lesson learned about which port was blocked."
         )
         mid_d1 = _dispatch_mission(api_key, query_d1)
         _wait_for_mission(api_key, mid_d1)
@@ -374,11 +368,10 @@ def test_raven_comprehensive_curriculum():
 
         # Dispatch Mission 2: must bypass port 9099 autonomously using the saved lesson
         query_d2 = (
-            f"Target the EXISTING workspace with id '{workspace_id}'. "
-            f"Use workspace_id='{workspace_id}' in EVERY tool call.\n"
-            f"Start a python HTTP server. Check your past lessons for blocked port constraints. "
-            f"Use the correct alternative port directly (do NOT try port 9099 first), "
-            f"write the port used to 'port2_result.txt', and report completion."
+            f"In workspace '{workspace_id}', start another Python HTTP server. "
+            f"Check what you've learned from previous missions about port availability "
+            f"and pick the right port from the start. Write the port you used into "
+            f"'port2_result.txt' and report when it's running."
         )
         mid_d2 = _dispatch_mission(api_key, query_d2)
         _wait_for_mission(api_key, mid_d2)
