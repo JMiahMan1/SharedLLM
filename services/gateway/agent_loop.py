@@ -4430,8 +4430,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{bounded_log}\n\nThe LLM did not produce a final response, but the following actions were completed successfully. Summarize what was accomplished. Output the summary directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
             ]
             try:
-                data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.0, "enable_thinking": False})
-                ans = data.get("message", {}).get("content", "").strip() or ans
+                async with asyncio.timeout(30.0):
+                    data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.0, "enable_thinking": False})
+                    ans = data.get("message", {}).get("content", "").strip() or ans
             except Exception as e:
                 log.warning(f"[AgentLoop] Summarization phase (empty-ans path) failed: {e}")
         else:
@@ -4440,8 +4441,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 {"role": "user", "content": f"Mission: {query}\n\nActions taken:\n{bounded_log}\n\nRaw output: {ans}\n\nPlease provide the final clean summary now: Output it directly as your response — do not draft, plan, or repeat phrases like 'I will write'."}
             ]
             try:
-                data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.0, "enable_thinking": False})
-                ans = data.get("message", {}).get("content", ans)
+                async with asyncio.timeout(30.0):
+                    data = await execute_inference(provider, selected_model, summary_prompt, {"temperature": 0.0, "enable_thinking": False})
+                    ans = data.get("message", {}).get("content", ans)
             except Exception as e:
                 log.warning(f"[AgentLoop] Summarization phase failed: {e}")
                 from services.gateway.orchestrator import strip_json_from_response
