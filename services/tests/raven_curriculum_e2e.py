@@ -45,7 +45,7 @@ DEFAULT_ADMIN_PASSWORD = os.getenv(
 )
 
 MISSION_POLL_INTERVAL = 15          # seconds
-MISSION_TIMEOUT = 25 * 60           # seconds (Raven can be slow)
+MISSION_TIMEOUT = 45 * 60           # seconds (Raven can be slow — 45 min per mission)
 
 
 def _resolve_github_user() -> str:
@@ -164,9 +164,11 @@ def _login() -> str:
     return key
 
 
-def _dispatch_mission(api_key: str, query: str) -> int:
-    """Dispatches a mission using ONLY the query parameter to honor payload constraints."""
-    payload = {"query": query}
+def _dispatch_mission(api_key: str, query: str, workspace_id: str | None = None) -> int:
+    """Dispatches a mission using the query (+ optional workspace_id to target an existing workspace)."""
+    payload: dict = {"query": query}
+    if workspace_id:
+        payload["workspace_id"] = workspace_id
     resp = requests.post(
         f"{GATEWAY_BASE}/api/raven/missions",
         json=payload,
@@ -281,7 +283,7 @@ def test_raven_comprehensive_curriculum():
             f"1. Write a file named 'MODIFY.md' inside workspace '{workspace_id}' with content 'Modify Phase Verification'.\n"
             f"2. Add the file, commit with message 'feat: add modify verification log', and push to the remote 'main' branch."
         )
-        mid_b = _dispatch_mission(api_key, query_b)
+        mid_b = _dispatch_mission(api_key, query_b, workspace_id=workspace_id)
         _wait_for_mission(api_key, mid_b)
 
         # Zero-trust verification (B)
@@ -320,7 +322,7 @@ def test_raven_comprehensive_curriculum():
             f"Quantum API described in 'docs/mock_api.md' to set the gravity level to zero. Retrieve the exact "
             f"auth token, headers, endpoint, payload keys, and method from that specification document."
         )
-        mid_c = _dispatch_mission(api_key, query_c)
+        mid_c = _dispatch_mission(api_key, query_c, workspace_id=workspace_id)
         _wait_for_mission(api_key, mid_c)
 
         # Zero-trust verification (C)
@@ -353,7 +355,7 @@ def test_raven_comprehensive_curriculum():
             f"Finally, save a learning lesson explaining that port 9099 is blocked and port 9098 should "
             f"be used instead."
         )
-        mid_d1 = _dispatch_mission(api_key, query_d1)
+        mid_d1 = _dispatch_mission(api_key, query_d1, workspace_id=workspace_id)
         _wait_for_mission(api_key, mid_d1)
 
         # Verify Mission 1 results
@@ -371,7 +373,7 @@ def test_raven_comprehensive_curriculum():
             f"re-routing rules for blocked port constraints. Directly write and start the server on the "
             f"alternative port (9098), write the port used to 'port2_result.txt', and report completion."
         )
-        mid_d2 = _dispatch_mission(api_key, query_d2)
+        mid_d2 = _dispatch_mission(api_key, query_d2, workspace_id=workspace_id)
         _wait_for_mission(api_key, mid_d2)
 
         # Zero-trust verification (D)
