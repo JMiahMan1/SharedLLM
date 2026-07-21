@@ -88,11 +88,20 @@ async def _get_workspace_root_async() -> Path:
 
 def get_workspace_root() -> Path:
     """Fetch the current workspace root from global settings or fallback to env/default."""
+    global WORKSPACE_ROOT
     try:
-        return asyncio.run(_get_workspace_root_async())
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                return WORKSPACE_ROOT
+        except RuntimeError:
+            pass
+        val = asyncio.run(_get_workspace_root_async())
+        WORKSPACE_ROOT = val
+        return val
     except Exception as e:
         log.debug(f"Failed to fetch workspace_runtime_root from identity: {e}")
-        return _DEFAULT_WORKSPACE_ROOT
+        return WORKSPACE_ROOT
 
 
 async def _get_config_timezone_async() -> str:
@@ -116,11 +125,21 @@ async def _get_config_timezone_async() -> str:
 
 def get_config_timezone() -> str:
     """Synchronously resolve the configured timezone name (falls back to UTC)."""
+    global _CONFIG_TZ_CACHE
     try:
-        return asyncio.run(_get_config_timezone_async())
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                return _CONFIG_TZ_CACHE["tz"]
+        except RuntimeError:
+            pass
+        val = asyncio.run(_get_config_timezone_async())
+        _CONFIG_TZ_CACHE["tz"] = val
+        _CONFIG_TZ_CACHE["ts"] = time.time()
+        return val
     except Exception as e:
         log.debug(f"Failed to resolve config timezone: {e}")
-        return "UTC"
+        return _CONFIG_TZ_CACHE["tz"]
 
 
 def _now_in_config_tz() -> datetime:
@@ -598,6 +617,17 @@ async def lifespan(app: FastAPI):
     # Resolve runtime config from Identity service
     from services.config import resolve_runtime_config
     await resolve_runtime_config()
+
+    # Pre-cache root path and timezone configuration
+    global WORKSPACE_ROOT, _CONFIG_TZ_CACHE
+    try:
+        val = await _get_workspace_root_async()
+        WORKSPACE_ROOT = val
+        tz = await _get_config_timezone_async()
+        _CONFIG_TZ_CACHE["tz"] = tz
+        _CONFIG_TZ_CACHE["ts"] = time.time()
+    except Exception as e:
+        log.warning(f"Failed to cache runtime configuration on startup: {e}")
 
     # Startup logic
     init_db()
@@ -1874,6 +1904,8 @@ def update_workspace(workspace_id: str, updates: dict, x_internal_secret: str | 
             raise HTTPException(status_code=404, detail="Workspace not found")
 
         for key, value in updates.items():
+            if key in {"id", "created_at"}:
+                continue
             if hasattr(ws, key):
                 setattr(ws, key, value)
 

@@ -110,3 +110,19 @@ def test_workspace_to_dict_masks_values(ws_id):
     assert "SECRET_KEY" not in d
     assert "env" not in d
     assert "env_enc" not in d
+
+
+def test_update_workspace_ignores_readonly_fields(ws_id):
+    # Simulate a frontend update passing the full serialised workspace representation
+    # including 'created_at' and 'id'.
+    res = wsrt.update_workspace(
+        ws_id,
+        {
+            "id": ws_id,
+            "created_at": "2026-07-13T16:16:49-07:00",
+            "display_name": "Updated Enc Test"
+        },
+        x_internal_secret=SECRET,
+    )
+    assert res["status"] == "SUCCESS"
+    assert res["workspace"]["display_name"] == "Updated Enc Test"
