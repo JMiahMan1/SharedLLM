@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 import redis
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
@@ -2377,8 +2377,7 @@ async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_inte
                     detail="pytest_targets are required before autonomous push so Raven can prove the branch is review-ready.",
                 )
 
-        write_result = await asyncio.to_thread(
-            write_file,
+        write_result = write_file(
             FileWriteRequest(
                 workspace_id=req.workspace_id,
                 local_path=req.local_path,
@@ -2467,8 +2466,7 @@ async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_inte
 
         provider_sync_result = None
         if req.sync_to_provider:
-            provider_sync_result = await asyncio.to_thread(
-                provider_sync_file,
+            provider_sync_result = await provider_sync_file(
                 ProviderSyncFileRequest(
                     workspace_id=req.workspace_id,
                     local_path=req.local_path,
@@ -2761,6 +2759,179 @@ async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path
 # every git command runs inside the workspace's dedicated container. This import
 # is placed at the very bottom so that all shared helpers referenced by
 # git_ops.py already exist on this module when it is imported (avoids a cycle).
-from services.workspace_runtime.git_ops import git_router  # noqa: E402
+from services.workspace_runtime.git_ops import git_router, git_push, GitPushRequest  # noqa: E402
 
 app.include_router(git_router)
+
+
+# =============================================================================
+# WebSocket Terminal Endpoint
+# =============================================================================
+
+@app.websocket("/ws/workspace/{workspace_id}/terminal")
+async def websocket_terminal(
+    websocket: WebSocket,
+    workspace_id: str,
+    token: str = ""  # query param for browser auth
+):
+    """
+    WebSocket terminal for interactive shell access to a workspace container.
+
+    Browser connects with `?token=<api_key>` in query string.
+    Token is validated against Identity service's /api/users/me.
+
+    Data protocol:
+    - Client -> Server: raw text (terminal input) or JSON control:
+      {"type": "resize", "width": 120, "height": 36}
+    - Server -> Client: JSON with stdout data:
+      {"type": "stdout", "data": "..."}
+    """
+    # ---- Authentication ----
+    if not token:
+        await websocket.close(code=1008, reason="Missing authentication token")
+        return
+
+    try:
+        async with asyncio.timeout(5):
+            async with get_client() as client:
+                resp = await client.get(
+                    f"{IDENTITY_SVC_URL}/api/users/me",
+                    headers={"Authorization": f"Bearer {token}"}
+                )
+                if resp.status != 200:
+                    await websocket.close(code=1008, reason="Invalid token")
+                    return
+    except Exception as e:
+        log.warning(f"[terminal] Auth error: {e}")
+        await websocket.close(code=1011, reason="Auth service unavailable")
+        return
+
+    # ---- Accept WebSocket ----
+    await websocket.accept()
+
+    # ---- Resolve workspace ----
+    try:
+        async with get_client() as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC_URL}/api/resolve",
+                json={"workspace_id": workspace_id},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            )
+            if resp.status != 200:
+                await websocket.close(code=1009, reason="Workspace not found")
+                return
+            ws_data = await resp.json()
+            host_path = ws_data.get("path") or ws_data.get("resolved_path") or "/workspaces/default"
+    except Exception as e:
+        log.error(f"[terminal] Failed to resolve workspace: {e}")
+        await websocket.close(code=1009, reason="Workspace resolution failed")
+        return
+
+    # ---- Get Docker client and container ----
+    try:
+        import docker
+        docker_client = docker.from_env(timeout=5)
+    except Exception as e:
+        log.warning(f"[terminal] Docker unavailable: {e}")
+        await websocket.close(code=1011, reason="Docker unavailable")
+        return
+
+    cname = f"wsbox-{re.sub(r'[^a-z0-9]+', '-', workspace_id.lower()).strip('-') or 'workspace'}"
+
+    try:
+        container = docker_client.containers.get(cname)
+        if container.status != "running":
+            container.start()
+    except Exception as e:
+        log.error(f"[terminal] Failed to get/start container: {e}")
+        await websocket.close(code=1011, reason="Container unavailable")
+        return
+
+    # ---- Create PTY exec ----
+    try:
+        exec_resp = container.exec_create(
+            cmd=["/bin/sh"],
+            user=f"{SANDBOX_UID}:{SANDBOX_GID}",
+            workdir=host_path,
+            tty=True,
+            stdin=True,
+            stdout=True,
+            stderr=True,
+            demux=False,
+        )
+        exec_id = exec_resp["Id"]
+    except Exception as e:
+        log.error(f"[terminal] Failed to create exec: {e}")
+        await websocket.close(code=1011, reason="Failed to create shell")
+        return
+
+    # ---- Start streaming ----
+    sock = None
+    try:
+        sock = container.exec_start(exec_id, tty=True, socket=True)
+
+        # Helper to send stdout to client
+        async def send_to_client(data: bytes):
+            try:
+                await websocket.send_text(json.dumps({"type": "stdout", "data": data.decode(errors="replace")}))
+            except Exception:
+                pass
+
+        # Read from socket and forward to websocket
+        async def read_socket():
+            loop = asyncio.get_event_loop()
+            while True:
+                try:
+                    data = await loop.run_in_executor(None, sock.recv, 4096)
+                    if not data:
+                        break
+                    await send_to_client(data)
+                except Exception as e:
+                    log.warning(f"[terminal] socket read error: {e}")
+                    break
+
+        # Read from websocket and forward to exec stdin
+        async def read_websocket():
+            try:
+                async for msg in websocket.iter_text():
+                    is_ctrl = False
+                    if msg.startswith("{"):
+                        try:
+                            ctrl = json.loads(msg)
+                            if isinstance(ctrl, dict) and ctrl.get("type") == "resize":
+                                is_ctrl = True
+                                width = ctrl.get("width", 80)
+                                height = ctrl.get("height", 24)
+                                try:
+                                    container.exec_resize(exec_id, width=width, height=height)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                    if not is_ctrl:
+                        # Raw input - send to exec stdin
+                        try:
+                            sock.sendall(msg.encode())
+                        except Exception:
+                            pass
+            except Exception as e:
+                log.warning(f"[terminal] websocket read error: {e}")
+
+        # Run both directions
+        await asyncio.gather(read_socket(), read_websocket())
+
+    except Exception as e:
+        log.error(f"[terminal] streaming error: {e}")
+    finally:
+        # Cleanup
+        try:
+            if sock:
+                sock.close()
+        except Exception:
+            pass
+        try:
+            container.exec_kill(exec_id, timeout=1)
+        except Exception:
+            pass
+        await websocket.close()
