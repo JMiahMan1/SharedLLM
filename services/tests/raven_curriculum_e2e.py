@@ -164,11 +164,9 @@ def _login() -> str:
     return key
 
 
-def _dispatch_mission(api_key: str, query: str, workspace_id: str | None = None) -> int:
-    """Dispatches a mission using the query (+ optional workspace_id to target an existing workspace)."""
-    payload: dict = {"query": query}
-    if workspace_id:
-        payload["workspace_id"] = workspace_id
+def _dispatch_mission(api_key: str, query: str) -> int:
+    """Dispatches a mission with ONLY the query — fully prompt-driven, no API hints."""
+    payload = {"query": query}
     resp = requests.post(
         f"{GATEWAY_BASE}/api/raven/missions",
         json=payload,
@@ -279,11 +277,13 @@ def test_raven_comprehensive_curriculum():
         # ===================================================================
         _log("=== PATH B: Existing Path (Modify) ===")
         query_b = (
-            f"Target the existing workspace '{workspace_id}' (wired to git repo '{repo_name}').\n"
+            f"Target the EXISTING workspace with id '{workspace_id}' that was created earlier "
+            f"(it already has a .git directory and remote origin pointing at GitHub repo '{repo_name}').\n"
+            f"Use workspace_id='{workspace_id}' in EVERY tool call.\n"
             f"1. Write a file named 'MODIFY.md' inside workspace '{workspace_id}' with content 'Modify Phase Verification'.\n"
             f"2. Add the file, commit with message 'feat: add modify verification log', and push to the remote 'main' branch."
         )
-        mid_b = _dispatch_mission(api_key, query_b, workspace_id=workspace_id)
+        mid_b = _dispatch_mission(api_key, query_b)
         _wait_for_mission(api_key, mid_b)
 
         # Zero-trust verification (B)
@@ -318,11 +318,14 @@ def test_raven_comprehensive_curriculum():
         _ingest_to_rag(f"{workspace_id}/docs/mock_api.md", api_spec_content)
 
         query_c = (
-            f"In workspace '{workspace_id}', write a Python script named 'query_api.py' that calls the Antigravity "
-            f"Quantum API described in 'docs/mock_api.md' to set the gravity level to zero. Retrieve the exact "
-            f"auth token, headers, endpoint, payload keys, and method from that specification document."
+            f"Target the EXISTING workspace with id '{workspace_id}'. "
+            f"Use workspace_id='{workspace_id}' in EVERY tool call.\n"
+            f"Write a Python script named 'query_api.py' inside that workspace that calls the Antigravity "
+            f"Quantum API described in 'docs/mock_api.md'. Retrieve the exact "
+            f"auth token, headers, endpoint, payload keys, and method from that specification document "
+            f"(the file already exists in the workspace at docs/mock_api.md)."
         )
-        mid_c = _dispatch_mission(api_key, query_c, workspace_id=workspace_id)
+        mid_c = _dispatch_mission(api_key, query_c)
         _wait_for_mission(api_key, mid_c)
 
         # Zero-trust verification (C)
@@ -349,13 +352,15 @@ def test_raven_comprehensive_curriculum():
 
         # Dispatch Mission 1 to trigger port failure, alternative selection, and learning persistence
         query_d1 = (
-            f"In workspace '{workspace_id}', write and start a Python HTTP server in the background. "
+            f"Target the EXISTING workspace with id '{workspace_id}'. "
+            f"Use workspace_id='{workspace_id}' in EVERY tool call.\n"
+            f"Write a Python HTTP server script and try to start it in the background. "
             f"Try to bind it to port 9099 first. If that fails (since it is blocked), modify the code "
             f"to use port 9098, start it on 9098, and record the working port in 'port_result.txt'. "
             f"Finally, save a learning lesson explaining that port 9099 is blocked and port 9098 should "
             f"be used instead."
         )
-        mid_d1 = _dispatch_mission(api_key, query_d1, workspace_id=workspace_id)
+        mid_d1 = _dispatch_mission(api_key, query_d1)
         _wait_for_mission(api_key, mid_d1)
 
         # Verify Mission 1 results
@@ -369,11 +374,13 @@ def test_raven_comprehensive_curriculum():
 
         # Dispatch Mission 2: must bypass port 9099 autonomously using the saved lesson
         query_d2 = (
-            f"In workspace '{workspace_id}', start a second python HTTP server. Check your past lessons "
-            f"re-routing rules for blocked port constraints. Directly write and start the server on the "
-            f"alternative port (9098), write the port used to 'port2_result.txt', and report completion."
+            f"Target the EXISTING workspace with id '{workspace_id}'. "
+            f"Use workspace_id='{workspace_id}' in EVERY tool call.\n"
+            f"Start a python HTTP server. Check your past lessons for blocked port constraints. "
+            f"Use the correct alternative port directly (do NOT try port 9099 first), "
+            f"write the port used to 'port2_result.txt', and report completion."
         )
-        mid_d2 = _dispatch_mission(api_key, query_d2, workspace_id=workspace_id)
+        mid_d2 = _dispatch_mission(api_key, query_d2)
         _wait_for_mission(api_key, mid_d2)
 
         # Zero-trust verification (D)
