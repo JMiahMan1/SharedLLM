@@ -186,14 +186,24 @@ def _wait_for_mission(api_key: str, mission_id: int) -> dict:
     deadline = time.time() + MISSION_TIMEOUT
     last_status = None
     while time.time() < deadline:
-        resp = requests.get(
-            f"{GATEWAY_BASE}/api/raven/missions/{mission_id}",
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=30,
-        )
-        if resp.status_code != 200:
-            raise RuntimeError(f"Mission details fetch failed {resp.status_code}: {resp.text}")
-        detail = resp.json()
+        try:
+            resp = requests.get(
+                f"{GATEWAY_BASE}/api/raven/missions/{mission_id}",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=30,
+            )
+            if resp.status_code in (502, 503, 504):
+                _log(f"Transient HTTP {resp.status_code} while polling mission {mission_id}, retrying in 5s...")
+                time.sleep(5)
+                continue
+            if resp.status_code != 200:
+                raise RuntimeError(f"Mission details fetch failed {resp.status_code}: {resp.text}")
+            detail = resp.json()
+        except (requests.RequestException, ConnectionError) as err:
+            _log(f"Connection error while polling mission {mission_id}: {err}, retrying in 5s...")
+            time.sleep(5)
+            continue
+
         status = (detail.get("status") or "").lower()
         if status != last_status:
             _log(f"Mission {mission_id} status: {status}")
@@ -204,6 +214,7 @@ def _wait_for_mission(api_key: str, mission_id: int) -> dict:
             raise RuntimeError(f"Mission {mission_id} failed. Logs: {detail.get('summary') or detail}")
         time.sleep(MISSION_POLL_INTERVAL)
     raise TimeoutError(f"Mission {mission_id} did not finish within {MISSION_TIMEOUT}s")
+
 
 
 # ---------------------------------------------------------------------------
