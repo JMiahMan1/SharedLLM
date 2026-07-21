@@ -171,7 +171,7 @@ def _dispatch_mission(api_key: str, query: str) -> int:
         f"{GATEWAY_BASE}/api/raven/missions",
         json=payload,
         headers={"Authorization": f"Bearer {api_key}"},
-        timeout=180,
+        timeout=300,
     )
     if resp.status_code != 200:
         raise RuntimeError(f"Mission dispatch failed {resp.status_code}: {resp.text}")
