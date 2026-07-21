@@ -5286,17 +5286,25 @@ async def kill_mission(request: Request, id_or_slug: str):
         mission_data = await m_resp.json()
         real_id = mission_data["id"]
 
-        # 1. Update status in database
-        resp = await client.patch(
-            f"{IDENTITY_SVC}/api/raven/missions/{real_id}",
-            json={
-                "status": "failed",
-                "result": "Aborted by user"
-            },
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        if resp.status != 200:
-            raise HTTPException(status_code=resp.status, detail="Failed to update mission status")
+        # 1. Update status in database — only if mission is still active.
+        # Never overwrite a terminal state (completed / failed / cancelled).
+        TERMINAL_STATES = {"completed", "failed", "cancelled"}
+        if mission_data.get("status") in TERMINAL_STATES:
+            log.warning(
+                f"[AUDIT] Kill on already-terminal mission {real_id} "
+                f"(status={mission_data.get('status')}) — skipping DB patch."
+            )
+        else:
+            resp = await client.patch(
+                f"{IDENTITY_SVC}/api/raven/missions/{real_id}",
+                json={
+                    "status": "failed",
+                    "result": "Aborted by user"
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+            )
+            if resp.status != 200:
+                raise HTTPException(status_code=resp.status, detail="Failed to update mission status")
 
         # 2. Publish kill signal to Redis
         import redis.asyncio as redis
