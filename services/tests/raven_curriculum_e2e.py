@@ -314,7 +314,10 @@ def test_raven_comprehensive_curriculum():
             '{"gravity_level": "zero", "device_signature": "signature-9988-abc"}\n'
         )
         _seed_file(workspace_id, "docs/mock_api.md", api_spec_content)
-        _ingest_to_rag(f"{workspace_id}/docs/mock_api.md", api_spec_content)
+        # NOTE: RAG ingest is NOT called directly here — port 8004 is internal to the
+        # Docker network and not reachable from the test runner. The workspace file
+        # itself is the source of truth; Raven reads it via workspace file tools.
+        # Path C tests file-grounded code synthesis, not RAG search retrieval.
 
         query_c = (
             f"Open workspace '{workspace_id}'. There is a file at 'docs/mock_api.md' that "
