@@ -7975,3 +7975,89 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
         except Exception as e:
             log.error(f"[media/favorite] Exception: {e}", exc_info=True)
             raise HTTPException(status_code=502, detail="Error communicating with Music Assistant") from e
+
+
+@app.websocket("/api/workspaces/{workspace_id}/terminal")
+async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token: str = ""):
+    """Proxy WebSocket connection for the interactive terminal to the workspace runtime service."""
+    await websocket.accept()
+    log.info(f"[workspaces-terminal] WebSocket connection accepted for workspace {workspace_id}")
+
+    api_token = token or websocket.query_params.get("token")
+    if not api_token:
+        log.error("[workspaces-terminal] Missing authentication token")
+        await websocket.close(code=1008, reason="Missing token")
+        return
+
+    # Validate token against Identity service
+    try:
+        async with borrow_http_client() as client:
+            auth_resp = await client.get(
+                f"{IDENTITY_SVC}/api/users/me",
+                headers={"Authorization": f"Bearer {api_token}"}
+            )
+            if auth_resp.status != 200:
+                log.warning(f"[workspaces-terminal] Token validation failed: status={auth_resp.status}")
+                await websocket.close(code=1008, reason="Invalid token")
+                return
+    except Exception as e:
+        log.error(f"[workspaces-terminal] Token validation failed due to error: {e}")
+        await websocket.close(code=1011, reason="Auth service unavailable")
+        return
+
+    # Connect to the workspace_runtime WebSocket terminal endpoint
+    ws_url = WORKSPACE_RUNTIME_SVC.replace("http://", "ws://").replace("https://", "wss://")
+    target_url = f"{ws_url}/ws/workspace/{workspace_id}/terminal?token={api_token}"
+    log.info(f"[workspaces-terminal] Connecting to workspace runtime terminal: {target_url}")
+
+    import websockets
+    try:
+        async with websockets.connect(target_url) as ws_run:
+            log.info("[workspaces-terminal] Connection to workspace runtime established")
+
+            async def forward_client_to_run():
+                try:
+                    while True:
+                        msg = await websocket.receive()
+                        text_data = msg.get("text")
+                        binary_data = msg.get("bytes")
+                        if text_data is None and binary_data is None:
+                            break
+                        if text_data is not None:
+                            await ws_run.send(text_data)
+                        elif binary_data is not None:
+                            await ws_run.send(binary_data)
+                except WebSocketDisconnect:
+                    log.info("[workspaces-terminal] Browser disconnected")
+                except Exception as e:
+                    log.warning(f"[workspaces-terminal] Client->Run error: {e}")
+
+            async def forward_run_to_client():
+                try:
+                    while True:
+                        message = await ws_run.recv()
+                        if isinstance(message, str):
+                            await websocket.send_text(message)
+                        else:
+                            await websocket.send_bytes(message)
+                except WebSocketDisconnect:
+                    log.info("[workspaces-terminal] Browser disconnected (Run->Client)")
+                except Exception as e:
+                    log.warning(f"[workspaces-terminal] Run->Client error: {e}")
+
+            await asyncio.gather(
+                forward_client_to_run(),
+                forward_run_to_client(),
+            )
+    except Exception as e:
+        log.error(f"[workspaces-terminal] Failed to connect to workspace runtime: {e}")
+        try:
+            await websocket.send_text(json.dumps({"type": "stdout", "data": f"\r\n\x1b[31mFailed to connect to workspace runtime terminal: {e}\x1b[0m\r\n"}))
+        except Exception:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+

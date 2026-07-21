@@ -128,6 +128,36 @@ function FileCtxMenuItem({ icon, label, onClick, danger }: FileCtxMenuItemProps)
 
 export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) {
   const [activeView, setActiveView] = useState<View>('explorer');
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalPosition, setTerminalPosition] = useState<'sidebar' | 'bottom'>('bottom');
+  const [terminalHeight, setTerminalHeight] = useState(250);
+
+  const startResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = terminalHeight;
+    
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const deltaY = moveEvent.clientY - startY;
+      const newHeight = Math.max(100, Math.min(window.innerHeight - 150, startHeight - deltaY));
+      setTerminalHeight(newHeight);
+    };
+    
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [terminalHeight]);
+
+  useEffect(() => {
+    if (activeView === 'terminal' && terminalPosition === 'bottom') {
+      setActiveView('explorer');
+      setTerminalOpen(true);
+    }
+  }, [activeView, terminalPosition]);
   const hasGit = useMemo(
     () => workspace.capabilities.some((c) => c === 'git_status' || c === 'git_write' || c.startsWith('git')),
     [workspace.capabilities],
@@ -925,12 +955,22 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         <div className="w-12 shrink-0 bg-[#0b0f1a] border-r border-white/10 flex flex-col items-center py-2 gap-1">
           {ACTIVITY.map((a) => {
             const Icon = a.icon;
-            const isActive = activeView === a.id;
+            const isActive = a.id === 'terminal' && terminalPosition === 'bottom' ? terminalOpen : activeView === a.id;
             return (
               <button
                 key={a.id}
                 title={a.label}
-                onClick={() => setActiveView(a.id)}
+                onClick={() => {
+                  if (a.id === 'terminal') {
+                    if (terminalPosition === 'bottom') {
+                      setTerminalOpen((prev) => !prev);
+                    } else {
+                      setActiveView('terminal');
+                    }
+                  } else {
+                    setActiveView(a.id);
+                  }
+                }}
                 className={cn(
                   'relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors',
                   isActive ? 'text-white bg-white/10' : 'text-slate-500 hover:text-slate-200',
@@ -1109,8 +1149,26 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
             </div>
           )}
 
-          {activeView === 'terminal' && (
-            <TerminalPane workspace={workspace} />
+          {activeView === 'terminal' && terminalPosition === 'sidebar' && (
+            <div className="flex-1 flex flex-col min-h-0 bg-[#0b0f1a]">
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-[#0d1222]">
+                <span className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">Terminal</span>
+                <button
+                  onClick={() => {
+                    setTerminalPosition('bottom');
+                    setTerminalOpen(true);
+                    setActiveView('explorer');
+                  }}
+                  className="p-1 text-slate-400 hover:text-white rounded"
+                  title="Move Panel to Bottom"
+                >
+                  <ChevronUp size={14} />
+                </button>
+              </div>
+              <div className="flex-1 min-h-0">
+                <TerminalPane workspace={workspace} />
+              </div>
+            </div>
           )}
 
           {activeView === 'tools' && (
@@ -1213,6 +1271,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
 
         {/* Editor / Preview */}
         <div className="flex-1 min-w-0 flex flex-col bg-[#0a0e1a]">
+          <div className="flex-1 min-h-0 flex flex-col">
           {showDiff ? (
             <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
@@ -1450,6 +1509,51 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
             <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-2">
               <FolderOpen size={42} />
               <p className="text-sm">Select a file from the Explorer to edit</p>
+            </div>
+          )}
+          </div>
+          {terminalOpen && terminalPosition === 'bottom' && (
+            <div
+              style={{ height: `${terminalHeight}px` }}
+              className="shrink-0 border-t border-white/10 bg-[#0b0f1a] flex flex-col relative"
+            >
+              {/* Drag resize handle */}
+              <div
+                onMouseDown={startResize}
+                className="absolute top-0 left-0 right-0 h-1 cursor-ns-resize hover:bg-indigo-500/50 transition-colors z-20"
+              />
+              
+              {/* Header bar */}
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-[#0d1222]">
+                <span className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">
+                  Terminal
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => {
+                      setTerminalPosition('sidebar');
+                      setTerminalOpen(false);
+                      setActiveView('terminal');
+                    }}
+                    className="p-1 text-slate-400 hover:text-white rounded transition-colors"
+                    title="Move Panel to Sidebar"
+                  >
+                    <ChevronRight size={13} />
+                  </button>
+                  <button
+                    onClick={() => setTerminalOpen(false)}
+                    className="p-1 text-slate-400 hover:text-white rounded transition-colors"
+                    title="Close Terminal"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              </div>
+              
+              {/* Terminal content */}
+              <div className="flex-1 min-h-0">
+                <TerminalPane workspace={workspace} />
+              </div>
             </div>
           )}
         </div>

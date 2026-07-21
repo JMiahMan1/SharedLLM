@@ -142,9 +142,9 @@ def test_workspace_file_operations(workspace_env):
     assert read_resp["content"] == "print('hello')"
 
 
-def test_autonomous_fix_it_loop(workspace_env):
+async def test_autonomous_fix_it_loop(workspace_env):
     with pytest.raises(HTTPException) as exc_info:
-        workflow_write_sync_commit(
+        await workflow_write_sync_commit(
             WorkflowWriteSyncCommitRequest(
                 workspace_id="demo",
                 rag_user="admin",
@@ -161,9 +161,9 @@ def test_autonomous_fix_it_loop(workspace_env):
     assert "Pytest failed" in exc_info.value.detail
 
 
-def test_workflow_requires_pytest_before_push(workspace_env):
+async def test_workflow_requires_pytest_before_push(workspace_env):
     with pytest.raises(HTTPException) as exc_info:
-        workflow_write_sync_commit(
+        await workflow_write_sync_commit(
             WorkflowWriteSyncCommitRequest(
                 workspace_id="demo",
                 rag_user="admin",
@@ -180,9 +180,9 @@ def test_workflow_requires_pytest_before_push(workspace_env):
     assert "pytest_targets are required" in exc_info.value.detail
 
 
-def test_git_push_blocks_protected_branch(workspace_env):
+async def test_git_push_blocks_protected_branch(workspace_env):
     with pytest.raises(HTTPException) as exc_info:
-        git_push(
+        await git_push(
             GitPushRequest(workspace_id="demo", rag_user="admin"),
             "test-secret",
         )
@@ -191,8 +191,8 @@ def test_git_push_blocks_protected_branch(workspace_env):
     assert "protected branch 'main'" in exc_info.value.detail
 
 
-def test_workflow_auto_creates_review_branch_and_returns_review_metadata(workspace_env):
-    result = workflow_write_sync_commit(
+async def test_workflow_auto_creates_review_branch_and_returns_review_metadata(workspace_env):
+    result = await workflow_write_sync_commit(
         WorkflowWriteSyncCommitRequest(
             workspace_id="demo",
             rag_user="admin",
