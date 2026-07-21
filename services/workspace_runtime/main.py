@@ -2823,6 +2823,7 @@ async def websocket_terminal(
         await websocket.close(code=1008, reason="Missing authentication token")
         return
 
+    user_ctx = None
     try:
         async with asyncio.timeout(5):
             async with get_client() as client:
@@ -2833,6 +2834,11 @@ async def websocket_terminal(
                 if resp.status != 200:
                     await websocket.close(code=1008, reason="Invalid token")
                     return
+                user_data = await resp.json()
+                user_ctx = {
+                    "user": user_data.get("username", "default"),
+                    "is_admin": user_data.get("is_admin", False)
+                }
     except Exception as e:
         log.warning(f"[terminal] Auth error: {e}")
         await websocket.close(code=1011, reason="Auth service unavailable")
@@ -2843,22 +2849,20 @@ async def websocket_terminal(
 
     # ---- Resolve workspace ----
     try:
-        async with get_client() as client:
-            resp = await client.get(
-                f"{IDENTITY_SVC_URL}/api/resolve",
-                json={"workspace_id": workspace_id},
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=5.0),
-            )
-            if resp.status != 200:
-                await websocket.close(code=1009, reason="Workspace not found")
-                return
-            ws_data = await resp.json()
-            host_path = ws_data.get("path") or ws_data.get("resolved_path") or "/workspaces/default"
+        ref = WorkspaceRef(workspace_id=workspace_id, user_context=user_ctx)
+        ws_data = await asyncio.get_event_loop().run_in_executor(
+            None, _resolve_workspace, ref
+        )
+        host_path = ws_data.get("resolved_path") or "/workspaces/default"
+    except HTTPException as he:
+        log.error(f"[terminal] Workspace resolution failed: {he.detail}")
+        await websocket.close(code=1009, reason=he.detail[:120])
+        return
     except Exception as e:
         log.error(f"[terminal] Failed to resolve workspace: {e}")
         await websocket.close(code=1009, reason="Workspace resolution failed")
         return
+
 
     # ---- Get Docker client and container ----
     try:
