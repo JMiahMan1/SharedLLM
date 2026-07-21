@@ -1,3 +1,8 @@
+import os
+os.environ["INTERNAL_SECRET"] = "test-secret"
+os.environ["WORKSPACE_DATABASE_URL"] = "sqlite:////tmp/test_ws_security.db"
+os.environ["FERNET_KEY"] = "g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14="
+
 import httpx
 import pytest
 
@@ -5,14 +10,47 @@ import pytest
 # This test attempts a path traversal attack and asserts a 403 Forbidden.
 
 @pytest.mark.asyncio
-async def test_workspace_path_traversal_blocked():
+async def test_workspace_path_traversal_blocked(monkeypatch):
+    from services.workspace_runtime.database import engine, init_db
+    from services.workspace_runtime.models import Workspace
     from services.workspace_runtime.main import app
+    import services.workspace_runtime.main as wsrt
+    from sqlmodel import Session
+    
+    init_db()
+    with Session(engine) as session:
+        existing = session.get(Workspace, "main")
+        if existing:
+            session.delete(existing)
+            session.commit()
+        ws = Workspace(
+            id="main",
+            display_name="Main Workspace",
+            local_path="main",
+            sync_mode="git",
+            scope="user",
+            capabilities=["read", "write"]
+        )
+        session.add(ws)
+        session.commit()
+
+    monkeypatch.setattr(wsrt, "_resolve_identity_context", lambda ref: {
+        "user": ref.rag_user or "admin",
+        "is_admin": True,
+        "forbidden_branches": ["main", "master"],
+    })
+
+    from pathlib import Path
+    tmp_root = Path("/tmp/test_ws_security_root")
+    tmp_root.mkdir(exist_ok=True)
+    monkeypatch.setattr(wsrt, "get_workspace_root", lambda: tmp_root)
 
     # We attempt to write to a path outside the workspace
     malicious_payload = {
         "workspace_id": "main",
         "relative_path": "../../../main.py",
-        "content": "print('hacked')"
+        "content": "print('hacked')",
+        "rag_user": "admin"
     }
 
     transport = httpx.ASGITransport(app=app)
