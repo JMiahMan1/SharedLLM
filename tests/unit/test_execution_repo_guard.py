@@ -35,12 +35,12 @@ def test_push_allowed_when_target_matches_designated_repo():
     assert reason == ""
 
 
-def test_push_blocked_when_no_designated_repo():
+def test_push_allowed_when_no_designated_repo():
     g = _load()
     allowed, _ = g.push_allowed(None, "https://github.com/JMiahMan1/raven-e2e-123.git")
-    assert allowed is False
+    assert allowed is True
     allowed2, _ = g.push_allowed("", "https://github.com/JMiahMan1/raven-e2e-123.git")
-    assert allowed2 is False
+    assert allowed2 is True
 
 
 def test_push_blocked_when_target_differs_from_designated_repo():

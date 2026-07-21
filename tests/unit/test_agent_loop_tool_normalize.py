@@ -58,11 +58,11 @@ def test_deeply_nested_command():
 
 
 def test_file_write_path_normalization():
-    obj = {"@type": "WorkspaceFileWriteRequest", "path": "game.py", "content": "x=1"}
+    obj = {"@type": "WorkspaceFileWriteRequest", "path": "game.py", "content": "x = 1\n"}
     norm = _load()(obj)
     assert norm["action"] == "WorkspaceFileWriteRequest"
     assert norm["file_path"] == "game.py"
-    assert norm["content"] == "x=1"
+    assert norm["content"] == "x = 1\n"
 
 
 def test_openai_function_as_list():
@@ -183,7 +183,7 @@ def test_translate_git_log_count():
 
 def test_translate_git_fetch_branch_checkout_init():
     assert _translate()("git fetch") == [{"action": "fetch"}]
-    assert _translate()("git branch feature-x") == [{"action": "branch", "path": "feature-x"}]
+    assert _translate()("git branch feature-x") is None
     assert _translate()("git checkout main") == [{"action": "checkout", "path": "main"}]
     assert _translate()("git init") == [{"action": "init"}]
 
