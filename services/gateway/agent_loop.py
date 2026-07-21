@@ -2070,6 +2070,27 @@ async def resolve_mission_workspace(
             log.warning(f"[workspace] bootstrap {assigned_workspace_id} failed: {e}")
         return None
 
+    # No assigned_workspace_id explicitly passed. Check if mission query mentions an existing workspace.
+    if query:
+        try:
+            async with shared_http_client() as client:
+                lst = await client.get(
+                    f"{WORKSPACE_RUNTIME_SVC}/workspaces",
+                    params={"rag_user": user_id},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                if lst.status == 200:
+                    all_ws = (await lst.json()).get("workspaces", [])
+                    for item in all_ws:
+                        if isinstance(item, dict):
+                            wid = item.get("id")
+                            if wid and wid != "default" and wid in query:
+                                log.info(f"[workspace] Auto-detected existing workspace '{wid}' referenced in mission query")
+                                return item
+        except Exception as e:
+            log.warning(f"[workspace] Auto-detect mentioned workspace failed: {e}")
+
     # No assigned workspace. System-maintenance missions (fixing SharedLLM's own
     # code/logs) run in the user's Default Workspace. Everything else (building or
     # creating a new project) must NOT use the Default Workspace — return None so
