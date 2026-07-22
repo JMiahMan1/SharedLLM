@@ -111,7 +111,7 @@ WORKSPACE_TOOL_ACTIONS = {
     "workspacefilepatchrequest", "workspaceshellrequest",
     "workspacesearchrequest", "workspacelintrequest",
     "gitoperationrequest", "workspacebootstraprequest",
-    "workspacesettingsupdaterequest",
+    "workspacesettingsupdaterequest", "workspaceportexposerequest",
 }
 
 
@@ -3524,6 +3524,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "workspaceshellrequest": (EXECUTION_SVC, "/execute/workspace_shell"),
                 "workspacecreaterequest": (WORKSPACE_RUNTIME_SVC, "/workspaces"),
                 "workspacesettingsupdaterequest": (WORKSPACE_RUNTIME_SVC, "/workspaces/{workspace_id}"),
+                "workspaceportexposerequest": (WORKSPACE_RUNTIME_SVC, "/ports/expose"),
+                "workspace_expose_port": (WORKSPACE_RUNTIME_SVC, "/ports/expose"),
+                "expose_port": (WORKSPACE_RUNTIME_SVC, "/ports/expose"),
+                "port_expose": (WORKSPACE_RUNTIME_SVC, "/ports/expose"),
                 "storagefilereadrequest": (EXECUTION_SVC, "/execute/storage_file_read"),
                 "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
                 "storagelistrequest": (EXECUTION_SVC, "/execute/storage_list"),
