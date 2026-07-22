@@ -494,6 +494,7 @@ ALLOWED_TOOLS = {
     "documentbroadcastrequest", "nightmoderequest", "ttsrequest", "storagetexttorequest",
     "ghrequest",
     "ravenrecallrequest",
+    "workspaceportexposerequest", "workspace_expose_port", "expose_port", "port_expose",
     # Aliases and Hallucination-prefixed tools
     "git_status", "git_diff", "git_log", "git_add", "git_commit", "git_push", "git_pull", "git_sync",
     "workspace_file_read", "workspace_file_write", "workspace_file_patch",
@@ -4463,6 +4464,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
     # --- POST-MISSION REFLECTION ---
     reflection_summary = ""
+    _lesson_rule = ""
+    _lesson_cause = ""
+    _lesson_outcome = "success"
+    _lesson_confidence = 0.5
     if action_log and successful_tool_calls > 0:
         try:
             raven_reflection = await load_prompt(get_http_client(), PROMPT_RAVEN_REFLECTION)
@@ -4482,10 +4487,6 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             ]
             reflection_data = await execute_inference(provider, selected_model, reflection_prompt, {"temperature": 0.1, "enable_thinking": False})
             reflection_summary = reflection_data.get("message", {}).get("content", "").strip()
-            _lesson_rule = ""
-            _lesson_cause = ""
-            _lesson_outcome = "success"
-            _lesson_confidence = 0.5
             if reflection_summary:
                 _parsed = _parse_lesson_marker(reflection_summary)
                 _lesson_rule = _parsed.get("rule", "")

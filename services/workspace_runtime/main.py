@@ -12,7 +12,7 @@ import time
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
@@ -369,6 +369,11 @@ class FileWriteRequest(WorkspaceRef):
     patch: str | None = None
     expected_sha256: str | None = None
     create_parents: bool = False
+
+
+class WorkspaceExposePortRequest(WorkspaceRef):
+    container_port: int
+    host_port: int | None = None
 
 
 class PytestRequest(WorkspaceRef):
@@ -2031,6 +2036,23 @@ def list_files(req: FileListRequest, x_internal_secret: str | None = Header(defa
     }
 
 
+@app.post("/ports/expose")
+@app.post("/workspaces/ports/expose")
+def expose_workspace_port_endpoint(req: WorkspaceExposePortRequest, x_internal_secret: str | None = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    workspace = _resolve_workspace(req, check_recovery=True)
+    from services.workspace_sandbox import expose_workspace_port
+    return expose_workspace_port(workspace["id"], req.container_port, req.host_port)
+
+
+@app.get("/ports/list/{workspace_id}")
+@app.get("/workspaces/ports/{workspace_id}")
+def list_workspace_ports_endpoint(workspace_id: str, x_internal_secret: str | None = Header(default=None)):
+    _require_internal_secret(x_internal_secret)
+    from services.workspace_sandbox import list_workspace_ports
+    return list_workspace_ports(workspace_id)
+
+
 @app.post("/files/write")
 def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
@@ -2800,6 +2822,9 @@ app.include_router(git_router)
 # WebSocket Terminal Endpoint
 # =============================================================================
 
+SANDBOX_UID = int(os.getenv("WORKSPACE_SANDBOX_UID", "1000"))
+SANDBOX_GID = int(os.getenv("WORKSPACE_SANDBOX_GID", "1000"))
+
 @app.websocket("/ws/workspace/{workspace_id}/terminal")
 async def websocket_terminal(
     websocket: WebSocket,
@@ -2863,11 +2888,13 @@ async def websocket_terminal(
         await websocket.close(code=1009, reason="Workspace resolution failed")
         return
 
-
     # ---- Get Docker client and container ----
     try:
         import docker
-        docker_client = docker.from_env(timeout=5)
+        from_env = cast(Any, getattr(docker, "from_env", None))
+        if from_env is None:
+            raise RuntimeError("docker.from_env not available")
+        docker_client = from_env(timeout=5)
     except Exception as e:
         log.warning(f"[terminal] Docker unavailable: {e}")
         await websocket.close(code=1011, reason="Docker unavailable")

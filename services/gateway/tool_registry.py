@@ -28,6 +28,7 @@ TOOL_IMAGE_GENERATE = "sharedllm_image_generate"
 TOOL_IMAGE_EDIT = "sharedllm_image_edit"
 TOOL_LIST_IMAGE_MODELS = "sharedllm_list_image_models"
 TOOL_RAVEN_MISSION = "sharedllm_raven_mission"
+TOOL_WORKSPACE_EXPOSE_PORT = "workspaceportexposerequest"
 
 # Service identifiers used by the resolver / proxy layer.
 SVC_EXECUTION = "execution"
@@ -178,6 +179,33 @@ _RAVEN_MISSION_TOOL = {
 }
 
 
+_WORKSPACE_EXPOSE_PORT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": TOOL_WORKSPACE_EXPOSE_PORT,
+        "description": "Expose a port running inside the workspace sandbox container so it is accessible on the host IP.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {
+                    "type": "string",
+                    "description": "Target workspace ID.",
+                },
+                "container_port": {
+                    "type": "integer",
+                    "description": "The port number running inside the container to expose.",
+                },
+                "host_port": {
+                    "type": "integer",
+                    "description": "Optional host port to bind to. If omitted or 0, an available host port is auto-assigned.",
+                },
+            },
+            "required": ["container_port"],
+        },
+    },
+}
+
+
 def get_tool_schemas() -> list[dict]:
     """Return the OpenAI ``tools`` schemas for all SharedLLM tools."""
     return [
@@ -188,6 +216,7 @@ def get_tool_schemas() -> list[dict]:
         _IMAGE_EDIT_TOOL,
         _LIST_IMAGE_MODELS_TOOL,
         _RAVEN_MISSION_TOOL,
+        _WORKSPACE_EXPOSE_PORT_TOOL,
     ]
 
 
@@ -305,6 +334,19 @@ def resolve_tool_call(
                 "query": arguments.get("mission", ""),
                 "workspace_id": arguments.get("workspace_id"),
             },
+        )
+
+    if name in (TOOL_WORKSPACE_EXPOSE_PORT, "workspace_expose_port", "expose_port", "port_expose"):
+        return ResolvedToolCall(
+            method="POST",
+            service=SVC_WORKSPACE,
+            path="/ports/expose",
+            json={
+                "workspace_id": ws,
+                "container_port": int(arguments.get("container_port") or arguments.get("port") or 8000),
+                "host_port": int(arguments.get("host_port")) if arguments.get("host_port") else None,
+            },
+            requires_workspace=True,
         )
 
     raise ValueError(f"Unknown SharedLLM tool: {name}")

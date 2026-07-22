@@ -700,3 +700,170 @@ def resize_workspace_terminal(
     except Exception as e:
         log.warning(f"[Sandbox terminal] Failed to resize PTY: {e}")
     return False
+
+
+# ---------------------------------------------------------------------------
+# Host Port Exposure & TCP Proxy Forwarding for Sandbox Workspaces
+# ---------------------------------------------------------------------------
+_PORT_FORWARD_LOCK = threading.Lock()
+_ACTIVE_PORT_FORWARDS: dict[Tuple[str, int], Tuple[threading.Thread, threading.Event, int, str]] = {}
+
+
+def _find_free_host_port(start_port: int = 9000, max_attempts: int = 200) -> int:
+    import socket
+    for port in range(start_port, start_port + max_attempts):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind(("0.0.0.0", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError("No free host ports available in specified range")
+
+
+def _run_tcp_proxy(host_port: int, target_ip: str, target_port: int, stop_event: threading.Event) -> None:
+    import socket
+
+    server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_sock.settimeout(1.0)
+    try:
+        server_sock.bind(("0.0.0.0", host_port))
+        server_sock.listen(128)
+    except Exception as e:
+        log.error(f"[Sandbox Port Forward] Failed to bind host port {host_port}: {e}")
+        return
+
+    log.info(f"[Sandbox Port Forward] Forwarding 0.0.0.0:{host_port} -> {target_ip}:{target_port}")
+
+    def handle_client(client_sock: socket.socket) -> None:
+        try:
+            target_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            target_sock.settimeout(10.0)
+            target_sock.connect((target_ip, target_port))
+            target_sock.settimeout(None)
+            client_sock.settimeout(None)
+        except Exception as err:
+            log.warning(f"[Sandbox Port Forward] Cannot connect to {target_ip}:{target_port}: {err}")
+            client_sock.close()
+            return
+
+        def pipe(src: socket.socket, dst: socket.socket) -> None:
+            try:
+                while not stop_event.is_set():
+                    data = src.recv(8192)
+                    if not data:
+                        break
+                    dst.sendall(data)
+            except Exception:
+                pass
+            finally:
+                with contextlib.suppress(Exception):
+                    src.shutdown(socket.SHUT_RDWR)
+                with contextlib.suppress(Exception):
+                    dst.shutdown(socket.SHUT_RDWR)
+
+        t1 = threading.Thread(target=pipe, args=(client_sock, target_sock), daemon=True)
+        t2 = threading.Thread(target=pipe, args=(target_sock, client_sock), daemon=True)
+        t1.start()
+        t2.start()
+
+    while not stop_event.is_set():
+        try:
+            client_sock, _ = server_sock.accept()
+            t = threading.Thread(target=handle_client, args=(client_sock,), daemon=True)
+            t.start()
+        except socket.timeout:
+            continue
+        except Exception as e:
+            if not stop_event.is_set():
+                log.warning(f"[Sandbox Port Forward] Accept error on port {host_port}: {e}")
+            break
+
+    with contextlib.suppress(Exception):
+        server_sock.close()
+    log.info(f"[Sandbox Port Forward] Stopped forwarding on host port {host_port}")
+
+
+def expose_workspace_port(
+    workspace_id: str,
+    container_port: int,
+    host_port: int | None = None,
+) -> dict[str, Any]:
+    """Expose a container port running inside a sandbox workspace to the host IP."""
+    client = _get_client()
+    cname = _container_name(workspace_id)
+    net_name = _network_name(workspace_id)
+
+    container_ip = None
+    if client:
+        try:
+            c = client.containers.get(cname)
+            networks = c.attrs.get("NetworkSettings", {}).get("Networks", {})
+            if net_name in networks:
+                container_ip = networks[net_name].get("IPAddress")
+            if not container_ip:
+                for n_info in networks.values():
+                    if n_info.get("IPAddress"):
+                        container_ip = n_info.get("IPAddress")
+                        break
+        except Exception as e:
+            log.warning(f"[Sandbox Port Forward] Could not inspect IP for {workspace_id}: {e}")
+
+    if not container_ip:
+        container_ip = "127.0.0.1"
+
+    with _PORT_FORWARD_LOCK:
+        if not host_port:
+            host_port = _find_free_host_port(9000)
+
+        key = (workspace_id, host_port)
+        if key in _ACTIVE_PORT_FORWARDS:
+            _, old_evt, _, _ = _ACTIVE_PORT_FORWARDS[key]
+            old_evt.set()
+            del _ACTIVE_PORT_FORWARDS[key]
+
+        stop_evt = threading.Event()
+        thread = threading.Thread(
+            target=_run_tcp_proxy,
+            args=(host_port, container_ip, container_port, stop_evt),
+            daemon=True,
+        )
+        thread.start()
+        _ACTIVE_PORT_FORWARDS[key] = (thread, stop_evt, container_port, container_ip)
+
+    return {
+        "workspace_id": workspace_id,
+        "container_port": container_port,
+        "container_ip": container_ip,
+        "host_port": host_port,
+        "status": "active",
+        "url": f"http://192.168.2.205:{host_port}",
+    }
+
+
+def unexpose_workspace_port(workspace_id: str, host_port: int) -> bool:
+    with _PORT_FORWARD_LOCK:
+        key = (workspace_id, host_port)
+        if key in _ACTIVE_PORT_FORWARDS:
+            _, stop_evt, _, _ = _ACTIVE_PORT_FORWARDS[key]
+            stop_evt.set()
+            del _ACTIVE_PORT_FORWARDS[key]
+            return True
+    return False
+
+
+def list_workspace_ports(workspace_id: str) -> list[dict[str, Any]]:
+    result = []
+    with _PORT_FORWARD_LOCK:
+        for (ws_id, h_port), (_, _, c_port, c_ip) in _ACTIVE_PORT_FORWARDS.items():
+            if ws_id == workspace_id:
+                result.append({
+                    "workspace_id": ws_id,
+                    "container_port": c_port,
+                    "container_ip": c_ip,
+                    "host_port": h_port,
+                    "url": f"http://192.168.2.205:{h_port}",
+                })
+    return result
