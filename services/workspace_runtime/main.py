@@ -2913,8 +2913,16 @@ async def websocket_terminal(
 
     # ---- Create PTY exec ----
     try:
+        shell_cmd = ["/bin/bash"]
+        try:
+            test_exec = container.exec_create(cmd=["/bin/bash", "-c", "exit 0"])
+            container.exec_start(test_exec["Id"])
+        except Exception:
+            shell_cmd = ["/bin/sh"]
+
         exec_resp = container.exec_create(
-            cmd=["/bin/sh"],
+            cmd=shell_cmd,
+            environment={"TERM": "xterm-256color"},
             user=f"{SANDBOX_UID}:{SANDBOX_GID}",
             workdir=host_path,
             tty=True,
