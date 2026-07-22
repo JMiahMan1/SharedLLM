@@ -54,7 +54,7 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
         if (dims) {
           ws.send(JSON.stringify({ type: 'resize', width: dims.cols, height: dims.rows }));
         }
-      } catch (err) {
+      } catch {
         // ignore
       }
     };
@@ -65,13 +65,13 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
         if (msg.type === 'stdout') {
           term.write(msg.data);
         }
-      } catch (e) {
+      } catch {
         // In case of raw message
         term.write(event.data);
       }
     };
 
-    ws.onerror = (err) => {
+    ws.onerror = () => {
       term.writeln('\r\n\x1b[31mTerminal WebSocket error occurred.\x1b[0m');
     };
 
