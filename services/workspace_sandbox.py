@@ -21,6 +21,7 @@ import logging
 import os
 import re
 import time
+import threading
 from typing import Any, AsyncGenerator, Tuple
 
 # docker is a runtime-only dependency (used for sandbox container execution),
