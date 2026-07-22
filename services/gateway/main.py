@@ -8103,7 +8103,7 @@ async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token:
             pass
     finally:
         try:
-            await websocket.close()
+            await websocket.close(code=1011, reason="Terminal service unavailable")
         except Exception:
             pass
 
