@@ -152,10 +152,15 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     document.addEventListener('mouseup', onMouseUp);
   }, [terminalHeight]);
 
+  const terminalRedirectHandledRef = useRef(false);
+
   useEffect(() => {
-    if (activeView === 'terminal' && terminalPosition === 'bottom') {
-      setActiveView('explorer');
+    if (activeView === 'terminal' && terminalPosition === 'bottom' && !terminalRedirectHandledRef.current) {
+      terminalRedirectHandledRef.current = true;
       setTerminalOpen(true);
+      setActiveView('explorer');
+    } else if (activeView !== 'terminal') {
+      terminalRedirectHandledRef.current = false;
     }
   }, [activeView, terminalPosition]);
   const hasGit = useMemo(
