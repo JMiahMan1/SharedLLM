@@ -4350,6 +4350,16 @@ async def pytest_workspace_proxy(request: Request):
 async def write_sync_commit_workspace_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/workflow/write-sync-commit", request)
 
+@app.post("/api/workspaces/ports/expose")
+@app.post("/ports/expose")
+async def expose_workspace_port_proxy(request: Request):
+    return await _proxy_workspace_runtime_json("POST", "/ports/expose", request)
+
+@app.get("/api/workspaces/ports/{workspace_id}")
+@app.get("/ports/list/{workspace_id}")
+async def list_workspace_ports_proxy(workspace_id: str, request: Request):
+    return await _proxy_workspace_runtime_json("GET", f"/ports/list/{workspace_id}", request)
+
 @app.post("/api/storage/list")
 async def list_storage_files(request: Request, body: StorageListRequest):
     creds = await _resolve_identity_from_request(request)
@@ -4689,6 +4699,34 @@ async def pull_service_image(service_name: str, request: Request):
         resp = await client.post(
             f"{CONTROL_PLANE_URL}/api/containers/{service_name}/pull",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return await _proxy_json_response(resp)
+
+@app.get("/api/admin/services/{service_name}/pull/status")
+async def get_pull_status(service_name: str, request: Request):
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{CONTROL_PLANE_URL}/api/containers/{service_name}/pull/status",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return await _proxy_json_response(resp)
+
+@app.post("/api/admin/services/{service_name}/pull-and-restart")
+async def pull_and_restart_service(service_name: str, request: Request):
+    """Pull latest image and restart the container with it (phone-update flow)."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{CONTROL_PLANE_URL}/api/containers/{service_name}/pull-and-restart",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=120.0),
         )
         return await _proxy_json_response(resp)
 

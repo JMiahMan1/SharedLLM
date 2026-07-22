@@ -89,6 +89,11 @@ _TOOLS: tuple[_Tool, ...] = (
         ("workspace settings", "set repo url", "wire remote", "set remote"),
     ),
     _Tool(
+        "WorkspacePortExposeRequest",
+        "Expose a container port running inside the workspace sandbox to the host IP.",
+        ("expose port", "host port", "port expose", "container port", "map port", "forward port"),
+    ),
+    _Tool(
         "ImageGenerationRequest",
         "Generate an image from a text prompt via Stable Diffusion.",
         ("generate image", "image from prompt", "stable diffusion", "text to image",

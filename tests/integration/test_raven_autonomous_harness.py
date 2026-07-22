@@ -63,20 +63,40 @@ def _list_missions() -> list[dict]:
     return []
 
 
-def _recover_mission_id(prompt: str) -> int | None:
+def _get_max_mission_id() -> int:
+    missions = _list_missions()
+    ids = [m.get("id") for m in missions if isinstance(m.get("id"), int)]
+    return max(ids) if ids else 0
+
+
+def _recover_mission_id(prompt: str, min_id: int = 0) -> int | None:
     marker = prompt.strip()[:160]
     best: int | None = None
     for m in _list_missions():
-        proposed = (m.get("proposed_mission") or "").strip()
-        if proposed[:160] == marker:
-            mid = m.get("id")
-            if isinstance(mid, int) and (best is None or mid > best):
-                best = mid
+        mid = m.get("id")
+        if isinstance(mid, int) and mid > min_id:
+            proposed = (m.get("proposed_mission") or "").strip()
+            if proposed[:160] == marker:
+                if best is None or mid > best:
+                    best = mid
     return best
+
+
+def _purge_all_missions() -> None:
+    try:
+        with httpx.Client(headers=_chat_auth_headers(), timeout=30.0) as c:
+            missions = _list_missions()
+            for m in missions:
+                mid = m.get("id")
+                if mid:
+                    c.delete(f"{GATEWAY_URL}/api/raven/missions/{mid}")
+    except Exception:
+        pass
 
 
 def _submit_prompt(prompt: str) -> int:
     """Rule 2: Send ONLY prompt string in payload."""
+    min_id = _get_max_mission_id()
     body = {"query": prompt}
     last_err = None
     for _ in range(3):
@@ -93,7 +113,7 @@ def _submit_prompt(prompt: str) -> int:
         except Exception as e:
             last_err = f"{type(e).__name__}: {e}"
         time.sleep(3)
-    recovered = _recover_mission_id(prompt)
+    recovered = _recover_mission_id(prompt, min_id=min_id)
     assert recovered is not None, f"Mission submit failed ({last_err}) and none in queue"
     return int(recovered)
 
@@ -158,6 +178,7 @@ def _clone_and_check_file(repo: str, filename: str) -> str:
 def test_raven_path_a_genesis():
     ws_id = "raven-auto-genesis"
     repo_name = "raven-auto-genesis"
+    _purge_all_missions()
     _delete_workspace(ws_id)
 
     prompt = (
