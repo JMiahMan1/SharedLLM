@@ -28,11 +28,25 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(ref.current);
-    try {
-      fit.fit();
-    } catch {
-      /* layout not ready */
-    }
+
+    const fitTerminal = () => {
+      try {
+        fit.fit();
+        const dims = fit.proposeDimensions();
+        if (dims && wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'resize',
+            width: dims.cols,
+            height: dims.rows
+          }));
+        }
+      } catch {
+        /* layout not ready */
+      }
+    };
+
+    // Initial fit after DOM paint
+    requestAnimationFrame(() => fitTerminal());
     termRef.current = term;
 
     // Build the WebSocket connection URL
@@ -48,26 +62,22 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
 
     ws.onopen = () => {
       term.writeln('\x1b[32mInteractive terminal session established.\x1b[0m\r\n');
-      // Send initial resize to fit the dimensions
-      try {
-        const dims = fit.proposeDimensions();
-        if (dims) {
-          ws.send(JSON.stringify({ type: 'resize', width: dims.cols, height: dims.rows }));
-        }
-      } catch {
-        // ignore
-      }
+      fitTerminal();
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = async (event) => {
+      let data = event.data;
+      if (data instanceof Blob) {
+        data = await data.text();
+      }
       try {
-        const msg = JSON.parse(event.data);
+        const msg = JSON.parse(data);
         if (msg.type === 'stdout') {
           term.write(msg.data);
         }
       } catch {
-        // In case of raw message
-        term.write(event.data);
+        // Raw text message
+        term.write(data);
       }
     };
 
@@ -85,21 +95,7 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
       }
     });
 
-    const onResize = () => {
-      try {
-        fit.fit();
-        const dims = fit.proposeDimensions();
-        if (dims && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'resize',
-            width: dims.cols,
-            height: dims.rows
-          }));
-        }
-      } catch {
-        /* ignore */
-      }
-    };
+    const onResize = () => fitTerminal();
 
     window.addEventListener('resize', onResize);
     const ro = new ResizeObserver(onResize);
@@ -108,7 +104,9 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     return () => {
       window.removeEventListener('resize', onResize);
       ro.disconnect();
-      ws.close();
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
       term.dispose();
     };
   }, [workspace.id]);
