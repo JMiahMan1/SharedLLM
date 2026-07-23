@@ -8058,7 +8058,7 @@ async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token:
 
     import websockets
     try:
-        async with websockets.connect(target_url) as ws_run:
+        async with websockets.connect(target_url, open_timeout=10, close_timeout=5) as ws_run:
             log.info("[workspaces-terminal] Connection to workspace runtime established")
 
             async def forward_client_to_run():
@@ -8096,14 +8096,13 @@ async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token:
                 forward_run_to_client(),
             )
     except Exception as e:
-        log.error(f"[workspaces-terminal] Failed to connect to workspace runtime: {e}")
+        log.error(f"[workspaces-terminal] Failed to connect to workspace runtime: {e}", exc_info=True)
         try:
             await websocket.send_text(json.dumps({"type": "stdout", "data": f"\r\n\x1b[31mFailed to connect to workspace runtime terminal: {e}\x1b[0m\r\n"}))
         except Exception:
             pass
-    finally:
         try:
-            await websocket.close(code=1011, reason="Terminal service unavailable")
+            await websocket.close(code=1011, reason=f"Terminal service unavailable: {str(e)[:100]}")
         except Exception:
             pass
 
