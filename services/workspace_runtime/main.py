@@ -2903,7 +2903,7 @@ async def websocket_terminal(
     # Ensure the workspace container exists (create if needed)
     try:
         from services.workspace_sandbox import ensure_workspace_container
-        ensure_workspace_container(workspace_id, docker_client)
+        ensure_workspace_container(workspace_id, host_path)
     except Exception as e:
         log.error(f"[terminal] Failed to ensure workspace container: {e}")
         await websocket.close(code=1011, reason="Failed to create workspace container")
