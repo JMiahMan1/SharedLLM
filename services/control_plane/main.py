@@ -433,6 +433,31 @@ def _verify_sharedllm_container(container) -> bool:
     )
 
 
+def _infer_ghcr_image_ref(service_name: str) -> str | None:
+    """
+    Construct the GHCR image reference for a sharedllm service.
+
+    Images are published as ghcr.io/{GHCR_NAMESPACE}/sharedllm-{service}:latest
+    where GHCR_NAMESPACE defaults to 'jmiahman1' (matching the CI workflow).
+    Returns None if the service name doesn't look like a sharedllm service.
+    """
+    # Strip common prefixes/suffixes from the service name
+    clean_name = service_name
+    if clean_name.startswith("sharedllm_"):
+        clean_name = clean_name[len("sharedllm_"):]
+    if clean_name.endswith("_1"):
+        clean_name = clean_name[:-2]
+
+    # Only infer for known sharedllm services
+    known_services = {"gateway", "identity", "rag", "storage", "logging",
+                      "workspace_runtime", "control_plane", "geo", "ui", "caddy"}
+    if clean_name not in known_services:
+        return None
+
+    namespace = os.getenv("GHCR_NAMESPACE", "jmiahman1")
+    return f"ghcr.io/{namespace}/sharedllm-{clean_name}:latest"
+
+
 def _recreate_container(container, new_image_id: str):
     """
     Recreates a container with the new image, preserving all config (port bindings,
@@ -820,17 +845,22 @@ def check_all_updates():
                     if compose_image:
                         image_tag = compose_image
                     else:
-                        log.warning(f"[updates] {container.name} has no image tag, skipping")
-                        updates.append({
-                            "service": svc_name,
-                            "image": "unknown",
-                            "current_digest": None,
-                            "remote_digest": None,
-                            "has_update": False,
-                            "check_error": "no_image_tag",
-                            "status": container.status,
-                        })
-                        continue
+                        # Try to construct from service name (GHCR pattern)
+                        inferred = _infer_ghcr_image_ref(svc_name)
+                        if inferred:
+                            image_tag = inferred
+                        else:
+                            log.warning(f"[updates] {container.name} has no image tag, skipping")
+                            updates.append({
+                                "service": svc_name,
+                                "image": "unknown",
+                                "current_digest": None,
+                                "remote_digest": None,
+                                "has_update": False,
+                                "check_error": "no_image_tag",
+                                "status": container.status,
+                            })
+                            continue
 
                 # Local digest (from what was pulled when the container was last started)
                 current_digest = _get_local_digest(container.image)
@@ -920,12 +950,17 @@ def pull_image_update(service_name: str):
             if compose_image:
                 image_tag = compose_image
             else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Container has no image tag to pull. "
-                           "Rebuild the image with a tag (e.g. ghcr.io/owner/repo:latest) "
-                           "and recreate the container."
-                )
+                # Try to construct from service name (GHCR pattern)
+                inferred = _infer_ghcr_image_ref(service_name)
+                if inferred:
+                    image_tag = inferred
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Container has no image tag to pull. "
+                               "Rebuild the image with a tag (e.g. ghcr.io/owner/repo:latest) "
+                               "and recreate the container."
+                    )
 
         # If a pull is already running, return its current status
         with _pull_lock:
@@ -1004,12 +1039,17 @@ def pull_and_restart(service_name: str):
             if compose_image:
                 image_tag = compose_image
             else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Container has no image tag to pull. "
-                           "Rebuild the image with a tag (e.g. ghcr.io/owner/repo:latest) "
-                           "and recreate the container."
-                )
+                # Try to construct from service name (GHCR pattern)
+                inferred = _infer_ghcr_image_ref(service_name)
+                if inferred:
+                    image_tag = inferred
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Container has no image tag to pull. "
+                               "Rebuild the image with a tag (e.g. ghcr.io/owner/repo:latest) "
+                               "and recreate the container."
+                    )
 
         log.info(f"[pull-and-restart] Pulling latest image for {container.name}: {image_tag}")
         client.images.pull(image_tag)
