@@ -113,6 +113,96 @@ except Exception as e:
     client = None
 
 
+# ─── Background Pull Tracking ──────────────────────────────────────────────────
+# Tracks non-blocking image pulls so the UI can poll progress without
+# holding an HTTP connection open. Keyed by compose service name.
+_pull_status: dict[str, dict] = {}
+_pull_lock = threading.Lock()
+
+
+def _pull_image_background(service_name: str, image_tag: str, current_image_id: str):
+    """Pull an image in a background thread, recording status for polling."""
+    with _pull_lock:
+        _pull_status[service_name] = {
+            "status": "pulling",
+            "progress": "Starting pull...",
+            "image": image_tag,
+            "current_image_id": current_image_id,
+            "started_at": time.time(),
+            "completed_at": None,
+            "new_image_id": None,
+            "error": None,
+        }
+
+    try:
+        log.info(f"[pull] Background pull started for {service_name}: {image_tag}")
+        # Stream pull output to capture layer progress
+        for line in client.api.pull(image_tag, stream=True, decode=True):
+            status = line.get("status", "")
+            progress = line.get("progress", "")
+            if progress:
+                display = f"{status}: {progress}"
+            elif status:
+                display = status
+            else:
+                display = str(line)
+            with _pull_lock:
+                _pull_status[service_name]["progress"] = display
+                _pull_status[service_name]["last_update"] = time.time()
+
+        new_image_id = client.images.get(image_tag).id
+        updated = new_image_id != current_image_id
+        with _pull_lock:
+            _pull_status[service_name]["status"] = "completed"
+            _pull_status[service_name]["progress"] = "Pull completed"
+            _pull_status[service_name]["completed_at"] = time.time()
+            _pull_status[service_name]["new_image_id"] = new_image_id
+            _pull_status[service_name]["updated"] = updated
+        log.info(f"[pull] Background pull completed for {service_name}: updated={updated}")
+    except Exception as e:
+        log.error(f"[pull] Background pull failed for {service_name}: {e}")
+        with _pull_lock:
+            _pull_status[service_name]["status"] = "failed"
+            _pull_status[service_name]["progress"] = str(e)
+            _pull_status[service_name]["completed_at"] = time.time()
+            _pull_status[service_name]["error"] = str(e)
+
+
+def _fix_volume_permissions(container) -> list[str]:
+    """Fix volume permissions to avoid permission denied errors on recreate.
+
+    Mirrors the deploy.sh volume permission guard: ensures named volumes
+    are owned by the current process UID/GID so the recreated container
+    (running as PUID:PGID) can read/write its data.
+    """
+    import os
+
+    puid = os.getuid()
+    pgid = os.getgid()
+    fixed = []
+    try:
+        mounts = container.attrs.get("Mounts", [])
+        for mount in mounts:
+            if mount.get("Type") == "volume":
+                vol_name = mount.get("Name", "")
+                if not vol_name:
+                    continue
+                try:
+                    log.info(f"[permissions] Fixing volume {vol_name} -> {puid}:{pgid}")
+                    client.containers.run(
+                        "busybox",
+                        command=f"sh -c 'chown -R {puid}:{pgid} /data && chmod -R 775 /data'",
+                        volumes={vol_name: {"bind": "/data", "mode": "rw"}},
+                        remove=True,
+                    )
+                    fixed.append(vol_name)
+                except Exception as ve:
+                    log.warning(f"[permissions] Failed to fix volume {vol_name}: {ve}")
+    except Exception as e:
+        log.warning(f"[permissions] Error checking volumes for {container.name}: {e}")
+    return fixed
+
+
 # ─── Auth Dependency ───────────────────────────────────────────────────────────
 
 def verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Internal-Secret")):
@@ -421,6 +511,11 @@ def _recreate_container(container, new_image_id: str):
             except Exception as ne:
                 log.warning(f"[recreate] Network connect warning for {net_name}: {ne}")
 
+        # 5b. Fix volume permissions before starting (mirrors deploy.sh guard)
+        fixed_vols = _fix_volume_permissions(container)
+        if fixed_vols:
+            log.info(f"[recreate] Fixed permissions for volumes: {fixed_vols}")
+
         # 6. Start the new container
         log.info(f"[recreate] Starting new container {new_container.name}...")
         new_container.start()
@@ -534,8 +629,10 @@ def check_all_updates():
     remote registry manifest digest fetched via the OCI Distribution HTTP API.
     This never pulls an image — it only does a HEAD/GET request to the registry.
 
-    For GHCR images, authentication uses the GHCR_TOKEN environment variable
-    (a GitHub PAT with packages:read scope — the same token used by CI to push).
+    For GHCR images, authentication uses (in order):
+    1. github_token for user ID 1 from the Identity service
+    2. GHCR_TOKEN environment variable
+    3. GITHUB_TOKEN environment variable
     """
     import json as _json
     import urllib.request
@@ -585,8 +682,8 @@ def check_all_updates():
     remote_available = False
     if not ghcr_token:
         log.warning(
-            "[updates] No GHCR/GitHub token available — skipping remote digest "
-            "checks (set GHCR_TOKEN to enable update detection)."
+                 "[updates] No GHCR/GitHub token available — skipping remote digest "
+                 "checks (set GHCR_TOKEN or GITHUB_TOKEN in .env to enable update detection)."
         )
         remote_error = "ghcr_auth_unavailable"
     else:
@@ -601,9 +698,10 @@ def check_all_updates():
                 with urllib.request.urlopen(req, timeout=8) as resp:
                     # 200 = authenticated and usable; 401/403 = unusable token.
                     return resp.status == 200
-            except urllib.error.HTTPError as e:
-                # 401/403 = token rejected -> skip; anything else is inconclusive.
-                return e.code in (200,)
+            except urllib.error.HTTPError:
+                # 401/403 = token rejected -> skip. Any other HTTP error is
+                # inconclusive but treated as unusable to avoid slow timeouts.
+                return False
             except Exception:
                 # Registry unreachable (timeout/DNS/TLS): cannot verify digests.
                 return False
@@ -717,17 +815,22 @@ def check_all_updates():
                 image_tags = container.image.tags if container.image else []
                 image_tag = image_tags[0] if image_tags else None
                 if not image_tag:
-                    log.warning(f"[updates] {container.name} has no image tag, skipping")
-                    updates.append({
-                        "service": svc_name,
-                        "image": "unknown",
-                        "current_digest": None,
-                        "remote_digest": None,
-                        "has_update": False,
-                        "check_error": "no_image_tag",
-                        "status": container.status,
-                    })
-                    continue
+                    # Try to infer from compose image label
+                    compose_image = container.labels.get("com.docker.compose.image")
+                    if compose_image:
+                        image_tag = compose_image
+                    else:
+                        log.warning(f"[updates] {container.name} has no image tag, skipping")
+                        updates.append({
+                            "service": svc_name,
+                            "image": "unknown",
+                            "current_digest": None,
+                            "remote_digest": None,
+                            "has_update": False,
+                            "check_error": "no_image_tag",
+                            "status": container.status,
+                        })
+                        continue
 
                 # Local digest (from what was pulled when the container was last started)
                 current_digest = _get_local_digest(container.image)
@@ -789,7 +892,11 @@ def check_all_updates():
 
 @app.post("/api/containers/{service_name}/pull", dependencies=[Depends(verify_internal_secret)])
 def pull_image_update(service_name: str):
-    """Pull latest image for a service to check for updates."""
+    """Start a non-blocking pull of the latest image for a service.
+
+    Returns immediately with status ``pulling``. Poll
+    ``GET /api/containers/{service_name}/pull/status`` for progress.
+    """
     if not client:
         raise HTTPException(status_code=500, detail="Docker client not initialized")
 
@@ -808,23 +915,130 @@ def pull_image_update(service_name: str):
         image_tags = container.image.tags if container.image else []
         image_tag = image_tags[0] if image_tags else None
         if not image_tag:
-            raise HTTPException(status_code=400, detail="Container has no image tag to pull")
+            # Try to infer from container labels (compose image label)
+            compose_image = container.labels.get("com.docker.compose.image")
+            if compose_image:
+                image_tag = compose_image
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Container has no image tag to pull. "
+                           "Rebuild the image with a tag (e.g. ghcr.io/owner/repo:latest) "
+                           "and recreate the container."
+                )
 
-        # Pull the latest version of the image
-        log.info(f"Pulling latest image for {container.name}: {image_tag}")
-        client.images.pull(image_tag)
+        # If a pull is already running, return its current status
+        with _pull_lock:
+            existing = _pull_status.get(service_name)
+            if existing and existing.get("status") == "pulling":
+                return {
+                    "service": service_name,
+                    "image": image_tag,
+                    "current_image_id": current_image_id,
+                    "status": "pulling",
+                    "message": "Pull already in progress",
+                    "pull_status": existing,
+                }
 
-        # Check if image ID changed
-        new_image_id = client.images.get(image_tag).id
-        updated = new_image_id != current_image_id
+        # Start the pull in a daemon thread so the HTTP request returns immediately
+        thread = threading.Thread(
+            target=_pull_image_background,
+            args=(service_name, image_tag, current_image_id),
+            daemon=True,
+        )
+        thread.start()
 
         return {
             "service": service_name,
             "image": image_tag,
             "current_image_id": current_image_id,
-            "latest_image_id": new_image_id,
-            "updated": updated,
-            "message": "Image is up to date" if not updated else "New version pulled successfully"
+            "status": "pulling",
+            "message": "Pull started in background. Poll pull/status for progress.",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/containers/{service_name}/pull/status", dependencies=[Depends(verify_internal_secret)])
+def get_pull_status(service_name: str):
+    """Get the status of a background image pull for a service."""
+    with _pull_lock:
+        status = _pull_status.get(service_name)
+    if not status:
+        return {
+            "service": service_name,
+            "status": "idle",
+            "message": "No pull in progress. Call POST /api/containers/{service_name}/pull to start one.",
+        }
+    return {"service": service_name, **status}
+
+
+@app.post("/api/containers/{service_name}/pull-and-restart", dependencies=[Depends(verify_internal_secret)])
+def pull_and_restart(service_name: str):
+    """Pull the latest image and immediately restart the container with it.
+
+    This is the 'phone update' flow: pull the new image (blocking for this
+    combined operation), fix volume permissions, then recreate the container
+    with the new image.
+    """
+    if not client:
+        raise HTTPException(status_code=500, detail="Docker client not initialized")
+
+    container = _resolve_container(service_name)
+    if not container:
+        raise HTTPException(status_code=404, detail=f"Container for service '{service_name}' not found")
+
+    if not _verify_sharedllm_container(container):
+        raise HTTPException(status_code=400, detail=f"Container '{container.name}' is not part of the sharedllm stack")
+
+    try:
+        current_image_id = container.image.id
+        if not current_image_id:
+            raise HTTPException(status_code=500, detail="Cannot determine current image ID")
+
+        image_tags = container.image.tags if container.image else []
+        image_tag = image_tags[0] if image_tags else None
+        if not image_tag:
+            # Try to infer from container labels (compose image label)
+            compose_image = container.labels.get("com.docker.compose.image")
+            if compose_image:
+                image_tag = compose_image
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Container has no image tag to pull. "
+                           "Rebuild the image with a tag (e.g. ghcr.io/owner/repo:latest) "
+                           "and recreate the container."
+                )
+
+        log.info(f"[pull-and-restart] Pulling latest image for {container.name}: {image_tag}")
+        client.images.pull(image_tag)
+
+        new_image_id = client.images.get(image_tag).id
+        if new_image_id == current_image_id:
+            return {
+                "service": service_name,
+                "status": "SUCCESS",
+                "message": "Image is up to date, no restart needed",
+                "updated": False,
+                "current_image_id": current_image_id,
+                "new_image_id": new_image_id,
+            }
+
+        # Fix volume permissions before recreating (mirrors deploy.sh guard)
+        fixed_vols = _fix_volume_permissions(container)
+        log.info(f"[pull-and-restart] Fixed permissions for volumes: {fixed_vols}")
+
+        _recreate_container(container, new_image_id)
+
+        return {
+            "service": service_name,
+            "status": "SUCCESS",
+            "message": f"Container {container.name} updated and restarted with new image",
+            "updated": True,
+            "current_image_id": current_image_id,
+            "new_image_id": new_image_id,
+            "volumes_fixed": fixed_vols,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

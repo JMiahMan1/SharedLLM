@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -39,6 +39,7 @@ import type {
   DiscoveredUser,
   GlobalSetting,
   LogEntry,
+  PullStatus,
   UserProfile,
   RagStats,
 } from '../services/api';
@@ -175,6 +176,7 @@ const Admin = () => {
   const [announceTargets, setAnnounceTargets] = useState('');
   const [intercomSessionTarget, setIntercomSessionTarget] = useState('');
   const [intercomSessionType, setIntercomSessionType] = useState<'twoway' | 'broadcast' | 'announcement'>('twoway');
+  const [activePullService, setActivePullService] = useState<string | null>(null);
 
   const { data: users = [] } = useQuery<UserProfile[]>({
     queryKey: ['users'],
@@ -229,16 +231,64 @@ const Admin = () => {
     refetchOnWindowFocus: true,
   });
 
+  const { data: pullStatusData } = useQuery<PullStatus>({
+    queryKey: ['pull-status', activePullService],
+    queryFn: () => (activePullService ? api.getPullStatus(activePullService) : Promise.resolve({ status: 'idle' } as PullStatus)),
+    enabled: !!activePullService,
+    refetchInterval: 2000,
+    refetchIntervalInBackground: true,
+    staleTime: 0,
+  });
+
+  useEffect(() => {
+    if (pullStatusData && activePullService) {
+      if (pullStatusData.status === 'completed' || pullStatusData.status === 'failed') {
+        const wasActive = activePullService;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing active pull is required to stop polling
+        setActivePullService(null);
+        queryClient.invalidateQueries({ queryKey: ['service-updates'] });
+        queryClient.invalidateQueries({ queryKey: ['system-health'] });
+        if (pullStatusData.status === 'completed') {
+          if (pullStatusData.updated) {
+            toast.success(`${wasActive}: Image updated! Restart to apply.`);
+          } else {
+            toast.success(`${wasActive}: Image is up to date.`);
+          }
+        } else {
+          toast.error(`${wasActive}: Pull failed — ${pullStatusData.error || pullStatusData.progress}`);
+        }
+      }
+    }
+  }, [pullStatusData, activePullService, queryClient]);
+
   const pullImageMutation = useMutation({
     mutationFn: (serviceName: string) => api.pullServiceImage(serviceName),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['system-health'] });
       queryClient.invalidateQueries({ queryKey: ['service-updates'] });
-      toast.success(data.message || 'Image pull completed');
+      if (data.status === 'pulling') {
+        setActivePullService(variables);
+        toast.success('Pull started in background');
+      } else {
+        toast.success(data.message || 'Image pull completed');
+      }
     },
     onError: (error: unknown) => {
       const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       toast.error(detail || 'Image pull failed');
+    },
+  });
+
+  const pullAndRestartMutation = useMutation({
+    mutationFn: (serviceName: string) => api.pullAndRestart(serviceName),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['system-health'] });
+      queryClient.invalidateQueries({ queryKey: ['service-updates'] });
+      toast.success(data.message);
+    },
+    onError: (error: unknown) => {
+      const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      toast.error(detail || 'Pull and restart failed');
     },
   });
 
@@ -1548,92 +1598,131 @@ const Admin = () => {
                 </div>
 
                 <div className="space-y-3">
-                  {systemHealth.services.map((service) => {
-                  const updateInfo = updatesData?.services.find(s => s.service === service.name);
-                  const hasUpdate = updateInfo?.has_update;
-                  const checkError = updateInfo?.check_error;
+                   {systemHealth.services.map((service) => {
+                   const updateInfo = updatesData?.services.find(s => s.service === service.name);
+                   const hasUpdate = updateInfo?.has_update;
+                   const checkError = updateInfo?.check_error;
+                   const isPulling = activePullService === service.name;
+                   const pullStatus = isPulling ? pullStatusData : null;
 
-                  return (
-                    <div key={service.name} className={`glass-card p-4 ${hasUpdate ? 'border-orange-500/30' : ''}`}>
-                      <div className="flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <div className={`rounded-full p-2 ${
-                            service.status === 'running' ? 'bg-emerald-500/10' :
-                            service.health_status === 'unhealthy' ? 'bg-red-500/10' :
-                            'bg-slate-500/10'
-                          }`}>
-                            {service.status === 'running' ? (
-                              <Power size={16} className="text-emerald-400" />
-                            ) : service.health_status === 'unhealthy' ? (
-                              <ShieldAlert size={16} className="text-red-400" />
-                            ) : (
-                              <PowerOff size={16} className="text-slate-400" />
-                            )}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <p className="font-semibold text-white capitalize">{service.name.replace(/_/g, ' ')}</p>
-                              {hasUpdate && (
-                                <span className="flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-orange-400">
-                                  <ArrowUpCircle size={10} /> Update Available
-                                </span>
-                              )}
-                              {!hasUpdate && checkError && checkError !== 'no_image_tag' && (
-                                <span
-                                  className="flex items-center gap-1 rounded-full bg-slate-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-500"
-                                  title={`Update check failed: ${checkError}. Set GHCR_TOKEN in .env to enable registry checks.`}
-                                >
-                                  Check Failed
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[10px] font-mono text-slate-500">{service.image}</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${
-                            service.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' :
-                            service.health_status === 'unhealthy' ? 'bg-red-500/10 text-red-400' :
-                            'bg-slate-500/10 text-slate-400'
-                          }`}>
-                            {service.status}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between gap-4 border-t border-white/5 pt-3 text-xs text-slate-500">
-                        <div className="flex gap-4">
-                          <span>Uptime: {service.uptime || 'N/A'}</span>
-                          {(service.restart_count ?? 0) > 0 && (
-                            <span>Restarts: {service.restart_count ?? 0}</span>
-                          )}
-                          {service.started_at && (
-                            <span>Started: {new Date(service.started_at).toLocaleString()}</span>
-                          )}
-                        </div>
-                        <div className="flex gap-1 shrink-0">
-                          {service.status === 'running' && (
-                            <>
-                              <button
-                                onClick={() => restartServiceMutation.mutate(service.name)}
-                                disabled={restartServiceMutation.isPending}
-                                className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest"
-                              >
-                                <RefreshCw size={12} /> Restart
-                              </button>
-                              <button
-                                onClick={() => pullImageMutation.mutate(service.name)}
-                                disabled={pullImageMutation.isPending || pullImageMutation.isPaused}
-                                className={`glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest ${hasUpdate ? 'border-orange-500/50 text-orange-400' : ''}`}
-                              >
-                                <Cloud size={12} /> {hasUpdate ? 'Update' : 'Pull'}
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                   return (
+                     <div key={service.name} className={`glass-card p-4 ${hasUpdate ? 'border-orange-500/30' : ''}`}>
+                       <div className="flex items-center justify-between gap-4">
+                         <div className="flex items-center gap-3">
+                           <div className={`rounded-full p-2 ${
+                             service.status === 'running' ? 'bg-emerald-500/10' :
+                             service.health_status === 'unhealthy' ? 'bg-red-500/10' :
+                             'bg-slate-500/10'
+                           }`}>
+                             {service.status === 'running' ? (
+                               <Power size={16} className="text-emerald-400" />
+                             ) : service.health_status === 'unhealthy' ? (
+                               <ShieldAlert size={16} className="text-red-400" />
+                             ) : (
+                               <PowerOff size={16} className="text-slate-400" />
+                             )}
+                           </div>
+                           <div>
+                             <div className="flex items-center gap-2">
+                               <p className="font-semibold text-white capitalize">{service.name.replace(/_/g, ' ')}</p>
+                               {hasUpdate && !isPulling && (
+                                 <span className="flex items-center gap-1 rounded-full bg-orange-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-orange-400">
+                                   <ArrowUpCircle size={10} /> Update Available
+                                 </span>
+                               )}
+                               {isPulling && (
+                                 <span className="flex items-center gap-1 rounded-full bg-cyan-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-cyan-400">
+                                   <RefreshCw size={10} className="animate-spin" /> Pulling
+                                 </span>
+                               )}
+                               {!hasUpdate && !isPulling && checkError && checkError !== 'no_image_tag' && (
+                                 <span
+                                   className="flex items-center gap-1 rounded-full bg-slate-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-500"
+                                   title={`Update check failed: ${checkError}. Set GHCR_TOKEN or GITHUB_TOKEN in .env to enable registry checks.`}
+                                 >
+                                   Check Failed
+                                 </span>
+                               )}
+                               {!hasUpdate && !isPulling && checkError === 'no_image_tag' && (
+                                 <span
+                                   className="flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-amber-400"
+                                   title="Container image has no tag. Pull is unavailable — rebuild the image with a tag and recreate the container."
+                                 >
+                                   No Image Tag
+                                 </span>
+                               )}
+                             </div>
+                             <p className="text-[10px] font-mono text-slate-500">{service.image}</p>
+                             {isPulling && pullStatus?.progress && (
+                               <p className="mt-1 max-w-[300px] truncate text-[10px] font-mono text-slate-400">
+                                 {pullStatus.progress}
+                               </p>
+                             )}
+                           </div>
+                         </div>
+                         <div className="flex items-center gap-2">
+                           <span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase tracking-widest ${
+                             service.status === 'running' ? 'bg-emerald-500/10 text-emerald-400' :
+                             service.health_status === 'unhealthy' ? 'bg-red-500/10 text-red-400' :
+                             'bg-slate-500/10 text-slate-400'
+                           }`}>
+                             {service.status}
+                           </span>
+                         </div>
+                       </div>
+                       <div className="mt-3 flex items-center justify-between gap-4 border-t border-white/5 pt-3 text-xs text-slate-500">
+                         <div className="flex gap-4">
+                           <span>Uptime: {service.uptime || 'N/A'}</span>
+                           {(service.restart_count ?? 0) > 0 && (
+                             <span>Restarts: {service.restart_count ?? 0}</span>
+                           )}
+                           {service.started_at && (
+                             <span>Started: {new Date(service.started_at).toLocaleString()}</span>
+                           )}
+                         </div>
+                         <div className="flex gap-1 shrink-0">
+                           {service.status === 'running' && (
+                             <>
+                               <button
+                                 onClick={() => restartServiceMutation.mutate(service.name)}
+                                 disabled={restartServiceMutation.isPending}
+                                 className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest"
+                               >
+                                 <RefreshCw size={12} /> Restart
+                               </button>
+                               {isPulling ? (
+                                 <button
+                                   disabled
+                                   className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest text-cyan-400"
+                                 >
+                                   <RefreshCw size={12} className="animate-spin" /> Pulling...
+                                 </button>
+                               ) : (
+                                 <button
+                                   onClick={() => pullImageMutation.mutate(service.name)}
+                                   disabled={pullImageMutation.isPending || pullImageMutation.isPaused || checkError === 'no_image_tag'}
+                                   className={`glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest ${hasUpdate ? 'border-orange-500/50 text-orange-400' : ''} ${checkError === 'no_image_tag' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                   title={checkError === 'no_image_tag' ? 'Cannot pull: container image has no tag. Rebuild with a tag and recreate.' : undefined}
+                                 >
+                                   <Cloud size={12} /> {hasUpdate ? 'Update' : 'Pull'}
+                                 </button>
+                               )}
+                               {hasUpdate && !isPulling && (
+                                 <button
+                                   onClick={() => pullAndRestartMutation.mutate(service.name)}
+                                   disabled={pullAndRestartMutation.isPending}
+                                   className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest border-indigo-500/50 text-indigo-400"
+                                 >
+                                   <ArrowUpCircle size={12} /> Pull & Restart
+                                 </button>
+                               )}
+                             </>
+                           )}
+                         </div>
+                       </div>
+                     </div>
+                   );
+                 })}
                 </div>
               </>
             ) : (
