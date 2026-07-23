@@ -2900,6 +2900,15 @@ async def websocket_terminal(
         await websocket.close(code=1011, reason="Docker unavailable")
         return
 
+    # Ensure the workspace container exists (create if needed)
+    try:
+        from services.workspace_sandbox import ensure_workspace_container
+        ensure_workspace_container(workspace_id, docker_client)
+    except Exception as e:
+        log.error(f"[terminal] Failed to ensure workspace container: {e}")
+        await websocket.close(code=1011, reason="Failed to create workspace container")
+        return
+
     cname = f"wsbox-{re.sub(r'[^a-z0-9]+', '-', workspace_id.lower()).strip('-') or 'workspace'}"
 
     try:
