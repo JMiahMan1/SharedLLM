@@ -10,7 +10,7 @@ import tempfile
 import threading
 import time
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlparse
@@ -157,7 +157,7 @@ WORKSPACE_ROOT = _DEFAULT_WORKSPACE_ROOT
 
 # Cache the configured timezone (Config DB `timezone` setting) so per-workspace
 # serialization doesn't hit identity on every request. Refreshed hourly.
-_CONFIG_TZ_CACHE: dict[str, float] = {"tz": "UTC", "ts": 0.0}
+_CONFIG_TZ_CACHE: dict[str, Any] = {"tz": "UTC", "ts": 0.0}
 
 
 def _cached_config_tz() -> str:
@@ -175,11 +175,12 @@ def _created_at_in_config_tz(value: "datetime | None") -> "str | None":
         return None
     # SQLite TIMESTAMP columns return naive datetimes; treat them as UTC.
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
+        value = value.replace(tzinfo=UTC)
+    tz: timezone | ZoneInfo
     try:
         tz = ZoneInfo(_cached_config_tz())
     except Exception:
-        tz = timezone.utc
+        tz = UTC
     return value.astimezone(tz).isoformat()
 
 DEFAULT_PYTEST_TIMEOUT_SECONDS = WORKSPACE_RUNTIME_PYTEST_TIMEOUT_SECONDS
@@ -747,7 +748,7 @@ def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
         data = future.result(timeout=60.0)
     except aiohttp.ClientError as exc:
         raise HTTPException(status_code=503, detail=f"Identity service unreachable: {exc}") from exc
-    except Exception as exc:  # noqa: BLE001 - surface any resolution failure clearly
+    except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Identity resolution failed: {exc}") from exc
 
     if not isinstance(data, dict):
@@ -1868,7 +1869,7 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
         # Stamp creation time in UTC (unambiguous at rest). It is converted to
         # the configured Config DB timezone at serialization time so the
         # "Created" label renders in the operator's local time.
-        ws.created_at = datetime.now(timezone.utc)
+        ws.created_at = datetime.now(UTC)
         session.add(ws)
         session.commit()
         session.refresh(ws)
@@ -2379,6 +2380,7 @@ async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_inte
     # file/lint/pytest helpers are offloaded to a worker thread so the event
     # loop is never blocked.
     from services.workspace_runtime.git_ops import (
+        GitPushRequest,
         create_review_branch,
         current_branch_name,
         git_commit,
@@ -2813,7 +2815,7 @@ async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path
 # every git command runs inside the workspace's dedicated container. This import
 # is placed at the very bottom so that all shared helpers referenced by
 # git_ops.py already exist on this module when it is imported (avoids a cycle).
-from services.workspace_runtime.git_ops import git_router, git_push, GitPushRequest  # noqa: E402
+from services.workspace_runtime.git_ops import git_router  # noqa: E402
 
 app.include_router(git_router)
 
