@@ -308,9 +308,35 @@ export interface ImagePullResult {
   service: string;
   image: string;
   current_image_id: string;
-  latest_image_id: string;
-  updated: boolean;
+  latest_image_id?: string;
+  updated?: boolean;
+  status?: string;
   message: string;
+  pull_status?: PullStatus;
+}
+
+export interface PullStatus {
+  service: string;
+  status: 'idle' | 'pulling' | 'completed' | 'failed';
+  progress: string;
+  image?: string;
+  current_image_id?: string;
+  new_image_id?: string;
+  updated?: boolean;
+  started_at?: number;
+  completed_at?: number | null;
+  last_update?: number;
+  error?: string | null;
+}
+
+export interface PullAndRestartResult {
+  service: string;
+  status: string;
+  message: string;
+  updated: boolean;
+  current_image_id: string;
+  new_image_id: string;
+  volumes_fixed?: string[];
 }
 
 export interface ImageUpdateCheck {

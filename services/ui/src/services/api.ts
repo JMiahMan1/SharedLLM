@@ -29,6 +29,8 @@ import type {
   IntercomSessionData,
   IntercomConfigData,
   ImagePullResult,
+  PullStatus,
+  PullAndRestartResult,
   CheckUpdatesResponse,
   SearchResult,
   SystemHealthStatus,
@@ -96,6 +98,10 @@ export type {
   StorageEntry,
   TalkConversation,
   TalkMessage,
+  ImagePullResult,
+  PullStatus,
+  PullAndRestartResult,
+  CheckUpdatesResponse,
 } from '../types/api';
 
 declare module 'axios' {
@@ -1572,6 +1578,16 @@ export const api = {
 
   async pullServiceImage(serviceName: string): Promise<ImagePullResult> {
     const resp = await apiClient.post(`/api/admin/services/${serviceName}/pull`);
+    return resp.data;
+  },
+
+  async getPullStatus(serviceName: string): Promise<PullStatus> {
+    const resp = await apiClient.get(`/api/admin/services/${serviceName}/pull/status`);
+    return resp.data;
+  },
+
+  async pullAndRestart(serviceName: string): Promise<PullAndRestartResult> {
+    const resp = await apiClient.post(`/api/admin/services/${serviceName}/pull-and-restart`);
     return resp.data;
   },
 

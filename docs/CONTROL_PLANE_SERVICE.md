@@ -69,6 +69,7 @@ On failure: new container is torn down, backup is restored and started.
 Token resolution order:
 1. Fetches `github_token` for user ID 1 from Identity service (`POST /api/resolve`)
 2. Falls back to `GHCR_TOKEN` environment variable
+3. Falls back to `GITHUB_TOKEN` environment variable
 
 Uses `Docker-Content-Digest` header from registry HEAD response.
 
@@ -76,7 +77,9 @@ Uses `Docker-Content-Digest` header from registry HEAD response.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `POST` | `/api/containers/{service_name}/pull` | Internal Secret | Pull latest image for a service. Returns current vs. new image ID and whether an update was applied |
+| `POST` | `/api/containers/{service_name}/pull` | Internal Secret | Start a **non-blocking** pull of the latest image for a service. Returns immediately with `status: "pulling"`. Poll `GET /api/containers/{service_name}/pull/status` for progress. |
+| `GET` | `/api/containers/{service_name}/pull/status` | Internal Secret | Get the status of a background image pull (`idle` / `pulling` / `completed` / `failed`). |
+| `POST` | `/api/containers/{service_name}/pull-and-restart` | Internal Secret | Pull the latest image and immediately restart the container with it (phone-update flow). Fixes volume permissions before recreating. |
 
 ### Logs
 
@@ -112,6 +115,7 @@ Environment variables (from `docker-compose.yml`):
 | `FERNET_KEY` | Shared encryption key |
 | `DOCKER_HOST` | Docker socket path (default: `unix:///var/run/docker.sock`) |
 | `GHCR_TOKEN` | GitHub PAT with `packages:read` scope (for update checks) |
+| `GITHUB_TOKEN` | Fallback GitHub PAT (same as GHCR_TOKEN if GHCR_TOKEN unset) |
 | `IDENTITY_SVC_URL` | Identity service URL (for GHCR token resolution) |
 | `GIT_SHA`, `BUILD_DATE`, `SERVICE_NAME` | Build metadata (set via Docker build args) |
 
