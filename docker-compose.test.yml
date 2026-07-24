@@ -190,7 +190,7 @@ services:
       - OLLAMA_URL=http://ollama_mock:11434
       - GIT_WEBHOOK_SECRET=test-webhook-secret
       - TEST_MODE=true
-      - HOME=/home/sharedllm
+      - HOME=/home/raven
       - WORKSPACE_ROOT=/tmp/workspaces
     volumes:
       - ./test.env:/app/.env:ro
