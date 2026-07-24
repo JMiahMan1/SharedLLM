@@ -2968,7 +2968,7 @@ async def websocket_terminal(
             loop = asyncio.get_event_loop()
             while True:
                 try:
-                    data = await loop.run_in_executor(None, sock.recv, 4096)
+                    data = await loop.run_in_executor(None, sock.read, 4096)
                     if not data:
                         break
                     await send_to_client(data)
@@ -2997,7 +2997,7 @@ async def websocket_terminal(
                     if not is_ctrl:
                         # Raw input - send to exec stdin
                         try:
-                            sock.sendall(msg.encode())
+                            sock.write(msg.encode())
                         except Exception:
                             pass
             except Exception as e:
