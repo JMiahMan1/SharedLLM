@@ -427,7 +427,7 @@ services:
       - WORKSPACE_RUNTIME_ROOT=/workspaces
       - GIT_WEBHOOK_SECRET=${GIT_WEBHOOK_SECRET:-change-me-in-production}
       - TZ=America/Phoenix
-      - HOME=/home/sharedllm
+      - HOME=/home/raven
       # Host path that /workspaces maps to, so the sandbox can mount the real
       # workspace data (the Docker daemon resolves mount sources on the host).
       - WORKSPACE_HOST_PATH=${WORKSPACE_HOST_PATH:-/home/jeremiah/workspaces}

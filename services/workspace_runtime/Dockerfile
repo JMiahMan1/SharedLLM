@@ -8,7 +8,9 @@ ENV BUILD_DATE=${BUILD_DATE}
 ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
-RUN mkdir -p /home/sharedllm && chown 1000:1000 /home/sharedllm
+RUN groupadd -g 1000 raven || true \
+    && useradd -u 1000 -g 1000 -m -s /bin/bash raven || true \
+    && mkdir -p /home/raven && chown 1000:1000 /home/raven
 EXPOSE 8007
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
@@ -190,7 +192,7 @@ RUN set -eux; \
 # --- Git credential helper so NATIVE `git push` over HTTPS authenticates using
 #     the GITHUB_TOKEN/GIT_TOKEN injected into the sandbox at exec time. The
 #     helper reads the token from the environment, so no credential store is
-#     needed. Configured for the sandbox user's HOME (/home/sharedllm). ---
+#     needed. Configured for the sandbox user's HOME (/home/raven). ---
 RUN cat > /usr/local/bin/git-credential-github-token <<'EOF'
 #!/bin/sh
 if [ "$1" = "get" ]; then
@@ -201,10 +203,10 @@ if [ "$1" = "get" ]; then
 fi
 EOF
 RUN chmod +x /usr/local/bin/git-credential-github-token
-RUN git config --file /home/sharedllm/.gitconfig credential.helper /usr/local/bin/git-credential-github-token \
- && git config --file /home/sharedllm/.gitconfig --add safe.directory '*' \
- && git config --file /home/sharedllm/.gitconfig init.defaultBranch main \
- && chown 1000:1000 /home/sharedllm/.gitconfig
+RUN git config --file /home/raven/.gitconfig credential.helper /usr/local/bin/git-credential-github-token \
+ && git config --file /home/raven/.gitconfig --add safe.directory '*' \
+ && git config --file /home/raven/.gitconfig init.defaultBranch main \
+ && chown 1000:1000 /home/raven/.gitconfig
 
 # Copy service source LAST so the (source-independent) toolchain layers above
 # stay cached across code changes — only this layer rebuilds on each push.

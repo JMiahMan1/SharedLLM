@@ -641,7 +641,7 @@ async def lifespan(app: FastAPI):
     try:
         import subprocess
         subprocess.run(["git", "--version"], capture_output=True, check=True) # Basic check
-        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], check=True, env={**os.environ, "HOME": "/home/sharedllm"})
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "*"], check=True, env={**os.environ, "HOME": "/home/raven"})
         log.info("Added '*' to git safe.directory")
     except Exception as e:
         log.warning(f"Failed to set git safe.directory: {e}")
