@@ -120,9 +120,9 @@ services:
     # in /workspaces produce files owned by uid 1000 (not root). The IDE commits
     # via workspace_runtime (uid 1000), so a root-owned .git created by the
     # execution service would otherwise cause "Permission denied" on index.lock.
-    user: "${PUID:-1000}:${PGID:-1000}"
+    user: "${PUID}:${PGID}"
     group_add:
-      - "${DOCKER_GID:-999}"
+      - "${DOCKER_GID}"
     env_file:
       - .env
     environment:
@@ -243,7 +243,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_gateway
     restart: unless-stopped
-    user: "${PUID:-1000}:${PGID:-1000}"
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     depends_on:
@@ -324,11 +324,11 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_automation
     restart: unless-stopped
-    user: "${PUID:-1000}:${PGID:-1000}"
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     group_add:
-      - "${DOCKER_GID:-999}"
+      - "${DOCKER_GID}"
     security_opt:
       - label=disable
     environment:
@@ -404,11 +404,11 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
-    user: "${PUID:-1000}:${PGID:-1000}"
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     group_add:
-      - "${DOCKER_GID:-999}"
+      - "${DOCKER_GID}"
     security_opt:
       - label=disable
     environment:
@@ -522,11 +522,11 @@ services:
     hostname: control-plane.local
     container_name: sharedllm_control_plane
     restart: always
-    user: "${PUID:-1000}:${PGID:-1000}"
+    user: "${PUID}:${PGID}"
     env_file:
       - .env
     group_add:
-      - "${DOCKER_GID:-999}"
+      - "${DOCKER_GID}"
     security_opt:
       - label=disable
     privileged: true

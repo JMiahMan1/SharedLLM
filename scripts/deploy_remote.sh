@@ -98,8 +98,31 @@ if ssh $SSH_OPTS "$HOST" << EOF
     export PGID=\$(id -g)
     export DOCKER_GID=\$(getent group docker | cut -d: -f3)
     if [ -z "\$DOCKER_GID" ]; then
-        export DOCKER_GID=\$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 980)
+        export DOCKER_GID=\$(stat -c '%g' /var/run/docker.sock 2>/dev/null)
     fi
+    if [ -z "\$DOCKER_GID" ]; then
+        echo "[FAIL] Cannot determine Docker group GID. 'docker' group or socket missing?"
+        exit 1
+    fi
+    echo "[OK] Detected PUID=\$PUID PGID=\$PGID DOCKER_GID=\$DOCKER_GID"
+
+    # Write detected values into .env so docker-compose reads them
+    if grep -q '^PUID=' .env; then
+        sed -i "s/^PUID=.*/PUID=\$PUID/" .env
+    else
+        echo "PUID=\$PUID" >> .env
+    fi
+    if grep -q '^PGID=' .env; then
+        sed -i "s/^PGID=.*/PGID=\$PGID/" .env
+    else
+        echo "PGID=\$PGID" >> .env
+    fi
+    if grep -q '^DOCKER_GID=' .env; then
+        sed -i "s/^DOCKER_GID=.*/DOCKER_GID=\$DOCKER_GID/" .env
+    else
+        echo "DOCKER_GID=\$DOCKER_GID" >> .env
+    fi
+    echo "[OK] Updated .env with PUID=\$PUID PGID=\$PGID DOCKER_GID=\$DOCKER_GID"
 
     # Prune pycache using Docker to bypass root permission issues BEFORE git ops
     echo "Pruning __pycache__ via Docker..."
