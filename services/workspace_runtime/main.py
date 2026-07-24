@@ -2944,7 +2944,6 @@ async def websocket_terminal(
             stdin=True,
             stdout=True,
             stderr=True,
-            demux=False,
         )
         exec_id = exec_resp["Id"]
     except Exception as e:
