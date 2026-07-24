@@ -2925,13 +2925,17 @@ async def websocket_terminal(
     # ---- Create PTY exec ----
     try:
         shell_cmd = ["/bin/bash"]
+        log.debug(f"[terminal] Creating PTY exec for container {cname} at {host_path}")
         try:
-            test_exec = container.exec_create(cmd=["/bin/bash", "-c", "exit 0"])
-            container.exec_start(test_exec["Id"])
+            test_exec = docker_client.api.exec_create(
+                cname, cmd=["/bin/bash", "-c", "exit 0"]
+            )
+            docker_client.api.exec_start(test_exec["Id"])
         except Exception:
             shell_cmd = ["/bin/sh"]
 
-        exec_resp = container.exec_create(
+        exec_resp = docker_client.api.exec_create(
+            cname,
             cmd=shell_cmd,
             environment={"TERM": "xterm-256color"},
             user=f"{SANDBOX_UID}:{SANDBOX_GID}",
@@ -2951,7 +2955,7 @@ async def websocket_terminal(
     # ---- Start streaming ----
     sock = None
     try:
-        sock = container.exec_start(exec_id, tty=True, socket=True)
+        sock = docker_client.api.exec_start(exec_id, tty=True, socket=True)
 
         # Helper to send stdout to client
         async def send_to_client(data: bytes):
@@ -2986,7 +2990,7 @@ async def websocket_terminal(
                                 width = ctrl.get("width", 80)
                                 height = ctrl.get("height", 24)
                                 try:
-                                    container.exec_resize(exec_id, width=width, height=height)
+                                    docker_client.api.exec_resize(exec_id, width=width, height=height)
                                 except Exception:
                                     pass
                         except Exception:
@@ -3013,7 +3017,7 @@ async def websocket_terminal(
         except Exception:
             pass
         try:
-            container.exec_kill(exec_id, timeout=1)
+            docker_client.api.exec_kill(exec_id, signal=15)
         except Exception:
             pass
         await websocket.close()
