@@ -46,11 +46,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Determine base commit for path filtering
+        id: base
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "ref=${{ github.event.before }}" >> $GITHUB_OUTPUT
+          else
+            echo "ref=$(git rev-parse HEAD~1 2>/dev/null || git rev-list --max-parents=0 HEAD | head -1)" >> $GITHUB_OUTPUT
+          fi
+
       - name: Filter Paths
         uses: dorny/paths-filter@v3
         id: filter
         with:
-          base: ${{ github.event_name == 'push' && github.event.before || 'HEAD~1' }}
+          base: ${{ steps.base.outputs.ref }}
           filters: |
             base:
               - 'docker/Dockerfile.base'
