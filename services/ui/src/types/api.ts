@@ -245,6 +245,7 @@ export interface RavenConfig {
   system_default_tts_voice: string;
   system_default_tts_engine: string;
   cleanup_interval_seconds?: number;
+  raven_max_total_seconds?: number;
 }
 
 export interface MediaGroup {
