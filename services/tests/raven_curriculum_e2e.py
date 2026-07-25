@@ -14,12 +14,11 @@ from __future__ import annotations
 import base64
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 import requests
-import redis
 from dotenv import dotenv_values
 
 # ---------------------------------------------------------------------------
@@ -75,7 +74,7 @@ pytestmark = pytest.mark.integration
 # Diagnostics & Infrastructure Helpers
 # ---------------------------------------------------------------------------
 def _log(msg: str) -> None:
-    print(f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}Z] {msg}")
+    print(f"[{datetime.now(UTC).isoformat(timespec='seconds')}Z] {msg}")
 
 
 def _ssh(cmd: str) -> tuple[int, str]:

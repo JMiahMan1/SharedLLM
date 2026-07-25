@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from services.gateway.prose_tools import extract_action_prose  # noqa: E402
+from services.gateway.prose_tools import extract_action_prose
 
 
 def test_recovers_full_push_chain():

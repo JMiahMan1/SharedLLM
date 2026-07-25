@@ -22,7 +22,7 @@ from services.gateway.llm_providers import OllamaProvider
 
 def _ndjson(*contents: str, done_last: bool = True) -> list[str]:
     lines = []
-    for i, c in enumerate(contents):
+    for _i, c in enumerate(contents):
         obj = {"model": "test", "message": {"role": "assistant", "content": c}, "done": False}
         lines.append(json.dumps(obj))
     if done_last:

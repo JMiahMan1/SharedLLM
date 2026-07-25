@@ -76,10 +76,10 @@ def test_run_workspace_cmd_shapes_exec(fake_docker):
 
 
 def test_run_workspace_cmd_timeout(fake_docker):
-    container, _ = fake_docker
+    _container, _ = fake_docker
 
     async def go():
-        with patch("asyncio.to_thread", side_effect=asyncio.TimeoutError()):
+        with patch("asyncio.to_thread", side_effect=TimeoutError()):
             return await sb.run_workspace_cmd("ws", "/w", "sleep 10", shell=True, timeout=0.01)
 
     res = asyncio.run(go())

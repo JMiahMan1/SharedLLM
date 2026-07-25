@@ -1,4 +1,5 @@
 import os
+
 os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["WORKSPACE_DATABASE_URL"] = "sqlite:////tmp/test_ws_security.db"
 os.environ["FERNET_KEY"] = "g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14="
@@ -11,12 +12,13 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_workspace_path_traversal_blocked(monkeypatch):
-    from services.workspace_runtime.database import engine, init_db
-    from services.workspace_runtime.models import Workspace
-    from services.workspace_runtime.main import app
-    import services.workspace_runtime.main as wsrt
     from sqlmodel import Session
-    
+
+    import services.workspace_runtime.main as wsrt
+    from services.workspace_runtime.database import engine, init_db
+    from services.workspace_runtime.main import app
+    from services.workspace_runtime.models import Workspace
+
     init_db()
     with Session(engine) as session:
         existing = session.get(Workspace, "main")

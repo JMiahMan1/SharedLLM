@@ -444,10 +444,7 @@ async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
                 progress_data = await abs_client.get_book_progress(abs_url, abs_key, item.get("id", ""))
                 current_time = progress_data.get("currentTime", 0)
                 is_complete = progress_data.get("isComplete", False)
-                if duration and duration > 0:
-                    pct = min(100, int((current_time / duration) * 100))
-                else:
-                    pct = progress_data.get("progress", 0)
+                pct = min(100, int(current_time / duration * 100)) if duration and duration > 0 else progress_data.get("progress", 0)
             except Exception:
                 current_time = 0
                 is_complete = False

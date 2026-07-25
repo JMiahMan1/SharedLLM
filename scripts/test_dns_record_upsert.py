@@ -60,7 +60,7 @@ def main():
         print(f"(already present, skipping add) {TEST_IP}")
         added_values = original
     else:
-        added_values = original + [TEST_IP]
+        added_values = [*original, TEST_IP]
         s, d = req("PUT", f"/api/dns/{rid}", {
             "domain": rec["domain"], "record_type": rec["record_type"],
             "values": added_values, "ttl": rec.get("ttl", 300),

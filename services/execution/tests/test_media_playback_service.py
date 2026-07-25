@@ -5,6 +5,8 @@ import pytest
 
 os.environ["DEVICE_REGISTRY_PATH"] = ":memory:"
 
+import contextlib
+
 from services.execution.media_playback_service import MediaPlaybackService
 from services.execution.schemas import MediaPlayRequest, MediaStateSyncRequest, MediaStatusRequest, MediaTransportRequest, UserContext
 
@@ -29,10 +31,8 @@ mock_ha_states = [
 @pytest.mark.asyncio
 async def test_sync_local_and_status(mocker):
     mocker.patch("services.execution.ha_client.get_states", return_value=mock_ha_states)
-    try:
+    with contextlib.suppress(ModuleNotFoundError):
         mocker.patch("ha_client.get_states", return_value=mock_ha_states)
-    except ModuleNotFoundError:
-        pass
 
     # Sync initial local state
     sync_req = MediaStateSyncRequest(
@@ -71,10 +71,8 @@ async def test_sync_local_and_status(mocker):
 @pytest.mark.asyncio
 async def test_play_local_and_transport(mocker):
     mocker.patch("services.execution.ha_client.get_states", return_value=mock_ha_states)
-    try:
+    with contextlib.suppress(ModuleNotFoundError):
         mocker.patch("ha_client.get_states", return_value=mock_ha_states)
-    except ModuleNotFoundError:
-        pass
 
     # Play locally
     play_req = MediaPlayRequest(

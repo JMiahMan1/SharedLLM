@@ -5,10 +5,7 @@ URL = "http://ai.local:11435"
 def check(endpoint, method="GET", payload=None):
     print(f"\n--- Checking {method} {URL}{endpoint} ---")
     try:
-        if method == "GET":
-            r = requests.get(f"{URL}{endpoint}", timeout=5)
-        else:
-            r = requests.post(f"{URL}{endpoint}", json=payload or {}, timeout=5)
+        r = requests.get(f"{URL}{endpoint}", timeout=5) if method == "GET" else requests.post(f"{URL}{endpoint}", json=payload or {}, timeout=5)
 
         print(f"Status: {r.status_code}")
         print("Headers:")

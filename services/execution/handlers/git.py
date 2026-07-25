@@ -185,7 +185,7 @@ async def _resolve_workspace_path(
     required_capability: str | None = None
 ) -> str:
     """Resolve workspace path from workspace_runtime service and check capability.
-    
+
     Priority:
     1. Explicit workspace_id
     2. Workspace marked as is_default=True
@@ -296,7 +296,7 @@ async def _run_git(args: list[str], cwd: str = WORKSPACE_ROOT, env_override: dic
     Run a git command as a subprocess and return stdout/stderr/returncode.
     args — list of git sub-command + arguments (NOT including 'git' itself).
     """
-    cmd = ["git"] + args
+    cmd = ["git", *args]
 
     # Redact tokens from log output
     safe_cmd = []
@@ -565,7 +565,7 @@ async def handle_git(req: GitOperationRequest) -> GitExecutionResult:
     elif action == "add":
         # Support multi-path staging if path contains spaces or is a list (though schema says str)
         paths = shlex.split(path) if path else ["."]
-        r = await _run_git(["add"] + paths, cwd=workspace_path)
+        r = await _run_git(["add", *paths], cwd=workspace_path)
         if r["returncode"] != 0:
             return _fail("add", r)
         return _ok("add", {"added_paths": paths, **r})

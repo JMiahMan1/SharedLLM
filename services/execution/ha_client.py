@@ -37,10 +37,9 @@ def authorize_action(user_context: dict, domain: str, action: str) -> bool:
         "climate": ["set_temperature"], # Some homes consider this sensitive
     }
 
-    if domain in sensitive_actions:
-        if action in sensitive_actions[domain] and not is_admin:
-            log.warning(f"[Security] BLOCK: Non-admin user '{user_context.get('user')}' attempted '{action}' on '{domain}'")
-            return False
+    if domain in sensitive_actions and action in sensitive_actions[domain] and not is_admin:
+        log.warning(f"[Security] BLOCK: Non-admin user '{user_context.get('user')}' attempted '{action}' on '{domain}'")
+        return False
 
     return True
 
@@ -303,7 +302,7 @@ async def resolve_entity_by_name(ha_url: str, ha_token: str, device_name: str, d
     Resolve a human-readable device name to an HA entity_id.
     Searches all states for entities matching the device_name in their friendly_name or entity_id.
     Prefers exact matches over partial matches.
-    
+
     When media_type is provided:
     - "music": prefers entities with Music Assistant Queue (active_queue attribute)
     - "video": prefers entities with Cast capability (Default Media Receiver) or Android TV (device_class=tv)

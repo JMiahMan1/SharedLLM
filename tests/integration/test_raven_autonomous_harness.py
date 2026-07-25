@@ -11,6 +11,7 @@ import os
 import subprocess
 import tempfile
 import time
+
 import httpx
 import pytest
 
@@ -76,9 +77,8 @@ def _recover_mission_id(prompt: str, min_id: int = 0) -> int | None:
         mid = m.get("id")
         if isinstance(mid, int) and mid > min_id:
             proposed = (m.get("proposed_mission") or "").strip()
-            if proposed[:160] == marker:
-                if best is None or mid > best:
-                    best = mid
+            if proposed[:160] == marker and (best is None or mid > best):
+                best = mid
     return best
 
 
@@ -167,7 +167,7 @@ def _clone_and_check_file(repo: str, filename: str) -> str:
         assert clone.returncode == 0, f"Git clone failed: {clone.stderr}"
         target = os.path.join(d, filename)
         assert os.path.isfile(target), f"File {filename} missing from repo {repo}"
-        with open(target, "r") as f:
+        with open(target) as f:
             return f.read()
 
 

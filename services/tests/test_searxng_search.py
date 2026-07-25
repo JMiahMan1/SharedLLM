@@ -1,6 +1,6 @@
 # services/tests/test_searxng_search.py
 """Tests for SearXNG JSON search integration with Playwright fallback."""
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

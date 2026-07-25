@@ -52,7 +52,7 @@ else:
 def run_migration():
     with Session(engine) as session:
         # Find the system default user (or any user)
-        user = session.exec(select(User).where(User.is_system_default == True)).first()
+        user = session.exec(select(User).where(User.is_system_default)).first()
         if not user:
             user = session.exec(select(User)).first()
 

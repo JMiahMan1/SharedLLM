@@ -20,9 +20,9 @@ import contextlib
 import logging
 import os
 import re
-import time
 import threading
-from typing import Any, AsyncGenerator, Tuple
+from collections.abc import AsyncGenerator
+from typing import Any
 
 # docker is a runtime-only dependency (used for sandbox container execution),
 # not needed at import time. Importing it lazily keeps modules that import this
@@ -569,7 +569,7 @@ async def run_workspace_terminal(
     image: str | None = None,
     width: int = 80,
     height: int = 24,
-) -> AsyncGenerator[Tuple[bytes, bytes], None]:
+) -> AsyncGenerator[tuple[bytes, bytes], None]:
     """Run an interactive terminal PTY inside the workspace's sandbox container.
 
     Yields tuples of (stdout_data, stderr_data) as they become available.
@@ -622,18 +622,16 @@ async def run_workspace_terminal(
             demux=False,  # We'll handle multiplexing ourselves
         )
         exec_id = exec_resp["Id"]
-        
+
         # Start the exec process with a socket
         sock = client.api.exec_start(exec_id, detach=False, tty=True, socket=True)
-        
+
         # Set terminal size
         client.api.exec_resize(exec_id, height=height, width=width)
-        
+
         # Convert socket to asyncio-friendly streams
         # We'll use a simple approach: read from socket in a thread and yield chunks
-        import socket
-        import ssl
-        
+
         def _socket_reader():
             """Read from the socket in a blocking thread."""
             try:
@@ -646,7 +644,7 @@ async def run_workspace_terminal(
                 log.warning(f"[Sandbox terminal] Socket read error: {e}")
             finally:
                 sock.close()
-        
+
         # For simplicity in this implementation, we'll use a blocking approach
         # and yield data as it becomes available. In production, this would
         # use proper asyncio socket handling.
@@ -662,7 +660,7 @@ async def run_workspace_terminal(
             except Exception as e:
                 log.warning(f"[Sandbox terminal] Error reading from socket: {e}")
                 break
-                
+
     finally:
         # Clean up the exec instance if it was created
         if exec_id:
@@ -680,7 +678,7 @@ def resize_workspace_terminal(
     height: int,
 ) -> bool:
     """Resize an active terminal PTY in the workspace's sandbox container.
-    
+
     Returns True if successful, False otherwise.
     """
     client = _get_client()
@@ -688,7 +686,7 @@ def resize_workspace_terminal(
         return False
     cname = _container_name(workspace_id)
     try:
-        c = client.containers.get(cname)
+        client.containers.get(cname)
         # Find the most recent exec instance for this container
         # In a real implementation, we'd track the exec ID
         # For now, we'll rely on the fact that there's typically one
@@ -707,7 +705,7 @@ def resize_workspace_terminal(
 # Host Port Exposure & TCP Proxy Forwarding for Sandbox Workspaces
 # ---------------------------------------------------------------------------
 _PORT_FORWARD_LOCK = threading.Lock()
-_ACTIVE_PORT_FORWARDS: dict[Tuple[str, int], Tuple[threading.Thread, threading.Event, int, str]] = {}
+_ACTIVE_PORT_FORWARDS: dict[tuple[str, int], tuple[threading.Thread, threading.Event, int, str]] = {}
 
 
 def _find_free_host_port(start_port: int = 9000, max_attempts: int = 200) -> int:
@@ -775,7 +773,7 @@ def _run_tcp_proxy(host_port: int, target_ip: str, target_port: int, stop_event:
             client_sock, _ = server_sock.accept()
             t = threading.Thread(target=handle_client, args=(client_sock,), daemon=True)
             t.start()
-        except socket.timeout:
+        except TimeoutError:
             continue
         except Exception as e:
             if not stop_event.is_set():

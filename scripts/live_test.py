@@ -69,8 +69,10 @@ def find_entity_id(friendly_name):
 def get_state(entity_id):
     try:
         r = requests.get(f"{API_URL}/api/ha/state/{entity_id}", headers=HEADERS, timeout=5)
-        if r.status_code == 200: return r.json().get("state")
-    except: pass
+        if r.status_code == 200:
+            return r.json().get("state")
+    except Exception:
+        pass
     return "unknown"
 
 def ensure_device_state(friendly_name, entity_id, target_state="off"):
@@ -134,7 +136,7 @@ def safe_post(url, payload, label):
 
             print(f"   [RESPONSE] {label}: {msg.strip()[:120]}...")
             return msg
-        except:
+        except Exception:
             print(f"   [RESPONSE] {label}: (Non-JSON response) {r.text[:50]}")
             return r.text
     except Exception as e:
@@ -247,7 +249,8 @@ def test_calendar_integration():
                             if ev.vobject_instance.vevent.summary.value == test_event_title:
                                 ev.delete()
                                 print("   [CLEANUP] Removed leftover test event directly.")
-                except: pass
+                except Exception:
+                    pass
     except Exception as e:
         print(f"   [INFO] Cleanup skipped or failed: {e}")
 
@@ -444,7 +447,8 @@ def main():
     try:
         if requests.get(f"{API_URL}/health", timeout=5).status_code != 200:
             print("API Down"); return
-    except: print("API Unreachable"); return
+    except Exception:
+        print("API Unreachable"); return
 
     test_functionality()
     print("\nTEST SEQUENCE COMPLETE")

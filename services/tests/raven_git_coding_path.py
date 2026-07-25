@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -92,7 +92,7 @@ pytestmark = pytest.mark.integration
 # Helpers
 # ---------------------------------------------------------------------------
 def _log(msg: str) -> None:
-    print(f"[{datetime.now(timezone.utc).isoformat(timespec='seconds')}Z] {msg}")
+    print(f"[{datetime.now(UTC).isoformat(timespec='seconds')}Z] {msg}")
 
 
 def _login() -> str:
@@ -244,7 +244,7 @@ def _delete_workspace_via_api(api_key: str, workspace_id: str) -> None:
             timeout=60,
         )
         _log(f"Workspace delete requested: {workspace_id}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         _log(f"Workspace API delete failed (will try host rm): {e}")
 
 
@@ -286,7 +286,7 @@ def test_raven_git_coding_path():
     )
     _log("=== PATH A: Genesis ===")
     mid_a = _dispatch_mission(api_key, query_a)
-    detail_a = _wait_for_mission(api_key, mid_a)
+    _wait_for_mission(api_key, mid_a)
 
     try:
         # ---- Zero-trust verification (Path A) ----
@@ -311,7 +311,7 @@ def test_raven_git_coding_path():
     )
     _log("=== PATH B: Modify ===")
     mid_b = _dispatch_mission(api_key, query_b, workspace_id=workspace_id)
-    detail_b = _wait_for_mission(api_key, mid_b)
+    _wait_for_mission(api_key, mid_b)
 
     try:
         _verify_modify(workspace_id, repo_name)

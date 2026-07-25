@@ -108,8 +108,8 @@ def test_pending_verification_empty_when_all_verified():
 def _load_no_progress():
     from services.gateway.agent_loop import (
         detect_no_progress,
-        normalize_shell_goal,
         no_progress_directive,
+        normalize_shell_goal,
     )
     return detect_no_progress, normalize_shell_goal, no_progress_directive
 

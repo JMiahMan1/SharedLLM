@@ -20,7 +20,8 @@ def discover_prod_ip():
             for line in f:
                 if "ai-server:" in line:
                     return line.split(":")[1].strip().strip('"').strip("'")
-    except: pass
+    except Exception:
+        pass
     return None
 
 PROD_IP = discover_prod_ip() or os.getenv("EXECUTION_EXTERNAL_HOST")
@@ -99,9 +100,11 @@ def verify_logbook(entity_id, since_minutes=1):
                         # Allow 5 minute window for drift
                         if (now - ts).total_seconds() < since_minutes * 60 + 300:
                             recent.append(e)
-                    except: continue
+                    except Exception:
+                        continue
             return recent
-    except: pass
+    except Exception:
+        pass
     return []
 
 # --- Test Cases ---
@@ -179,7 +182,7 @@ def test_announcement_logic(entity_id="media_player.office_speaker"):
         # Check Logbook for 'play_media' or 'mass' events
         time.sleep(2)
         logs = verify_logbook(entity_id)
-        found_event = any("media_player" in str(l) for l in logs)
+        found_event = any("media_player" in str(log) for log in logs)
         log_step("Verify Announcement Event in HA", found_event, "Found service call event in Logbook.")
 
     return success
@@ -246,7 +249,8 @@ def run_suite():
     # 1. Health
     try:
         r = requests.get(f"{EXECUTION_URL}/health", timeout=5)
-        if r.status_code != 200: raise Exception("Health check failed")
+        if r.status_code != 200:
+            raise Exception("Health check failed")
         print(f"[{Colors.OKGREEN}READY{Colors.ENDC}] Execution service is online.")
     except Exception as e:
         print(f"[{Colors.FAIL}ERROR{Colors.ENDC}] Cannot reach Execution service: {e}")

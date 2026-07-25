@@ -3602,24 +3602,18 @@ async def proxy_trigger_telemetry_snapshot(entity_id: str, request: Request):
                     if power_attr:
                         attr_value = attrs.get(power_attr)
                         if attr_value is not None:
-                            try:
+                            with suppress(TypeError, ValueError):
                                 power_w = float(attr_value)
-                            except (TypeError, ValueError):
-                                pass
         except Exception:
             pass
 
         if power_w is None:
             if state not in (None, "unavailable", "unknown"):
-                try:
+                with suppress(TypeError, ValueError):
                     power_w = float(state)
-                except (TypeError, ValueError):
-                    pass
             if power_w is None and "current_power_w" in attrs:
-                try:
+                with suppress(TypeError, ValueError):
                     power_w = float(attrs.get("current_power_w"))
-                except (TypeError, ValueError):
-                    pass
 
         snapshot = {
             "entity_id": entity_id,
@@ -8097,12 +8091,8 @@ async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token:
             )
     except Exception as e:
         log.error(f"[workspaces-terminal] Failed to connect to workspace runtime: {e}", exc_info=True)
-        try:
+        with suppress(Exception):
             await websocket.send_text(json.dumps({"type": "stdout", "data": f"\r\n\x1b[31mFailed to connect to workspace runtime terminal: {e}\x1b[0m\r\n"}))
-        except Exception:
-            pass
-        try:
+        with suppress(Exception):
             await websocket.close(code=1011, reason=f"Terminal service unavailable: {str(e)[:100]}")
-        except Exception:
-            pass
 

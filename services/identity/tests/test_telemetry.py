@@ -1,5 +1,5 @@
-import os
 import json
+import os
 import time
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
@@ -7,7 +7,7 @@ os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
+from sqlmodel import Session, SQLModel, StaticPool, create_engine
 
 from services.identity import main as identity_main
 from services.identity.main import app, require_internal
@@ -40,7 +40,7 @@ def test_client_fixture(session: Session):
 def test_telemetry_summary_peak_duration(test_client: TestClient, session: Session):
     entity_id = "sensor.test_power"
     key = f"telemetry_data:{entity_id}"
-    
+
     # 1. Momentary peak: power is 25W for exactly one point, other points are 10W
     now = time.time()
     data_points = [
@@ -49,12 +49,12 @@ def test_telemetry_summary_peak_duration(test_client: TestClient, session: Sessi
         {"recorded_at": now - 100, "power_w": 25.0, "is_available": True}, # Peak
         {"recorded_at": now,       "power_w": 10.0, "is_available": True},
     ]
-    
+
     # Save the telemetry data in db
     setting = GlobalSetting(key=key, value=json.dumps(data_points))
     session.add(setting)
     session.commit()
-    
+
     # Call the API
     resp = test_client.get(
         f"/api/telemetry/summary/{entity_id}",
@@ -65,7 +65,7 @@ def test_telemetry_summary_peak_duration(test_client: TestClient, session: Sessi
     assert summary["peak_power_w"] == 25.0
     # Peak duration should be 0.0 because it's a momentary peak (only one point >= 95% of peak)
     assert summary["peak_duration_seconds"] == 0.0
-    
+
     # 2. Sustained peak: power is 25W for two consecutive points, 24W for another (which is >= 23.75W threshold)
     # 24W is 96% of 25W. So it should be included!
     data_points_sustained = [
@@ -75,12 +75,12 @@ def test_telemetry_summary_peak_duration(test_client: TestClient, session: Sessi
         {"recorded_at": now - 100, "power_w": 25.0, "is_available": True}, # Peak point
         {"recorded_at": now,       "power_w": 10.0, "is_available": True},
     ]
-    
+
     # Update db
     setting.value = json.dumps(data_points_sustained)
     session.add(setting)
     session.commit()
-    
+
     resp = test_client.get(
         f"/api/telemetry/summary/{entity_id}",
         headers={"X-Internal-Secret": "test-secret"}

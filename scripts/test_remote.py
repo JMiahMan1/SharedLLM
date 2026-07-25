@@ -15,7 +15,7 @@ try:
     print("Status Code:", resp.status_code)
     try:
         print(json.dumps(resp.json(), indent=2))
-    except:
+    except Exception:
         print("Raw Response:", resp.text)
 except Exception as e:
     print("Error:", e)

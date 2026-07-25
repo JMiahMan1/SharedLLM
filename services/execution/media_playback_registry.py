@@ -75,7 +75,7 @@ async def get_playback_state(username: str) -> dict[str, Any] | None:
                 "is_volume_muted", "media_title", "media_artist", "media_album",
                 "queue", "updated_at"
             ]
-            data = dict(zip(cols, row))
+            data = dict(zip(cols, row, strict=False))
             if data.get("queue"):
                 try:
                     data["queue"] = json.loads(data["queue"])

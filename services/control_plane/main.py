@@ -3,7 +3,7 @@ import os
 import re
 import threading
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import requests
 from docker.errors import NotFound
@@ -276,10 +276,7 @@ def _get_container_info(container):
     if started_at:
         try:
             from datetime import datetime
-            if started_at.endswith("Z"):
-                started_at_clean = started_at[:-1] + "+00:00"
-            else:
-                started_at_clean = started_at
+            started_at_clean = started_at[:-1] + "+00:00" if started_at.endswith("Z") else started_at
             start_dt = datetime.fromisoformat(started_at_clean)
             uptime_seconds = time.time() - start_dt.timestamp()
             if uptime_seconds < 0:
@@ -516,10 +513,8 @@ def _recreate_container(container, new_image_id: str):
             try:
                 network = client.networks.get(net_name)
                 # Disconnect first to avoid auto-connect conflicts and set aliases/IPs
-                try:
+                with suppress(Exception):
                     network.disconnect(new_container)
-                except Exception:
-                    pass
 
                 # Filter auto-generated aliases (like container IDs) to avoid conflicts
                 aliases = [
@@ -558,10 +553,8 @@ def _recreate_container(container, new_image_id: str):
         log.error(f"[recreate] Failed to recreate container {old_name}: {e}. Falling back to old container...")
         # Clean up new container if it was created
         if new_container:
-            try:
+            with suppress(Exception):
                 new_container.remove(force=True)
-            except Exception:
-                pass
         # Restore backup container
         try:
             container.rename(old_name)
@@ -762,10 +755,7 @@ def check_all_updates():
         else:
             # Docker Hub or plain image name
             registry = "registry-1.docker.io"
-            if "/" not in image_ref:
-                repo = f"library/{image_ref}"
-            else:
-                repo = image_ref
+            repo = f"library/{image_ref}" if "/" not in image_ref else image_ref
 
         # OCI-compliant manifest accept types (prefer multi-arch index)
         accept_types = (

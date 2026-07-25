@@ -320,7 +320,7 @@ async def _run_command_async(
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
             ret_code = proc.returncode if proc.returncode is not None else 0
             return ret_code, stdout.decode(errors="replace"), stderr.decode(errors="replace")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 proc.kill()
                 await proc.wait()

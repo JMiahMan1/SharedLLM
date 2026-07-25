@@ -20,7 +20,7 @@ class MockRedis:
 
     async def keys(self, pattern):
         prefix = pattern.replace("*", "")
-        return [k for k in self.store.keys() if k.startswith(prefix)]
+        return [k for k in self.store if k.startswith(prefix)]
 
     async def delete(self, key):
         if key in self.store:

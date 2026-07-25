@@ -2958,10 +2958,8 @@ async def websocket_terminal(
 
         # Helper to send stdout to client
         async def send_to_client(data: bytes):
-            try:
+            with suppress(Exception):
                 await websocket.send_text(json.dumps({"type": "stdout", "data": data.decode(errors="replace")}))
-            except Exception:
-                pass
 
         # Read from socket and forward to websocket
         async def read_socket():
@@ -2988,10 +2986,8 @@ async def websocket_terminal(
                                 is_ctrl = True
                                 width = ctrl.get("width", 80)
                                 height = ctrl.get("height", 24)
-                                try:
+                                with suppress(Exception):
                                     docker_client.api.exec_resize(exec_id, width=width, height=height)
-                                except Exception:
-                                    pass
                         except Exception:
                             pass
                     if not is_ctrl:
@@ -3021,8 +3017,6 @@ async def websocket_terminal(
                 sock.close()
         except Exception:
             pass
-        try:
+        with suppress(Exception):
             docker_client.api.exec_kill(exec_id, signal=15)
-        except Exception:
-            pass
         await websocket.close()

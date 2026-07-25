@@ -13,10 +13,7 @@ if not api_url_raw:
     sys.exit(1)
 
 # Ensure http prefix
-if not api_url_raw.startswith("http"):
-    api_url = f"http://{api_url_raw}:11435"
-else:
-    api_url = f"{api_url_raw}:11435"
+api_url = f"http://{api_url_raw}:11435" if not api_url_raw.startswith("http") else f"{api_url_raw}:11435"
 
 HEADERS = {
     "Content-Type": "application/json",

@@ -16,15 +16,14 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import aiohttp
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 _STATIC = Path(__file__).resolve().parent / "static"
 
-from services.config import HA_TOKEN, HA_URL, INTERNAL_SECRET
 from services.common.http import get_client_insecure
+from services.config import HA_TOKEN, HA_URL, INTERNAL_SECRET
 from services.shared.info_endpoint import info_router
 
 log = logging.getLogger(__name__)
@@ -82,11 +81,10 @@ def _entity_to_feature(entity_id: str, state: dict) -> dict | None:
 async def _ha_get_states() -> list:
     if not HA_URL:
         raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
-    async with get_client_insecure() as client:
-        async with client.get(f"{HA_URL}/api/states", headers=_ha_headers()) as resp:
-            if resp.status != 200:
-                raise HTTPException(status_code=502, detail=f"HA returned {resp.status}")
-            return await resp.json()
+    async with get_client_insecure() as client, client.get(f"{HA_URL}/api/states", headers=_ha_headers()) as resp:
+        if resp.status != 200:
+            raise HTTPException(status_code=502, detail=f"HA returned {resp.status}")
+        return await resp.json()
 
 
 def _filter_entities(states: list, domain: str) -> list:
@@ -139,11 +137,10 @@ async def get_history(entity_id: str, samples: int = Query(200, ge=1, le=2000)):
         raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
     url = f"{HA_URL}/api/history/period"
     params = {"filter_entity_id": entity_id, "significant_changes_only": "true", "minimal_response": "true"}
-    async with get_client_insecure() as client:
-        async with client.get(url, headers=_ha_headers(), params=params) as resp:
-            if resp.status != 200:
-                raise HTTPException(status_code=502, detail=f"HA returned {resp.status}")
-            data = await resp.json()
+    async with get_client_insecure() as client, client.get(url, headers=_ha_headers(), params=params) as resp:
+        if resp.status != 200:
+            raise HTTPException(status_code=502, detail=f"HA returned {resp.status}")
+        data = await resp.json()
     points = []
     for row in (data[0] if isinstance(data, list) and data else []):
         attrs = row.get("a", {})  # minimal_response puts attributes under "a"

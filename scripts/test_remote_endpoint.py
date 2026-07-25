@@ -53,7 +53,7 @@ def main():
     try:
         requests.get("http://ai.local:11435/api/ping", timeout=5)
         log.info("Ping Successful.")
-    except:
+    except Exception:
         log.warning("Ping Failed (Method Not Allowed or Timeout), proceeding to Chat API.")
 
     try:

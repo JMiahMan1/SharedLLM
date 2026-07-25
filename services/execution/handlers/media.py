@@ -70,7 +70,7 @@ async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, medi
 
 async def resolve_mass_entity(ctx, original_entity: str) -> str:
     """Resolve a media_player entity to its Music Assistant variant.
-    
+
     Returns the original entity if it's already an MA player with active_queue.
     Otherwise searches for an MA player with a matching friendly name.
     Falls back to original entity if no match found.

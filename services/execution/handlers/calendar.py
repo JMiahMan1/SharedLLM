@@ -378,7 +378,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                     asyncio.gather(*(_gather_one(i) for i in targets), return_exceptions=True),
                     timeout=12,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 results = None
 
             # Per-integration liveness. A source is "hard" down when its read
@@ -392,7 +392,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 for i in targets:
                     availability[i["type"]] = {"available": False, "error": "timed out", "soft": False}
             else:
-                for i, r in zip(targets, results):
+                for i, r in zip(targets, results, strict=False):
                     t = i["type"]
                     if isinstance(r, Exception):
                         availability[t] = {"available": False, "error": str(r)[:120], "soft": False}

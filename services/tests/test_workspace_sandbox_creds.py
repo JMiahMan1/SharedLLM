@@ -3,9 +3,8 @@ integration credentials (GitHub token, etc.) so `gh`/`git push` inside the
 sandbox can authenticate. Without this, git push fails with rc=128 / "not
 logged in" even though the execution service has the token.
 """
-import os
 
-from services.workspace_sandbox import _sandbox_credential_env, _SANDBOX_CRED_ENV_KEYS
+from services.workspace_sandbox import _SANDBOX_CRED_ENV_KEYS, _sandbox_credential_env
 
 
 def test_credential_env_collects_host_tokens(monkeypatch):

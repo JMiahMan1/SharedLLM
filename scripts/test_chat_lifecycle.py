@@ -19,8 +19,10 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 log = logging.getLogger("test_chat_lifecycle")
 
-def chat_query(query: str, history: list = []) -> dict[str, Any]:
+def chat_query(query: str, history: list | None = None) -> dict[str, Any]:
     """Send a query to the Chat API."""
+    if history is None:
+        history = []
     url = f"{API_URL}/api/chat"
     payload = {
         "query": query,

@@ -88,9 +88,7 @@ async def is_samsung_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     samsung_indicators = ("org.tizen.", "samsung.tv", "tizen.tv")
     if any(ind in app_id for ind in samsung_indicators):
         return True
-    if "samsungtv" in entity_id_lower:
-        return True
-    return False
+    return "samsungtv" in entity_id_lower
 
 
 async def get_samsung_ip(ha_url: str, ha_token: str, entity_id: str) -> str | None:

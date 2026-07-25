@@ -100,7 +100,7 @@ async def _searxng_json_search(req: WebSearchRequest) -> ExecutionResult | None:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12.0)) as client, client.get(url) as resp:
             resp.raise_for_status()
             data = await resp.json()
-    except Exception as e:
+    except Exception:
         # Surface to the Playwright fallback — the JSON endpoint being down or
         # returning non-JSON is exactly the rare case it exists for.
         raise

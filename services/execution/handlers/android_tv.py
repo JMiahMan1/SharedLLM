@@ -45,9 +45,8 @@ async def is_android_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
 
     # Signal 2: device_class == "tv" without Cast/MA attributes
     # (Cast devices don't have device_class=tv, MA wrappers have device_class=speaker)
-    if attrs.get("device_class") == "tv":
-        if not attrs.get("mass_player_type") and "cast" not in entity_id.lower():
-            return True
+    if attrs.get("device_class") == "tv" and not attrs.get("mass_player_type") and "cast" not in entity_id.lower():
+        return True
 
     # Signal 3: corresponding remote entity exists (androidtv_remote creates both)
     remote_entity = entity_id.replace("media_player.", "remote.")
@@ -91,7 +90,7 @@ async def power_off(ha_url: str, ha_token: str, entity_id: str) -> ExecutionResu
 
 async def _find_cast_sibling(ha_url: str, ha_token: str, atv_entity_id: str) -> str | None:
     """Find a non-MA Cast sibling for the given Android TV entity.
-    
+
     Multiple integrations control the same physical device, each with their own entity.
     Uses capability-based detection from HA state attributes:
     1. Exclude MA wrappers (app_id, mass_player_type)

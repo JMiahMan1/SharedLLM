@@ -43,10 +43,7 @@ class NextCloudClient:
     async def _full_url(self, remote_path: str) -> str:
         clean_path = "/" + str(remote_path).lstrip("/")
         # If the path already includes the base_path, don't double it
-        if clean_path.startswith(self.base_path):
-            relative_path = clean_path[len(self.base_path):]
-        else:
-            relative_path = clean_path
+        relative_path = clean_path[len(self.base_path):] if clean_path.startswith(self.base_path) else clean_path
 
         quoted_path = quote(relative_path.lstrip("/"), safe="/")
         url = f"{self.base_url}{self.base_path}/{quoted_path}"
@@ -228,10 +225,7 @@ class NextCloudClient:
             parent = str(PurePosixPath(normalized).parent)
             await self.ensure_directory(parent)
 
-        if not isinstance(content, bytes):
-            content_bytes = content.encode("utf-8")
-        else:
-            content_bytes = content
+        content_bytes = content.encode("utf-8") if not isinstance(content, bytes) else content
 
         url = await self._full_url(normalized)
         try:

@@ -51,7 +51,7 @@ MANUFACTURER_PATTERNS = {
 
 def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_components: set[str] | None = None) -> str:
     """Detect TV platform type using multiple context clues in priority order.
-    
+
     Uses:
     1. entity_id patterns (integration naming conventions)
     2. app_id (Cast receiver IDs, Android packages, etc.)
@@ -140,7 +140,7 @@ def detect_tv_type(entity_id: str, state: str, attributes: dict, loaded_componen
 
 async def search_device_type(entity_id: str, attributes: dict, loaded_components: set[str] | None = None) -> str | None:
     """Search the web to identify an unknown device type using available clues.
-    
+
     Uses entity_id patterns, app_id, supported_features, and loaded components
     to construct a search query and determine the device platform.
     """
@@ -210,7 +210,7 @@ async def announce_cast(ha_url: str, ha_token: str, entity_id: str, media_url: s
 
 async def announce_roku(ha_url: str, ha_token: str, entity_id: str, media_url: str, volume: float, state: str = "unknown", attributes: dict | None = None, message: str = "") -> dict[str, Any]:
     """Roku: wake display via ECP, launch Media Assistant with audio URL.
-    
+
     Based on Media Assistant docs and main branch flow:
     1. Wake display via ECP Home key
     2. Launch Media Assistant via ECP with t=a, u=[Media URL]

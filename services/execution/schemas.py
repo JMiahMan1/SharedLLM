@@ -102,9 +102,8 @@ class BaseRequest(BaseModel):
             # Normalize empty strings to None for optional fields only
             for field_name in field_names:
                 field_info = cls.model_fields.get(field_name)
-                if field_info is not None and not field_info.is_required():
-                    if field_name in data and data[field_name] == "":
-                        data[field_name] = None
+                if field_info is not None and not field_info.is_required() and field_name in data and data[field_name] == "":
+                    data[field_name] = None
 
         return data
 
@@ -384,9 +383,8 @@ class WorkspaceFileReadRequest(BaseRequest):
     @model_validator(mode="before")
     @classmethod
     def pivot_file_read_fields(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "file_path" in data and "path" not in data:
-                data["path"] = data.pop("file_path")
+        if isinstance(data, dict) and "file_path" in data and "path" not in data:
+            data["path"] = data.pop("file_path")
         return data
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -405,9 +403,8 @@ class WorkspaceFileWriteRequest(BaseRequest):
     @model_validator(mode="before")
     @classmethod
     def pivot_file_write_fields(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "file_path" in data and "path" not in data:
-                data["path"] = data.pop("file_path")
+        if isinstance(data, dict) and "file_path" in data and "path" not in data:
+            data["path"] = data.pop("file_path")
         return data
 
     model_config = ConfigDict(extra="ignore", populate_by_name=True)
@@ -826,7 +823,7 @@ class NetworkDeviceScanRequest(BaseRequest):
     Scans the local network for devices by probing known ports (Roku ECP, webOS,
     Samsung, Chromecast, ESPHome, etc.) and enriches results with device info
     (model, serial, MAC address, friendly name).
-    
+
     Returns a list of all discovered devices with their IP, type, and metadata.
     Use this to find devices when you don't know their IP or entity_id.
     """
@@ -841,7 +838,7 @@ class HAConfigRequest(BaseRequest):
     Inspects Home Assistant integration configurations via WebSocket API.
     Use this to diagnose misconfigured integrations (e.g. wrong Ollama URL,
     incorrect entity IDs, disabled components).
-    
+
     NOTE: This tool is primarily for Voice Assistant troubleshooting in HA.
     It should NOT be used for general chat queries or by OpenWebUI clients.
     Only use when the user explicitly asks to check HA integration settings

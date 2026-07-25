@@ -56,17 +56,15 @@ def _parse_lesson_marker(text: str) -> dict:
         # tolerant), optionally wrapped in markdown bold (**RULE:**).
         marker = key.replace("_", r"[ _]")
         m = _re.search(
-            r"(?:^|\n)\s*\*{{0,2}}\s*{marker}\s*[:\-]\s*\*{{0,2}}\s*([^\n]+)".format(marker=marker),
+            rf"(?:^|\n)\s*\*{{0,2}}\s*{marker}\s*[:\-]\s*\*{{0,2}}\s*([^\n]+)",
             text,
             _re.IGNORECASE,
         )
         if m:
             val = m.group(1).strip().strip("*").strip()
             if key == "confidence":
-                try:
+                with contextlib.suppress(TypeError, ValueError, AttributeError):
                     out[key] = float(_re.search(r"[0-9]*\.?[0-9]+", val).group(0))
-                except (TypeError, ValueError, AttributeError):
-                    pass
             else:
                 out[key] = val
     return out
