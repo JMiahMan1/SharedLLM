@@ -66,7 +66,7 @@ async def _get_conn() -> aiosqlite.Connection:
 def _row_to_dict(row: Any | None, keys: list) -> dict | None:
     if row is None:
         return None
-    d = dict(zip(keys, row))
+    d = dict(zip(keys, row, strict=False))
     if d.get("metadata"):
         try:
             d["metadata"] = json.loads(d["metadata"])

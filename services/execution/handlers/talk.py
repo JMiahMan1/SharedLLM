@@ -140,7 +140,7 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any):
         # Output pipeline delivery back into the Nextcloud Talk room session stream
         cleaned_ans = strip_json_from_response(ans)
 
-        ok, data, message = await provider.request(
+        ok, _data, message = await provider.request(
             "POST",
             f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(token)}",
             data={"message": cleaned_ans},

@@ -9,6 +9,7 @@ Provides:
 - Proper cleanup
 """
 import asyncio
+import contextlib
 import logging
 
 from aiohttp import BasicAuth, ClientSession, ClientTimeout, TCPConnector
@@ -52,10 +53,7 @@ async def request(
         dict with keys: status_code, headers, text, content, ok
     """
     if timeout is None:
-        if "nextcloud" in url or "remote.php" in url:
-            timeout = _NEXTCLOUD_TIMEOUT
-        else:
-            timeout = _DEFAULT_TIMEOUT
+        timeout = _NEXTCLOUD_TIMEOUT if "nextcloud" in url or "remote.php" in url else _DEFAULT_TIMEOUT
     elif isinstance(timeout, int):
         timeout = ClientTimeout(total=timeout)
 
@@ -125,7 +123,5 @@ async def close_all_sessions():
     """Close all cached sessions."""
     for host in list(_SESSION_CACHE.keys()):
         session = _SESSION_CACHE.pop(host)[0]
-        try:
+        with contextlib.suppress(Exception):
             await session.close()
-        except Exception:
-            pass

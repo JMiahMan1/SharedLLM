@@ -21,8 +21,10 @@ def log(msg):
 def get_state(entity_id):
     try:
         r = requests.get(f"{API_URL}/api/ha/state/{entity_id}", headers=HEADERS, timeout=30)
-        if r.status_code == 200: return r.json().get("state", "unknown")
-    except: pass
+        if r.status_code == 200:
+            return r.json().get("state", "unknown")
+    except Exception:
+        pass
     return "unknown"
 
 def send_chat(content):

@@ -193,7 +193,7 @@ class MediaPlaybackService:
 
             detail["active"] = web_player
             detail["available"] = ha_available
-            detail["all_players"] = [web_player] + ha_available
+            detail["all_players"] = [web_player, *ha_available]
 
             ha_res.detail = detail
 

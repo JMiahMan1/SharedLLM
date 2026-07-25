@@ -65,9 +65,7 @@ async def is_roku_device(ha_url: str, ha_token: str, entity_id: str) -> bool:
         return True
     source_list = [s.lower() for s in (attrs.get("source_list") or [])]
     roku_sources = {"home", "roku media player", "the roku channel"}
-    if roku_sources & set(source_list):
-        return True
-    return False
+    return bool(roku_sources & set(source_list))
 
 
 async def get_roku_ip(ha_url: str, ha_token: str, entity_id: str) -> str | None:
@@ -82,7 +80,7 @@ async def get_roku_ip(ha_url: str, ha_token: str, entity_id: str) -> str | None:
 
 async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -> str | None:
     """Find the Music Assistant player entity that is a sibling of the Roku entity.
-    
+
     Only returns MA players that have an active_queue (i.e., are connected to a MA output).
     """
     all_states = await ha_client.get_states(ha_url, ha_token)

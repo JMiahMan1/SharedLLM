@@ -37,10 +37,7 @@ def test_coding_chat():
         data = resp.json()
 
         # Extract content (handle both OpenAI and Ollama formats)
-        if "choices" in data:
-            content = data["choices"][0].get("message", {}).get("content", "")
-        else:
-            content = data.get("message", {}).get("content", "")
+        content = data["choices"][0].get("message", {}).get("content", "") if "choices" in data else data.get("message", {}).get("content", "")
 
         print(f"Content length: {len(content)}")
         print(f"Content preview: {content[:100]}...")

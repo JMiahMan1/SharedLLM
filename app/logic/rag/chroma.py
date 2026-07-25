@@ -46,9 +46,8 @@ class ChromaDBClient:
         metadatas: list[dict[str, Any]] | None = None,
     ) -> bool:
         """Add documents to the collection."""
-        if self._collection is None:
-            if not self.connect():
-                return False
+        if self._collection is None and not self.connect():
+            return False
 
         if ids is None:
             ids = [f"doc_{i}" for i in range(len(documents))]
@@ -72,9 +71,8 @@ class ChromaDBClient:
         filters: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         """Search the collection for similar documents."""
-        if self._collection is None:
-            if not self.connect():
-                return []
+        if self._collection is None and not self.connect():
+            return []
 
         try:
             assert self._collection is not None
@@ -94,7 +92,7 @@ class ChromaDBClient:
                     "metadata": meta or {},
                     "distance": dist,
                 }
-                for doc_id, doc, meta, dist in zip(ids_data, docs_data, metas_data, dists_data)
+                for doc_id, doc, meta, dist in zip(ids_data, docs_data, metas_data, dists_data, strict=False)
             ]
         except Exception as e:
             log.error(f"Search failed: {e}")
@@ -102,9 +100,8 @@ class ChromaDBClient:
 
     def count(self) -> int:
         """Return the number of documents in the collection."""
-        if self._collection is None:
-            if not self.connect():
-                return 0
+        if self._collection is None and not self.connect():
+            return 0
         try:
             assert self._collection is not None
             return self._collection.count()

@@ -61,9 +61,7 @@ async def is_webos_tv(ha_url: str, ha_token: str, entity_id: str) -> bool:
     webos_indicators = ("com.webos.", "webos.tv", "lg.webos")
     if any(ind in app_id for ind in webos_indicators):
         return True
-    if "webostv" in entity_id_lower:
-        return True
-    return False
+    return "webostv" in entity_id_lower
 
 
 async def _get_webos_device_info(ha_url: str, ha_token: str, entity_id: str) -> dict:  # pyright: ignore[reportUnusedFunction]

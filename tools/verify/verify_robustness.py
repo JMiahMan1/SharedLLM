@@ -63,7 +63,7 @@ class MockCollection:
 
             score = 2.0 # No match
 
-            if q_norm == fname or q_norm == eid:
+            if q_norm in (fname, eid):
                 score = 0.0 # Exact
             elif q_norm in fname or q_norm in eid:
                 score = 0.5 # Partial
@@ -144,16 +144,14 @@ def discover_entities(collection):
                     log.info(f"Found TV Candidate: {friendly_name} ({eid}) [{integ}]")
 
         # Find Speaker
-        if not candidates["speaker"]:
-            if domain == "media_player" and ("music_assistant" in integ or "sonos" in integ or "speaker" in integ):
-                 candidates["speaker"] = {"eid": eid, "name": friendly_name, "integ": integ, "area": area}  # type: ignore[dict-item]
-                 log.info(f"Found Speaker Candidate: {friendly_name} ({eid}) [{integ}]")
+        if not candidates["speaker"] and domain == "media_player" and ("music_assistant" in integ or "sonos" in integ or "speaker" in integ):
+             candidates["speaker"] = {"eid": eid, "name": friendly_name, "integ": integ, "area": area}  # type: ignore[dict-item]
+             log.info(f"Found Speaker Candidate: {friendly_name} ({eid}) [{integ}]")
 
         # Find Light
-        if not candidates["light"]:
-            if domain == "light":
-                candidates["light"] = {"eid": eid, "name": friendly_name, "integ": integ, "area": area}  # type: ignore[dict-item]
-                log.info(f"Found Light Candidate: {friendly_name} ({eid})")
+        if not candidates["light"] and domain == "light":
+            candidates["light"] = {"eid": eid, "name": friendly_name, "integ": integ, "area": area}  # type: ignore[dict-item]
+            log.info(f"Found Light Candidate: {friendly_name} ({eid})")
 
     return candidates
 

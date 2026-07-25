@@ -24,10 +24,7 @@ rag_api_url_raw = os.getenv("RAG_API_URL")
 
 if not rag_api_url_raw:
     addr = os.getenv("RAG_ADDRESS")
-    if addr:
-        rag_api_url = f"http://{addr}:11435/api/chat"
-    else:
-        rag_api_url = ""
+    rag_api_url = f"http://{addr}:11435/api/chat" if addr else ""
 else:
     rag_api_url = rag_api_url_raw
 

@@ -1,8 +1,6 @@
 import sys
-from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
-
-import pytest
+from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 # Ensure the package root is importable
 sys.path.insert(0, ".")
@@ -14,7 +12,7 @@ def test_created_at_in_config_tz_converts_utc_to_config_tz():
     # Stored UTC naive -> emitted as offset-aware ISO in configured tz.
     with patch.object(rt, "get_config_timezone", return_value="America/Phoenix"):
         # 2026-07-18T00:00:00Z should become 2026-07-17T17:00:00-07:00
-        utc = datetime(2026, 7, 18, 0, 0, 0, tzinfo=timezone.utc)
+        utc = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
         out = rt._created_at_in_config_tz(utc)
         assert out is not None
         assert out.endswith("-07:00")
@@ -41,7 +39,7 @@ def test_workspace_to_dict_emits_config_tz_created_at():
         ws.webhook_token_enc = None
         ws.env_enc = None
         ws.excludes = []
-        ws.created_at = datetime(2026, 7, 18, 0, 0, 0, tzinfo=timezone.utc)
+        ws.created_at = datetime(2026, 7, 18, 0, 0, 0, tzinfo=UTC)
         d = rt._workspace_to_dict(ws)
         assert d["created_at"].endswith("-07:00")
         assert "2026-07-17T17:00:00" in d["created_at"]

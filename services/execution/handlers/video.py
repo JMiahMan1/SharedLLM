@@ -25,6 +25,7 @@ def extract_video_url(query: str) -> str | None:
     return match.group(0) if match else None
 
 
+import contextlib
 import time
 
 _SEARXNG_URL_CACHE = None
@@ -275,10 +276,8 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
 
     except Exception as e:
         log.error(f"[video] Download failed: {e}", exc_info=True)
-        try:
+        with contextlib.suppress(BaseException):
             os.remove(tmp_path)
-        except:
-            pass
         return None, None
 
 
@@ -354,10 +353,8 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
 
     except Exception as e:
         log.error(f"[video] Download failed: {e}", exc_info=True)
-        try:
+        with contextlib.suppress(BaseException):
             os.remove(tmp_path)
-        except:
-            pass
         return None, None
 
 
@@ -436,10 +433,8 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
 
     except Exception as e:
         log.error(f"[video] Download failed: {e}", exc_info=True)
-        try:
+        with contextlib.suppress(BaseException):
             os.remove(tmp_path)
-        except:
-            pass
         return None, None
 
 

@@ -112,4 +112,4 @@ async def test_admin_bypass():
 
 if __name__ == "__main__":
     import sys
-    pytest.main([__file__] + sys.argv[1:])
+    pytest.main([__file__, *sys.argv[1:]])

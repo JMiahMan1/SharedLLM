@@ -52,10 +52,7 @@ async def run_test():
         print("[FAIL] Error: RAG_ADDRESS not set in .env")
         return
     # Add http:// if not present
-    if not api_url_raw.startswith("http"):
-        rag_api_url = f"http://{api_url_raw}:11435"
-    else:
-        rag_api_url = api_url_raw
+    rag_api_url = f"http://{api_url_raw}:11435" if not api_url_raw.startswith("http") else api_url_raw
     if not rag_api_url.endswith("/api/chat"):
         rag_api_url = f"{rag_api_url}/api/chat"
     print(f"Using API URL: {rag_api_url}")
@@ -126,7 +123,8 @@ async def run_test():
                     is_playing = True
                     break
                 print(".", end="", flush=True)
-            except: pass
+            except Exception:
+                pass
 
         if not is_playing:
             print(f" [FAIL] Device failed to start playing {song}. Proceeding to Volume Test anyway (to verify control).")

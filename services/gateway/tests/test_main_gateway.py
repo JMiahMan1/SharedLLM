@@ -1,4 +1,3 @@
-import contextlib
 import os
 import sys
 from typing import cast
@@ -556,6 +555,7 @@ async def test_recreate_http_client_cooldown():
     """A second recreate within the cooldown window must NOT tear down the
     shared pool again; the connector's ttl_dns_cache handles DNS refresh."""
     import asyncio
+
     from services.gateway import main
 
     class _FakeClient:

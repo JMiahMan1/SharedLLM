@@ -1,5 +1,6 @@
 # services/tests/test_device_registry.py
 """Tests for device_registry.py (aiosqlite backend)."""
+import contextlib
 import os
 import tempfile
 
@@ -18,10 +19,8 @@ def use_tmp_db(monkeypatch):
     device_registry._db = None
     yield
     device_registry._db = None
-    try:
+    with contextlib.suppress(OSError):
         os.unlink(tmp.name)
-    except OSError:
-        pass
 
 
 @pytest.mark.asyncio

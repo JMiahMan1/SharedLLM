@@ -19,7 +19,8 @@ def log_result(model_name, task_name, success, latency):
         try:
             with open(RESULTS_FILE) as f:
                 results = json.load(f)
-        except: pass
+        except Exception:
+            pass
 
     results.append({
         "model": model_name,

@@ -1,4 +1,3 @@
-import pytest
 
 from services.gateway.agent_loop import _parse_lesson_marker
 

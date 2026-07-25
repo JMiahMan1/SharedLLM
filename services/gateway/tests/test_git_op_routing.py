@@ -1,7 +1,7 @@
 
 from services.gateway.agent_loop import (
-    ALLOWED_TOOLS,
     _GIT_VALID_ACTIONS,
+    ALLOWED_TOOLS,
     _is_git_op_shell_payload,
     _route_workspace_shell_to_git,
 )
@@ -150,7 +150,7 @@ def test_compound_git_shell_routes_to_gitoperationrequest_with_batch():
     # while only the secondary batch steps fanned out to /execute/git. The
     # interceptor MUST return 'gitoperationrequest' (not 'workspaceshellrequest')
     # so the primary step is dispatched to the git endpoint.
-    na, pl, gb = _route_workspace_shell_to_git(
+    na, _pl, gb = _route_workspace_shell_to_git(
         "workspaceshellrequest",
         {"command": "git add README.md && git commit -m 'feat: x'", "workspace_id": "w"},
     )

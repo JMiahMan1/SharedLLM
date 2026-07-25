@@ -56,6 +56,6 @@ for i in range(10):
     try:
         r = requests.get(f"http://{ROKU_IP}:8060/query/active-app", timeout=2)
         print(f"   [{i*2}s] Active App: {r.text.replace(chr(10), '').replace(chr(9), ' ')[0:80]}...")
-    except:
+    except Exception:
         pass
     time.sleep(2)

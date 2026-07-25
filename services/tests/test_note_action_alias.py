@@ -7,7 +7,6 @@ them to 'noterequest', so they fell through to 'Unknown action: note_create'.
 """
 from services.gateway.agent_loop import ALLOWED_TOOLS
 
-
 NOTE_HALLUCINATIONS = [
     "note_create", "note_delete", "note_list", "note_update",
     "create_note", "delete_note",

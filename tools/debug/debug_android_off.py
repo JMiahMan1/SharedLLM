@@ -100,16 +100,14 @@ def run_scenario(name, steps):
             return False
 
         # Verify Response Text (Optional keywords)
-        if "verify_text" in step:
-            if step["verify_text"] not in str(data):
-                 print(f"  [FAIL] Text verification failed. Need '{step['verify_text']}'")
-                 return False
+        if "verify_text" in step and step["verify_text"] not in str(data):
+             print(f"  [FAIL] Text verification failed. Need '{step['verify_text']}'")
+             return False
 
         # Verify State
-        if entity and expect_state:
-            if not wait_for_state(entity, expect_state):
-                print("  [FAIL] State verification failed.")
-                return False
+        if entity and expect_state and not wait_for_state(entity, expect_state):
+            print("  [FAIL] State verification failed.")
+            return False
 
         time.sleep(2) # Stability pause
 

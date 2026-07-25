@@ -72,7 +72,7 @@ async def search(
     library_only: bool = True,
 ) -> list[dict[str, Any]]:
     """Search MA for media items via HA proxy.
-    
+
     Args:
         query: Search query string
         mass_entry_id: MA config entry ID from HA
@@ -81,7 +81,7 @@ async def search(
         artist: Artist name to refine search
         album: Album name to refine search
         library_only: Restrict search results to local library items only
-    
+
     Returns:
         List of media items with name, uri, type fields
     """
@@ -166,7 +166,7 @@ async def get_library(
     order_by: str = "",
 ) -> list[dict[str, Any]]:
     """Get library content from MA via HA proxy.
-    
+
     Args:
         media_type: MediaType string - PLAYLIST, TRACK, ALBUM, ARTIST, RADIO
         limit: Max results
@@ -174,7 +174,7 @@ async def get_library(
         favorite: Only return favorites
         search: Filter by search term
         order_by: Sort order
-    
+
     Returns:
         List of library items
     """
@@ -234,10 +234,10 @@ async def get_queue(
     entity_id: str,
 ) -> dict[str, Any]:
     """Get active queue for an MA player entity.
-    
+
     Args:
         entity_id: HA media_player entity_id (e.g., 'media_player.office_speaker')
-    
+
     Returns:
         Queue dict with items, current_item, state, etc.
     """
@@ -299,13 +299,13 @@ async def play_media(
     enqueue: str = "replace",
 ) -> dict:
     """Play media on an MA player via HA.
-    
+
     Args:
         entity_id: HA media_player entity_id
         media_id: URI or search query to play
         media_type: content type
         enqueue: play mode (replace, next, add, etc.)
-    
+
     Returns:
         Service call result
     """
@@ -332,7 +332,7 @@ async def play_media(
 
 async def get_ma_players(ha_url: str, ha_token: str) -> list[dict[str, Any]]:
     """Get all MA player entities from HA.
-    
+
     Returns:
         List of player info dicts
     """
@@ -376,7 +376,7 @@ async def get_recently_played(
     limit: int = 10,
 ) -> list[dict[str, Any]]:
     """Get recently played items from MA via HA proxy.
-    
+
     Uses get_library with TRACK type and library_only=False to get recently played.
     MA tracks are ordered by recently_played rank when no order_by specified.
     """

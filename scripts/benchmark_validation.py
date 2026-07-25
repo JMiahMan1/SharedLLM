@@ -1,5 +1,6 @@
 import ast
 import asyncio
+import contextlib
 import json
 import os
 import time
@@ -20,11 +21,9 @@ MODELS = ["qwen2.5-coder:7b", "qwen3.5:9b"]
 async def unload_model(model):
     async with httpx.AsyncClient(timeout=30.0) as client:
         print(f"Unloading model: {model}...")
-        try:
+        with contextlib.suppress(Exception):
             # Sending keep_alive: 0 to force immediate eviction
             await client.post(f"{OLLAMA_URL}/api/generate", json={"model": model, "keep_alive": 0})
-        except:
-            pass
 
 def validate_code(code: str):
     try:
@@ -45,8 +44,10 @@ def validate_code(code: str):
                 has_class = True
                 for item in node.body:
                     if isinstance(item, ast.FunctionDef):
-                        if item.name == "acquire": has_acquire = True
-                        if item.name == "release": has_release = True
+                        if item.name == "acquire":
+                            has_acquire = True
+                        if item.name == "release":
+                            has_release = True
 
         return {
             "valid_syntax": True,

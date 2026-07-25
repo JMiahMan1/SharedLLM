@@ -25,7 +25,6 @@ import json
 import os
 import sys
 import time
-import base64
 
 import requests  # reliable JSON/Content-Type handling (urllib forced form-urlencoded)
 

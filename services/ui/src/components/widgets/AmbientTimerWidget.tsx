@@ -83,7 +83,6 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
   }, []);
 
   useEffect(() => {
-    fetchTimers();
     const interval = setInterval(fetchTimers, 10000);
     return () => clearInterval(interval);
   }, [fetchTimers]);

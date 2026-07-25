@@ -287,7 +287,7 @@ class DNSResolver:
 
             sock.sendto(query, (self.upstream_dns, 53))
 
-            data, addr = sock.recvfrom(1024)
+            data, _addr = sock.recvfrom(1024)
             sock.close()
 
             return self._parse_dns_response(data)
@@ -369,7 +369,7 @@ class DNSServer:
         asyncio.ensure_future(self._refresh_periodic())
 
         # Start receiving
-        transport, protocol = await loop.create_datagram_endpoint(
+        _transport, _protocol = await loop.create_datagram_endpoint(
             lambda: DNSProtocol(self.resolver),
             local_addr=('0.0.0.0', self.port)
         )

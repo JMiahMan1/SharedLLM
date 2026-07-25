@@ -36,7 +36,7 @@ async def probe(session, url, timeout):
             await resp.read()
             dt = (time.monotonic() - t0) * 1000.0
             return resp.status, dt
-    except asyncio.TimeoutError:
+    except TimeoutError:
         return ("TIMEOUT", (time.monotonic() - t0) * 1000.0)
     except Exception as e:  # connection reset / refused / 000
         return (f"ERR:{type(e).__name__}", (time.monotonic() - t0) * 1000.0)
@@ -62,7 +62,7 @@ async def run(duration, concurrency, url, timeout):
 
     statuses = Counter(s for s, _ in results)
     lat = [dt for s, dt in results if isinstance(s, int) and s == 200]
-    print(f"\n=== NET PATH TEST ===")
+    print("\n=== NET PATH TEST ===")
     print(f"target          : {url}")
     print(f"duration        : {duration}s  concurrency: {concurrency}")
     print(f"total probes    : {len(results)}")

@@ -15,9 +15,9 @@ import socket
 import struct
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse
-import urllib.request
 
 # Try to import docker library for container discovery
 try:
@@ -137,7 +137,7 @@ def discover_networks():
 
 def discover_containers_via_docker():
     """Discover all containers and their IPs via Docker API.
-    
+
     Returns dict of service_name -> {ip, host_networked}
     """
     if not DOCKER_AVAILABLE:
@@ -200,7 +200,7 @@ def discover_containers_via_docker():
 
 def build_dns_records(containers, host_ip):
     """Build DNS records mapping hostnames to IPs.
-    
+
     For host-networked services, use host IP.
     For Docker-networked services, use container IP.
     """
@@ -390,10 +390,7 @@ def check_ip_alive_http(ip, port, path="/health"):
         sock.close()
 
         # Check for 200 OK
-        if response.startswith(b"HTTP/1.0 200") or response.startswith(b"HTTP/1.1 200"):
-            return True
-
-        return False
+        return bool(response.startswith(b"HTTP/1.0 200") or response.startswith(b"HTTP/1.1 200"))
     except Exception:
         return False
 

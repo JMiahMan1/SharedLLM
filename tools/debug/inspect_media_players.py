@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import contextlib
 import logging
 import os
 import sys
@@ -14,10 +15,8 @@ load_dotenv()
 
 # Env setup (mimic app settings without importing whole app if possible, or minimal import)
 _ha_url_from_app: str | None = None
-try:
+with contextlib.suppress(ImportError):
     from app.settings import HA_URL as _ha_url_from_app
-except ImportError:
-    pass
 
 HA_URL: str = _ha_url_from_app or os.getenv("HA_URL", "")  # type: ignore[assignment]
 HA_TOKEN: str = os.getenv("HA_ENV_TOKEN", "") or os.getenv("HA_TOKEN", "")  # type: ignore[assignment]

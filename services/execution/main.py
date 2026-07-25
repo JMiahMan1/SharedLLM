@@ -9,19 +9,19 @@ import secrets
 import time
 import traceback
 import warnings
-from datetime import date as date_cls, timedelta
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from datetime import date as date_cls
+from datetime import timedelta
 from typing import Any
+
+# Suppress InsecureRequestWarning for internal self-signed certs (homelab)
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 import aiohttp
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-
-# Suppress InsecureRequestWarning for internal self-signed certs (homelab)
-from urllib.parse import parse_qs, urlparse
-
 from urllib3.exceptions import InsecureRequestWarning
 
 from services.common.http import get_client
@@ -35,7 +35,6 @@ from services.config import (
     INTERNAL_SECRET,
     OLLAMA_URL,
 )
-from services.shared.rag_client import push_telemetry_alert
 
 # Now import everything from sibling modules
 from services.execution import device_registry, ha_client
@@ -116,6 +115,7 @@ from services.execution.schemas import (
 )
 from services.execution.tts import text_to_speech as _text_to_speech
 from services.shared.info_endpoint import info_router
+from services.shared.rag_client import push_telemetry_alert
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] [%(name)s] %(message)s')
@@ -127,7 +127,7 @@ detect_tv_type = _detect_tv_type
 
 async def resolve_internal_user(user_id: int | None = None, rag_user: str | None = None) -> dict[str, Any] | None:
     """Query Identity Service for full user credentials using internal secret.
-    
+
     If called with a single positional arg, auto-detect: int -> user_id param, str -> rag_user param.
     """
     payload: dict[str, Any] = {}
@@ -225,22 +225,16 @@ async def telemetry_ingestion_loop(interval_seconds: int = 60):
                     if power_attr:
                         attr_value = attrs.get(power_attr)
                         if attr_value is not None:
-                            try:
+                            with suppress(TypeError, ValueError):
                                 power_w = float(attr_value)
-                            except (TypeError, ValueError):
-                                pass
 
                     if power_w is None:
                         if raw not in (None, "unavailable", "unknown"):
-                            try:
+                            with suppress(TypeError, ValueError):
                                 power_w = float(raw)
-                            except (TypeError, ValueError):
-                                pass
                         if power_w is None and "current_power_w" in attrs:
-                            try:
+                            with suppress(TypeError, ValueError):
                                 power_w = float(attrs.get("current_power_w"))
-                            except (TypeError, ValueError):
-                                pass
                     snapshot = {
                         "entity_id": entity_id,
                         "power_w": power_w,
@@ -423,10 +417,8 @@ async def lifespan(app: FastAPI):
 
     yield
     telemetry_task.cancel()
-    try:
+    with suppress(Exception):
         await telemetry_task
-    except Exception:
-        pass
     media_server.join(timeout=5)
     log.info("Execution Bridge shutting down.")
 
@@ -477,10 +469,10 @@ def get_public_host():
 
 async def verify_playback(ha_url: str, ha_token: str, entity_id: str, expected_media_url: str, timeout: int = 10, device_type: str = "unknown") -> dict[str, Any]:
     """Verify that a media player actually started playing the expected content.
-    
+
     For speakers/Chromecast: requires 'playing' state with matching media URL.
     For TVs: accepts 'on' or 'idle' state since TVs don't always report 'playing' for audio.
-    
+
     Returns dict with: verified (bool), state, media_content_id, app_name, detail
     """
     import time
@@ -775,7 +767,6 @@ async def execute_trigger(payload: dict[str, Any]):
                 return _ok(f"Triggered {timer_data.get('title')} but TTS failed", "automation_trigger")
 
             from uuid import uuid4
-            import time
             audio_key = f"tts-timer-{uuid4().hex[:8]}"
             TEMP_AUDIO_CACHE[audio_key] = audio_bytes
 
@@ -866,7 +857,7 @@ async def execute_docker(req: DockerComposeRequest):
         log.info(f"[docker] Running docker-compose up -d --build for services: {services}")
         try:
             # We run this from the workspace root where docker-compose.yml is
-            cmd = ["docker-compose", "up", "-d", "--build"] + list(services)
+            cmd = ["docker-compose", "up", "-d", "--build", *list(services)]
             from services.config import COMPOSE_PROJECT_DIR
             compose_dir = COMPOSE_PROJECT_DIR or os.path.expanduser("~/workspace")
             res = subprocess.run(cmd, capture_output=True, text=True, cwd=compose_dir)
@@ -2430,10 +2421,7 @@ async def execute_ha_config(req: "HAConfigRequest"):
 async def execute_media_group(req):
     """Manage media device groups."""
     from schemas_groups import MediaGroupRequest
-    if isinstance(req, BaseModel):
-        dump = req.model_dump()
-    else:
-        dump = req
+    dump = req.model_dump() if isinstance(req, BaseModel) else req
     if "user_context" not in dump:
         dump["user_context"] = UserContext(user="")
     parsed = MediaGroupRequest(**dump)
@@ -2446,10 +2434,7 @@ async def execute_media_group(req):
 async def execute_light_cluster(req):
     """Manage light clusters."""
     from schemas_groups import LightClusterRequest
-    if isinstance(req, BaseModel):
-        dump = req.model_dump()
-    else:
-        dump = req
+    dump = req.model_dump() if isinstance(req, BaseModel) else req
     if "user_context" not in dump:
         dump["user_context"] = UserContext(user="")
     parsed = LightClusterRequest(**dump)
@@ -2539,10 +2524,8 @@ async def transcribe_audio(file: UploadFile = File(...), model: str = "base", la
             content={"status": "FAILURE", "message": f"Transcription failed: {e}"}
         )
     finally:
-        try:
+        with suppress(Exception):
             os.unlink(tmp_path)
-        except Exception:
-            pass
 
 
 # ─── Voice Command Routing ────────────────────────────────────────────────────
@@ -2570,10 +2553,7 @@ async def execute_voice_command(req: dict, x_internal_secret: str = Header(None)
         entity_id = req.get("entity_id", "")
         if not entity_id:
             return {"status": "FAILURE", "message": "entity_id required for light commands"}
-        if "turn on" in transcript or "on" in transcript or "dim" in transcript or "brightness" in transcript:
-            action = "turn_on"
-        else:
-            action = "turn_off"
+        action = "turn_on" if "turn on" in transcript or "on" in transcript or "dim" in transcript or "brightness" in transcript else "turn_off"
         brightness_pct = None
         if "dim" in transcript or "brightness" in transcript:
             brightness_pct = 50

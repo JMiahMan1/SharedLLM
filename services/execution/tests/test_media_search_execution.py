@@ -35,7 +35,7 @@ async def test_execution_search_ma_library_only_default_not_found(client):
             assert resp.json() == {"status": "SUCCESS", "results": [], "query": "Miles Davis", "source": "ha"}
 
             # Verify the service call to HA included library_only=True
-            called_ha_url, called_ha_token, called_action, called_data = mock_ha_call.call_args[0]
+            _called_ha_url, _called_ha_token, called_action, called_data = mock_ha_call.call_args[0]
             assert called_action == "search"
             assert called_data["name"] == "Miles Davis"
             assert called_data["library_only"] is True
@@ -66,7 +66,7 @@ async def test_execution_search_ma_not_library_only_found(client):
             assert resp.json()["results"][0]["name"] == "Miles Davis - So What"
 
             # Verify the service call to HA included library_only=False
-            called_ha_url, called_ha_token, called_action, called_data = mock_ha_call.call_args[0]
+            _called_ha_url, _called_ha_token, _called_action, called_data = mock_ha_call.call_args[0]
             assert called_data["library_only"] is False
 
 
