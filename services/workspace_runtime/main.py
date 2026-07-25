@@ -2997,7 +2997,13 @@ async def websocket_terminal(
                     if not is_ctrl:
                         # Raw input - send to exec stdin
                         try:
-                            sock.write(msg.encode())
+                            # docker-py 7.x exec_start(socket=True) returns a read-only
+                            # SocketIO; use the underlying raw socket for writing
+                            raw = getattr(sock, "_sock", None)
+                            if raw is not None:
+                                raw.sendall(msg.encode())
+                            else:
+                                sock.write(msg.encode())
                         except Exception:
                             pass
             except Exception as e:
