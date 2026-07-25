@@ -34,7 +34,7 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     y: 0,
   });
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
-  const mountedRef = useRef(true);
+  const menuLeaveRef = useRef(false);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -48,6 +48,27 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     }
     return () => document.removeEventListener('mousedown', handleClick);
   }, [menuPos.visible]);
+
+  // Close menu when mouse leaves after right-click
+  useEffect(() => {
+    if (!menuPos.visible) return;
+    menuLeaveRef.current = false;
+    const timeout = setTimeout(() => {
+      if (!menuLeaveRef.current) {
+        setMenuPos(prev => ({ ...prev, visible: false }));
+      }
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [menuPos.visible]);
+
+  const handleMenuMouseLeave = useCallback(() => {
+    menuLeaveRef.current = true;
+    setTimeout(() => {
+      if (menuLeaveRef.current) {
+        setMenuPos(prev => ({ ...prev, visible: false }));
+      }
+    }, 200);
+  }, []);
 
   const handleContextMenu = useCallback((e: Event) => {
     e.preventDefault();
@@ -79,7 +100,7 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
             const text = await navigator.clipboard.readText();
             ws?.send(text);
           } catch {
-            /* clipboard access denied */
+            term?.writeln('\r\n\x1b[33mPaste failed: clipboard access denied\x1b[0m');
           }
         },
         disabled: !isConnected,
@@ -194,7 +215,6 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     if (ref.current) ro.observe(ref.current);
 
     return () => {
-      mountedRef.current = false;
       term.element!.removeEventListener('contextmenu', handleContextMenu);
       window.removeEventListener('resize', onResize);
       ro.disconnect();
@@ -217,6 +237,7 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
           className="fixed z-50 min-w-[160px] bg-[#1e293b] border border-[#334155] rounded shadow-lg py-1"
           style={{ left: menuPos.x, top: menuPos.y }}
           onClick={(e) => e.stopPropagation()}
+          onMouseLeave={handleMenuMouseLeave}
         >
           {menuItems.map((item, idx) => (
             <button
