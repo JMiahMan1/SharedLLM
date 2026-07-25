@@ -2601,7 +2601,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # Consecutive textual (no-tool-call) responses tolerated before the loop
     # decides the agent is stuck and terminates. Without this, a single plan-as-
     # text reply after the first tool call ends the whole mission prematurely.
-    MAX_IDLE_NUDGES = 6
+    MAX_IDLE_NUDGES = 12
     loop_start = asyncio.get_event_loop().time()
     exec_data = None
     ans = ""
@@ -3270,7 +3270,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # for MAX_IDLE_NUDGES consecutive no-tool replies (runaway guard).
                 if _consecutive_no_tool >= MAX_IDLE_NUDGES:
                     log.error(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} tool call(s). Terminating to prevent runaway.")
-                    ans = "ERROR: Agent stalled — produced no tool calls for several turns after making progress. Last response: " + (ans[:200] if ans else "empty")
+                    ans = (
+                        "ERROR: Agent stalled — produced no tool calls for several turns after making progress. "
+                        "Last response: " + (ans[:200] if ans else "empty")
+                        + "\n\nPOSSIBLE CAUSES:\n"
+                        "- The model got confused by its own output and needs a fresh prompt\n"
+                        "- A tool call was syntactically invalid and was silently ignored\n"
+                        "- The model ran out of context or hit a quality ceiling\n\n"
+                        "RECOMMENDED FIX: Retry the mission with a more specific, step-by-step prompt. "
+                        "Break the work into smaller subtasks (e.g. 'Step 1: create the workspace, Step 2: write the file, Step 3: run the test'). "
+                        "If the issue persists, increase the model size or reduce the mission scope."
+                    )
                     await _clear_checkpoint()
                     break
                 log.warning(f"[AgentLoop] Textual reply after progress (idle {_consecutive_no_tool}/{MAX_IDLE_NUDGES}); nudging to continue with tool calls.")
