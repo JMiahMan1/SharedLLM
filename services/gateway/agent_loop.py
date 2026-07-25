@@ -2696,8 +2696,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         raven_max_total = int(str((settings or {}).get("raven_max_total_seconds", RAVEN_MAX_TOTAL_SECONDS)).strip())
     except (ValueError, TypeError):
         raven_max_total = RAVEN_MAX_TOTAL_SECONDS
-    if raven_max_total < 1:
-        raven_max_total = RAVEN_MAX_TOTAL_SECONDS
+    if raven_max_total <= 0:
+        raven_max_total = float("inf")  # 0 = no lifetime cap
 
     async def _compress_context() -> tuple[str, str]:
         """Compress action_log into a summary + recent entries to prevent context bloat.
@@ -2787,7 +2787,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             }
             await r_cp.setex(
                 f"raven:checkpoint:{mission_id}",
-                raven_max_total + 60,
+                (raven_max_total if raven_max_total != float("inf") else RAVEN_MAX_TOTAL_SECONDS) + 60,
                 json.dumps(cp_data),
             )
             # NOTE: do NOT close r_cp — shared singleton; see checkpoint-load comment.
