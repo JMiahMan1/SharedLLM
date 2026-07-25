@@ -305,6 +305,35 @@ export default function RavenOpsPanel() {
             </button>
           </div>
         </div>
+
+        <div className="glass-card p-4 border border-white/10 flex flex-col justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-2 flex items-center gap-2">
+              <Clock size={12} /> Mission Lifetime Cap
+            </p>
+            <p className="text-sm text-slate-300 mb-4">Max total mission runtime in seconds. Set 0 for unlimited.</p>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              min={0}
+              step={60}
+              value={currentConfig.raven_max_total_seconds ?? 1800}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                setDraftConfig({ ...draftConfig, raven_max_total_seconds: isNaN(val) ? 0 : val });
+              }}
+              className="glass-input flex-1 text-xs"
+            />
+            <button
+              onClick={() => updateConfigMutation.mutate({ raven_max_total_seconds: currentConfig.raven_max_total_seconds })}
+              disabled={updateConfigMutation.isPending}
+              className="glass-button px-3 py-1 text-[10px] font-black uppercase"
+            >
+              Set
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 mt-6">
