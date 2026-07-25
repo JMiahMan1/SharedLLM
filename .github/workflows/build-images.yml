@@ -176,9 +176,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-base
           tags: |
-            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -251,9 +251,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-${{ matrix.service }}
           tags: |
-            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
       - name: Set build args
         id: build-args
@@ -315,9 +315,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-ui
           tags: |
-            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
       - name: Set build args
         id: build-args
@@ -376,9 +376,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.REPO_NAME }}-caddy
           tags: |
-            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' }}
-            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ steps.sha.outputs.short }},enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+            type=raw,value=${{ steps.slug.outputs.slug }},enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
