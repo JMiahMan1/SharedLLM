@@ -2924,7 +2924,7 @@ async def websocket_terminal(
 
     # ---- Create PTY exec ----
     try:
-        shell_cmd = ["/bin/bash"]
+        shell_cmd = ["/bin/bash", "-i"]
         log.debug(f"[terminal] Creating PTY exec for container {cname} at {host_path}")
         try:
             test_exec = docker_client.api.exec_create(
@@ -2932,7 +2932,7 @@ async def websocket_terminal(
             )
             docker_client.api.exec_start(test_exec["Id"])
         except Exception:
-            shell_cmd = ["/bin/sh"]
+            shell_cmd = ["/bin/bash", "-i"]
 
         exec_resp = docker_client.api.exec_create(
             cname,
