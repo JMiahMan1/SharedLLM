@@ -83,7 +83,6 @@ async def launch_browser(headless=True, is_mobile=False):
         )
         ctx = await p.chromium.launch_persistent_context(
             user_data_dir=f"/tmp/pw_scraper_{hash(os.getpid()) % 10000}",
-            channel="chrome",
             viewport={"width": 390, "height": 844},
             user_agent=mobile_ua,
         )
