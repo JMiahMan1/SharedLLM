@@ -189,6 +189,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {
     "talkrequest": "/execute/talk",
     "websearchrequest": "/execute/web_search",
     "webreadrequest": "/execute/web_read",
+    "webscraperrequest": "/execute/web_scraper",
     "dockerlogsrequest": "/execute/docker_logs",
     "dockercomposerequest": "/execute/docker",
     "gitoperationrequest": "/execute/git",

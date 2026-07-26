@@ -105,6 +105,7 @@ from services.execution.schemas import (
     VideoPlayRequest,
     VolumeInventoryRequest,
     WebReadRequest,
+    WebScraperRequest,
     WebSearchRequest,
     WorkspaceFilePatchRequest,
     WorkspaceFileReadRequest,
@@ -721,6 +722,11 @@ async def execute_web_search(req: WebSearchRequest):
 @app.post("/execute/web_read", response_model=ExecutionResult)
 async def execute_web_read(req: WebReadRequest):
     return await browser.handle_web_read(req)
+
+@app.post("/execute/web_scraper", response_model=ExecutionResult)
+async def execute_web_scraper(req: WebScraperRequest):
+    from services.execution.handlers import webscraper
+    return await webscraper.handle_web_scraper(req)
 
 @app.get("/execute/timers")
 async def list_timers(user_id: str | None = None):
