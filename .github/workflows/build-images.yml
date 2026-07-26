@@ -91,6 +91,8 @@ jobs:
               - 'services/common/**'
               - 'services/config.py'
               - 'services/workspace_sandbox.py'
+              - 'tools/webscraper.py'
+              - 'tools/vision_ocr.py'
               - '.github/workflows/build-images.yml'
             storage:
               - 'services/storage/**'
