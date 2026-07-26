@@ -81,8 +81,8 @@ async def launch_browser(headless=True, is_mobile=False):
             "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 "
             "Mobile/15E148 Safari/604.1"
         )
-        ctx = await p.chromium.launch_persistent_context(
-            user_data_dir=f"/tmp/pw_scraper_{hash(os.getpid()) % 10000}",
+        browser = await p.chromium.launch(headless=headless)
+        ctx = await browser.new_context(
             viewport={"width": 390, "height": 844},
             user_agent=mobile_ua,
         )
