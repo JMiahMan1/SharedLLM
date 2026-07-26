@@ -43,6 +43,7 @@ class ScrapeResult:
     source: str
     prices: list[PriceItem] = field(default_factory=list)
     raw_ocr: str = ""
+    ocr_data: dict | None = None
     screenshot_path: str = ""
     error: str = ""
 
@@ -112,25 +113,48 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
         await page.screenshot(path=str(screenshot_path), full_page=True)
         result.screenshot_path = str(screenshot_path)
 
-        # OCR
-        ocr_output = output_dir / f"ocr_{result.source}_{hash(query) % 10000}"
-        ocr_cmd = [
-            "tesseract",
-            str(screenshot_path),
-            str(ocr_output),
-            "--psm", "6",
-        ]
-        ocr_result = subprocess.run(ocr_cmd, capture_output=True, text=True, timeout=120)
+        # Vision OCR (Qwen2.5-VL via proxy)
+        try:
+            from vision_ocr import extract_text
+            ocr_result_data = extract_text(str(screenshot_path), task="price_scrape")
+            result.raw_ocr = ocr_result_data.get("full_text", "")
+            result.ocr_data = ocr_result_data
+        except Exception as ocr_err:
+            # Fallback to Tesseract if vision OCR unavailable
+            ocr_output = output_dir / f"ocr_{result.source}_{hash(query) % 10000}"
+            ocr_cmd = [
+                "tesseract",
+                str(screenshot_path),
+                str(ocr_output),
+                "--psm", "6",
+            ]
+            ocr_result = subprocess.run(ocr_cmd, capture_output=True, text=True, timeout=120)
 
-        ocr_txt = f"{ocr_output}.txt"
-        if os.path.exists(ocr_txt):
-            with open(ocr_txt, "r") as f:
-                result.raw_ocr = f.read()
+            ocr_txt = f"{ocr_output}.txt"
+            if os.path.exists(ocr_txt):
+                with open(ocr_txt, "r") as f:
+                    result.raw_ocr = f.read()
+            else:
+                result.raw_ocr = ""
+                if not result.error:
+                    result.error = f"Vision OCR failed: {ocr_err}. Tesseract also failed."
+
+        # Extract prices — use vision OCR structured items when available
+        if "ocr_data" in vars(result) and result.ocr_data and "items" in result.ocr_data:
+            for item in result.ocr_data["items"]:
+                try:
+                    result.prices.append(
+                        PriceItem(
+                            product=item.get("product", ""),
+                            price=float(item["price"]) if item.get("price") else 0.0,
+                            shipping=0.0,
+                            total=float(item["price"]) if item.get("price") else 0.0,
+                        )
+                    )
+                except (ValueError, TypeError):
+                    pass
         else:
-            result.error = "OCR output file not created"
-
-        # Extract prices
-        result.prices = extract_prices(result.raw_ocr)
+            result.prices = extract_prices(result.raw_ocr)
 
     except subprocess.TimeoutExpired:
         result.error = "OCR timed out"
@@ -213,6 +237,19 @@ def _parse_amazon(ocr_text: str, html_snippet: str = "") -> list[PriceItem]:
     price_pattern = re.compile(r"\$\s*([\d,]+(?:\.\d{1,2})?)")
     prime_pattern = re.compile(r"prime", re.I)
 
+    # Patterns to skip (UI noise, not product names)
+    skip_patterns = re.compile(
+        r"(bought in past|used & new offers|Now Price:|\d+\s*\(\d+\)|"
+        r"Add to cart|See options|Join Prime|delivery|shipping|"
+        r"Non-members|Tomorrow|Mon|Tue|Wed|Thu|Fri|Sat|Jul|Aug|Sep|"
+        r"Conditions of Use|Privacy|Amazon\.com|Your Orders|AmazonFresh|"
+        r"Gift Cards|Registry|Browsing History|Customer Service)",
+        re.I
+    )
+
+    def is_noise(line: str) -> bool:
+        return bool(skip_patterns.search(line)) or len(line) < 10
+
     i = 0
     while i < len(lines):
         line = lines[i].strip()
@@ -224,11 +261,17 @@ def _parse_amazon(ocr_text: str, html_snippet: str = "") -> list[PriceItem]:
                 i += 1
                 continue
 
-            # Look for product name in nearby lines
+            # Skip if price is absurdly high (likely OCR error) or low for GPUs
+            if price > 10000 or price < 10:
+                i += 1
+                continue
+
+            # Look for product name in nearby lines - skip noise
             product_name = ""
-            for j in range(max(0, i - 4), i):
+            for j in range(max(0, i - 6), i):
                 candidate = lines[j].strip()
-                if candidate and len(candidate) > 15 and not candidate.startswith("$") and not candidate.startswith("Prime"):
+                if (candidate and len(candidate) > 12 and not candidate.startswith("$")
+                        and not candidate.startswith("Prime") and not is_noise(candidate)):
                     product_name = candidate
                     break
 

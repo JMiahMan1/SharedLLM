@@ -12,6 +12,7 @@ python-dateutil
 python-multipart
 redis
 playwright
+Pillow>=10.0.0
 html2text
 docker>=7.0.0
 kokoro-onnx
