@@ -1,8 +1,6 @@
 """Tests for the webscraper execution handler."""
 
 import asyncio
-import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -136,7 +134,7 @@ async def test_handle_web_scraper_timeout(sample_request, mocker):
 
     # Simulate timeout
     async def mock_wait_for(coro, timeout):
-        raise asyncio.TimeoutError("timed out")
+        raise TimeoutError("timed out")
 
     mocker.patch("asyncio.wait_for", mock_wait_for)
 
