@@ -2539,6 +2539,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "talkrequest": (EXECUTION_SVC, "/execute/talk"),
                 "websearchrequest": (EXECUTION_SVC, "/execute/web_search"),
                 "webreadrequest": (EXECUTION_SVC, "/execute/web_read"),
+                "webscraperrequest": (EXECUTION_SVC, "/execute/web_scraper"),
                 "dockerlogsrequest": (EXECUTION_SVC, "/execute/docker_logs"),
                 "gitoperationrequest": (EXECUTION_SVC, "/execute/git"),
                 "deploymentrequest": (EXECUTION_SVC, "/execute/deploy"),

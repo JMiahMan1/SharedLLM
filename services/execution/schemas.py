@@ -635,6 +635,19 @@ class WebReadRequest(BaseRequest):
     use_current_user_auth: bool = False
 
 
+class WebScraperRequest(BaseRequest):
+    """Scrapes product prices from e-commerce sites using Playwright + Tesseract OCR."""
+    user_context: UserContext
+    query: str = Field(description="Search query to look for products")
+    urls: list[str] = Field(
+        default=["ebay", "amazon", "newegg"],
+        description="URL sources to scrape. Valid named sources: ebay, amazon, newegg, aliexpress, google_shopping. Or full custom URLs."
+    )
+    mobile: bool = Field(False, description="Use mobile viewport (bypasses some captchas)")
+    headless: bool = Field(True, description="Run browser headless")
+    output_file: str | None = Field(None, description="Optional JSON output file path for results")
+
+
 # ─── Ouroboros Autonomous Loop ───────────────────────────────────────────────
 
 class DockerLogsRequest(BaseRequest):
@@ -858,4 +871,6 @@ class ResolveStreamRequest(BaseRequest):
     """Request to resolve a media query (track name, video title, etc.) into a playable stream URL."""
     user_context: UserContext
     query: str
+    media_type: str | None = Field(None, description="Type of media to resolve: track, video, playlist")
+    max_results: int | None = Field(None, description="Maximum number of stream results to return")
 
