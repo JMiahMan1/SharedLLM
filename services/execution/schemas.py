@@ -648,6 +648,21 @@ class WebScraperRequest(BaseRequest):
     output_file: str | None = Field(None, description="Optional JSON output file path for results")
 
 
+class CodeSearchRequest(BaseRequest):
+    """Searches GitHub and GitLab repositories for code snippets."""
+    user_context: UserContext
+    query: str = Field(description="Code search query (function names, patterns, keywords)")
+    sources: list[str] = Field(
+        default=["github", "gitlab"],
+        description="Sources to search: github, gitlab"
+    )
+    language: str | None = Field(None, description="Filter by programming language (e.g. python, javascript)")
+    owner: str | None = Field(None, description="GitHub user/org or GitLab namespace to narrow search")
+    repo: str | None = Field(None, description="Specific GitHub repo (format: owner/repo)")
+    max_results: int | None = Field(20, ge=1, le=100, description="Maximum results per source (default: 20)")
+    output_file: str | None = Field(None, description="Optional JSON output file path for results")
+
+
 # ─── Ouroboros Autonomous Loop ───────────────────────────────────────────────
 
 class DockerLogsRequest(BaseRequest):

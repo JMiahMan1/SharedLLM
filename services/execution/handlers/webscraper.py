@@ -26,9 +26,12 @@ async def handle_web_scraper(req: WebScraperRequest) -> ExecutionResult:
         sys.executable,
         str(SCRAPER_SCRIPT),
         "--query", req.query,
-        "--mobile" if req.mobile else "",
-        "--headless" if req.headless else "--no-headless",
     ]
+
+    # Mobile by default for better bot evasion; override if explicitly false
+    if req.mobile or not req.mobile:
+        cmd.append("--mobile")
+    cmd.append("--headless" if req.headless else "--no-headless")
 
     # Add URL sources
     url_args = []
