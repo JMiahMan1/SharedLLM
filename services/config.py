@@ -56,9 +56,9 @@ def _net_url(name: str, default: str = "") -> str:
     hardcoded defaults — if the appropriate network-mode variable is not set
     the caller receives ``default`` (empty string by default) and must fail fast.
     """
-    val = os.getenv(f"{NETWORK_MODE}_{name}_SVC_URL")
+    val = os.getenv(f"{NETWORK_MODE.upper()}_{name}_SVC_URL")
     if not val:
-        logging.warning(f"WARNING: {NETWORK_MODE}_{name}_SVC_URL is not set in the environment. Service connectivity may fail.")
+        logging.warning(f"WARNING: {NETWORK_MODE.upper()}_{name}_SVC_URL is not set in the environment. Service connectivity may fail.")
     return val or default
 
 # --- Identity service endpoint (bootstrap only) ---
