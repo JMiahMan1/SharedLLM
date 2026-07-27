@@ -32,24 +32,24 @@ def _resolve_ocr_model() -> str:
 
     Raises ValueError if no model is configured in the identity settings.
     """
-    # Try identity settings via gateway or local URL
-    for candidate in (
-        os.environ.get("GATEWAY_URL", ""),
-        os.environ.get("LLM_LOCAL_URL", ""),
-    ):
-        candidate = candidate.rstrip("/")
-        if not candidate:
-            continue
-        try:
-            with httpx.Client(timeout=3.0) as client:
-                resp = client.get(f"{candidate}/api/settings")
-                if resp.status_code == 200:
-                    for s in resp.json():
-                        if s.get("key") == "vision_ocr_model" and s.get("value"):
-                            log.info(f"[vision_ocr] model resolved from settings: {s['value']}")
-                            return s["value"]
-        except Exception:
-            continue
+    # Identity service settings API (network-aware via config._net_url)
+    from services.config import IDENTITY_SVC_URL
+
+    identity_url = IDENTITY_SVC_URL.rstrip("/")
+    if not identity_url:
+        raise ValueError(
+            "IDENTITY_SVC_URL not set. Configure the Identity service URL."
+        )
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(f"{identity_url}/api/settings")
+            if resp.status_code == 200:
+                for s in resp.json():
+                    if s.get("key") == "vision_ocr_model" and s.get("value"):
+                        log.info(f"[vision_ocr] model resolved from settings: {s['value']}")
+                        return s["value"]
+    except Exception as e:
+        log.error(f"[vision_ocr] failed to resolve model from identity service at {identity_url}: {e}")
 
     raise ValueError(
         "OCR model not configured. Configure "
@@ -62,24 +62,24 @@ def _resolve_ocr_proxy() -> str:
 
     Raises ValueError if no proxy URL is configured in the identity settings.
     """
-    # Try identity settings via gateway or local URL
-    for candidate in (
-        os.environ.get("GATEWAY_URL", ""),
-        os.environ.get("LLM_LOCAL_URL", ""),
-    ):
-        candidate = candidate.rstrip("/")
-        if not candidate:
-            continue
-        try:
-            with httpx.Client(timeout=3.0) as client:
-                resp = client.get(f"{candidate}/api/settings")
-                if resp.status_code == 200:
-                    for s in resp.json():
-                        if s.get("key") == "vision_ocr_proxy_url" and s.get("value"):
-                            log.info(f"[vision_ocr] proxy resolved from settings: {s['value']}")
-                            return s["value"].rstrip("/")
-        except Exception:
-            continue
+    # Identity service settings API (network-aware via config._net_url)
+    from services.config import IDENTITY_SVC_URL
+
+    identity_url = IDENTITY_SVC_URL.rstrip("/")
+    if not identity_url:
+        raise ValueError(
+            "IDENTITY_SVC_URL not set. Configure the Identity service URL."
+        )
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(f"{identity_url}/api/settings")
+            if resp.status_code == 200:
+                for s in resp.json():
+                    if s.get("key") == "vision_ocr_proxy_url" and s.get("value"):
+                        log.info(f"[vision_ocr] proxy resolved from settings: {s['value']}")
+                        return s["value"].rstrip("/")
+    except Exception as e:
+        log.error(f"[vision_ocr] failed to resolve proxy from identity service at {identity_url}: {e}")
 
     raise ValueError(
         "OCR proxy URL not configured. Configure "

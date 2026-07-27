@@ -51,12 +51,15 @@ NETWORK_MODE = os.getenv("NETWORK_MODE", "bridge").lower()
 def _net_url(name: str, default: str = "") -> str:
     """Resolve a service URL for the current network mode.
 
-    Prefers ``{NETWORK_MODE}_{name}_SVC_URL`` (the network-aware BRIDGE_*/HOST_*
-    sets defined in .env), then falls back to the legacy ``{name}_SVC_URL``, then
-    to a hardcoded default. This lets a container determine its network and call
-    the correct variable instead of one variable being reused for both networks.
+    Reads ``{NETWORK_MODE}_{name}_SVC_URL`` (the network-aware BRIDGE_*/HOST_*
+    set defined in .env) only. No fallback to legacy ``{name}_SVC_URL`` or
+    hardcoded defaults — if the appropriate network-mode variable is not set
+    the caller receives ``default`` (empty string by default) and must fail fast.
     """
-    return os.getenv(f"{NETWORK_MODE}_{name}_SVC_URL") or os.getenv(f"{name}_SVC_URL") or default
+    val = os.getenv(f"{NETWORK_MODE}_{name}_SVC_URL")
+    if not val:
+        logging.warning(f"WARNING: {NETWORK_MODE}_{name}_SVC_URL is not set in the environment. Service connectivity may fail.")
+    return val or default
 
 # --- Identity service endpoint (bootstrap only) ---
 IDENTITY_SVC_URL = _net_url("IDENTITY", "http://identity:8001")

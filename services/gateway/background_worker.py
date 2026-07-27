@@ -165,7 +165,7 @@ class RavenWorker:
         try:
             async with _shared_http_client() as client:
                 resp = await client.get(
-                    "http://identity:8001/api/raven/missions",
+                    f"{IDENTITY_SVC}/api/raven/missions",
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )
                 if resp.status != 200:
@@ -186,7 +186,7 @@ class RavenWorker:
                     }
                     await self.job_queue.enqueue_job("raven_resume", payload)
                     await client.patch(
-                        f"http://identity:8001/api/raven/missions/{mid}",
+                        f"{IDENTITY_SVC}/api/raven/missions/{mid}",
                         json={"status": "queued"},
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
@@ -436,7 +436,7 @@ class RavenWorker:
         try:
             async with _shared_http_client() as client:
                 resp = await client.post(
-                    "http://identity:8001/api/resolve",
+                    f"{IDENTITY_SVC}/api/resolve",
                     json={"rag_user": "default"},
                     headers={"X-Internal-Secret": INTERNAL_SECRET}
                 )

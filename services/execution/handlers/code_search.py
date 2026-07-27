@@ -40,6 +40,19 @@ async def handle_code_search(req: CodeSearchRequest) -> ExecutionResult:
     if req.repo:
         cmd.extend(["--repo", req.repo])
 
+    # Tokens from user_context
+    github_token = getattr(req.user_context, "github_token", None) or (
+        req.user_context.get("github_token") if isinstance(req.user_context, dict) else None
+    )
+    gitlab_token = getattr(req.user_context, "gitlab_token", None) or (
+        req.user_context.get("gitlab_token") if isinstance(req.user_context, dict) else None
+    )
+
+    if github_token:
+        cmd.extend(["--github-token", github_token])
+    if gitlab_token:
+        cmd.extend(["--gitlab-token", gitlab_token])
+
     # Max results
     cmd.extend(["--max-results", str(req.max_results)])
 

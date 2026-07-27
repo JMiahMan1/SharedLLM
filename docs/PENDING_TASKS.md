@@ -7,6 +7,17 @@ been removed from their source docs; tasks whose direction was superseded by a
 working alternative (e.g. the DNS relay, implemented via `dns-sync` +
 `dns-forwarder`) are also removed.
 
+## Identity Config DB — seeding & runtime integration
+Source: `services/identity/seed.py`, `services/identity/models.py`, `services/config.py`
+
+- Complete `seed.py` with all `.env` runtime keys that should persist to GlobalSettings table:
+  - Missing seeds: `ALPACA_SD_URL`, `WORKSPACE_ROOT`, `WORKSPACE_REGISTRY_PATH`, `WORKSPACE_DATABASE_URL`, `VOLUME_MANIFEST_PATH`, `VOLUME_BACKUP_ROOT`, `GIT_WEBHOOK_SECRET`, `ANNOUNCEMENT_BLACKLIST`, `LOCAL_NOTES_ROOT`, `FAST_PATH_THRESHOLD`, `MODELS_DIR`, `TEMP_MEDIA_DIR`, `SCRIPTS_DIR`, `LEGACY_ENV_PATH`, `COMPOSE_PROJECT_DIR`, `GATEWAY_INTERNAL_URL`, `LLAMA_SERVER_PROXY_URL`
+- Fix key name mismatches between seed.py and settings_map: `WORKSPACE_ROOT` vs `workspace_root`, `MODELS_DIR` vs `models_dir`, `PHRASEBOOK_PATH` vs `phrasebook_path`
+- Complete `resolve_runtime_config()` settings_map in `services/config.py` with all missing entries:
+  - Missing map keys: `MA_URL`, `MA_TOKEN`, `MODELS_DIR`/`models_dir`, `PHRASEBOOK_PATH`/`phrasebook_path`, `EXTRA_INDEX_URL`, `ALPACA_SD_URL`, `WORKSPACE_*`, `VOLUME_*`, `GIT_WEBHOOK_SECRET`, `ANNOUNCEMENT_BLACKLIST`, `LOCAL_NOTES_ROOT`, `FAST_PATH_THRESHOLD`, `TEMP_MEDIA_DIR`, `SCRIPTS_DIR`, `LEGACY_ENV_PATH`, `COMPOSE_PROJECT_DIR`, `GATEWAY_INTERNAL_URL`, `LLAMA_SERVER_PROXY_URL`
+- Verify first-run seeding (non-destructive — existing settings must not be overwritten)
+- Test runtime config resolution against live container
+
 ## Artifact Framework (`services/storage`) — not implemented
 Source: `services/storage/ARTIFACT_IMPLEMENTATION_PLAN.md` (design spec: `ARTIFACTS.md`)
 
@@ -45,3 +56,14 @@ Source: `docs/ui_stabilization_plan.md`
 
 - Enhance E2E Playwright test coverage.
 - Monitor GHA pipelines after push.
+
+## Raven Capability Gaps
+Source: `docs/RAVEN_CAPABILITY_GAP_ANALYSIS.md`, `docs/RAVEN_AUDIT_BLUEPRINT.md`, `docs/raven_learning.md`
+
+- No native browser automation tool — Raven can't test web UIs interactively
+- No screenshot/visual feedback loop — can't verify UI state or visual rendering
+- No multi-agent delegation — all work done by single LLM instance
+- CI workflow generation conditional on GitHub credentials — no automated validation without CI
+- No explicit dependency-install awareness — must discover and install deps manually
+- Loop detection escalates but doesn't auto-diagnose — Raven still needs to figure out fixes
+- No cross-workspace shared library/template reuse — each mission starts from scratch
