@@ -21,8 +21,7 @@ RUN update-alternatives --install /usr/bin/fd fd /usr/bin/fd-find 100 2>/dev/nul
 
 # Install Node.js for frontend/tooling support (npm packages)
 RUN     curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-    apt-get update && apt-get install -y nodejs npm && \
-    npm install -g npm@latest
+    apt-get update && apt-get install -y nodejs npm
 
 # Install coding-related npm packages that agentic AIs use
 RUN npm install -g \
