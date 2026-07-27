@@ -83,7 +83,7 @@ def _resolve_ocr_proxy() -> str:
                 resp = client.get(f"{candidate}/api/settings")
                 if resp.status_code == 200:
                     for s in resp.json():
-                        if s.get("key") == "llm_local_url" and s.get("value"):
+                        if s.get("key") == "vision_ocr_proxy_url" and s.get("value"):
                             log.info(f"[vision_ocr] proxy resolved from settings: {s['value']}")
                             return s["value"].rstrip("/")
         except Exception:
@@ -91,7 +91,7 @@ def _resolve_ocr_proxy() -> str:
 
     raise ValueError(
         "OCR proxy URL not configured. Set VISION_OCR_PROXY_URL env var, or configure "
-        "llm_local_url in Settings > Endpoints."
+        "vision_ocr_proxy_url in Settings > Endpoints."
     )
 
 

@@ -170,6 +170,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "coding_model", "value": "", "description": "Global coding model"},
     {"key": "librarian_model", "value": "", "description": "Global librarian/RAG model"},
     {"key": "vision_ocr_model", "value": "", "description": "Vision model for OCR/text extraction from images, screenshots, and documents (PDF pages). Default: qwen2.5-vl:7b"},
+    {"key": "vision_ocr_proxy_url", "value": "", "description": "Proxy URL for Vision OCR service (Qwen2.5-VL, or any /v1/chat/completions-compatible vision endpoint). Set in Settings > AI & Compute > Endpoints."},
 
     # --- ANTI-REFUSAL & AGENT PROTOCOLS ---
     {
