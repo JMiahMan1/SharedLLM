@@ -12,9 +12,11 @@ Usage:
 import argparse
 import asyncio
 import json
+import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from urllib.parse import quote
 
 
 @dataclass
@@ -63,7 +65,7 @@ URLS = {
 }
 
 
-async def launch_browser(headless=True, is_mobile=False):
+async def launch_browser(headless=True, is_mobile=True):
     from playwright.async_api import async_playwright  # type: ignore[import-untyped]
 
     p = await async_playwright().start()
@@ -71,21 +73,79 @@ async def launch_browser(headless=True, is_mobile=False):
     ctx = None  # type: ignore[assignment]
     browser = None  # type: ignore[assignment]
 
-    if is_mobile:
-        mobile_ua = (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 "
-            "Mobile/15E148 Safari/604.1"
-        )
-        browser = await p.chromium.launch(headless=headless)
-        ctx = await browser.new_context(
-            viewport={"width": 390, "height": 844},
-            user_agent=mobile_ua,
-        )
-        page = await ctx.new_page()
-    else:
-        browser = await p.chromium.launch(headless=headless)
-        page = await browser.new_page(viewport={"width": 1440, "height": 900})
+    launch_args = [
+        "--no-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-features=PlaywrightControl",
+        "--disable-infobars",
+        "--disable-default-apps",
+        "--disable-hang-monitor",
+        "--disable-prompt-on-repost",
+        "--disable-sync",
+        "--disable-background-timer-throttling",
+        "--disable-popup-blocking",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-renderer-backgrounding",
+        "--window-position=0,0",
+    ]
+
+    mobile_ua = (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/18.0 Mobile/15E148 Safari/604.1"
+    )
+
+    browser = await p.chromium.launch(
+        headless=headless,
+        args=launch_args
+    )
+    ctx = await browser.new_context(
+        user_agent=mobile_ua,
+        viewport={"width": 390, "height": 844},
+        locale="en-US",
+        timezone_id="America/New_York",
+        device_scale_factor=3,
+        has_touch=True,
+    )
+
+    # Remove webdriver property
+    await ctx.add_init_script("""
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+
+        // Mock plugins
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [1, 2, 3, 4, 5]
+        });
+
+        // Mock languages
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en']
+        });
+
+        // Mock chrome runtime
+        window.chrome = {
+            runtime: {},
+            loadTimes: function() {},
+            csi: function() {}
+        };
+
+        // Mock deviceMemory
+        Object.defineProperty(navigator, 'deviceMemory', {
+            get: () => 8
+        });
+
+        // Override permissions query
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+                Promise.resolve({state: Notification.permission}) :
+                originalQuery(parameters)
+        );
+    """)
+
+    page = await ctx.new_page()
 
     return p, page, ctx, browser
 
@@ -676,7 +736,8 @@ async def scrape_multiple(
     for url_template in urls:
         # Format URL with query
         if "{query}" in url_template:
-            url = url_template.format(query=query)
+            encoded_query = quote(query, safe='')
+            url = url_template.format(query=encoded_query)
         elif "{query_slug}" in url_template:
             url = url_template.format(query_slug=query.replace(" ", "-"))
         else:
@@ -729,6 +790,8 @@ def main():
         headless=args.headless,
         output_dir=args.output_dir,
         output_file=args.output,
+        ocr_model=os.environ.get("VISION_OCR_MODEL", ""),
+        ocr_proxy=os.environ.get("VISION_OCR_PROXY_URL", ""),
     ))
 
 
