@@ -28,14 +28,10 @@ log = logging.getLogger(__name__)
 # a clear error is raised so misconfiguration is immediately visible.
 
 def _resolve_ocr_model() -> str:
-    """Resolve the OCR model name from identity settings or VISION_OCR_MODEL env var.
+    """Resolve the OCR model name from identity settings (config DB).
 
-    Raises ValueError if no model is configured anywhere.
+    Raises ValueError if no model is configured in the identity settings.
     """
-    env_val = os.environ.get("VISION_OCR_MODEL", "").strip()
-    if env_val:
-        return env_val
-
     # Try identity settings via gateway or local URL
     for candidate in (
         os.environ.get("GATEWAY_URL", ""),
@@ -56,20 +52,16 @@ def _resolve_ocr_model() -> str:
             continue
 
     raise ValueError(
-        "OCR model not configured. Set VISION_OCR_MODEL env var, or configure "
+        "OCR model not configured. Configure "
         "vision_ocr_model in Settings > AI & Compute Pane."
     )
 
 
 def _resolve_ocr_proxy() -> str:
-    """Resolve the OCR proxy URL from identity settings or VISION_OCR_PROXY_URL env var.
+    """Resolve the OCR proxy URL from identity settings (config DB).
 
-    Raises ValueError if no proxy URL is configured anywhere.
+    Raises ValueError if no proxy URL is configured in the identity settings.
     """
-    env_val = os.environ.get("VISION_OCR_PROXY_URL", "").strip()
-    if env_val:
-        return env_val
-
     # Try identity settings via gateway or local URL
     for candidate in (
         os.environ.get("GATEWAY_URL", ""),
@@ -90,7 +82,7 @@ def _resolve_ocr_proxy() -> str:
             continue
 
     raise ValueError(
-        "OCR proxy URL not configured. Set VISION_OCR_PROXY_URL env var, or configure "
+        "OCR proxy URL not configured. Configure "
         "vision_ocr_proxy_url in Settings > Endpoints."
     )
 
