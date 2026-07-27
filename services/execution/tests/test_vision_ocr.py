@@ -1,30 +1,42 @@
 import os
+import sys
 import pytest
 import respx
 from httpx import Response
 
 
+def _reimport_vision_ocr():
+    """Force-reimport vision_ocr with current env by clearing cached modules."""
+    for mod in list(sys.modules):
+        if mod in ("tools.vision_ocr", "services.config"):
+            del sys.modules[mod]
+
+
 @respx.mock
-def test_resolve_ocr_model_raises_when_not_configured(monkeypatch):
-    """_resolve_ocr_model raises ValueError when no settings API is reachable."""
-    # Ensure GATEWAY_URL and LLM_LOCAL_URL are not set or empty
-    monkeypatch.setenv("GATEWAY_URL", "")
-    monkeypatch.setenv("LLM_LOCAL_URL", "")
+def test_resolve_ocr_model_raises_when_env_not_set():
+    """_resolve_ocr_model raises ValueError when BRIDGE_IDENTITY_SVC_URL is empty."""
+    _reimport_vision_ocr()
+    os.environ["BRIDGE_IDENTITY_SVC_URL"] = ""
 
     from tools.vision_ocr import _resolve_ocr_model
     with pytest.raises(ValueError, match="OCR model not configured"):
         _resolve_ocr_model()
 
+    # Restore
+    os.environ["BRIDGE_IDENTITY_SVC_URL"] = "http://localhost:8001"
+
 
 @respx.mock
-def test_resolve_ocr_model_from_settings(monkeypatch):
-    """_resolve_ocr_model returns value from settings API."""
-    monkeypatch.setenv("LLM_LOCAL_URL", "http://localhost:11434")
+def test_resolve_ocr_model_from_settings():
+    """_resolve_ocr_model returns value from identity service settings API."""
+    _reimport_vision_ocr()
+    os.environ["BRIDGE_IDENTITY_SVC_URL"] = "http://localhost:8001"
+
     settings_response = [
         {"key": "other_setting", "value": "foo"},
         {"key": "vision_ocr_model", "value": "qwen2.5-vl:7b"},
     ]
-    respx.get("http://localhost:11434/api/settings").mock(
+    respx.get("http://localhost:8001/api/settings").mock(
         return_value=Response(200, json=settings_response)
     )
 
@@ -34,25 +46,34 @@ def test_resolve_ocr_model_from_settings(monkeypatch):
 
 
 @respx.mock
-def test_resolve_ocr_proxy_raises_when_not_configured(monkeypatch):
-    """_resolve_ocr_proxy raises ValueError when no settings API is reachable."""
-    monkeypatch.setenv("GATEWAY_URL", "")
-    monkeypatch.setenv("LLM_LOCAL_URL", "")
+def test_resolve_ocr_model_not_found_in_settings():
+    """_resolve_ocr_model raises ValueError when key not in settings response."""
+    _reimport_vision_ocr()
+    os.environ["BRIDGE_IDENTITY_SVC_URL"] = "http://localhost:8001"
 
-    from tools.vision_ocr import _resolve_ocr_proxy
-    with pytest.raises(ValueError, match="OCR proxy URL not configured"):
-        _resolve_ocr_proxy()
+    settings_response = [
+        {"key": "other_setting", "value": "foo"},
+    ]
+    respx.get("http://localhost:8001/api/settings").mock(
+        return_value=Response(200, json=settings_response)
+    )
+
+    from tools.vision_ocr import _resolve_ocr_model
+    with pytest.raises(ValueError, match="OCR model not configured"):
+        _resolve_ocr_model()
 
 
 @respx.mock
-def test_resolve_ocr_proxy_from_settings(monkeypatch):
-    """_resolve_ocr_proxy returns value from settings API."""
-    monkeypatch.setenv("LLM_LOCAL_URL", "http://localhost:11434")
+def test_resolve_ocr_proxy_from_settings():
+    """_resolve_ocr_proxy returns value from identity service settings API."""
+    _reimport_vision_ocr()
+    os.environ["BRIDGE_IDENTITY_SVC_URL"] = "http://localhost:8001"
+
     settings_response = [
         {"key": "other_setting", "value": "foo"},
         {"key": "vision_ocr_proxy_url", "value": "http://proxy:7888/"},
     ]
-    respx.get("http://localhost:11434/api/settings").mock(
+    respx.get("http://localhost:8001/api/settings").mock(
         return_value=Response(200, json=settings_response)
     )
 
@@ -62,17 +83,37 @@ def test_resolve_ocr_proxy_from_settings(monkeypatch):
 
 
 @respx.mock
-def test_get_cached_ocr_model(monkeypatch):
-    """_get_cached_ocr_model caches the result and doesn't call API again."""
-    monkeypatch.setenv("LLM_LOCAL_URL", "http://localhost:11434")
+def test_resolve_ocr_proxy_raises_when_empty():
+    """_resolve_ocr_proxy raises ValueError when key not in settings response."""
+    _reimport_vision_ocr()
+    os.environ["BRIDGE_IDENTITY_SVC_URL"] = "http://localhost:8001"
+
     settings_response = [
-        {"key": "vision_ocr_model", "value": "qwen2.5-vl:7b"},
+        {"key": "other_setting", "value": "foo"},
     ]
-    respx.get("http://localhost:11434/api/settings").mock(
+    respx.get("http://localhost:8001/api/settings").mock(
         return_value=Response(200, json=settings_response)
     )
 
-    from tools.vision_ocr import _get_cached_ocr_model, _VOCAB_MODEL_CACHE
+    from tools.vision_ocr import _resolve_ocr_proxy
+    with pytest.raises(ValueError, match="OCR proxy URL not configured"):
+        _resolve_ocr_proxy()
+
+
+@respx.mock
+def test_get_cached_ocr_model():
+    """_get_cached_ocr_model caches the result and doesn't call API again."""
+    _reimport_vision_ocr()
+    os.environ["BRIDGE_IDENTITY_SVC_URL"] = "http://localhost:8001"
+
+    settings_response = [
+        {"key": "vision_ocr_model", "value": "qwen2.5-vl:7b"},
+    ]
+    respx.get("http://localhost:8001/api/settings").mock(
+        return_value=Response(200, json=settings_response)
+    )
+
+    from tools.vision_ocr import _get_cached_ocr_model
 
     # Clear cache
     import tools.vision_ocr
@@ -87,6 +128,3 @@ def test_get_cached_ocr_model(monkeypatch):
     # Should still return cached value without hitting API
     model2 = _get_cached_ocr_model()
     assert model2 == "qwen2.5-vl:7b"
-
-    # Restore cache
-    tools.vision_ocr._VOCAB_MODEL_CACHE = _VOCAB_MODEL_CACHE

@@ -10,7 +10,7 @@ from docker.errors import NotFound
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 import docker
-from services.config import INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
+from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, WORKSPACE_RUNTIME_SVC_URL
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
@@ -662,7 +662,7 @@ def check_all_updates():
     # First, try to fetch user ID 1's github_token from identity service
     ghcr_token = ""
     try:
-        identity_svc_url = os.getenv("IDENTITY_SVC_URL", "http://identity:8001")
+        identity_svc_url = IDENTITY_SVC_URL
         req_data = _json.dumps({"user_id": 1}).encode("utf-8")
         req = urllib.request.Request(
             f"{identity_svc_url}/api/resolve",
