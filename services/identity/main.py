@@ -1257,7 +1257,7 @@ def get_settings(
 # The UI dropdowns are always populated with real values, so a blank write
 # here means a UI bug or a bad direct API call — both must fail loudly.
 _MODEL_KEYS = {
-    "assistant_model", "librarian_model", "coding_model",
+    "assistant_model", "librarian_model", "coding_model", "vision_ocr_model",
 }
 
 @app.post("/api/settings")

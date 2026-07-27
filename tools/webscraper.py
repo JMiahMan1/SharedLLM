@@ -9,16 +9,12 @@ Usage:
     python webscraper.py --query "gpu replacement" --desktop --output /tmp/results.json
 """
 
+import argparse
 import asyncio
 import json
-import os
 import re
-import sys
-import argparse
-import subprocess
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
@@ -94,7 +90,7 @@ async def launch_browser(headless=True, is_mobile=False):
     return p, page, ctx, browser
 
 
-async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = False, headless: bool = True) -> ScrapeResult:
+async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = False, headless: bool = True, ocr_model: str = "", ocr_proxy: str = "") -> ScrapeResult:
     result = ScrapeResult(query=query, source=url.split("/")[2])
 
     p = None
@@ -112,51 +108,36 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
         await page.screenshot(path=str(screenshot_path), full_page=True)
         result.screenshot_path = str(screenshot_path)
 
-        # Vision OCR (Qwen2.5-VL via proxy)
+        # Vision OCR (Qwen2.5-VL via proxy) — primary method
         try:
             from vision_ocr import extract_text
-            ocr_result_data = extract_text(str(screenshot_path), task="price_scrape")
+            ocr_result_data = extract_text(str(screenshot_path), task="price_scrape", model=ocr_model or None, proxy_url=ocr_proxy or None)
             result.raw_ocr = ocr_result_data.get("full_text", "")
             result.ocr_data = ocr_result_data
-        except Exception as ocr_err:
-            # Fallback to Tesseract if vision OCR unavailable
-            ocr_output = output_dir / f"ocr_{result.source}_{hash(query) % 10000}"
-            ocr_cmd = [
-                "tesseract",
-                str(screenshot_path),
-                str(ocr_output),
-                "--psm", "6",
-            ]
-            ocr_result = subprocess.run(ocr_cmd, capture_output=True, text=True, timeout=120)
 
-            ocr_txt = f"{ocr_output}.txt"
-            if os.path.exists(ocr_txt):
-                with open(ocr_txt, "r") as f:
-                    result.raw_ocr = f.read()
-            else:
-                result.raw_ocr = ""
-                if not result.error:
-                    result.error = f"Vision OCR failed: {ocr_err}. Tesseract also failed."
-
-        # Extract prices — use vision OCR structured items when available
-        if "ocr_data" in vars(result) and result.ocr_data and "items" in result.ocr_data:
-            for item in result.ocr_data["items"]:
-                try:
-                    result.prices.append(
-                        PriceItem(
-                            product=item.get("product", ""),
-                            price=float(item["price"]) if item.get("price") else 0.0,
-                            shipping=0.0,
-                            total=float(item["price"]) if item.get("price") else 0.0,
+            # Use vision LLM structured items when available
+            if ocr_result_data.get("items"):
+                for item in ocr_result_data["items"]:
+                    try:
+                        result.prices.append(
+                            PriceItem(
+                                product=item.get("product", ""),
+                                price=float(item["price"]) if item.get("price") else 0.0,
+                                shipping=0.0,
+                                total=float(item["price"]) if item.get("price") else 0.0,
+                            )
                         )
-                    )
-                except (ValueError, TypeError):
-                    pass
-        else:
-            result.prices = extract_prices(result.raw_ocr)
+                    except (ValueError, TypeError):
+                        pass
 
-    except subprocess.TimeoutExpired:
-        result.error = "OCR timed out"
+            if not result.prices and result.raw_ocr:
+                # LLM returned text but no structured items — try heuristic parser
+                result.prices = extract_prices(result.raw_ocr)
+
+        except Exception as ocr_err:
+            result.error = f"Vision OCR failed: {ocr_err}"
+            result.raw_ocr = ""
+
     except Exception as e:
         result.error = str(e)
     finally:
@@ -683,8 +664,10 @@ async def scrape_multiple(
     urls: list[str],
     mobile: bool = False,
     headless: bool = True,
-    output_dir: Optional[str | Path] = None,
-    output_file: Optional[str] = None,
+    output_dir: str | Path | None = None,
+    output_file: str | None = None,
+    ocr_model: str = "",
+    ocr_proxy: str = "",
 ):
     output_dir_path: Path = Path(output_dir or "/tmp/webscraper_output")
     output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -700,7 +683,7 @@ async def scrape_multiple(
             url = url_template
 
         print(f"Scraping: {url}")
-        result = await scrape_page(url, query, output_dir_path, is_mobile=mobile, headless=headless)
+        result = await scrape_page(url, query, output_dir_path, is_mobile=mobile, headless=headless, ocr_model=ocr_model, ocr_proxy=ocr_proxy)
         results.append(result)
 
         # Brief delay between requests

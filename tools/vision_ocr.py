@@ -13,18 +13,106 @@ Usage:
 import argparse
 import base64
 import json
+import logging
 import os
-import sys
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
 
 import httpx
 from PIL import Image
 
+log = logging.getLogger(__name__)
 
-VOCAB_DEFAULT_MODEL = os.environ.get("VISION_OCR_MODEL", "qwen2.5-vl:qwen2.5-vl-7b-instruct-q8_0")
-VOCAB_DEFAULT_PROXY = os.environ.get("VISION_OCR_PROXY_URL", "")
+# --- Resolve model and proxy from settings (identity service) or env vars. ---
+# No hardcoded defaults: if neither settings nor env vars provide a value,
+# a clear error is raised so misconfiguration is immediately visible.
+
+def _resolve_ocr_model() -> str:
+    """Resolve the OCR model name from identity settings or VISION_OCR_MODEL env var.
+
+    Raises ValueError if no model is configured anywhere.
+    """
+    env_val = os.environ.get("VISION_OCR_MODEL", "").strip()
+    if env_val:
+        return env_val
+
+    # Try identity settings via gateway or local URL
+    for candidate in (
+        os.environ.get("GATEWAY_URL", ""),
+        os.environ.get("LLM_LOCAL_URL", ""),
+    ):
+        candidate = candidate.rstrip("/")
+        if not candidate:
+            continue
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                resp = client.get(f"{candidate}/api/settings")
+                if resp.status_code == 200:
+                    for s in resp.json():
+                        if s.get("key") == "vision_ocr_model" and s.get("value"):
+                            log.info(f"[vision_ocr] model resolved from settings: {s['value']}")
+                            return s["value"]
+        except Exception:
+            continue
+
+    raise ValueError(
+        "OCR model not configured. Set VISION_OCR_MODEL env var, or configure "
+        "vision_ocr_model in Settings > AI & Compute Pane."
+    )
+
+
+def _resolve_ocr_proxy() -> str:
+    """Resolve the OCR proxy URL from identity settings or VISION_OCR_PROXY_URL env var.
+
+    Raises ValueError if no proxy URL is configured anywhere.
+    """
+    env_val = os.environ.get("VISION_OCR_PROXY_URL", "").strip()
+    if env_val:
+        return env_val
+
+    # Try identity settings via gateway or local URL
+    for candidate in (
+        os.environ.get("GATEWAY_URL", ""),
+        os.environ.get("LLM_LOCAL_URL", ""),
+    ):
+        candidate = candidate.rstrip("/")
+        if not candidate:
+            continue
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                resp = client.get(f"{candidate}/api/settings")
+                if resp.status_code == 200:
+                    for s in resp.json():
+                        if s.get("key") == "llm_local_url" and s.get("value"):
+                            log.info(f"[vision_ocr] proxy resolved from settings: {s['value']}")
+                            return s["value"].rstrip("/")
+        except Exception:
+            continue
+
+    raise ValueError(
+        "OCR proxy URL not configured. Set VISION_OCR_PROXY_URL env var, or configure "
+        "llm_local_url in Settings > Endpoints."
+    )
+
+
+_VOCAB_MODEL_CACHE: str | None = None
+_VOCAB_PROXY_CACHE: str | None = None
+
+
+def _get_cached_ocr_model() -> str:
+    """Lazy, cached resolution of OCR model."""
+    global _VOCAB_MODEL_CACHE
+    if _VOCAB_MODEL_CACHE is None:
+        _VOCAB_MODEL_CACHE = _resolve_ocr_model()
+    return _VOCAB_MODEL_CACHE
+
+
+def _get_cached_ocr_proxy() -> str:
+    """Lazy, cached resolution of OCR proxy URL."""
+    global _VOCAB_PROXY_CACHE
+    if _VOCAB_PROXY_CACHE is None:
+        _VOCAB_PROXY_CACHE = _resolve_ocr_proxy()
+    return _VOCAB_PROXY_CACHE
 
 
 def _image_to_base64(image_path: str, max_size: int = 1024) -> str:
@@ -94,8 +182,8 @@ def _build_prompt(task: str = "general") -> str:
 
 def extract_text(
     image_path: str,
-    proxy_url: Optional[str] = None,
-    model: Optional[str] = None,
+    proxy_url: str | None = None,
+    model: str | None = None,
     max_size: int = 1024,
     task: str = "general",
 ) -> dict:
@@ -111,8 +199,8 @@ def extract_text(
 
     Returns dict with keys: full_text, headline, subtext, badge
     """
-    proxy_url = (proxy_url or VOCAB_DEFAULT_PROXY).rstrip("/")
-    model = model or VOCAB_DEFAULT_MODEL
+    proxy_url = (proxy_url or _get_cached_ocr_proxy()).rstrip("/")
+    model = model or _get_cached_ocr_model()
 
     b64_image = _image_to_base64(image_path, max_size=max_size)
 
@@ -173,9 +261,9 @@ def extract_text(
 
 def extract_text_from_file(
     image_path: str,
-    output_text_path: Optional[str] = None,
-    proxy_url: Optional[str] = None,
-    model: Optional[str] = None,
+    output_text_path: str | None = None,
+    proxy_url: str | None = None,
+    model: str | None = None,
 ) -> str:
     """Extract text from image and optionally save to file. Returns full_text."""
     result = extract_text(image_path, proxy_url=proxy_url, model=model)

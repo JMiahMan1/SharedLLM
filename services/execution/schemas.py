@@ -636,7 +636,7 @@ class WebReadRequest(BaseRequest):
 
 
 class WebScraperRequest(BaseRequest):
-    """Scrapes product prices from e-commerce sites using Playwright + Tesseract OCR."""
+    """Scrapes product prices from e-commerce sites using Playwright + Vision OCR."""
     user_context: UserContext
     query: str = Field(description="Search query to look for products")
     urls: list[str] = Field(
@@ -646,6 +646,8 @@ class WebScraperRequest(BaseRequest):
     mobile: bool = Field(False, description="Use mobile viewport (bypasses some captchas)")
     headless: bool = Field(True, description="Run browser headless")
     output_file: str | None = Field(None, description="Optional JSON output file path for results")
+    ocr_model: str | None = Field(None, description="Override OCR vision model name (e.g. qwen2.5-vl:7b)")
+    ocr_proxy: str | None = Field(None, description="Override OCR proxy URL (e.g. http://alpaca-proxy:7888)")
 
 
 class CodeSearchRequest(BaseRequest):
