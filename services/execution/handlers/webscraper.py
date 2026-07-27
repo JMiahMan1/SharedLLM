@@ -6,7 +6,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 try:
     from schemas import ExecutionResult, WebScraperRequest
@@ -41,6 +40,15 @@ async def handle_web_scraper(req: WebScraperRequest) -> ExecutionResult:
     if req.output_file:
         cmd.extend(["--output", req.output_file])
 
+    # Pass OCR settings via environment variables
+    env = os.environ.copy()
+    if req.ocr_model:
+        env["VISION_OCR_MODEL"] = req.ocr_model
+        log.info(f"[webscraper] using OCR model from request: {req.ocr_model}")
+    if req.ocr_proxy:
+        env["VISION_OCR_PROXY_URL"] = req.ocr_proxy
+        log.info(f"[webscraper] using OCR proxy from request: {req.ocr_proxy}")
+
     # Filter empty args
     cmd = [c for c in cmd if c]
 
@@ -51,6 +59,7 @@ async def handle_web_scraper(req: WebScraperRequest) -> ExecutionResult:
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
 
@@ -91,7 +100,7 @@ async def handle_web_scraper(req: WebScraperRequest) -> ExecutionResult:
             detail={"output": output_text[:10000], "output_length": len(output_text)},
         )
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         log.error("[webscraper] command timed out")
         return ExecutionResult(
             status="FAILURE",

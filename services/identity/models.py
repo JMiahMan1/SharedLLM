@@ -169,6 +169,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "assistant_model", "value": "", "description": "Global assistant model"},
     {"key": "coding_model", "value": "", "description": "Global coding model"},
     {"key": "librarian_model", "value": "", "description": "Global librarian/RAG model"},
+    {"key": "vision_ocr_model", "value": "", "description": "Vision model for OCR/text extraction from images, screenshots, and documents (PDF pages). Default: qwen2.5-vl:7b"},
 
     # --- ANTI-REFUSAL & AGENT PROTOCOLS ---
     {

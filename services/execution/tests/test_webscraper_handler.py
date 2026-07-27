@@ -204,3 +204,59 @@ async def test_handle_web_scraper_general_error(sample_request, mocker):
 
     assert result.status == "FAILURE"
     assert "subprocess error" in result.message
+
+
+@pytest.mark.asyncio
+async def test_handle_web_scraper_with_ocr_settings(sample_request, mocker):
+    """Verify OCR model and proxy settings are passed as environment variables."""
+    from services.execution.schemas import WebScraperRequest
+
+    req = WebScraperRequest(
+        user_context=sample_request.user_context,
+        query="RTX 5090",
+        urls=["ebay"],
+        ocr_model="qwen2.5-vl:7b",
+        ocr_proxy="http://alpaca-proxy:7888",
+    )
+
+    mock_create = AsyncMock()
+    mock_create.return_value.communicate = AsyncMock(
+        return_value=(b"done", b"")
+    )
+    mock_create.return_value.returncode = 0
+
+    async def mock_wait_for(coro, timeout):
+        return await coro
+
+    mocker.patch("asyncio.create_subprocess_exec", mock_create)
+    mocker.patch("asyncio.wait_for", mock_wait_for)
+
+    await handle_web_scraper(req)
+
+    call_kwargs = mock_create.call_args[1]
+    env = call_kwargs.get("env", {})
+    assert env.get("VISION_OCR_MODEL") == "qwen2.5-vl:7b"
+    assert env.get("VISION_OCR_PROXY_URL") == "http://alpaca-proxy:7888"
+
+
+@pytest.mark.asyncio
+async def test_handle_web_scraper_without_cr_settings(sample_request, mocker):
+    """Verify no OCR env vars are set when fields are None."""
+    mock_create = AsyncMock()
+    mock_create.return_value.communicate = AsyncMock(
+        return_value=(b"done", b"")
+    )
+    mock_create.return_value.returncode = 0
+
+    async def mock_wait_for(coro, timeout):
+        return await coro
+
+    mocker.patch("asyncio.create_subprocess_exec", mock_create)
+    mocker.patch("asyncio.wait_for", mock_wait_for)
+
+    await handle_web_scraper(sample_request)
+
+    call_kwargs = mock_create.call_args[1]
+    env = call_kwargs.get("env", {})
+    assert "VISION_OCR_MODEL" not in env
+    assert "VISION_OCR_PROXY_URL" not in env
