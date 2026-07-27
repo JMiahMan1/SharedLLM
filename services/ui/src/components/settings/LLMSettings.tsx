@@ -167,6 +167,16 @@ const LLMSettings: React.FC = () => {
                 </div>
               </div>
               <div>
+                <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">Vision OCR Proxy URL</label>
+                <input 
+                  type="text" 
+                  value={getSetting('vision_ocr_proxy_url')} 
+                  onChange={e => setDrafts({...drafts, vision_ocr_proxy_url: e.target.value})}
+                  className="glass-input w-full text-xs"
+                  placeholder="http://host:port for Qwen2.5-VL / Vision OCR endpoint"
+                />
+              </div>
+              <div>
                 <label className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-2">System Timezone</label>
                 <div className="relative">
                   <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={14} />
