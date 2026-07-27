@@ -40,14 +40,8 @@ async def handle_web_scraper(req: WebScraperRequest) -> ExecutionResult:
     if req.output_file:
         cmd.extend(["--output", req.output_file])
 
-    # Pass OCR settings via environment variables
+    # OCR settings resolved at runtime from config DB via identity service
     env = os.environ.copy()
-    if req.ocr_model:
-        env["VISION_OCR_MODEL"] = req.ocr_model
-        log.info(f"[webscraper] using OCR model from request: {req.ocr_model}")
-    if req.ocr_proxy:
-        env["VISION_OCR_PROXY_URL"] = req.ocr_proxy
-        log.info(f"[webscraper] using OCR proxy from request: {req.ocr_proxy}")
 
     # Filter empty args
     cmd = [c for c in cmd if c]

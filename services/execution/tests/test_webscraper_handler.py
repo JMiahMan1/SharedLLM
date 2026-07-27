@@ -1,7 +1,6 @@
 """Tests for the webscraper execution handler."""
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -208,7 +207,7 @@ async def test_handle_web_scraper_general_error(sample_request, mocker):
 
 @pytest.mark.asyncio
 async def test_handle_web_scraper_with_ocr_settings(sample_request, mocker):
-    """Verify OCR model and proxy settings are passed as environment variables."""
+    """Verify OCR settings in request do not affect subprocess env (resolved at runtime from config DB)."""
     from services.execution.schemas import WebScraperRequest
 
     req = WebScraperRequest(
@@ -235,8 +234,8 @@ async def test_handle_web_scraper_with_ocr_settings(sample_request, mocker):
 
     call_kwargs = mock_create.call_args[1]
     env = call_kwargs.get("env", {})
-    assert env.get("VISION_OCR_MODEL") == "qwen2.5-vl:7b"
-    assert env.get("VISION_OCR_PROXY_URL") == "http://alpaca-proxy:7888"
+    assert "VISION_OCR_MODEL" not in env
+    assert "VISION_OCR_PROXY_URL" not in env
 
 
 @pytest.mark.asyncio

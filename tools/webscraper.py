@@ -12,7 +12,6 @@ Usage:
 import argparse
 import asyncio
 import json
-import os
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -790,8 +789,6 @@ def main():
         headless=args.headless,
         output_dir=args.output_dir,
         output_file=args.output,
-        ocr_model=os.environ.get("VISION_OCR_MODEL", ""),
-        ocr_proxy=os.environ.get("VISION_OCR_PROXY_URL", ""),
     ))
 
 
