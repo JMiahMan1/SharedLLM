@@ -32,7 +32,6 @@ def _resolve_ocr_model() -> str:
 
     Raises ValueError if no model is configured in the identity settings.
     """
-    # Identity service settings API (network-aware via config._net_url)
     from services.config import IDENTITY_SVC_URL
 
     identity_url = IDENTITY_SVC_URL.rstrip("/")
@@ -41,8 +40,14 @@ def _resolve_ocr_model() -> str:
             "IDENTITY_SVC_URL not set. Configure the Identity service URL."
         )
     try:
+        secret = os.environ.get("INTERNAL_SECRET", "").strip()
+        if not secret:
+            raise ValueError(
+                "INTERNAL_SECRET not set. Configure INTERNAL_SECRET in .env."
+            )
+        headers = {"X-Internal-Secret": secret}
         with httpx.Client(timeout=5.0) as client:
-            resp = client.get(f"{identity_url}/api/settings")
+            resp = client.get(f"{identity_url}/api/settings", headers=headers)
             if resp.status_code == 200:
                 for s in resp.json():
                     if s.get("key") == "vision_ocr_model" and s.get("value"):
@@ -71,8 +76,14 @@ def _resolve_ocr_proxy() -> str:
             "IDENTITY_SVC_URL not set. Configure the Identity service URL."
         )
     try:
+        secret = os.environ.get("INTERNAL_SECRET", "").strip()
+        if not secret:
+            raise ValueError(
+                "INTERNAL_SECRET not set. Configure INTERNAL_SECRET in .env."
+            )
+        headers = {"X-Internal-Secret": secret}
         with httpx.Client(timeout=5.0) as client:
-            resp = client.get(f"{identity_url}/api/settings")
+            resp = client.get(f"{identity_url}/api/settings", headers=headers)
             if resp.status_code == 200:
                 for s in resp.json():
                     if s.get("key") == "vision_ocr_proxy_url" and s.get("value"):
