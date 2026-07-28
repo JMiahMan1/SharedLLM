@@ -208,6 +208,27 @@ RUN git config --file /home/raven/.gitconfig credential.helper /usr/local/bin/gi
  && git config --file /home/raven/.gitconfig init.defaultBranch main \
  && chown 1000:1000 /home/raven/.gitconfig
 
+# Install Playwright Chromium browser and system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-liberation \
+    fonts-noto-cjk \
+    libglib2.0-0 \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libxshmfence1 \
+    && rm -rf /var/lib/apt/lists/*
+RUN python -m playwright install chromium
+
 # Copy service source LAST so the (source-independent) toolchain layers above
 # stay cached across code changes — only this layer rebuilds on each push.
 COPY . .
