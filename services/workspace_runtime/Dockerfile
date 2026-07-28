@@ -226,8 +226,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libasound2 \
     libxshmfence1 \
-    && rm -rf /var/lib/apt/lists/*
-RUN python -m playwright install chromium
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m playwright install chromium
 
 # Copy service source LAST so the (source-independent) toolchain layers above
 # stay cached across code changes — only this layer rebuilds on each push.
