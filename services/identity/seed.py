@@ -6,7 +6,6 @@ Reads the legacy USER_{USERNAME}_{SETTING} environment variables from the
 monolith's .env and seeds the SQL database if it is empty. Run once on
 first startup or call via the /api/admin/seed endpoint.
 """
-import contextlib
 import hashlib
 import logging
 import os
@@ -151,20 +150,12 @@ def _parse_env_users() -> dict:
 def seed_from_env(session: Session, force: bool = False) -> int:
     """
     Seed the database from environment variables.
-    If force is True, clears existing users/assignments first.
+    Only creates records that do not already exist — never overwrites or deletes.
     """
-    if force:
-        log.info("[seed] Forced re-seed: Clearing existing users/assignments.")
-        # Clear using SQLModel to avoid table name mismatches
-        for table in ["deviceassignment", "user", "apikey", "globalsetting"]:
-            with contextlib.suppress(Exception):
-                session.execute(text(f"DELETE FROM {table}"))  # type: ignore[deprecated]
-        session.commit()
-
     count = 0
     existing: GlobalSetting | None = None
     has_users = session.exec(select(User)).first() is not None
-    if not has_users or force:
+    if not has_users:
         env_users = _parse_env_users()
         for udata in env_users.values():
             # Set default password for 'default' user if not already set
@@ -281,12 +272,8 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         if not existing:
             setting = GlobalSetting(key=ds["key"], value=ds["value"])
             if "description" in ds:
-                setting.description = ds["description"]
+                setting.description = ds.get("description")
             session.add(setting)
-        elif force:
-            existing.value = ds["value"]
-            existing.description = ds.get("description")
-            session.add(existing)
 
     # ── Seed OLLAMA_URL from .env (seed-only, not in DEFAULT_GLOBAL_SETTINGS) ─
     env_ollama_url = os.getenv("OLLAMA_URL")
@@ -300,10 +287,10 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         if not existing:
             session.add(GlobalSetting(key="llm_local_url", value=env_ollama_url, description="Base URL for local LLM inference (Ollama, llama.cpp server, or compatible API). Seeded from .env OLLAMA_URL on first startup."))
             log.info(f"[seed] Seeded OLLAMA_URL from .env: {env_ollama_url}")
-        elif not existing.value or force:
+        elif not existing.value:
             existing.value = env_ollama_url
             session.add(existing)
-            log.info(f"[seed] Seeded OLLAMA_URL from .env: {env_ollama_url}")
+            log.info(f"[seed] Backfilled empty llm_local_url from .env: {env_ollama_url}")
 
     # ── Seed additional .env vars into GlobalSettings ─────────────────────────
     env_to_global = {
@@ -327,10 +314,10 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             if not existing:
                 session.add(GlobalSetting(key=global_key, value=env_val))
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
-            elif not existing.value or force:
+            elif not existing.value:
                 existing.value = env_val
                 session.add(existing)
-                log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
+                log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {env_val}")
 
     # ── Seed network-aware service URLs (BRIDGE_*/HOST_*) ──────────────────────
     # Two explicit sets so the same variable is never reused for different
@@ -361,10 +348,10 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             if not existing:
                 session.add(GlobalSetting(key=global_key, value=env_val, description=f"Network-aware service URL ({env_key}). Seeded from .env on first startup."))
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
-            elif not existing.value or force:
+            elif not existing.value:
                 existing.value = env_val
                 session.add(existing)
-                log.info(f"[seed] Re-seeded {env_key} -> {global_key}: {env_val}")
+                log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {env_val}")
 
     # ── Seed models from .env (seed-only, overrides DEFAULT_GLOBAL_SETTINGS) ──
     env_models = {
@@ -379,10 +366,10 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             if not existing:
                 session.add(GlobalSetting(key=global_key, value=env_val, description=f"Global {global_key} model. Seeded from .env {env_key} on first startup."))
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
-            elif not existing.value or existing.value == "qwen3:8b" or force:
+            elif not existing.value:
                 existing.value = env_val
                 session.add(existing)
-                log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
+                log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {env_val}")
 
     # ── Seed execution service paths from .env ──
     env_paths = {
@@ -399,10 +386,10 @@ def seed_from_env(session: Session, force: bool = False) -> int:
             if not existing:
                 session.add(GlobalSetting(key=global_key, value=env_val, description=f"Execution service path. Seeded from .env {env_key} on first startup."))
                 log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
-            elif not existing.value or force:
+            elif not existing.value:
                 existing.value = env_val
                 session.add(existing)
-                log.info(f"[seed] Re-seeded {env_key} -> {global_key}: {env_val}")
+                log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {env_val}")
 
     # ── Seed SKYLIGHT_PASS (encrypted) ────────────────────────────────────────
     skylight_pass = os.getenv("SKYLIGHT_PASS")
@@ -411,10 +398,10 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         if not existing:
             session.add(GlobalSetting(key="skylight_pass_enc", value=encrypt(skylight_pass) or ""))
             log.info("[seed] Seeded SKYLIGHT_PASS (encrypted)")
-        elif not existing.value or force:
+        elif not existing.value:
             existing.value = encrypt(skylight_pass) or ""
             session.add(existing)
-            log.info("[seed] Re-seeded SKYLIGHT_PASS (encrypted)")
+            log.info("[seed] Backfilled empty skylight_pass_enc")
 
     # ── Seed prompts from prompts/*.md files ────────────────────────────────────
     # Reads markdown files from the prompts/ directory and seeds them into
