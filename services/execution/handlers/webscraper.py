@@ -36,6 +36,7 @@ async def handle_web_scraper(req: WebScraperRequest) -> ExecutionResult:
     url_args = []
     for u in req.urls:
         url_args.extend(["--urls", u])
+    cmd.extend(url_args)
 
     if req.output_file:
         cmd.extend(["--output", req.output_file])
