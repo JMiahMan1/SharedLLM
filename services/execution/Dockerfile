@@ -35,4 +35,25 @@ RUN set -eux; \
     rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION#v}_linux_${GH_ARCH}"; \
     gh --version
 
+# Install Playwright Chromium browser and system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    fonts-liberation \
+    fonts-noto-cjk \
+    libglib2.0-0 \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libxshmfence1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && playwright install chromium
+
 CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]
