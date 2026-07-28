@@ -53,7 +53,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libasound2 \
     libxshmfence1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && playwright install chromium
+    && rm -rf /var/lib/apt/lists/*
+RUN playwright install chromium
 
 CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]
