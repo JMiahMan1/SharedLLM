@@ -89,7 +89,7 @@ services:
       - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
       - TZ=America/Phoenix
     volumes:
-      - identity_db:/data
+      - ./data/identity:/data
       - /etc/localtime:/etc/localtime:ro
       - ./.env:/app/.env:ro
       - ./prompts:/app/prompts:ro
@@ -556,7 +556,6 @@ services:
       - sharedllm
 
 volumes:
-  identity_db:
   chroma_data:
   logging_data:
   workspace_runtime_data:
