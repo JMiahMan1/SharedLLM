@@ -766,8 +766,11 @@ def main():
                         help="URL sources (ebay, amazon, newegg, aliexpress, google_shopping, walmart) or full URLs")
     parser.add_argument("--mobile", action="store_true", help="Use mobile viewport")
     parser.add_argument("--headless", action="store_true", default=True, help="Run headless (default: True)")
+    parser.add_argument("--no-headless", action="store_false", dest="headless", help="Run with browser visible")
     parser.add_argument("--output", "-o", help="Output JSON file path")
     parser.add_argument("--output-dir", default=None, help="Directory for screenshots/OCR (default: /tmp/webscraper_output)")
+    parser.add_argument("--ocr-model", default=None, help="OCR vision model name (e.g. qwen2.5-vl:7b)")
+    parser.add_argument("--ocr-proxy", default=None, help="OCR proxy URL (e.g. http://jeremiah-home-desktop.local:11434)")
 
     args = parser.parse_args()
 
@@ -789,6 +792,8 @@ def main():
         headless=args.headless,
         output_dir=args.output_dir,
         output_file=args.output,
+        ocr_model=args.ocr_model or "",
+        ocr_proxy=args.ocr_proxy or "",
     ))
 
 
