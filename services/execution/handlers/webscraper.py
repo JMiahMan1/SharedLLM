@@ -47,6 +47,10 @@ async def handle_web_scraper(req: WebScraperRequest) -> ExecutionResult:
     if req.ocr_proxy:
         cmd.extend(["--ocr-proxy", req.ocr_proxy])
 
+    # Browser engine - default to camoufox for better anti-bot evasion
+    browser_engine = req.browser_engine or "camoufox"
+    cmd.extend(["--browser", browser_engine])
+
     # OCR settings resolved at runtime from config DB via identity service
     env = os.environ.copy()
 
