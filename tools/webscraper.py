@@ -65,7 +65,34 @@ URLS = {
 }
 
 
-async def launch_browser(headless=True, is_mobile=True):
+async def launch_camoufox(headless=True, is_mobile=True):
+    from camoufox.async_api import AsyncCamoufox
+
+    mobile_ua = (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+        "Version/18.0 Mobile/15E148 Safari/604.1"
+    )
+
+    desktop_ua = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    )
+
+    ctx = await AsyncCamoufox(
+        headless=headless,
+        browser_args={}
+    ).__aenter__()
+
+    page = await ctx.new_page()
+
+    return page, ctx
+
+async def launch_browser(headless=True, is_mobile=True, engine="playwright"):
+    if engine == "camoufox":
+        return await launch_camoufox(headless=headless, is_mobile=is_mobile)
+
     from playwright.async_api import async_playwright  # type: ignore[import-untyped]
 
     p = await async_playwright().start()
@@ -125,105 +152,20 @@ async def launch_browser(headless=True, is_mobile=True):
         },
     )
 
-    # Stealth patches — remove all known Playwright/Puppeteer detection vectors
     await ctx.add_init_script("""
-        // Remove cdc_ variable (Puppeteer/Playwright detection)
-        (function() {
-            Object.defineProperty(document, 'querySelector', {
-                value: function() { return Function.prototype.apply; }
-            });
-        })();
-
-        // Patch cdc_ variables
-        const deletePropertyHook = (object, prop) => {
-            const descriptor = Object.getOwnPropertyDescriptor(object, prop) || {
-                configurable: true,
-                enumerable: true,
-                value: object[prop],
-                writable: true
-            };
-            Object.defineProperty(object, prop, {
-                ...descriptor,
-                set: (name) => Object.defineProperty(object, prop, {
-                    configurable: true,
-                    enumerable: true,
-                    writable: true,
-                    value: name
-                }),
-                get: () => descriptor.value
-            });
-        };
-        for (const key of Object.getOwnPropertyNames(globalThis)) {
-            if (~key.indexOf('cdc_')) deletePropertyHook(globalThis, key);
-        }
-
-        // Remove webdriver property
-        Object.defineProperty(navigator, 'webdriver', {
-            get: () => false
-        });
-
-        // Mock plugins
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => [1, 2, 3, 4, 5]
-        });
-
-        // Mock languages
-        Object.defineProperty(navigator, 'languages', {
-            get: () => ['en-US', 'en']
-        });
-
-        // Mock chrome runtime (complete)
-        if (!window.chrome) {
-            window.chrome = {
-                runtime: {},
-                loadTimes: function() {},
-                csi: function() {},
-                app: {}
-            };
-        }
-
-        // Mock deviceMemory
-        Object.defineProperty(navigator, 'deviceMemory', {
-            get: () => 8
-        });
-
-        // Mock connection
-        Object.defineProperty(navigator, 'connection', {
-            get: () => ({
-                effectiveType: '4g',
-                rtt: 50,
-                downlink: 10,
-                saveData: false
-            })
-        });
-
-        // Mock hardwareConcurrency
-        Object.defineProperty(navigator, 'hardwareConcurrency', {
-            get: () => 8
-        });
-
-        // Override permissions query
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        if (!window.chrome) window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+        Object.defineProperty(navigator, 'connection', { get: () => ({ effectiveType: '4g', rtt: 50, downlink: 10, saveData: false }) });
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
         const originalQuery = window.navigator.permissions.query;
         window.navigator.permissions.query = (parameters) => (
             parameters.name === 'notifications' ?
                 Promise.resolve({state: Notification.permission}) :
                 originalQuery(parameters)
         );
-
-        // Prevent WebRTC IP leak
-        const _nativeRTCPeerConnection = window.RTCPeerConnection;
-        const _nativeRTCSessionDescription = window.RTCSessionDescription;
-        const _nativeRTCIceCandidate = window.RTCIceCandidate;
-
-        // Patch toString methods to avoid detection
-        const patchToString = (obj, name) => {
-            Object.defineProperty(obj, 'toString', {
-                value: function toString() { return name; },
-                writable: true,
-                configurable: true
-            });
-        };
-        patchToString(Object.getPrototypeOf(navigator), 'Navigator');
     """)
 
     page = await ctx.new_page()
@@ -231,33 +173,29 @@ async def launch_browser(headless=True, is_mobile=True):
     return p, page, ctx, browser
 
 
-async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = False, headless: bool = True, ocr_model: str = "", ocr_proxy: str = "") -> ScrapeResult:
+async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = False, headless: bool = True, ocr_model: str = "", ocr_proxy: str = "", browser_engine: str = "playwright") -> ScrapeResult:
     result = ScrapeResult(query=query, source=url.split("/")[2])
 
     p = None
     page = None
     ctx = None  # type: ignore[assignment]
     browser = None  # type: ignore[assignment]
+    camoufox_ctx = None
 
     try:
-        p, page, ctx, browser = await launch_browser(headless=headless, is_mobile=is_mobile)
+        if browser_engine == "camoufox":
+            page, camoufox_ctx = await launch_browser(headless=headless, is_mobile=is_mobile, engine="camoufox")
+        else:
+            p, page, ctx, browser = await launch_browser(headless=headless, is_mobile=is_mobile, engine=browser_engine)
 
         import random
         import asyncio as aio
 
         await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        # Human-like delay: scroll down, scroll back up (anti-bot fingerprint)
-        await page.evaluate("""() => {
-            window.scrollTo(0, Math.random() * 300 + 100);
-        }""")
-        await page.wait_for_timeout(random.randint(800, 2000))
-        await page.evaluate("""() => {
-            window.scrollTo(0, Math.random() * 200);
-        }""")
-        await page.wait_for_timeout(random.randint(500, 1500))
 
+        viewport = await page.viewport_size
         screenshot_path = output_dir / f"screenshot_{result.source}_{hash(query) % 10000}.png"
-        await page.screenshot(path=str(screenshot_path), full_page=True)
+        await page.screenshot(path=str(screenshot_path), full_page=False)
         result.screenshot_path = str(screenshot_path)
 
         # Vision OCR (Qwen2.5-VL via proxy) — primary method
@@ -267,7 +205,6 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
             result.raw_ocr = ocr_result_data.get("full_text", "")
             result.ocr_data = ocr_result_data
 
-            # Use vision LLM structured items when available
             if ocr_result_data.get("items"):
                 for item in ocr_result_data["items"]:
                     try:
@@ -283,7 +220,6 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
                         pass
 
             if not result.prices and result.raw_ocr:
-                # LLM returned text but no structured items — try heuristic parser
                 result.prices = extract_prices(result.raw_ocr)
 
         except Exception as ocr_err:
@@ -293,10 +229,16 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
     except Exception as e:
         result.error = str(e)
     finally:
-        if page and ctx:
-            await ctx.close()
-        elif page and browser:
-            await browser.close()
+        if page:
+            if browser_engine == "camoufox" and camoufox_ctx:
+                try:
+                    await camoufox_ctx.close()
+                except Exception:
+                    pass
+            elif ctx:
+                await ctx.close()
+            elif browser:
+                await browser.close()
         if p:
             await p.stop()
 
@@ -820,13 +762,13 @@ async def scrape_multiple(
     output_file: str | None = None,
     ocr_model: str = "",
     ocr_proxy: str = "",
+    browser_engine: str = "playwright",
 ):
     output_dir_path: Path = Path(output_dir or "/tmp/webscraper_output")
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
     results = []
     for url_template in urls:
-        # Format URL with query
         if "{query}" in url_template:
             encoded_query = quote(query, safe='')
             url = url_template.format(query=encoded_query)
@@ -835,17 +777,20 @@ async def scrape_multiple(
         else:
             url = url_template
 
-        print(f"Scraping: {url}")
-        result = await scrape_page(url, query, output_dir_path, is_mobile=mobile, headless=headless, ocr_model=ocr_model, ocr_proxy=ocr_proxy)
+        print(f"Scraping ({browser_engine}): {url}")
+        result = await scrape_page(
+            url, query, output_dir_path,
+            is_mobile=mobile,
+            headless=headless,
+            ocr_model=ocr_model,
+            ocr_proxy=ocr_proxy,
+            browser_engine=browser_engine,
+        )
         results.append(result)
-
-        # Brief delay between requests
         await asyncio.sleep(1)
 
-    # Print results
     print(format_results(results))
 
-    # Save if requested
     if output_file:
         save_results(results, output_file)
 
@@ -860,6 +805,8 @@ def main():
     parser.add_argument("--mobile", action="store_true", help="Use mobile viewport")
     parser.add_argument("--headless", action="store_true", default=True, help="Run headless (default: True)")
     parser.add_argument("--no-headless", action="store_false", dest="headless", help="Run with browser visible")
+    parser.add_argument("--browser", "-b", default="playwright", choices=["playwright", "camoufox"],
+                        help="Browser engine to use (default: playwright)")
     parser.add_argument("--output", "-o", help="Output JSON file path")
     parser.add_argument("--output-dir", default=None, help="Directory for screenshots/OCR (default: /tmp/webscraper_output)")
     parser.add_argument("--ocr-model", default=None, help="OCR vision model name (e.g. qwen2.5-vl:7b)")
@@ -867,7 +814,6 @@ def main():
 
     args = parser.parse_args()
 
-    # Resolve URL sources
     resolved_urls = []
     for u in args.urls:
         if u in URLS:
@@ -887,6 +833,7 @@ def main():
         output_file=args.output,
         ocr_model=args.ocr_model or "",
         ocr_proxy=args.ocr_proxy or "",
+        browser_engine=args.browser,
     ))
 
 
