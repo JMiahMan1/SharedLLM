@@ -769,6 +769,9 @@ async def scrape_multiple(
 
     results = []
     for url_template in urls:
+        # Resolve named sources to full URLs
+        if url_template in URLS:
+            url_template = URLS[url_template]
         if "{query}" in url_template:
             encoded_query = quote(query, safe='')
             url = url_template.format(query=encoded_query)
