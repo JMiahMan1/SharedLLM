@@ -6,6 +6,7 @@ Sends screenshots to a local LLM proxy (alpaca-proxy) running Qwen2.5-VL
 for structured text extraction. Returns full text and/or structured fields.
 
 Usage:
+    python vision_ocr.py --image screenshot.png
     python vision_ocr.py --image screenshot.png --model qwen2.5-vl:qwen2.5-vl-7b-instruct-q8_0
     python vision_ocr.py --image screenshot.png --output-text extracted.txt
 """
@@ -27,6 +28,7 @@ log = logging.getLogger(__name__)
 # No hardcoded defaults: if neither settings nor env vars provide a value,
 # a clear error is raised so misconfiguration is immediately visible.
 
+
 def _resolve_ocr_model() -> str:
     """Resolve the OCR model name from identity settings (config DB).
 
@@ -36,15 +38,11 @@ def _resolve_ocr_model() -> str:
 
     identity_url = IDENTITY_SVC_URL.rstrip("/")
     if not identity_url:
-        raise ValueError(
-            "IDENTITY_SVC_URL not set. Configure the Identity service URL."
-        )
+        raise ValueError("IDENTITY_SVC_URL not set. Configure the Identity service URL.")
     try:
         secret = os.environ.get("INTERNAL_SECRET", "").strip()
         if not secret:
-            raise ValueError(
-                "INTERNAL_SECRET not set. Configure INTERNAL_SECRET in .env."
-            )
+            raise ValueError("INTERNAL_SECRET not set. Configure INTERNAL_SECRET in .env.")
         headers = {"X-Internal-Secret": secret}
         with httpx.Client(timeout=5.0) as client:
             resp = client.get(f"{identity_url}/api/settings", headers=headers)
@@ -56,10 +54,7 @@ def _resolve_ocr_model() -> str:
     except Exception as e:
         log.error(f"[vision_ocr] failed to resolve model from identity service at {identity_url}: {e}")
 
-    raise ValueError(
-        "OCR model not configured. Configure "
-        "vision_ocr_model in Settings > AI & Compute Pane."
-    )
+    raise ValueError("OCR model not configured. Configure vision_ocr_model in Settings > AI & Compute Pane.")
 
 
 def _resolve_ocr_proxy() -> str:
@@ -72,15 +67,11 @@ def _resolve_ocr_proxy() -> str:
 
     identity_url = IDENTITY_SVC_URL.rstrip("/")
     if not identity_url:
-        raise ValueError(
-            "IDENTITY_SVC_URL not set. Configure the Identity service URL."
-        )
+        raise ValueError("IDENTITY_SVC_URL not set. Configure the Identity service URL.")
     try:
         secret = os.environ.get("INTERNAL_SECRET", "").strip()
         if not secret:
-            raise ValueError(
-                "INTERNAL_SECRET not set. Configure INTERNAL_SECRET in .env."
-            )
+            raise ValueError("INTERNAL_SECRET not set. Configure INTERNAL_SECRET in .env.")
         headers = {"X-Internal-Secret": secret}
         with httpx.Client(timeout=5.0) as client:
             resp = client.get(f"{identity_url}/api/settings", headers=headers)
@@ -92,10 +83,7 @@ def _resolve_ocr_proxy() -> str:
     except Exception as e:
         log.error(f"[vision_ocr] failed to resolve proxy from identity service at {identity_url}: {e}")
 
-    raise ValueError(
-        "OCR proxy URL not configured. Configure "
-        "vision_ocr_proxy_url in Settings > Endpoints."
-    )
+    raise ValueError("OCR proxy URL not configured. Configure vision_ocr_proxy_url in Settings > Endpoints.")
 
 
 _VOCAB_MODEL_CACHE: str | None = None
@@ -131,54 +119,53 @@ def _build_prompt(task: str = "general") -> str:
     """Build task-specific OCR prompt."""
     prompts = {
         "price_scrape": (
-            'You are an expert e-commerce price extraction assistant.\n'
-            'Analyze the uploaded screenshot and extract ALL product prices and names.\n\n'
-            'Respond ONLY with a valid JSON object with the following structure:\n'
-            '{\n'
+            "You are an expert e-commerce price extraction assistant.\n"
+            "Analyze the uploaded screenshot and extract ALL product prices and names.\n\n"
+            "Respond ONLY with a valid JSON object with the following structure:\n"
+            "{\n"
             '  "full_text": "Complete extracted text from top to bottom, line by line...",\n'
             '  "items": [\n'
             '    {"product": "Product Name Here", "price": 49.99},\n'
             '    {"product": "Another Product", "price": 29.99}\n'
-            '  ],\n'
+            "  ],\n"
             '  "headline": "Page title or search results header",\n'
             '  "subtext": "Any filtering or sorting text",\n'
             '  "badge": "Promotional text like Deal of the Day or Prime"\n'
             "}\n\n"
-            'CRITICAL RULES:\n'
-            '- Extract EVERY product with its price\n'
-            '- Include shipping costs if shown separately\n'
+            "CRITICAL RULES:\n"
+            "- Extract EVERY product with its price\n"
+            "- Include shipping costs if shown separately\n"
             '- Skip UI noise like "bought in past month", "add to cart", dates\n'
-            '- Price must be a number (not a string), in the displayed currency\n'
-            '- Preserve exact prices: $49.99 not $4999\n'
-            '- If a product has no price, skip it\n'
+            "- Price must be a number (not a string), in the displayed currency\n"
+            "- Preserve exact prices: $49.99 not $4999\n"
+            "- If a product has no price, skip it\n"
         ),
         "document": (
-            'You are an expert document OCR assistant.\n'
-            'Transcribe the uploaded document image completely.\n\n'
-            'Respond ONLY with a valid JSON object:\n'
-            '{\n'
+            "You are an expert document OCR assistant.\n"
+            "Transcribe the uploaded document image completely.\n\n"
+            "Respond ONLY with a valid JSON object:\n"
+            "{\n"
             '  "full_text": "Complete transcription line by line...",\n'
             '  "headline": "Document title or main heading",\n'
             '  "subtext": "Body text or details",\n'
             '  "badge": "Headers, footers, page numbers, stamps"\n'
             "}\n\n"
-            'Preserve all text exactly, including numbers, dates, and formatting.'
+            "Preserve all text exactly, including numbers, dates, and formatting."
         ),
     }
     price_prompt = prompts["price_scrape"]
     doc_prompt = prompts["document"]
     general_prompt = (
-        'You are an expert Document AI and OCR vision assistant.\n'
-        'Analyze the uploaded image and extract all visible text.\n\n'
-        'Respond ONLY with a valid JSON object with the following structure:\n'
-        '{\n'
+        "You are an expert Document AI and OCR vision assistant.\n"
+        "Analyze the uploaded image and extract all visible text.\n\n"
+        "Respond ONLY with a valid JSON object with the following structure:\n"
+        "{\n"
         '  "full_text": "Complete extracted text from top to bottom, line by line...",\n'
         '  "headline": "Main title or headline text found in the image",\n'
         '  "subtext": "Subtitle, body text, or event details",\n'
         '  "badge": "Badge, price tag, or call-to-action text"\n'
-        "}\n\n" +
-        'IMPORTANT: Include EVERY line of text you see. Do not summarize. '
-        'Preserve prices, numbers, and formatting exactly as shown.'
+        "}\n\n" + "IMPORTANT: Include EVERY line of text you see. Do not summarize. "
+        "Preserve prices, numbers, and formatting exactly as shown."
     )
     return {"price_scrape": price_prompt, "document": doc_prompt}.get(task, general_prompt)
 

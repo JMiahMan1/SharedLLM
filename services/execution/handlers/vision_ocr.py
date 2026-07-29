@@ -8,22 +8,21 @@ Usage from execution service:
     text = await vision_ocr_screenshot("/tmp/screenshot.png", user_context=user)
 """
 
-import asyncio
 import base64
 import json
 import logging
 from io import BytesIO
-from typing import Optional
 
 from PIL import Image
 
 log = logging.getLogger("execution.vision_ocr")
 
 
-async def get_ollama_url() -> Optional[str]:
+async def get_ollama_url() -> str | None:
     """Fetch LLM proxy URL from Identity settings (user-configured 'llm_local_url')."""
     try:
         import aiohttp
+
         from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
 
         async with aiohttp.ClientSession() as client:
@@ -42,13 +41,14 @@ async def get_ollama_url() -> Optional[str]:
     return None
 
 
-async def get_vision_ocr_model() -> Optional[str]:
+async def get_vision_ocr_model() -> str | None:
     """Fetch vision OCR model from Identity settings (user-configured 'vision_ocr_model').
 
-    Returns None if not set - caller should use default vision model.
+    Returns None if not set - caller must fail clearly with a configuration error.
     """
     try:
         import aiohttp
+
         from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
 
         async with aiohttp.ClientSession() as client:
@@ -70,8 +70,8 @@ async def get_vision_ocr_model() -> Optional[str]:
 async def vision_ocr_screenshot(
     image_path: str,
     user_context=None,
-    proxy_url: Optional[str] = None,
-    model: Optional[str] = None,
+    proxy_url: str | None = None,
+    model: str | None = None,
     max_size: int = 1024,
     task: str = "general",
 ) -> dict:
@@ -101,7 +101,8 @@ async def vision_ocr_screenshot(
     if not model:
         model = await get_vision_ocr_model()
         if not model:
-            model = "qwen2.5-vl:qwen2.5-vl-7b-instruct-q8_0"  # fallback
+            log.error("Vision OCR: no vision_ocr_model configured in Identity settings")
+            return {"full_text": "", "headline": "", "subtext": "", "badge": "", "_error": "vision_ocr_model not configured in Identity settings"}
 
     # Load and prepare image
     img = Image.open(image_path).convert("RGB")
@@ -120,7 +121,7 @@ async def vision_ocr_screenshot(
         '  "items": [\n'
         '    {"product": "Product Name Here", "price": 49.99},\n'
         '    {"product": "Another Product", "price": 29.99}\n'
-        '  ],\n'
+        "  ],\n"
         '  "headline": "Page title or search results header",\n'
         '  "subtext": "Any filtering or sorting text",\n'
         '  "badge": "Promotional text like Deal of the Day or Prime"\n'
@@ -170,14 +171,11 @@ async def vision_ocr_screenshot(
         }
     ]
 
-    # Determine model name
-    if not model:
-        model = "qwen2.5-vl:qwen2.5-vl-7b-instruct-q8_0"
-
     proxy_model = model.replace("--", ":") if ("--" in model and ":" not in model) else model
 
     try:
         import aiohttp
+
         payload = {
             "model": proxy_model,
             "messages": messages,
@@ -221,7 +219,7 @@ async def vision_ocr_screenshot(
                 "badge": result.get("badge", ""),
             }
         except json.JSONDecodeError:
-            log.warning(f"Vision OCR failed to parse LLM response as JSON")
+            log.warning("Vision OCR failed to parse LLM response as JSON")
             return {
                 "full_text": raw_text,
                 "headline": "",
@@ -230,7 +228,7 @@ async def vision_ocr_screenshot(
                 "_raw": raw_text,
             }
 
-    except asyncio.TimeoutError:
+    except TimeoutError:
         log.error("Vision OCR timed out waiting for LLM response")
         return {"full_text": "", "headline": "", "subtext": "", "badge": "", "_error": "LLM timeout"}
     except Exception as e:
