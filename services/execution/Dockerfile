@@ -49,11 +49,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxdamage1 \
     libxrandr2 \
     libgbm1 \
-    libpango-1.0-0 \
+    libpango-1.0.0 \
     libcairo2 \
     libasound2 \
     libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 RUN playwright install chromium
+
+# Install camoufox browser for anti-bot evasion
+RUN pip install --no-cache-dir camoufox
+RUN python -m camoufox download
 
 CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]
