@@ -12,6 +12,7 @@ Usage:
 import argparse
 import asyncio
 import json
+import random
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -94,23 +95,71 @@ async def launch_browser(headless=True, is_mobile=True):
         "Version/18.0 Mobile/15E148 Safari/604.1"
     )
 
+    desktop_ua = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    )
+
     browser = await p.chromium.launch(
         headless=headless,
         args=launch_args
     )
     ctx = await browser.new_context(
-        user_agent=mobile_ua,
-        viewport={"width": 390, "height": 844},
+        user_agent=mobile_ua if is_mobile else desktop_ua,
+        viewport={"width": 1366, "height": 768} if not is_mobile else {"width": 390, "height": 844},
         locale="en-US",
         timezone_id="America/New_York",
-        device_scale_factor=3,
-        has_touch=True,
+        device_scale_factor=1 if not is_mobile else 3,
+        has_touch=is_mobile,
+        extra_http_headers={
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+        },
     )
 
-    # Remove webdriver property
+    # Stealth patches — remove all known Playwright/Puppeteer detection vectors
     await ctx.add_init_script("""
+        // Remove cdc_ variable (Puppeteer/Playwright detection)
+        (function() {
+            Object.defineProperty(document, 'querySelector', {
+                value: function() { return Function.prototype.apply; }
+            });
+        })();
+
+        // Patch cdc_ variables
+        const deletePropertyHook = (object, prop) => {
+            const descriptor = Object.getOwnPropertyDescriptor(object, prop) || {
+                configurable: true,
+                enumerable: true,
+                value: object[prop],
+                writable: true
+            };
+            Object.defineProperty(object, prop, {
+                ...descriptor,
+                set: (name) => Object.defineProperty(object, prop, {
+                    configurable: true,
+                    enumerable: true,
+                    writable: true,
+                    value: name
+                }),
+                get: () => descriptor.value
+            });
+        };
+        for (const key of Object.getOwnPropertyNames(globalThis)) {
+            if (~key.indexOf('cdc_')) deletePropertyHook(globalThis, key);
+        }
+
+        // Remove webdriver property
         Object.defineProperty(navigator, 'webdriver', {
-            get: () => undefined
+            get: () => false
         });
 
         // Mock plugins
@@ -123,15 +172,33 @@ async def launch_browser(headless=True, is_mobile=True):
             get: () => ['en-US', 'en']
         });
 
-        // Mock chrome runtime
-        window.chrome = {
-            runtime: {},
-            loadTimes: function() {},
-            csi: function() {}
-        };
+        // Mock chrome runtime (complete)
+        if (!window.chrome) {
+            window.chrome = {
+                runtime: {},
+                loadTimes: function() {},
+                csi: function() {},
+                app: {}
+            };
+        }
 
         // Mock deviceMemory
         Object.defineProperty(navigator, 'deviceMemory', {
+            get: () => 8
+        });
+
+        // Mock connection
+        Object.defineProperty(navigator, 'connection', {
+            get: () => ({
+                effectiveType: '4g',
+                rtt: 50,
+                downlink: 10,
+                saveData: false
+            })
+        });
+
+        // Mock hardwareConcurrency
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
             get: () => 8
         });
 
@@ -142,6 +209,21 @@ async def launch_browser(headless=True, is_mobile=True):
                 Promise.resolve({state: Notification.permission}) :
                 originalQuery(parameters)
         );
+
+        // Prevent WebRTC IP leak
+        const _nativeRTCPeerConnection = window.RTCPeerConnection;
+        const _nativeRTCSessionDescription = window.RTCSessionDescription;
+        const _nativeRTCIceCandidate = window.RTCIceCandidate;
+
+        // Patch toString methods to avoid detection
+        const patchToString = (obj, name) => {
+            Object.defineProperty(obj, 'toString', {
+                value: function toString() { return name; },
+                writable: true,
+                configurable: true
+            });
+        };
+        patchToString(Object.getPrototypeOf(navigator), 'Navigator');
     """)
 
     page = await ctx.new_page()
@@ -160,8 +242,19 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
     try:
         p, page, ctx, browser = await launch_browser(headless=headless, is_mobile=is_mobile)
 
-        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        await page.wait_for_timeout(3000)
+        import random
+        import asyncio as aio
+
+        await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+        # Human-like delay: scroll down, scroll back up (anti-bot fingerprint)
+        await page.evaluate("""() => {
+            window.scrollTo(0, Math.random() * 300 + 100);
+        }""")
+        await page.wait_for_timeout(random.randint(800, 2000))
+        await page.evaluate("""() => {
+            window.scrollTo(0, Math.random() * 200);
+        }""")
+        await page.wait_for_timeout(random.randint(500, 1500))
 
         screenshot_path = output_dir / f"screenshot_{result.source}_{hash(query) % 10000}.png"
         await page.screenshot(path=str(screenshot_path), full_page=True)
