@@ -80,10 +80,7 @@ async def launch_camoufox(headless=True, is_mobile=True):
         "Chrome/125.0.0.0 Safari/537.36"
     )
 
-    ctx = await AsyncCamoufox(
-        headless=headless,
-        browser_args={}
-    ).__aenter__()
+    ctx = await AsyncCamoufox(headless=headless).__aenter__()
 
     page = await ctx.new_page()
 

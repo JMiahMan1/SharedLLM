@@ -53,12 +53,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libasound2 \
     libxshmfence1 \
+    libgtk-3-0 \
     && rm -rf /var/lib/apt/lists/*
 RUN playwright install chromium
 
 # Install camoufox browser for anti-bot evasion
 RUN pip install --no-cache-dir camoufox
 ENV XDG_CACHE_HOME=/home/sharedllm/.cache
-RUN mkdir -p /home/sharedllm/.cache/camoufox && touch /home/sharedllm/.cache/camoufox/.0.5_FLAG && python -m camoufox sync && python -m camoufox fetch
+# Build camoufox browser cache at build time, then make it world-writable so uid 1000 can create files at runtime
+RUN mkdir -p /home/sharedllm/.cache/camoufox && touch /home/sharedllm/.cache/camoufox/.0.5_FLAG && python -m camoufox sync && python -m camoufox fetch && chmod -R a+rwX /home/sharedllm/.cache/camoufox
 
 CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]
