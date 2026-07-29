@@ -58,6 +58,7 @@ RUN playwright install chromium
 
 # Install camoufox browser for anti-bot evasion
 RUN pip install --no-cache-dir camoufox
-RUN python -m camoufox fetch latest
+ENV XDG_CACHE_HOME=/home/sharedllm/.cache
+RUN mkdir -p /home/sharedllm/.cache && python -m camoufox fetch stable
 
 CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]
