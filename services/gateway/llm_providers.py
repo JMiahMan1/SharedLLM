@@ -59,11 +59,45 @@ class OllamaProvider(BaseLLMProvider):
             pass
         return None
 
-    async def _wait_for_slot(self, client: aiohttp.ClientSession) -> bool:
+    async def _wait_for_model(self, client: aiohttp.ClientSession, model: str) -> bool:
+        """Poll /api/ps until the target model appears in loaded models.
+
+        Prevents 404s when the model is cold-loaded -- /api/chat returns 404
+        until Ollama has finished loading the weights into VRAM.
+        """
+        try:
+            resp = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
+            if resp.status != 200:
+                return True
+            data = await resp.json()
+            loaded = data.get("models") or data.get("slots") or []
+            for entry in loaded:
+                if isinstance(entry, dict) and entry.get("model", "").endswith(model):
+                    log.info(
+                        f"[OllamaProvider] Model {model} loaded "
+                        f"({entry.get('size', 0) / 1e9:.1f} GB)"
+                    )
+                    return True
+                elif isinstance(entry, str) and entry == model:
+                    log.info(f"[OllamaProvider] Model {model} loaded")
+                    return True
+        except Exception:
+            pass
+        return False
+
+    async def _wait_for_slot(self, client: aiohttp.ClientSession, model: str = "") -> bool:
         """Poll /api/ps until a slot is available or timeout.
         If /api/ps has no slot info, returns immediately (no slot mgmt).
-        If /api/ps is unreachable, returns True (graceful degradation)."""
+        If /api/ps is unreachable, returns True (graceful degradation).
+        If model name is provided, waits for model to be loaded first."""
         loop = asyncio.get_running_loop()
+
+        # Wait for model to be loaded before checking slots
+        if model:
+            loaded = await self._wait_for_model(client, model)
+            if not loaded:
+                log.warning(f"[OllamaProvider] Model {model} may not be fully loaded, proceeding anyway")
+
         try:
             resp = await client.get(f"{self.base_url}/api/ps", timeout=aiohttp.ClientTimeout(total=3.0))
             if resp.status != 200:
@@ -104,7 +138,7 @@ class OllamaProvider(BaseLLMProvider):
         from services.gateway.main import shared_http_client
         # Queue-and-wait: check if Ollama has available slots before submitting
         async with shared_http_client() as slot_client:
-            if not await self._wait_for_slot(slot_client):
+            if not await self._wait_for_slot(slot_client, model=model):
                 raise RuntimeError(f"No slots available within {self.slot_wait_timeout}s")
 
         opts = options or {}
