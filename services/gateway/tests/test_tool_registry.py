@@ -6,6 +6,7 @@ from services.gateway.tool_registry import (
     TOOL_IMAGE_GENERATE,
     TOOL_LIST_IMAGE_MODELS,
     TOOL_RAVEN_MISSION,
+    TOOL_WEBSCRAPER,
     TOOL_WRITE_FILE,
     ResolvedToolCall,
     get_tool_schemas,
@@ -24,6 +25,8 @@ def test_get_tool_schemas_returns_all_seven_tools():
         TOOL_IMAGE_EDIT,
         TOOL_LIST_IMAGE_MODELS,
         TOOL_RAVEN_MISSION,
+        TOOL_WEBSCRAPER,
+        "workspaceportexposerequest",
     }
     # Every tool must declare JSON-schema parameters.
     for s in schemas:
@@ -105,3 +108,30 @@ def test_resolve_raven_mission_targets_gateway():
     assert r.json["query"] == "build a 3D game"
     assert r.json["workspace_id"] == "ws9"
     assert r.requires_workspace is False
+
+
+def test_resolve_web_scraper_targets_execution():
+    r = resolve_tool_call(
+        TOOL_WEBSCRAPER,
+        {"query": "RTX 5090", "urls": ["ebay", "amazon"], "browser_engine": "camoufox"},
+        user_context={"user": "default", "is_admin": True},
+    )
+    assert isinstance(r, ResolvedToolCall)
+    assert r.method == "POST"
+    assert r.service == "execution"
+    assert r.path == "/execute/web_scraper"
+    assert r.json["query"] == "RTX 5090"
+    assert r.json["urls"] == ["ebay", "amazon"]
+    assert r.json["browser_engine"] == "camoufox"
+    assert r.json["headless"] is True
+    assert r.json["mobile"] is False
+    assert r.requires_workspace is False
+
+
+def test_resolve_web_scraper_uses_defaults():
+    r = resolve_tool_call(TOOL_WEBSCRAPER, {"query": "gaming laptop"})
+    assert r.json["query"] == "gaming laptop"
+    assert r.json["urls"] == ["ebay", "amazon", "newegg"]
+    assert r.json["browser_engine"] is None
+    assert r.json["headless"] is True
+    assert r.json["mobile"] is False

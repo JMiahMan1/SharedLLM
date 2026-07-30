@@ -28,6 +28,7 @@ TOOL_IMAGE_GENERATE = "sharedllm_image_generate"
 TOOL_IMAGE_EDIT = "sharedllm_image_edit"
 TOOL_LIST_IMAGE_MODELS = "sharedllm_list_image_models"
 TOOL_RAVEN_MISSION = "sharedllm_raven_mission"
+TOOL_WEBSCRAPER = "sharedllm_web_scraper"
 TOOL_WORKSPACE_EXPOSE_PORT = "workspaceportexposerequest"
 
 # Service identifiers used by the resolver / proxy layer.
@@ -179,6 +180,51 @@ _RAVEN_MISSION_TOOL = {
 }
 
 
+_WEBSCRAPER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": TOOL_WEBSCRAPER,
+        "description": (
+            "Scrape product prices and details from e-commerce sites. "
+            "Supports eBay, Amazon, Newegg, AliExpress, Google Shopping, or custom URLs. "
+            "Uses Playwright or Camoufox browser for anti-bot evasion."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query to look for products.",
+                },
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "URL sources to scrape. Valid named sources: ebay, amazon, newegg, aliexpress, google_shopping. Or full custom URLs.",
+                    "default": ["ebay", "amazon", "newegg"],
+                },
+                "browser_engine": {
+                    "type": "string",
+                    "enum": ["playwright", "camoufox"],
+                    "description": "Browser engine: playwright or camoufox (default: camoufox).",
+                    "default": "camoufox",
+                },
+                "headless": {
+                    "type": "boolean",
+                    "description": "Run browser headless.",
+                    "default": True,
+                },
+                "mobile": {
+                    "type": "boolean",
+                    "description": "Use mobile viewport (bypasses some captchas).",
+                    "default": False,
+                },
+            },
+            "required": ["query"],
+        },
+    },
+}
+
+
 _WORKSPACE_EXPOSE_PORT_TOOL = {
     "type": "function",
     "function": {
@@ -216,6 +262,7 @@ def get_tool_schemas() -> list[dict]:
         _IMAGE_EDIT_TOOL,
         _LIST_IMAGE_MODELS_TOOL,
         _RAVEN_MISSION_TOOL,
+        _WEBSCRAPER_TOOL,
         _WORKSPACE_EXPOSE_PORT_TOOL,
     ]
 
@@ -333,6 +380,21 @@ def resolve_tool_call(
             json={
                 "query": arguments.get("mission", ""),
                 "workspace_id": arguments.get("workspace_id"),
+            },
+        )
+
+    if name == TOOL_WEBSCRAPER:
+        return ResolvedToolCall(
+            method="POST",
+            service=SVC_EXECUTION,
+            path="/execute/web_scraper",
+            json={
+                "user_context": uc,
+                "query": arguments.get("query", ""),
+                "urls": list(arguments.get("urls", ["ebay", "amazon", "newegg"])),
+                "browser_engine": arguments.get("browser_engine"),
+                "headless": bool(arguments.get("headless", True)),
+                "mobile": bool(arguments.get("mobile", False)),
             },
         )
 
