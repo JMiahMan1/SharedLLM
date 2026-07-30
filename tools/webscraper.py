@@ -30,6 +30,11 @@ class PriceItem:
     rating: str = ""
     url: str = ""
     raw_text: str = ""
+    description: str = ""
+    specifications: dict = field(default_factory=dict)
+    features: list = field(default_factory=list)
+    model: str = ""
+    availability: str = ""
 
     def to_dict(self):
         return asdict(self)
@@ -44,6 +49,9 @@ class ScrapeResult:
     ocr_data: dict | None = None
     screenshot_path: str = ""
     error: str = ""
+    specifications: list[dict] = field(default_factory=list)
+    product_details: list[dict] = field(default_factory=list)
+    full_description: str = ""
 
     def to_dict(self):
         return {
@@ -52,6 +60,9 @@ class ScrapeResult:
             "prices": [p.to_dict() for p in self.prices],
             "screenshot": self.screenshot_path,
             "error": self.error,
+            "specifications": self.specifications,
+            "product_details": self.product_details,
+            "full_description": self.full_description,
         }
 
 
@@ -206,12 +217,27 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
             if ocr_result_data.get("items"):
                 for item in ocr_result_data["items"]:
                     try:
+                        price_val = float(item["price"]) if item.get("price") else 0.0
+                        specs = item.get("specifications", {})
+                        if isinstance(specs, str):
+                            try:
+                                specs = json.loads(specs)
+                            except (json.JSONDecodeError, TypeError):
+                                specs = {}
+                        elif not isinstance(specs, dict):
+                            specs = {}
+                        
                         result.prices.append(
                             PriceItem(
                                 product=item.get("product", ""),
-                                price=float(item["price"]) if item.get("price") else 0.0,
+                                price=price_val,
                                 shipping=0.0,
-                                total=float(item["price"]) if item.get("price") else 0.0,
+                                total=price_val,
+                                description=item.get("description", ""),
+                                specifications=specs,
+                                features=item.get("features", []) or [],
+                                model=item.get("model", ""),
+                                availability=item.get("availability", ""),
                             )
                         )
                     except (ValueError, TypeError):
@@ -219,6 +245,24 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
 
             if not result.prices and result.raw_ocr:
                 result.prices = extract_prices(result.raw_ocr)
+
+            # Aggregate top-level spec/detail fields from OCR
+            all_specs = []
+            all_details = []
+            descriptions = []
+            if ocr_result_data.get("items"):
+                for item in ocr_result_data["items"]:
+                    if item.get("specifications"):
+                        all_specs.append({"product": item.get("product", ""), **item["specifications"]})
+                    if item.get("description"):
+                        descriptions.append(item["description"])
+                    if item.get("features"):
+                        all_details.append({"product": item.get("product", ""), "features": item["features"]})
+                    if item.get("model"):
+                        all_details.append({"product": item.get("product", ""), "model": item["model"]})
+            result.specifications = all_specs
+            result.product_details = all_details
+            result.full_description = "\n\n".join(descriptions) if descriptions else ""
 
         except Exception as ocr_err:
             result.error = f"Vision OCR failed: {ocr_err}"

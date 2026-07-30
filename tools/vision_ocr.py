@@ -120,13 +120,20 @@ def _build_prompt(task: str = "general") -> str:
     prompts = {
         "price_scrape": (
             "You are an expert e-commerce price extraction assistant.\n"
-            "Analyze the uploaded screenshot and extract ALL product prices and names.\n\n"
+            "Analyze the uploaded screenshot and extract ALL product prices, names, specs, and details.\n\n"
             "Respond ONLY with a valid JSON object with the following structure:\n"
             "{\n"
             '  "full_text": "Complete extracted text from top to bottom, line by line...",\n'
             '  "items": [\n'
-            '    {"product": "Product Name Here", "price": 49.99},\n'
-            '    {"product": "Another Product", "price": 29.99}\n'
+            '    {\n'
+            '      "product": "Product Name Here",\n'
+            '      "price": 49.99,\n'
+            '      "description": "Full product description from the page",\n'
+            '      "features": ["Feature 1", "Feature 2", "Feature 3"],\n'
+            '      "specifications": {"key": "value", "brand": "Example"},\n'
+            '      "model": "Model Number if visible",\n'
+            '      "availability": "In Stock / Out of Stock / Pre-order"\n'
+            '    }\n'
             "  ],\n"
             '  "headline": "Page title or search results header",\n'
             '  "subtext": "Any filtering or sorting text",\n'
@@ -135,10 +142,14 @@ def _build_prompt(task: str = "general") -> str:
             "CRITICAL RULES:\n"
             "- Extract EVERY product with its price\n"
             "- Include shipping costs if shown separately\n"
+            "- Extract ALL visible specs, features, model numbers, descriptions\n"
             '- Skip UI noise like "bought in past month", "add to cart", dates\n'
             "- Price must be a number (not a string), in the displayed currency\n"
             "- Preserve exact prices: $49.99 not $4999\n"
             "- If a product has no price, skip it\n"
+            "- For specifications, capture all visible attribute-value pairs (size, weight, color, capacity, etc.)\n"
+            "- For features, capture bullet points or highlighted selling points\n"
+            "- For food/goods, include ingredients, size, quantity, brand details\n"
         ),
         "document": (
             "You are an expert document OCR assistant.\n"
