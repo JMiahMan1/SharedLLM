@@ -60,6 +60,7 @@ URLS = {
     "amazon": "https://www.amazon.com/s?k={query}&ref=sr_st_keyword-optimization",
     "walmart": "https://www.walmart.com/search?q={query}",
     "newegg": "https://www.newegg.com/p/pl?d={query}",
+    "bestbuy": "https://www.bestbuy.com/site/searchpage.php?st={query}",
     "aliexpress": "https://www.aliexpress.com/w/wholesale-{query_slug}.html",
     "google_shopping": "https://www.google.com/search?q={query}&tbm=shop",
 }
@@ -532,6 +533,64 @@ def _parse_aliexpress(ocr_text: str, html_snippet: str = "") -> list[PriceItem]:
     return unique
 
 
+def _parse_bestbuy(ocr_text: str, html_snippet: str = "") -> list[PriceItem]:
+    """Parse Best Buy search results."""
+    items = []
+    lines = ocr_text.split("\n")
+
+    price_pattern = re.compile(r"\$\s*([\d,]+(?:\.\d{1,2})?)")
+
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        price_match = price_pattern.search(line)
+        if price_match:
+            try:
+                price = float(price_match.group(1).replace(",", ""))
+            except ValueError:
+                i += 1
+                continue
+
+            product_name = ""
+            for j in range(max(0, i - 4), i):
+                candidate = lines[j].strip()
+                if candidate and len(candidate) > 10 and not candidate.startswith("$"):
+                    product_name = candidate
+                    break
+
+            # Best Buy often shows "Save X" or clearance info
+            shipping = 0.0
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].lower()
+                if "free shipping" in next_line:
+                    shipping = 0.0
+                elif "shipping" in next_line:
+                    ship_p = re.search(r"\$\s*([\d,]+(?:\.\d{1,2})?)", lines[i + 1])
+                    if ship_p:
+                        try:
+                            shipping = float(ship_p.group(1).replace(",", ""))
+                        except ValueError:
+                            pass
+
+            if product_name:
+                items.append(PriceItem(
+                    product=product_name[:100],
+                    price=price,
+                    shipping=shipping,
+                    total=price + shipping,
+                ))
+        i += 1
+
+    seen = set()
+    unique = []
+    for item in items:
+        key = (item.price, item.product[:30])
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique
+
+
 def _parse_google_shopping(ocr_text: str, html_snippet: str = "") -> list[PriceItem]:
     """Parse Google Shopping results."""
     items = []
@@ -595,6 +654,7 @@ _SOURCE_PARSERS = {
     "amazon.com": _parse_amazon,
     "newegg.com": _parse_newegg,
     "walmart.com": _parse_walmart,
+    "bestbuy.com": _parse_bestbuy,
     "aliexpress.com": _parse_aliexpress,
     "google.com": _parse_google_shopping,
 }
@@ -800,8 +860,8 @@ async def scrape_multiple(
 def main():
     parser = argparse.ArgumentParser(description="Web scraper with OCR price extraction")
     parser.add_argument("--query", "-q", required=True, help="Search query")
-    parser.add_argument("--urls", "-u", nargs="+", default=["ebay", "amazon", "newegg", "walmart"],
-                        help="URL sources (ebay, amazon, newegg, aliexpress, google_shopping, walmart) or full URLs")
+    parser.add_argument("--urls", "-u", nargs="+", default=["ebay", "amazon", "newegg", "walmart", "bestbuy"],
+                        help="URL sources (ebay, amazon, newegg, aliexpress, google_shopping, walmart, bestbuy) or full URLs")
     parser.add_argument("--mobile", action="store_true", help="Use mobile viewport")
     parser.add_argument("--headless", action="store_true", default=True, help="Run headless (default: True)")
     parser.add_argument("--no-headless", action="store_false", dest="headless", help="Run with browser visible")
