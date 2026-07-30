@@ -1,5 +1,6 @@
 """Tests for the webscraper execution handler."""
 
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -259,3 +260,144 @@ async def test_handle_web_scraper_without_cr_settings(sample_request, mocker):
     env = call_kwargs.get("env", {})
     assert "VISION_OCR_MODEL" not in env
     assert "VISION_OCR_PROXY_URL" not in env
+
+
+def test_parse_json_from_output_with_formatted_text_and_json():
+    """Verify JSON is correctly extracted from output that contains formatted text followed by JSON."""
+    from services.execution.handlers.webscraper import _parse_json_from_output
+
+    output = """
+============================================================
+QUERY: RTX 5090
+SOURCE: eBay
+============================================================
+Product                           Price     Ship      Total
+---------------------------------------------------------------------
+NVIDIA GeForce RTX 5090            $1,999.00    $9.99  $2,008.99
+- $1,999.00    $0.00  $1,999.00
+{
+  "results": [
+    {
+      "query": "RTX 5090",
+      "source": "eBay",
+      "prices": [
+        {"product": "RTX 5090", "price": 1999.00, "currency": "USD", "shipping": 0.00, "total": 1999.00}
+      ],
+      "specifications": [{"key": "Memory", "value": "32GB GDDR7"}],
+      "product_details": [{"key": "Brand", "value": "NVIDIA"}],
+      "full_description": "NVIDIA GeForce RTX 5090 graphics card"
+    }
+  ],
+  "summary": {"total_queries": 1, "total_sources": 1, "total_prices_found": 1}
+}
+"""
+    result = _parse_json_from_output(output)
+    assert result is not None
+    assert result["summary"]["total_queries"] == 1
+    assert result["summary"]["total_prices_found"] == 1
+    assert len(result["results"]) == 1
+    assert result["results"][0]["specifications"] == [{"key": "Memory", "value": "32GB GDDR7"}]
+    assert result["results"][0]["full_description"] == "NVIDIA GeForce RTX 5090 graphics card"
+
+
+def test_parse_json_from_output_pure_json():
+    """Verify pure JSON output (no formatted text) is still parsed."""
+    from services.execution.handlers.webscraper import _parse_json_from_output
+
+    output = '{"results": [{"query": "test", "source": "ebay", "prices": []}], "summary": {"total_queries": 1}}'
+    result = _parse_json_from_output(output)
+    assert result is not None
+    assert result["summary"]["total_queries"] == 1
+
+
+def test_parse_json_from_output_no_json():
+    """Verify None is returned when no JSON is found."""
+    from services.execution.handlers.webscraper import _parse_json_from_output
+
+    output = "QUERY: RTX 5090\neBay: $1,499.99"
+    result = _parse_json_from_output(output)
+    assert result is None
+
+
+def test_parse_json_from_output_malformed_json():
+    """Verify None is returned when JSON block is found but malformed."""
+    from services.execution.handlers.webscraper import _parse_json_from_output
+
+    output = "QUERY: test\n{invalid json"
+    result = _parse_json_from_output(output)
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_handle_web_scraper_with_structured_data(sample_request, mocker):
+    """Verify handler returns structured data in detail when JSON is present."""
+    structured_json = json.dumps({
+        "results": [
+            {
+                "query": "RTX 5090",
+                "source": "eBay",
+                "prices": [{"product": "RTX 5090", "price": 1999.00, "currency": "USD", "shipping": 0.00, "total": 1999.00}],
+                "specifications": [{"key": "Memory", "value": "32GB GDDR7"}],
+                "product_details": [{"key": "Brand", "value": "NVIDIA"}],
+                "full_description": "NVIDIA GeForce RTX 5090",
+            }
+        ],
+        "summary": {"total_queries": 1, "total_sources": 1, "total_prices_found": 1},
+    })
+
+    formatted_text = """============================================================
+QUERY: RTX 5090
+SOURCE: eBay
+============================================================
+Product                           Price     Ship      Total
+---------------------------------------------------------------------
+NVIDIA GeForce RTX 5090            $1,999.00    $0.00  $1,999.00"""
+
+    full_output = formatted_text + "\n" + structured_json
+
+    mock_create = AsyncMock()
+    mock_create.return_value.communicate = AsyncMock(return_value=(full_output.encode(), b""))
+    mock_create.return_value.returncode = 0
+
+    async def mock_wait_for(coro, timeout):
+        return await coro
+
+    mocker.patch("asyncio.create_subprocess_exec", mock_create)
+    mocker.patch("asyncio.wait_for", mock_wait_for)
+
+    result = await handle_web_scraper(sample_request)
+
+    assert result.status == "SUCCESS"
+    assert result.detail is not None
+    assert "structured" in result.detail
+    assert result.detail["structured"]["summary"]["total_prices_found"] == 1
+    assert result.detail["specifications"] == [{"key": "Memory", "value": "32GB GDDR7"}]
+    assert result.detail["product_details"] == [{"key": "Brand", "value": "NVIDIA"}]
+    assert result.detail["full_description"] == "NVIDIA GeForce RTX 5090"
+    assert result.detail["total_prices"] == 1
+    # Verify --json-output flag is passed
+    call_args = mock_create.call_args[0]
+    assert "--json-output" in call_args
+
+
+@pytest.mark.asyncio
+async def test_handle_web_scraper_without_json_fallback(sample_request, mocker):
+    """Verify handler still works when structured JSON is not present (backward compat)."""
+    mock_create = AsyncMock()
+    mock_create.return_value.communicate = AsyncMock(
+        return_value=(b"QUERY: RTX 5090\neBay: $1,499.99", b"")
+    )
+    mock_create.return_value.returncode = 0
+
+    async def mock_wait_for(coro, timeout):
+        return await coro
+
+    mocker.patch("asyncio.create_subprocess_exec", mock_create)
+    mocker.patch("asyncio.wait_for", mock_wait_for)
+
+    result = await handle_web_scraper(sample_request)
+
+    assert result.status == "SUCCESS"
+    assert result.detail is not None
+    assert "formatted_output" in result.detail
+    assert "RTX 5090" in result.message

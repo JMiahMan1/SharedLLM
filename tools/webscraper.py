@@ -864,6 +864,7 @@ async def scrape_multiple(
     ocr_model: str = "",
     ocr_proxy: str = "",
     browser_engine: str = "playwright",
+    json_output: bool = False,
 ):
     output_dir_path: Path = Path(output_dir or "/tmp/webscraper_output")
     output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -898,6 +899,17 @@ async def scrape_multiple(
     if output_file:
         save_results(results, output_file)
 
+    if json_output:
+        json_data = {
+            "results": [r.to_dict() for r in results],
+            "summary": {
+                "total_queries": len(results),
+                "total_sources": len(set(r.source for r in results)),
+                "total_prices_found": sum(len(r.prices) for r in results),
+            },
+        }
+        print(json.dumps(json_data, indent=2))
+
     return results
 
 
@@ -915,6 +927,7 @@ def main():
     parser.add_argument("--output-dir", default=None, help="Directory for screenshots/OCR (default: /tmp/webscraper_output)")
     parser.add_argument("--ocr-model", default=None, help="OCR vision model name (e.g. qwen2.5-vl:7b)")
     parser.add_argument("--ocr-proxy", default=None, help="OCR proxy URL (e.g. http://jeremiah-home-desktop.local:11434)")
+    parser.add_argument("--json-output", action="store_true", help="Print structured JSON to stdout for programmatic parsing")
 
     args = parser.parse_args()
 
@@ -938,6 +951,7 @@ def main():
         ocr_model=args.ocr_model or "",
         ocr_proxy=args.ocr_proxy or "",
         browser_engine=args.browser,
+        json_output=args.json_output,
     ))
 
 
