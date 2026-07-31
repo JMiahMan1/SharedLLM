@@ -287,7 +287,7 @@ async def get_areas(ha_url: str, ha_token: str) -> dict:
         try:
             async with client.post(url, headers=headers, json={"template": template}, timeout=_TIMEOUT) as resp:
                 resp.raise_for_status()
-                raw_data = await resp.json()
+                raw_data = await resp.json(content_type=None)
                 # Convert list of dicts to a single mapping dict
                 if isinstance(raw_data, list):
                     return {item["eid"]: item["a"] for item in raw_data if item.get("a")}

@@ -18,6 +18,22 @@ except ImportError:
 log = logging.getLogger("execution.talk")
 
 TALK_UPLOAD_DIR = "Talk Uploads"
+_TALK_RETRIES = 3
+_TALK_RETRY_DELAY = 2
+
+
+async def _talk_request_with_retry(provider: Any, method: str, endpoint: str, *, params: dict | None = None, data: dict | None = None, timeout: int = 30) -> tuple[bool, Any, str]:
+    """Retry provider.request() on connection errors up to _TALK_RETRIES times."""
+    last_exc: Exception | None = None
+    for attempt in range(_TALK_RETRIES):
+        try:
+            return await provider.request(method, endpoint, params=params, data=data, timeout=timeout)
+        except Exception as e:
+            last_exc = e
+            log.warning(f"[talk] request attempt {attempt + 1}/{_TALK_RETRIES} failed: {e}")
+            if attempt < _TALK_RETRIES - 1:
+                await asyncio.sleep(_TALK_RETRY_DELAY)
+    return False, None, f"Talk request failed after {_TALK_RETRIES} attempts: {last_exc}"
 
 
 def _decode_audio(audio_base64: str) -> bytes:
@@ -140,7 +156,8 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any):
         # Output pipeline delivery back into the Nextcloud Talk room session stream
         cleaned_ans = strip_json_from_response(ans)
 
-        ok, _data, message = await provider.request(
+        ok, _data, message = await _talk_request_with_retry(
+            provider,
             "POST",
             f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(token)}",
             data={"message": cleaned_ans},
@@ -163,7 +180,8 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
 
     try:
         if action == "list":
-            ok, data, message = await provider.request(
+            ok, data, message = await _talk_request_with_retry(
+                provider,
                 "GET",
                 "/ocs/v2.php/apps/spreed/api/v4/room",
                 params={"includeStatus": "true"},
@@ -180,12 +198,14 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
 
         if action == "open":
             if req.token:
-                ok, data, message = await provider.request(
+                ok, data, message = await _talk_request_with_retry(
+                    provider,
                     "GET",
                     f"/ocs/v2.php/apps/spreed/api/v4/room/{urllib.parse.quote(req.token)}",
                 )
             elif req.target_user:
-                ok, data, message = await provider.request(
+                ok, data, message = await _talk_request_with_retry(
+                    provider,
                     "POST",
                     "/ocs/v2.php/apps/spreed/api/v4/room",
                     data={"roomType": "1", "invite": req.target_user},
@@ -204,7 +224,8 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
         if action == "messages":
             if not req.token:
                 return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_messages")
-            ok, data, message = await provider.request(
+            ok, data, message = await _talk_request_with_retry(
+                provider,
                 "GET",
                 f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}",
                 params={"lookIntoFuture": "0", "limit": str(req.limit)},
@@ -222,7 +243,8 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
         if action == "send":
             if not req.token or not req.message:
                 return ExecutionResult(status="FAILURE", message="Conversation token and message are required.", service="talk_send")
-            ok, data, message = await provider.request(
+            ok, data, message = await _talk_request_with_retry(
+                provider,
                 "POST",
                 f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}",
                 data={"message": req.message},
@@ -281,7 +303,8 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
             if req.caption:
                 metadata["caption"] = req.caption
 
-            ok, data, message = await provider.request(
+            ok, data, message = await _talk_request_with_retry(
+                provider,
                 "POST",
                 "/ocs/v2.php/apps/files_sharing/api/v1/shares",
                 data={
