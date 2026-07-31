@@ -89,101 +89,75 @@ else:
 
 
 def _ensure_schema_upgrades() -> None:
-    inspector = inspect(engine)
-    if "user" in inspector.get_table_names():
-        columns = {column["name"] for column in inspector.get_columns("user")}
-        with engine.connect() as conn:
-            if "is_admin" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0"))
-            if "password_hash" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN password_hash VARCHAR"))
-            if "api_key" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN api_key VARCHAR"))
-            if "api_key_enc" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN api_key_enc VARCHAR"))
-            if "api_key_hash" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN api_key_hash VARCHAR"))
-            if "github_url" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN github_url VARCHAR"))
-            if "github_user" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN github_user VARCHAR"))
-            if "github_token_enc" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN github_token_enc VARCHAR"))
-            if "huggingface_token_enc" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN huggingface_token_enc VARCHAR"))
-            if "gitlab_url" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN gitlab_url VARCHAR"))
-            if "gitlab_user" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN gitlab_user VARCHAR"))
-            if "gitlab_token_enc" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN gitlab_token_enc VARCHAR"))
-            if "audiobookshelf_url" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_url VARCHAR"))
-            if "audiobookshelf_user" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_user VARCHAR"))
-            if "audiobookshelf_pass_enc" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_pass_enc VARCHAR"))
-            if "audiobookshelf_api_key_enc" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN audiobookshelf_api_key_enc VARCHAR"))
-            if "mass_url" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN mass_url VARCHAR"))
-            if "mass_token_enc" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR"))
-            if "skylight_enabled" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1"))
-            if "skylight_url" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN skylight_url VARCHAR"))
-            if "skylight_email" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN skylight_email VARCHAR"))
-            if "skylight_pass_enc" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN skylight_pass_enc VARCHAR"))
-            if "git_url" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN git_url VARCHAR"))
-            if "git_user" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN git_user VARCHAR"))
-            if "git_token_enc" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN git_token_enc VARCHAR"))
-            if "voice_fingerprint" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR"))
-            if "preferred_tts_voice" not in columns:
-                conn.execute(text("ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR DEFAULT 'af_heart'"))
-            conn.commit()
-    if "apikey" in inspector.get_table_names():
-        key_columns = {column["name"] for column in inspector.get_columns("apikey")}
-        with engine.connect() as conn:
-            if "key_hash" not in key_columns:
-                conn.execute(text("ALTER TABLE apikey ADD COLUMN key_hash VARCHAR"))
-            if "key_prefix" not in key_columns:
-                conn.execute(text("ALTER TABLE apikey ADD COLUMN key_prefix VARCHAR"))
-            conn.commit()
+    _table_columns: dict[str, set[str]] = {}
+    _known_tables: set[str] = set()
 
-    if "ravenmission" in inspector.get_table_names():
-        raven_columns = {column["name"] for column in inspector.get_columns("ravenmission")}
-        with engine.connect() as conn:
-            if "slug" not in raven_columns:
-                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN slug VARCHAR"))
-            if "queued_at" not in raven_columns:
-                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN queued_at VARCHAR"))
-            if "started_at" not in raven_columns:
-                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN started_at VARCHAR"))
-            if "completed_at" not in raven_columns:
-                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN completed_at VARCHAR"))
-            if "duration" not in raven_columns:
-                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN duration INTEGER"))
-            if "workspace_id" not in raven_columns:
-                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN workspace_id VARCHAR"))
-            if "last_llm_reply" not in raven_columns:
-                conn.execute(text("ALTER TABLE ravenmission ADD COLUMN last_llm_reply TEXT"))
-            conn.commit()
+    def _table_exists(table_name: str) -> bool:
+        if table_name not in _known_tables:
+            try:
+                _known_tables.add(table_name) if table_name in inspect(engine).get_table_names() else None
+            except Exception:
+                return False
+        return table_name in _known_tables
 
-    if "deviceassignment" in inspector.get_table_names():
-        da_columns = {column["name"] for column in inspector.get_columns("deviceassignment")}
-        with engine.connect() as conn:
-            if "revoked" not in da_columns:
-                conn.execute(text("ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0"))
-            conn.commit()
+    def _has_column(table_name: str, col_name: str) -> bool:
+        key = table_name
+        if key not in _table_columns:
+            _table_columns[key] = {c["name"] for c in inspect(engine).get_columns(table_name)} if _table_exists(table_name) else set()
+        return col_name in _table_columns[key]
 
-    if "user_widgets" not in inspector.get_table_names():
+    def _add_column(table_name: str, col_name: str, sql: str) -> None:
+        if not _has_column(table_name, col_name):
+            with engine.connect() as conn:
+                conn.execute(text(sql))
+                conn.commit()
+
+    if _table_exists("user"):
+        _add_column("user", "is_admin", "ALTER TABLE user ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
+        _add_column("user", "password_hash", "ALTER TABLE user ADD COLUMN password_hash VARCHAR")
+        _add_column("user", "api_key", "ALTER TABLE user ADD COLUMN api_key VARCHAR")
+        _add_column("user", "api_key_enc", "ALTER TABLE user ADD COLUMN api_key_enc VARCHAR")
+        _add_column("user", "api_key_hash", "ALTER TABLE user ADD COLUMN api_key_hash VARCHAR")
+        _add_column("user", "github_url", "ALTER TABLE user ADD COLUMN github_url VARCHAR")
+        _add_column("user", "github_user", "ALTER TABLE user ADD COLUMN github_user VARCHAR")
+        _add_column("user", "github_token_enc", "ALTER TABLE user ADD COLUMN github_token_enc VARCHAR")
+        _add_column("user", "huggingface_token_enc", "ALTER TABLE user ADD COLUMN huggingface_token_enc VARCHAR")
+        _add_column("user", "gitlab_url", "ALTER TABLE user ADD COLUMN gitlab_url VARCHAR")
+        _add_column("user", "gitlab_user", "ALTER TABLE user ADD COLUMN gitlab_user VARCHAR")
+        _add_column("user", "gitlab_token_enc", "ALTER TABLE user ADD COLUMN gitlab_token_enc VARCHAR")
+        _add_column("user", "audiobookshelf_url", "ALTER TABLE user ADD COLUMN audiobookshelf_url VARCHAR")
+        _add_column("user", "audiobookshelf_user", "ALTER TABLE user ADD COLUMN audiobookshelf_user VARCHAR")
+        _add_column("user", "audiobookshelf_pass_enc", "ALTER TABLE user ADD COLUMN audiobookshelf_pass_enc VARCHAR")
+        _add_column("user", "audiobookshelf_api_key_enc", "ALTER TABLE user ADD COLUMN audiobookshelf_api_key_enc VARCHAR")
+        _add_column("user", "mass_url", "ALTER TABLE user ADD COLUMN mass_url VARCHAR")
+        _add_column("user", "mass_token_enc", "ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR")
+        _add_column("user", "skylight_enabled", "ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1")
+        _add_column("user", "skylight_url", "ALTER TABLE user ADD COLUMN skylight_url VARCHAR")
+        _add_column("user", "skylight_email", "ALTER TABLE user ADD COLUMN skylight_email VARCHAR")
+        _add_column("user", "skylight_pass_enc", "ALTER TABLE user ADD COLUMN skylight_pass_enc VARCHAR")
+        _add_column("user", "git_url", "ALTER TABLE user ADD COLUMN git_url VARCHAR")
+        _add_column("user", "git_user", "ALTER TABLE user ADD COLUMN git_user VARCHAR")
+        _add_column("user", "git_token_enc", "ALTER TABLE user ADD COLUMN git_token_enc VARCHAR")
+        _add_column("user", "voice_fingerprint", "ALTER TABLE user ADD COLUMN voice_fingerprint VARCHAR")
+        _add_column("user", "preferred_tts_voice", "ALTER TABLE user ADD COLUMN preferred_tts_voice VARCHAR DEFAULT 'af_heart'")
+
+    if _table_exists("apikey"):
+        _add_column("apikey", "key_hash", "ALTER TABLE apikey ADD COLUMN key_hash VARCHAR")
+        _add_column("apikey", "key_prefix", "ALTER TABLE apikey ADD COLUMN key_prefix VARCHAR")
+
+    if _table_exists("ravenmission"):
+        _add_column("ravenmission", "slug", "ALTER TABLE ravenmission ADD COLUMN slug VARCHAR")
+        _add_column("ravenmission", "queued_at", "ALTER TABLE ravenmission ADD COLUMN queued_at VARCHAR")
+        _add_column("ravenmission", "started_at", "ALTER TABLE ravenmission ADD COLUMN started_at VARCHAR")
+        _add_column("ravenmission", "completed_at", "ALTER TABLE ravenmission ADD COLUMN completed_at VARCHAR")
+        _add_column("ravenmission", "duration", "ALTER TABLE ravenmission ADD COLUMN duration INTEGER")
+        _add_column("ravenmission", "workspace_id", "ALTER TABLE ravenmission ADD COLUMN workspace_id VARCHAR")
+        _add_column("ravenmission", "last_llm_reply", "ALTER TABLE ravenmission ADD COLUMN last_llm_reply TEXT")
+
+    if _table_exists("deviceassignment"):
+        _add_column("deviceassignment", "revoked", "ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0")
+
+    if not _table_exists("user_widgets"):
         with engine.connect() as conn:
             conn.execute(text("""
                 CREATE TABLE user_widgets (

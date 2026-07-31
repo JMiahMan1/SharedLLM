@@ -401,6 +401,8 @@ async def lifespan(app: FastAPI):
             )
             if _login.returncode == 0:
                 log.info("GitHub CLI (gh) authenticated via GITHUB_TOKEN at startup.")
+            elif "GITHUB_TOKEN environment variable is being used" in (_login.stderr or ""):
+                log.info("GitHub CLI (gh) using GITHUB_TOKEN from environment for API auth and git credential helper.")
             else:
                 log.warning(f"gh auth login returned {_login.returncode}: {_login.stderr[:200]}")
             # Sensible git identity so commits don't fail on missing user.name/email.

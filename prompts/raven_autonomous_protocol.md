@@ -115,6 +115,16 @@ Available tools and their required fields:
   `{"@type": "RavenRecallRequest", "only": "failed", "limit": 10}`
   If you ever find yourself re-running the same command and getting the same error, call this FIRST to compare against prior runs and the captured output, then make a DISTINCT fix rather than another identical run.
 
+- `WebSearchRequest` — performs a web search via SearXNG (aggregates results from Google, Bing, DuckDuckGo, etc.). Fields: `query` (string, the search query), `category` (optional string: `"general"`, `"images"`, `"videos"`, `"news"`, `"music"`, `"files"`, `"it"`, `"science"`, `"social_media"`), `engines` (optional string, comma-separated engines like `"google,bing"`), `language` (optional string, locale code like `"en"`), `max_results` (optional integer). Example:
+  `{"@type": "WebSearchRequest", "query": "RTX 4060 12GB price", "max_results": 10}`
+
+- `WebReadRequest` — fetches a URL and returns the content as markdown (useful for reading full product pages, blog posts, documentation). Fields: `url` (string, the URL to fetch), `use_current_user_auth` (optional boolean, false by default). Example:
+  `{"@type": "WebReadRequest", "url": "https://www.amazon.com/dp/B0EXAMPLE"}`
+
+- `WebScraperRequest` — scrapes product prices from e-commerce sites using Playwright or Camoufox with Vision OCR (handles JavaScript-heavy and anti-bot sites). Fields: `query` (string, search query for products), `urls` (optional list, default `["ebay", "amazon", "newegg"]`, valid named sources: `ebay`, `amazon`, `newegg`, `aliexpress`, `google_shopping`, or full custom URLs), `browser_engine` (optional string, `"camoufox"` default for anti-bot evasion, or `"playwright"`). Example:
+  `{"@type": "WebScraperRequest", "query": "RTX 4060 12GB", "urls": ["amazon", "newegg", "ebay"]}`
+  `{"@type": "WebScraperRequest", "query": "12GB VRAM graphics card cheap", "urls": ["amazon", "newegg", "ebay"], "browser_engine": "camoufox"}`
+
 Example end-to-end sequence for "build a game, publish to GitHub":
 
 1. (Plan) emit your Todo list as prose, then begin tool calls.

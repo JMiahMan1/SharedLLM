@@ -345,8 +345,8 @@ class OllamaProvider(BaseLLMProvider):
         self, client: aiohttp.ClientSession, model: str, timeout: float = 120.0
     ) -> None:
         """Poll /api/ps until the target model appears in loaded models.
-
-        Prevents 404s when the model is cold-loaded -- /api/chat returns 404
+        
+        Prevents 404s when the model is cold-loaded — /api/chat returns 404
         until Ollama has finished loading the weights into VRAM.
         """
         deadline = asyncio.get_running_loop().time() + timeout
@@ -369,23 +369,24 @@ class OllamaProvider(BaseLLMProvider):
                         elif isinstance(entry, str) and entry == model:
                             log.info(f"[OllamaProvider-Hardened] Model {model} loaded")
                             return
-                    slots = data.get("slots") or data.get("active_requests", {})
-                    if isinstance(slots, dict):
-                        for req_model in slots:
-                            if isinstance(req_model, str) and req_model.endswith(model):
-                                log.info(f"[OllamaProvider-Hardened] Model {model} active in slots")
-                                return
-                        if data.get("slots") and data["slots"].get("available", 0) > 0:
-                            log.info(
-                                f"[OllamaProvider-Hardened] No active slots, slot pool available"
-                            )
+                # Check slots — if available, model may already be loaded
+                slots = data.get("slots") or data.get("active_requests", {})
+                if isinstance(slots, dict):
+                    for req_model in slots:
+                        if isinstance(req_model, str) and req_model.endswith(model):
+                            log.info(f"[OllamaProvider-Hardened] Model {model} active in slots")
                             return
+                    if isinstance(data.get("slots"), dict) and data["slots"].get("available", 0) > 0:
+                        log.info(
+                            f"[OllamaProvider-Hardened] No active slots, but slot pool available — model may be preloaded"
+                        )
+                        return
             except Exception:
                 pass
             await asyncio.sleep(2)
         log.warning(
             f"[OllamaProvider-Hardened] Timed out waiting for model {model} "
-            f"after {timeout}s -- attempting request anyway"
+            f"after {timeout}s — attempting request anyway"
         )
 
     async def generate(
@@ -409,7 +410,7 @@ class OllamaProvider(BaseLLMProvider):
         async with shared_http_client() as client:
             # Wait for model to be loaded before attempting streaming request.
             # This prevents 404s caused by cold-start (model weights not yet
-            # in VRAM) -- /api/chat returns 404 until loading completes.
+            # in VRAM) — /api/chat returns 404 until loading completes.
             await self._wait_for_model(client, model, timeout=120.0)
 
             log.info(f"[OllamaProvider-Hardened] Calling {self.base_url}/api/chat for model {model}")
