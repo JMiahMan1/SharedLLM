@@ -202,14 +202,23 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
 
         await page.goto(url, wait_until="domcontentloaded", timeout=45000)
 
+        # Let JS-rendered results settle before capturing (eBay et al. render
+        # listings async; domcontentloaded fires before prices exist on screen)
+        await page.wait_for_timeout(6000)
+        try:
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            await page.wait_for_timeout(1500)
+        except Exception:
+            pass
+
         screenshot_path = output_dir / f"screenshot_{result.source}_{hash(query) % 10000}.png"
-        await page.screenshot(path=str(screenshot_path), full_page=False)
+        await page.screenshot(path=str(screenshot_path), full_page=True)
         result.screenshot_path = str(screenshot_path)
 
         # Vision OCR (Qwen2.5-VL via proxy) — primary method
         try:
             from vision_ocr import extract_text
-            ocr_result_data = extract_text(str(screenshot_path), task="price_scrape", model=ocr_model or None, proxy_url=ocr_proxy or None)
+            ocr_result_data = extract_text(str(screenshot_path), task="price_scrape", model=ocr_model or None, proxy_url=ocr_proxy or None, max_size=768)
             result.raw_ocr = ocr_result_data.get("full_text", "")
             result.ocr_data = ocr_result_data
 

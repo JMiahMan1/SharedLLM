@@ -187,6 +187,7 @@ def extract_text(
     model: str | None = None,
     max_size: int = 1024,
     task: str = "general",
+    max_tokens: int | None = None,
 ) -> dict:
     """
     Extract text from an image using vision LLM (Qwen2.5-VL).
@@ -197,6 +198,9 @@ def extract_text(
         model: Model name (env: VISION_OCR_MODEL)
         max_size: Max thumbnail size for image
         task: Task type ('general', 'price_scrape', 'document')
+        max_tokens: Max completion tokens (default: task-aware — price_scrape
+            is capped at 800 so a ~5 t/s vision model finishes inside the
+            webscraper handler's timeout; full transcription tasks stay at 2000)
 
     Returns dict with keys: full_text, headline, subtext, badge
     """
@@ -206,6 +210,8 @@ def extract_text(
     b64_image = _image_to_base64(image_path, max_size=max_size)
 
     prompt = _build_prompt(task)
+    if max_tokens is None:
+        max_tokens = 800 if task == "price_scrape" else 2000
 
     messages = [
         {
@@ -225,7 +231,7 @@ def extract_text(
             json={
                 "model": proxy_model,
                 "messages": messages,
-                "max_tokens": 2000,
+                "max_tokens": max_tokens,
                 "temperature": 0.1,
             },
         )
