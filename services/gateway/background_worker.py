@@ -710,9 +710,16 @@ class RavenWorker:
 
     async def _get_upgrade_model(self, current_model: str) -> str:
         """
-        Dynamically find the largest available model that isn't the current one.
-        Queries Ollama's /api/tags and picks the model with the largest size.
+        Find the largest available model within the SAME family as the current one.
+        Queries Ollama's /api/tags, filters to the same model family (prefix before
+        the first ':' or '--'), and picks the largest by size. Returns the current
+        model unchanged if no same-family upgrade exists — so the UI-configured
+        default model is always respected and cross-family jumps (e.g. qwen → ornith)
+        never happen.
         """
+        def _family(name: str) -> str:
+            return name.split(":", 1)[0].split("--", 1)[0]
+
         from services.gateway.orchestrator import _get, get_all_settings
         try:
             settings = await get_all_settings()
@@ -728,10 +735,13 @@ class RavenWorker:
                 if not models:
                     log.warning("[Worker] No models available from Ollama")
                     return current_model
-                # Filter out the current model and pick the largest by size
-                candidates = [m for m in models if m["name"] != current_model]
+                current_family = _family(current_model)
+                candidates = [
+                    m for m in models
+                    if m["name"] != current_model and _family(m["name"]) == current_family
+                ]
                 if not candidates:
-                    log.warning("[Worker] No alternative models available for upgrade")
+                    log.warning(f"[Worker] No same-family upgrade available for '{current_model}' (family '{current_family}'); keeping current model")
                     return current_model
                 best = max(candidates, key=lambda m: m.get("size", 0))
                 log.info(f"[Worker] Selected upgrade model: {best['name']} ({best.get('size', 0) / 1e9:.1f}GB)")
