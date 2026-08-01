@@ -185,13 +185,17 @@ async def _playwright_fallback(req: WebSearchRequest) -> ExecutionResult:
     )
 
 def _is_cloudflare_challenge(title: str | None, content: str) -> bool:
-    """Detect a Cloudflare interstitial page (challenge or 'Just a moment' check)."""
+    """Detect a Cloudflare interstitial page (challenge or 'Just a moment' check).
+
+    NOTE: 'challenge-platform' is deliberately NOT a marker — Cloudflare injects
+    challenge-platform scripts into normal pages served via its CDN, so it is a
+    false positive on real content.
+    """
     lowered_title = (title or "").lower()
     lowered = content.lower()
     if "just a moment" in lowered_title:
         return True
     return any(marker in lowered for marker in (
-        "challenge-platform",
         "cf-chl-",
         "checking your browser before accessing",
         "cloudflare-challenge",
