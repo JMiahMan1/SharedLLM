@@ -183,9 +183,63 @@ async def _playwright_fallback(req: WebSearchRequest) -> ExecutionResult:
         detail={"results": results, "formatted_content": formatted, "source": "playwright_fallback"}
     )
 
+def _is_cloudflare_challenge(title: str | None, content: str) -> bool:
+    """Detect a Cloudflare interstitial page (challenge or 'Just a moment' check)."""
+    lowered_title = (title or "").lower()
+    lowered = content.lower()
+    if "just a moment" in lowered_title:
+        return True
+    return any(marker in lowered for marker in (
+        "challenge-platform",
+        "cf-chl-",
+        "checking your browser before accessing",
+        "cloudflare-challenge",
+    ))
+
+
+async def _read_with_camoufox(url: str, api_key: str | None = None) -> tuple[str, str] | None:
+    """Retry a web read using the camoufox anti-bot browser. Returns (title, content) or None."""
+    try:
+        from camoufox.async_api import AsyncCamoufox
+    except ImportError:
+        log.warning("[browser/read] camoufox not installed; skipping anti-bot retry")
+        return None
+    try:
+        ctx = await AsyncCamoufox(headless=True).__aenter__()
+        try:
+            page = await ctx.new_page()
+            if api_key:
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc
+                if domain:
+                    log.info(f"[browser/read] Injecting jarvis_api_key for {domain} (camoufox retry)")
+                    await page.context.add_cookies([{
+                        'name': 'jarvis_api_key',
+                        'value': api_key,
+                        'domain': domain.split(':')[0],
+                        'path': '/'
+                    }])
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            content = await page.content()
+            title = await page.title()
+            if _is_cloudflare_challenge(title, content):
+                log.info(f"[browser/read] camoufox retry still blocked by a challenge for {url}")
+                return None
+            return title, content
+        finally:
+            await ctx.close()
+    except Exception as e:
+        log.warning(f"[browser/read] camoufox retry failed: {e}")
+        return None
+
+
 async def handle_web_read(req: WebReadRequest) -> ExecutionResult:
     """
     Fetches a URL and converts it to markdown.
+
+    If the target is behind a Cloudflare challenge, retries with the camoufox
+    anti-bot browser; if that still fails, returns an explicit instruction to
+    fall back to WebScraperRequest (which uses camoufox by default).
     """
     log.info(f"[browser/read] url='{req.url}'")
 
@@ -215,23 +269,39 @@ async def handle_web_read(req: WebReadRequest) -> ExecutionResult:
 
             await browser.close()
 
-            # Convert to markdown
-            h = html2text.HTML2Text()
-            h.ignore_links = False
-            h.ignore_images = True
-            h.ignore_emphasis = False
-            markdown = h.handle(content)
+        used_anti_bot = False
+        if _is_cloudflare_challenge(title, content):
+            log.info(f"[browser/read] Cloudflare challenge detected for {req.url}; retrying with camoufox")
+            retry = await _read_with_camoufox(req.url, req.user_context.api_key if req.use_current_user_auth else None)
+            if retry is None:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message="Cloudflare challenge detected and the anti-bot retry could not bypass it. Use WebScraperRequest (camoufox engine) for this URL instead.",
+                    service="web_read",
+                )
+            title, content = retry
+            used_anti_bot = True
 
-            # Truncate if too large for LLM context (e.g., 15k chars)
-            if len(markdown) > 15000:
-                markdown = markdown[:15000] + "\n\n... (Content truncated due to size) ..."
+        # Convert to markdown
+        h = html2text.HTML2Text()
+        h.ignore_links = False
+        h.ignore_images = True
+        h.ignore_emphasis = False
+        markdown = h.handle(content)
 
-            return ExecutionResult(
-                status="SUCCESS",
-                message=f"Successfully read page: {title}",
-                service="web_read",
-                detail={"title": title, "content": markdown}
-            )
+        # Truncate if too large for LLM context (e.g., 15k chars)
+        if len(markdown) > 15000:
+            markdown = markdown[:15000] + "\n\n... (Content truncated due to size) ..."
+
+        detail = {"title": title, "content": markdown}
+        if used_anti_bot:
+            detail["note"] = "Retrieved via camoufox anti-bot browser after a Cloudflare challenge"
+        return ExecutionResult(
+            status="SUCCESS",
+            message=f"Successfully read page: {title}",
+            service="web_read",
+            detail=detail,
+        )
 
     except Exception as e:
         log.error(f"Web read failed: {e}")
