@@ -3510,7 +3510,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         "Git Tools": ["gitoperationrequest"],
                         "Storage Tools": ["storagefilereadrequest", "storagefilewriterequest", "storagelistrequest", "storageindexrequest"],
                         "Media Tools": ["mediaplayrequest", "mediatransportrequest", "mediastatusrequest", "videoplayrequest"],
-                        "Web Tools": ["websearchrequest", "webreadrequest"],
+                        "Web Tools": ["websearchrequest", "webreadrequest", "webscraperrequest"],
                         "Docker Tools": ["dockerlogsrequest", "dockercomposerequest"],
                         "HA Tools": ["lightcontrolrequest", "haservicerequest", "climate", "securityrequest", "announcementrequest", "entitysearchrequest", "logbookrequest", "executionlogrequest", "haconfigrequest"],
                         "Other": ["calendarrequest", "noterequest", "timerrequest", "talkrequest", "tvcastrequest", "systemlearningrequest", "discoverysyncrequest", "identityrequest", "identitymanagerequest", "audiobookshelfrequest", "llminforequest", "contextsearchrequest", "deploymentrequest", "capabilityindexrequest", "volumeinventoryrequest", "controlplanerequest"],
@@ -4390,6 +4390,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 tags.append("deployment")
             if "fix" in ql or "repair" in ql or "bug" in ql:
                 tags.append("repair")
+            if "web" in ql or "search" in ql or "browser" in ql:
+                tags.append("web")
+            if "search" in ql or "find" in ql or "research" in ql:
+                tags.append("search")
+            if "scrape" in ql or "scraper" in ql or "price" in ql or "pricing" in ql:
+                tags.append("scrape")
 
             # Parse structured fields out of a free-form reflection when the
             # model did not fill them explicitly.

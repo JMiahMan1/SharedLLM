@@ -4621,7 +4621,7 @@ async def update_raven_config(request: Request):
 
     async with borrow_http_client() as client:
         for k, v in body.items():
-            if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold", "raven_max_total_seconds", "system_default_tts_voice", "system_default_tts_engine"]:
+            if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold", "raven_max_total_seconds", "system_default_tts_voice", "system_default_tts_engine", "coding_model", "ollama_coding_model", "assistant_model", "librarian_model"]:
                 await client.patch(
                     f"{IDENTITY_SVC}/api/settings/{k}",
                     json={"value": str(v).lower() if isinstance(v, bool) else str(v)},
