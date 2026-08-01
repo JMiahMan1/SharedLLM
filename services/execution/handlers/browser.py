@@ -224,13 +224,13 @@ async def _read_with_camoufox(url: str, api_key: str | None = None) -> tuple[str
             title = await page.title()
             content = await page.content()
             if _is_cloudflare_challenge(title, content):
-                # Cloudflare's JS challenge usually auto-solves after a few seconds;
-                # wait for it, then reload so the real page comes back.
+                # Cloudflare's JS challenge auto-solves after a few seconds and
+                # replaces the page content in place; reloading restarts it, so
+                # just wait and re-read until the real page arrives.
                 log.info(f"[browser/read] camoufox waiting up to 12s for challenge to solve at {url}")
                 solved = False
                 for _ in range(6):
                     await asyncio.sleep(2)
-                    await page.reload(wait_until="domcontentloaded", timeout=30000)
                     title = await page.title()
                     content = await page.content()
                     if not _is_cloudflare_challenge(title, content):
