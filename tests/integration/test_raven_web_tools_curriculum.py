@@ -90,8 +90,26 @@ def _recover_mission_id(query: str) -> int | None:
     return best
 
 
+def _prune_stale_missions(query: str) -> None:
+    """Delete queued missions with the same prompt from previous runs/retries
+    so they don't pile up in the singleton worker queue ahead of the one we
+    are about to dispatch (each mission takes ~20-30 min to execute)."""
+    marker = query.strip()[:160]
+    for m in _list_missions():
+        proposed = (m.get("proposed_mission") or "").strip()
+        if proposed[:160] == marker and m.get("status") in ("queued", "pending"):
+            mid = m.get("id")
+            if isinstance(mid, int):
+                try:
+                    with httpx.Client(headers=_chat_auth_headers(), timeout=30.0) as c:
+                        c.delete(f"{GATEWAY_URL}/api/raven/missions/{mid}")
+                except Exception:
+                    pass
+
+
 def _chat_submit(query: str) -> int:
     body = {"query": query, "coding_model": _live_coding_model()}
+    _prune_stale_missions(query)
     last_err: str | None = None
     for _ in range(3):
         try:
@@ -113,19 +131,30 @@ def _chat_submit(query: str) -> int:
 
 
 def _chat_wait(mission_id: int) -> dict:
+    """Wait for a mission, tolerating queue delay: the overall deadline counts
+    from dispatch, but once the mission starts EXECUTING it gets a fresh
+    CHAT_TIMEOUT (the worker is a singleton, so earlier missions can consume
+    the whole initial window before ours even starts)."""
     with httpx.Client(headers=_chat_auth_headers(), timeout=60.0) as c:
         deadline = time.time() + CHAT_TIMEOUT
-        while time.time() < deadline:
+        exec_deadline: float | None = None
+        while True:
+            now = time.time()
+            if exec_deadline is not None and now > exec_deadline:
+                return {"status": "TIMEOUT"}
+            if exec_deadline is None and now > deadline:
+                return {"status": "TIMEOUT"}
             try:
                 resp = c.get(f"{GATEWAY_URL}/api/raven/missions/{mission_id}")
                 if resp.status_code == 200:
                     data = resp.json()
                     if data.get("status") in ("completed", "failed", "dismissed"):
                         return data
+                    if data.get("status") == "executing" and exec_deadline is None:
+                        exec_deadline = now + CHAT_TIMEOUT
             except Exception:
                 pass
             time.sleep(POLL_INTERVAL)
-    return {"status": "TIMEOUT"}
 
 
 def _live_coding_model() -> str:
