@@ -21,7 +21,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     jq \
+    libnss-mdns \
     && rm -rf /var/lib/apt/lists/*
+# mDNS (.local) name resolution for host-networked services (vision OCR proxy
+# at jeremiah-home-desktop.local:11434 etc.) — mirror the host's nsswitch so
+# .local names resolve the same way the host does.
+RUN sed -i 's/^hosts:.*/hosts:          files mdns4_minimal [NOTFOUND=return] dns/' /etc/nsswitch.conf
 
 # GitHub CLI (gh) — used by the gh workspace tool (repo create, PRs, issues).
 # Authentication is injected at runtime via the GH_TOKEN env (no credential store).
