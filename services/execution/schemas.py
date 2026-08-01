@@ -393,10 +393,12 @@ class WorkspaceFileWriteRequest(BaseRequest):
     """
     Writes or overwrites a file in the local Git workspace.
     Requires the FULL file content in the 'content' field.
+    Set 'append' to True to append instead of overwriting.
     """
     user_context: UserContext
     path: str = Field(..., alias="file_path", description="Path relative to workspace root")
     content: str
+    append: bool = False
     commit_after: bool = False
     commit_message: str | None = None
 
