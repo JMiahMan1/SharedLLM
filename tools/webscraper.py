@@ -215,10 +215,25 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
         await page.screenshot(path=str(screenshot_path), full_page=True)
         result.screenshot_path = str(screenshot_path)
 
+        # OCR the RESULTS AREA (viewport shot near the top of the listing), not
+        # the squished full page: a 7934px page thumbnailed to 768px is
+        # unreadable to the vision model, and transcribing it blows the token
+        # cap (truncated JSON -> parse failure -> 'No prices found').
+        try:
+            await page.evaluate("window.scrollTo(0, 500)")
+            await page.wait_for_timeout(800)
+        except Exception:
+            pass
+        ocr_shot_path = output_dir / f"ocr_{result.source}_{hash(query) % 10000}.png"
+        try:
+            await page.screenshot(path=str(ocr_shot_path), full_page=False)
+        except Exception:
+            ocr_shot_path = screenshot_path
+
         # Vision OCR (Qwen2.5-VL via proxy) — primary method
         try:
             from vision_ocr import extract_text
-            ocr_result_data = extract_text(str(screenshot_path), task="price_scrape", model=ocr_model or None, proxy_url=ocr_proxy or None, max_size=768)
+            ocr_result_data = extract_text(str(ocr_shot_path), task="price_scrape", model=ocr_model or None, proxy_url=ocr_proxy or None, max_size=768)
             result.raw_ocr = ocr_result_data.get("full_text", "")
             result.ocr_data = ocr_result_data
 
