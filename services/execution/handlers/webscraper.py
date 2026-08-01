@@ -71,7 +71,9 @@ async def handle_web_scraper(req: WebScraperRequest) -> ExecutionResult:
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+        # 300s: settle waits + full-page screenshot + vision OCR (capped at
+        # 800 tokens, ~150s on a ~5 t/s local vision model) need headroom
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
 
         output_text = stdout.decode(errors="replace").strip()
         error_text = stderr.decode(errors="replace").strip()
