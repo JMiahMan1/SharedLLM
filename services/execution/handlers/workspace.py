@@ -537,6 +537,11 @@ async def handle_workspace_write(req: WorkspaceFileWriteRequest) -> ExecutionRes
 
         os.makedirs(os.path.dirname(abs_path), exist_ok=True)
 
+        if getattr(req, "append", False) and exists:
+            with open(abs_path, "a", encoding="utf-8") as f:
+                f.write(req.content)
+            return _ok(f"Successfully appended to {req.path}.", {"path": req.path, "bytes": len(req.content), "created_new": False, "appended": True})
+
         with open(abs_path, "w", encoding="utf-8") as f:
             f.write(req.content)
 
