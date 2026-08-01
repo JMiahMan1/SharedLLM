@@ -156,6 +156,10 @@ services:
       - kokoro_models:/app/models
       - ${WORKSPACE_HOST_PATH:-/home/jeremiah/workspaces}:/workspaces
       - execution_data:/data
+      # DNS via the gateway's dnsmasq so .local hostnames (synced by the DNS
+      # sync service) resolve inside this host-networked container; resolv.conf
+      # cannot be baked at build time (buildkit bind-mounts it read-only).
+      - ./services/execution/resolv.conf:/etc/resolv.conf:ro
 
   rag:
     image: ghcr.io/jmiahman1/sharedllm-rag:latest
