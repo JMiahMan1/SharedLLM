@@ -325,3 +325,31 @@ def test_raven_web_chaining_memory():
         ("lesson", "chain", "applied"),
         "report.md has URLs and a 'Lessons applied' section naming past lessons",
     )
+
+
+def test_raven_web_challenge_fallback():
+    prompt = (
+        "Raven, create a dedicated workspace with id 'raven-challenge'. "
+        "Lesson to learn: some sites (e.g. raspberrypi.com) are behind a "
+        "Cloudflare challenge that WebReadRequest cannot bypass. "
+        "Task: use WebReadRequest to read "
+        "https://www.raspberrypi.com/products/raspberry-pi-5/. "
+        "If the result reports a Cloudflare challenge (or 'Just a moment' / "
+        "empty anti-bot page), do NOT give up — switch to your "
+        "WebScraperRequest tool (it uses the camoufox anti-bot browser) with "
+        "that product URL and extract the product name, a headline/description, "
+        "and the price if visible. Save `challenge_fallback.md` in the "
+        "workspace containing: which tool succeeded, the product name, and "
+        "whatever product info you could extract. Then APPEND a dated lesson to "
+        "`raven_memory.md` about falling back to WebScraperRequest when "
+        "WebReadRequest hits a Cloudflare challenge. No GitHub repo needed."
+    )
+    _run_mission(
+        "web-challenge-fallback",
+        "raven-challenge",
+        prompt,
+        "challenge_fallback.md",
+        lambda c: "raspberry" in c.lower() and "webscraper" in c.lower() and len(c) > 80,
+        ("scraper", "challenge", "cloudflare"),
+        "challenge_fallback.md names WebScraperRequest and extracted Raspberry Pi product info",
+    )
