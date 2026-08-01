@@ -69,4 +69,10 @@ RUN mkdir -p /home/sharedllm/.cache/camoufox && touch /home/sharedllm/.cache/cam
 ENV HOME=/home/sharedllm
 RUN mkdir -p /home/sharedllm/.cache && playwright install chromium && chmod -R a+rwX /home/sharedllm/.cache/ms-playwright
 
+# Ensure the runtime HOME dir is owned by the runtime user (uid 1000). Without
+# this, docker auto-creates the /home/sharedllm volume-mount point as root:755,
+# and camoufox/firefox hang at startup (~180s) failing to create ~/.camoufox
+# and the fontconfig cache.
+RUN mkdir -p /home/sharedllm && chown -R 1000:1000 /home/sharedllm && chmod -R a+rwX /home/sharedllm
+
 CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]

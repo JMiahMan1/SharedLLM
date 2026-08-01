@@ -1,4 +1,5 @@
 # services/execution/handlers/browser.py
+import asyncio
 import logging
 import os
 import sys
@@ -220,11 +221,24 @@ async def _read_with_camoufox(url: str, api_key: str | None = None) -> tuple[str
                         'path': '/'
                     }])
             await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-            content = await page.content()
             title = await page.title()
+            content = await page.content()
             if _is_cloudflare_challenge(title, content):
-                log.info(f"[browser/read] camoufox retry still blocked by a challenge for {url}")
-                return None
+                # Cloudflare's JS challenge usually auto-solves after a few seconds;
+                # wait for it, then reload so the real page comes back.
+                log.info(f"[browser/read] camoufox waiting up to 12s for challenge to solve at {url}")
+                solved = False
+                for _ in range(6):
+                    await asyncio.sleep(2)
+                    await page.reload(wait_until="domcontentloaded", timeout=30000)
+                    title = await page.title()
+                    content = await page.content()
+                    if not _is_cloudflare_challenge(title, content):
+                        solved = True
+                        break
+                if not solved:
+                    log.warning(f"[browser/read] camoufox retry still blocked by a challenge for {url}")
+                    return None
             return title, content
         finally:
             await ctx.close()
