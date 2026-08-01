@@ -68,10 +68,13 @@ class TestDynamicModelSelection:
         self.worker = RavenWorker()
 
     @pytest.mark.asyncio
-    async def test_selects_largest_model(self):
+    async def test_selects_largest_same_family_model(self):
+        """Picks the largest model within the current model's family, ignoring bigger cross-family models."""
         mock_resp = _aio_resp(200, {
             "models": [
                 {"name": "qwen3:8b", "size": 5_000_000_000},
+                {"name": "qwen3:14b", "size": 9_000_000_000},
+                {"name": "qwen3:32b", "size": 20_000_000_000},
                 {"name": "qwen3.6-35b-a3b:q4_k_m", "size": 21_000_000_000},
                 {"name": "qwen2.5-coder:7b", "size": 4_000_000_000},
             ]
@@ -87,10 +90,11 @@ class TestDynamicModelSelection:
 
         with patch("services.gateway.orchestrator.get_all_settings", mock_settings), patch("services.gateway.background_worker._shared_http_client", return_value=mock_ctx):
             result = await self.worker._get_upgrade_model("qwen3:8b")
-            assert result == "qwen3.6-35b-a3b:q4_k_m"
+            assert result == "qwen3:32b"
 
     @pytest.mark.asyncio
     async def test_excludes_current_model(self):
+        """No same-family alternative → keeps the current model (no cross-family jump)."""
         mock_resp = _aio_resp(200, {
             "models": [
                 {"name": "qwen3.6-35b-a3b:q4_k_m", "size": 21_000_000_000},
@@ -108,7 +112,36 @@ class TestDynamicModelSelection:
 
         with patch("services.gateway.orchestrator.get_all_settings", mock_settings), patch("services.gateway.background_worker._shared_http_client", return_value=mock_ctx):
             result = await self.worker._get_upgrade_model("qwen3.6-35b-a3b:q4_k_m")
-            assert result == "qwen3:8b"
+            assert result == "qwen3.6-35b-a3b:q4_k_m"
+
+    @pytest.mark.asyncio
+    async def test_cross_family_never_upgrades_router_id(self):
+        """
+        Regression: a flattened router-style id (no colon, e.g. the UI default
+        qwen3-6-35b-a3b-ud-iq4-nl-mtp) must never be replaced by a bigger model
+        from a different family (e.g. ornith:35b-q4_K_M).
+        """
+        mock_resp = _aio_resp(200, {
+            "models": [
+                {"name": "ornith:35b-q4_K_M", "size": 21_200_000_000},
+                {"name": "qwen3-6-35b-a3b-ud-iq4-nl", "size": 18_500_000_000},
+                {"name": "qwen3-6-35b-a3b-ud-iq4-nl-mtp", "size": 18_500_000_000},
+                {"name": "ornith-1-0-35b-ud-iq4-nl", "size": 18_100_000_000},
+                {"name": "qwen2.5-coder:7b", "size": 4_700_000_000},
+            ]
+        })
+
+        mock_settings = AsyncMock(return_value={"llm_local_url": "http://localhost:11434"})
+
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=mock_resp)
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("services.gateway.orchestrator.get_all_settings", mock_settings), patch("services.gateway.background_worker._shared_http_client", return_value=mock_ctx):
+            result = await self.worker._get_upgrade_model("qwen3-6-35b-a3b-ud-iq4-nl-mtp")
+            assert result == "qwen3-6-35b-a3b-ud-iq4-nl-mtp"
 
     @pytest.mark.asyncio
     async def test_returns_current_on_api_failure(self):

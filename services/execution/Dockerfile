@@ -55,7 +55,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxshmfence1 \
     libgtk-3-0 \
     && rm -rf /var/lib/apt/lists/*
-RUN playwright install chromium
+# Install Playwright Chromium into the runtime HOME cache (/home/sharedllm) so
+# uid 1000 (PUID:PGID, HOME=/home/sharedllm at runtime) can find it, then make
+# it world-writable so the runtime user can manage it (mirrors camoufox pattern)
+ENV HOME=/home/sharedllm
+RUN mkdir -p /home/sharedllm/.cache && playwright install chromium && chmod -R a+rwX /home/sharedllm/.cache/ms-playwright
 
 # Install camoufox browser for anti-bot evasion
 RUN pip install --no-cache-dir camoufox

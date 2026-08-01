@@ -31,7 +31,7 @@ async def _get_searxng_url() -> str:
     if _is_testing():
         return os.environ.get("SEARXNG_URL", "http://localhost:8080").rstrip("/")
     try:
-        from main import IDENTITY_SVC_URL, INTERNAL_SECRET
+        from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.get(
             f"{IDENTITY_SVC_URL}/api/settings",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
