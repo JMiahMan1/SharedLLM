@@ -67,6 +67,12 @@ ENV XDG_CACHE_HOME=/home/sharedllm/.cache
 # Build camoufox browser cache at build time, then make it world-writable so uid 1000 can create files at runtime
 RUN mkdir -p /home/sharedllm/.cache/camoufox && touch /home/sharedllm/.cache/camoufox/.0.5_FLAG && python -m camoufox sync && python -m camoufox fetch && chmod -R a+rwX /home/sharedllm/.cache/camoufox
 
+# Route DNS through the gateway's dnsmasq FIRST so .local hostnames (synced by
+# the DNS sync service) resolve inside this host-networked container — mDNS
+# (libnss-mdns) cannot multicast in a container without NET_ADMIN, and the
+# host systemd-resolved stub (127.0.0.53) never forwards .local upstream.
+RUN sed -i '1i nameserver 192.168.2.1' /etc/resolv.conf && cat /etc/resolv.conf
+
 # Install Playwright Chromium LAST (after camoufox), so the downloaded browser
 # revision matches the final playwright version at runtime. Installed into the
 # runtime HOME cache (/home/sharedllm) so uid 1000 (PUID:PGID, HOME=/home/sharedllm)
