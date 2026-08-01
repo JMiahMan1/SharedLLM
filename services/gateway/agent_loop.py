@@ -2654,7 +2654,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # Consecutive textual (no-tool-call) responses tolerated before the loop
     # decides the agent is stuck and terminates. Without this, a single plan-as-
     # text reply after the first tool call ends the whole mission prematurely.
-    MAX_IDLE_NUDGES = 12
+    # Lower than the historical 12 so a chatty model fails fast (triggering the
+    # worker's same-family retry) instead of yapping until the hard time cap.
+    MAX_IDLE_NUDGES = 6
     loop_start = asyncio.get_event_loop().time()
     exec_data = None
     ans = ""
