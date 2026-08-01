@@ -202,7 +202,6 @@ async def scrape_page(url: str, query: str, output_dir: Path, is_mobile: bool = 
 
         await page.goto(url, wait_until="domcontentloaded", timeout=45000)
 
-        viewport = await page.viewport_size
         screenshot_path = output_dir / f"screenshot_{result.source}_{hash(query) % 10000}.png"
         await page.screenshot(path=str(screenshot_path), full_page=False)
         result.screenshot_path = str(screenshot_path)
