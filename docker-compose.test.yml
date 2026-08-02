@@ -41,7 +41,7 @@ services:
       - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
-      - RAG_SVC_URL=http://rag:8004
+      - BRIDGE_RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
@@ -75,7 +75,7 @@ services:
       - OLLAMA_URL=http://ollama_mock:11434
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
-      - RAG_SVC_URL=http://rag:8004
+      - BRIDGE_RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
@@ -147,7 +147,7 @@ services:
       - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
-      - RAG_SVC_URL=http://rag:8004
+      - BRIDGE_RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
@@ -179,7 +179,7 @@ services:
       - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
-      - RAG_SVC_URL=http://rag:8004
+      - BRIDGE_RAG_SVC_URL=http://rag:8004
       - STORAGE_SVC_URL=http://storage:8005
       - LOGGING_SVC_URL=http://logging:8006
       - WORKSPACE_RUNTIME_SVC_URL=http://workspace_runtime:8007
