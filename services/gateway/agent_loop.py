@@ -3322,6 +3322,18 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             f"Then run the real test/selftest (e.g. `pytest`, `npm test`, `--selftest`)."
                         )
                         continue
+                # STALLED-COMPLETION: the model made real progress, everything it
+                # wrote is verified, and it has now produced two consecutive
+                # text-only replies without a tool call even after nudging.
+                # It is finished (regression: model wrote answer.md, verified it,
+                # but never uttered a COMPLETION_INDICATOR phrase, so the
+                # early-completion check above never fired and it looped until
+                # MAX_IDLE_NUDGES -> runaway ERROR). A verified stall is success:
+                # the final text reply IS the deliverable summary.
+                if _consecutive_no_tool >= 2:
+                    log.info(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} successful tool call(s) with nothing unverified — treating as completion.")
+                    await _clear_checkpoint()
+                    break
                 # The mission is multi-step; a plan-as-text reply is NOT "done".
                 # Nudge the agent to keep executing tool calls instead of ending
                 # the loop after the first one. Only give up once it has stalled
@@ -3347,7 +3359,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     f"call. The mission is NOT complete — you must keep executing it with tool "
                     f"calls (e.g. WorkspaceShellRequest to run `gh repo create`, "
                     f"WorkspaceFileWriteRequest to write files, then git add/commit/push). Emit "
-                    f"the next concrete tool call now; do not stop at a description."
+                    f"the next concrete tool call now; do not stop at a description. "
+                    f"If you have genuinely finished everything the mission asked for, "
+                    f"end your reply with exactly: Mission complete."
                 )
                 continue
 
@@ -4614,7 +4628,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         try:
             import re as _re
             _cited = _re.findall(
-                r"apply\s*[:=]?\s*\[([^\]]+)\]",
+                r"apply\s*[:=]?\s*\[?(lesson-[a-z0-9_\-]+)\]?",
                 (ans or "")
                 + "\n" + (generated_plan or "")
                 + "\n" + "\n".join(action_log[-15:]),
