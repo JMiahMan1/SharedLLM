@@ -167,6 +167,51 @@ def _container_name(workspace_id: str) -> str:
     return f"{CONTAINER_PREFIX}{_slug(workspace_id)}"
 
 
+def _current_image_id(client: Any, img: str) -> str | None:
+    """Local image ID for ``img``, or None when it cannot be resolved.
+
+    None is treated as 'unknown' and callers skip recreation, so a sandbox is
+    never torn down just because the image cannot be inspected (e.g. not yet
+    pulled on first run)."""
+    try:
+        return client.images.get(img).id
+    except Exception:
+        return None
+
+
+def _get_or_recreate(client: Any, cname: str, img: str) -> Any | None:
+    """Return the running container for ``cname``, recreating it when its image
+    is stale.
+
+    Deploys rebuild ``ghcr.io/...:latest`` and ``docker compose up -d`` only
+    recreates the *service* containers — existing ``wsbox-*`` sandboxes keep
+    their original image indefinitely. The toolchain probe advertises tools
+    from the fresh image, so a stale sandbox then fails with ``command not
+    found`` (e.g. ``pdflatex`` after a texlive deploy) even though the tool is
+    truthfully listed. Recreating on image change keeps the shell in sync with
+    what the probe advertises.
+
+    Returns None when the container does not exist or was removed (the caller
+    creates it from ``img``); otherwise the (possibly just recreated) container.
+    """
+    try:
+        c = client.containers.get(cname)
+    except NotFound:
+        return None
+    current_id = _current_image_id(client, img)
+    if current_id is not None and getattr(c.image, "id", None) != current_id:
+        log.info(f"[Sandbox] Image changed for {cname}; recreating from {img}")
+        try:
+            c.remove(force=True)
+        except Exception as e:
+            log.warning(
+                f"[Sandbox] Could not recreate {cname} (image changed), reusing stale container: {e}"
+            )
+            return c
+        return None
+    return c
+
+
 def _network_name(workspace_id: str) -> str:
     return f"{NETWORK_PREFIX}{_slug(workspace_id)}"
 
@@ -256,15 +301,13 @@ def ensure_workspace_container(
     if client is None:
         return None
     cname = _container_name(workspace_id)
+    img = image or SANDBOX_IMAGE
     ensure_workspace_network(workspace_id)
-    try:
-        c = client.containers.get(cname)
+    c = _get_or_recreate(client, cname, img)
+    if c is not None:
         if c.status != "running":
             c.start()
         return c
-    except NotFound:
-        pass
-    img = image or SANDBOX_IMAGE
     # Merge inherited integration credentials so the sandbox can authenticate.
     cred_env = _sandbox_credential_env()
     if env:
@@ -409,11 +452,8 @@ def _exec_blocking(
         raise RuntimeError("docker-unavailable")
     cname = _container_name(workspace_id)
     img = image or SANDBOX_IMAGE
-    try:
-        c = client.containers.get(cname)
-        if c.status != "running":
-            c.start()
-    except NotFound:
+    c = _get_or_recreate(client, cname, img)
+    if c is None:
         # Only create the sandbox if its image is already pulled locally.
         # Pulling a large image mid-command would hang; in that case we raise
         # so run_workspace_cmd falls back to a host subprocess (CI runners and
@@ -426,6 +466,8 @@ def _exec_blocking(
         c = ensure_workspace_container(workspace_id, host_path, image=image, uid=uid, gid=gid)
         if c is None:
             raise RuntimeError("docker-unavailable") from None
+    elif c.status != "running":
+        c.start()
 
     full_env = dict(os.environ)
     # Guarantee the sandbox shell inherits integration credentials even when the
@@ -583,11 +625,8 @@ async def run_workspace_terminal(
         raise RuntimeError("docker-unavailable")
     cname = _container_name(workspace_id)
     img = image or SANDBOX_IMAGE
-    try:
-        c = client.containers.get(cname)
-        if c.status != "running":
-            c.start()
-    except NotFound:
+    c = _get_or_recreate(client, cname, img)
+    if c is None:
         # Only create the sandbox if its image is already pulled locally.
         try:
             client.images.get(img)
@@ -596,6 +635,8 @@ async def run_workspace_terminal(
         c = ensure_workspace_container(workspace_id, host_path, image=image, uid=uid, gid=gid)
         if c is None:
             raise RuntimeError("docker-unavailable") from None
+    elif c.status != "running":
+        c.start()
 
     # Build environment with credentials
     full_env = dict(os.environ)
