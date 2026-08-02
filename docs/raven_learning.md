@@ -203,9 +203,11 @@ User query → orchestrator → is_raven_intent() = True (or _mission_id present
 
 Raven's memory system ensures it gets better over time:
 
-1. **Write**: After a successful mission, `_persist_learning()` extracts the `reflection_summary` (the lesson) and writes it to RAG `system_learnings` collection with task-aware tags (python/javascript/go/rust, workspace/git/repair/deployment).
-2. **Read**: Before each new mission, `_fetch_rag_context()` searches `system_learnings` and injects the most relevant past lessons into the system prompt under a `[SYSTEM_LEARNINGS — PAST LESSONS]` header.
-3. **Apply**: Raven is instructed to cite applied lessons as `Apply: [id]` in its plan and to use `RavenRecallRequest` to review its own history before repeating failed approaches.
+1. **Seed**: At startup, the RAG service seeds an **always-on protocol curriculum** (`lesson-proto-*` lessons, tag `protocol`) covering conventions Raven must follow on every mission: dedicated workspace, verification-before-reporting, web-search fact checks, plan + `Apply: [id]` citations, plus scenario lessons (writing, programming, typesetting, publishing, image-editing, resource pulling). Seeding is idempotent per lesson id.
+2. **Write**: After a successful mission, `_persist_learning()` extracts the `reflection_summary` (the lesson) and writes it to RAG `system_learnings` collection with task-aware tags (python/javascript/go/rust, workspace/git/repair/deployment).
+3. **Read**: Before each new mission, `_fetch_rag_context()` searches `system_learnings` and injects the most relevant past lessons into the system prompt under a `[SYSTEM_LEARNINGS — PAST LESSONS]` header, plus an always-on `[PROTOCOL — ALWAYS-ON CURRICULUM]` block (protocol-tagged lessons pinned at the top) and dynamic environment blocks: `[WORKSPACE TOOLCHAIN]` (binaries probed from the execution container), `[NEXTCLOUD RESOURCES]`, and `[HOME ASSISTANT SNAPSHOT]`.
+4. **Apply**: Raven is instructed to cite applied lessons as `Apply: [id]` in its plan and to use `RavenRecallRequest` to review its own history before repeating failed approaches. Applied lessons are marked with `mark_learning_applied` so reuse statistics are tracked.
+5. **Consolidate**: `POST /rag/dream` runs three compaction passes — COMPACT (truncate oversized summaries), MERGE (collapse duplicates sharing a rule), PRUNE (delete superseded lessons) — keeping the store lean over time.
 
 The per-workspace `raven_memory.md` journal provides same-workspace reinforcement on top of the global system_learnings store.
 
@@ -217,13 +219,20 @@ The per-workspace `raven_memory.md` journal provides same-workspace reinforcemen
 
 | Area | Gap | Impact |
 |------|-----|--------|
-| **Tool set** | No native browser automation tool (only shell-based web scraping) | Raven can't test web UIs interactively |
 | **Observation** | No screenshot/visual feedback loop | Can't verify UI state or visual rendering |
 | **Multi-agent** | No delegation to specialized sub-agents | All work is done by a single LLM instance |
-| **CI integration** | CI workflow generation is conditional on GitHub credentials | Projects without CI get no automated validation |
-| **Dependency management** | No explicit dependency-install awareness | Raven must discover and install deps manually |
 | **Error recovery** | Loop detection escalates but doesn't auto-diagnose | Raven still needs to figure out fixes itself |
 | **Cross-workspace** | No shared library/template reuse across workspaces | Each mission starts from scratch for tooling |
+
+### Closed Gaps (recently shipped)
+
+| Area | What changed |
+|------|-------------|
+| **Curriculum** | Protocol + scenario lessons seeded idempotently at RAG startup (`lesson-proto-*`, tag `protocol`), pinned into every mission via the `[PROTOCOL — ALWAYS-ON CURRICULUM]` block — Raven follows conventions even for terse prompts |
+| **Tool awareness** | Execution service probes its container binaries at startup (26 tools: python3, pandoc, pdflatex, ImageMagick, ghostscript, ffmpeg, tesseract, pdftotext, gh, tshark, nmap, ...) and syncs them to RAG (`/rag/sync/capabilities` with type `binary`); gateway renders them as the dynamic `[WORKSPACE TOOLCHAIN]` block |
+| **Resource access** | RAG inventory endpoints `/rag/resources/nextcloud` and `/rag/resources/ha`; gateway renders `[NEXTCLOUD RESOURCES]` and `[HOME ASSISTANT SNAPSHOT]` blocks so Raven can pull files (StorageFileReadRequest → WorkspaceFileWriteRequest) and read entity states |
+| **Document tooling** | Execution image gained pandoc, TeX Live (base/recommended/extra), ImageMagick, Ghostscript — Markdown→PDF/DOCX, image editing, PDF rasterization/OCR workflows |
+| **Memory hygiene** | Dreaming mode (`POST /rag/dream`: COMPACT/MERGE/PRUNE) consolidates the lesson store; lesson summaries truncated to 400 chars at write time to fit the RAG context budget |
 
 ### Expansion Points
 
@@ -309,6 +318,18 @@ These missions are designed to teach Raven specific capabilities in a progressio
 | T13 | Reuse a lesson from `system_learnings` to solve a variant of a previous task | RAG memory recall, lesson application | Mission explicitly cites `Apply: [id]` in its plan |
 | T14 | Build a tool that reads `raven_memory.md` from a previous workspace | Workspace memory recall | Tool reads and applies the journal correctly |
 
+### Tier 5 — Terse Prompts & Resource Pulling
+
+These verify the learning system itself: Raven must complete a mission from a deliberately
+under-specified prompt, drawing the missing conventions from the always-on protocol
+curriculum rather than from the prompt text.
+
+| # | Mission | Teaches | Verification |
+|---|---------|---------|-------------|
+| T15 | `"find out when the Raspberry Pi 5 came out"` (no workspace, tool, or artifact instructions) | Protocol recall from a terse prompt: dedicated workspace, WebSearchRequest for facts, answer.md artifact, `Apply: [id]` citation | answer.md exists in the created workspace; content matches the web fact; mission log contains `Apply:` with a real `lesson-*` id |
+| T16 | Pull a resource from RAG inventory and produce a document from it | Resource awareness (NEXTCLOUD RESOURCES block), StorageFileReadRequest → WorkspaceFileWriteRequest, toolchain conversion | Resource pulled into workspace, converted (e.g. pandoc → PDF), artifact verified in workspace root |
+| T17 | Terse document mission ("make a PDF flyer about the sale") | Scenario curriculum (typesetting/publishing) + toolchain discovery | `file`/`ls -la` shows a well-formed PDF in the workspace root |
+
 ---
 
 ## 10. Key Files Reference
@@ -332,7 +353,15 @@ These missions are designed to teach Raven specific capabilities in a progressio
 | `services/gateway/agent_loop.py:2019` | — | `resolve_mission_workspace()` — workspace allocation logic |
 | `services/gateway/background_worker.py:53` | — | `RavenWorker` — the singleton inference worker |
 | `services/gateway/orchestrator.py:270` | — | `process_full_orchestration()` — top-level pipeline entry |
-| `services/gateway/orchestrator.py:327` | — | `_fetch_rag_context()` — RAG read path with workspace memory bridge |
+| `services/gateway/orchestrator.py:327` | — | `_fetch_rag_context()` — RAG read path with workspace memory bridge, protocol curriculum pinning, toolchain + resource inventory blocks |
+| `services/rag/main.py:321` | — | `_seed_protocol_lessons()` — idempotent always-on curriculum seeding (`lesson-proto-*`, tag `protocol`) |
+| `services/rag/main.py:691` | — | `list_learnings()` — `/rag/learning` with `tag` filter |
+| `services/rag/main.py:1242` | — | `GET /rag/toolchain` — binary inventory from `system_capabilities` (type `binary`) |
+| `services/rag/main.py:1278` | — | `GET /rag/resources/nextcloud` — Nextcloud file inventory |
+| `services/rag/main.py:1305` | — | `GET /rag/resources/ha` — Home Assistant entity snapshot |
+| `services/rag/main.py:680` | — | `dream_learnings()` — `POST /rag/dream` COMPACT/MERGE/PRUNE consolidation |
+| `services/execution/toolchain.py` | — | Container binary probe + `sync_toolchain_to_rag()` at execution startup |
+| `services/execution/handlers/learning.py` | — | Lesson persistence to RAG (`lesson-<sha1[:10]>` stable ids, summary truncated to 400 chars) |
 | `services/gateway/tool_builder.py:142` | — | `decide()` — the tool discovery router |
 | `services/gateway/intent_engine.py:37` | — | `is_raven_intent()` — the intent classifier |
 | `docs/RAVEN_LEARNING_MEMORY.md` | — | Design doc for the learning memory system |

@@ -126,6 +126,10 @@ async def lifespan(app: FastAPI):
 
     BACKEND = "sqlite-vec" if type(adapter).__name__ == "SqliteVecAdapter" else "numpy"
     log.info("RAG Service Ready.")
+    try:
+        _seed_protocol_lessons()
+    except Exception as e:
+        log.warning(f"[RAG] protocol lesson seeding failed (non-fatal): {e}")
     yield
     try:
         _conn().commit()
@@ -227,6 +231,147 @@ def _add_item(
         log.debug(f"FTS5 index skip for {doc_id}: {e}")
 
     _conn().commit()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Protocol curriculum (always-available behavioral lessons)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Seeded once at startup (idempotent by stable id). These teach the operating
+# conventions Raven must follow even when a user prompt is terse and does not
+# spell them out: dedicated workspace, cheapest-sufficient tool, answer.md
+# artifact, `Apply: [id]` citations, post-mission reflection, source
+# verification. They are tagged `protocol` so the gateway can pin them into
+# every mission prompt regardless of similarity hits.
+_PROTOCOL_LESSONS: list[dict] = [
+    {
+        "id": "lesson-proto-workspace",
+        "topic": "Raven protocol: dedicated workspace per mission",
+        "rule": "Every mission runs in its own dedicated workspace. If the mission has no pre-assigned workspace, create one as your very first tool call (WorkspaceCreateRequest, id like 'raven-<project>') and pass that id as workspace_id in every subsequent file/shell/git call. Never operate in the Default Workspace.",
+        "tags": ["protocol", "workspace"],
+    },
+    {
+        "id": "lesson-proto-tool-choice",
+        "topic": "Raven protocol: cheapest sufficient tool",
+        "rule": "Prefer the cheapest sufficient tool for the task: a straightforward factual question only needs WebSearchRequest — do not write code, launch browsers, or invent extra steps.",
+        "tags": ["protocol", "web", "search"],
+    },
+    {
+        "id": "lesson-proto-artifact",
+        "topic": "Raven protocol: answer.md artifact",
+        "rule": "Save the mission deliverable as answer.md in the mission workspace root: state the answer, cite the applied lesson as `Apply: [id]`, and note which lesson you applied.",
+        "tags": ["protocol", "workspace"],
+    },
+    {
+        "id": "lesson-proto-citation",
+        "topic": "Raven protocol: apply citations",
+        "rule": "When you apply a stored lesson, cite it exactly as `Apply: [id]` (copy the id verbatim) in your plan so the system records it as used.",
+        "tags": ["protocol", "learning"],
+    },
+    {
+        "id": "lesson-proto-reflect",
+        "topic": "Raven protocol: persist lessons after missions",
+        "rule": "After each mission, persist one compact learning capturing the rule, outcome, and confidence so future missions can reuse it.",
+        "tags": ["protocol", "learning"],
+    },
+    {
+        "id": "lesson-proto-verify",
+        "topic": "Raven protocol: verify facts from sources",
+        "rule": "For factual claims, verify against authoritative sources (e.g. Wikipedia) with WebSearchRequest instead of answering from memory; when results conflict, prefer the authoritative source.",
+        "tags": ["protocol", "web", "search"],
+    },
+    # --- Scenario playbooks: how to apply the workspace toolchain ---
+    # These teach scenario -> tool recipes. The actual available binaries are
+    # reported dynamically by the execution container (type="binary"
+    # capabilities, see /rag/toolchain), so these lessons reference tool NAMES
+    # only and never hardcode versions or paths.
+    {
+        "id": "lesson-proto-writing",
+        "topic": "Raven scenario: writing documents",
+        "rule": "Writing tasks: draft in Markdown in the mission workspace (WorkspaceFileWriteRequest, relative_path like 'report.md'); structure with headings, lists, and tables; python-docx is available for .docx output.",
+        "tags": ["protocol", "writing", "document"],
+    },
+    {
+        "id": "lesson-proto-programming",
+        "topic": "Raven scenario: programming",
+        "rule": "Programming tasks: use python3, git, and gh in the workspace shell; write code via WorkspaceFileWriteRequest, run it and its tests via WorkspaceShellRequest; commit with git. Verify code runs before reporting done.",
+        "tags": ["protocol", "programming", "git"],
+    },
+    {
+        "id": "lesson-proto-typesetting",
+        "topic": "Raven scenario: typesetting",
+        "rule": "Typesetting: convert Markdown to PDF/HTML/DOCX with pandoc (e.g. `pandoc report.md -o report.pdf --pdf-engine=pdflatex`); pdflatex is available for LaTeX/math-heavy documents.",
+        "tags": ["protocol", "typesetting", "document"],
+    },
+    {
+        "id": "lesson-proto-publishing",
+        "topic": "Raven scenario: publishing artifacts",
+        "rule": "Publishing: produce the final artifact (PDF/HTML/Markdown) in the workspace root and verify it exists and is valid (`ls -la`, `file out.pdf`) before finishing; name deliverables clearly and mention them in the final answer.",
+        "tags": ["protocol", "publishing", "document"],
+    },
+    {
+        "id": "lesson-proto-image-editing",
+        "topic": "Raven scenario: image editing",
+        "rule": "Image editing: use ImageMagick (`convert`/`magick`) for resize/crop/annotate/format conversion, Pillow (python3) for scripted edits, and ffmpeg for video/audio; verify outputs with `identify`/`ffprobe`.",
+        "tags": ["protocol", "image-editing", "media"],
+    },
+    {
+        "id": "lesson-proto-resources",
+        "topic": "Raven protocol: pulling resources in",
+        "rule": "Before starting, check the available resources blocks in the prompt. Pull in what you need instead of inventing it: Nextcloud files via StorageFileReadRequest then WorkspaceFileWriteRequest to import into the workspace; Home Assistant entity state via entity requests; previously indexed knowledge via the context blocks. Resources you import may then be processed with the workspace toolchain.",
+        "tags": ["protocol", "resources", "nextcloud", "ha"],
+    },
+]
+
+
+def _seed_protocol_lessons(user_id: str = "default") -> int:
+    """Idempotently ensure the protocol curriculum exists for the user.
+
+    Skips any lesson whose stable id is already stored, so applied/usage
+    counts and user edits are never overwritten. Returns how many lessons
+    were newly created.
+    """
+    created = 0
+    now = int(time.time())
+    indexed_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    for lesson in _PROTOCOL_LESSONS:
+        if _item_exists(lesson["id"]):
+            continue
+        _add_item(
+            collection="system_learnings",
+            doc_id=lesson["id"],
+            user_id=user_id,
+            content=json.dumps(
+                {
+                    "id": lesson["id"],
+                    "topic": lesson["topic"],
+                    "rule": lesson["rule"],
+                    "root_cause": "",
+                    "outcome": "success",
+                    "confidence": 0.9,
+                    "tags": lesson["tags"],
+                    "summary": lesson["rule"],
+                },
+                ensure_ascii=False,
+            ),
+            metadata={
+                "id": lesson["id"],
+                "topic": lesson["topic"],
+                "rule": lesson["rule"],
+                "root_cause": "",
+                "outcome": "success",
+                "confidence": 0.9,
+                "tags": lesson["tags"],
+                "type": "learning",
+                "supersedes": [],
+            },
+            created_at=now,
+            indexed_at=indexed_at,
+        )
+        created += 1
+    if created:
+        log.info(f"[RAG] Seeded {created} protocol lessons for user {user_id}")
+    return created
 
 
 def reindex_all() -> int:
@@ -550,20 +695,27 @@ async def list_collection_documents(collection_name: str, user_id: str = "defaul
 
 
 @app.get("/rag/learning", dependencies=[Depends(require_internal)])
-async def list_learnings(user_id: str = "default", limit: int = 200, sort: str = "recent"):
+async def list_learnings(user_id: str = "default", limit: int = 200, sort: str = "recent", tag: str | None = None):
     """List Raven lessons (system_learnings) with reuse stats.
 
     ``sort`` may be ``recent`` (newest first) or ``reuse`` (most-reused first).
+    ``tag`` filters to lessons whose ``metadata.tags`` includes the tag (e.g.
+    ``protocol``), which is how the gateway pins the always-on curriculum.
     """
     try:
         target_user = "default"
         order = "usage_count DESC, created_at DESC" if sort == "reuse" else "created_at DESC"
+        where = "collection_name = ? AND user_id = ?"
+        params: list = ["system_learnings", target_user]
+        if tag:
+            where += " AND metadata LIKE ?"
+            params.append(f'%"{tag}"%')
         rows = _conn().execute(
             f"SELECT id, content, metadata, created_at, usage_count, last_used_at, "
             f"rule, root_cause, outcome, confidence, applied_count, supersedes "
-            f"FROM rag_items WHERE collection_name = ? AND user_id = ? "
+            f"FROM rag_items WHERE {where} "
             f"ORDER BY {order} LIMIT ?",
-            ["system_learnings", target_user, limit],
+            [*params, limit],
         ).fetchall()
         items = [
             {
@@ -1079,12 +1231,123 @@ async def sync_capabilities(payload: dict):
             "description": description[:200],
             "indexed_at": now_ts,
         }
+        if type_ == "binary":
+            # Workspace toolchain inventory entries carry their version and
+            # scenario tags so the gateway can render a truthful
+            # [WORKSPACE TOOLCHAIN] block (what Raven can actually run).
+            meta["version"] = (cap.get("version") or "")[:60]
+            meta["tags"] = list(cap.get("tags") or [])
         try:
             _add_item("system_capabilities", cid, "default", content, meta, now, now_ts)
             count += 1
         except Exception as e:
             log.error(f"Capability sync failed for {cid}: {e}")
     return {"status": "SUCCESS", "count": count}
+
+
+@app.get("/rag/toolchain", dependencies=[Depends(require_internal)])
+async def get_toolchain(user_id: str = "default"):
+    """Compact inventory of the workspace container's CLI tools.
+
+    Returns the type="binary" capabilities the execution container reported
+    at startup (name, version, scenario tags, short description) so the
+    gateway can inject a truthful [WORKSPACE TOOLCHAIN] block into every
+    mission prompt — Raven always knows exactly which tools it can run.
+    """
+    try:
+        rows = _conn().execute(
+            "SELECT metadata FROM rag_items "
+            "WHERE collection_name = ? AND user_id = ? AND metadata LIKE ? "
+            "ORDER BY metadata",
+            ["system_capabilities", "default", '%"binary"%'],
+        ).fetchall()
+        tools = []
+        for r in rows:
+            try:
+                meta = json.loads(r["metadata"])
+            except Exception:
+                continue
+            tools.append({
+                "name": meta.get("name", ""),
+                "version": meta.get("version", ""),
+                "tags": meta.get("tags", []),
+                "description": meta.get("description", ""),
+            })
+        return {"status": "SUCCESS", "count": len(tools), "tools": tools}
+    except Exception as e:
+        log.error(f"Failed to list toolchain: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.get("/rag/resources/nextcloud", dependencies=[Depends(require_internal)])
+async def list_nextcloud_resources(user_id: str = "default", limit: int = 15):
+    """Inventory of the most recently indexed Nextcloud files.
+
+    Lets the gateway render a compact [NEXTCLOUD RESOURCES] block so Raven
+    knows which documents it can pull into its workspace (via
+    StorageFileReadRequest -> WorkspaceFileWriteRequest). Only the paths,
+    friendly names and timestamps are returned — not the contents.
+    """
+    try:
+        target_user = "default"
+        rows = _conn().execute(
+            "SELECT id, content, metadata, created_at, indexed_at FROM rag_items "
+            "WHERE collection_name = 'nextcloud_files' AND user_id = ? "
+            "ORDER BY indexed_at DESC LIMIT ?",
+            [target_user, limit],
+        ).fetchall()
+        files = []
+        for r in rows:
+            try:
+                meta = json.loads(r["metadata"])
+            except Exception:
+                meta = {}
+            path = meta.get("path") or ""
+            files.append({
+                "id": r["id"],
+                "path": path,
+                "name": meta.get("friendly_name") or meta.get("name") or path.rsplit("/", 1)[-1] or r["id"],
+                "indexed_at": meta.get("indexed_at") or r["indexed_at"],
+            })
+        return {"status": "SUCCESS", "count": len(files), "files": files}
+    except Exception as e:
+        log.error(f"Failed to list nextcloud resources: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.get("/rag/resources/ha", dependencies=[Depends(require_internal)])
+async def list_ha_resources(user_id: str = "default", limit: int = 15):
+    """Compact snapshot of the most recently indexed Home Assistant entities.
+
+    Lets the gateway render a small [HOME ASSISTANT SNAPSHOT] block listing
+    the entities Raven can read state from or control, without dumping the
+    full HA catalog into the prompt.
+    """
+    try:
+        target_user = "default"
+        rows = _conn().execute(
+            "SELECT id, content, metadata, indexed_at FROM rag_items "
+            "WHERE collection_name = 'ha_entities' AND user_id = ? "
+            "ORDER BY indexed_at DESC LIMIT ?",
+            [target_user, limit],
+        ).fetchall()
+        entities = []
+        for r in rows:
+            try:
+                meta = json.loads(r["metadata"])
+            except Exception:
+                meta = {}
+            entities.append({
+                "id": r["id"],
+                "entity_id": meta.get("entity_id") or r["id"],
+                "friendly_name": meta.get("friendly_name") or "",
+                "state": meta.get("state") or "",
+                "indexed_at": meta.get("indexed_at") or r["indexed_at"],
+            })
+        return {"status": "SUCCESS", "count": len(entities), "entities": entities}
+    except Exception as e:
+        log.error(f"Failed to list HA resources: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

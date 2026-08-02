@@ -22,6 +22,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     jq \
     libnss-mdns \
+    pandoc \
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-latex-extra \
+    texlive-fonts-recommended \
+    imagemagick \
+    ghostscript \
     && rm -rf /var/lib/apt/lists/*
 # mDNS (.local) name resolution for host-networked services (vision OCR proxy
 # at jeremiah-home-desktop.local:11434 etc.) — mirror the host's nsswitch so

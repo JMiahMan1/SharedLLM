@@ -419,10 +419,25 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         log.warning(f"GitHub CLI startup auth setup failed (non-fatal): {_e}")
 
+    # Report the workspace toolchain (which CLI binaries exist + versions) to
+    # the RAG service so missions always know what tools they can run.
+    # Best-effort and non-blocking: a failed probe/sync only logs a warning.
+    try:
+        from services.execution.toolchain import sync_toolchain_to_rag
+
+        _toolchain_task = asyncio.create_task(sync_toolchain_to_rag())
+    except Exception as _e:
+        log.warning(f"Toolchain sync startup failed (non-fatal): {_e}")
+        _toolchain_task = None
+
     yield
     telemetry_task.cancel()
     with suppress(Exception):
         await telemetry_task
+    if _toolchain_task is not None:
+        _toolchain_task.cancel()
+        with suppress(Exception):
+            await _toolchain_task
     media_server.join(timeout=5)
     log.info("Execution Bridge shutting down.")
 

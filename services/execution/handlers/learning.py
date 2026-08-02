@@ -23,7 +23,11 @@ async def handle_system_learning(req: SystemLearningRequest) -> ExecutionResult:
         # renderer (orchestrator._fetch_rag_context) can inject each lesson as
         # a single short line `- [id][outcome] (conf) RULE` instead of up to
         # 2000 chars of narrative. The truncated summary keeps enough signal
-        # for semantic retrieval without wasting the context budget.
+        # for semantic retrieval without wasting the context budget. 400 chars
+        # matches the dreaming COMPACT pass (summary_len=400) so stored lessons
+        # stay within the 1500-char compactness ceiling the training
+        # curriculum asserts (800-char summaries overrun it once rule + topic
+        # + JSON wrapper are added).
         content = json.dumps({
             "id": _lid,
             "topic": req.topic,
@@ -32,7 +36,7 @@ async def handle_system_learning(req: SystemLearningRequest) -> ExecutionResult:
             "outcome": req.outcome,
             "confidence": req.confidence,
             "tags": req.tags,
-            "summary": (req.content or "")[:800],
+            "summary": (req.content or "")[:400],
         }, ensure_ascii=False)
         payload = {
             "user_id": req.user_context.user,

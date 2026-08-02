@@ -109,9 +109,21 @@ lesson* it can actually find and apply next time.
 
 ## 4. How the teaching curriculum exercises it
 
-The memory is only as good as the missions that populate it. We drive
-it with a **progression of deliberately simple, independently
-verifiable Python missions** (`tests/integration/test_raven_python_basics.py`):
+The memory is only as good as the missions that populate it. Two layers
+drive it:
+
+1. **Always-on protocol curriculum (seeded, not earned).** At RAG
+   startup, `_seed_protocol_lessons()` idempotently writes
+   `lesson-proto-*` lessons (tag `protocol`) to `system_learnings`:
+   workspace acquisition, verification-before-reporting, web-search fact
+   checks, plan + `Apply: [id]` citations, and scenario lessons
+   (writing, programming, typesetting, publishing, image-editing,
+   resource pulling). The gateway pins these into every mission as the
+   `[PROTOCOL — ALWAYS-ON CURRICULUM]` block, so Raven follows the
+   conventions even when the mission prompt is terse.
+2. **Verified mission lessons (earned).** A progression of deliberately
+   simple, independently verifiable Python missions
+   (`tests/integration/test_raven_python_basics.py`):
 
 1. **T1 — hello CLI**: a runnable Python CLI printing
    `Hello, Raven` with an optional `--name` flag.
@@ -143,6 +155,14 @@ instead of lurching straight into the 3D-shooter integration test.
 ## 5. How to verify the memory is working
 
 ```bash
+# 0. Protocol curriculum is seeded (should return the 13 lesson-proto-* ids):
+curl -s -X GET 'http://192.168.2.205:8004/rag/learning?tag=protocol&user_id=default' \
+  -H 'X-Internal-Secret: <from .env>' | python3 -m json.tool
+
+# 0b. Toolchain inventory is populated after execution container restart:
+curl -s -X GET 'http://192.168.2.205:8004/rag/toolchain' \
+  -H 'X-Internal-Secret: <from .env>' | python3 -m json.tool
+
 # 1. Live Raven mission completes -> reflection persisted.
 #    Check gateway logs for the lesson text:
 docker logs sharedllm_gateway 2>&1 | grep "Mission reflection"
@@ -175,3 +195,15 @@ LIVE_E2E=1 GH_TOKEN=... RAVEN_API_KEY=... \
 - **Retrieval returns nothing** → check the RAG `system_learnings`
   collection exists and the query is semantically close to stored
   topics/tags.
+- **Protocol block missing from a mission** → the
+  `[PROTOCOL — ALWAYS-ON CURRICULUM]` fetch in `_fetch_rag_context`
+  failed (gateway log shows a warning); check the RAG service is up and
+  `tag=protocol` returns rows.
+- **Toolchain block empty** → the execution container never synced
+  (`sync_toolchain_to_rag` runs at startup, best-effort); check
+  execution logs and `/rag/toolchain`. Restart the execution container
+  after Dockerfile changes so the probe picks up new binaries.
+- **Mission wrote to the wrong workspace / stale artifacts** → a
+  workspace bootstrap may have failed (`create_if_missing` must be
+  true for new raven-* workspaces); the mission then falls back to a
+  stale workspace id from an old lesson topic.

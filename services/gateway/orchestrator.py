@@ -416,6 +416,103 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
     except Exception as e:
         log.error(f"RAG search failed: {e}")
 
+    # ── ALWAYS-ON CURRICULUM + ENVIRONMENT AWARENESS ─────────────────────────
+    # Terse prompts only work when Raven can fill in the gaps itself. These
+    # pinned blocks teach the transferable protocol (dedicated workspace,
+    # WebSearch for facts, answer.md, `Apply: [id]` citations), list the CLI
+    # tools the workspace container actually has, and surface the resources it
+    # can pull in (Nextcloud files, Home Assistant entities). All fetches are
+    # best-effort with short timeouts — never block a mission on them.
+    try:
+        from services.gateway.main import shared_http_client
+        async with shared_http_client() as client:
+            try:
+                _pr = await client.get(
+                    f"{rag_svc}/rag/learning",
+                    params={"tag": "protocol", "limit": 12},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
+                )
+                if _pr.status == 200:
+                    _proto = (await _pr.json()).get("items") or []
+                    if _proto:
+                        rag_context += (
+                            "\n[PROTOCOL — ALWAYS-ON CURRICULUM: follow these conventions on "
+                            "EVERY task, even when the prompt does not mention them. When you "
+                            "apply one, cite it once as `Apply: [id]` in your plan.]\n"
+                        )
+                        for _l in _proto:
+                            _m = _l.get("metadata") or {}
+                            _prule = _m.get("rule") or _l.get("content") or ""
+                            _pid = _m.get("id") or _l.get("id") or ""
+                            _pout = _m.get("outcome", "")
+                            _pconf = _m.get("confidence", "")
+                            _ps = f" [{_pout}]" if _pout else ""
+                            _cs = f" (conf {_pconf})" if _pconf != "" else ""
+                            rag_context += f"- [{_pid}]{_ps}{_cs} {_prule}\n"
+            except Exception as e:
+                log.warning(f"[Orchestrator] protocol curriculum fetch skipped: {e}")
+
+            try:
+                _tr = await client.get(
+                    f"{rag_svc}/rag/toolchain",
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
+                )
+                if _tr.status == 200:
+                    _tools = (await _tr.json()).get("tools") or []
+                    if _tools:
+                        rag_context += (
+                            "\n[WORKSPACE TOOLCHAIN — CLI tools available in the workspace "
+                            "shell: use them instead of assuming tools exist]\n"
+                        )
+                        for _t in _tools:
+                            _tv = f" {_t.get('version')}" if _t.get("version") else ""
+                            rag_context += f"- {_t.get('name')}{_tv} — {_t.get('description', '')}\n"
+            except Exception as e:
+                log.warning(f"[Orchestrator] toolchain fetch skipped: {e}")
+
+            try:
+                _nr = await client.get(
+                    f"{rag_svc}/rag/resources/nextcloud",
+                    params={"limit": 10},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
+                )
+                if _nr.status == 200:
+                    _files = (await _nr.json()).get("files") or []
+                    if _files:
+                        rag_context += (
+                            "\n[NEXTCLOUD RESOURCES — files you can pull into the workspace "
+                            "via StorageFileReadRequest then WorkspaceFileWriteRequest]\n"
+                        )
+                        for _f in _files:
+                            rag_context += f"- {_f.get('path') or _f.get('name')}\n"
+            except Exception as e:
+                log.warning(f"[Orchestrator] nextcloud resources fetch skipped: {e}")
+
+            try:
+                _hr = await client.get(
+                    f"{rag_svc}/rag/resources/ha",
+                    params={"limit": 10},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
+                )
+                if _hr.status == 200:
+                    _ents = (await _hr.json()).get("entities") or []
+                    if _ents:
+                        rag_context += (
+                            "\n[HOME ASSISTANT SNAPSHOT — entities you can read state from "
+                            "or control]\n"
+                        )
+                        for _e in _ents:
+                            _en = _e.get("friendly_name") or _e.get("entity_id") or ""
+                            rag_context += f"- {_e.get('entity_id')}: {_e.get('state')} ({_en})\n"
+            except Exception as e:
+                log.warning(f"[Orchestrator] HA resources fetch skipped: {e}")
+    except Exception as e:
+        log.warning(f"[Orchestrator] awareness blocks skipped: {e}")
+
     # BRIDGE (read path): surface THIS workspace's own raven_memory.md journal so
     # repeatable tasks in the same workspace start from accumulated experience,
     # not just the global system_learnings store. system_learnings covers
