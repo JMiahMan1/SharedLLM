@@ -271,7 +271,7 @@ def test_raven_terse_document_mission():
     entries = _list_workspace_files(ws_id)
     pdfs = [
         e for e in entries
-        if e.get("type") == "file" and str(e.get("name", "")).lower().endswith(".pdf")
+        if e.get("is_dir") is False and str(e.get("name", "")).lower().endswith(".pdf")
     ]
     assert pdfs, (
         f"[terse-flyer] no .pdf artifact in workspace {ws_id} "
