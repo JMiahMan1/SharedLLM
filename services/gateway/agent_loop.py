@@ -2696,7 +2696,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             {"role": "system", "content": raven_plan},
             {"role": "user", "content": f"Mission: {query}\n\nCreate a concise execution plan:"}
         ]
-        plan_data = await execute_inference(provider, selected_model, plan_prompt, {"temperature": 0.1, "num_predict": 512})
+        # Thinking-capable models default to emitting reasoning; a thinking-only
+        # reply would strip to an empty plan (the provider only surfaces
+        # thinking when show_thinking is requested), so keep the plan phase
+        # direct like the summary/reflection phases.
+        plan_data = await execute_inference(
+            provider,
+            selected_model,
+            plan_prompt,
+            {"temperature": 0.1, "num_predict": 512, "enable_thinking": False, "include_reasoning": False},
+        )
         generated_plan = plan_data.get("message", {}).get("content", "").strip()
         if generated_plan:
             action_log.append(f"PLAN GENERATED:\n{generated_plan}")
