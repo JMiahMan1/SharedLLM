@@ -93,24 +93,54 @@ def discover_toolchain(
 
 
 async def sync_toolchain_to_rag() -> dict:
-    """POST the discovered toolchain to the RAG capabilities sync."""
+    """POST the discovered toolchain to the RAG capabilities sync.
+
+    Resolves the RAG URL from the ``RAG_SVC_URL`` environment variable
+    (the network-mode-correct URL set by docker-compose), NOT from
+    ``services.config.RAG_SVC_URL`` — that module-level value is overwritten
+    by ``resolve_runtime_config()`` with the BRIDGE-mode URL (``http://rag:8004``)
+    from Identity, which does not resolve in this host-network container.
+    Retries the POST a few times with a short backoff so the sync survives
+    the deploy window where RAG may not be serving yet (containers restart
+    together). A permanent failure only logs a warning — best-effort.
+    """
+    import asyncio
+    import os
+
     import aiohttp
 
-    from services.config import INTERNAL_SECRET, RAG_SVC_URL
+    from services.config import INTERNAL_SECRET
 
+    rag_url = os.environ.get("RAG_SVC_URL", "").strip()
+    if not rag_url:
+        log.warning("[toolchain] RAG_SVC_URL env var is not set; skipping sync")
+        return {"status": "ERROR", "count": 0, "error": "RAG_SVC_URL not set"}
+
+    log.warning(f"[toolchain] task starting; RAG_SVC_URL={rag_url}")
     capabilities = discover_toolchain()
     if not capabilities:
         log.warning("[toolchain] no binaries discovered; nothing to sync")
         return {"status": "SKIPPED", "count": 0}
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
-        async with client.post(
-            f"{RAG_SVC_URL}/rag/sync/capabilities",
-            json={"capabilities": capabilities},
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-        ) as resp:
-            body = await resp.json() if resp.status == 200 else {}
-            if resp.status != 200:
-                log.warning(f"[toolchain] sync failed: {resp.status} {await resp.text()}")
-                return {"status": "ERROR", "count": 0}
-    log.info(f"[toolchain] synced {len(capabilities)} binaries to RAG")
-    return {"status": "SUCCESS", "count": len(capabilities), **body}
+    last_error = "unknown"
+    for attempt in range(6):
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15.0)) as client:
+                async with client.post(
+                    f"{rag_url}/rag/sync/capabilities",
+                    json={"capabilities": capabilities},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                ) as resp:
+                    body = await resp.json() if resp.status == 200 else {}
+                    if resp.status != 200:
+                        last_error = f"status {resp.status}"
+                        log.warning(f"[toolchain] sync attempt {attempt + 1}/6 failed: {resp.status}")
+                        await asyncio.sleep(5)
+                        continue
+            log.info(f"[toolchain] synced {len(capabilities)} binaries to RAG")
+            return {"status": "SUCCESS", "count": len(capabilities), **body}
+        except Exception as e:
+            last_error = str(e)[:120]
+            log.warning(f"[toolchain] sync attempt {attempt + 1}/6 failed: {e}")
+            await asyncio.sleep(5)
+    log.warning(f"[toolchain] sync gave up after 6 attempts: {last_error}")
+    return {"status": "ERROR", "count": 0, "error": last_error}
