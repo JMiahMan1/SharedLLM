@@ -205,7 +205,7 @@ Raven's memory system ensures it gets better over time:
 
 1. **Seed**: At startup, the RAG service seeds an **always-on protocol curriculum** (`lesson-proto-*` lessons, tag `protocol`) covering conventions Raven must follow on every mission: dedicated workspace, verification-before-reporting, web-search fact checks, plan + `Apply: [id]` citations, plus scenario lessons (writing, programming, typesetting, publishing, image-editing, resource pulling). Seeding is idempotent per lesson id.
 2. **Write**: After a successful mission, `_persist_learning()` extracts the `reflection_summary` (the lesson) and writes it to RAG `system_learnings` collection with task-aware tags (python/javascript/go/rust, workspace/git/repair/deployment).
-3. **Read**: Before each new mission, `_fetch_rag_context()` searches `system_learnings` and injects the most relevant past lessons into the system prompt under a `[SYSTEM_LEARNINGS — PAST LESSONS]` header, plus an always-on `[PROTOCOL — ALWAYS-ON CURRICULUM]` block (protocol-tagged lessons pinned at the top) and dynamic environment blocks: `[WORKSPACE TOOLCHAIN]` (binaries probed from the execution container), `[NEXTCLOUD RESOURCES]`, and `[HOME ASSISTANT SNAPSHOT]`.
+3. **Read**: Before each new mission, `_fetch_rag_context()` searches `system_learnings` and injects the most relevant past lessons into the system prompt under a `[SYSTEM_LEARNINGS — PAST LESSONS]` header, plus an always-on `[PROTOCOL — ALWAYS-ON CURRICULUM]` block (protocol-tagged lessons pinned at the top) and dynamic environment blocks: `[WORKSPACE TOOLCHAIN]` (binaries probed from the workspace shell image), `[NEXTCLOUD RESOURCES]`, and `[HOME ASSISTANT SNAPSHOT]`.
 4. **Apply**: Raven is instructed to cite applied lessons as `Apply: [id]` in its plan and to use `RavenRecallRequest` to review its own history before repeating failed approaches. Applied lessons are marked with `mark_learning_applied` so reuse statistics are tracked.
 5. **Consolidate**: `POST /rag/dream` runs three compaction passes — COMPACT (truncate oversized summaries), MERGE (collapse duplicates sharing a rule), PRUNE (delete superseded lessons) — keeping the store lean over time.
 
@@ -360,7 +360,7 @@ curriculum rather than from the prompt text.
 | `services/rag/main.py:1278` | — | `GET /rag/resources/nextcloud` — Nextcloud file inventory |
 | `services/rag/main.py:1305` | — | `GET /rag/resources/ha` — Home Assistant entity snapshot |
 | `services/rag/main.py:680` | — | `dream_learnings()` — `POST /rag/dream` COMPACT/MERGE/PRUNE consolidation |
-| `services/execution/toolchain.py` | — | Container binary probe + `sync_toolchain_to_rag()` at execution startup |
+|  `services/execution/toolchain.py` (run by the workspace_runtime service) | — | Container binary probe + `sync_toolchain_to_rag()` at workspace_runtime startup (the wsbox shell image) |
 | `services/execution/handlers/learning.py` | — | Lesson persistence to RAG (`lesson-<sha1[:10]>` stable ids, summary truncated to 400 chars) |
 | `services/gateway/tool_builder.py:142` | — | `decide()` — the tool discovery router |
 | `services/gateway/intent_engine.py:37` | — | `is_raven_intent()` — the intent classifier |

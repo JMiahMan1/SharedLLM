@@ -664,9 +664,27 @@ async def lifespan(app: FastAPI):
 
     log.info("Workspace Runtime service ready.")
 
+    # Report the workspace shell toolchain (which CLI binaries exist + versions)
+    # to the RAG service so missions always know what the wsbox shell can run.
+    # Runs HERE because the wsbox sandbox reuses this image — probing the
+    # execution service instead advertised binaries that do not exist in the
+    # shell (e.g. pdflatex/tshark), causing exit-127 command failures.
+    # Best-effort and non-blocking: a failed probe/sync only logs a warning.
+    try:
+        from services.execution.toolchain import sync_toolchain_to_rag
+
+        _toolchain_task = asyncio.create_task(sync_toolchain_to_rag())
+    except Exception as _e:
+        log.warning(f"Toolchain sync startup failed (non-fatal): {_e}")
+        _toolchain_task = None
+
     yield
 
     # Shutdown logic
+    if _toolchain_task is not None:
+        _toolchain_task.cancel()
+        with suppress(Exception):
+            await _toolchain_task
     log.info("Workspace Runtime service shutting down.")
 
 app = FastAPI(title="Jarvis Workspace Runtime", version="1.0.0", lifespan=lifespan)

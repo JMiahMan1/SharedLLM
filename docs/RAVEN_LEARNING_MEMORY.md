@@ -159,7 +159,7 @@ instead of lurching straight into the 3D-shooter integration test.
 curl -s -X GET 'http://192.168.2.205:8004/rag/learning?tag=protocol&user_id=default' \
   -H 'X-Internal-Secret: <from .env>' | python3 -m json.tool
 
-# 0b. Toolchain inventory is populated after execution container restart:
+# 0b. Toolchain inventory is populated after workspace_runtime container restart:
 curl -s -X GET 'http://192.168.2.205:8004/rag/toolchain' \
   -H 'X-Internal-Secret: <from .env>' | python3 -m json.tool
 
@@ -199,10 +199,10 @@ LIVE_E2E=1 GH_TOKEN=... RAVEN_API_KEY=... \
   `[PROTOCOL — ALWAYS-ON CURRICULUM]` fetch in `_fetch_rag_context`
   failed (gateway log shows a warning); check the RAG service is up and
   `tag=protocol` returns rows.
-- **Toolchain block empty** → the execution container never synced
+- **Toolchain block empty** → the workspace_runtime container never synced
   (`sync_toolchain_to_rag` runs at startup, best-effort); check
-  execution logs and `/rag/toolchain`. Restart the execution container
-  after Dockerfile changes so the probe picks up new binaries.
+  workspace_runtime logs and `/rag/toolchain`. Restart the workspace_runtime container
+  after Dockerfile changes so the probe picks up new binaries (the wsbox shell reuses the workspace_runtime image).
 - **Mission wrote to the wrong workspace / stale artifacts** → a
   workspace bootstrap may have failed (`create_if_missing` must be
   true for new raven-* workspaces); the mission then falls back to a

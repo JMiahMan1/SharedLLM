@@ -1,23 +1,26 @@
 # services/execution/toolchain.py
 """Workspace toolchain inventory.
 
-Probes the execution container for the CLI tools Raven can actually run
-inside its workspace shell and reports them to the RAG service as
-``type="binary"`` capabilities (with version + scenario tags). The gateway
-renders these as a truthful ``[WORKSPACE TOOLCHAIN]`` block in every mission
-prompt, so Raven always knows its full toolset — writing, programming,
-typesetting, publishing, image editing, media, and more — without hardcoding
-anything in prompt text.
+Probes the workspace shell (the workspace-runtime image the per-workspace
+wsbox sandboxes reuse) for the CLI tools Raven can actually run and reports
+them to the RAG service as ``type="binary"`` capabilities (with version +
+scenario tags). The gateway renders these as a truthful ``[WORKSPACE
+TOOLCHAIN]`` block in every mission prompt, so Raven always knows its full
+toolset — writing, programming, typesetting, publishing, image editing,
+media, and more — without hardcoding anything in prompt text.
 
-The probe is best-effort and never blocks startup: missing binaries are
-skipped, and a failed sync is logged as a warning.
+The probe is started by the workspace_runtime service (NOT the execution
+service — the two images differ, and advertising execution-only binaries
+such as pdflatex/tshark to the shell caused exit-127 command failures). It
+is best-effort and never blocks startup: missing binaries are skipped, and
+a failed sync is logged as a warning.
 """
 import logging
 import shutil
 import subprocess
 from typing import Callable
 
-log = logging.getLogger("execution.toolchain")
+log = logging.getLogger("workspace_runtime.toolchain")
 
 # (binary, --version flag, scenario tags, short description)
 # The version flag list covers common conventions; each probe falls back
