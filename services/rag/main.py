@@ -1308,6 +1308,26 @@ async def sync_capabilities(payload: dict):
             count += 1
         except Exception as e:
             log.error(f"Capability sync failed for {cid}: {e}")
+
+    # Binary inventory converges to the probing container's actual tool set:
+    # drop binary rows this probe did not report so stale entries (e.g. from a
+    # previously deployed service) are never advertised in [WORKSPACE TOOLCHAIN].
+    if any(cid.startswith("cap:binary:") for cid, _, _ in pending):
+        incoming = {cid for cid, _, _ in pending if cid.startswith("cap:binary:")}
+        stale = [
+            r["id"]
+            for r in _conn()
+            .execute(
+                "SELECT id FROM rag_items "
+                "WHERE collection_name = ? AND user_id = ? AND metadata LIKE ?",
+                ["system_capabilities", "default", '%"binary"%'],
+            )
+            .fetchall()
+            if r["id"] not in incoming
+        ]
+        if stale:
+            _delete_items(stale)
+            log.warning(f"Capability sync pruned {len(stale)} stale binary entries")
     return {"status": "SUCCESS", "count": count}
 
 
