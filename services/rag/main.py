@@ -17,6 +17,7 @@ Key design notes:
   metadata in ``rag_items``. Structured collections additionally mirror into
   dedicated relational tables for direct SQL queries.
 """
+import asyncio
 import hashlib
 import json
 import logging
@@ -190,8 +191,16 @@ def _add_item(
     metadata: dict,
     created_at: int,
     indexed_at: str,
+    vector: list[float] | None = None,
 ):
-    """Insert/replace a document into rag_items + vector store + FTS5."""
+    """Insert/replace a document into rag_items + vector store + FTS5.
+
+    ``vector`` may be precomputed by async callers: embedding is CPU-bound
+    ONNX inference, so batch endpoints run it in a worker thread
+    (``asyncio.to_thread``) and pass the result here to keep the event loop
+    responsive; when omitted, embedding happens synchronously (sync callers
+    such as lifespan seeding and tests).
+    """
     user_id = user_id.lower()
     # Carry usage tracking into metadata for backward-visible reuse stats.
     stored_metadata = dict(metadata or {})
@@ -217,7 +226,8 @@ def _add_item(
             json.dumps((metadata or {}).get("supersedes", [])),
         ],
     )
-    vector = embed([content])[0]
+    if vector is None:
+        vector = embed([content])[0]
     _adapter().add(doc_id, vector, collection, user_id)
 
     # BM25 keyword index (best effort).
@@ -815,10 +825,16 @@ async def mark_learning_applied(doc_id: str):
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
 
-def _reembed_doc(doc_id: str, new_content: str, meta: dict) -> None:
-    """Re-embed a doc after its content changed (best effort, mirrors edit_learning)."""
+def _reembed_doc(doc_id: str, new_content: str, meta: dict, vector: list[float] | None = None) -> None:
+    """Re-embed a doc after its content changed (best effort, mirrors edit_learning).
+
+    ``vector`` may be precomputed by async callers (embedding is CPU-bound
+    ONNX inference; run it in a worker thread there); when omitted, embedding
+    happens synchronously.
+    """
     try:
-        vector = embed([new_content])[0]
+        if vector is None:
+            vector = embed([new_content])[0]
         _adapter().add(doc_id, vector, "system_learnings", meta.get("user_id", "default"))
         _conn().execute("DELETE FROM rag_fts WHERE id = ?", [doc_id])
         _conn().execute(
@@ -871,6 +887,7 @@ async def dream_learnings(user_id: str = "default", compact_at: int = 600, summa
 
         # Pass 1: COMPACT oversized JSON lessons.
         compacted: list[str] = []
+        pending_reembed: list[tuple[str, str, dict]] = []
         for d in docs:
             content = d["content"]
             if not content.strip().startswith("{"):
@@ -887,9 +904,19 @@ async def dream_learnings(user_id: str = "default", compact_at: int = 600, summa
                     "UPDATE rag_items SET content = ?, metadata = ? WHERE id = ?",
                     [new_content, json.dumps(d["metadata"]), d["id"]],
                 )
-                _reembed_doc(d["id"], new_content, d["metadata"])
+                pending_reembed.append((d["id"], new_content, d["metadata"]))
                 d["content"] = new_content
                 compacted.append(d["id"])
+        # Re-embedding is CPU-bound ONNX inference; run it in a worker thread
+        # so the event loop stays responsive during the compaction pass.
+        if pending_reembed:
+            try:
+                vectors = await asyncio.to_thread(embed, [p[1] for p in pending_reembed])
+            except Exception as ex:
+                log.warning(f"Dream re-embed failed for {len(pending_reembed)} doc(s): {ex}")
+            else:
+                for i, (doc_id, new_content, meta) in enumerate(pending_reembed):
+                    _reembed_doc(doc_id, new_content, meta, vectors[i])
         _conn().commit()
 
         # Pass 2: MERGE lessons sharing the same rule.
@@ -984,6 +1011,7 @@ async def sync_files(payload: dict):
     now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     now = int(time.time())
     count = 0
+    pending: list[tuple[str, str, dict]] = []
 
     for c in chunks:
         if not isinstance(c, dict):
@@ -1012,8 +1040,21 @@ async def sync_files(payload: dict):
         if "created_at" not in meta:
             meta["created_at"] = now
 
+        pending.append((cid, content, meta))
+
+    # Embedding is CPU-bound ONNX inference; run it in a worker thread so the
+    # event loop stays responsive while file chunks are being indexed.
+    try:
+        vectors = await asyncio.to_thread(embed, [p[1] for p in pending])
+    except Exception as ex:
+        log.error(f"File chunk embedding failed for {len(pending)} chunks: {ex}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "ERROR", "message": f"File chunk embedding failed: {ex}"},
+        )
+    for i, (cid, content, meta) in enumerate(pending):
         try:
-            _add_item(collection_name, cid, user_id, content, meta, now, now_ts)
+            _add_item(collection_name, cid, user_id, content, meta, now, now_ts, vector=vectors[i])
             count += 1
         except Exception as e:
             log.error(f"File chunk sync failed for {cid}: {e}")
@@ -1090,6 +1131,7 @@ async def sync_ha(payload: dict, user_id: str | None = None):
         existing_ids = set()
 
     new_count = 0
+    pending: list[tuple[str, str, dict, int]] = []
     for e in entities:
         if not isinstance(e, dict):
             continue
@@ -1143,10 +1185,7 @@ async def sync_ha(payload: dict, user_id: str | None = None):
             "device_last_verified": str(dev_last_verified) if dev_last_verified else "",
             "device_metadata": json.dumps(dev_metadata) if dev_metadata else "",
         }
-        try:
-            _add_item("ha_entities", cid, resolved_user, content, meta, created_at, now_ts)
-        except Exception as ex:
-            log.error(f"HA entity sync failed for {cid}: {ex}")
+        pending.append((cid, content, meta, created_at))
 
     # Orphan cleanup: delete entities no longer present in HA.
     incoming_ids = {f"ha:{e.get('entity_id')}" for e in entities if e.get("entity_id")}
@@ -1155,11 +1194,9 @@ async def sync_ha(payload: dict, user_id: str | None = None):
         _delete_items(orphaned_entities)
         log.info(f"[ha_sync] Removed {len(orphaned_entities)} orphaned entity entries")
 
-    try:
-        _add_item(
-            "ha_entities",
+    pending.append(
+        (
             f"sync_status:{resolved_user}",
-            resolved_user,
             f"Last HA sync for {resolved_user} at {now}. Total: {len(entities)}, "
             f"New: {new_count}, Removed: {len(orphaned_entities)}",
             {
@@ -1172,10 +1209,25 @@ async def sync_ha(payload: dict, user_id: str | None = None):
                 "indexed_at": now_ts,
             },
             now,
-            now_ts,
         )
+    )
+
+    # Embedding is CPU-bound ONNX inference; run it in a worker thread so the
+    # event loop stays responsive (health checks, searches) while HA entities
+    # are being (re-)indexed.
+    try:
+        vectors = await asyncio.to_thread(embed, [p[1] for p in pending])
     except Exception as ex:
-        log.error(f"HA sync_status update failed: {ex}")
+        log.error(f"[ha_sync] embedding {len(pending)} entities failed: {ex}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "ERROR", "message": f"HA entity embedding failed: {ex}"},
+        )
+    for i, (cid, content, meta, created_at) in enumerate(pending):
+        try:
+            _add_item("ha_entities", cid, resolved_user, content, meta, created_at, now_ts, vector=vectors[i])
+        except Exception as ex:
+            log.error(f"HA entity sync failed for {cid}: {ex}")
 
     return {
         "status": "SUCCESS",
@@ -1215,6 +1267,7 @@ async def sync_capabilities(payload: dict):
     now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     now = int(time.time())
     count = 0
+    pending: list[tuple[str, str, dict]] = []
     for cap in capabilities:
         name = cap.get("name")
         description = cap.get("description", "")
@@ -1237,8 +1290,21 @@ async def sync_capabilities(payload: dict):
             # [WORKSPACE TOOLCHAIN] block (what Raven can actually run).
             meta["version"] = (cap.get("version") or "")[:60]
             meta["tags"] = list(cap.get("tags") or [])
+        pending.append((cid, content, meta))
+
+    # Embedding is CPU-bound ONNX inference; run it in a worker thread so the
+    # event loop stays responsive while capabilities are being indexed.
+    try:
+        vectors = await asyncio.to_thread(embed, [p[1] for p in pending])
+    except Exception as ex:
+        log.error(f"Capability embedding failed for {len(pending)} entries: {ex}")
+        return JSONResponse(
+            status_code=500,
+            content={"status": "ERROR", "message": f"Capability embedding failed: {ex}"},
+        )
+    for i, (cid, content, meta) in enumerate(pending):
         try:
-            _add_item("system_capabilities", cid, "default", content, meta, now, now_ts)
+            _add_item("system_capabilities", cid, "default", content, meta, now, now_ts, vector=vectors[i])
             count += 1
         except Exception as e:
             log.error(f"Capability sync failed for {cid}: {e}")
