@@ -663,6 +663,147 @@ async def mark_learning_applied(doc_id: str):
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
 
+def _reembed_doc(doc_id: str, new_content: str, meta: dict) -> None:
+    """Re-embed a doc after its content changed (best effort, mirrors edit_learning)."""
+    try:
+        vector = embed([new_content])[0]
+        _adapter().add(doc_id, vector, "system_learnings", meta.get("user_id", "default"))
+        _conn().execute("DELETE FROM rag_fts WHERE id = ?", [doc_id])
+        _conn().execute(
+            "INSERT INTO rag_fts(id, content, collection_name, user_id) VALUES(?, ?, ?, ?)",
+            [doc_id, new_content, "system_learnings", meta.get("user_id", "default").lower()],
+        )
+    except Exception as e:  # pragma: no cover - embedding best effort
+        log.warning(f"Re-embed during dream failed for {doc_id}: {e}")
+
+
+@app.post("/rag/dream", dependencies=[Depends(require_internal)])
+async def dream_learnings(user_id: str = "default", compact_at: int = 600, summary_len: int = 400):
+    """Dreaming mode: review Raven lessons and consolidate memory.
+
+    Runs three deterministic passes over ``system_learnings`` for the user:
+      1. COMPACT — lessons whose JSON content exceeds ``compact_at`` chars get
+         their ``summary`` truncated to ``summary_len`` (re-embedded) so the
+         mission context budget is not wasted on long prose.
+      2. MERGE — lessons sharing the same ``rule`` are consolidated: the
+         highest-confidence (tie: newest) lesson survives and absorbs the
+         others' applied/usage counts and ids into ``supersedes``.
+      3. PRUNE — any lesson referenced by another's ``supersedes`` list is
+         deleted (outdated information is removed).
+    Returns a dream report of what was compacted/merged/pruned.
+    """
+    try:
+        target_user = user_id.lower()
+        rows = _conn().execute(
+            f"SELECT id, content, metadata, created_at, usage_count, applied_count, "
+            f"rule, confidence, supersedes "
+            f"FROM rag_items WHERE collection_name = ? AND user_id = ? "
+            f"ORDER BY created_at DESC",
+            ["system_learnings", target_user],
+        ).fetchall()
+        docs = [
+            {
+                "id": r["id"],
+                "content": r["content"],
+                "metadata": json.loads(r["metadata"]),
+                "created_at": r["created_at"],
+                "usage_count": r["usage_count"] or 0,
+                "applied_count": r["applied_count"] or 0,
+                "rule": (r["rule"] or "").strip(),
+                "confidence": float(r["confidence"]) if r["confidence"] is not None else 0.5,
+                "supersedes": json.loads(r["supersedes"]) if r["supersedes"] else [],
+            }
+            for r in rows
+        ]
+        reviewed = len(docs)
+
+        # Pass 1: COMPACT oversized JSON lessons.
+        compacted: list[str] = []
+        for d in docs:
+            content = d["content"]
+            if not content.strip().startswith("{"):
+                continue
+            try:
+                parsed = json.loads(content)
+            except Exception:
+                continue
+            if len(content) > compact_at and isinstance(parsed.get("summary"), str) and len(parsed["summary"]) > summary_len:
+                parsed["summary"] = parsed["summary"][:summary_len]
+                new_content = json.dumps(parsed, ensure_ascii=False)
+                d["metadata"]["indexed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+                _conn().execute(
+                    "UPDATE rag_items SET content = ?, metadata = ? WHERE id = ?",
+                    [new_content, json.dumps(d["metadata"]), d["id"]],
+                )
+                _reembed_doc(d["id"], new_content, d["metadata"])
+                d["content"] = new_content
+                compacted.append(d["id"])
+        _conn().commit()
+
+        # Pass 2: MERGE lessons sharing the same rule.
+        merged: dict[str, list[str]] = {}
+        by_rule: dict[str, list[dict]] = {}
+        for d in docs:
+            if d["rule"]:
+                by_rule.setdefault(d["rule"].lower(), []).append(d)
+        deleted: set[str] = set()
+        for key, group in by_rule.items():
+            if len(group) < 2:
+                continue
+            survivor = max(group, key=lambda d: (d["confidence"], d["created_at"]))
+            others = [d for d in group if d["id"] != survivor["id"]]
+            for o in others:
+                survivor["usage_count"] += o["usage_count"]
+                survivor["applied_count"] += o["applied_count"]
+                merged_ids = list(dict.fromkeys(survivor["supersedes"] + [o["id"]]))
+                survivor["supersedes"] = merged_ids
+                survivor["metadata"]["supersedes"] = merged_ids
+            _conn().execute(
+                "UPDATE rag_items SET usage_count = ?, applied_count = ?, "
+                "metadata = ?, supersedes = ? WHERE id = ?",
+                [
+                    survivor["usage_count"],
+                    survivor["applied_count"],
+                    json.dumps(survivor["metadata"]),
+                    json.dumps(survivor["supersedes"]),
+                    survivor["id"],
+                ],
+            )
+            merged[survivor["id"]] = [o["id"] for o in others]
+            deleted.update(o["id"] for o in others)
+        _conn().commit()
+        if deleted:
+            _delete_items(list(deleted))
+
+        # Pass 3: PRUNE lessons referenced by another lesson's supersedes.
+        pruned: list[str] = []
+        referenced: set[str] = set()
+        for d in docs:
+            referenced.update(d["supersedes"])
+        for doc_id in referenced:
+            if doc_id not in deleted and _item_exists(doc_id):
+                pruned.append(doc_id)
+        if pruned:
+            _delete_items(pruned)
+
+        kept = _conn().execute(
+            "SELECT COUNT(*) AS c FROM rag_items WHERE collection_name = ? AND user_id = ?",
+            ["system_learnings", target_user],
+        ).fetchone()["c"]
+        return {
+            "status": "SUCCESS",
+            "user_id": target_user,
+            "reviewed": reviewed,
+            "compacted": compacted,
+            "merged": merged,
+            "pruned": pruned,
+            "kept": kept,
+        }
+    except Exception as e:
+        log.error(f"Dream failed: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
 @app.get("/rag/indexed-paths", dependencies=[Depends(require_internal)])
 async def get_indexed_paths(user_id: str = "default"):
     user_id = user_id.lower()

@@ -2112,7 +2112,7 @@ async def resolve_mission_workspace(
             async with shared_http_client() as client:
                 boot = await client.post(
                     f"{WORKSPACE_RUNTIME_SVC}/workspaces/bootstrap",
-                    json={"workspace_id": assigned_workspace_id, "rag_user": user_id},
+                    json={"workspace_id": assigned_workspace_id, "rag_user": user_id, "create_if_missing": True},
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=aiohttp.ClientTimeout(total=20.0),
                 )
@@ -2156,7 +2156,7 @@ async def resolve_mission_workspace(
                     async with shared_http_client() as client:
                         boot = await client.post(
                             f"{WORKSPACE_RUNTIME_SVC}/workspaces/bootstrap",
-                            json={"workspace_id": cand, "rag_user": user_id},
+                            json={"workspace_id": cand, "rag_user": user_id, "create_if_missing": True},
                             headers={"X-Internal-Secret": INTERNAL_SECRET},
                             timeout=aiohttp.ClientTimeout(total=20.0),
                         )
