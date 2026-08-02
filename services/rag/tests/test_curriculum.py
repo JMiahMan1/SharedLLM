@@ -182,6 +182,47 @@ async def test_sync_capabilities_truncates_long_version(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_sync_capabilities_prunes_stale_binaries(tmp_path):
+    _install_fakes(tmp_path)
+    first = {
+        "capabilities": [
+            {
+                "name": "pandoc",
+                "type": "binary",
+                "version": "3.1.11",
+                "tags": ["typesetting"],
+                "description": "Universal document converter",
+            },
+            {
+                "name": "tshark",
+                "type": "binary",
+                "version": "4.4.16",
+                "tags": ["network"],
+                "description": "Packet capture",
+            },
+        ]
+    }
+    await rag_main.sync_capabilities(first)
+    assert (await rag_main.get_toolchain())["count"] == 2
+
+    second = {
+        "capabilities": [
+            {
+                "name": "pandoc",
+                "type": "binary",
+                "version": "3.1.11",
+                "tags": ["typesetting"],
+                "description": "Universal document converter",
+            }
+        ]
+    }
+    await rag_main.sync_capabilities(second)
+    toolchain = await rag_main.get_toolchain()
+    assert toolchain["count"] == 1
+    assert toolchain["tools"][0]["name"] == "pandoc"
+
+
+@pytest.mark.asyncio
 async def test_nextcloud_resources_inventory(tmp_path):
     _install_fakes(tmp_path)
     await _ingest(
