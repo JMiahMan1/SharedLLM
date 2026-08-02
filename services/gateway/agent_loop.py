@@ -1086,7 +1086,11 @@ def extract_action_batch(text: str) -> list[dict] | None:
         batch = []
         for item in parsed:
             norm = _normalize_tool(item)
-            if norm and (norm.get("action") or norm.get("@type")):
+            # Structurally-valid calls only: a truncated bag-of-words stub
+            # (e.g. {"file_path": ":", "content": ":"}) in a multi-call array
+            # must not become batch[0], or the whole batch is rejected and the
+            # valid calls that followed it are never executed.
+            if norm and (norm.get("action") or norm.get("@type")) and _valid_structured_tool(norm):
                 batch.append(norm)
         if batch:
             return batch
@@ -3339,8 +3343,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # early-completion check above never fired and it looped until
                 # MAX_IDLE_NUDGES -> runaway ERROR). A verified stall is success:
                 # the final text reply IS the deliverable summary.
-                if _consecutive_no_tool >= 2:
-                    log.info(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} successful tool call(s) with nothing unverified — treating as completion.")
+                # Extra guards: a real artifact must exist in the workspace
+                # (_written_files non-empty) and no queued batch call may be
+                # pending — otherwise a stall after a rejected/malformed write
+                # would "complete" a mission whose deliverable was never created
+                # (regression: flyer mission stalled after the write call was
+                # rejected as malformed and the mission ended without a PDF).
+                if (
+                    _consecutive_no_tool >= 2
+                    and _written_files
+                    and not pending_verification(_written_files, _verified_files)
+                    and not pending_batch
+                ):
+                    log.info(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} successful tool call(s) with a verified artifact and nothing queued — treating as completion.")
                     await _clear_checkpoint()
                     break
                 # The mission is multi-step; a plan-as-text reply is NOT "done".
