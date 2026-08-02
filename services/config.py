@@ -156,16 +156,21 @@ async def resolve_runtime_config():
 
     import aiohttp
 
+    # Service URLs are network-aware: Identity stores the BRIDGE_*/HOST_* pair
+    # per service (seeded from .env, editable in the UI Settings page), and
+    # each service reads the set matching its own NETWORK_MODE. The plain keys
+    # (e.g. "rag_svc_url") are legacy bridge-mode defaults and must not be used
+    # by host-network services.
     settings_map = {
         "llm_local_url": "OLLAMA_URL",
-        "execution_svc_url": "EXECUTION_SVC_URL",
-        "rag_svc_url": "RAG_SVC_URL",
-        "storage_svc_url": "STORAGE_SVC_URL",
-        "logging_svc_url": "LOGGING_SVC_URL",
-        "workspace_runtime_svc_url": "WORKSPACE_RUNTIME_SVC_URL",
+        f"{NETWORK_MODE}_execution_svc_url": "EXECUTION_SVC_URL",
+        f"{NETWORK_MODE}_rag_svc_url": "RAG_SVC_URL",
+        f"{NETWORK_MODE}_storage_svc_url": "STORAGE_SVC_URL",
+        f"{NETWORK_MODE}_logging_svc_url": "LOGGING_SVC_URL",
+        f"{NETWORK_MODE}_workspace_runtime_svc_url": "WORKSPACE_RUNTIME_SVC_URL",
+        f"{NETWORK_MODE}_searxng_url": "SEARXNG_URL",
         "geo_svc_url": "GEO_SVC_URL",
         "control_plane_url": "CONTROL_PLANE_URL",
-        "searxng_url": "SEARXNG_URL",
         "ha_url": "HA_URL",
         "ha_token": "HA_TOKEN",
         "nextcloud_url": "NEXTCLOUD_URL",

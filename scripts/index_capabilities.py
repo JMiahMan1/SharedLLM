@@ -23,9 +23,11 @@ except ImportError:
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("indexer")
 
-# TWEAK: Default to 'rag' service name for Docker automation, fallback to localhost for manual runs
-RAG_SVC_URL = os.getenv("RAG_SVC_URL", "http://localhost:8004")
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+# The RAG URL resolves through services.config: it reads the network-aware
+# {NETWORK_MODE}_RAG_SVC_URL from .env (seeded there, editable in the UI
+# settings page) — it is never defined in docker-compose.
+from services.config import INTERNAL_SECRET, RAG_SVC_URL  # noqa: E402
+
 
 def get_json_schema(model: type[BaseModel]):
     """Returns a simplified string representation of the Pydantic model for RAG indexing."""

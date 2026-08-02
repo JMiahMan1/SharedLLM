@@ -1929,7 +1929,8 @@ async def health():
     # cascades into the gateway marking Execution UNREACHABLE (a false alarm that
     # flips the whole gateway to DEGRADED). A degraded RAG only downgrades
     # Execution to "degraded"; it must never block Execution's own health probe.
-    rag_url = os.getenv("RAG_SVC_URL", "http://localhost:8004")
+    from services.config import RAG_SVC_URL
+    rag_url = RAG_SVC_URL.rstrip("/") if RAG_SVC_URL else ""
 
     async def _rag_health_check():
         async with get_client() as client:

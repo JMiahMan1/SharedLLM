@@ -95,25 +95,26 @@ def discover_toolchain(
 async def sync_toolchain_to_rag() -> dict:
     """POST the discovered toolchain to the RAG capabilities sync.
 
-    Resolves the RAG URL from the ``RAG_SVC_URL`` environment variable
-    (the network-mode-correct URL set by docker-compose), NOT from
-    ``services.config.RAG_SVC_URL`` — that module-level value is overwritten
-    by ``resolve_runtime_config()`` with the BRIDGE-mode URL (``http://rag:8004``)
-    from Identity, which does not resolve in this host-network container.
+    The RAG URL is resolved through the normal configuration flow: the
+    ``services.config`` module loads ``HOST_RAG_SVC_URL``/``BRIDGE_RAG_SVC_URL``
+    from the .env file at import time, then ``resolve_runtime_config()``
+    overwrites it with the network-aware setting from Identity (``host_rag_svc_url``
+    for this host-network container, seeded from .env on first startup and
+    editable in the UI Settings page). The RAG URL is therefore never defined
+    in docker-compose.
     Retries the POST a few times with a short backoff so the sync survives
     the deploy window where RAG may not be serving yet (containers restart
     together). A permanent failure only logs a warning — best-effort.
     """
     import asyncio
-    import os
 
     import aiohttp
 
-    from services.config import INTERNAL_SECRET
+    from services.config import INTERNAL_SECRET, RAG_SVC_URL
 
-    rag_url = os.environ.get("RAG_SVC_URL", "").strip()
+    rag_url = RAG_SVC_URL
     if not rag_url:
-        log.warning("[toolchain] RAG_SVC_URL env var is not set; skipping sync")
+        log.warning("[toolchain] RAG_SVC_URL is not configured; skipping sync")
         return {"status": "ERROR", "count": 0, "error": "RAG_SVC_URL not set"}
 
     log.warning(f"[toolchain] task starting; RAG_SVC_URL={rag_url}")
