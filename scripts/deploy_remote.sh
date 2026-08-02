@@ -24,9 +24,9 @@ wait_for_build() {
 
     while [ $attempt -lt $max_attempts ]; do
         local latest_status latest_conclusion
-        latest_status=$(gh run list --branch=microservices --json status,name \
+        latest_status=$(gh run list --branch=microservices --limit 5 --json status,name \
             --jq '.[] | select(.name=="Build & Push Images") | .status' | head -1)
-        latest_conclusion=$(gh run list --branch=microservices --json conclusion,name \
+        latest_conclusion=$(gh run list --branch=microservices --limit 5 --json conclusion,name \
             --jq '.[] | select(.name=="Build & Push Images") | .conclusion' | head -1)
 
         if [ "$latest_status" = "completed" ] && [ "$latest_conclusion" = "success" ]; then
@@ -38,7 +38,7 @@ wait_for_build() {
         # Check if any BPI run on this branch succeeded at all — images may already be built.
         if [ "$latest_status" = "completed" ] && [ "$latest_conclusion" != "success" ]; then
             local any_success
-            any_success=$(gh run list --branch=microservices --json conclusion,name \
+            any_success=$(gh run list --branch=microservices --limit 5 --json conclusion,name \
                 --jq '.[] | select(.name=="Build & Push Images" and .conclusion=="success") | .conclusion' | head -1)
             if [ "$any_success" = "success" ]; then
                 echo "[OK] Build & Push Images completed successfully (earlier run succeeded)."
