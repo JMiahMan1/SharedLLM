@@ -16,6 +16,14 @@ actually steering behavior.
                           curriculum (typesetting/publishing) + toolchain
                           discovery (pandoc/pdflatex) to produce a real
                           PDF in the workspace root.
+  3. ``terse-git``       — bare git task; expects lesson-proto-git to
+                          steer a clone + repository summary artifact.
+  4. ``terse-media``     — bare TTS/narration request; expects
+                          lesson-proto-media to generate an audio artifact.
+  5. ``terse-report``    — bare research request; expects lesson-proto-report
+                          (multi-source web synthesis) into report.md.
+  6. ``terse-orchestrate`` — bare multi-source request; expects cross-domain
+                          chaining (web + Home Assistant) into one artifact.
 
 Requires LIVE_E2E=1 and a reachable gateway (GATEWAY_URL). Missions take
 ~5-30 minutes each; run this file alone.
@@ -280,3 +288,185 @@ def test_raven_terse_document_mission():
 
     content = _read_workspace_file(ws_id, pdfs[0]["name"])
     assert content, f"[terse-flyer] pdf artifact {pdfs[0]['name']} unreadable"
+
+
+def test_raven_terse_git_mission():
+    """A bare git task with NO clone/collaboration instructions.
+
+    Passing proves the scenario curriculum (lesson-proto-git) + toolchain
+    discovery steer Raven to clone a repo, inspect it, and summarize its
+    content into a workspace artifact.
+    """
+    prompt = "Clone the public repo https://github.com/octocat/Hello-World.git into the workspace and write a short summary of what it contains."
+
+    mid = _chat_submit(prompt)
+    result = _chat_wait(mid)
+    assert result.get("status") == "completed", (
+        f"terse-git mission did not complete: {result.get('status')}\n"
+        f"result: {(result.get('result') or '')[:500]}"
+    )
+
+    ws_id = result.get("workspace_id") or ""
+    assert ws_id and ws_id.startswith("raven-"), (
+        f"[terse-git] no dedicated workspace created (got {ws_id!r})"
+    )
+
+    entries = _list_workspace_files(ws_id)
+    names = [str(e.get("name") or "") for e in entries]
+    has_git_tree = any(n == "README" or n == "Hello-World" or n == ".git" for n in names)
+    assert has_git_tree, (
+        f"[terse-git] clone artifact (README / Hello-World / .git) not found in {ws_id} "
+        f"(entries: {names[:20]})"
+    )
+
+    md_artifacts = [
+        e for e in entries
+        if e.get("is_dir") is False and str(e.get("name") or "").lower().endswith((".md", ".txt"))
+    ]
+    summary = None
+    for e in md_artifacts:
+        c = _read_workspace_file(ws_id, e["name"])
+        if c and len(c.strip()) > 30:
+            summary = c
+            break
+    assert summary, (
+        f"[terse-git] no non-empty summary artifact (.md/.txt) found in workspace {ws_id} "
+        f"(md files: {[e.get('name') for e in md_artifacts][:10]})"
+    )
+
+
+def test_raven_terse_media_mission():
+    """A bare narration request with no format instructions.
+
+    Passing proves the scenario curriculum (lesson-proto-media) + toolchain
+    steer Raven to generate an audio narration artifact with the local TTS
+    engine and store it in the workspace.
+    """
+    prompt = "Use text-to-speech to create a short audio narration that says 'The Raspberry Pi 5 was released in 2023' and save it in the workspace."
+
+    mid = _chat_submit(prompt)
+    result = _chat_wait(mid)
+    assert result.get("status") == "completed", (
+        f"terse-media mission did not complete: {result.get('status')}\n"
+        f"result: {(result.get('result') or '')[:500]}"
+    )
+
+    ws_id = result.get("workspace_id") or ""
+    assert ws_id and ws_id.startswith("raven-"), (
+        f"[terse-media] no dedicated workspace created (got {ws_id!r})"
+    )
+
+    entries = _list_workspace_files(ws_id)
+    audio = [
+        e for e in entries
+        if e.get("is_dir") is False
+        and str(e.get("name") or "").lower().endswith((".mp3", ".wav", ".ogg", ".flac", ".aac"))
+    ]
+    assert audio, (
+        f"[terse-media] no audio artifact in workspace {ws_id} "
+        f"(entries: {[e.get('name') for e in entries][:20]})"
+    )
+
+    output_log = _mission_output_log(mid)
+    assert any(kw in output_log.lower() for kw in ("tts", "kokoro", "narration", "audio")), (
+        "[terse-media] log shows no evidence of the TTS/audio pipeline"
+    )
+
+
+def test_raven_terse_research_report_mission():
+    """A bare research-report request with no document instructions.
+
+    Passing proves the scenario curriculum (lesson-proto-report: 2-3 web
+    searches, synthesize into report.md) produces a real multi-source
+    report artifact in the workspace root.
+    """
+    prompt = "Research the history of the Raspberry Pi and write a short report about it in the workspace."
+
+    mid = _chat_submit(prompt)
+    result = _chat_wait(mid)
+    assert result.get("status") == "completed", (
+        f"terse-report mission did not complete: {result.get('status')}\n"
+        f"result: {(result.get('result') or '')[:500]}"
+    )
+
+    ws_id = result.get("workspace_id") or ""
+    assert ws_id and ws_id.startswith("raven-"), (
+        f"[terse-report] no dedicated workspace created (got {ws_id!r})"
+    )
+
+    entries = _list_workspace_files(ws_id)
+    md_pdfs = [
+        e for e in entries
+        if e.get("is_dir") is False
+        and str(e.get("name") or "").lower().endswith((".md", ".pdf", ".html"))
+    ]
+    assert md_pdfs, (
+        f"[terse-report] no report artifact (.md/.pdf/.html) in workspace {ws_id} "
+        f"(entries: {[e.get('name') for e in entries][:20]})"
+    )
+
+    report_content = None
+    for e in md_pdfs:
+        if not str(e.get("name") or "").lower().endswith(".pdf"):
+            c = _read_workspace_file(ws_id, e["name"])
+            if c and len(c.strip()) > 80:
+                report_content = c
+                break
+    assert report_content, (
+        f"[terse-report] no readable multi-line report content among "
+        f"{[e.get('name') for e in md_pdfs][:10]}"
+    )
+
+    output_log = _mission_output_log(mid)
+    assert "Apply:" in output_log, (
+        "[terse-report] plan has no Apply: citation — lesson application not recorded"
+    )
+
+
+def test_raven_terse_orchestration_mission():
+    """A bare multi-source status request with no data-source/artifact guidance.
+
+    Passing proves the scenario curriculum (lesson-proto-orchestrate:
+    cross-domain chaining) + environment awareness blocks (HA snapshot,
+    web) steer the agent to query state, fetch web information, and synth
+    everything into a single workspace artifact.
+    """
+    prompt = "Create a combined status report in the workspace that uses both a web search about the Raspberry Pi 5 and Home Assistant data to describe the current home indoor temperature."
+
+    mid = _chat_submit(prompt)
+    result = _chat_wait(mid)
+    assert result.get("status") == "completed", (
+        f"orchestrate mission did not complete: {result.get('status')}\n"
+        f"result: {(result.get('result') or '')[:500]}"
+    )
+
+    ws_id = result.get("workspace_id") or ""
+    assert ws_id and ws_id.startswith("raven-"), (
+        f"[orchestrate] no dedicated workspace created (got {ws_id!r})"
+    )
+
+    entries = _list_workspace_files(ws_id)
+    artifacts = [
+        e for e in entries
+        if e.get("is_dir") is False
+        and str(e.get("name") or "").lower().endswith((".md", ".json", ".html", ".pdf"))
+    ]
+    assert artifacts, (
+        f"[orchestrate] no synthesized artifact in workspace {ws_id} "
+        f"(entries: {[e.get('name') for e in entries][:20]})"
+    )
+
+    artifact_text = None
+    for e in artifacts:
+        if str(e.get("name") or "").lower().endswith(".pdf"):
+            continue
+        c = _read_workspace_file(ws_id, e["name"])
+        if c and len(c.strip()) > 80:
+            artifact_text = c
+            break
+    assert artifact_text, "no readable synthesized artifact content"
+
+    output_log = _mission_output_log(mid)
+    assert "Apply:" in output_log, (
+        "[orchestrate] plan has no Apply: citation — lesson application not recorded"
+    )

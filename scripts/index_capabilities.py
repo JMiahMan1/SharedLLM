@@ -68,8 +68,23 @@ def index_capabilities():
         "WorkspaceBootstrapRequest": "Autonomously initializes or clones a repository into a workspace path if it is missing.",
         "SystemLearningRequest": "Persists successful bug fixes and architectural insights to the RAG ledger.",
         "TTSRequest": "Converts text to speech using local Kokoro engine. Supports storybook mode.",
-        "StorageTextToAudioRequest": "Converts a text file in Nextcloud storage to an audio file using Kokoro narration."
+        "StorageTextToAudioRequest": "Converts a text file in Nextcloud storage to an audio file using Kokoro narration.",
+        "RavenMissionRequest": "Dispatch a background Raven mission — an autonomous agent that plans, writes code, creates its own workspace, builds, tests, and can push to GitHub. Use this for complex multi-step tasks such as building an app, running long research, or orchestrating multi-tool workflows. The mission runs asynchronously in the Raven queue and returns a mission id."
     }
+
+
+    # RavenMissionRequest is not a Pydantic class — it is a string-type tool recognized by
+    # the prose tool parser and the tool_registry resolver (which POSTs to /api/raven/missions).
+    # We inject its schema directly since no model is available.
+    _raven_mission_schema = json.dumps({
+        "title": "RavenMissionRequest",
+        "type": "object",
+        "properties": {
+            "mission": {"title": "Mission", "type": "string", "description": "The full task/mission description for Raven to execute."},
+            "workspace_id": {"title": "Workspace Id", "type": "string", "description": "Optional existing workspace id to run the mission in."}
+        },
+        "required": ["mission"]
+    }, indent=2)
 
 
     # Process Execution and Workspace Schemas
@@ -112,6 +127,16 @@ def index_capabilities():
                 "type": "execution_schema"
             })
             log.info(f"Prepared storage schema: {class_name}")
+
+    # RavenMissionRequest is a string-type tool (not a Pydantic class) handled by
+    # the prose_tools parser and tool_registry resolver (POST /api/raven/missions).
+    capabilities.append({
+        "name": "RavenMissionRequest",
+        "description": schema_map["RavenMissionRequest"],
+        "schema": _raven_mission_schema,
+        "type": "execution_schema"
+    })
+    log.info("Prepared schema: RavenMissionRequest")
 
     log.info("Skipping legacy phrasebook intents.")
 

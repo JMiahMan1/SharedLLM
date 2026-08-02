@@ -331,6 +331,30 @@ _PROTOCOL_LESSONS: list[dict] = [
         "rule": "Before starting, check the available resources blocks in the prompt. Pull in what you need instead of inventing it: Nextcloud files via StorageFileReadRequest then WorkspaceFileWriteRequest to import into the workspace; Home Assistant entity state via entity requests; previously indexed knowledge via the context blocks. Resources you import may then be processed with the workspace toolchain.",
         "tags": ["protocol", "resources", "nextcloud", "ha"],
     },
+    {
+        "id": "lesson-proto-git",
+        "topic": "Raven scenario: git operations",
+        "rule": "Git tasks: clone repositories with `git clone URL` in the workspace shell; for existing repos use `git pull`, `git add`, `git commit -m`, `git push`; for GitHub operations use `gh` (issues, PRs, releases). Verify state with `git status`, `git log --oneline -5`. The workspace README and commit history are always accessible via WorkspaceFileReadRequest and WorkspaceShellRequest.",
+        "tags": ["protocol", "git", "programming"],
+    },
+    {
+        "id": "lesson-proto-media",
+        "topic": "Raven scenario: media and audio creation",
+        "rule": "Media creation: TTSRequest converts text to speech via local Kokoro engine (set storybook_mode for multi-voice narration); StorageTextToAudioRequest converts a Nextcloud text file to audio; ffmpeg is available for audio format conversion and trimming. For image/media generation, use the text-to-image tool if available. Always mention what format the output is in.",
+        "tags": ["protocol", "media", "audio", "tts"],
+    },
+    {
+        "id": "lesson-proto-report",
+        "topic": "Raven scenario: research reports",
+        "rule": "Research reports: gather facts via WebSearchRequest from multiple sources (2-3 searches for balance), synthesize into a structured Markdown report with headings, citations to sources, and a summary; save as report.md (or .pdf with pandoc) in the workspace root. Verify the artifact exists before finishing.",
+        "tags": ["protocol", "report", "research", "web"],
+    },
+    {
+        "id": "lesson-proto-orchestrate",
+        "topic": "Raven scenario: multi-tool orchestration",
+        "rule": "Multi-source tasks that cross domains: query Home Assistant for current state (temperature, device status), fetch related web information with WebSearchRequest, then synthesize everything into a combined workspace artifact (status report, dashboard JSON, etc.). Pull resources from Nextcloud as needed. Each domain feeds into the next — show the logical chain in your plan and Apply: citations.",
+        "tags": ["protocol", "orchestration", "ha", "web", "resources"],
+    },
 ]
 
 
