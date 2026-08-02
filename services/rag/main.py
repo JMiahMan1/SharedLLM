@@ -326,9 +326,15 @@ _PROTOCOL_LESSONS: list[dict] = [
         "tags": ["protocol", "image-editing", "media"],
     },
     {
+        "id": "lesson-proto-graphics",
+        "topic": "Raven scenario: graphics flyers with image generation",
+        "rule": "Graphics flyers: to create a true image flyer (not a typeset PDF), call the imagegenerationrequest tool backed by the local alpaca sd-server (POST /v1/images/generations). Prompt it for a vertical poster with a large headline, key bullet points and bright colors about the topic; ask for a PNG. Persist the returned image into the workspace with WorkspaceFileWriteRequest (relative_path like flyer.png, content_base64 = the returned b64) or via the workspace files endpoint, then verify it exists and renders (`ls -la`, `file flyer.png`). Pandoc/LaTeX PDFs and ImageMagick/Pillow compositions exist as alternatives, but when asked for a graphics/image flyer generate an actual image. Keep the prompt concise; include text you want on the flyer in the prompt itself.",
+        "tags": ["protocol", "graphics", "image", "media", "publishing"],
+    },
+    {
         "id": "lesson-proto-resources",
         "topic": "Raven protocol: pulling resources in",
-        "rule": "Before starting, check the available resources blocks in the prompt. Pull in what you need instead of inventing it: Nextcloud files via StorageFileReadRequest then WorkspaceFileWriteRequest to import into the workspace; Home Assistant entity state via entity requests; previously indexed knowledge via the context blocks. Resources you import may then be processed with the workspace toolchain.",
+        "rule": "Before starting, check the resources blocks in the prompt. Bring in what you need instead of inventing it: Nextcloud files via StorageFileReadRequest then WorkspaceFileWriteRequest to import into the workspace; Home Assistant entity state via entity requests; previously indexed knowledge via the context blocks. Resources you import may then be processed with the workspace toolchain.",
         "tags": ["protocol", "resources", "nextcloud", "ha"],
     },
     {

@@ -290,6 +290,43 @@ def test_raven_terse_document_mission():
     assert content, f"[terse-flyer] pdf artifact {pdfs[0]['name']} unreadable"
 
 
+def test_raven_terse_graphics_flyer_mission():
+    """A bare image-flyer request with NO format/tool/artifact instructions.
+
+    Passing proves the graphics scenario lesson (lesson-proto-graphics)
+    steers Raven to the local image-generation backend (alpaca sd-server
+    via imagegenerationrequest) and persists a real image flyer into the
+    workspace instead of falling back to a typeset document.
+    """
+    prompt = "Create a graphics flyer (an image, for example PNG) about the Raspberry Pi 5 and save it in the workspace."
+
+    mid = _chat_submit(prompt)
+    result = _chat_wait(mid)
+    assert result.get("status") == "completed", (
+        f"terse-graphics mission did not complete: {result.get('status')}\n"
+        f"result: {(result.get('result') or '')[:500]}"
+    )
+
+    ws_id = result.get("workspace_id") or ""
+    assert ws_id and ws_id.startswith("raven-"), (
+        f"[terse-graphics] no dedicated workspace created (got {ws_id!r})"
+    )
+
+    entries = _list_workspace_files(ws_id)
+    imgs = [
+        e for e in entries
+        if e.get("is_dir") is False
+        and str(e.get("name", "")).lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+    ]
+    assert imgs, (
+        f"[terse-graphics] no image flyer (.png/.jpg/.jpeg/.webp) in workspace "
+        f"{ws_id} (files: {[e.get('name') for e in entries][:20]})"
+    )
+
+    content = _read_workspace_file(ws_id, imgs[0]["name"])
+    assert content, f"[terse-graphics] image flyer {imgs[0]['name']} unreadable"
+
+
 def test_raven_terse_git_mission():
     """A bare git task with NO clone/collaboration instructions.
 
