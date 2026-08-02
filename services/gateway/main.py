@@ -3034,7 +3034,12 @@ async def chat_handler(request: Request, background_tasks=None):
         result_payload = {
             "status": "queued",
             "mission_id": mission_id,
-            "message": "Raven mission dispatched. Track it in the Raven queue (/api/raven/missions/{id}).",
+            "message": (
+                f"Raven mission #{mission_id} dispatched. You will be notified when it completes. "
+                f"Track its progress in JarvisLab > Missions or at /api/raven/missions/{mission_id}. "
+                "Results are written into the mission's shared workspace (Workspaces page, "
+                "path users/default/raven-<topic>) for you to open, inspect, and download."
+            ),
             "mission": mission,
         }
         if is_openai:
@@ -5283,7 +5288,16 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         slug=body.slug,
         priority=body.priority,
     )
-    return {"status": "SUCCESS", "mission": mission_data}
+    return {
+        "status": "SUCCESS",
+        "mission": mission_data,
+        "message": (
+            f"Raven mission #{mission_data['id']} dispatched. You will be notified when it completes. "
+            f"Track its progress in JarvisLab > Missions or at /api/raven/missions/{mission_data['id']}. "
+            "Results are written into the mission's shared workspace (Workspaces page, "
+            "path users/default/raven-<topic>) for you to open, inspect, and download."
+        ),
+    }
 
 @app.get("/api/raven/missions/{id_or_slug}")
 async def get_mission_details(request: Request, id_or_slug: str):
