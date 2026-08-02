@@ -429,7 +429,7 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
             try:
                 _pr = await client.get(
                     f"{rag_svc}/rag/learning",
-                    params={"tag": "protocol", "limit": 12},
+                    params={"tag": "protocol", "limit": 25},
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=aiohttp.ClientTimeout(total=5.0),
                 )
