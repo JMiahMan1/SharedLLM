@@ -1,4 +1,6 @@
 # services/execution/handlers/learning.py
+import hashlib
+import json
 import logging
 
 import aiohttp
@@ -12,23 +14,32 @@ RAG_SVC = RAG_SVC_URL
 
 async def handle_system_learning(req: SystemLearningRequest) -> ExecutionResult:
     try:
-        # Structured, honest lesson. The content wraps the narrative evidence; the
-        # transferable takeaway lives in `rule` so it is mechanically matchable
-        # and renderable as a first-class field (not buried prose).
-        content = (
-            f"### TOPIC: {req.topic}\n\n"
-            f"**RULE:** {req.rule}\n\n"
-            f"**ROOT CAUSE:** {req.root_cause}\n\n"
-            f"**OUTCOME:** {req.outcome}\n\n"
-            f"**CONFIDENCE:** {req.confidence:.2f}\n\n"
-            f"{req.content}\n\n"
-            f"TAGS: {', '.join(req.tags)}"
-        )
+        # Stable, citable lesson id derived from the rule so re-ingests of the
+        # same lesson converge and `Apply: [id]` citations stay valid.
+        _lid = "lesson-" + hashlib.sha1(
+            (req.rule or req.content or req.topic).encode("utf-8")
+        ).hexdigest()[:10]
+        # The stored document is COMPACT JSON (not prose) so the mission-prompt
+        # renderer (orchestrator._fetch_rag_context) can inject each lesson as
+        # a single short line `- [id][outcome] (conf) RULE` instead of up to
+        # 2000 chars of narrative. The truncated summary keeps enough signal
+        # for semantic retrieval without wasting the context budget.
+        content = json.dumps({
+            "id": _lid,
+            "topic": req.topic,
+            "rule": req.rule,
+            "root_cause": req.root_cause,
+            "outcome": req.outcome,
+            "confidence": req.confidence,
+            "tags": req.tags,
+            "summary": (req.content or "")[:800],
+        }, ensure_ascii=False)
         payload = {
             "user_id": req.user_context.user,
             "content": content,
             "collection_name": "system_learnings",
             "metadata": {
+                "id": _lid,
                 "topic": req.topic,
                 "rule": req.rule,
                 "root_cause": req.root_cause,

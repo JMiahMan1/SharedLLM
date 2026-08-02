@@ -360,7 +360,7 @@ def test_raven_web_challenge_fallback():
     prompt = (
         "Raven, create a dedicated workspace with id 'raven-challenge'. "
         "Lesson to learn: some sites (e.g. raspberrypi.com) are behind a "
-        "Cloudflare challenge that WebReadRequest cannot bypass. "
+        "Cloudflare challenge that WebReadRequest may not bypass. "
         "Task: use WebReadRequest to read "
         "https://www.raspberrypi.com/products/raspberry-pi-5/. "
         "If the result reports a Cloudflare challenge (or 'Just a moment' / "
@@ -370,15 +370,160 @@ def test_raven_web_challenge_fallback():
         "and the price if visible. Save `challenge_fallback.md` in the "
         "workspace containing: which tool succeeded, the product name, and "
         "whatever product info you could extract. Then APPEND a dated lesson to "
-        "`raven_memory.md` about falling back to WebScraperRequest when "
-        "WebReadRequest hits a Cloudflare challenge. No GitHub repo needed."
+        "`raven_memory.md` about falling back when a site is behind a "
+        "Cloudflare challenge. No GitHub repo needed."
     )
+    # WebReadRequest can now auto-bypass Cloudflare via its internal camoufox
+    # retry (challenge wait-solve), so the report may legitimately document a
+    # successful WebReadRequest with a camoufox bypass instead of the scraper.
+    def _challenge_resolved(content: str) -> bool:
+        lower = content.lower()
+        return (
+            "raspberry" in lower
+            and ("webscraper" in lower or "camoufox" in lower or "bypass" in lower)
+            and len(content) > 80
+        )
     _run_mission(
         "web-challenge-fallback",
         "raven-challenge",
         prompt,
         "challenge_fallback.md",
-        lambda c: "raspberry" in c.lower() and "webscraper" in c.lower() and len(c) > 80,
+        _challenge_resolved,
         ("scraper", "challenge", "cloudflare"),
-        "challenge_fallback.md names WebScraperRequest and extracted Raspberry Pi product info",
+        "challenge_fallback.md names a working tool (WebScraperRequest or camoufox bypass) and extracted Raspberry Pi product info",
     )
+
+
+def test_raven_web_program_mission():
+    """End-to-end coding from web research: search example code, build a real
+    (web) program, test it with tests that build on one another, and prove it
+    actually runs."""
+    prompt = (
+        "Raven, create a dedicated workspace with id 'raven-web-program'. "
+        "Task: build a real, runnable web program from example code you find "
+        "on the web. Steps: "
+        "(1) Use WebSearchRequest (2-3 queries) to find example code for a "
+        "simple in-memory REST API using ONLY the Python standard library "
+        "(http.server / BaseHTTPRequestHandler — no external packages). "
+        "(2) Create the workspace and write `app.py` implementing: "
+        "POST /items (JSON body {name}, returns {id, name}), GET /items "
+        "(list all), GET /items/<id> (one item or 404). Use an in-memory "
+        "store with a counter for ids. "
+        "(3) Write tests that BUILD ON ONE ANOTHER using unittest "
+        "(stdlib): a setUpClass/class attribute starts the server once; "
+        "test_01 checks the server starts and /items returns an empty list; "
+        "test_02 POSTs an item and asserts the response; test_03 GETs /items "
+        "and asserts the item created in test_02 is present; test_04 GETs "
+        "/items/<id> from test_02 and asserts it. Run them with "
+        "`python -m unittest discover -s tests -v` and fix until all pass. "
+        "(4) PROVE it runs: start the server in the background in the "
+        "workspace shell, curl POST /items then GET /items, capture the real "
+        "responses, then stop the server. "
+        "(5) Write PROGRAM_REPORT.md containing: the exact URLs where you "
+        "found the example code, what you adapted, the test output showing "
+        "all tests passing, and the curl proof output. "
+        "(6) APPEND a dated lesson to raven_memory.md about building from "
+        "web-researched example code (format: RULE / ROOT CAUSE / OUTCOME / "
+        "CONFIDENCE). No GitHub repo needed."
+    )
+
+    def _program_report_ok(content: str) -> bool:
+        lower = content.lower()
+        return (
+            "http" in lower
+            and any(kw in lower for kw in ("pass", "ok", "ran", "test"))
+            and len(content) > 300
+        )
+
+    _run_mission(
+        "web-program-mission",
+        "raven-web-program",
+        prompt,
+        "PROGRAM_REPORT.md",
+        _program_report_ok,
+        ("program", "web", "test"),
+        "PROGRAM_REPORT.md documents web-researched example code, passing tests, and a live run",
+    )
+
+
+def test_raven_memory_usage():
+    """Prove Raven actually APPLIES a stored lesson and cites it as
+    `Apply: [id]` in its plan — the measurable memory-usage signal — and
+    that lesson documents stay compact (JSON) so they do not waste the
+    context budget."""
+    prompt = (
+        "Raven, create a dedicated workspace with id 'raven-memory-check'. "
+        "This mission trains MEMORY USAGE. Your prompt includes a "
+        "[SYSTEM_LEARNINGS — PAST LESSONS] block: each line is "
+        "`- [id][outcome] (conf) rule`. Pick ONE lesson relevant to this "
+        "task (e.g. the one about WebSearchRequest being the cheapest "
+        "sufficient tool for straightforward facts). When you apply it in "
+        "your plan, cite it EXACTLY as `Apply: [id]` (copy the id verbatim "
+        "from the brackets). Task: use WebSearchRequest to answer: 'In what "
+        "year was the Raspberry Pi 5 released?' Save `answer.md` containing "
+        "the answer, the exact `Apply: [id]` citation line, and which lesson "
+        "you applied. No GitHub repo needed."
+    )
+    ws_id = "raven-memory-check"
+    _delete_workspace_if_exists(ws_id)
+
+    mid = _chat_submit(prompt)
+    result = _chat_wait(mid)
+    assert result.get("status") == "completed", (
+        f"mission memory-usage did not complete: {result.get('status')}\n"
+        f"result: {(result.get('result') or '')[:500]}"
+    )
+
+    # Proof 1: the mission's own answer documents an applied lesson citation.
+    used_ws = (result.get("workspace_id") or ws_id)
+    content = _read_workspace_file(used_ws, "answer.md")
+    assert content, f"[memory-usage] answer.md missing from workspace {used_ws}"
+    lower = content.lower()
+    assert "apply:" in lower and "lesson-" in lower, (
+        f"[memory-usage] answer.md does not cite an applied lesson:\n{content[-800:]}"
+    )
+
+    # Proof 2: the mission output_log contains the `Apply: [id]` citation in
+    # the plan (the plan is where the protocol requires the citation).
+    try:
+        with httpx.Client(headers=_chat_auth_headers(), timeout=30.0) as c:
+            resp = c.get(f"{GATEWAY_URL}/api/raven/missions/{mid}")
+            detail = resp.json() if resp.status_code == 200 else {}
+        output_log = detail.get("output_log") or ""
+        assert "Apply:" in output_log, (
+            f"[memory-usage] output_log has no Apply: citation (plan not recorded):\n{output_log[-600:]}"
+        )
+    except Exception as e:
+        raise AssertionError(f"[memory-usage] could not read mission output_log: {e}")
+
+    # Proof 3 (context budget): lesson documents in system_learnings are
+    # compact JSON (id + rule), not multi-KB prose — the renderer injects one
+    # short line per lesson and respects the 15k-char mission budget.
+    rag_url = GATEWAY_URL.replace(":8080", ":8004")
+    try:
+        with httpx.Client(headers=_ws_headers(), timeout=30.0) as c:
+            resp = c.post(
+                f"{rag_url}/rag/search",
+                json={
+                    "collection_name": "system_learnings",
+                    "query": "web search lesson",
+                    "user_id": "default",
+                    "k": 10,
+                },
+            )
+            hits = (resp.json() or {}).get("results", []) if resp.status_code == 200 else []
+        assert hits, "[memory-usage] no system_learnings hits found for budget check"
+        for h in hits:
+            content_hit = h.get("content") or ""
+            assert content_hit.strip().startswith("{"), (
+                "[memory-usage] lesson not stored as compact JSON (context bloat):\n"
+                f"{content_hit[:200]}"
+            )
+            assert len(content_hit) <= 1500, (
+                f"[memory-usage] lesson document too large ({len(content_hit)} chars):\n"
+                f"{content_hit[:200]}"
+            )
+    except AssertionError:
+        raise
+    except Exception as e:
+        raise AssertionError(f"[memory-usage] RAG budget check failed: {e}")
