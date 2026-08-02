@@ -2701,7 +2701,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         if generated_plan:
             action_log.append(f"PLAN GENERATED:\n{generated_plan}")
             log.info(f"[AgentLoop] Planning phase complete. Plan:\n{generated_plan[:500]}")
-            await stream_event("system", f"Plan generated ({generated_plan.count(chr(10)) + 1} steps)")
+            await stream_event(
+                "system",
+                f"PLAN GENERATED:\n{generated_plan[:2000]}",
+            )
     except Exception as e:
         log.warning(f"[AgentLoop] Planning phase failed (continuing without plan): {e}")
         generated_plan = ""
@@ -4612,7 +4615,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             import re as _re
             _cited = _re.findall(
                 r"apply\s*[:=]?\s*\[([^\]]+)\]",
-                (ans or "") + "\n" + "\n".join(action_log[-15:]),
+                (ans or "")
+                + "\n" + (generated_plan or "")
+                + "\n" + "\n".join(action_log[-15:]),
                 _re.IGNORECASE,
             )
             _ids: set[str] = set()
