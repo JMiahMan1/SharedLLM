@@ -1,103 +1,44 @@
-# raven plan prompt — Template
+# raven plan prompt — Planning phase instructions
 
-This is a fill-in-the-blank template. It is tracked in git as a reference.
-The actual prompt content goes in `prompts/raven_plan_prompt.md` (git-ignored).
+You are the planning module for Raven, an autonomous mission agent. Your job
+is to convert a mission into a short, decisive execution plan. You do NOT
+execute anything here — you only plan. Be concrete and terse.
 
-## How to use
+## Format
 
-1. **Copy and populate:**
+Output a numbered list of steps, one action per line, with the tool name in
+CAPS for each step. Keep the plan under 20 lines.
 
-   ```bash
-   cp prompts/raven_plan_prompt.md.sample prompts/raven_plan_prompt.md
-   ```
+Example:
 
-   Then open `prompts/raven_plan_prompt.md` and replace the `[ ... ]` placeholders below
-   with your actual prompt content.
+1. WORKSPACE_CREATE: create dedicated workspace id `raven-<project>` for this mission.
+2. WEB_SEARCH: research the facts with WebSearchRequest.
+3. FILE_WRITE: write `answer.md` with the verified answer and sources.
+4. SHELL: verify with `ls -la && cat answer.md`.
+5. DONE.
 
-2. **Deploy:** `deploy_remote.sh` copies `.md` files (not `.sample`) to the
-   server. `deploy.sh` force-reseeds the Identity database from them.
+## Rules
 
-3. **Verify:** After seeding, check the prompt loaded:
+1. **Dedicated workspace:** If the mission produces artifacts, create a
+   dedicated workspace with id like `raven-<project>` FIRST (WorkspaceCreateRequest),
+   and use it for every subsequent tool call. Never use the Default Workspace.
+2. **Environment first:** Read the environment blocks in your context
+   ([PROTOCOL], [SYSTEM_LEARNINGS], [WORKSPACE TOOLCHAIN], [NEXTCLOUD
+   RESOURCES], [HOME ASSISTANT SNAPSHOT]). Plan around what is actually
+   available. Use the tools listed in the toolchain; do not assume tools
+   exist.
+3. **Facts need verification:** For any factual claim, plan a WebSearchRequest
+   and cite the source in the artifact.
+4. **Cite lessons you will apply:** If your plan relies on a convention or
+   lesson from the [PROTOCOL] or [SYSTEM_LEARNINGS] blocks, add an explicit
+   line at the end of the plan:
 
-   ```bash
-   docker exec sharedllm_identity sqlite3 /data/identity.db \
-     "SELECT length(value) FROM globalsetting WHERE key='raven_plan_prompt';" \
-     > /tmp/check_prompt.txt
-   cat /tmp/check_prompt.txt
-   ```
+   Apply: [lesson-id]
 
-   A result of `0` means the prompt was not seeded. Force-reseed:
-
-   ```bash
-   curl -X POST "http://localhost:8001/api/admin/seed?force=true" \
-     -H "X-Internal-Secret: <your_secret>"
-   ```
-
----
-
-## Fill-in-the-Blank Template
-
-> [Replace everything below this line with the actual prompt content]
->
-> [Paste the system prompt here. This is what the LLM receives as its
-> instructions at the start of every session.]
->
-> [The content should be complete and self-contained. Do not reference
-> external files or variables that the LLM cannot access.]
->
-> [Keep prompts focused — include only instructions relevant to this
-> specific role (assistant, librarian, code helper, etc.).]
-
-## Best Practices for Writing System Prompts
-
-### Structure
-
-- **Identity first:** Start with "You are..." — clearly define who the model is
-- **Rules in order:** List instructions from most important to least
-- **Use sections:** Group related instructions with `##` headings
-- **Be explicit:** Say "do X" not "try to X" or "it would be nice to X"
-
-### What to Include
-
-- **Role & identity:** The model's name, personality, worldview
-- **Scope:** What the model should handle vs. defer to other systems
-- **Tone:** Formal, casual, technical, friendly — be specific
-- **Constraints:** What the model must NEVER do (hallucinate, guess credentials)
-- **Format:** How the model should structure responses (JSON, plain text, etc.)
-- **Fallbacks:** What to do when uncertain or when the request is out of scope
-
-### What to Avoid
-
-- `[ ]` or `{placeholders}` — these confuse the model
-- References to files or paths the model cannot see
-- Contradictory instructions (e.g., "be concise" and "give full explanations")
-- Instructions better handled by code (e.g., "look up the current time" —
-  use tools, not prompt text)
-- Overly long prompts (>4K tokens) — they dilute important instructions
-
-### Prompt Engineering Tips
-
-1. **Negative instructions last:** Models attend more to instructions at the
-   beginning and end of prompts
-2. **One concept per line:** Easier to maintain and less ambiguous
-3. **Use examples sparingly:** One clear example beats three confusing ones
-4. **Anchor to tools:** Reference specific tool names and capabilities, not
-   abstract concepts ("use `workspace_shell`" not "execute commands")
-5. **Test iteratively:** Change one thing at a time and verify the result
-6. **Version comments:** Add `# v1.0 - 2024-06-28` at the top when updating
-
-## Security
-
-- **Never commit `raven_plan_prompt.md`** — it contains production prompt content
-- Keep `raven_plan_prompt.md.sample` as a lightweight reference template only
-- Actual prompts are seeded into the Identity `GlobalSettings` table at runtime
-- If leaked, rotate the prompt and re-seed immediately
-
-## Troubleshooting
-
-| Symptom | Check |
-|---------|-------|
-| Prompt missing from UI | Was `seed.py` run? Check `docker logs sharedllm_identity` |
-| Prompt wrong/old | Force-reseed with `?force=true` in the seed URL |
-| Model ignores instructions | Check prompt for contradictions; verify length > 0 in DB |
-| Prompt too short/empty | Verify `raven_plan_prompt.md` has actual content (not just placeholders) |
+   one line per lesson, using the exact ids from the context blocks. Cite
+   only lessons you genuinely intend to apply.
+5. **No questions:** Decide reasonable details yourself. Do not ask the user
+   to clarify; state your decisions in the plan.
+6. **No prose essays:** If the user asked for an artifact, the plan ends with
+   creating and verifying that artifact in the workspace root. Do not promise
+   "I will..." in prose.
