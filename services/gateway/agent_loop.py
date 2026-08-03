@@ -2691,6 +2691,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
     # Lower than the historical 12 so a chatty model fails fast (triggering the
     # worker's same-family retry) instead of yapping until the hard time cap.
     MAX_IDLE_NUDGES = 6
+    # Persist the audit log to the mission record every N iterations so
+    # long-running missions stay observable even when they never reach the
+    # normal completion tail (worker-side gates finalize missions early).
+    RAVEN_AUDIT_CHECKPOINT_EVERY = 5
     loop_start = asyncio.get_event_loop().time()
     exec_data = None
     ans = ""
@@ -2905,6 +2909,38 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         except Exception as e:
             log.warning(f"[AgentLoop] Failed to clear checkpoint for mission {mission_id}: {e}")
 
+    async def _persist_audit_checkpoint() -> None:
+        """Persist the current audit log to the mission record.
+
+        Called periodically during long missions so the output_log stays
+        observable even if the loop never reaches the normal completion tail
+        (e.g. worker-side gates that finalize the mission early).
+        """
+        if not mission_id or not full_audit_log:
+            return
+        try:
+            summarized_log = normalize_audit_log(full_audit_log)
+            last_llm_reply = None
+            for ev in reversed(full_audit_log):
+                if ev.get("type") == "reasoning":
+                    txt = (ev.get("data") or "").strip()
+                    if txt:
+                        last_llm_reply = txt[:4000]
+                        break
+            patch_body = {"output_log": json.dumps(summarized_log)}
+            if last_llm_reply is not None:
+                patch_body["last_llm_reply"] = last_llm_reply
+            async with shared_http_client() as client:
+                await client.patch(
+                    f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
+                    json=patch_body,
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+            log.info(f"[AgentLoop] Persisted output_log checkpoint ({len(summarized_log)} events)")
+        except Exception as e:
+            log.warning(f"[AgentLoop] Failed to persist output_log checkpoint for mission {mission_id}: {e}")
+
     # Reconstruct history if resuming/refining from output_log or history_log
     prior_conversation_turns = []
     if mission_id:
@@ -3039,6 +3075,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
 
         await stream_event("system", f"Agent loop iteration {iter_num}/{max_iterations} started.")
         log.info(f"[AgentLoop] Iteration {iter_num}/{max_iterations} | total elapsed {elapsed_total:.0f}s")
+
+        if iter_num % RAVEN_AUDIT_CHECKPOINT_EVERY == 0:
+            await _persist_audit_checkpoint()
 
         heartbeat_stop = asyncio.Event()
 
@@ -4907,27 +4946,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.debug(f"[AgentLoop] Apply-citation parse skipped: {e}")
 
     if mission_id and full_audit_log:
-        try:
-            summarized_log = normalize_audit_log(full_audit_log)
-            last_llm_reply = None
-            for ev in reversed(full_audit_log):
-                if ev.get("type") == "reasoning":
-                    txt = (ev.get("data") or "").strip()
-                    if txt:
-                        last_llm_reply = txt[:4000]
-                        break
-            patch_body = {"output_log": json.dumps(summarized_log)}
-            if last_llm_reply is not None:
-                patch_body["last_llm_reply"] = last_llm_reply
-            async with shared_http_client() as client:
-                await client.patch(
-                    f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                    json=patch_body,
-                    headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    timeout=aiohttp.ClientTimeout(total=10.0),
-                )
-        except Exception as e:
-            log.warning(f"[AgentLoop] Failed to persist output_log for mission {mission_id}: {e}")
+        await _persist_audit_checkpoint()
 
     # Clear checkpoint on successful completion
     await _clear_checkpoint()
