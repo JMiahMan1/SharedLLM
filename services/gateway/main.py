@@ -355,6 +355,23 @@ async def get_coding_model():
     return model
 
 
+async def resolve_current_coding_model() -> str:
+    """Resolve the coding model currently selected in Identity settings.
+
+    NO fallback chain: only ``coding_model`` from the settings/config DB is
+    accepted. Used at mission execution time so system-triggered missions run
+    on the model selected in the UI right now, never a frozen or fallback value.
+    """
+    settings = await get_all_settings()
+    model = settings.get("coding_model")
+    if not model:
+        raise RuntimeError(
+            "No coding model configured. Set coding_model in Identity settings "
+            "and try again."
+        )
+    return model
+
+
 async def get_resident_model() -> str | None:
     """Check what model is currently in VRAM to avoid unnecessary swaps."""
     try:
@@ -5047,9 +5064,14 @@ async def execute_raven_mission(id: int, request: Request):
 
         # Push job
         assert job_queue is not None, "Job queue not initialized"
+        mission_model = target["coding_model"]
+        if target["mission_type"] == "admin_fix":
+            # System-triggered repair missions always run on the coding model
+            # currently selected in the config DB — never a stale frozen value.
+            mission_model = await resolve_current_coding_model()
         await job_queue.enqueue_job("raven_admin", {
             "query": target["proposed_mission"],
-            "model": target["coding_model"],
+            "model": mission_model,
             "system": system_prompt,
             "stream": False,
             "creds": creds,
@@ -5540,6 +5562,11 @@ async def refine_mission(request: Request, id_or_slug: str, body: MissionRefineR
                 model = await get_coding_model()
             except Exception:
                 model = ""
+
+        if mission_data.get("mission_type") == "admin_fix":
+            # System-triggered repair missions always run on the coding model
+            # currently selected in the config DB — never a stale frozen value.
+            model = await resolve_current_coding_model()
 
         assert job_queue is not None, "Job queue not initialized"
         await job_queue.enqueue_job("raven_admin", {

@@ -110,12 +110,12 @@ class RavenWorker:
         try:
             from services.gateway.orchestrator import get_all_settings
             settings = await get_all_settings()
-            model = settings.get("ollama_coding_model") or settings.get("coding_model") or settings.get("assistant_model")
+            model = settings.get("coding_model")
             if model:
                 return model
         except Exception:
             pass
-        raise RuntimeError("No coding model configured in Identity settings")
+        raise RuntimeError("No coding model configured in Identity settings (coding_model)")
 
     async def _get_model_from_settings(self) -> str:
         """Resolve assistant/librarian model from Identity settings. Never hardcode."""
@@ -913,13 +913,68 @@ class RavenWorker:
         except Exception:
             return []
 
+    def __init_self_repair_state(self):
+        # Guard state for the self-repair loop: per-container cooldown so a
+        # service that keeps failing does NOT spawn a new admin_fix mission on
+        # every health-check cycle (which stacks coder missions in the queue).
+        self._self_repair_cooldown: dict[str, float] = {}
+        self._self_repair_cooldown_seconds = int(
+            os.getenv("SELF_REPAIR_COOLDOWN_SECONDS", "1800")
+        )
+
+    async def _has_pending_self_repair(self, container: str) -> bool:
+        """True if an admin_fix mission for this container is already queued,
+        executing or paused — in that case pushing another one is redundant."""
+        try:
+            async with _shared_http_client() as client:
+                resp = await client.get(
+                    f"{IDENTITY_SVC}/api/raven/missions?limit=50",
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
+                )
+                if resp.status != 200:
+                    return False
+                missions = json.loads(await resp.text())
+            for m in missions:
+                if m.get("mission_type") != "admin_fix":
+                    continue
+                if m.get("target_container") != container:
+                    continue
+                status = (m.get("status") or "").lower()
+                if status in ("queued", "executing", "paused"):
+                    log.info(
+                        f"[SelfRepair] Skipping {container}: admin_fix mission "
+                        f"#{m.get('id')} already {status}"
+                    )
+                    return True
+        except Exception as e:
+            log.warning(f"[SelfRepair] Pending-mission check failed (proceeding): {e}")
+        return False
+
     async def trigger_self_repair(self, problematic, settings):
-        coding_model = settings.get("coding_model") or settings.get("ollama_coding_model")
+        coding_model = settings.get("coding_model")
         if not coding_model:
-            log.error("No valid coding model configured in Identity. Triage queue may fail to execute.")
-            # We still push the anomaly, but the UI must be used to assign a model.
+            log.error(
+                "[SelfRepair] No coding_model configured in Identity settings. "
+                "Set coding_model in Settings (AI & Compute) — self-repair missions "
+                "cannot be dispatched without it. Skipping."
+            )
+            return
 
         for c in problematic:
+            if not hasattr(self, "_self_repair_cooldown"):
+                self.__init_self_repair_state()
+            now = time.monotonic()
+            last = self._self_repair_cooldown.get(c["name"], 0.0)
+            if last + self._self_repair_cooldown_seconds > now:
+                remain = int(last + self._self_repair_cooldown_seconds - now)
+                log.info(
+                    f"[SelfRepair] Skipping {c['name']}: within cooldown "
+                    f"({remain}s remaining, {c['count']} errors)"
+                )
+                continue
+            if await self._has_pending_self_repair(c["name"]):
+                continue
             summary = f"Detected {c['count']} errors."
             query = f"SYSTEM ALERT: Health check detected errors.\n\nServices:\n- {c['name']}: {c['count']} errors\n\nFix them."
 
@@ -941,6 +996,7 @@ class RavenWorker:
                     )
                     if resp.status == 200:
                         log.info(f"Mission for {c['name']} successfully pushed to Triage Queue.")
+                        self._self_repair_cooldown[c["name"]] = now
                     else:
                         log.error(f"Failed to push mission to Triage Queue: {await resp.text()}")
             except Exception as e:
