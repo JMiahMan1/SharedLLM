@@ -26,6 +26,7 @@ from services.gateway.config import (
     RAVEN_ERROR_THRESHOLD,
     REDIS_URL,
     SYSTEM_IDENTITY,
+    WORKSPACE_RUNTIME_SVC,
 )
 from services.gateway.intent_engine import is_raven_intent
 from services.shared.rag_client import push_mission
@@ -45,6 +46,38 @@ from services.gateway.messaging import TIER2_SEMAPHORE, TIER3_LOCK, InferenceJob
 from services.gateway.orchestrator import process_full_orchestration  # noqa: E402
 
 log = logging.getLogger("gateway.background_worker")
+
+
+async def _capture_mission_artifacts(mission_id: str, workspace_id: str | None) -> str | None:
+    """Snapshot the mission workspace file listing as a JSON string of artifacts.
+
+    Best-effort: returns None (skipped) when the mission has no workspace or the
+    listing fails, so the mission status PATCH is never blocked by this.
+    """
+    if not workspace_id:
+        return None
+    try:
+        async with _shared_http_client() as client:
+            resp = await client.post(
+                f"{WORKSPACE_RUNTIME_SVC}/files/list",
+                json={
+                    "workspace_id": workspace_id,
+                    "relative_path": ".",
+                    "recursive": True,
+                    "include_dirs": False,
+                    "max_entries": 500,
+                },
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=20,
+            )
+            if resp.status != 200:
+                log.warning(f"[Worker] Artifact capture failed for mission {mission_id}: HTTP {resp.status}")
+                return None
+            entries = (await resp.json()).get("entries") or []
+            return json.dumps(entries, default=str)
+    except Exception as e:
+        log.warning(f"[Worker] Artifact capture error for mission {mission_id}: {e}")
+        return None
 
 CHECK_INTERVAL_SECONDS = RAVEN_CHECK_INTERVAL
 ERROR_THRESHOLD = RAVEN_ERROR_THRESHOLD
@@ -631,9 +664,22 @@ class RavenWorker:
                     async with _shared_http_client() as client:
                         completed_iso = datetime.now(UTC).isoformat()
                         duration = int(time.time() - started_ts) if started_ts else None
+                        workspace_id = payload.get("workspace_id")
+                        if not workspace_id:
+                            try:
+                                mission_resp = await client.get(
+                                    f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
+                                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                    timeout=5,
+                                )
+                                if mission_resp.status == 200:
+                                    workspace_id = (await mission_resp.json()).get("workspace_id")
+                            except Exception as ws_e:
+                                log.warning(f"[Worker] Could not fetch workspace_id for mission {mission_id}: {ws_e}")
+                        artifacts = await _capture_mission_artifacts(mission_id, workspace_id)
                         await client.patch(
                             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                            json={"status": status, "result": result_str, "completed_at": completed_iso, "duration": duration},
+                            json={"status": status, "result": result_str, "completed_at": completed_iso, "duration": duration, "artifacts": artifacts},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
                         # Best-effort: persist a mission post-mortem into RAG for
@@ -663,9 +709,11 @@ class RavenWorker:
                     async with _shared_http_client() as client:
                         completed_iso = datetime.now(UTC).isoformat()
                         duration = int(time.time() - started_ts) if started_ts else None
+                        fail_workspace_id = payload.get("workspace_id")
+                        fail_artifacts = await _capture_mission_artifacts(mission_id, fail_workspace_id)
                         await client.patch(
                             f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                            json={"status": "failed", "result": str(e), "completed_at": completed_iso, "duration": duration},
+                            json={"status": "failed", "result": str(e), "completed_at": completed_iso, "duration": duration, "artifacts": fail_artifacts},
                             headers={"X-Internal-Secret": INTERNAL_SECRET}
                         )
                 except Exception as patch_e:
