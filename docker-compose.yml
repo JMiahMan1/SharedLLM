@@ -18,6 +18,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_dns
     restart: unless-stopped
+    mem_limit: 256m
     networks:
       sharedllm:
         ipv4_address: 172.26.0.254
@@ -41,6 +42,7 @@ services:
     image: ghcr.io/jmiahman1/sharedllm-caddy:latest
     container_name: sharedllm_caddy
     restart: unless-stopped
+    mem_limit: 256m
     networks:
       - sharedllm
     ports:
@@ -77,6 +79,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_identity
     restart: unless-stopped
+    mem_limit: 1g
     env_file:
       - .env
     environment:
@@ -115,6 +118,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_execution
     restart: always
+    mem_limit: 3g
     network_mode: host
     # Run as the same uid/gid as workspace_runtime so all git/shell operations
     # in /workspaces produce files owned by uid 1000 (not root). The IDE commits
@@ -171,6 +175,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_rag
     restart: unless-stopped
+    mem_limit: 6g
     env_file:
       - .env
     environment:
@@ -215,6 +220,7 @@ services:
         - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_capabilities_sync
+    mem_limit: 512m
     working_dir: /app
     env_file:
       - .env
@@ -244,6 +250,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_gateway
     restart: unless-stopped
+    mem_limit: 4g
     user: "${PUID}:${PGID}"
     env_file:
       - .env
@@ -287,6 +294,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_logging
     restart: unless-stopped
+    mem_limit: 512m
     env_file:
       - .env
     environment:
@@ -323,6 +331,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_automation
     restart: unless-stopped
+    mem_limit: 512m
     user: "${PUID}:${PGID}"
     env_file:
       - .env
@@ -365,6 +374,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_storage
     restart: unless-stopped
+    mem_limit: 1g
     env_file:
       - .env
     environment:
@@ -401,6 +411,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_workspace_runtime
     restart: unless-stopped
+    mem_limit: 1.5g
     user: "${PUID}:${PGID}"
     env_file:
       - .env
@@ -445,6 +456,7 @@ services:
     build: ./services/ui
     container_name: sharedllm_ui
     restart: unless-stopped
+    mem_limit: 256m
     environment:
       - TZ=America/Phoenix
     depends_on:
@@ -465,6 +477,7 @@ services:
         - SERVICE_NAME=${SERVICE_NAME:-unknown}
     container_name: sharedllm_geo
     restart: unless-stopped
+    mem_limit: 512m
     env_file:
       - .env
     environment:
@@ -495,6 +508,7 @@ services:
     image: redis:7-alpine
     container_name: sharedllm_redis
     restart: unless-stopped
+    mem_limit: 512m
     command: redis-server --appendonly yes
     ports:
       - "6379:6379"
@@ -517,6 +531,7 @@ services:
     hostname: control-plane.local
     container_name: sharedllm_control_plane
     restart: always
+    mem_limit: 1g
     user: "${PUID}:${PGID}"
     env_file:
       - .env
