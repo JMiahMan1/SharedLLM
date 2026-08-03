@@ -4061,6 +4061,13 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                             }
                         except Exception as _e:
                             exec_data = {"status": "ERROR", "message": f"TTS generation failed: {_e}"}
+                            log.warning(f"[AgentLoop] TTSRequest exception: {_e!r}")
+                    if exec_data.get("status") != "SUCCESS":
+                        log.warning(
+                            f"[AgentLoop] TTSRequest result ERROR: {exec_data.get('message', '')}"
+                        )
+                    else:
+                        log.info(f"[AgentLoop] TTSRequest result: {exec_data.get('message', '')}")
                     _skip_post = True
 
                 # RavenBuildToolRequest: let Raven discover an existing tool,
