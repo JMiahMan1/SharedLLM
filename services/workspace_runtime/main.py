@@ -1174,6 +1174,11 @@ def _list_workspace_entries(
 
             rel_path = child.relative_to(workspace_path).as_posix()
             is_dir = child.is_dir()
+            # Skip VCS metadata: the workspace's own .git tree (objects, hooks,
+            # refs) can hold thousands of entries that flood the max_entries cap
+            # before the user's real files are reached.
+            if is_dir and child.name == ".git":
+                continue
             if include_dirs or not is_dir:
                 entries.append(
                     {

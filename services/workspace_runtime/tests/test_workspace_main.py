@@ -130,3 +130,30 @@ def test_create_workspace_rejects_empty_id(client: TestClient):
         listing = client.get("/workspaces", headers=headers).json()
         assert not any((ws.get("id") or "") == "" for ws in listing["workspaces"])
 
+
+def test_list_entries_skips_git_tree(tmp_path):
+    """The workspace's own .git tree must not flood file listings."""
+    import services.workspace_runtime.main as main
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "objects").mkdir()
+    (tmp_path / ".git" / "objects" / "pack").mkdir()
+    (tmp_path / ".git" / "objects" / "pack" / "pack-abc.pack").write_bytes(b"x" * 10)
+    (tmp_path / "narration.wav").write_bytes(b"\x00" * 100)
+
+    root, entries, truncated = main._list_workspace_entries(
+        workspace_path=tmp_path,
+        relative_path=".",
+        recursive=True,
+        max_depth=10,
+        max_entries=200,
+        include_dirs=True,
+    )
+
+    names = {e["name"] for e in entries}
+    assert "narration.wav" in names
+    assert ".git" not in names
+    assert not any(e["path"].startswith(".git") for e in entries)
+    assert truncated is False
+
+
