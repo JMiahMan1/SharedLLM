@@ -3875,8 +3875,25 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 _t_payload["storybook"] = True
                             if _tts_voice:
                                 _t_payload["voice"] = _tts_voice
-                            if isinstance(payload, dict):
-                                _t_payload.setdefault("user_context", payload.get("user_context"))
+                            # TTSRequest is on the no-user_context injection list, but the
+                            # execution schema REQUIRES user_context. execute_tts itself
+                            # never reads it — so synthesize a valid one from creds.
+                            _tts_uc = payload.get("user_context")
+                            if not _tts_uc:
+                                _tts_uc = {
+                                    "user": creds.user,
+                                    "is_admin": creds.is_admin,
+                                    "api_key": creds.api_key,
+                                    "ha_url": creds.ha_url,
+                                    "ha_token": creds.ha_token,
+                                    "nextcloud_url": creds.nextcloud_url,
+                                    "nextcloud_user": creds.nextcloud_user,
+                                    "nextcloud_pass": creds.nextcloud_pass,
+                                    "github_token": creds.github_token,
+                                    "gitlab_token": creds.gitlab_token,
+                                    "git_token": creds.git_token,
+                                }
+                            _t_payload["user_context"] = _tts_uc
                             async with shared_http_client() as _tc:
                                 _tts_resp = await _tc.post(
                                     f"{EXECUTION_SVC}/execute/tts",
