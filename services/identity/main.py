@@ -153,6 +153,7 @@ def _ensure_schema_upgrades() -> None:
         _add_column("ravenmission", "duration", "ALTER TABLE ravenmission ADD COLUMN duration INTEGER")
         _add_column("ravenmission", "workspace_id", "ALTER TABLE ravenmission ADD COLUMN workspace_id VARCHAR")
         _add_column("ravenmission", "last_llm_reply", "ALTER TABLE ravenmission ADD COLUMN last_llm_reply TEXT")
+        _add_column("ravenmission", "artifacts", "ALTER TABLE ravenmission ADD COLUMN artifacts TEXT")
 
     if _table_exists("deviceassignment"):
         _add_column("deviceassignment", "revoked", "ALTER TABLE deviceassignment ADD COLUMN revoked BOOLEAN NOT NULL DEFAULT 0")
