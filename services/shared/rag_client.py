@@ -27,7 +27,7 @@ async def _post(path: str, payload: dict, timeout: float = 10.0) -> bool:
         ) as resp:
             return resp.status == 200
     except Exception as e:  # pragma: no cover - network dependent
-        log.warning(f"[rag_client] push to {path} failed: {e}")
+        log.warning(f"[rag_client] push to {path} failed: {type(e).__name__}: {e}")
         return False
 
 

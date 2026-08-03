@@ -3351,13 +3351,47 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # rejected as malformed and the mission ended without a PDF).
                 if (
                     _consecutive_no_tool >= 2
-                    and _written_files
-                    and not pending_verification(_written_files, _verified_files)
                     and not pending_batch
                 ):
-                    log.info(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} successful tool call(s) with a verified artifact and nothing queued — treating as completion.")
-                    await _clear_checkpoint()
-                    break
+                    # The model believes it is done. Accept completion only when
+                    # real artifacts exist: either files we tracked as written AND
+                    # verified, or (for media/graphics missions where the model
+                    # generates artifacts via shell/TTS instead of file-writes)
+                    # actual entries in the mission workspace listing.
+                    _gate_ok = bool(_written_files) and not pending_verification(_written_files, _verified_files)
+                    if not _gate_ok and workspace_id:
+                        try:
+                            _uc = {
+                                "user": creds.user,
+                                "is_admin": creds.is_admin,
+                                "api_key": creds.api_key,
+                                "ha_url": creds.ha_url,
+                                "ha_token": creds.ha_token,
+                            }
+                            async with shared_http_client() as _gc:
+                                _list = await _gc.post(
+                                    f"{WORKSPACE_RUNTIME_SVC}/files/list",
+                                    json={
+                                        "workspace_id": workspace_id,
+                                        "relative_path": ".",
+                                        "recursive": True,
+                                        "include_dirs": False,
+                                        "max_entries": 500,
+                                        "user_context": _uc,
+                                    },
+                                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                    timeout=aiohttp.ClientTimeout(total=15.0),
+                                )
+                                _entries = (await _list.json()).get("entries") or [] if _list.status == 200 else []
+                            if _entries:
+                                _gate_ok = True
+                                log.info(f"[AgentLoop] Workspace listing shows {len(_entries)} artifact(s) — treating stalled media/graphics mission as complete.")
+                        except Exception as _ge:
+                            log.warning(f"[AgentLoop] Workspace listing check failed on stall: {_ge}")
+                    if _gate_ok:
+                        log.info(f"[AgentLoop] {_consecutive_no_tool} consecutive no-tool replies after {successful_tool_calls} successful tool call(s) with a verified artifact and nothing queued — treating as completion.")
+                        await _clear_checkpoint()
+                        break
                 # The mission is multi-step; a plan-as-text reply is NOT "done".
                 # Nudge the agent to keep executing tool calls instead of ending
                 # the loop after the first one. Only give up once it has stalled
@@ -3929,6 +3963,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                     "message": f"Audio saved to {_tts_path} ({len(_tts_b64)} base64 bytes).",
                                     "detail": _tts_save_data,
                                 }
+                                # The audio artifact now exists in the workspace. Track it
+                                # as written AND verified (the save itself is the
+                                # artifact), so the stalled-completion gate can fire
+                                # when the model reports done instead of looping into
+                                # the runaway guard (media missions otherwise always
+                                # stall: nothing lands in _written_files).
+                                _written_files.add(_tts_path)
+                                _verified_files.add(_tts_path)
                         except Exception as _e:
                             exec_data = {"status": "ERROR", "message": f"TTS generation failed: {_e}"}
                     _skip_post = True
@@ -3997,7 +4039,16 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 # raven:mission:history:{id} (and raven:mission:loopstate:{id}) we
                 # already write every step, returning a capped, scoped summary — never
                 # the raw firehose, which would blow the context window.
-                if lookup_action == "ravenrecallrequest" and isinstance(payload, dict):
+                if lookup_action == "ravenrecallrequest":
+                    # The local 35B sometimes emits a non-dict payload (e.g. a bare
+                    # string or an empty list). Coerce it so the call still serves
+                    # mission history instead of degrading into "Unknown action"
+                    # (which poisons the loop with a spurious error).
+                    if not isinstance(payload, dict):
+                        if isinstance(payload, str) and payload.strip():
+                            payload = {"query": payload}
+                        else:
+                            payload = {}
                     try:
                         _rk = max(1, min(int(payload.get("limit") or 15), 50))
                         _only = str(payload.get("only") or "").lower()

@@ -66,8 +66,12 @@ from services.shared.info_endpoint import info_router
 START_TIME = time.time()
 
 # --- Setup Logging IMMEDIATELY ---
+# force=True: uvicorn's own logging config may already have set root to
+# WARNING (silently dropping all agent-loop INFO diagnostics). Re-assert INFO
+# so mission observability lines (Reply shape, Guidance branch, Normalized
+# Tool Data) actually reach the logs.
 log = logging.getLogger("gateway")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s", force=True)
 
 # Singleton lock for Ollama inference to prevent concurrent VRAM exhaustion
 INFERENCE_LOCK = asyncio.Lock()

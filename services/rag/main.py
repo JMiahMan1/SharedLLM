@@ -346,7 +346,7 @@ _PROTOCOL_LESSONS: list[dict] = [
     {
         "id": "lesson-proto-media",
         "topic": "Raven scenario: media and audio creation",
-        "rule": "Media creation: TTSRequest converts text to speech via local Kokoro engine (set storybook_mode for multi-voice narration); the generated audio is automatically saved to the workspace when you include a relative_path (e.g. 'narration.wav') and workspace_id, and returns the saved path. StorageTextToAudioRequest converts a Nextcloud text file to audio; ffmpeg is available for audio format conversion and trimming. For image/media generation, use the text-to-image tool if available. Always mention what format the output is in.",
+        "rule": "Media creation: to generate speech use TTSRequest — it converts text to speech locally (Kokoro) and SAVES the audio to the workspace automatically when you include a relative_path (e.g. 'narration.wav') AND workspace_id; it returns the saved path. Do NOT pip-install or script external TTS libraries (gTTS/espeak) — TTSRequest is the intended tool. StorageTextToAudioRequest converts a Nextcloud text file to audio; ffmpeg is available for audio format conversion and trimming. For image/media generation, use the text-to-image tool if available. Always mention what format the output is in.",
         "tags": ["protocol", "media", "audio", "tts"],
     },
     {
