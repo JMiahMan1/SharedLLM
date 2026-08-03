@@ -414,25 +414,27 @@ def _seed_protocol_lessons(user_id: str = "default") -> int:
     return created
 
 
-def reindex_all() -> int:
+def reindex_all(batch_size: int = 256) -> int:
     """Re-embed every document in ``rag_items`` with the CURRENT model and rebuild
     the vector store.
 
     Stale vectors (indexed with a previous embedding model) silently break
     semantic search — the KNN returns 0 hits even though documents exist. This
-    guarantees the index always matches the active model. Embedding is batched
-    into a single call so it stays fast even for thousands of documents, and it
-    also warms the embedder so the first live search is fast.
+    guarantees the index always matches the active model. Embedding runs in
+    bounded batches so peak memory stays flat even for thousands of documents
+    (a single giant batch once peaked at >11 GiB for ~3.5k docs and OOM-killed
+    the host), while still warming the embedder for fast live search.
     """
     rows = _conn().execute(
         "SELECT id, content, collection_name, user_id FROM rag_items"
     ).fetchall()
     if not rows:
         return 0
-    contents = [r["content"] or "" for r in rows]
-    vectors = embed(contents)  # batched; uses/warms the current model
-    for r, vec in zip(rows, vectors, strict=False):
-        _adapter().add(r["id"], vec, r["collection_name"], r["user_id"])
+    for start in range(0, len(rows), max(1, batch_size)):
+        chunk = rows[start : start + batch_size]
+        vectors = embed([r["content"] or "" for r in chunk])
+        for r, vec in zip(chunk, vectors, strict=False):
+            _adapter().add(r["id"], vec, r["collection_name"], r["user_id"])
     _conn().commit()
     log.info(f"[RAG] reindexed {len(rows)} documents into the vector store")
     return len(rows)
