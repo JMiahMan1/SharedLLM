@@ -1693,7 +1693,7 @@ def get_missions(limit: int = 200, workspace_id: str | None = None, session: Ses
     stmt = select(RavenMission).order_by(text("created_at DESC"))
     if workspace_id:
         stmt = stmt.where(RavenMission.workspace_id == workspace_id)
-    stmt = stmt.options(defer(cast(Any, RavenMission.output_log)), defer(cast(Any, RavenMission.result)))
+    stmt = stmt.options(defer(cast(Any, RavenMission.output_log)), defer(cast(Any, RavenMission.result)), defer(cast(Any, RavenMission.artifacts)))
     if limit and limit > 0:
         stmt = stmt.limit(limit)
     return session.exec(stmt).all()

@@ -3851,6 +3851,71 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             exec_data = {"status": "ERROR", "message": f"Image generation failed: {_e}"}
                     _skip_post = True
 
+                # TTSRequest: convert text to speech via the execution service (Kokoro /
+                # Edge-TTS), then persist the returned base64 audio straight into the
+                # workspace as a binary file. Unlike generic tools, /execute/tts returns
+                # the audio only as detail.audio_base64 — it does not write a file itself
+                # — so if we only relayed the detail back to the model, Raven would have
+                # to base64-decode and re-save it by hand (which it reliably forgets to
+                # do; mission 36 lost its narration this way). Mirror the image-generation
+                # artifact path: decode server-side, write via the workspace_runtime binary
+                # endpoint, and return the saved path so the model can verify it.
+                if lookup_action == "ttsrequest" and isinstance(payload, dict):
+                    _tts_text = payload.get("text") or payload.get("content")
+                    _tts_voice = payload.get("voice")
+                    _tts_storybook = bool(payload.get("storybook"))
+                    _tts_ws = payload.get("workspace_id") or workspace_id
+                    _tts_path = payload.get("relative_path") or payload.get("path") or payload.get("filename")
+                    if not _tts_text:
+                        exec_data = {"status": "ERROR", "message": "TTSRequest requires a 'text'."}
+                    else:
+                        try:
+                            _t_payload: dict = {"text": _tts_text}
+                            if _tts_storybook:
+                                _t_payload["storybook"] = True
+                            if _tts_voice:
+                                _t_payload["voice"] = _tts_voice
+                            if isinstance(payload, dict):
+                                _t_payload.setdefault("user_context", payload.get("user_context"))
+                            async with shared_http_client() as _tc:
+                                _tts_resp = await _tc.post(
+                                    f"{EXECUTION_SVC}/execute/tts",
+                                    json=_t_payload,
+                                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                    timeout=aiohttp.ClientTimeout(total=180.0),
+                                )
+                                _tts_body = await _tts_resp.json()
+                            _tts_detail = (_tts_body or {}).get("detail") or {}
+                            _tts_b64 = _tts_detail.get("audio_base64")
+                            if not _tts_b64:
+                                exec_data = {"status": "ERROR", "message": f"TTS returned no audio: {_tts_body}"}
+                            elif _tts_ws and not _tts_path:
+                                exec_data = {"status": "ERROR", "message": "TTS generated audio. Provide a relative_path (e.g. 'narration.wav') and workspace_id to save it to the workspace."}
+                            elif not _tts_ws:
+                                exec_data = {"status": "SUCCESS", "message": f"TTS generated ({len(_tts_b64)} base64 bytes). Provide workspace_id + relative_path to save it to the workspace.", "detail": {"b64_len": len(_tts_b64)}}
+                            else:
+                                async with shared_http_client() as _c2:
+                                    _tts_save = await _c2.post(
+                                        f"{WORKSPACE_RUNTIME_SVC}/files/write",
+                                        json={
+                                            "workspace_id": _tts_ws,
+                                            "relative_path": _tts_path,
+                                            "content_base64": _tts_b64,
+                                            "create_parents": True,
+                                        },
+                                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                        timeout=aiohttp.ClientTimeout(total=30.0),
+                                    )
+                                    _tts_save_data = await _tts_save.json() if _tts_save.status == 200 else {"status": "ERROR", "detail": f"save status {_tts_save.status}"}
+                                exec_data = {
+                                    "status": "SUCCESS",
+                                    "message": f"Audio saved to {_tts_path} ({len(_tts_b64)} base64 bytes).",
+                                    "detail": _tts_save_data,
+                                }
+                        except Exception as _e:
+                            exec_data = {"status": "ERROR", "message": f"TTS generation failed: {_e}"}
+                    _skip_post = True
+
                 # RavenBuildToolRequest: let Raven discover an existing tool,
                 # chain existing tools together, or scaffold + run a brand-new tool.
                 # Decision logic lives in tool_builder.decide() (existing -> chain -> build).
