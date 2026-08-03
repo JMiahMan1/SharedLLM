@@ -186,6 +186,28 @@ def test_reindex_is_idempotent_and_fast(tmp_path, monkeypatch):
     assert rag_main.adapter.count() == 20
 
 
+def test_reindex_embeds_in_bounded_batches(tmp_path, monkeypatch):
+    """Reindex must embed in bounded chunks (memory guard), never one giant batch."""
+    pytest.importorskip("sqlite_vec")
+    _install(tmp_path, SqliteVecAdapter)
+    for i in range(10):
+        asyncio.run(_ingest("default", f"batched document {i} about github repo", "system_learnings"))
+    calls: list[int] = []
+    real_embed = rag_main.embed
+
+    def recording_embed(texts):
+        calls.append(len(texts))
+        return real_embed(texts)
+
+    monkeypatch.setattr(rag_main, "embed", recording_embed)
+    n = rag_main.reindex_all(batch_size=4)
+    assert n == 10
+    assert calls, "embed must have been called"
+    assert max(calls) <= 4, f"embed batch exceeded the bound: {calls}"
+    assert sum(calls) == 10
+    assert rag_main.adapter.count() == 10
+
+
 # ───────────────────── legacy schema migration (production path) ──────────────
 
 def test_legacy_vec_table_is_migrated_and_reindexed(tmp_path):
