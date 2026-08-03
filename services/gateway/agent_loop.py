@@ -1871,6 +1871,35 @@ async def shared_http_client() -> AsyncIterator[aiohttp.ClientSession]:
     yield get_http_client()
 
 
+async def _save_b64_artifact(workspace_id: str, relative_path: str, content_base64: str, user_context: dict) -> tuple[int, dict]:
+    """Persist a base64 blob (audio/image) into a workspace via files/write.
+
+    Returns (http_status, parsed_json). Non-system workspaces REJECT writes
+    without user_context (400 'User context is required'), which silently
+    killed media saves until the interceptor began forwarding it.
+    """
+    async with shared_http_client() as _sc:
+        _resp = await _sc.post(
+            f"{WORKSPACE_RUNTIME_SVC}/files/write",
+            json={
+                "workspace_id": workspace_id,
+                "relative_path": relative_path,
+                "content_base64": content_base64,
+                "create_parents": True,
+                "user_context": user_context,
+            },
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=30.0),
+        )
+        if _resp.status == 200:
+            try:
+                return _resp.status, await _resp.json()
+            except Exception:
+                return _resp.status, {}
+        return _resp.status, {"status": "ERROR", "detail": (await _resp.text())[:300]}
+
+
+
 _stream_redis = None
 _redis_cmd: "redis.Redis | None" = None  # shared command connection (GET/SET only; never used for pub/sub)
 
@@ -3870,7 +3899,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     except (TypeError, ValueError):
                         _img_n = 1
                     _img_ws = payload.get("workspace_id") or workspace_id
-                    _img_path = payload.get("relative_path")
+                    _img_path_raw = payload.get("relative_path")
+                    _img_path = str(_img_path_raw) if _img_path_raw is not None else None
                     if not _img_prompt:
                         exec_data = {"status": "ERROR", "message": "ImageGenerationRequest requires a 'prompt'."}
                     else:
@@ -3891,24 +3921,20 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             if not _b64:
                                 exec_data = {"status": "ERROR", "message": f"Image generation returned no image: {_sd_data}"}
                             elif _img_ws and _img_path:
-                                async with shared_http_client() as _c3:
-                                    _save = await _c3.post(
-                                        f"{WORKSPACE_RUNTIME_SVC}/files/write",
-                                        json={
-                                            "workspace_id": _img_ws,
-                                            "relative_path": _img_path,
-                                            "content_base64": _b64,
-                                            "create_parents": True,
-                                        },
-                                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                                        timeout=aiohttp.ClientTimeout(total=30.0),
-                                    )
-                                    _save_data = await _save.json() if _save.status == 200 else {"status": "ERROR", "detail": f"save status {_save.status}"}
-                                exec_data = {
-                                    "status": "SUCCESS",
-                                    "message": f"Generated image saved to {_img_path} ({len(_b64)} base64 bytes).",
-                                    "detail": _save_data,
-                                }
+                                _img_status, _img_save_data = await _save_b64_artifact(
+                                    _img_ws, _img_path, _b64, _uc
+                                )
+                                if _img_status == 200:
+                                    exec_data = {
+                                        "status": "SUCCESS",
+                                        "message": f"Generated image saved to {_img_path} ({len(_b64)} base64 bytes).",
+                                        "detail": _img_save_data,
+                                    }
+                                else:
+                                    exec_data = {
+                                        "status": "ERROR",
+                                        "message": f"Image generated but workspace save failed (status {_img_status}): {_img_save_data.get('detail', '')}",
+                                    }
                             else:
                                 exec_data = {
                                     "status": "SUCCESS",
@@ -4011,32 +4037,28 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                     elif not _tts_ws:
                                         exec_data = {"status": "SUCCESS", "message": f"TTS generated ({len(_tts_b64)} base64 bytes, verified {(_tts_check['format'] or '?').upper()}). Provide workspace_id + relative_path to save it to the workspace.", "detail": {"b64_len": len(_tts_b64)}}
                                     else:
-                                        async with shared_http_client() as _c2:
-                                            _tts_save = await _c2.post(
-                                                f"{WORKSPACE_RUNTIME_SVC}/files/write",
-                                                json={
-                                                    "workspace_id": _tts_ws,
-                                                    "relative_path": _tts_path,
-                                                    "content_base64": _tts_b64,
-                                                    "create_parents": True,
-                                                },
-                                                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                                                timeout=aiohttp.ClientTimeout(total=30.0),
-                                            )
-                                            _tts_save_data = await _tts_save.json() if _tts_save.status == 200 else {"status": "ERROR", "detail": f"save status {_tts_save.status}"}
-                                        exec_data = {
-                                            "status": "SUCCESS",
-                                            "message": f"Audio saved to {_tts_path} ({len(_tts_audio)} bytes, verified {_tts_check['format'].upper()}).{_tts_fmt_note}",
-                                            "detail": _tts_save_data,
-                                        }
-                                        # The audio artifact now exists in the workspace. Track it
-                                        # as written AND verified (the save itself is the
-                                        # artifact), so the stalled-completion gate can fire
-                                        # when the model reports done instead of looping into
-                                        # the runaway guard (media missions otherwise always
-                                        # stall: nothing lands in _written_files).
-                                        _written_files.add(_tts_path)
-                                        _verified_files.add(_tts_path)
+                                        _tts_status, _tts_save_data = await _save_b64_artifact(
+                                            _tts_ws, _tts_path, _tts_b64, _uc
+                                        )
+                                        if _tts_status == 200:
+                                            exec_data = {
+                                                "status": "SUCCESS",
+                                                "message": f"Audio saved to {_tts_path} ({len(_tts_audio)} bytes, verified {_tts_check['format'].upper()}).{_tts_fmt_note}",
+                                                "detail": _tts_save_data,
+                                            }
+                                            # The audio artifact now exists in the workspace. Track it
+                                            # as written AND verified (the save itself is the
+                                            # artifact), so the stalled-completion gate can fire
+                                            # when the model reports done instead of looping into
+                                            # the runaway guard (media missions otherwise always
+                                            # stall: nothing lands in _written_files).
+                                            _written_files.add(_tts_path)
+                                            _verified_files.add(_tts_path)
+                                        else:
+                                            exec_data = {
+                                                "status": "ERROR",
+                                                "message": f"TTS audio generated but workspace save failed (status {_tts_status}): {_tts_save_data.get('detail', '')}",
+                                            }
                         except Exception as _e:
                             exec_data = {"status": "ERROR", "message": f"TTS generation failed: {_e}"}
                     _skip_post = True
@@ -4070,6 +4092,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                             "relative_path": _rel,
                                             "content": _src,
                                             "create_parents": True,
+                                            "user_context": _uc,
                                         },
                                         headers={"X-Internal-Secret": INTERNAL_SECRET},
                                         timeout=aiohttp.ClientTimeout(total=30.0),
