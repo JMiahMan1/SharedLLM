@@ -18,8 +18,10 @@ from services.execution.schemas import (
     WorkspaceSearchRequest,
     WorkspaceShellRequest,
 )
+from services.shared.media_validation import MEDIA_EXTS, validate_media_bytes
 
 log = logging.getLogger("execution.workspace")
+MAX_MEDIA_VALIDATION_BYTES = 64 * 1024 * 1024
 READ_ONLY_SHELL_COMMANDS = {
     # File reading / listing
     "cat", "find", "head", "ls", "pwd", "rg", "sed", "tail", "wc", "grep", "du", "stat", "file",
@@ -1072,6 +1074,46 @@ async def handle_workspace_lint(req) -> ExecutionResult:
         # ── Dockerfile ────────────────────────────────────────────────────────
         elif os.path.basename(req.path) == "Dockerfile" or forced == "hadolint":
             await _lint_step("hadolint", [])
+
+        # ── Audio / Video ─────────────────────────────────────────────────────
+        # A media file is verified by sniffing its actual container bytes and
+        # checking them against the declared extension + structural playability
+        # (magic-byte check, never trusts the name or the generator's claim).
+        # This catches "generated" files that are really HTML error pages,
+        # empty files, or .wav-named MP3s. The sniffer is the checker: it always
+        # runs, so this branch never reports an UNVERIFIED pass.
+        elif ext in MEDIA_EXTS or forced == "media":
+            try:
+                size = os.path.getsize(abs_path)
+                if size > MAX_MEDIA_VALIDATION_BYTES:
+                    results.append({
+                        "tool": "media-sniffer", "returncode": 1,
+                        "output": f"media file too large to validate ({size} bytes)",
+                    })
+                    passed = False
+                elif size == 0:
+                    results.append({"tool": "media-sniffer", "returncode": 1, "output": "media file is empty"})
+                    passed = False
+                else:
+                    with open(abs_path, "rb") as _mf:
+                        _media_data = _mf.read(MAX_MEDIA_VALIDATION_BYTES + 1)
+                    _mv = validate_media_bytes(_media_data, req.path)
+                    if _mv["valid"]:
+                        results.append({
+                            "tool": "media-sniffer", "returncode": 0,
+                            "output": f"VALID {(_mv['format'] or '?').upper()} ({size} bytes) — matches declared {ext} and is structurally playable",
+                        })
+                    else:
+                        results.append({
+                            "tool": "media-sniffer", "returncode": 1,
+                            "output": f"INVALID — {('; '.join(_mv['issues'])) or 'unrecognized content'}",
+                        })
+                        passed = False
+                verified = True
+            except OSError as _me:
+                results.append({"tool": "media-sniffer", "returncode": 1, "output": f"cannot read media file: {_me}"})
+                passed = False
+                verified = True
 
         else:
             return _ok(f"No linter configured for {ext} files — skipping.", {"path": req.path, "skipped": True})

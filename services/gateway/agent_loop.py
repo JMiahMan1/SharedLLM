@@ -30,6 +30,7 @@ from services.gateway.config import (
 from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider
 from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION, load_prompt
 from services.gateway.schemas import ResolvedCredentials
+from services.shared.media_validation import MEDIA_EXTS, media_extension, rewrite_media_extension, validate_media_bytes
 
 _LESSON_MARKERS = ("RULE:", "ROOT CAUSE:", "OUTCOME:", "CONFIDENCE:", "SUPERSEDES:")
 
@@ -3386,6 +3387,39 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             if _entries:
                                 _gate_ok = True
                                 log.info(f"[AgentLoop] Workspace listing shows {len(_entries)} artifact(s) — treating stalled media/graphics mission as complete.")
+                                # Independent verification of media artifacts: a
+                                # listed file is only trustworthy if it is actually
+                                # the playable format its name claims. Fetch a small
+                                # bounded sample of audio/video files and sniff their
+                                # magic bytes; results land in the logs so mission
+                                # output carries the verification evidence.
+                                _media_entries = [e for e in _entries if media_extension(e.get("path") or e.get("name")) in MEDIA_EXTS][:4]
+                                for _me in _media_entries:
+                                    _me_path = str(_me.get("path") or _me.get("name"))
+                                    try:
+                                        async with shared_http_client() as _mc:
+                                            _me_raw = await _mc.post(
+                                                f"{WORKSPACE_RUNTIME_SVC}/files/raw",
+                                                json={
+                                                    "workspace_id": workspace_id,
+                                                    "relative_path": _me_path,
+                                                    "user_context": _uc,
+                                                },
+                                                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                                timeout=aiohttp.ClientTimeout(total=30.0),
+                                            )
+                                            _me_len = _me_raw.headers.get("Content-Length")
+                                            if _me_len and int(_me_len) > 32 * 1024 * 1024:
+                                                log.warning(f"[AgentLoop] Media artifact {_me_path}: SKIPPED (too large to validate)")
+                                                continue
+                                            _me_bytes = await _me_raw.read()
+                                        _mv = validate_media_bytes(_me_bytes, _me_path)
+                                        if _mv["valid"]:
+                                            log.info(f"[AgentLoop] Media artifact {_me_path}: VALID {(_mv['format'] or '?').upper()} ({len(_me_bytes)} bytes)")
+                                        else:
+                                            log.warning(f"[AgentLoop] Media artifact {_me_path}: INVALID — {'; '.join(_mv['issues'])}")
+                                    except Exception as _me_e:
+                                        log.warning(f"[AgentLoop] Media validation of {_me_path} failed: {_me_e}")
                         except Exception as _ge:
                             log.warning(f"[AgentLoop] Workspace listing check failed on stall: {_ge}")
                     if _gate_ok:
@@ -3940,37 +3974,69 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             _tts_b64 = _tts_detail.get("audio_base64")
                             if not _tts_b64:
                                 exec_data = {"status": "ERROR", "message": f"TTS returned no audio: {_tts_body}"}
-                            elif _tts_ws and not _tts_path:
-                                exec_data = {"status": "ERROR", "message": "TTS generated audio. Provide a relative_path (e.g. 'narration.wav') and workspace_id to save it to the workspace."}
-                            elif not _tts_ws:
-                                exec_data = {"status": "SUCCESS", "message": f"TTS generated ({len(_tts_b64)} base64 bytes). Provide workspace_id + relative_path to save it to the workspace.", "detail": {"b64_len": len(_tts_b64)}}
                             else:
-                                async with shared_http_client() as _c2:
-                                    _tts_save = await _c2.post(
-                                        f"{WORKSPACE_RUNTIME_SVC}/files/write",
-                                        json={
-                                            "workspace_id": _tts_ws,
-                                            "relative_path": _tts_path,
-                                            "content_base64": _tts_b64,
-                                            "create_parents": True,
-                                        },
-                                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                                        timeout=aiohttp.ClientTimeout(total=30.0),
-                                    )
-                                    _tts_save_data = await _tts_save.json() if _tts_save.status == 200 else {"status": "ERROR", "detail": f"save status {_tts_save.status}"}
-                                exec_data = {
-                                    "status": "SUCCESS",
-                                    "message": f"Audio saved to {_tts_path} ({len(_tts_b64)} base64 bytes).",
-                                    "detail": _tts_save_data,
-                                }
-                                # The audio artifact now exists in the workspace. Track it
-                                # as written AND verified (the save itself is the
-                                # artifact), so the stalled-completion gate can fire
-                                # when the model reports done instead of looping into
-                                # the runaway guard (media missions otherwise always
-                                # stall: nothing lands in _written_files).
-                                _written_files.add(_tts_path)
-                                _verified_files.add(_tts_path)
+                                # Independent verification: decode the audio and
+                                # confirm it is actually a playable audio container
+                                # that matches the requested extension. The engine
+                                # may return WAV (Kokoro) when the model asked for
+                                # .mp3 (or vice versa) — instead of failing, the
+                                # path is rewritten to the REAL format so the file
+                                # is what its name says it is. Garbage output (an
+                                # HTML error page, empty bytes, unknown container)
+                                # is a hard ERROR — never persist it.
+                                _tts_audio = base64.b64decode(_tts_b64) if isinstance(_tts_b64, str) else b""
+                                _tts_check = validate_media_bytes(_tts_audio, _tts_path or "audio")
+                                if not _tts_check["valid"]:
+                                    _tts_problem = "; ".join(_tts_check["issues"]) or "unrecognized content"
+                                    exec_data = {
+                                        "status": "ERROR",
+                                        "message": (
+                                            f"TTS returned {len(_tts_audio)} bytes that are NOT valid, "
+                                            f"playable audio ({_tts_problem}). Regenerate with a different "
+                                            "voice or engine."
+                                        ),
+                                    }
+                                else:
+                                    if _tts_path and _tts_check["mismatch"] and _tts_check["format"]:
+                                        _old_path = _tts_path
+                                        _tts_path = rewrite_media_extension(_tts_path, _tts_check["format"])
+                                        _tts_fmt_note = (
+                                            f" TTS engine produced {_tts_check['format'].upper()}, so the file "
+                                            f"was saved as {_tts_path} instead of {_old_path}."
+                                        )
+                                    else:
+                                        _tts_fmt_note = ""
+                                    if _tts_ws and not _tts_path:
+                                        exec_data = {"status": "ERROR", "message": "TTS generated audio. Provide a relative_path (e.g. 'narration.wav') and workspace_id to save it to the workspace."}
+                                    elif not _tts_ws:
+                                        exec_data = {"status": "SUCCESS", "message": f"TTS generated ({len(_tts_b64)} base64 bytes, verified {(_tts_check['format'] or '?').upper()}). Provide workspace_id + relative_path to save it to the workspace.", "detail": {"b64_len": len(_tts_b64)}}
+                                    else:
+                                        async with shared_http_client() as _c2:
+                                            _tts_save = await _c2.post(
+                                                f"{WORKSPACE_RUNTIME_SVC}/files/write",
+                                                json={
+                                                    "workspace_id": _tts_ws,
+                                                    "relative_path": _tts_path,
+                                                    "content_base64": _tts_b64,
+                                                    "create_parents": True,
+                                                },
+                                                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                                timeout=aiohttp.ClientTimeout(total=30.0),
+                                            )
+                                            _tts_save_data = await _tts_save.json() if _tts_save.status == 200 else {"status": "ERROR", "detail": f"save status {_tts_save.status}"}
+                                        exec_data = {
+                                            "status": "SUCCESS",
+                                            "message": f"Audio saved to {_tts_path} ({len(_tts_audio)} bytes, verified {_tts_check['format'].upper()}).{_tts_fmt_note}",
+                                            "detail": _tts_save_data,
+                                        }
+                                        # The audio artifact now exists in the workspace. Track it
+                                        # as written AND verified (the save itself is the
+                                        # artifact), so the stalled-completion gate can fire
+                                        # when the model reports done instead of looping into
+                                        # the runaway guard (media missions otherwise always
+                                        # stall: nothing lands in _written_files).
+                                        _written_files.add(_tts_path)
+                                        _verified_files.add(_tts_path)
                         except Exception as _e:
                             exec_data = {"status": "ERROR", "message": f"TTS generation failed: {_e}"}
                     _skip_post = True
@@ -4855,7 +4921,7 @@ async def run_post_write_lint(file_path: str, execution_svc: str | None, interna
         "sh", "bash", "go", "rs", "c", "h", "cpp", "cc", "cxx", "hpp",
         "java", "rb", "lua", "php", "json", "yaml", "yml",
     }
-    if ext not in lintable_exts:
+    if ext not in lintable_exts and media_extension(file_path) not in MEDIA_EXTS:
         return None
 
     logger.info(f"Post-write lint check for {file_path} (ext={ext})")
