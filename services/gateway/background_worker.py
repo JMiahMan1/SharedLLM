@@ -66,6 +66,7 @@ async def _capture_mission_artifacts(mission_id: str, workspace_id: str | None) 
                     "recursive": True,
                     "include_dirs": False,
                     "max_entries": 500,
+                    "user_context": {"user": "default", "is_admin": False},
                 },
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=20,
