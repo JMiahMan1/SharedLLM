@@ -3998,7 +3998,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     _tts_voice = payload.get("voice")
                     _tts_storybook = bool(payload.get("storybook"))
                     _tts_ws = payload.get("workspace_id") or workspace_id
-                    _tts_path = payload.get("relative_path") or payload.get("path") or payload.get("filename")
+                    _tts_path = payload.get("file_path") or payload.get("relative_path") or payload.get("path") or payload.get("filename")
                     if not _tts_text:
                         exec_data = {"status": "ERROR", "message": "TTSRequest requires a 'text'."}
                     else:

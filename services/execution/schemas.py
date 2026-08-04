@@ -789,6 +789,8 @@ class TTSRequest(BaseRequest):
     text: str = Field(..., description="The text to convert to speech")
     voice: str | None = Field("af_heart", description="Voice ID (e.g. af_heart, am_adam, en-US-GuyNeural)")
     storybook: bool = Field(False, description="Enable multi-speaker narration for stories/dialogue")
+    workspace_id: str | None = Field(None, description="Workspace where the generated audio file should be saved")
+    relative_path: str | None = Field(None, description="Path (e.g. 'narration.wav') where the audio file is saved inside the workspace")
 
 class StorageTextToAudioRequest(BaseRequest):
     """
