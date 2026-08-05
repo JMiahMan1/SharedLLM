@@ -48,7 +48,7 @@ function AllArtifacts({ workspaces }: { workspaces: Workspace[] }) {
     const out: Record<string, { path: string; size: number }[]> = {};
     for (const ws of workspaces) {
       try {
-        const resp = await api.listWorkspaceFiles(ws.id, '.', true, 100);
+        const resp = await api.listWorkspaceFiles(ws.id, '.', true, 8);
         const entries = (resp.entries ?? [])
           .filter((e) => !e.is_dir && ARTIFACT_RE.test(e.path))
           .map((e) => ({ path: e.path, size: e.size ?? 0 }));
