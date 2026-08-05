@@ -1,6 +1,7 @@
 import asyncio
 import fnmatch
 import hashlib
+import io
 import json
 import logging
 import os
@@ -9,6 +10,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import zipfile
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timezone
 from pathlib import Path
@@ -19,7 +21,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 import redis
 from fastapi import BackgroundTasks, FastAPI, Header, HTTPException, Request, WebSocket
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
@@ -353,6 +355,16 @@ class FileReadRequest(WorkspaceRef):
 
 class FileRawRequest(WorkspaceRef):
     relative_path: str
+
+
+class ZipEntry(BaseModel):
+    workspace_id: str
+    relative_path: str
+
+
+class ZipRequest(BaseModel):
+    entries: list[ZipEntry]
+    user_context: dict[str, Any] | None = None
 
 
 class FileListRequest(WorkspaceRef):
@@ -2033,6 +2045,39 @@ def read_file_raw(req: FileRawRequest, x_internal_secret: str | None = Header(de
 
     media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
     return FileResponse(path=str(target), media_type=media_type, filename=target.name)
+
+
+@app.post("/files/zip")
+def zip_files(req: ZipRequest, x_internal_secret: str | None = Header(default=None)):
+    """Stream a zip archive of the requested workspace files (may span workspaces)."""
+    _require_internal_secret(x_internal_secret)
+    if not req.entries:
+        raise HTTPException(status_code=400, detail="No files requested")
+
+    buffer = io.BytesIO()
+    added_names: set[str] = set()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for entry in req.entries:
+            ref = WorkspaceRef(workspace_id=entry.workspace_id, user_context=req.user_context)
+            workspace = _resolve_workspace(ref)
+            _require_workspace_capability(workspace, "read")
+            workspace_path = Path(workspace["resolved_path"])
+            stripped = _strip_workspace_path_prefix(entry.relative_path, workspace)
+            target = resolve_safe_path(workspace_path, stripped)
+            if not target.is_file():
+                raise HTTPException(status_code=400, detail=f"Path is not a file: {entry.relative_path}")
+            arcname = f"{entry.workspace_id}/{stripped.lstrip('/') or target.name}"
+            if arcname in added_names:
+                continue
+            added_names.add(arcname)
+            zf.write(target, arcname=arcname)
+
+    buffer.seek(0)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="mission-artifacts.zip"'},
+    )
 
 
 @app.post("/files/list")

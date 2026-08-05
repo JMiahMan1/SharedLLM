@@ -1409,6 +1409,12 @@ export const api = {
     return resp.data;
   },
 
+  // Zip multiple workspace files (possibly across workspaces) into one archive.
+  async zipWorkspaceFiles(entries: { workspace_id: string; relative_path: string }[]): Promise<Blob> {
+    const resp = await apiClient.post('/api/workspaces/files/zip', { entries }, { responseType: 'blob' });
+    return resp.data;
+  },
+
   async writeWorkspaceFileBase64(workspaceId: string, relative_path: string, content_base64: string): Promise<{ status: string; message?: string }> {
     const resp = await apiClient.post('/api/workspaces/files/write', { workspace_id: workspaceId, relative_path, content_base64 });
     return resp.data;

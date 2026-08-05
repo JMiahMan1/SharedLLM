@@ -24,7 +24,8 @@ import {
   Package,
   RefreshCcw,
   Download,
-  Eye
+  Eye,
+  Archive
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ARTIFACT_RE, artifactKind, downloadBlobUrl } from '../lib/artifactKinds';
@@ -42,6 +43,8 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
   const [blobs, setBlobs] = useState<Record<string, { url: string; text?: string }>>({});
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [zipping, setZipping] = useState(false);
   const initialLoadDone = useRef(false);
 
   const loadAll = useCallback(async () => {
@@ -73,6 +76,20 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
     setExpanded((prev) => ({ ...prev, [`${wsId}:${path}`]: !prev[`${wsId}:${path}`] }));
   };
 
+  const getBlob = async (wsId: string, path: string) => {
+    const key = `${wsId}:${path}`;
+    if (blobs[key]) return blobs[key];
+    const blob = await api.fetchWorkspaceFileRaw(wsId, path);
+    const url = URL.createObjectURL(blob);
+    let text: string | undefined;
+    if (artifactKind(path) === 'text') {
+      text = (await blob.text()).slice(0, 2000);
+    }
+    const entry = { url, text };
+    setBlobs((prev) => ({ ...prev, [key]: entry }));
+    return entry;
+  };
+
   const loadBlob = async (wsId: string, path: string) => {
     const key = `${wsId}:${path}`;
     if (blobs[key]) {
@@ -80,13 +97,7 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
       return;
     }
     try {
-      const blob = await api.fetchWorkspaceFileRaw(wsId, path);
-      const url = URL.createObjectURL(blob);
-      let text: string | undefined;
-      if (artifactKind(path) === 'text') {
-        text = (await blob.text()).slice(0, 2000);
-      }
-      setBlobs((prev) => ({ ...prev, [key]: { url, text } }));
+      await getBlob(wsId, path);
       setExpanded((prev) => ({ ...prev, [key]: true }));
     } catch (err) {
       console.error('Failed to load preview:', err);
@@ -94,7 +105,44 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
     }
   };
 
+  const handleDownload = async (wsId: string, path: string) => {
+    try {
+      const entry = await getBlob(wsId, path);
+      downloadBlobUrl(entry.url, path);
+    } catch (err) {
+      console.error('Failed to download file:', err);
+      toast.error('Failed to download file');
+    }
+  };
+
+  const downloadSelectedZip = async () => {
+    const picks: { wsId: string; path: string }[] = [];
+    for (const [key, isSel] of Object.entries(selected)) {
+      if (isSel) {
+        const sep = key.indexOf(':');
+        picks.push({ wsId: key.slice(0, sep), path: key.slice(sep + 1) });
+      }
+    }
+    if (picks.length === 0) {
+      toast.error('Select at least one artifact to download');
+      return;
+    }
+    setZipping(true);
+    try {
+      const blob = await api.zipWorkspaceFiles(
+        picks.map((p) => ({ workspace_id: p.wsId, relative_path: p.path }))
+      );
+      downloadBlobUrl(URL.createObjectURL(blob), 'mission-artifacts.zip');
+    } catch (err) {
+      console.error('Failed to create zip:', err);
+      toast.error('Failed to create zip archive');
+    } finally {
+      setZipping(false);
+    }
+  };
+
   const artifactCount = Object.values(entriesByWs).reduce((n, arr) => n + arr.length, 0);
+  const selectedCount = Object.values(selected).filter(Boolean).length;
 
   return (
     <div className="glass-panel rounded-2xl border border-slate-700/50 p-6">
@@ -111,6 +159,15 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
         >
           <RefreshCcw size={14} />
           {loading ? 'Scanning...' : 'Refresh'}
+        </button>
+        <button
+          onClick={() => void downloadSelectedZip()}
+          disabled={zipping || selectedCount === 0}
+          className="glass-button px-4 py-1.5 bg-indigo-600/30 border-indigo-500/40 text-indigo-200 font-bold text-sm flex items-center gap-2 disabled:opacity-40 hover:bg-indigo-600/40"
+          title="Download selected artifacts as a zip archive"
+        >
+          <Archive size={14} />
+          {zipping ? 'Zipping...' : `Download ${selectedCount > 0 ? `${selectedCount} ` : ''}(zip)`}
         </button>
       </div>
       {loading ? (
@@ -132,6 +189,13 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
                   return (
                     <div key={key} className="px-3 py-2">
                       <div className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={!!selected[key]}
+                          onChange={(e) => setSelected((prev) => ({ ...prev, [key]: e.target.checked }))}
+                          className="accent-indigo-500 w-3.5 h-3.5"
+                          title="Select for zip download"
+                        />
                         <span className="text-slate-400 text-xs">{kind}</span>
                         <button
                           onClick={() => {
@@ -163,15 +227,13 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
                         >
                           <Eye size={14} />
                         </button>
-                        {b?.url && (
-                          <button
-                            onClick={() => downloadBlobUrl(b.url, f.path)}
-                            className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded"
-                            title="Download"
-                          >
-                            <Download size={14} />
-                          </button>
-                        )}
+                        <button
+                          onClick={() => void handleDownload(wsId, f.path)}
+                          className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded"
+                          title="Download"
+                        >
+                          <Download size={14} />
+                        </button>
                       </div>
                       {isOpen && b?.url && (
                         <div className="mt-2">
