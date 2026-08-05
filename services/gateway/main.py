@@ -4841,6 +4841,44 @@ async def get_intercom_config(request: Request):
             return JSONResponse(status_code=resp.status, content={"detail": await resp.text()})
         return JSONResponse(status_code=200, content=await resp.json())
 
+
+@app.api_route("/api/intercom/sessions", methods=["GET", "POST"])
+async def proxy_intercom_sessions(request: Request):
+    """Proxy intercom session list/create to Identity service."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    body = None
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+    async with borrow_http_client() as client:
+        resp = await client.request(
+            request.method,
+            f"{IDENTITY_SVC}/api/intercom/sessions",
+            json=body,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.delete("/api/intercom/sessions/{session_id}")
+async def proxy_delete_intercom_session(session_id: str, request: Request):
+    """Proxy intercom session deletion to Identity service."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    async with borrow_http_client() as client:
+        resp = await client.delete(
+            f"{IDENTITY_SVC}/api/intercom/sessions/{session_id}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+        )
+        return await _proxy_json_response(resp)
+
 @app.get("/api/admin/services/{service_name}/logs")
 async def get_service_logs(service_name: str, request: Request, tail: int = 100):
     creds = await _resolve_identity_from_request(request)

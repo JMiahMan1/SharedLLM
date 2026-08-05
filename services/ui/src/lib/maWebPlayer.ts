@@ -339,11 +339,6 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       return;
     }
 
-    const markSendspinConnected = () => {
-      updateConnectionState('CONNECTED', 0);
-      reconnectAttemptsRef.current = 0;
-    };
-
     let sendspinWs: WebSocket;
     let jsonrpcWs: WebSocket;
     let player: SendspinPlayer;
@@ -420,7 +415,6 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       }
       sendspinWs = (player as unknown as { core: { wsManager: { ws: WebSocket } } }).core.wsManager.ws;
       sendspinWsRef.current = sendspinWs;
-      markSendspinConnected();
       console.log('[MAWebPlayer] player.connect() completed, volume:', player.volume, 'muted:', player.muted);
 
       // Set up onclose handler AFTER adopt() to avoid being overwritten
@@ -440,6 +434,11 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
       jsonrpcWs.onopen = () => {
         console.log('[MAWebPlayer] JSON-RPC WebSocket connected');
+        // Sendspin was awaited before jsonrpcWs was created, so when the
+        // jsonrpc socket opens BOTH connections are ready — only then flip
+        // isConnected so consumers (e.g. the players list) don't race an
+        // unopened socket.
+        reconnectAttemptsRef.current = 0;
         updateConnectionState('CONNECTED', 0);
       };
 
