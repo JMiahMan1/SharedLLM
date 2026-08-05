@@ -31,6 +31,7 @@ import {
   Send,
   Bot,
   Image as ImageIcon,
+  Music,
   KeyRound,
   Wand2,
   Maximize2,
@@ -62,7 +63,7 @@ type View = 'explorer' | 'git' | 'tools' | 'chat' | 'terminal';
 // preserves edits; image tabs cache an object URL for preview.
 interface OpenTab {
   path: string;
-  kind: 'text' | 'image' | 'markdown' | 'pdf' | 'docx' | 'xlsx' | 'terminal';
+  kind: 'text' | 'image' | 'markdown' | 'pdf' | 'docx' | 'xlsx' | 'audio' | 'video' | 'terminal';
   content: string;
   imageUrl: string | null;
   blobUrl?: string | null;
@@ -314,6 +315,16 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p);
   }, []);
 
+  const isAudioPath = useCallback((p: string | null): boolean => {
+    if (!p) return false;
+    return /\.(mp3|wav|ogg|oga|opus|flac|aac|m4a|wma|aiff|aif)$/i.test(p);
+  }, []);
+
+  const isVideoPath = useCallback((p: string | null): boolean => {
+    if (!p) return false;
+    return /\.(mp4|m4v|mov|mkv|webm|avi|wmv|mpg|mpeg|ts|m2ts)$/i.test(p);
+  }, []);
+
   const isMarkdownPath = useCallback((p: string | null): boolean => {
     if (!p) return false;
     return /\.(md|markdown|mdx)$/i.test(p);
@@ -380,6 +391,20 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         }
         return;
       }
+      if (isAudioPath(entry.path) || isVideoPath(entry.path)) {
+        try {
+          const blob = await api.fetchWorkspaceFileRaw(workspace.id, entry.path);
+          const url = URL.createObjectURL(blob);
+          setTabs((prev) => [
+            ...prev,
+            { path: entry.path, kind: isAudioPath(entry.path) ? 'audio' : 'video', content: '', imageUrl: null, blobUrl: url, dirty: false, language: 'plaintext', baseContent: '' },
+          ]);
+          setActiveTab(entry.path);
+        } catch (e: unknown) {
+          toast.error(`Failed to open media file: ${apiErr(e)}`);
+        }
+        return;
+      }
       if (isPdfPath(entry.path) || isDocxPath(entry.path) || isExcelPath(entry.path)) {
         const kind = isPdfPath(entry.path) ? 'pdf' : isDocxPath(entry.path) ? 'docx' : 'xlsx';
         try {
@@ -421,7 +446,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         toast.error(`Failed to read file: ${apiErr(e)}`);
       }
     },
-    [workspace.id, loadDir, isImagePath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, loadImageModels, tabs],
+    [workspace.id, loadDir, isImagePath, isAudioPath, isVideoPath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, loadImageModels, tabs],
   );
 
   // Programmatic open by path (e.g. a freshly generated image from Stable Diffusion).
@@ -441,6 +466,20 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
           ]);
           setActiveTab(path);
           await loadImageModels();
+        } catch {
+          /* preview optional */
+        }
+        return;
+      }
+      if (isAudioPath(path) || isVideoPath(path)) {
+        try {
+          const blob = await api.fetchWorkspaceFileRaw(workspace.id, path);
+          const url = URL.createObjectURL(blob);
+          setTabs((prev) => [
+            ...prev,
+            { path, kind: isAudioPath(path) ? 'audio' : 'video', content: '', imageUrl: null, blobUrl: url, dirty: false, language: 'plaintext', baseContent: '' },
+          ]);
+          setActiveTab(path);
         } catch {
           /* preview optional */
         }
@@ -487,7 +526,7 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
         /* open optional */
       }
     },
-    [workspace.id, isImagePath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, loadImageModels, tabs],
+    [workspace.id, isImagePath, isAudioPath, isVideoPath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, loadImageModels, tabs],
   );
 
   // Close a tab (confirm if it has unsaved edits). Revokes image object URLs.
@@ -1317,6 +1356,8 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                   >
                     {t.kind === 'image' ? (
                       <ImageIcon size={13} className="text-indigo-400 shrink-0" />
+                    ) : t.kind === 'audio' || t.kind === 'video' ? (
+                      <Music size={13} className="text-indigo-400 shrink-0" />
                     ) : (
                       <FileText size={13} className="text-indigo-400 shrink-0" />
                     )}
@@ -1436,6 +1477,25 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
                     </div>
                   </div>
                   <div className="flex-1 min-h-0"><MarkdownViewer value={active.content} onChange={onEditorChange} height="100%" /></div>
+                </>
+              ) : active.kind === 'audio' || active.kind === 'video' ? (
+                <>
+                  <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Music size={14} className="text-indigo-400 shrink-0" />
+                      <span className="text-sm text-slate-300 truncate">{active.path}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => active.blobUrl && downloadBlob(active.blobUrl, active.path)} disabled={!active.blobUrl} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30" title="Download"><Download size={15} /></button>
+                    </div>
+                  </div>
+                  <div className="flex-1 min-h-0 flex items-center justify-center p-4">
+                    {active.kind === 'audio' ? (
+                      <audio controls src={active.blobUrl ?? undefined} className="w-full max-w-2xl" />
+                    ) : (
+                      <video controls src={active.blobUrl ?? undefined} className="max-w-full max-h-full" />
+                    )}
+                  </div>
                 </>
               ) : active.kind === 'pdf' || active.kind === 'docx' || active.kind === 'xlsx' ? (
                 <>
