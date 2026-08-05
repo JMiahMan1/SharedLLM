@@ -56,6 +56,11 @@ const DOMAIN_LABELS: Record<string, string> = {
 
 const ACTIVE_STATES = new Set(['on', 'playing', 'open', 'home', 'cooling', 'heating', 'unlocked', 'cleaning']);
 
+// Stable empty reference — returning a fresh [] from the zustand selector
+// makes React's useSyncExternalStore see a new snapshot every call while
+// widget settings haven't loaded, causing "Maximum update depth exceeded".
+const EMPTY_PINNED_DEVICES: string[] = [];
+
 function isActive(state: string): boolean {
   return ACTIVE_STATES.has(state.toLowerCase());
 }
@@ -101,7 +106,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   const { user, role } = useAuth();
   const togglePinnedDevice = useWidgetStore((s) => s.togglePinnedDevice);
   const pinnedDevices = useWidgetStore(
-    (s) => s.userWidgets['device_control']?.pinned_devices || []
+    (s) => s.userWidgets['device_control']?.pinned_devices ?? EMPTY_PINNED_DEVICES
   );
 
   const [devices, setDevices] = useState<DeviceEntry[]>([]);
