@@ -3485,6 +3485,29 @@ async def proxy_users(request: Request):
         return await _proxy_json_response(resp)
 
 
+@app.api_route("/api/groups/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def proxy_groups(path: str, request: Request):
+    auth_header = request.headers.get("Authorization")
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    if auth_header:
+        headers["Authorization"] = auth_header
+    body = None
+    if request.method in ("POST", "PUT"):
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+    async with shared_http_client() as client:
+        resp = await client.request(
+            request.method,
+            f"{IDENTITY_SVC}/api/groups/{path}",
+            json=body,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 # --- Telemetry Monitoring ---
 @app.get("/api/telemetry/enroll")
 async def proxy_list_telemetry_enrollments(request: Request):

@@ -333,7 +333,7 @@ async def handle_calendar(req: CalendarRequest) -> ExecutionResult:
                 try:
                     client = provider.calendar_client()
                     for c in _nextcloud_list_calendars(client):
-                        calendars.append({"id": c[0], "display_name": c[1]})
+                        calendars.append({"id": str(c[0]), "display_name": c[1]})
                 except Exception:
                     pass
             return ExecutionResult(
