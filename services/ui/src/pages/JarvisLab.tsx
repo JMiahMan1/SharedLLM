@@ -3,6 +3,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle, FlaskConical, Shield, Activity, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { artifactKind, downloadBlobUrl } from '../lib/artifactKinds';
 import { api } from '../services/api';
 import type { HealthStatus, LogEntry, RavenMission, SmokeTestResult, Workspace } from '../services/api';
 
@@ -868,31 +869,6 @@ const renderTimeline = (outputLog: string | null | undefined) => {
     return <p className="text-red-400 text-xs italic text-center p-2">Failed to parse execution log: {String(e)}</p>;
   }
 };
-
-// ─── Mission Artifacts panel ────────────────────────────────────────────────
-const AUDIO_RE = /\.(mp3|wav|ogg|oga|opus|flac|aac|m4a|wma|aiff|aif)$/i;
-const VIDEO_RE = /\.(mp4|m4v|mov|mkv|webm|avi|wmv|mpg|mpeg|ts|m2ts)$/i;
-const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
-const PDF_RE = /\.pdf$/i;
-const TEXT_RE = /\.(md|txt|markdown|log|json|py|js|ts|css|html|yaml|yml|toml|ini|sh|bash|sql)$/i;
-
-function artifactKind(path: string): 'audio' | 'video' | 'image' | 'pdf' | 'text' | 'other' {
-  if (AUDIO_RE.test(path)) return 'audio';
-  if (VIDEO_RE.test(path)) return 'video';
-  if (IMAGE_RE.test(path)) return 'image';
-  if (PDF_RE.test(path)) return 'pdf';
-  if (TEXT_RE.test(path)) return 'text';
-  return 'other';
-}
-
-function downloadBlobUrl(url: string, filename: string) {
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename.split('/').pop() || 'download';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
 
 function MissionArtifacts({ workspaceId }: { workspaceId: string }) {
   const [entries, setEntries] = useState<{ path: string; size: number }[] | null>(null);

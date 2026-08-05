@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -20,9 +20,13 @@ import {
   Star,
   Brain,
   Calendar,
-  KeyRound
+  KeyRound,
+  Package,
+  RefreshCcw,
+  Download
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { ARTIFACT_RE, artifactKind, downloadBlobUrl } from '../lib/artifactKinds';
 import { api, type Workspace } from '../services/api';
 import { formatDateTime } from '../lib/utils';
 import Modal from '../components/ui/Modal';
@@ -31,6 +35,134 @@ import { WorkspaceSecrets } from '../components/workspace/WorkspaceSecrets';
 
 const generateWebhookToken = () =>
   Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+function AllArtifacts({ workspaces }: { workspaces: Workspace[] }) {
+  const [entriesByWs, setEntriesByWs] = useState<Record<string, { path: string; size: number }[]>>({});
+  const [blobs, setBlobs] = useState<Record<string, { url: string; text?: string }>>({});
+  const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const initialLoadDone = useRef(false);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    const out: Record<string, { path: string; size: number }[]> = {};
+    for (const ws of workspaces) {
+      try {
+        const resp = await api.listWorkspaceFiles(ws.id, '.', true, 100);
+        const entries = (resp.entries ?? [])
+          .filter((e) => !e.is_dir && ARTIFACT_RE.test(e.path))
+          .map((e) => ({ path: e.path, size: e.size ?? 0 }));
+        if (entries.length > 0) out[ws.id] = entries;
+      } catch {
+        /* workspace may be unreachable — skip */
+      }
+    }
+    setEntriesByWs(out);
+    setLoading(false);
+  }, [workspaces]);
+
+  useEffect(() => {
+    if (!initialLoadDone.current && workspaces.length > 0) {
+      initialLoadDone.current = true;
+      void loadAll();
+    }
+  }, [workspaces, loadAll]);
+
+  const toggle = (wsId: string, path: string) => {
+    setExpanded((prev) => ({ ...prev, [`${wsId}:${path}`]: !prev[`${wsId}:${path}`] }));
+  };
+
+  const loadBlob = async (wsId: string, path: string) => {
+    const key = `${wsId}:${path}`;
+    if (blobs[key]) {
+      toggle(wsId, path);
+      return;
+    }
+    try {
+      const blob = await api.fetchWorkspaceFileRaw(wsId, path);
+      const url = URL.createObjectURL(blob);
+      let text: string | undefined;
+      if (artifactKind(path) === 'text') {
+        text = (await blob.text()).slice(0, 2000);
+      }
+      setBlobs((prev) => ({ ...prev, [key]: { url, text } }));
+    } catch {
+      /* preview failed */
+    }
+  };
+
+  const artifactCount = Object.values(entriesByWs).reduce((n, arr) => n + arr.length, 0);
+
+  return (
+    <div className="glass-panel rounded-2xl border border-slate-700/50 p-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Package size={18} className="text-indigo-400" />
+          <h3 className="text-lg font-bold text-white">All Mission Artifacts</h3>
+          <span className="text-xs text-slate-400">({artifactCount} files across {Object.keys(entriesByWs).length} workspaces)</span>
+        </div>
+        <button
+          onClick={() => void loadAll()}
+          disabled={loading}
+          className="glass-button px-4 py-1.5 bg-slate-800/40 border-slate-700/50 text-slate-300 font-bold text-sm flex items-center gap-2 disabled:opacity-40"
+        >
+          <RefreshCcw size={14} />
+          {loading ? 'Scanning...' : 'Refresh'}
+        </button>
+      </div>
+      {loading ? (
+        <p className="mt-4 text-sm text-slate-400">Scanning workspaces for audio, video, image, PDF and document artifacts...</p>
+      ) : artifactCount === 0 ? (
+        <p className="mt-4 text-sm text-slate-400">No artifacts found yet — run a Raven mission that produces files.</p>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {Object.entries(entriesByWs).map(([wsId, files]) => (
+            <div key={wsId} className="rounded-xl border border-slate-700/40 bg-slate-900/40">
+              <div className="px-3 py-2 border-b border-slate-700/40 font-mono text-xs text-indigo-300">{wsId}</div>
+              <div className="divide-y divide-slate-800/60">
+                {files.map((f) => {
+                  const key = `${wsId}:${f.path}`;
+                  const kind = artifactKind(f.path);
+                  const b = blobs[key];
+                  const isOpen = !!expanded[key];
+                  return (
+                    <div key={key} className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400 text-xs">{kind}</span>
+                        <button onClick={() => void loadBlob(wsId, f.path)} className="truncate text-sm text-slate-200 hover:text-white text-left flex-1">
+                          {f.path.split('/').pop()}
+                        </button>
+                        <span className="text-xs text-slate-500">{(f.size / 1024).toFixed(1)} KB</span>
+                        {b?.url && (
+                          <button
+                            onClick={() => downloadBlobUrl(b.url, f.path)}
+                            className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded"
+                            title="Download"
+                          >
+                            <Download size={14} />
+                          </button>
+                        )}
+                      </div>
+                      {isOpen && b?.url && (
+                        <div className="mt-2">
+                          {kind === 'audio' && <audio controls src={b.url} className="w-full max-w-md" />}
+                          {kind === 'video' && <video controls src={b.url} className="max-h-56" />}
+                          {kind === 'image' && <img src={b.url} alt={f.path} className="max-h-56 object-contain rounded-lg" />}
+                          {kind === 'pdf' && <iframe src={b.url} title={f.path} className="h-48 w-full rounded-lg" />}
+                          {kind === 'text' && <pre className="max-h-40 overflow-auto text-xs text-slate-300 whitespace-pre-wrap">{b.text ?? ''}</pre>}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const Workspaces = () => {
   const queryClient = useQueryClient();
@@ -189,6 +321,8 @@ const Workspaces = () => {
           </div>
         )}
       </header>
+
+      <AllArtifacts workspaces={workspaces} />
 
       {isAdmin && (
         <div className="glass-card p-4 border-l-4 border-l-purple-500 flex items-center justify-between gap-4">
