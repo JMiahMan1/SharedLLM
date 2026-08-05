@@ -4257,6 +4257,27 @@ async def read_workspace_file_raw_proxy(request: Request):
         media_type=resp.headers.get("content-type", "application/octet-stream"),
     )
 
+
+@app.post("/api/workspaces/files/zip")
+async def zip_workspace_files_proxy(request: Request):
+    body = await request.json()
+    if isinstance(body, dict) and not body.get("user_context"):
+        with suppress(Exception):
+            body = {**body, "user_context": await _resolve_user_context(request, body)}
+    resp = await get_http_client().post(
+        f"{WORKSPACE_RUNTIME_SVC}/files/zip",
+        json=body,
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    body_bytes = await resp.read()
+    content_disposition = resp.headers.get("content-disposition", 'attachment; filename="artifacts.zip"')
+    return Response(
+        content=body_bytes,
+        status_code=resp.status,
+        media_type=resp.headers.get("content-type", "application/zip"),
+        headers={"Content-Disposition": content_disposition},
+    )
+
 def _sd_request_authorized(request: Request) -> bool:
     api_key = request.headers.get("X-API-Key")
     auth_header = request.headers.get("Authorization")
