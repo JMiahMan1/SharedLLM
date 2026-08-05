@@ -25,6 +25,20 @@ def test_is_raven_intent_keywordless_prompt_is_false():
     assert is_raven_intent(q) is False
 
 
+def test_is_raven_intent_colon_prefixed_prompt_is_false():
+    # Regression: legacy `":" in query[:15]` clause re-opened the false-trigger
+    # door — e.g. "Note: ...", "Q: ...", "Hey: ..." dispatched missions through
+    # the OpenAI/Ollama chat endpoints and surfaced model_config_error when the
+    # mission dispatch failed. Only EXPLICIT Raven invocations may trigger.
+    for q in (
+        "Note: remind me to water the plants",
+        "Q: what is the capital of France?",
+        "Hey: can you tell me the weather?",
+        "Check: what time is it?",
+    ):
+        assert is_raven_intent(q) is False
+
+
 def test_mission_id_forces_autonomous_even_without_keyword():
     fake_self = SimpleNamespace()
     payload = {
