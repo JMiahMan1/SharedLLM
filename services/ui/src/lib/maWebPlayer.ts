@@ -303,7 +303,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       const onMessage = (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data as string);
-          if (data?.message_id === id && data?.type === 'RESULT') {
+          if (data?.message_id === id && data?.result !== undefined) {
             clearTimeout(timeout);
             ws.removeEventListener('message', onMessage);
             resolve(data.result);
