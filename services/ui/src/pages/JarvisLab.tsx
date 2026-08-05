@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle, FlaskConical, Shield, Activity } from 'lucide-react';
+import { CheckCircle2, Play, RefreshCcw, Terminal, Wrench, Zap, Eye, Filter, Trash2, Pause, PlayCircle, FlaskConical, Shield, Activity, Download } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
 import type { HealthStatus, LogEntry, RavenMission, SmokeTestResult, Workspace } from '../services/api';
@@ -767,6 +767,13 @@ const MissionsPane = () => {
                   </div>
                 )}
 
+                {detailedMission.workspace_id && (
+                  <div>
+                    <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Mission Artifacts</label>
+                    <MissionArtifacts workspaceId={detailedMission.workspace_id} />
+                  </div>
+                )}
+
                 <div>
                   <label className="text-[10px] uppercase font-black text-slate-500 tracking-wider mb-1.5 block">Audit Execution Timeline</label>
                   {renderTimeline(detailedMission.output_log)}
@@ -861,5 +868,123 @@ const renderTimeline = (outputLog: string | null | undefined) => {
     return <p className="text-red-400 text-xs italic text-center p-2">Failed to parse execution log: {String(e)}</p>;
   }
 };
+
+// ─── Mission Artifacts panel ────────────────────────────────────────────────
+const AUDIO_RE = /\.(mp3|wav|ogg|oga|opus|flac|aac|m4a|wma|aiff|aif)$/i;
+const VIDEO_RE = /\.(mp4|m4v|mov|mkv|webm|avi|wmv|mpg|mpeg|ts|m2ts)$/i;
+const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+const PDF_RE = /\.pdf$/i;
+const TEXT_RE = /\.(md|txt|markdown|log|json|py|js|ts|css|html|yaml|yml|toml|ini|sh|bash|sql)$/i;
+
+function artifactKind(path: string): 'audio' | 'video' | 'image' | 'pdf' | 'text' | 'other' {
+  if (AUDIO_RE.test(path)) return 'audio';
+  if (VIDEO_RE.test(path)) return 'video';
+  if (IMAGE_RE.test(path)) return 'image';
+  if (PDF_RE.test(path)) return 'pdf';
+  if (TEXT_RE.test(path)) return 'text';
+  return 'other';
+}
+
+function downloadBlobUrl(url: string, filename: string) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename.split('/').pop() || 'download';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+function MissionArtifacts({ workspaceId }: { workspaceId: string }) {
+  const [entries, setEntries] = useState<{ path: string; size: number }[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [blobs, setBlobs] = useState<Record<string, { url: string; text?: string }>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listWorkspaceFiles(workspaceId, '.', true, 4)
+      .then((res) => {
+        if (cancelled) return;
+        setEntries((res.entries ?? []).filter((f) => !f.is_dir).map((f) => ({ path: f.path ?? f.name, size: f.size ?? 0 })));
+      })
+      .catch((e) => {
+        if (!cancelled) setError(String(e));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
+
+  const loadBlob = useCallback(
+    async (path: string, kind: string) => {
+      if (blobs[path]) return;
+      try {
+        const blob = await api.fetchWorkspaceFileRaw(workspaceId, path);
+        const url = URL.createObjectURL(blob);
+        if (kind === 'text') {
+          const text = await blob.text();
+          setBlobs((prev) => ({ ...prev, [path]: { url, text } }));
+        } else {
+          setBlobs((prev) => ({ ...prev, [path]: { url } }));
+        }
+      } catch (e) {
+        toast.error(`Failed to load ${path}: ${String(e)}`);
+      }
+    },
+    [workspaceId, blobs],
+  );
+
+  useEffect(() => {
+    if (!entries) return;
+    entries.forEach((e) => {
+      const kind = artifactKind(e.path);
+      if (kind === 'audio' || kind === 'video' || kind === 'image' || kind === 'pdf' || kind === 'text') void loadBlob(e.path, kind);
+    });
+  }, [entries, loadBlob]);
+
+  if (error) return <p className="text-red-400 text-xs italic p-2">Failed to load artifacts: {error}</p>;
+  if (!entries) return <p className="text-slate-500 text-xs p-2">Loading artifacts…</p>;
+  if (entries.length === 0) return <p className="text-slate-500 text-xs p-2">No artifact files in workspace.</p>;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {entries.map((e) => {
+        const kind = artifactKind(e.path);
+        const b = blobs[e.path];
+        return (
+          <div key={e.path} className="bg-black/30 border border-white/5 rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[11px] text-slate-300 font-mono truncate" title={e.path}>{e.path.split('/').pop()}</span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[9px] text-slate-500">{formatBytes(e.size)}</span>
+                <button
+                  onClick={() => b?.url && downloadBlobUrl(b.url, e.path)}
+                  disabled={!b?.url}
+                  className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30"
+                  title="Download"
+                >
+                  <Download size={13} />
+                </button>
+              </div>
+            </div>
+            {kind === 'audio' && b?.url && <audio controls src={b.url} className="w-full" />}
+            {kind === 'video' && b?.url && <video controls src={b.url} className="w-full max-h-56 rounded bg-black" />}
+            {kind === 'image' && b?.url && <img src={b.url} alt={e.path} className="max-h-56 max-w-full object-contain rounded bg-black/40 mx-auto" />}
+            {kind === 'pdf' && b?.url && <iframe src={b.url} title={e.path} className="w-full h-48 rounded bg-white/5 border border-white/10" />}
+            {kind === 'text' && b?.text != null && <pre className="text-[10px] text-slate-300 bg-black/40 p-2 rounded max-h-40 overflow-auto whitespace-pre-wrap">{b.text.slice(0, 2000)}</pre>}
+            {kind === 'other' && <p className="text-[10px] text-slate-500 italic">Binary file — download to inspect.</p>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function formatBytes(n?: number | null): string {
+  if (n == null) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default JarvisLab;
