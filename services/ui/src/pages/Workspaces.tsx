@@ -87,8 +87,10 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
         text = (await blob.text()).slice(0, 2000);
       }
       setBlobs((prev) => ({ ...prev, [key]: { url, text } }));
-    } catch {
-      /* preview failed */
+      setExpanded((prev) => ({ ...prev, [key]: true }));
+    } catch (err) {
+      console.error('Failed to load preview:', err);
+      toast.error('Failed to load preview');
     }
   };
 
