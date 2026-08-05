@@ -2980,9 +2980,10 @@ async def chat_handler(request: Request, background_tasks=None):
     is_autonomous = False
     # Hardened intent logic: a Raven autonomous mission is only triggered when
     # the prompt EXPLICITLY invokes Raven AND pairs it with a command verb.
-    # Bare action words (e.g. "scan", "build", "check") no longer auto-route
-    # ordinary requests to the Raven mission queue.
-    if is_raven_intent(query) or ":" in query[:15]:
+    # Bare action words (e.g. "scan", "build", "check") and colon-prefixed
+    # phrasing (e.g. "Note: ...", "Q: ...") no longer auto-route ordinary
+    # requests to the Raven mission queue.
+    if is_raven_intent(query):
         log.info("[ShadowExecution] AUTONOMOUS MISSION DETECTED via Raven keyword + command")
         is_autonomous = True
         system_instruction = await load_prompt(get_http_client(), "raven_autonomous_protocol")
