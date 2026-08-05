@@ -127,7 +127,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const sendspinWsRef = useRef<WebSocket | null>(null);
   const playerIdRef = useRef<string>('');
   const reconnectAttemptsRef = useRef(0);
-  const [msgId, setMsgId] = useState(0);
+  const msgIdRef = useRef(0);
   const [state, setStateLocal] = useState<MAWebPlayerState>({
     isConnected: false,
     isPlaying: false,
@@ -280,8 +280,8 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         return;
       }
 
-      const id = `counter${msgId + 1}`;
-      setMsgId(prev => prev + 1);
+      const id = `counter${msgIdRef.current + 1}`;
+      msgIdRef.current += 1;
 
       const payload = JSON.stringify({
         message_id: id,
@@ -321,7 +321,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       ws.addEventListener('message', onMessage);
       ws.send(payload);
     });
-  }, [msgId]);
+  }, []);
 
   const initPlayer = useCallback(async () => {
     console.log('[MAWebPlayer] initPlayer called, playerRef.current:', !!playerRef.current);
