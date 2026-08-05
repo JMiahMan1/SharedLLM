@@ -23,7 +23,8 @@ import {
   KeyRound,
   Package,
   RefreshCcw,
-  Download
+  Download,
+  Eye
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { ARTIFACT_RE, artifactKind, downloadBlobUrl } from '../lib/artifactKinds';
@@ -36,7 +37,7 @@ import { WorkspaceSecrets } from '../components/workspace/WorkspaceSecrets';
 const generateWebhookToken = () =>
   Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 
-function AllArtifacts({ workspaces }: { workspaces: Workspace[] }) {
+function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; onOpenInIDE?: (ws: Workspace, path: string) => void }) {
   const [entriesByWs, setEntriesByWs] = useState<Record<string, { path: string; size: number }[]>>({});
   const [blobs, setBlobs] = useState<Record<string, { url: string; text?: string }>>({});
   const [loading, setLoading] = useState(false);
@@ -125,14 +126,41 @@ function AllArtifacts({ workspaces }: { workspaces: Workspace[] }) {
                   const kind = artifactKind(f.path);
                   const b = blobs[key];
                   const isOpen = !!expanded[key];
+                  const ws = workspaces.find((w) => w.id === wsId);
                   return (
                     <div key={key} className="px-3 py-2">
                       <div className="flex items-center gap-2">
                         <span className="text-slate-400 text-xs">{kind}</span>
-                        <button onClick={() => void loadBlob(wsId, f.path)} className="truncate text-sm text-slate-200 hover:text-white text-left flex-1">
+                        <button
+                          onClick={() => {
+                            if (onOpenInIDE && ws) {
+                              onOpenInIDE(ws, f.path);
+                            } else {
+                              void loadBlob(wsId, f.path);
+                            }
+                          }}
+                          className="truncate text-sm text-slate-200 hover:text-white text-left flex-1"
+                          title={onOpenInIDE ? 'Open in IDE' : 'Preview'}
+                        >
                           {f.path.split('/').pop()}
                         </button>
                         <span className="text-xs text-slate-500">{(f.size / 1024).toFixed(1)} KB</span>
+                        {onOpenInIDE && ws && (
+                          <button
+                            onClick={() => onOpenInIDE(ws, f.path)}
+                            className="px-2 py-1 text-[10px] text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/10 rounded font-semibold"
+                            title={`Open ${f.path.split('/').pop()} in ${ws.display_name || ws.id}`}
+                          >
+                            Open in IDE
+                          </button>
+                        )}
+                        <button
+                          onClick={() => void loadBlob(wsId, f.path)}
+                          className="p-1 text-slate-400 hover:text-white hover:bg-white/10 rounded"
+                          title="Preview"
+                        >
+                          <Eye size={14} />
+                        </button>
                         {b?.url && (
                           <button
                             onClick={() => downloadBlobUrl(b.url, f.path)}
@@ -171,6 +199,7 @@ const Workspaces = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingWs, setEditingWs] = useState<Workspace | null>(null);
   const [ideWs, setIdeWs] = useState<Workspace | null>(null);
+  const [ideInitialPath, setIdeInitialPath] = useState<string | null>(null);
   const [secretsWs, setSecretsWs] = useState<Workspace | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
@@ -322,7 +351,13 @@ const Workspaces = () => {
         )}
       </header>
 
-      <AllArtifacts workspaces={workspaces} />
+      <AllArtifacts
+        workspaces={workspaces}
+        onOpenInIDE={(ws, path) => {
+          setIdeWs(ws);
+          setIdeInitialPath(path);
+        }}
+      />
 
       {isAdmin && (
         <div className="glass-card p-4 border-l-4 border-l-purple-500 flex items-center justify-between gap-4">
@@ -613,7 +648,14 @@ const Workspaces = () => {
       </div>
 
       {ideWs && (
-        <WorkspaceIDE workspace={ideWs} onClose={() => setIdeWs(null)} />
+        <WorkspaceIDE
+          workspace={ideWs}
+          initialPath={ideInitialPath}
+          onClose={() => {
+            setIdeWs(null);
+            setIdeInitialPath(null);
+          }}
+        />
       )}
       {secretsWs && (
         <WorkspaceSecrets workspace={secretsWs} onClose={() => setSecretsWs(null)} />

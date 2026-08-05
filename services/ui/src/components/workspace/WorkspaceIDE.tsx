@@ -55,6 +55,7 @@ import { cn } from '../../lib/utils';
 interface WorkspaceIDEProps {
   workspace: Workspace;
   onClose: () => void;
+  initialPath?: string | null;
 }
 
 type View = 'explorer' | 'git' | 'tools' | 'chat' | 'terminal';
@@ -127,7 +128,7 @@ function FileCtxMenuItem({ icon, label, onClick, danger }: FileCtxMenuItemProps)
   );
 }
 
-export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) {
+export default function WorkspaceIDE({ workspace, onClose, initialPath }: WorkspaceIDEProps) {
   const [activeView, setActiveView] = useState<View>('explorer');
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalPosition, setTerminalPosition] = useState<'sidebar' | 'bottom'>('bottom');
@@ -528,6 +529,18 @@ export default function WorkspaceIDE({ workspace, onClose }: WorkspaceIDEProps) 
     },
     [workspace.id, isImagePath, isAudioPath, isVideoPath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, loadImageModels, tabs],
   );
+
+  // Open a file programmatically on mount (e.g. an artifact from the
+  // Workspaces page). Runs once per (workspace, initialPath) pair.
+  const initialPathHandledRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!initialPath || initialPathHandledRef.current === initialPath) return;
+    initialPathHandledRef.current = initialPath;
+    void (async () => {
+      const dir = baseDirOf(initialPath) || '.';
+      await Promise.all([loadDir(dir), openByPath(initialPath)]);
+    })();
+  }, [workspace.id, initialPath, baseDirOf, loadDir, openByPath]);
 
   // Close a tab (confirm if it has unsaved edits). Revokes image object URLs.
   const closeTab = useCallback(
