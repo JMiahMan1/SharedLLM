@@ -129,6 +129,7 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
   const [isEditable, setIsEditable] = useState(true);
   const originalRef = useRef<Document | null>(null);
   const docTypeRef = useRef<'text' | 'spreadsheet' | 'presentation'>('text');
+  const parsedHtmlRef = useRef<string | null>(null);
   const dirtyRef = useRef(false);
 
   const markDirty = useCallback(
@@ -339,14 +340,16 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
         const doc = new DOMParser().parseFromString(xml, 'text/xml');
         originalRef.current = doc;
 
-        const editor = editorRef.current;
-        if (!editor) return;
-        editor.innerHTML = '';
+        // Parse into a detached holder: the editor surface is unmounted and
+        // remounted when loading flips, so writing directly to editorRef here
+        // would be wiped. A post-commit effect copies the finished HTML in.
+        const holder = document.createElement('div');
 
         const isSpreadsheet = !!doc.getElementsByTagNameNS(NS.office, 'spreadsheet')[0];
         const isPresentation = !!doc.getElementsByTagNameNS(NS.office, 'presentation')[0];
         docTypeRef.current = isSpreadsheet ? 'spreadsheet' : isPresentation ? 'presentation' : 'text';
         setIsEditable(!isSpreadsheet && !isPresentation);
+        parsedHtmlRef.current = '';
 
         const appendRuns = (parent: HTMLElement, node: Element, pstyleName: string | null) => {
           Array.from(node.childNodes).forEach((child) => {
@@ -399,7 +402,7 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
             if (css.textDecoration) p.setAttribute('style', `text-decoration: ${css.textDecoration}`);
           }
           appendRuns(p, el, pstyleName);
-          editor.appendChild(p);
+          holder.appendChild(p);
         };
 
         const appendList = (el: Element) => {
@@ -419,7 +422,7 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
             });
             list.appendChild(li);
           });
-          editor.appendChild(list);
+          holder.appendChild(list);
         };
 
         if (docTypeRef.current === 'text') {
@@ -468,7 +471,7 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
               tbl.appendChild(tr);
             });
             wrap.appendChild(tbl);
-            editor.appendChild(wrap);
+            holder.appendChild(wrap);
           });
         } else {
           const pages = doc.getElementsByTagNameNS(NS.draw, 'page');
@@ -486,9 +489,10 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
               appendRuns(p, pEl, pstyleName);
               wrap.appendChild(p);
             });
-            editor.appendChild(wrap);
+            holder.appendChild(wrap);
           });
         }
+        parsedHtmlRef.current = holder.innerHTML;
       } catch (e: unknown) {
         setError(`Failed to parse ODF file: ${(e as Error)?.message || 'Unknown error'}`);
       } finally {
@@ -499,6 +503,13 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
       cancelled = true;
     };
   }, [url]);
+
+  // Populate the editor once it is mounted with the parsed content.
+  useEffect(() => {
+    if (!editorRef.current || parsedHtmlRef.current === null) return;
+    editorRef.current.innerHTML = parsedHtmlRef.current;
+    parsedHtmlRef.current = null;
+  });
 
   // ── Toolbar commands ─────────────────────────────────────────────────────────
 
