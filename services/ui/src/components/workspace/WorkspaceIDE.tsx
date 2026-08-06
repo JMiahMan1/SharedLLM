@@ -44,6 +44,7 @@ import type { GitLogEntry, GitStatusResponse, WorkspaceFileEntry } from '../../t
 import { detectLanguage } from '../../lib/editorLanguages';
 import { CodeEditor } from '../editor/CodeEditor';
 import { MarkdownViewer } from './viewers/MarkdownViewer';
+import { MarkdownEditor } from './viewers/MarkdownEditor';
 import { ImageViewer } from './viewers/ImageViewer';
 import { PdfViewer } from './viewers/PdfViewer';
 import { DocxEditor } from './viewers/DocxEditor';
@@ -541,6 +542,8 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
   const initialPathHandledRef = useRef<string | null>(null);
   const docxEditorRef = useRef<{ save: () => Promise<void> } | null>(null);
   const odfViewerRef = useRef<{ save: () => Promise<void> } | null>(null);
+  const markdownEditorRef = useRef<{ save: () => Promise<void> } | null>(null);
+  const [mdRichPaths, setMdRichPaths] = useState<Record<string, boolean>>({});
   useEffect(() => {
     if (!initialPath || initialPathHandledRef.current === initialPath) return;
     initialPathHandledRef.current = initialPath;
@@ -611,7 +614,22 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
   }, [active]);
 
   const saveFile = useCallback(async () => {
-    if (!active || (active.kind !== 'text' && active.kind !== 'markdown') || !active.dirty) return;
+    if (!active) return;
+    if (active.kind === 'markdown' && mdRichPaths[active.path]) {
+      if (!markdownEditorRef.current) return;
+      setSaving(true);
+      try {
+        await markdownEditorRef.current.save();
+        setTabs((prev) => prev.map((t) => (t.path === active.path ? { ...t, dirty: false } : t)));
+      } catch (e: unknown) {
+        toast.error(`Save failed: ${apiErr(e)}`);
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    if (active.kind !== 'text' && active.kind !== 'markdown') return;
+    if (!active.dirty) return;
     setSaving(true);
     try {
       await api.writeWorkspaceFile(workspace.id, active.path, active.content);
@@ -622,7 +640,7 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
     } finally {
       setSaving(false);
     }
-  }, [active, workspace.id]);
+  }, [active, workspace.id, mdRichPaths]);
 
   // Run the workspace linter against the active file and surface the results
   // in a VSCode-style Problems panel at the bottom of the editor.
@@ -1509,11 +1527,32 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                       {active.dirty && <span className="text-[10px] text-amber-400">● unsaved</span>}
                     </div>
                     <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setMdRichPaths((prev) => ({ ...prev, [active.path]: !(prev[active.path] ?? false) }))}
+                        className={cn('px-2.5 py-1.5 text-xs font-medium rounded', mdRichPaths[active.path] ? 'bg-indigo-600/30 text-indigo-300 hover:bg-indigo-600/50' : 'bg-white/10 hover:bg-white/20 text-slate-200')}
+                        title={mdRichPaths[active.path] ? 'Switch to source view' : 'Switch to rich markdown editor'}
+                      >
+                        {mdRichPaths[active.path] ? 'Source' : 'Rich'}
+                      </button>
                       <button onClick={downloadFile} disabled={!active} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30" title="Download"><Download size={15} /></button>
                       <button onClick={saveFile} disabled={!active.dirty || saving} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40" title="Save (Ctrl+S)">{saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Save</button>
                     </div>
                   </div>
-                  <div className="flex-1 min-h-0"><MarkdownViewer value={active.content} onChange={onEditorChange} height="100%" /></div>
+                  <div className="flex-1 min-h-0">
+                    {mdRichPaths[active.path] ? (
+                      <MarkdownEditor
+                        ref={markdownEditorRef}
+                        workspaceId={workspace.id}
+                        path={active.path}
+                        initialMarkdown={active.content}
+                        onDirtyChange={(dirty) => {
+                          setTabs((prev) => prev.map((t) => (t.path === active.path ? { ...t, dirty } : t)));
+                        }}
+                      />
+                    ) : (
+                      <MarkdownViewer value={active.content} onChange={onEditorChange} height="100%" />
+                    )}
+                  </div>
                 </>
               ) : active.kind === 'audio' || active.kind === 'video' ? (
                 <>
