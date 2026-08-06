@@ -122,6 +122,8 @@ class RavenMission(SQLModel, table=True):  # type: ignore
     result: str | None = None
     user_id: int | None = Field(default=None, foreign_key="user.id")
     workspace_id: str | None = Field(default=None)
+    depends_on_mission_id: int | None = Field(default=None)
+    next_mission_query: str | None = None
     last_llm_reply: str | None = Field(default=None)
     artifacts: str | None = Field(default=None)
 
