@@ -758,6 +758,8 @@ class RavenWorker:
             log.warning("[Worker] Suspicious short 'success' — candidate for model upgrade")
             return True
 
+        return False
+
     async def _dispatch_chained_missions(
         self,
         client: aiohttp.ClientSession,
@@ -850,8 +852,6 @@ class RavenWorker:
                     log.error(f"[Worker] Failed to launch next_mission_query follow-up after mission {completed_mission_id}: {chain_e}")
         except Exception as dispatch_e:
             log.error(f"[Worker] Chained mission dispatch failed after mission {completed_mission_id}: {dispatch_e}")
-
-        return False
 
     async def _get_upgrade_model(self, current_model: str) -> str:
         """
