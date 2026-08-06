@@ -778,7 +778,12 @@ class RavenWorker:
         missions get full system prompts and worker treatment.
         """
         try:
-            from services.gateway.main import _build_raven_system_prompt, _enqueue_user_mission
+            from services.gateway.main import (
+                _build_raven_system_prompt,
+                _enqueue_user_mission,
+                resolve_first_user,
+                resolve_identity,
+            )
 
             async def _enqueue_existing(mission_data: dict, user_id: int | None) -> dict:
                 """Enqueue a job for an ALREADY-EXISTING pending mission record.
@@ -790,7 +795,10 @@ class RavenWorker:
                 query = mission_data.get("proposed_mission", "")
                 coding_model = mission_data.get("coding_model") or payload.get("model")
                 system_prompt = await _build_raven_system_prompt(query)
-                creds = {"user_id": user_id, "user": None}
+                if user_id:
+                    creds = await resolve_identity({"user_id": user_id})
+                else:
+                    creds = await resolve_first_user()
                 mission_id = mission_data["id"]
                 await self.job_queue.enqueue_job(
                     creds.get("user") or "raven_user",
@@ -840,10 +848,14 @@ class RavenWorker:
                 try:
                     followup_user_id = payload.get("user_id") or payload.get("creds", {}).get("user_id")
                     system_prompt = await _build_raven_system_prompt(payload["next_mission_query"])
+                    if followup_user_id:
+                        followup_creds = await resolve_identity({"user_id": followup_user_id})
+                    else:
+                        followup_creds = await resolve_first_user()
                     enqueued = await _enqueue_user_mission(
                         query=payload["next_mission_query"],
                         system=system_prompt,
-                        creds={"user_id": followup_user_id, "user": None},
+                        creds=followup_creds,
                         coding_model=payload.get("model"),
                         next_mission_query=None,
                         job_queue_override=self.job_queue,
