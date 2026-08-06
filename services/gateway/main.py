@@ -5362,12 +5362,17 @@ async def _enqueue_user_mission(
     priority: int = 1,
     depends_on_mission_id: int | None = None,
     next_mission_query: str | None = None,
+    job_queue_override: "InferenceJobQueue | None" = None,
 ) -> dict:
     """Create a Raven user mission in Identity and enqueue it for the Raven worker.
 
     Shared by the ``/api/raven/missions`` HTTP endpoint and the chat handler's
     autonomous routing, so that any chat request recognized as a Raven mission
     shows up in the Raven queue. Returns the mission record (status=queued).
+
+    ``job_queue_override`` lets the background worker (which runs on its own
+    event loop) inject its own loop-bound InferenceJobQueue instead of the
+    module-global one owned by the API loop.
 
     The mission runs with NO pre-assigned workspace: Raven creates its own
     dedicated workspace at the start of the mission (via the WorkspaceCreateRequest
@@ -5411,8 +5416,9 @@ async def _enqueue_user_mission(
             mission_data["status"] = "pending"
             return mission_data
 
-        assert job_queue is not None, "Job queue not initialized"
-        await job_queue.enqueue_job(creds.get("user") or owner_user or "raven_user", {
+        queue = job_queue_override or job_queue
+        assert queue is not None, "Job queue not initialized"
+        await queue.enqueue_job(creds.get("user") or owner_user or "raven_user", {
             "query": query,
             "model": target_model,
             "system": system,
