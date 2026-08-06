@@ -846,6 +846,7 @@ class RavenWorker:
                         creds={"user_id": followup_user_id, "user": None},
                         coding_model=payload.get("model"),
                         next_mission_query=None,
+                        job_queue_override=self.job_queue,
                     )
                     log.info(f"[Worker] next_mission_query follow-up {enqueued.get('id')} launched after mission {completed_mission_id}")
                 except Exception as chain_e:
