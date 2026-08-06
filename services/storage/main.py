@@ -261,7 +261,7 @@ async def write_provider_content(req: ProviderWriteRequest):
         if content is None:
             raise HTTPException(status_code=400, detail="Either content or content_b64 must be provided")
 
-        result = provider.write_content(
+        result = await provider.write_content(
             req.path,
             content,
             create_parents=req.create_parents,
