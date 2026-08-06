@@ -27,11 +27,23 @@ function qn(local: string): string {
   return `w:${local}`;
 }
 
-function qsel(local: string): string {
-  // In an XML DOM (DOMParser 'text/xml'), CSS selectors match the full
-  // qualified tag name, so the 'w:' prefix must be escaped. XPath-style
-  // '*[local-name()=...]' is NOT valid CSS and throws in querySelector.
-  return `w\\:${local}`;
+// XML DOMs (DOMParser 'text/xml') do not support CSS selectors on
+// namespace-prefixed element names at all, so find descendants by
+// localName with a tree walk instead.
+function qsel(root: Element | null, local: string): Element | null {
+  if (!root) return null;
+  const walker = (root.ownerDocument || document).createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Element;
+    if (node !== root && node.localName === local) return node;
+  }
+  return null;
+}
+
+function qselDirectChildren(root: Element, local: string): Element[] {
+  return Array.from(root.childNodes).filter(
+    (n): n is Element => n.nodeType === Node.ELEMENT_NODE && (n as Element).localName === local,
+  );
 }
 
 // Resolve effective run properties: local rPr merged over paragraph rPr and
@@ -39,19 +51,19 @@ function qsel(local: string): string {
 function resolveRpr(doc: Document, rPr: Element | null, pPr: Element | null): Record<string, string> {
   const out: Record<string, string> = {};
 
-  const styleId = pPr?.querySelector(qsel('pStyle'))?.getAttribute('w:val') || null;
+  const styleId = qsel(pPr, 'pStyle')?.getAttribute('w:val') || null;
   if (styleId) {
     const styleEl = Array.from(doc.getElementsByTagNameNS(W, 'style')).find(
       (s) => s.getAttribute('w:styleId') === styleId && (s.getAttribute('w:type') === 'paragraph' || s.getAttribute('w:type') === 'character'),
     );
     if (styleEl) {
-      const srPr = styleEl.querySelector(qsel('rPr'));
+      const srPr = qsel(styleEl, 'rPr');
       if (srPr) applyRprElement(srPr, out);
-      const basedOn = styleEl.querySelector(qsel('basedOn'))?.getAttribute('w:val');
+      const basedOn = qsel(styleEl, 'basedOn')?.getAttribute('w:val');
       if (basedOn) {
         const baseEl = Array.from(doc.getElementsByTagNameNS(W, 'style')).find((s) => s.getAttribute('w:styleId') === basedOn);
         if (baseEl) {
-          const brPr = baseEl.querySelector(qsel('rPr'));
+          const brPr = qsel(baseEl, 'rPr');
           if (brPr) applyRprElement(brPr, out);
         }
       }
@@ -59,11 +71,11 @@ function resolveRpr(doc: Document, rPr: Element | null, pPr: Element | null): Re
   }
 
   const defaults = doc.getElementsByTagNameNS(W, 'docDefaults')[0];
-  const drPr = defaults?.querySelector(qsel('rPrDefault'))?.querySelector(qsel('rPr'));
+  const drPr = qsel(qsel(defaults, 'rPrDefault'), 'rPr');
   if (drPr) applyRprElement(drPr, out);
 
   if (pPr) {
-    const prPr = pPr.querySelector(qsel('rPr'));
+    const prPr = qsel(pPr, 'rPr');
     if (prPr) applyRprElement(prPr, out);
   }
   if (rPr) applyRprElement(rPr, out);
@@ -71,19 +83,19 @@ function resolveRpr(doc: Document, rPr: Element | null, pPr: Element | null): Re
 }
 
 function applyRprElement(rPr: Element, out: Record<string, string>) {
-  const b = rPr.querySelector(qsel('b'));
+  const b = qsel(rPr, 'b');
   if (b && b.getAttribute('w:val') !== '0' && b.getAttribute('w:val') !== 'false') out.bold = '1';
-  const i = rPr.querySelector(qsel('i'));
+  const i = qsel(rPr, 'i');
   if (i && i.getAttribute('w:val') !== '0' && i.getAttribute('w:val') !== 'false') out.italic = '1';
-  const u = rPr.querySelector(qsel('u'));
+  const u = qsel(rPr, 'u');
   if (u && u.getAttribute('w:val') && u.getAttribute('w:val') !== 'none') out.underline = '1';
-  const strike = rPr.querySelector(qsel('strike'));
+  const strike = qsel(rPr, 'strike');
   if (strike && strike.getAttribute('w:val') !== '0' && strike.getAttribute('w:val') !== 'false') out.strike = '1';
-  const sz = rPr.querySelector(qsel('sz'));
+  const sz = qsel(rPr, 'sz');
   if (sz?.getAttribute('w:val')) out.size = sz.getAttribute('w:val') || '';
-  const color = rPr.querySelector(qsel('color'));
+  const color = qsel(rPr, 'color');
   if (color?.getAttribute('w:val')) out.color = color.getAttribute('w:val') || '';
-  const fonts = rPr.querySelector(qsel('rFonts'));
+  const fonts = qsel(rPr, 'rFonts');
   if (fonts?.getAttribute('w:ascii')) out.font = fonts.getAttribute('w:ascii') || '';
 }
 
@@ -352,14 +364,14 @@ export const DocxEditor = forwardRef<DocxEditorHandle, DocxEditorProps>(function
 
         const body = doc.getElementsByTagNameNS(W, 'body')[0];
         const processParagraph = (pEl: Element, appendTo: HTMLElement) => {
-          const pPr = pEl.querySelector(qsel('pPr'));
-          const isHeading = pPr?.querySelector(qsel('outlineLvl'))?.getAttribute('w:val');
-          const align = pPr?.querySelector(qsel('jc'))?.getAttribute('w:val');
+          const pPr = qsel(pEl, 'pPr');
+          const isHeading = qsel(pPr, 'outlineLvl')?.getAttribute('w:val');
+          const align = qsel(pPr, 'jc')?.getAttribute('w:val');
           const p = document.createElement(isHeading !== undefined ? `h${Math.min(Number(isHeading) + 1, 6)}` : 'p');
           if (align) p.setAttribute('style', `text-align: ${align === 'both' ? 'justify' : align}`);
-          const runs = pEl.querySelectorAll(':scope > ' + qsel('r'));
+          const runs = qselDirectChildren(pEl, 'r');
           runs.forEach((r) => {
-            const rPr = r.querySelector(qsel('rPr'));
+            const rPr = qsel(r, 'rPr');
             const props = resolveRpr(doc, rPr, pPr);
             const css = rprToCss(props);
             const span = document.createElement('span');
