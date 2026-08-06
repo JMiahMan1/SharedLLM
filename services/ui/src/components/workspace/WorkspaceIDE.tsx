@@ -46,7 +46,8 @@ import { CodeEditor } from '../editor/CodeEditor';
 import { MarkdownViewer } from './viewers/MarkdownViewer';
 import { ImageViewer } from './viewers/ImageViewer';
 import { PdfViewer } from './viewers/PdfViewer';
-import { DocxViewer } from './viewers/DocxViewer';
+import { DocxEditor } from './viewers/DocxEditor';
+import { OdfViewer } from './viewers/OdfViewer';
 import { ExcelViewer } from './viewers/ExcelViewer';
 import { TerminalPane } from './viewers/TerminalPane';
 import { WorkspaceSecrets } from './WorkspaceSecrets';
@@ -64,7 +65,7 @@ type View = 'explorer' | 'git' | 'tools' | 'chat' | 'terminal';
 // preserves edits; image tabs cache an object URL for preview.
 interface OpenTab {
   path: string;
-  kind: 'text' | 'image' | 'markdown' | 'pdf' | 'docx' | 'xlsx' | 'audio' | 'video' | 'terminal';
+  kind: 'text' | 'image' | 'markdown' | 'pdf' | 'docx' | 'xlsx' | 'odf' | 'audio' | 'video' | 'terminal';
   content: string;
   imageUrl: string | null;
   blobUrl?: string | null;
@@ -346,6 +347,11 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
     return /\.(xlsx?|csv)$/i.test(p);
   }, []);
 
+  const isOdfPath = useCallback((p: string | null): boolean => {
+    if (!p) return false;
+    return /\.(odt|ods|odp|fodt)$/i.test(p);
+  }, []);
+
   const baseDirOf = useCallback((path: string) => {
     if (path === '.' || !path.includes('/')) return '';
     return path.replace(/\/$/, '') + '/';
@@ -406,8 +412,8 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
         }
         return;
       }
-      if (isPdfPath(entry.path) || isDocxPath(entry.path) || isExcelPath(entry.path)) {
-        const kind = isPdfPath(entry.path) ? 'pdf' : isDocxPath(entry.path) ? 'docx' : 'xlsx';
+      if (isPdfPath(entry.path) || isDocxPath(entry.path) || isExcelPath(entry.path) || isOdfPath(entry.path)) {
+        const kind = isPdfPath(entry.path) ? 'pdf' : isDocxPath(entry.path) ? 'docx' : isOdfPath(entry.path) ? 'odf' : 'xlsx';
         try {
           const blob = await api.fetchWorkspaceFileRaw(workspace.id, entry.path);
           const url = URL.createObjectURL(blob);
@@ -447,7 +453,7 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
         toast.error(`Failed to read file: ${apiErr(e)}`);
       }
     },
-    [workspace.id, loadDir, isImagePath, isAudioPath, isVideoPath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, loadImageModels, tabs],
+    [workspace.id, loadDir, isImagePath, isAudioPath, isVideoPath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, isOdfPath, loadImageModels, tabs],
   );
 
   // Programmatic open by path (e.g. a freshly generated image from Stable Diffusion).
@@ -486,8 +492,8 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
         }
         return;
       }
-      if (isPdfPath(path) || isDocxPath(path) || isExcelPath(path)) {
-        const kind = isPdfPath(path) ? 'pdf' : isDocxPath(path) ? 'docx' : 'xlsx';
+      if (isPdfPath(path) || isDocxPath(path) || isExcelPath(path) || isOdfPath(path)) {
+        const kind = isPdfPath(path) ? 'pdf' : isDocxPath(path) ? 'docx' : isOdfPath(path) ? 'odf' : 'xlsx';
         try {
           const blob = await api.fetchWorkspaceFileRaw(workspace.id, path);
           const url = URL.createObjectURL(blob);
@@ -527,12 +533,14 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
         /* open optional */
       }
     },
-    [workspace.id, isImagePath, isAudioPath, isVideoPath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, loadImageModels, tabs],
+    [workspace.id, isImagePath, isAudioPath, isVideoPath, isMarkdownPath, isPdfPath, isDocxPath, isExcelPath, isOdfPath, loadImageModels, tabs],
   );
 
   // Open a file programmatically on mount (e.g. an artifact from the
   // Workspaces page). Runs once per (workspace, initialPath) pair.
   const initialPathHandledRef = useRef<string | null>(null);
+  const docxEditorRef = useRef<{ save: () => Promise<void> } | null>(null);
+  const odfViewerRef = useRef<{ save: () => Promise<void> } | null>(null);
   useEffect(() => {
     if (!initialPath || initialPathHandledRef.current === initialPath) return;
     initialPathHandledRef.current = initialPath;
@@ -585,6 +593,22 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
     },
     [activeTab],
   );
+
+  // Save a rich-text document tab (docx/odf) via its editor handle.
+  const saveDocumentTab = useCallback(async () => {
+    if (!active) return;
+    const editorRef = active.kind === 'docx' ? docxEditorRef : active.kind === 'odf' ? odfViewerRef : null;
+    if (!editorRef?.current) return;
+    setSaving(true);
+    try {
+      await editorRef.current.save();
+      setTabs((prev) => prev.map((t) => (t.path === active.path ? { ...t, dirty: false } : t)));
+    } catch (e: unknown) {
+      toast.error(`Save failed: ${apiErr(e)}`);
+    } finally {
+      setSaving(false);
+    }
+  }, [active]);
 
   const saveFile = useCallback(async () => {
     if (!active || (active.kind !== 'text' && active.kind !== 'markdown') || !active.dirty) return;
@@ -1510,7 +1534,7 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                     )}
                   </div>
                 </>
-              ) : active.kind === 'pdf' || active.kind === 'docx' || active.kind === 'xlsx' ? (
+              ) : active.kind === 'pdf' || active.kind === 'docx' || active.kind === 'xlsx' || active.kind === 'odf' ? (
                 <>
                   <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10 bg-[#0c1120]">
                     <div className="flex items-center gap-2 min-w-0">
@@ -1518,13 +1542,20 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                       <span className="text-sm text-slate-300 truncate">{active.path}</span>
                     </div>
                     <div className="flex items-center gap-1.5">
+                      {(active.kind === 'docx' || active.kind === 'odf') && (
+                        <button onClick={saveDocumentTab} disabled={saving} className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40" title="Save (Ctrl+S)">
+                          {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                          Save
+                        </button>
+                      )}
                       <button onClick={() => active.blobUrl && downloadBlob(active.blobUrl, active.path)} disabled={!active.blobUrl} className="p-1.5 text-slate-400 hover:text-white hover:bg-white/10 rounded disabled:opacity-30" title="Download"><Download size={15} /></button>
                     </div>
                   </div>
                   <div className="flex-1 min-h-0">
                     {active.kind === 'pdf' && <PdfViewer url={active.blobUrl ?? ''} />}
-                    {active.kind === 'docx' && <DocxViewer url={active.blobUrl ?? ''} />}
+                    {active.kind === 'docx' && <DocxEditor ref={docxEditorRef} url={active.blobUrl ?? ''} workspaceId={workspace.id} path={active.path} />}
                     {active.kind === 'xlsx' && <ExcelViewer url={active.blobUrl ?? ''} />}
+                    {active.kind === 'odf' && <OdfViewer ref={odfViewerRef} url={active.blobUrl ?? ''} workspaceId={workspace.id} path={active.path} />}
                   </div>
                 </>
               ) : (
