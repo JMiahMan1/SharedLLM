@@ -222,6 +222,8 @@ class RavenMissionCreate(BaseModel):
     user_id: int | None = None
     queued_at: str | None = None
     workspace_id: str | None = None
+    depends_on_mission_id: int | None = None
+    next_mission_query: str | None = None
 
 class RavenMissionUpdate(BaseModel):
     slug: str | None = None
@@ -259,6 +261,8 @@ class RavenMissionRead(BaseModel):
     workspace_id: str | None = None
     last_llm_reply: str | None = None
     artifacts: str | None = None
+    depends_on_mission_id: int | None = None
+    next_mission_query: str | None = None
 
 class RavenMissionListItem(BaseModel):
     id: int
@@ -282,6 +286,8 @@ class RavenMissionListItem(BaseModel):
     workspace_id: str | None = None
     last_llm_reply: str | None = None
     artifacts: str | None = None
+    depends_on_mission_id: int | None = None
+    next_mission_query: str | None = None
 
 class UserWidgetRead(BaseModel):
     widget_key: str
