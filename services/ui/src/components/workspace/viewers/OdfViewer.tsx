@@ -510,8 +510,21 @@ export const OdfViewer = forwardRef<OdfViewerHandle, OdfViewerProps>(function Od
 
   if (loading) {
     return (
-      <div className="h-full flex items-center justify-center text-sm text-slate-400">
-        <Loader2 size={16} className="animate-spin mr-2" /> Loading document…
+      <div className="h-full flex flex-col">
+        <div className="flex-1 min-h-0 overflow-auto bg-white p-8">
+          <div
+            ref={editorRef}
+            contentEditable={isEditable}
+            suppressContentEditableWarning
+            spellCheck={false}
+            onInput={() => markDirty(true)}
+            className="mx-auto max-w-3xl bg-white text-slate-900 text-sm leading-relaxed outline-none min-h-full shadow-lg rounded-sm px-10 py-8 prose-headings:font-semibold"
+            style={{ fontFamily: 'Georgia, serif' }}
+          />
+        </div>
+        <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-400 bg-[#0c1120]/60">
+          <Loader2 size={16} className="animate-spin mr-2" /> Loading document…
+        </div>
       </div>
     );
   }
