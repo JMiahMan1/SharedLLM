@@ -28,7 +28,10 @@ function qn(local: string): string {
 }
 
 function qsel(local: string): string {
-  return `*[local-name()='${local}']`;
+  // In an XML DOM (DOMParser 'text/xml'), CSS selectors match the full
+  // qualified tag name, so the 'w:' prefix must be escaped. XPath-style
+  // '*[local-name()=...]' is NOT valid CSS and throws in querySelector.
+  return `w\\:${local}`;
 }
 
 // Resolve effective run properties: local rPr merged over paragraph rPr and
