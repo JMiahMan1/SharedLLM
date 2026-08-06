@@ -159,6 +159,7 @@ export const DocxEditor = forwardRef<DocxEditorHandle, DocxEditorProps>(function
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
   const originalRef = useRef<Document | null>(null);
+  const parsedHtmlRef = useRef<string | null>(null);
 
   const markDirty = useCallback(
     (d: boolean) => {
@@ -344,9 +345,7 @@ export const DocxEditor = forwardRef<DocxEditorHandle, DocxEditorProps>(function
         const doc = new DOMParser().parseFromString(xml, 'text/xml');
         originalRef.current = doc;
 
-        const editor = editorRef.current;
-        if (!editor) return;
-        editor.innerHTML = '';
+        const holder = document.createElement('div');
 
         const body = doc.getElementsByTagNameNS(W, 'body')[0];
         const processParagraph = (pEl: Element, appendTo: HTMLElement) => {
@@ -387,7 +386,7 @@ export const DocxEditor = forwardRef<DocxEditorHandle, DocxEditorProps>(function
         Array.from(body.childNodes).forEach((node) => {
           if (node.nodeType !== Node.ELEMENT_NODE) return;
           const el = node as Element;
-          if (el.localName === 'p') processParagraph(el, editor);
+          if (el.localName === 'p') processParagraph(el, holder);
           else if (el.localName === 'tbl') {
             // Render tables read-only as best-effort HTML.
             const tbl = document.createElement('table');
@@ -404,9 +403,10 @@ export const DocxEditor = forwardRef<DocxEditorHandle, DocxEditorProps>(function
               });
               tbl.appendChild(trEl);
             });
-            editor.appendChild(tbl);
+            holder.appendChild(tbl);
           }
         });
+        parsedHtmlRef.current = holder.innerHTML;
       } catch (e: unknown) {
         setError(`Failed to parse DOCX: ${(e as Error)?.message || 'Unknown error'}`);
       } finally {
@@ -417,6 +417,15 @@ export const DocxEditor = forwardRef<DocxEditorHandle, DocxEditorProps>(function
       cancelled = true;
     };
   }, [url]);
+
+  // Populate the editor once it is mounted (the parse above may complete
+  // while the loading state is still showing, when the editor div does not
+  // exist yet). Runs after every commit; consumes parsedHtmlRef once.
+  useEffect(() => {
+    if (!editorRef.current || parsedHtmlRef.current === null) return;
+    editorRef.current.innerHTML = parsedHtmlRef.current;
+    parsedHtmlRef.current = null;
+  });
 
   const exec = (command: string, value?: string) => {
     editorRef.current?.focus();
