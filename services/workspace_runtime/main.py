@@ -2208,7 +2208,7 @@ def write_file(req: FileWriteRequest, x_internal_secret: str | None = Header(def
                         f"({len(expected_bytes)} bytes). The write did not persist correctly."
                     ),
                 )
-            if not new_bytes:
+            if expected_bytes is None and not new_bytes:
                 raise HTTPException(
                     status_code=500,
                     detail=f"Write verification failed for {req.relative_path}: file is empty after write.",
