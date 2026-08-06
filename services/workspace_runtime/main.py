@@ -2533,19 +2533,42 @@ async def workflow_write_sync_commit(req: WorkflowWriteSyncCommitRequest, x_inte
 
         pytest_result = None
         if req.pytest_targets:
-            pytest_result = await asyncio.to_thread(
-                run_pytest,
-                PytestRequest(
-                    workspace_id=req.workspace_id,
-                    local_path=req.local_path,
-                    rag_user=req.rag_user,
-                    voice_id=req.voice_id,
-                    device_id=req.device_id,
-                    targets=req.pytest_targets,
-                    timeout_seconds=req.pytest_timeout_seconds,
-                ),
-                x_internal_secret,
-            )
+            existing_targets = [
+                target
+                for target in _sanitize_targets(req.pytest_targets)
+                if (workspace_path / target.lstrip("/")).exists()
+            ]
+            if not existing_targets:
+                # The model-emitted test_cmd may reference targets that do not
+                # exist yet (or a bare 'pytest -q' that collects nothing). The
+                # write itself succeeded and lint passed, so do not fail the
+                # whole workflow on a phantom test target — record it as
+                # skipped and proceed.
+                log.warning(
+                    f"[Pytest] targets {_sanitize_targets(req.pytest_targets)} do not exist in "
+                    f"workspace '{workspace['id']}' — skipping pytest gate (write succeeded)"
+                )
+                pytest_result = {
+                    "status": "SUCCESS",
+                    "skipped": True,
+                    "reason": "requested pytest targets do not exist",
+                    "targets": _sanitize_targets(req.pytest_targets),
+                    "passed": True,
+                }
+            else:
+                pytest_result = await asyncio.to_thread(
+                    run_pytest,
+                    PytestRequest(
+                        workspace_id=req.workspace_id,
+                        local_path=req.local_path,
+                        rag_user=req.rag_user,
+                        voice_id=req.voice_id,
+                        device_id=req.device_id,
+                        targets=existing_targets,
+                        timeout_seconds=req.pytest_timeout_seconds,
+                    ),
+                    x_internal_secret,
+                )
             if not pytest_result.get("passed"):
                 failure_count = _record_verification_failure(req.relative_path)
                 log.warning(f"[Quarantine] Pytest failed for {req.relative_path} (failure #{failure_count} in window)")

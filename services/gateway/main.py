@@ -1249,6 +1249,44 @@ async def resolve_chat_workspace(body: dict, user_id: str) -> dict | None:
         return bootstrapped if isinstance(bootstrapped, dict) else None
 
     available = [item for item in workspaces if isinstance(item, dict) and item.get("available")]
+
+    def _query_text() -> str:
+        raw = body.get("query")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        for message in body.get("messages") or []:
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+        return ""
+
+    def _match_named_workspace(query: str) -> dict | None:
+        # "in the <name> workspace", "<name> workspace", "workspace <name>",
+        # "the <name> workspace" — case-insensitive against id/display_name/local_path
+        patterns = [
+            r"\bin (?:the |my |our )?([A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*) workspace\b",
+            r"\bthe ([A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*) workspace\b",
+            r"\b([A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*) workspace\b",
+            r"\bworkspace (?:named |called )?[\"']?([A-Za-z0-9_-]+(?: [A-Za-z0-9_-]+)*)[\"']?\b",
+        ]
+        query_l = query.lower()
+        for pattern in patterns:
+            for match in re.finditer(pattern, query_l):
+                name = match.group(1).strip().lower()
+                if not name or len(name) > 64:
+                    continue
+                for item in workspaces:
+                    if not isinstance(item, dict):
+                        continue
+                    if name in (
+                        str(item.get("id") or "").lower(),
+                        str(item.get("display_name") or "").lower(),
+                        str(item.get("local_path") or "").lower(),
+                    ):
+                        return item
+        return None
+
     if workspace_id:
       requested = next((item for item in workspaces if isinstance(item, dict) and item.get("id") == workspace_id), None)
       if requested and not requested.get("available"):
@@ -1259,6 +1297,14 @@ async def resolve_chat_workspace(body: dict, user_id: str) -> dict | None:
           if item.get("id") == workspace_id:
               return item
       return None
+
+    named = _match_named_workspace(_query_text())
+    if named:
+        if named.get("available"):
+            return named
+        bootstrapped = await try_bootstrap(named)
+        if bootstrapped:
+            return bootstrapped
 
     for item in available:
         if str(item.get("scope") or "user") == "user":
