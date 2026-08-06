@@ -5223,6 +5223,8 @@ class UserMissionRequest(BaseModel):
     priority: int = 1
     coding_model: str | None = None
     workspace_id: str | None = None
+    depends_on_mission_id: int | None = None
+    next_mission_query: str | None = None
 
 
 async def _fetch_relevant_lessons(query: str, client=None, limit: int = 5) -> str:
@@ -5358,6 +5360,8 @@ async def _enqueue_user_mission(
     workspace_id: str | None = None,
     slug: str | None = None,
     priority: int = 1,
+    depends_on_mission_id: int | None = None,
+    next_mission_query: str | None = None,
 ) -> dict:
     """Create a Raven user mission in Identity and enqueue it for the Raven worker.
 
@@ -5385,6 +5389,8 @@ async def _enqueue_user_mission(
         "coding_model": target_model,
         "user_id": owner_user,
         "workspace_id": workspace_id,
+        "depends_on_mission_id": depends_on_mission_id,
+        "next_mission_query": next_mission_query,
     }
 
     async with borrow_http_client() as client:
@@ -5399,6 +5405,12 @@ async def _enqueue_user_mission(
         mission_data = await resp.json()
         mission_id = mission_data["id"]
 
+        if depends_on_mission_id:
+            # Chained mission: wait until the dependency completes. The worker
+            # will enqueue + mark queued in its completion hook.
+            mission_data["status"] = "pending"
+            return mission_data
+
         assert job_queue is not None, "Job queue not initialized"
         await job_queue.enqueue_job(creds.get("user") or owner_user or "raven_user", {
             "query": query,
@@ -5408,6 +5420,7 @@ async def _enqueue_user_mission(
             "creds": creds,
             "_mission_id": mission_id,
             "workspace_id": workspace_id,
+            "next_mission_query": next_mission_query,
         })
 
         await client.patch(
@@ -5442,6 +5455,8 @@ async def create_user_mission(body: UserMissionRequest, request: Request):
         workspace_id=body.workspace_id,
         slug=body.slug,
         priority=body.priority,
+        depends_on_mission_id=body.depends_on_mission_id,
+        next_mission_query=body.next_mission_query,
     )
     return {
         "status": "SUCCESS",
