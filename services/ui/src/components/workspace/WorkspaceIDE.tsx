@@ -786,10 +786,21 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
       const file = e.target.files?.[0];
       e.target.value = '';
       if (!file) return;
-      const text = await file.text();
       const rel = currentPath === '.' ? file.name : `${currentPath}/${file.name}`;
+      const isText = /\.(txt|md|markdown|json|yaml|yml|toml|ini|cfg|conf|py|js|ts|tsx|jsx|css|html|htm|xml|sh|bash|zsh|fish|c|h|cpp|hpp|java|go|rs|rb|php|sql|gitignore|env|log|csv|tsv)$/i.test(file.name);
       try {
-        await api.writeWorkspaceFile(workspace.id, rel, text);
+        if (isText) {
+          await api.writeWorkspaceFile(workspace.id, rel, await file.text());
+        } else {
+          const buf = await file.arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          let binary = '';
+          const chunk = 0x8000;
+          for (let i = 0; i < bytes.length; i += chunk) {
+            binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+          }
+          await api.writeWorkspaceFileBase64(workspace.id, rel, btoa(binary));
+        }
         toast.success(`Uploaded ${rel}`);
         await loadDir(currentPath);
       } catch (err: unknown) {
