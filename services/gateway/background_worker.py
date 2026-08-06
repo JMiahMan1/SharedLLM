@@ -778,19 +778,37 @@ class RavenWorker:
         try:
             from services.gateway.main import _build_raven_system_prompt, _enqueue_user_mission
 
-            async def _enqueue_one(mission_data: dict, query: str, user_id: int | None) -> dict:
+            async def _enqueue_existing(mission_data: dict, user_id: int | None) -> dict:
+                """Enqueue a job for an ALREADY-EXISTING pending mission record.
+
+                The mission was created (with status pending) when its dependency
+                was declared; here we only build the job payload and mark it
+                queued — never create a second mission record.
+                """
+                query = mission_data.get("proposed_mission", "")
                 coding_model = mission_data.get("coding_model") or payload.get("model")
                 system_prompt = await _build_raven_system_prompt(query)
-                return await _enqueue_user_mission(
-                    query=query,
-                    system=system_prompt,
-                    creds={"user_id": user_id, "user": None},
-                    coding_model=coding_model,
-                    workspace_id=mission_data.get("workspace_id"),
-                    slug=mission_data.get("slug"),
-                    priority=mission_data.get("priority", 1),
-                    next_mission_query=mission_data.get("next_mission_query"),
+                creds = {"user_id": user_id, "user": None}
+                mission_id = mission_data["id"]
+                await self.job_queue.enqueue_job(
+                    creds.get("user") or "raven_user",
+                    {
+                        "query": query,
+                        "model": coding_model,
+                        "system": system_prompt,
+                        "stream": False,
+                        "creds": creds,
+                        "_mission_id": mission_id,
+                        "workspace_id": mission_data.get("workspace_id"),
+                        "next_mission_query": mission_data.get("next_mission_query"),
+                    },
                 )
+                await client.patch(
+                    f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
+                    json={"status": "queued"},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                )
+                return {"id": mission_id}
 
             async def _query_pending() -> list[dict]:
                 async with _shared_http_client() as search_client:
@@ -811,22 +829,21 @@ class RavenWorker:
             pending = await _query_pending()
             for m in pending:
                 try:
-                    enqueued = await _enqueue_one(m, m.get("proposed_mission", ""), m.get("user_id"))
+                    enqueued = await _enqueue_existing(m, m.get("user_id"))
                     log.info(f"[Worker] Chained mission {enqueued.get('id')} dispatched after mission {completed_mission_id}")
-                    await client.patch(
-                        f"{IDENTITY_SVC}/api/raven/missions/{m['id']}",
-                        json={"status": "queued"},
-                        headers={"X-Internal-Secret": INTERNAL_SECRET},
-                    )
                 except Exception as chain_e:
                     log.error(f"[Worker] Failed to dispatch chained mission {m.get('id')}: {chain_e}")
 
             if payload.get("next_mission_query"):
                 try:
-                    enqueued = await _enqueue_one(
-                        {"coding_model": payload.get("model")},
-                        payload["next_mission_query"],
-                        payload.get("user_id"),
+                    followup_user_id = payload.get("user_id") or payload.get("creds", {}).get("user_id")
+                    system_prompt = await _build_raven_system_prompt(payload["next_mission_query"])
+                    enqueued = await _enqueue_user_mission(
+                        query=payload["next_mission_query"],
+                        system=system_prompt,
+                        creds={"user_id": followup_user_id, "user": None},
+                        coding_model=payload.get("model"),
+                        next_mission_query=None,
                     )
                     log.info(f"[Worker] next_mission_query follow-up {enqueued.get('id')} launched after mission {completed_mission_id}")
                 except Exception as chain_e:
