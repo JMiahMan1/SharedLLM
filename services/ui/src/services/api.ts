@@ -1431,6 +1431,28 @@ export const api = {
     return resp.data;
   },
 
+  // Workspace-scoped AI image edit (execution service path). Uses a dedicated
+  // long-timeout request: CPU-offloaded image editing takes minutes, and the
+  // shared apiClient aborts at 15s.
+  async workspaceEditImage(workspaceId: string, payload: { prompt: string; image_path: string; output_path?: string; model?: string; size?: string }): Promise<{ status: string; message?: string; detail?: { output_path?: string } }> {
+    let baseURL = getBaseUrl();
+    if (Capacitor.isNativePlatform()) {
+      const serverUrl = storageGetSync('jarvis_server_url');
+      if (serverUrl) baseURL = serverUrl;
+    }
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = storageGetSync('jarvis_api_key');
+    const internalSecret = storageGetSync('internal_secret');
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (internalSecret) headers['X-Internal-Secret'] = internalSecret;
+    const resp = await axios.post(`/api/workspaces/${workspaceId}/images/edit`, payload, {
+      baseURL,
+      headers,
+      timeout: 640000,
+    });
+    return resp.data;
+  },
+
   async listImageModels(): Promise<{ status: string; models?: string[]; message?: string }> {
     const resp = await apiClient.get('/api/images/models');
     return resp.data;

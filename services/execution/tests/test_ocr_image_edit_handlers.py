@@ -202,3 +202,47 @@ async def test_image_edit_invalid_size_fails(tmpdir, monkeypatch):
     )
     assert result.status == "FAILURE"
     assert "out of range" in result.message
+
+
+@pytest.mark.asyncio
+async def test_image_edit_save_sends_plain_dict_user_context(tmpdir, monkeypatch):
+    """Regression: pydantic UserContext leaked into the aiohttp json= payload and
+    blew up with 'Object of type UserContext is not JSON serializable' — the
+    workspace save must receive a plain dict that json.dumps can encode."""
+    import json
+
+    _make_png(Path(tmpdir) / "sign_original.jpg")
+
+    async def fake_resolve(ws, uc):
+        return str(tmpdir), {}
+
+    monkeypatch.setattr(image_edit_mod, "_resolve_workspace_info", fake_resolve)
+    monkeypatch.setattr(image_edit_mod, "get_image_edit_model", _async("qwen-image-edit-rapid-aio:q4_k"))
+
+    b64 = base64.b64encode(b"fake-edited-png-bytes").decode()
+    captured = {}
+
+    def route(url, kwargs):
+        if "images/edits" in url:
+            return _FakeResponse(200, json_data={"data": [{"b64_json": b64}]})
+        if "files/write" in url:
+            captured["save_json"] = kwargs.get("json")
+            return _FakeResponse(200, json_data={"status": "SUCCESS"})
+        return _FakeResponse(500, text_data=f"unexpected url: {url}")
+
+    _patch_aiohttp(monkeypatch, route)
+
+    req = _edit_req(proxy_url="http://proxy:11434")
+    req.user_context = __import__("services.execution.schemas", fromlist=["UserContext"]).UserContext(
+        user="default", is_admin=True
+    )
+
+    result = await image_edit_mod.handle_image_edit(req)
+
+    assert result.status == "SUCCESS"
+    save_json = captured["save_json"]
+    assert isinstance(save_json["user_context"], dict)
+    json.dumps(save_json)
+    assert save_json["user_context"]["user"] == "default"
+    assert save_json["user_context"]["is_admin"] is True
+    assert save_json["relative_path"] == "sign_original_edited.jpg"

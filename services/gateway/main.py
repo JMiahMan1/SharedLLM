@@ -27,6 +27,7 @@ from services.gateway.agent_loop import (
 )
 from services.gateway.agent_loop import (
     extract_action_json,
+    get_dynamic_llm_settings,
     get_vram_safe_params,
 )
 from services.gateway.background_worker import worker as raven_worker
@@ -4333,15 +4334,32 @@ def _sd_request_authorized(request: Request) -> bool:
         return True
     return bool(api_key)
 
+async def _sd_proxy_base_url() -> str:
+    """Resolve the SD/image proxy base URL from Identity settings (llm_local_url).
+
+    The alpaca SD backend is only reachable through the user-configured LLM proxy
+    (Settings > AI & Compute > llm_local_url) — the legacy ALPACA_SD_URL default
+    (port 8081 direct) is refused from the server. Fail loudly when unconfigured.
+    """
+    settings = await get_dynamic_llm_settings()
+    url = (settings.get("llm_local_url") or "").strip().rstrip("/")
+    if not url:
+        raise RuntimeError(
+            "llm_local_url not configured in Identity settings (Settings > AI & Compute)."
+        )
+    return url
+
 @app.post("/api/images/generate")
 async def sd_image_generate_proxy(request: Request):
     if not _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     body = await request.json()
-    base_url = resolve_service_base_url(SVC_ALPACA_SD)
     try:
+        base_url = await _sd_proxy_base_url()
         resp = await get_http_client().post(f"{base_url}/v1/images/generations", json=body)
         return JSONResponse(status_code=resp.status, content=await resp.json())
+    except RuntimeError as exc:
+        return JSONResponse(status_code=400, content={"status": "ERROR", "message": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
 
@@ -4363,12 +4381,72 @@ async def sd_image_edit_proxy(request: Request):
 async def sd_image_models_proxy(request: Request):
     if not _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
-    base_url = resolve_service_base_url(SVC_ALPACA_SD)
     try:
+        base_url = await _sd_proxy_base_url()
         resp = await get_http_client().get(f"{base_url}/v1/images/models")
         return JSONResponse(status_code=resp.status, content=await resp.json())
+    except RuntimeError as exc:
+        return JSONResponse(status_code=400, content={"status": "ERROR", "message": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
+
+@app.post("/api/workspaces/{workspace_id}/images/edit")
+async def workspace_image_edit_proxy(workspace_id: str, request: Request):
+    """Workspace-scoped AI image edit: reads <image_path> in the workspace, runs the
+    configured image edit model via the LLM proxy, and saves the result as
+    <output_path> (default <stem>_edited.<ext>) back into the same workspace.
+
+    Delegates to the execution service /execute/image_edit handler (which owns
+    the workspace resolution, proxy multipart call, and binary save) so the IDE
+    and Raven share one code path. Long timeout: CPU-offloaded SD takes minutes.
+    """
+    if not _sd_request_authorized(request):
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    body = await request.json()
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    payload = {
+        "workspace_id": workspace_id,
+        "image_path": body.get("image_path") or body.get("path"),
+        "prompt": body.get("prompt"),
+        "model": body.get("model"),
+        "output_path": body.get("output_path"),
+        "size": body.get("size"),
+        "user_context": {
+            "user": creds.user,
+            "is_admin": creds.is_admin,
+            "api_key": creds.api_key,
+            "ha_url": creds.ha_url,
+            "ha_token": creds.ha_token,
+            "nextcloud_url": creds.nextcloud_url,
+            "nextcloud_user": creds.nextcloud_user,
+            "nextcloud_pass": creds.nextcloud_pass,
+            "github_token": creds.github_token,
+            "gitlab_token": creds.gitlab_token,
+            "git_token": creds.git_token,
+        },
+    }
+    if not payload["image_path"] or not payload["prompt"]:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "ERROR", "message": "image_path (or path) and prompt are required."},
+        )
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/image_edit",
+                json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=620.0),
+            )
+            try:
+                data = await resp.json()
+            except Exception:
+                data = {"status": "ERROR", "message": (await resp.text())[:500]}
+            return JSONResponse(status_code=resp.status, content=data)
+    except Exception as exc:
+        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Image edit failed: {exc}"})
 
 @app.post("/api/workspaces/git/status")
 async def git_status_workspace_proxy(request: Request):
