@@ -327,3 +327,27 @@ def test_branch_tags_match_guidance_priority():
     assert _branch(workspace_id=None) == "create_ws"
     # Healthy building phase -> batch.
     assert _branch() == "batch"
+
+
+def test_workspace_create_guard_blocks_assigned_workspace_missions():
+    """Regression: chained children / follow-ups inherit the parent's workspace
+    and MUST run there. The model must never be allowed to spawn a new workspace
+    for an assigned-workspace mission (observed live: mission 17 created
+    'raven-child-output' instead of using the assigned 'Test')."""
+    from services.gateway.agent_loop import _workspace_create_guard_message
+
+    # Assigned workspace + create attempt -> blocked with a redirect message.
+    msg = _workspace_create_guard_message("Test", "workspacecreaterequest")
+    assert msg is not None
+    assert "Test" in msg
+    assert "Do NOT call WorkspaceCreateRequest" in msg
+
+    # Non-create actions are never blocked by this guard.
+    assert _workspace_create_guard_message("Test", "workspacefilewriterequest") is None
+    assert _workspace_create_guard_message("Test", "workspaceshellrequest") is None
+    assert _workspace_create_guard_message("Test", "gitoperationrequest") is None
+
+    # No assigned workspace -> create allowed (project missions acquire a sandbox).
+    assert _workspace_create_guard_message(None, "workspacecreaterequest") is None
+    assert _workspace_create_guard_message("", "workspacecreaterequest") is None
+    assert _workspace_create_guard_message("   ", "workspacecreaterequest") is None
