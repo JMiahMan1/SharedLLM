@@ -148,7 +148,7 @@ async def handle_image_edit(req) -> ExecutionResult:
             resp = await client.post(
                 f"{proxy_url}/v1/images/edits",
                 data=form,
-                timeout=aiohttp.ClientTimeout(total=300.0),
+                timeout=aiohttp.ClientTimeout(total=590.0),
             )
             if resp.status != 200:
                 body = (await resp.text())[:500]

@@ -4381,11 +4381,15 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         _http_method = (
                             "patch" if lookup_action == "workspacesettingsupdaterequest" else "post"
                         )
+                        # Image edits run an img2img diffusion pass (can take
+                        # 5-10 min on CPU-offloaded SD); every other tool stays on
+                        # the standard 120s ceiling.
+                        _dispatch_timeout = 590.0 if lookup_action == "imageeditrequest" else 120.0
                         resp = await getattr(client, _http_method)(
                             f"{svc_base}{endpoint}",
                             json=payload,
                             headers={"X-Internal-Secret": INTERNAL_SECRET},
-                            timeout=aiohttp.ClientTimeout(total=120.0),
+                            timeout=aiohttp.ClientTimeout(total=_dispatch_timeout),
                         )
                         log.info(f"[AgentLoop] Tool response: {resp.status}")
 
