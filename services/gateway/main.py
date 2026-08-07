@@ -4837,6 +4837,33 @@ async def get_raven_tts_voices(request: Request):
         return await _proxy_json_response(resp)
 
 
+@app.post("/execute/tts/download")
+async def proxy_tts_voice_download(request: Request):
+    """Proxy the Kokoro TTS voice-model download to the execution service.
+
+    The UI (RavenOpsPanel 'Download models') calls POST /execute/tts/download
+    through the gateway; the execution service downloads the Kokoro ONNX
+    voice assets from GitHub if they are missing.
+    """
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    voice_type = (body or {}).get("voice_type") or request.query_params.get("voice_type") or "kokoro-v1.0"
+
+    async with borrow_http_client() as client:
+        resp = await client.post(
+            f"{EXECUTION_SVC}/execute/tts/download?voice_type={voice_type}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET}
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/admin/raven/queue")
 async def get_raven_queue(request: Request):
     creds = await _resolve_identity_from_request(request)
