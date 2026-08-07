@@ -2272,6 +2272,27 @@ async def _is_blocked_for_repo(
     return True
 
 
+def _workspace_create_guard_message(assigned_ws: str | None, action: str) -> str | None:
+    """Return an error message when a mission that already has an assigned workspace
+    tries to create a new one via WorkspaceCreateRequest.
+
+    Chained children and follow-ups inherit the parent's workspace and MUST run
+    there — the model must never spawn a new sandbox and strand the mission's
+    output outside the assigned workspace. Returns None when creation is allowed
+    (no assigned workspace, or a non-create action).
+    """
+    if action == "workspacecreaterequest" and _has_valid_workspace_id(assigned_ws):
+        return (
+            f"This mission is already assigned workspace '{assigned_ws}'. "
+            "Do NOT call WorkspaceCreateRequest. Use `workspace_id` "
+            f"'{assigned_ws}' in EVERY WorkspaceFileWriteRequest / "
+            "WorkspaceShellRequest / WorkspaceSettingsUpdateRequest, and "
+            "operate inside that workspace for all file, shell, and git "
+            "operations."
+        )
+    return None
+
+
 def _extract_repo_name_from_cmd(cmd: str | None) -> str | None:
     """Extract the repository name from a ``gh repo create <name> [flags]`` shell
     command (Raven usually runs ``gh`` via the shell, not the dedicated tool)."""
@@ -2556,10 +2577,12 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
             log.warning(f"[AgentLoop] loop-probe record failed: {e}")
 
     # 0. Resolve the workspace this agentic mission runs in.
-    # If the task assigned an existing workspace we use it; otherwise we resolve (or
-    # fall back to) a workspace. Raven itself decides — via the WorkspaceCreateRequest
-    # tool described in its protocol — whether a mission needs its own dedicated
-    # sandbox, or should reuse an existing one. The gateway only supplies the means.
+    # If the task assigned an existing workspace we use it and ENFORCE it: the model
+    # may never create a new workspace for such a mission (chained children and
+    # follow-ups must reuse the parent's workspace — see the guard at dispatch).
+    # Otherwise we resolve (or fall back to) a workspace, and Raven itself decides —
+    # via the WorkspaceCreateRequest tool described in its protocol — whether a
+    # project mission needs its own dedicated sandbox. The gateway only supplies the means.
     try:
         _ws = await resolve_mission_workspace(rag_user, workspace_id, query=query)
     except Exception as e:
@@ -2584,6 +2607,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 f"\n\n[WORKSPACE CONTEXT]\n"
                 f"You are operating inside workspace '{workspace_id}'.\n"
                 f"Absolute workspace path on disk: {_ws_path}\n"
+                f"Do NOT call WorkspaceCreateRequest — this mission is ALREADY assigned a "
+                f"workspace. Use workspace_id '{workspace_id}' in every workspace tool call. "
                 f"Write files relative to this path. In file tools, set `relative_path` to the "
                 f"file's path RELATIVE to the workspace root (e.g. 'game.py' or 'src/main.py'). "
                 f"Do NOT use the `local_path` field (e.g. 'users/default/...') as a file path — "
@@ -4299,6 +4324,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             "in the Default Workspace."
                         ),
                     }
+                    _skip_post = True
+                # GUARD: a workspace was assigned to this mission (e.g. a chained child or
+                # follow-up inheriting the parent's workspace). The mission MUST run inside
+                # that workspace — never let the model spawn a new one and strand the
+                # mission's output outside the assigned workspace.
+                _create_err = _workspace_create_guard_message(starting_ws_id, lookup_action)
+                if _create_err:
+                    exec_data = {"status": "ERROR", "message": _create_err}
                     _skip_post = True
                 if isinstance(payload, dict):
                     _cmd = " ".join(str(payload.get(k, "")) for k in ("command", "action", "repo_url", "operation"))
