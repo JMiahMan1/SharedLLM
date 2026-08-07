@@ -800,6 +800,7 @@ class RavenWorker:
                 else:
                     creds = await resolve_first_user()
                 mission_id = mission_data["id"]
+                ws_id = mission_data.get("workspace_id") or payload.get("workspace_id")
                 await self.job_queue.enqueue_job(
                     creds.get("user") or "raven_user",
                     {
@@ -809,13 +810,16 @@ class RavenWorker:
                         "stream": False,
                         "creds": creds,
                         "_mission_id": mission_id,
-                        "workspace_id": mission_data.get("workspace_id"),
+                        "workspace_id": ws_id,
                         "next_mission_query": mission_data.get("next_mission_query"),
                     },
                 )
+                patch_body = {"status": "queued"}
+                if ws_id:
+                    patch_body["workspace_id"] = ws_id
                 await client.patch(
                     f"{IDENTITY_SVC}/api/raven/missions/{mission_id}",
-                    json={"status": "queued"},
+                    json=patch_body,
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                 )
                 return {"id": mission_id}
@@ -836,9 +840,24 @@ class RavenWorker:
                         and m.get("status") == "pending"
                     ]
 
+            parent_workspace_id = payload.get("workspace_id")
+            try:
+                async with _shared_http_client() as fetch_client:
+                    parent_resp = await fetch_client.get(
+                        f"{IDENTITY_SVC}/api/raven/missions/{completed_mission_id}",
+                        headers={"X-Internal-Secret": INTERNAL_SECRET},
+                        timeout=10,
+                    )
+                    if parent_resp.status == 200:
+                        parent_record = await parent_resp.json()
+                        parent_workspace_id = parent_record.get("workspace_id") or parent_workspace_id
+            except Exception as parent_e:
+                log.warning(f"[Worker] Could not fetch parent mission {completed_mission_id} workspace: {parent_e}")
+
             pending = await _query_pending()
             for m in pending:
                 try:
+                    m["workspace_id"] = m.get("workspace_id") or parent_workspace_id
                     enqueued = await _enqueue_existing(m, m.get("user_id"))
                     log.info(f"[Worker] Chained mission {enqueued.get('id')} dispatched after mission {completed_mission_id}")
                 except Exception as chain_e:
@@ -857,6 +876,7 @@ class RavenWorker:
                         system=system_prompt,
                         creds=followup_creds,
                         coding_model=payload.get("model"),
+                        workspace_id=parent_workspace_id,
                         next_mission_query=None,
                         job_queue_override=self.job_queue,
                     )
