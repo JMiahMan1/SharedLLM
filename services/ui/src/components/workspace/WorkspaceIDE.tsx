@@ -976,41 +976,43 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
       }
       setSdBusy(true);
       try {
-        let b64: string | null = null;
         if (mode === 'txt2img') {
           const res = await api.generateImage({ prompt: sdPrompt.trim(), model: sdModel || undefined });
-          b64 = res?.data?.[0]?.b64_json ?? null;
-        } else {
-          const src = await api.fetchWorkspaceFileRaw(workspace.id, active!.path);
-          const srcB64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const result = String(reader.result || '');
-              const comma = result.indexOf(',');
-              resolve(comma >= 0 ? result.slice(comma + 1) : result);
-            };
-            reader.onerror = () => reject(reader.error);
-            reader.readAsDataURL(src);
-          });
-          const prompt =
-            mode === 'upscale'
-              ? sdPrompt.trim() || 'upscale to 2x higher resolution, enhance fine details'
-              : mode === 'inpaint'
-                ? sdPrompt.trim() || 'inpaint and seamlessly improve the masked region'
-                : sdPrompt.trim();
-          const res = await api.editImage({ prompt, image: srcB64, model: sdModel || undefined });
-          b64 = res?.data?.[0]?.b64_json ?? null;
-        }
-        if (!b64) {
-          toast.error('Stable Diffusion returned no image');
+          const b64 = res?.data?.[0]?.b64_json ?? null;
+          if (!b64) {
+            toast.error('Stable Diffusion returned no image');
+            return;
+          }
+          const fname = `${mode}_${Date.now()}.png`;
+          const rel = baseDirOf(currentPath) + fname;
+          await api.writeWorkspaceFileBase64(workspace.id, rel, b64);
+          toast.success(`Saved ${rel}`);
+          await loadDir(currentPath);
+          await openByPath(rel);
           return;
         }
+        const prompt =
+          mode === 'upscale'
+            ? sdPrompt.trim() || 'upscale to 2x higher resolution, enhance fine details'
+            : mode === 'inpaint'
+              ? sdPrompt.trim() || 'inpaint and seamlessly improve the masked region'
+              : sdPrompt.trim();
         const fname = `${mode}_${Date.now()}.png`;
         const rel = baseDirOf(currentPath) + fname;
-        await api.writeWorkspaceFileBase64(workspace.id, rel, b64);
-        toast.success(`Saved ${rel}`);
+        const res = await api.workspaceEditImage(workspace.id, {
+          prompt,
+          image_path: active!.path,
+          output_path: rel,
+          model: sdModel || undefined,
+        });
+        if (res?.status !== 'SUCCESS') {
+          toast.error(res?.message || 'Image edit failed');
+          return;
+        }
+        const saved = res?.detail?.output_path || rel;
+        toast.success(`Saved ${saved}`);
         await loadDir(currentPath);
-        await openByPath(rel);
+        await openByPath(saved);
       } catch (e: unknown) {
         toast.error(`SD task failed: ${apiErr(e)}`);
       } finally {

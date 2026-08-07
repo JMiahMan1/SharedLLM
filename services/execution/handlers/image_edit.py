@@ -171,6 +171,11 @@ async def handle_image_edit(req) -> ExecutionResult:
             )
 
         output_path = (req.output_path or "").strip() or _default_output_path(req.image_path)
+        uc = getattr(req, "user_context", None)
+        if hasattr(uc, "model_dump"):
+            uc = uc.model_dump()
+        elif hasattr(uc, "dict"):
+            uc = uc.dict()
         async with aiohttp.ClientSession() as client:
             save_resp = await client.post(
                 f"{WORKSPACE_RUNTIME_SVC_URL}/files/write",
@@ -179,7 +184,7 @@ async def handle_image_edit(req) -> ExecutionResult:
                     "relative_path": output_path,
                     "content_base64": b64,
                     "create_parents": True,
-                    "user_context": getattr(req, "user_context", None),
+                    "user_context": uc,
                 },
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=60.0),
