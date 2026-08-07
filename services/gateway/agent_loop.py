@@ -3818,6 +3818,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "networkdevicescanrequest": (EXECUTION_SVC, "/execute/network_scan"),
                 "ghrequest": (EXECUTION_SVC, "/execute/gh"),
                 "imagegenerationrequest": (ALPACA_SD_URL, "/v1/images/generations"),
+                "ocrrequest": (EXECUTION_SVC, "/execute/ocr"),
+                "imageeditrequest": (EXECUTION_SVC, "/execute/image_edit"),
                 "controlplanerequest": (CONTROL_PLANE_URL, "/api/restart/{service_name}"),
             }
 
@@ -3933,6 +3935,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "workspacesearchrequest", "workspacelintrequest",
                     "gitoperationrequest", "workspacebootstraprequest",
                     "workspacesettingsupdaterequest",
+                    "ocrrequest", "imageeditrequest",
                 }
                 if workspace_id and isinstance(payload, dict) and lookup_action in _ws_actions:
                     payload["workspace_id"] = workspace_id

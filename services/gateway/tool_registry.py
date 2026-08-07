@@ -29,6 +29,7 @@ TOOL_IMAGE_EDIT = "sharedllm_image_edit"
 TOOL_LIST_IMAGE_MODELS = "sharedllm_list_image_models"
 TOOL_RAVEN_MISSION = "sharedllm_raven_mission"
 TOOL_WEBSCRAPER = "sharedllm_web_scraper"
+TOOL_OCR = "sharedllm_ocr"
 TOOL_WORKSPACE_EXPOSE_PORT = "workspaceportexposerequest"
 
 # Service identifiers used by the resolver / proxy layer.
@@ -251,6 +252,27 @@ _WORKSPACE_EXPOSE_PORT_TOOL = {
     },
 }
 
+_OCR_TOOL = {
+    "type": "function",
+    "function": {
+        "name": TOOL_OCR,
+        "description": (
+            "Extract all visible text from an image inside a workspace using the "
+            "vision OCR model (qwen2.5-vl). Returns structured text fields "
+            "(full_text, headline, subtext, badge)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {"type": "string", "description": "Target workspace id."},
+                "image_path": {"type": "string", "description": "Path to the image inside the workspace (e.g. 'sign_original.jpg')."},
+                "task": {"type": "string", "description": "OCR task type: 'general', 'document', or 'price_scrape'.", "default": "general"},
+            },
+            "required": ["workspace_id", "image_path"],
+        },
+    },
+}
+
 
 def get_tool_schemas() -> list[dict]:
     """Return the OpenAI ``tools`` schemas for all SharedLLM tools."""
@@ -263,6 +285,7 @@ def get_tool_schemas() -> list[dict]:
         _LIST_IMAGE_MODELS_TOOL,
         _RAVEN_MISSION_TOOL,
         _WEBSCRAPER_TOOL,
+        _OCR_TOOL,
         _WORKSPACE_EXPOSE_PORT_TOOL,
     ]
 
@@ -396,6 +419,20 @@ def resolve_tool_call(
                 "headless": bool(arguments.get("headless", True)),
                 "mobile": bool(arguments.get("mobile", False)),
             },
+        )
+
+    if name == TOOL_OCR:
+        return ResolvedToolCall(
+            method="POST",
+            service=SVC_EXECUTION,
+            path="/execute/ocr",
+            json={
+                "user_context": uc,
+                "workspace_id": ws,
+                "image_path": arguments.get("image_path"),
+                "task": arguments.get("task", "general"),
+            },
+            requires_workspace=True,
         )
 
     if name in (TOOL_WORKSPACE_EXPOSE_PORT, "workspace_expose_port", "expose_port", "port_expose"):

@@ -21,6 +21,27 @@ def test_chain_multiple_tools():
     assert len(d["steps"]) <= 3
 
 
+def test_use_existing_image_edit_tool():
+    d = decide("make this image look old and remove the website link on the sign")
+    assert d["decision"] == "use_existing"
+    assert d["tool"] == "ImageEditRequest"
+
+
+def test_chain_ocr_and_image_edit_tools():
+    d = decide("read the text from the image then edit the image to remove it")
+    assert d["decision"] == "chain"
+    tools = [s["tool"] for s in d["steps"]]
+    assert "OcrRequest" in tools
+    assert "ImageEditRequest" in tools
+    assert len(d["steps"]) <= 3
+
+
+def test_use_existing_ocr_tool():
+    d = decide("ocr the sign image")
+    assert d["decision"] == "use_existing"
+    assert d["tool"] == "OcrRequest"
+
+
 def test_build_when_no_existing_tool_fits():
     d = decide("send a Slack message when the nightly build finishes")
     assert d["decision"] == "build"

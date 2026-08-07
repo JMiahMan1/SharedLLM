@@ -92,6 +92,8 @@ from services.execution.schemas import (
     MediaTransportRequest,
     NetworkDeviceScanRequest,
     NoteRequest,
+    OcrRequest,
+    ImageEditRequest,
     ResolveStreamRequest,
     StorageFileReadRequest,
     StorageFileWriteRequest,
@@ -730,6 +732,16 @@ async def execute_web_read(req: WebReadRequest):
 async def execute_web_scraper(req: WebScraperRequest):
     from services.execution.handlers import webscraper
     return await webscraper.handle_web_scraper(req)
+
+@app.post("/execute/ocr", response_model=ExecutionResult)
+async def execute_ocr(req: OcrRequest):
+    from services.execution.handlers import ocr
+    return await ocr.handle_ocr(req)
+
+@app.post("/execute/image_edit", response_model=ExecutionResult)
+async def execute_image_edit(req: ImageEditRequest):
+    from services.execution.handlers import image_edit
+    return await image_edit.handle_image_edit(req)
 
 @app.post("/execute/code_search", response_model=ExecutionResult)
 async def execute_code_search(req: CodeSearchRequest):

@@ -11,7 +11,8 @@ import {
   Globe,
   Key,
   Clock,
-  Eye
+  Eye,
+  Wand2
 } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
@@ -222,7 +223,8 @@ const LLMSettings: React.FC = () => {
                   { label: 'Assistant', key: 'assistant_model', icon: Brain },
                   { label: 'Coding / Repair', key: 'coding_model', icon: Code },
                   { label: 'Librarian / RAG', key: 'librarian_model', icon: Library },
-                  { label: 'Vision OCR', key: 'vision_ocr_model', icon: Eye }
+                  { label: 'Vision OCR', key: 'vision_ocr_model', icon: Eye },
+                  { label: 'Image Edit', key: 'image_edit_model', icon: Wand2 }
                 ].map(role => (
                   <div key={role.key} className="glass-card p-4 bg-white/5">
                     <div className="flex items-center gap-2 mb-3">
