@@ -100,6 +100,20 @@ _TOOLS: tuple[_Tool, ...] = (
          "make a picture", "create an image"),
     ),
     _Tool(
+        "ImageEditRequest",
+        "Edit an existing image in the workspace (remove objects/text, restyle, age it) via the image edit model.",
+        ("edit image", "edit photo", "edit picture", "edit the image", "edit the photo",
+         "remove from image", "remove the website", "remove text from", "make this image look old",
+         "restyle", "change the image", "modify the image", "age the photo", "old photo"),
+    ),
+    _Tool(
+        "OcrRequest",
+        "Extract/read all visible text from an image in the workspace using the vision OCR model.",
+        ("read text from image", "read the text from", "read the text in", "ocr", "extract text from image",
+         "ocr the image", "what does the image say", "read the sign", "text in the image",
+         "extract the text", "transcribe image"),
+    ),
+    _Tool(
         "DockerLogsRequest",
         "Fetch Docker container logs for diagnostics.",
         ("docker log", "container log", "service log", "pod log"),

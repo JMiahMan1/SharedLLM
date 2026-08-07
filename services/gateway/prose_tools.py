@@ -36,6 +36,8 @@ _RAVEN_TOOL_TYPES = (
     "GitOperationRequest",
     "RavenRecallRequest",
     "RavenMissionRequest",
+    "ImageEditRequest",
+    "OcrRequest",
 )
 
 # Lowercase alias -> canonical @type. The model sometimes lowercases or
@@ -54,6 +56,8 @@ _TYPE_ALIASES = {
     "gitoperationrequest": "GitOperationRequest",
     "ravenrecallrequest": "RavenRecallRequest",
     "ravenmissionrequest": "RavenMissionRequest",
+    "imageeditrequest": "ImageEditRequest",
+    "ocrrequest": "OcrRequest",
 }
 
 # Matches a tool-type token, optionally suffixed with a digit (e.g.

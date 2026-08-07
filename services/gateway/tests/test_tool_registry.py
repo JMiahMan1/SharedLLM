@@ -5,6 +5,7 @@ from services.gateway.tool_registry import (
     TOOL_IMAGE_EDIT,
     TOOL_IMAGE_GENERATE,
     TOOL_LIST_IMAGE_MODELS,
+    TOOL_OCR,
     TOOL_RAVEN_MISSION,
     TOOL_WEBSCRAPER,
     TOOL_WRITE_FILE,
@@ -26,12 +27,30 @@ def test_get_tool_schemas_returns_all_seven_tools():
         TOOL_LIST_IMAGE_MODELS,
         TOOL_RAVEN_MISSION,
         TOOL_WEBSCRAPER,
+        TOOL_OCR,
         "workspaceportexposerequest",
     }
     # Every tool must declare JSON-schema parameters.
     for s in schemas:
         assert s["type"] == "function"
         assert "parameters" in s["function"]
+
+
+def test_resolve_ocr_targets_execution_and_requires_workspace():
+    r = resolve_tool_call(
+        TOOL_OCR,
+        {"image_path": "sign_original.jpg", "task": "general"},
+        workspace_id="ws_ocr",
+        user_context={"user": "default", "is_admin": True},
+    )
+    assert r.method == "POST"
+    assert r.service == "execution"
+    assert r.path == "/execute/ocr"
+    assert r.json["workspace_id"] == "ws_ocr"
+    assert r.json["image_path"] == "sign_original.jpg"
+    assert r.json["task"] == "general"
+    assert r.json["user_context"]["user"] == "default"
+    assert r.requires_workspace is True
 
 
 def test_resolve_gh_builds_execution_request():

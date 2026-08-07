@@ -896,3 +896,35 @@ class ResolveStreamRequest(BaseRequest):
     media_type: str | None = Field(None, description="Type of media to resolve: track, video, playlist")
     max_results: int | None = Field(None, description="Maximum number of stream results to return")
 
+
+class OcrRequest(BaseRequest):
+    """
+    Extracts all visible text from an image in the workspace using the
+    user-configured vision LLM (vision_ocr_model, e.g. qwen2.5-vl:7b).
+
+    Returns structured fields: full_text, headline, subtext, badge.
+    """
+    user_context: UserContext
+    image_path: str = Field(..., description="Path to the image file inside the workspace (e.g. 'sign_original.jpg')")
+    task: str = Field("general", description="OCR task type: 'general', 'document', or 'price_scrape'")
+    model: str | None = Field(None, description="Override vision model name (default: vision_ocr_model setting)")
+    proxy_url: str | None = Field(None, description="Override LLM proxy URL (default: llm_local_url setting)")
+
+
+class ImageEditRequest(BaseRequest):
+    """
+    Edits an existing image in the workspace using the user-configured image
+    editing model (image_edit_model, e.g. qwen-image-edit-rapid-aio:q4_k) via
+    the LLM proxy /v1/images/edits endpoint.
+
+    Reads the source image, sends it with an editing instruction, and saves the
+    result back into the workspace.
+    """
+    user_context: UserContext
+    image_path: str = Field(..., description="Path to the source image inside the workspace (e.g. 'sign_original.jpg')")
+    prompt: str = Field(..., description="Editing instruction, e.g. 'Make this image look old and remove the website link on the sign'")
+    output_path: str | None = Field(None, description="Path to save the edited image (default: '<stem>_edited.<ext>' next to the source)")
+    size: str | None = Field(None, description="Output size as WxH (default: source image size, max 2048x2048)")
+    model: str | None = Field(None, description="Override image edit model name (default: image_edit_model setting)")
+    proxy_url: str | None = Field(None, description="Override LLM proxy URL (default: llm_local_url setting)")
+
