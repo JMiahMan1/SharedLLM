@@ -327,6 +327,54 @@ def test_raven_terse_graphics_flyer_mission():
     assert content, f"[terse-graphics] image flyer {imgs[0]['name']} unreadable"
 
 
+def test_raven_terse_image_edit_mission():
+    """A chained generate-then-edit request with NO tool/artifact hints.
+
+    Passing proves the graphics + image-edit scenario curriculum steers
+    Raven to generate an image via the local alpaca backend and then run
+    imageeditrequest on the result, persisting BOTH artifacts (original
+    and edited) into the workspace.
+    """
+    prompt = (
+        "Create an image of a mountain landscape at sunset, then edit that image "
+        "to give it a vintage 1970s film look and save the edited version too."
+    )
+
+    mid = _chat_submit(prompt)
+    result = _chat_wait(mid)
+    assert result.get("status") == "completed", (
+        f"terse-image-edit mission did not complete: {result.get('status')}\n"
+        f"result: {(result.get('result') or '')[:500]}"
+    )
+
+    ws_id = result.get("workspace_id") or ""
+    assert ws_id and ws_id.startswith("raven-"), (
+        f"[terse-image-edit] no dedicated workspace created (got {ws_id!r})"
+    )
+
+    entries = _list_workspace_files(ws_id)
+    imgs = [
+        e for e in entries
+        if e.get("is_dir") is False
+        and str(e.get("name", "")).lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+    ]
+    assert len(imgs) >= 2, (
+        f"[terse-image-edit] expected original + edited image artifacts, got "
+        f"{len(imgs)} (files: {[e.get('name') for e in entries][:20]})"
+    )
+
+    edited = [
+        e for e in imgs if "edited" in str(e.get("name", "")).lower()
+    ]
+    assert edited, (
+        f"[terse-image-edit] no '<stem>_edited' artifact found "
+        f"(images: {[e.get('name') for e in imgs]})"
+    )
+
+    content = _read_workspace_file(ws_id, edited[0]["name"])
+    assert content, f"[terse-image-edit] edited image {edited[0]['name']} unreadable"
+
+
 def test_raven_terse_git_mission():
     """A bare git task with NO clone/collaboration instructions.
 

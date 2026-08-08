@@ -4448,6 +4448,62 @@ async def workspace_image_edit_proxy(workspace_id: str, request: Request):
     except Exception as exc:
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Image edit failed: {exc}"})
 
+
+@app.post("/api/workspaces/{workspace_id}/ocr")
+async def workspace_ocr_proxy(workspace_id: str, request: Request):
+    """Workspace-scoped OCR: reads <image_path> in the workspace and extracts
+    the visible text with the configured vision model (vision_ocr_model).
+
+    Delegates to the execution service /execute/ocr handler (same code path
+    Raven uses) so the IDE and missions share one implementation. Long
+    timeout: vision LLM inference on CPU takes up to a minute or two.
+    """
+    if not _sd_request_authorized(request):
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    body = await request.json()
+    creds = await _resolve_identity_from_request(request)
+    if not creds:
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    payload = {
+        "workspace_id": workspace_id,
+        "image_path": body.get("image_path") or body.get("path"),
+        "task": body.get("task") or "general",
+        "model": body.get("model"),
+        "user_context": {
+            "user": creds.user,
+            "is_admin": creds.is_admin,
+            "api_key": creds.api_key,
+            "ha_url": creds.ha_url,
+            "ha_token": creds.ha_token,
+            "nextcloud_url": creds.nextcloud_url,
+            "nextcloud_user": creds.nextcloud_user,
+            "nextcloud_pass": creds.nextcloud_pass,
+            "github_token": creds.github_token,
+            "gitlab_token": creds.gitlab_token,
+            "git_token": creds.git_token,
+        },
+    }
+    if not payload["image_path"]:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "ERROR", "message": "image_path (or path) is required."},
+        )
+    try:
+        async with shared_http_client() as client:
+            resp = await client.post(
+                f"{EXECUTION_SVC}/execute/ocr",
+                json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=620.0),
+            )
+            try:
+                data = await resp.json()
+            except Exception:
+                data = {"status": "ERROR", "message": (await resp.text())[:500]}
+            return JSONResponse(status_code=resp.status, content=data)
+    except Exception as exc:
+        return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"OCR failed: {exc}"})
+
 @app.post("/api/workspaces/git/status")
 async def git_status_workspace_proxy(request: Request):
     return await _proxy_workspace_runtime_json("POST", "/git/status", request)
