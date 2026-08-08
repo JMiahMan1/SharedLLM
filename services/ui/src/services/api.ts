@@ -1458,6 +1458,31 @@ export const api = {
     return resp.data;
   },
 
+  // Workspace-scoped OCR via the execution service (same path Raven uses).
+  // Long timeout: the vision LLM runs on CPU and can take a minute or two.
+  async workspaceOcr(workspaceId: string, payload: { image_path: string; task?: string; model?: string }): Promise<{
+    status: string;
+    message?: string;
+    detail?: { full_text?: string; headline?: string; subtext?: string; badge?: string };
+  }> {
+    let baseURL = getBaseUrl();
+    if (Capacitor.isNativePlatform()) {
+      const serverUrl = storageGetSync('jarvis_server_url');
+      if (serverUrl) baseURL = serverUrl;
+    }
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = storageGetSync('jarvis_api_key');
+    const internalSecret = storageGetSync('internal_secret');
+    if (token) headers.Authorization = `Bearer ${token}`;
+    if (internalSecret) headers['X-Internal-Secret'] = internalSecret;
+    const resp = await axios.post(`/api/workspaces/${workspaceId}/ocr`, payload, {
+      baseURL,
+      headers,
+      timeout: 640000,
+    });
+    return resp.data;
+  },
+
   // Workspace git (tool panel)
   async workspaceGitStatus(workspaceId: string): Promise<GitStatusResponse> {
     const resp = await apiClient.post('/api/workspaces/git/status', { workspace_id: workspaceId });

@@ -37,6 +37,7 @@ import {
   Maximize2,
   Brush,
   Eye,
+  ScanText,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type RavenMission, type Workspace } from '../../services/api';
@@ -312,6 +313,20 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
   const [sdModel, setSdModel] = useState('');
   const [sdPrompt, setSdPrompt] = useState('');
   const [sdBusy, setSdBusy] = useState(false);
+  const [sdSize, setSdSize] = useState('');
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrResult, setOcrResult] = useState<{ full_text?: string; headline?: string; subtext?: string; badge?: string } | null>(null);
+
+  const RESTYLE_PRESETS = useMemo(
+    () => [
+      { label: 'Vintage 1970s', prompt: 'Convert this photograph to a 1970s vintage look: faded sepia tones, yellowed aged paper, worn and cracked paint, scratches and dust, an old faded photograph. Keep the composition, layout and all text content exactly the same and fully readable.' },
+      { label: 'Sepia', prompt: 'Restyle this photograph with a classic sepia tone: warm brown monochrome, soft faded blacks, gentle highlights. Keep the composition, layout and all text content exactly the same and fully readable.' },
+      { label: 'Film grain', prompt: 'Give this photograph an analog film look: visible film grain, slightly faded colors, subtle halation and vignette. Keep the composition, layout and all text content exactly the same and fully readable.' },
+      { label: 'Polaroid', prompt: 'Restyle this photograph like an old polaroid picture: slightly faded and desaturated colors, soft warm tint, gentle vignette, analog print feel. Keep the composition, layout and all text content exactly the same and fully readable.' },
+      { label: 'Black & white', prompt: 'Convert this photograph to classic black and white film: rich grayscale tones, soft film grain, good contrast. Keep the composition, layout and all text content exactly the same and fully readable.' },
+    ],
+    [],
+  );
 
   const isImagePath = useCallback((p: string | null): boolean => {
     if (!p) return false;
@@ -1004,6 +1019,7 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
           image_path: active!.path,
           output_path: rel,
           model: sdModel || undefined,
+          size: sdSize || undefined,
         });
         if (res?.status !== 'SUCCESS') {
           toast.error(res?.message || 'Image edit failed');
@@ -1019,8 +1035,64 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
         setSdBusy(false);
       }
     },
-    [active, sdPrompt, sdModel, currentPath, workspace.id, loadDir, openByPath, baseDirOf],
+    [active, sdPrompt, sdModel, sdSize, currentPath, workspace.id, loadDir, openByPath, baseDirOf],
   );
+
+  const runRestyle = useCallback(
+    async (presetPrompt: string) => {
+      if (!active) {
+        toast.error('Select a source image first');
+        return;
+      }
+      setSdBusy(true);
+      try {
+        const fname = `restyle_${Date.now()}.png`;
+        const rel = baseDirOf(currentPath) + fname;
+        const res = await api.workspaceEditImage(workspace.id, {
+          prompt: presetPrompt,
+          image_path: active.path,
+          output_path: rel,
+          model: sdModel || undefined,
+          size: sdSize || undefined,
+        });
+        if (res?.status !== 'SUCCESS') {
+          toast.error(res?.message || 'Restyle failed');
+          return;
+        }
+        const saved = res?.detail?.output_path || rel;
+        toast.success(`Saved ${saved}`);
+        await loadDir(currentPath);
+        await openByPath(saved);
+      } catch (e: unknown) {
+        toast.error(`Restyle failed: ${apiErr(e)}`);
+      } finally {
+        setSdBusy(false);
+      }
+    },
+    [active, sdModel, sdSize, currentPath, workspace.id, loadDir, openByPath, baseDirOf],
+  );
+
+  const runOcr = useCallback(async () => {
+    if (!active) {
+      toast.error('Select an image first');
+      return;
+    }
+    setOcrBusy(true);
+    setOcrResult(null);
+    try {
+      const res = await api.workspaceOcr(workspace.id, { image_path: active.path });
+      if (res?.status === 'SUCCESS' || res?.status === 'PARTIAL') {
+        setOcrResult(res.detail ?? {});
+        toast.success(res?.message || 'OCR complete');
+      } else {
+        toast.error(res?.message || 'OCR failed');
+      }
+    } catch (e: unknown) {
+      toast.error(`OCR failed: ${apiErr(e)}`);
+    } finally {
+      setOcrBusy(false);
+    }
+  }, [active, workspace.id]);
 
   const breadcrumbs = useMemo(() => {
     if (currentPath === '.') return ['~'];
@@ -1492,6 +1564,32 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                           ))}
                         </select>
                       )}
+                      <select
+                        value={sdSize}
+                        onChange={(e) => setSdSize(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white focus:border-indigo-500 outline-none"
+                        aria-label="Output size"
+                      >
+                        <option value="">Keep source size</option>
+                        <option value="960x720">960x720</option>
+                        <option value="1024x1024">1024x1024</option>
+                        <option value="1280x960">1280x960</option>
+                        <option value="2048x1536">2048x1536</option>
+                      </select>
+                      <div className="text-[11px] uppercase tracking-wide text-slate-500">Restyle presets</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {RESTYLE_PRESETS.map((p) => (
+                          <button
+                            key={p.label}
+                            onClick={() => void runRestyle(p.prompt)}
+                            disabled={sdBusy}
+                            className="px-2 py-1 text-[11px] rounded-full bg-white/5 hover:bg-indigo-500/30 disabled:opacity-40 text-slate-200 border border-white/10 transition-colors"
+                            title={p.prompt}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      </div>
                       <button
                         onClick={() => runImageTask('txt2img')}
                         disabled={sdBusy || !sdPrompt.trim()}
@@ -1520,6 +1618,35 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                       >
                         <Eye size={13} /> Inpaint
                       </button>
+                      <div className="mt-1 border-t border-white/10 pt-3">
+                        <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500 mb-2">
+                          <ScanText size={13} className="text-indigo-400" /> Read text (OCR)
+                        </div>
+                        <button
+                          onClick={() => void runOcr()}
+                          disabled={ocrBusy}
+                          className="flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200 w-full"
+                        >
+                          {ocrBusy ? <Loader2 size={13} className="animate-spin" /> : <ScanText size={13} />}
+                          {ocrBusy ? 'Reading text…' : 'Extract text from image'}
+                        </button>
+                        {ocrResult && (
+                          <div className="mt-2 rounded-lg bg-black/40 border border-white/10 p-2 text-xs text-slate-300">
+                            {ocrResult.full_text ? (
+                              <pre className="whitespace-pre-wrap font-sans text-slate-300 leading-relaxed">{ocrResult.full_text}</pre>
+                            ) : (
+                              <span className="text-slate-500">No text found</span>
+                            )}
+                            {(ocrResult.headline || ocrResult.subtext || ocrResult.badge) && (
+                              <div className="mt-2 pt-2 border-t border-white/10 text-[11px] text-slate-500">
+                                {ocrResult.headline && <div><span className="text-slate-400">Headline:</span> {ocrResult.headline}</div>}
+                                {ocrResult.subtext && <div><span className="text-slate-400">Details:</span> {ocrResult.subtext}</div>}
+                                {ocrResult.badge && <div><span className="text-slate-400">Badge:</span> {ocrResult.badge}</div>}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       {sdBusy && (
                         <div className="flex items-center gap-1.5 text-xs text-slate-400">
                           <Loader2 size={13} className="animate-spin" /> Processing…
