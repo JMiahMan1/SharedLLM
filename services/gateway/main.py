@@ -5500,9 +5500,27 @@ async def _build_raven_system_prompt(query: str) -> str:
         if lessons_block
         else ""
     )
+    tts_section = ""
+    if any(token in (query or "").lower() for token in TTS_SIGNALS):
+        tts_section = (
+            "\n\n[TTS & Narration] This mission requires AUDIO SYNTHESIS (text-to-speech). "
+            "Do NOT stop after preparing the text, and do NOT hand-roll audio yourself. "
+            "Use the `TTSRequest` tool for every piece of spoken text. Payload fields: "
+            "`text` (the speech text — REQUIRED), `voice` (optional; omit to use the "
+            "default Kokoro voice), `file_path` (output audio filename, e.g. "
+            "`narration.mp3`), `workspace_id` (your workspace). Example:\n"
+            '  {"@type": "TTSRequest", "text": "Chapter one. In the beginning...", '
+            '"file_path": "narration_01.mp3", "workspace_id": "<your workspace id>"}\n'
+            "The audio is automatically decoded and saved into your workspace as a binary "
+            "file, and the result returns the saved path. Verify the file exists after each "
+            "chunk, then continue with the next chunk until the whole text has been "
+            "narrated. If the text is long, split it into sections and emit a JSON ARRAY "
+            "of TTSRequest calls (one per section) in a single turn."
+        )
     return (
         f"{protocol}\n\n{protocols}\n\n"
         f"{lesson_section}"
+        f"{tts_section}"
         f"[Raven Mission]\n{query}\n\n"
         f"Execute the mission above using the tool-call format defined in your protocol. "
         f"Every turn must be tool calls only (never prose): emit a JSON ARRAY of tool-call "
