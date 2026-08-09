@@ -3713,7 +3713,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         "Workspace Tools": ["workspacefilereadrequest", "workspacefilewriterequest", "workspacefilepatchrequest", "workspacelintrequest", "workspacesearchrequest", "workspaceshellrequest", "workspacebootstraprequest", "workspacecreaterequest", "workspacesettingsupdaterequest"],
                         "Git Tools": ["gitoperationrequest"],
                         "Storage Tools": ["storagefilereadrequest", "storagefilewriterequest", "storagelistrequest", "storageindexrequest"],
-                        "Media Tools": ["mediaplayrequest", "mediatransportrequest", "mediastatusrequest", "videoplayrequest"],
+                        "Media Tools": ["mediaplayrequest", "mediatransportrequest", "mediastatusrequest", "videoplayrequest", "ttsrequest"],
                         "Web Tools": ["websearchrequest", "webreadrequest", "webscraperrequest"],
                         "Docker Tools": ["dockerlogsrequest", "dockercomposerequest"],
                         "HA Tools": ["lightcontrolrequest", "haservicerequest", "climate", "securityrequest", "announcementrequest", "entitysearchrequest", "logbookrequest", "executionlogrequest", "haconfigrequest"],
