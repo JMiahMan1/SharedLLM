@@ -4027,8 +4027,35 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     _tts_storybook = bool(payload.get("storybook"))
                     _tts_ws = payload.get("workspace_id") or workspace_id
                     _tts_path = payload.get("file_path") or payload.get("relative_path") or payload.get("path") or payload.get("filename")
+                    _tts_text_file = payload.get("text_file") or payload.get("source_file")
+                    if not _tts_text and _tts_text_file:
+                        # text_file mode: pull the speech text from a workspace file so
+                        # long documents never have to be inlined into model context.
+                        _tts_text_file_err = "unknown error"
+                        try:
+                            async with shared_http_client() as _tc:
+                                _tf_resp = await _tc.post(
+                                    f"{EXECUTION_SVC}/execute/workspace_file_read",
+                                    json={"path": _tts_text_file, "workspace_id": _tts_ws},
+                                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                    timeout=aiohttp.ClientTimeout(total=60.0),
+                                )
+                                _tf_body = await _tf_resp.json()
+                            if _tf_resp.status == 200:
+                                _tts_text = ((_tf_body or {}).get("detail") or {}).get("content")
+                            if not _tts_text:
+                                _tts_text_file_err = (_tf_body or {}).get("detail") or str(_tf_body)
+                        except Exception as _e:
+                            _tts_text = None
+                            _tts_text_file_err = f"{_e!r}"
                     if not _tts_text:
-                        exec_data = {"status": "ERROR", "message": "TTSRequest requires a 'text'."}
+                        if _tts_text_file:
+                            exec_data = {
+                                "status": "ERROR",
+                                "message": f"TTSRequest text_file '{_tts_text_file}' could not be read from the workspace: {_tts_text_file_err}",
+                            }
+                        else:
+                            exec_data = {"status": "ERROR", "message": "TTSRequest requires a 'text' (or a 'text_file' pointing at a workspace text file)."}
                     else:
                         try:
                             _t_payload: dict = {"text": _tts_text}
