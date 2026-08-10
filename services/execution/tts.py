@@ -13,6 +13,15 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("execution.tts")
 
+# Kokoro ONNX caps input at ~510 tokens. Docket-TTS learned to chunk at sentence
+# boundaries with inter-chunk pauses; the same approach lives here.
+MAX_TTS_CHUNK_CHARS = 1500  # ~375 tokens — safely under the 510-token cap
+PAUSE_SENTENCE = 0.5  # seconds of silence after . ? !
+PAUSE_SEMI = 0.3      # after ; :
+PAUSE_COMMA = 0.2     # between other chunks
+SAMPLE_RATE_HZ = 24000
+
+
 class TTSEngine(Protocol):
     async def generate(self, text: str, voice: str | None = None, storybook: bool = False) -> bytes:
         ...
@@ -56,11 +65,70 @@ class KokoroTTSEngine:
             return await self._generate_storybook(text, voice)
 
         text = self._normalize_text(text)
-        assert self._kokoro is not None
-        samples, sample_rate = await asyncio.to_thread(
-            self._kokoro.create, text, voice=voice, speed=1.0, lang="en-us"
-        )
+        samples, sample_rate = await self._synthesize(text, voice)
+        if len(samples) == 0:
+            return b""
         return self._samples_to_bytes(samples, sample_rate)
+
+    async def _synthesize(self, text: str, voice: str) -> tuple[np.ndarray, int]:
+        """Synthesize text in sentence-sized chunks with natural pauses between them.
+
+        Ported from Docket-TTS: the Kokoro ONNX engine caps input at ~510 tokens,
+        so long texts MUST be split at sentence boundaries and re-joined. Pauses
+        (0.5s after .?!, 0.3s after ;:, 0.2s otherwise) make the result sound like
+        a human narrator instead of a run-on stream.
+        """
+        assert self._kokoro is not None
+        chunks = self._chunk_text(text)
+        pieces: list[np.ndarray] = []
+        sample_rate = SAMPLE_RATE_HZ
+        for i, chunk in enumerate(chunks):
+            samples, sample_rate = await asyncio.to_thread(
+                self._kokoro.create, chunk, voice=voice, speed=1.0, lang="en-us"
+            )
+            pieces.append(samples)
+            if i < len(chunks) - 1:
+                pause = self._pause_between(chunk)
+                if pause > 0:
+                    pieces.append(np.zeros(int(pause * sample_rate), dtype=samples.dtype))
+        if not pieces:
+            return np.array([], dtype=np.float32), sample_rate
+        return np.concatenate(pieces), sample_rate
+
+    @staticmethod
+    def _pause_between(chunk: str) -> float:
+        stripped = chunk.strip()
+        tail = stripped[-1] if stripped else ""
+        if tail in ".?!":
+            return PAUSE_SENTENCE
+        if tail in ";:":
+            return PAUSE_SEMI
+        return PAUSE_COMMA
+
+    @staticmethod
+    def _chunk_text(text: str, max_chars: int = MAX_TTS_CHUNK_CHARS) -> list[str]:
+        text = text.strip()
+        if not text:
+            return []
+        sentences = re.split(r"(?<=[.!?;:])\s+", text)
+        chunks: list[str] = []
+        current = ""
+        for sent in sentences:
+            if len(sent) > max_chars:
+                if current:
+                    chunks.append(current)
+                    current = ""
+                for i in range(0, len(sent), max_chars):
+                    chunks.append(sent[i:i + max_chars])
+                continue
+            if current and len(current) + 1 + len(sent) > max_chars:
+                chunks.append(current)
+                current = sent
+            else:
+                current = f"{current} {sent}" if current else sent
+        if current:
+            chunks.append(current)
+        return chunks
 
 
     async def _generate_storybook(self, text: str, primary_voice: str) -> bytes:
