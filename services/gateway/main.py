@@ -5506,17 +5506,26 @@ async def _build_raven_system_prompt(query: str) -> str:
             "\n\n[TTS & Narration] This mission requires AUDIO SYNTHESIS (text-to-speech). "
             "Do NOT stop after preparing the text, and do NOT hand-roll audio yourself. "
             "Use the `TTSRequest` tool for every piece of spoken text. Payload fields: "
-            "`text` (the speech text — REQUIRED), `voice` (optional; omit to use the "
-            "default Kokoro voice), `file_path` (output audio filename — use a `.wav` "
-            "extension, e.g. `narration.wav`, since the engine produces WAV audio), "
-            "`workspace_id` (your workspace). Example:\n"
-            '  {"@type": "TTSRequest", "text": "Chapter one. In the beginning...", '
-            '"file_path": "narration_01.wav", "workspace_id": "<your workspace id>"}\n'
+            "`text` (the speech text), `text_file` (a workspace text file whose content "
+            "becomes the speech text — PREFERRED for anything longer than a short "
+            "paragraph, since it keeps file contents OUT of your context window), `voice` "
+            "(optional; omit to use the default Kokoro voice), `file_path` (output audio "
+            "filename — use a `.wav` extension, e.g. `narration.wav`, since the engine "
+            "produces WAV audio), `workspace_id` (your workspace). Example:\n"
+            '  {"@type": "TTSRequest", "text_file": "part_00.txt", '
+            '"file_path": "narration_00.wav", "workspace_id": "<your workspace id>"}\n'
             "The audio is automatically decoded and saved into your workspace as a binary "
-            "file, and the result returns the saved path. Verify the file exists after each "
-            "chunk, then continue with the next chunk until the whole text has been "
-            "narrated. If the text is long, split it into sections and emit a JSON ARRAY "
-            "of TTSRequest calls (one per section) in a single turn."
+            "file, and the result returns the saved path.\n"
+            "PROTOCOL: (1) Prepare the narration text as a small set of files — one "
+            "~2,500-character file per chapter/section (e.g. `narration_chapter_01.txt`, "
+            "`narration_chapter_02.txt`, ...), written with a shell `cat` or a write tool. "
+            "(2) DO NOT read those text files into context — use `text_file` to point at "
+            "them instead. (3) In a SINGLE turn, emit a JSON ARRAY of TTSRequest calls, one "
+            "per chapter, each with its own `text_file` and a distinct `file_path` (e.g. "
+            "`chapter_01.wav` ... `chapter_08.wav`). (4) After the calls return, verify "
+            "every .wav file exists in the workspace and report the list. Never re-read or "
+            "re-narrate a file you have already processed — reading file contents into "
+            "context exhausts your window and causes failures."
         )
     return (
         f"{protocol}\n\n{protocols}\n\n"
