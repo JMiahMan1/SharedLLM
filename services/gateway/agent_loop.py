@@ -4079,7 +4079,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                 # is a hard ERROR — never persist it.
                                 _tts_audio = base64.b64decode(_tts_b64) if isinstance(_tts_b64, str) else b""
                                 _tts_check = validate_media_bytes(_tts_audio, _tts_path or "audio")
-                                if not _tts_check["valid"]:
+                                if not _tts_check["playable"]:
                                     _tts_problem = "; ".join(_tts_check["issues"]) or "unrecognized content"
                                     exec_data = {
                                         "status": "ERROR",

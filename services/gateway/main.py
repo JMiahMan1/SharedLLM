@@ -5507,10 +5507,11 @@ async def _build_raven_system_prompt(query: str) -> str:
             "Do NOT stop after preparing the text, and do NOT hand-roll audio yourself. "
             "Use the `TTSRequest` tool for every piece of spoken text. Payload fields: "
             "`text` (the speech text — REQUIRED), `voice` (optional; omit to use the "
-            "default Kokoro voice), `file_path` (output audio filename, e.g. "
-            "`narration.mp3`), `workspace_id` (your workspace). Example:\n"
+            "default Kokoro voice), `file_path` (output audio filename — use a `.wav` "
+            "extension, e.g. `narration.wav`, since the engine produces WAV audio), "
+            "`workspace_id` (your workspace). Example:\n"
             '  {"@type": "TTSRequest", "text": "Chapter one. In the beginning...", '
-            '"file_path": "narration_01.mp3", "workspace_id": "<your workspace id>"}\n'
+            '"file_path": "narration_01.wav", "workspace_id": "<your workspace id>"}\n'
             "The audio is automatically decoded and saved into your workspace as a binary "
             "file, and the result returns the saved path. Verify the file exists after each "
             "chunk, then continue with the next chunk until the whole text has been "
