@@ -3226,8 +3226,8 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     # Handle thinking-capable models: some models put their entire response
                     # in the thinking/reasoning block when content is empty.
                     msg = data.get("message", {})
-                    ans = msg.get("content", "") or msg.get("thinking", "") or msg.get("reasoning", "") or "Error."
-                    if not ans or not ans.strip():
+                    ans = (msg.get("content") or msg.get("thinking") or msg.get("reasoning") or "").strip()
+                    if not ans:
                         log.warning(f"[AgentLoop] Empty output from model on attempt {retry_count + 1}; treating as failure.")
                         raise Exception("Empty model output")
                     # inference_success = True
