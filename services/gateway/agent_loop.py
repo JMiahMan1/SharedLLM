@@ -4090,7 +4090,10 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                                     f"{EXECUTION_SVC}/execute/tts",
                                     json=_t_payload,
                                     headers={"X-Internal-Secret": INTERNAL_SECRET},
-                                    timeout=aiohttp.ClientTimeout(total=180.0),
+                                    # Kokoro is realtime-ish on this box (~250wpm, so a
+                                    # 3-6KB narration file can take 2-6 min). Keep the
+                                    # TTS timeout generous so long chapters don't die.
+                                    timeout=aiohttp.ClientTimeout(total=900.0),
                                 )
                                 _tts_body = await _tts_resp.json()
                             _tts_detail = (_tts_body or {}).get("detail") or {}
