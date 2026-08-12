@@ -2555,6 +2555,70 @@ async def transcribe_audio(file: UploadFile = File(...), model: str = "base", la
             os.unlink(tmp_path)
 
 
+@app.post("/execute/stt/transcribe_workspace", response_model=ExecutionResult)
+async def transcribe_workspace_audio(request: Request):
+    """Transcribe a workspace audio file to text using Whisper.
+
+    This is the mission-facing variant of /execute/stt/transcribe: instead of a
+    multipart file upload it accepts a workspace ``file_path`` + ``workspace_id``
+    (JSON body, mirroring TTSRequest's text_file mode), resolves the file through
+    the workspace runtime, and returns the transcript in ExecutionResult.detail.
+    The engine's deterministic TTS normalization (scripture refs, years, eras,
+    small numbers) is verified by transcribing generated chapters back to text.
+    """
+    from services.execution.handlers.workspace import _resolve_workspace_info, resolve_safe_path
+
+    body = await request.json()
+    body = _normalize_llm_body(body)
+    file_path = body.get("file_path") or body.get("path") or body.get("filename") or body.get("audio_file")
+    workspace_id = body.get("workspace_id")
+    user_context = body.get("user_context") or {"user": "", "is_admin": True}
+    model = body.get("model") or "base"
+    language = body.get("language") or "en"
+
+    if not file_path:
+        return _fail("transcribe_workspace requires a 'file_path' (workspace-relative audio file)", "stt")
+
+    try:
+        resolved_root, _details = await _resolve_workspace_info(workspace_id, user_context)
+        absolute_path = resolve_safe_path(file_path, resolved_root)
+    except Exception as e:
+        log.error(f"transcribe_workspace workspace resolution failed: {e}")
+        return _fail(f"transcribe_workspace could not resolve workspace audio file: {e!s}", "stt")
+
+    if not os.path.exists(absolute_path):
+        return _fail(f"transcribe_workspace: audio file does not exist in workspace: {file_path}", "stt")
+
+    try:
+        import whisper  # pyright: ignore[reportMissingImports]
+    except ImportError:
+        return _fail("Whisper not installed. Run: pip install openai-whisper", "stt")
+
+    try:
+        whisper_model = whisper.load_model(model)
+    except Exception as e:
+        return _fail(f"Failed to load Whisper model '{model}': {e!s}", "stt")
+
+    try:
+        result = whisper_model.transcribe(
+            absolute_path, language=language, fp16=False, verbose=False
+        )
+        transcript = (result.get("text") or "").strip()
+        return _ok(
+            f"Transcribed {os.path.basename(file_path)} ({len(transcript)} chars)",
+            "stt",
+            {
+                "transcript": transcript,
+                "language": language,
+                "model": model,
+                "source_file": file_path,
+            },
+        )
+    except Exception as e:
+        log.error(f"transcribe_workspace transcription failed: {e}")
+        return _fail(f"Transcription failed: {e!s}", "stt")
+
+
 # ─── Voice Command Routing ────────────────────────────────────────────────────
 
 @app.post("/execute/voice/command")

@@ -3814,6 +3814,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "documentbroadcastrequest": (EXECUTION_SVC, "/execute/composite/broadcast"),
                 "nightmoderequest": (EXECUTION_SVC, "/execute/composite/night_mode"),
                 "ttsrequest": (EXECUTION_SVC, "/execute/tts"),
+                "sttrequest": (EXECUTION_SVC, "/execute/stt/transcribe_workspace"),
                 "storagetexttorequest": (STORAGE_SVC, "/text_to_audio"),
                 "networkdevicescanrequest": (EXECUTION_SVC, "/execute/network_scan"),
                 "ghrequest": (EXECUTION_SVC, "/execute/gh"),
@@ -4168,6 +4169,68 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         )
                     else:
                         log.info(f"[AgentLoop] TTSRequest result: {exec_data.get('message', '')}")
+                    _skip_post = True
+
+                # STTRequest: transcribe a workspace audio file back to text using
+                # Whisper. This is the audiobook/narration VERIFICATION path — the
+                # deterministic TTS normalization (scripture refs, years, eras,
+                # small numbers) is checked by hearing what the engine actually
+                # spoke. Mirror the TTSRequest text_file flow: resolve the file
+                # through the execution service, return the transcript to the model.
+                if lookup_action == "sttrequest" and isinstance(payload, dict):
+                    _stt_path = payload.get("file_path") or payload.get("path") or payload.get("audio_file")
+                    _stt_ws = payload.get("workspace_id") or workspace_id
+                    _stt_model = payload.get("model") or "base"
+                    _stt_lang = payload.get("language") or "en"
+                    _stt_uc = payload.get("user_context") or _uc
+                    if not _stt_path:
+                        exec_data = {
+                            "status": "ERROR",
+                            "message": "STTRequest requires a 'file_path' (workspace-relative audio file, e.g. 'scripture_day_01.wav').",
+                        }
+                    else:
+                        try:
+                            _stt_payload = {
+                                "file_path": _stt_path,
+                                "workspace_id": _stt_ws,
+                                "model": _stt_model,
+                                "language": _stt_lang,
+                                "user_context": _stt_uc,
+                            }
+                            async with shared_http_client() as _sc:
+                                _stt_resp = await _sc.post(
+                                    f"{EXECUTION_SVC}/execute/stt/transcribe_workspace",
+                                    json=_stt_payload,
+                                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                    # Whisper transcription of a multi-minute WAV on
+                                    # CPU is slow; give it a generous window.
+                                    timeout=aiohttp.ClientTimeout(total=900.0),
+                                )
+                                _stt_body = await _stt_resp.json()
+                            _stt_detail = (_stt_body or {}).get("detail") or {}
+                            _stt_transcript = _stt_detail.get("transcript") or ""
+                            if _stt_transcript:
+                                exec_data = {
+                                    "status": "SUCCESS",
+                                    "message": f"Transcribed {_stt_path} ({len(_stt_transcript)} chars). Transcript follows.",
+                                    "detail": {
+                                        "transcript": _stt_transcript,
+                                        "source_file": _stt_path,
+                                        "model": _stt_model,
+                                    },
+                                }
+                            else:
+                                exec_data = {
+                                    "status": "ERROR",
+                                    "message": f"STT returned no transcript: {_stt_body}",
+                                }
+                        except Exception as _se:
+                            exec_data = {"status": "ERROR", "message": f"STT transcription failed: {_se}"}
+                            log.warning(f"[AgentLoop] STTRequest exception: {_se!r}")
+                    if exec_data.get("status") != "SUCCESS":
+                        log.warning(f"[AgentLoop] STTRequest result ERROR: {exec_data.get('message', '')}")
+                    else:
+                        log.info(f"[AgentLoop] STTRequest result: {exec_data.get('message', '')}")
                     _skip_post = True
 
                 # RavenBuildToolRequest: let Raven discover an existing tool,
