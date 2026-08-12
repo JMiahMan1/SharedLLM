@@ -182,6 +182,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {
     "securityrequest": "/execute/security",
     "announcementrequest": "/execute/announce",
     "ttsrequest": "/execute/tts",
+    "audiobookregeneraterequest": "/execute/audiobook/regenerate",
     "haservicerequest": "/execute/ha_service",
     "calendarrequest": "/execute/calendar",
     "noterequest": "/execute/note",

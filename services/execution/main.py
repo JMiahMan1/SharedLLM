@@ -102,6 +102,7 @@ from services.execution.schemas import (
     TalkRequest,
     TimerRequest,
     TTSRequest,
+    AudiobookRegenerateRequest,
     TVCastRequest,
     UserContext,
     VideoPlayRequest,
@@ -2617,6 +2618,122 @@ async def transcribe_workspace_audio(request: Request):
     except Exception as e:
         log.error(f"transcribe_workspace transcription failed: {e}")
         return _fail(f"Transcription failed: {e!s}", "stt")
+
+
+@app.post("/execute/audiobook/regenerate", response_model=ExecutionResult)
+async def execute_audiobook_regenerate(req: AudiobookRegenerateRequest):
+    """
+    Regenerates a whole audiobook inside a workspace.
+
+    Given per-chapter narration text files (in concatenation order), each is
+    re-synthesized to a per-day WAV with the current Kokoro TTS engine (which
+    auto-inserts natural pauses after headings/titles, list items, and
+    scripture references), then all WAVs are concatenated with ffmpeg into a
+    single MP3. Returns per-file status plus the final MP3 path.
+    """
+    import subprocess as _sp
+
+    from services.execution.handlers.workspace import _resolve_workspace_info, resolve_safe_path
+
+    if not req.text_files:
+        return _fail("audiobook/regenerate requires at least one 'text_files' entry", "audiobook")
+
+    try:
+        resolved_root, _details = await _resolve_workspace_info(
+            req.workspace_id, req.user_context.model_dump() if req.user_context else None
+        )
+    except Exception as e:
+        log.error(f"audiobook/regenerate workspace resolution failed: {e}")
+        return _fail(f"audiobook/regenerate could not resolve workspace: {e!s}", "audiobook")
+
+    synthesized = []
+    results = []
+    all_ok = True
+    for text_file in req.text_files:
+        try:
+            absolute_path = resolve_safe_path(text_file, resolved_root)
+            if not os.path.exists(absolute_path):
+                results.append({"file": text_file, "status": "FAILURE", "message": "text file not found in workspace"})
+                all_ok = False
+                continue
+            with open(absolute_path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            if not text.strip():
+                results.append({"file": text_file, "status": "FAILURE", "message": "text file is empty"})
+                all_ok = False
+                continue
+            audio_bytes = await _text_to_speech(text, voice=req.voice, storybook=req.storybook)
+            if not audio_bytes:
+                results.append({"file": text_file, "status": "FAILURE", "message": "TTS returned empty audio"})
+                all_ok = False
+                continue
+            wav_name = os.path.splitext(text_file)[0] + ".wav"
+            wav_abs = resolve_safe_path(wav_name, resolved_root)
+            with open(wav_abs, "wb") as f:
+                f.write(audio_bytes)
+            synthesized.append(wav_abs)
+            results.append({
+                "file": text_file,
+                "wav": wav_name,
+                "status": "SUCCESS",
+                "bytes": len(audio_bytes),
+            })
+            log.info(f"[audiobook/regenerate] {text_file} -> {wav_name} ({len(audio_bytes)} bytes)")
+        except Exception as e:
+            log.error(f"audiobook/regenerate synth failed for {text_file}: {e}")
+            results.append({"file": text_file, "status": "FAILURE", "message": f"{e!s}"})
+            all_ok = False
+
+    if not synthesized:
+        return _fail("audiobook/regenerate: no audio was synthesized", "audiobook", {"results": results})
+
+    output_mp3 = req.output_mp3 or "audiobook.mp3"
+    mp3_abs = resolve_safe_path(output_mp3, resolved_root)
+    try:
+        manifest = os.path.join(resolved_root, f".audiobook_manifest_{os.getpid()}.txt")
+        with open(manifest, "w", encoding="utf-8") as f:
+            for wav in synthesized:
+                f.write(f"file '{wav}'\n")
+        _mp = await asyncio.to_thread(
+            _sp.run,
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", manifest,
+             "-c:a", "libmp3lame", "-q:a", "2", "-ar", "44100", mp3_abs],
+            capture_output=True,
+            text=True,
+        )
+        if _mp.returncode != 0:
+            return _fail(
+                f"audiobook/regenerate: ffmpeg concat failed for {output_mp3}: {(_mp.stderr or '')[-500:]}",
+                "audiobook",
+                {"results": results},
+            )
+    except Exception as e:
+        log.error(f"audiobook/regenerate ffmpeg failed: {e}")
+        return _fail(f"audiobook/regenerate: ffmpeg failed: {e!s}", "audiobook", {"results": results})
+    finally:
+        try:
+            if os.path.exists(manifest):
+                os.remove(manifest)
+        except Exception:
+            pass
+
+    mp3_len = os.path.getsize(mp3_abs) if os.path.exists(mp3_abs) else 0
+    detail = {
+        "mp3": output_mp3,
+        "mp3_bytes": mp3_len,
+        "wavs": [{"file": r.get("file"), "wav": r.get("wav"), "bytes": r.get("bytes"), "status": r.get("status")} for r in results],
+    }
+    status = "SUCCESS" if all_ok else "PARTIAL"
+    return ExecutionResult(
+        status=status,
+        message=(
+            f"Audiobook regenerated: {len(synthesized)} WAVs -> {output_mp3} ({mp3_len} bytes)."
+            if all_ok
+            else f"Audiobook regenerated with {len([r for r in results if r.get('status') == 'FAILURE'])} failure(s): {output_mp3} ({mp3_len} bytes)"
+        ),
+        service="audiobook",
+        detail=detail,
+    )
 
 
 # ─── Voice Command Routing ────────────────────────────────────────────────────
