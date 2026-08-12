@@ -25,6 +25,20 @@ def _resolve_action_name(raw_action: str) -> str:
     return action_name
 
 
+def test_sttrequest_is_exact_tool_not_fuzzy_matched():
+    # Regression (mission 14): `sttrequest` was NOT in ALLOWED_TOOLS, so the
+    # Tier-3 fuzzy matcher redirected it to `ttsrequest` (difflib ratio ~0.8),
+    # and transcription calls were posted to the TTS endpoint (which rejects
+    # audio). Once it is in the whitelist the exact-match fast path wins and the
+    # STT handler at lookup_action == "sttrequest" is reached.
+    import difflib
+
+    assert "sttrequest" in ALLOWED_TOOLS
+    assert "ttsrequest" in ALLOWED_TOOLS
+    matches = difflib.get_close_matches("sttrequest", list(ALLOWED_TOOLS), n=1, cutoff=0.6)
+    assert matches == ["sttrequest"], f"sttrequest must resolve exactly, got {matches}"
+
+
 def test_git_verb_resolves_to_gitoperationrequest_not_note_create():
     # Regression: `repo_create` (underscore-stripped to `repocreate`) is NOT in
     # ALLOWED_TOOLS, so the Tier-3 fuzzy matcher used to corrupt it to
