@@ -19,7 +19,14 @@ MAX_TTS_CHUNK_CHARS = 1500  # ~375 tokens — safely under the 510-token cap
 PAUSE_SENTENCE = 0.5  # seconds of silence after . ? !
 PAUSE_SEMI = 0.3      # after ; :
 PAUSE_COMMA = 0.2     # between other chunks
+PAUSE_STRUCTURE = 0.55  # seconds of silence after titles/headers, list items, and references
 SAMPLE_RATE_HZ = 24000
+
+# Internal marker used to flag narrator-structure boundaries (paragraph
+# titles/headers, list items, and scripture references) in the text. It is
+# inserted before normalization and split out again during synthesis, so it is
+# NEVER passed to Kokoro (which would otherwise try to speak it).
+_PAUSE_MARK = "\x02"
 
 # Bible books (with cardinal prefixes like "1 Corinthians") used to expand
 # scripture references into natural narration. Longest-first ordering so
@@ -131,6 +138,7 @@ class KokoroTTSEngine:
         if storybook:
             return await self._generate_storybook(text, voice)
 
+        text = self._mark_structure_pauses(text)
         text = self._normalize_text(text)
         samples, sample_rate = await self._synthesize(text, voice)
         if len(samples) == 0:
@@ -146,18 +154,28 @@ class KokoroTTSEngine:
         a human narrator instead of a run-on stream.
         """
         assert self._kokoro is not None
-        chunks = self._chunk_text(text)
+        # Split on the structure marker: everything before it is one narration
+        # unit (a title, list item, or reference) that ends in a longer beat
+        # (PAUSE_STRUCTURE) before the next unit begins.
+        segments = text.split(_PAUSE_MARK)
         pieces: list[np.ndarray] = []
         sample_rate = SAMPLE_RATE_HZ
-        for i, chunk in enumerate(chunks):
-            samples, sample_rate = await asyncio.to_thread(
-                self._kokoro.create, chunk, voice=voice, speed=1.0, lang="en-us"
-            )
-            pieces.append(samples)
-            if i < len(chunks) - 1:
-                pause = self._pause_between(chunk)
-                if pause > 0:
-                    pieces.append(np.zeros(int(pause * sample_rate), dtype=samples.dtype))
+        for seg_i, segment in enumerate(segments):
+            if not segment.strip():
+                continue
+            chunks = self._chunk_text(segment)
+            for i, chunk in enumerate(chunks):
+                samples, sample_rate = await asyncio.to_thread(
+                    self._kokoro.create, chunk, voice=voice, speed=1.0, lang="en-us"
+                )
+                pieces.append(samples)
+                if i < len(chunks) - 1:
+                    pause = self._pause_between(chunk)
+                    if pause > 0:
+                        pieces.append(np.zeros(int(pause * sample_rate), dtype=samples.dtype))
+            if seg_i < len(segments) - 1:
+                # Explicit structure beat after a title/list-item/reference.
+                pieces.append(np.zeros(int(PAUSE_STRUCTURE * sample_rate), dtype=np.float32))
         if not pieces:
             return np.array([], dtype=np.float32), sample_rate
         return np.concatenate(pieces), sample_rate
@@ -300,6 +318,88 @@ class KokoroTTSEngine:
 
         return text
 
+    def _mark_structure_pauses(self, text: str) -> str:
+        """Insert narrator-structure pause markers around structural units.
+
+        Runs on the RAW text (before normalization) so the original headings,
+        list markup and references are still visible, then inserts _PAUSE_MARK
+        so _synthesize can drop a slightly longer beat after:
+          * paragraph headers / titles  (e.g. "Week 2: Scripture", "Chapter One.")
+          * each item in an enumerated / bulleted list
+          * a scripture reference (e.g. "(Luke 11:1b)")
+        The marker survives normalization untouched and is stripped (never
+        spoken) during synthesis.
+        """
+        # 1) Append a marker after every scripture reference (plus a closing
+        #    paren if present), even inline: "Genesis 1:1 says, ..." reads as
+        #    "Genesis chapter one, verse one [beat] says, ...".
+        text = self._append_ref_markers(text)
+
+        # 2) Line-based structure: titles/headers, enumerated+bulleted lists,
+        #    and indented poetic/centered lines (e.g. the Lord's Prayer block).
+        lines = text.split("\n")
+        out: list[str] = []
+        prev_stripped = ""
+        for line in lines:
+            stripped = line.strip()
+            if not stripped:
+                out.append(line)
+                prev_stripped = ""
+                continue
+
+            is_title = (
+                len(stripped) <= 80
+                and (
+                    re.match(r"^(Chapter|Week|Day|Part|Section|Lesson)\b", stripped, re.I)
+                    or (
+                        not re.search(r"[.!?]\s*$", stripped)
+                        and (not prev_stripped and len(stripped) <= 60)
+                    )
+                )
+            )
+            is_list_item = bool(re.match(r"^\s*(?:\d{1,3}[.)]\s|[-•*]\s)", stripped))
+            is_poem_line = bool(
+                not is_title
+                and not is_list_item
+                and line.startswith((" ", "\t"))
+                and len(stripped) <= 60
+                and not re.search(r"[.!?]\s*$", stripped)
+            )
+
+            if is_title or is_list_item or is_poem_line:
+                out.append(line + _PAUSE_MARK)
+                prev_stripped = stripped
+                continue
+
+            out.append(line)
+            prev_stripped = stripped
+
+        return "\n".join(out)
+
+    def _append_ref_markers(self, text: str) -> str:
+        """Append _PAUSE_MARK after each scripture reference occurrence."""
+        ref_re = self._scripture_ref_re()
+        pieces: list[str] = []
+        last = 0
+        for m in ref_re.finditer(text):
+            pieces.append(text[last:m.end()])
+            last = m.end()
+            # Fold a closing parenthesis into the marked unit so we never leave
+            # a bare ")" fragment behind for Kokoro to synthesize.
+            if last < len(text) and text[last] == ")":
+                pieces.append(text[last])
+                last += 1
+            pieces.append(_PAUSE_MARK)
+        pieces.append(text[last:])
+        return "".join(pieces)
+
+    def _scripture_ref_re(self) -> "re.Pattern[str]":
+        books = "|".join(sorted(BIBLE_BOOKS, key=len, reverse=True))
+        return re.compile(
+            rf"\b({books})\s+(\d{{1,3}})"
+            rf"(?::(\d{{1,3}})(?:[-–—](\d{{1,3}}))?([a-zA-Z]?))?"  # noqa: RUF001
+        )
+
     def _expand_scripture_refs(self, text: str) -> str:
         """Expand Bible references so they read naturally aloud.
 
@@ -310,11 +410,7 @@ class KokoroTTSEngine:
           Psalm 139            -> Psalm chapter 139
           Luke 11:1b           -> Luke chapter 11, verse 1
         """
-        books = "|".join(sorted(BIBLE_BOOKS, key=len, reverse=True))
-        pattern = re.compile(
-            rf"\b({books})\s+(\d{{1,3}})"
-            rf"(?::(\d{{1,3}})(?:[-–—](\d{{1,3}}))?([a-zA-Z]?))?"  # noqa: RUF001
-        )
+        pattern = self._scripture_ref_re()
 
         def _repl(m: re.Match) -> str:
             book = m.group(1)
