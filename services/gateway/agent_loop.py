@@ -544,6 +544,7 @@ ALLOWED_TOOLS = {
     "audiobookshelfrequest", "llminforequest", "contextsearchrequest", "haconfigrequest",
     "entitysearchrequest", "logbookrequest", "executionlogrequest",
     "documentbroadcastrequest", "nightmoderequest", "ttsrequest", "sttrequest", "storagetexttorequest",
+    "audiobookregeneraterequest",
     "ghrequest",
     "ravenrecallrequest",
     "workspaceportexposerequest", "workspace_expose_port", "expose_port", "port_expose",
@@ -3713,7 +3714,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         "Workspace Tools": ["workspacefilereadrequest", "workspacefilewriterequest", "workspacefilepatchrequest", "workspacelintrequest", "workspacesearchrequest", "workspaceshellrequest", "workspacebootstraprequest", "workspacecreaterequest", "workspacesettingsupdaterequest"],
                         "Git Tools": ["gitoperationrequest"],
                         "Storage Tools": ["storagefilereadrequest", "storagefilewriterequest", "storagelistrequest", "storageindexrequest"],
-                        "Media Tools": ["mediaplayrequest", "mediatransportrequest", "mediastatusrequest", "videoplayrequest", "ttsrequest", "sttrequest"],
+                        "Media Tools": ["mediaplayrequest", "mediatransportrequest", "mediastatusrequest", "videoplayrequest", "ttsrequest", "sttrequest", "audiobookregeneraterequest"],
                         "Web Tools": ["websearchrequest", "webreadrequest", "webscraperrequest"],
                         "Docker Tools": ["dockerlogsrequest", "dockercomposerequest"],
                         "HA Tools": ["lightcontrolrequest", "haservicerequest", "climate", "securityrequest", "announcementrequest", "entitysearchrequest", "logbookrequest", "executionlogrequest", "haconfigrequest"],
@@ -3815,6 +3816,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "nightmoderequest": (EXECUTION_SVC, "/execute/composite/night_mode"),
                 "ttsrequest": (EXECUTION_SVC, "/execute/tts"),
                 "sttrequest": (EXECUTION_SVC, "/execute/stt/transcribe_workspace"),
+                "audiobookregeneraterequest": (EXECUTION_SVC, "/execute/audiobook/regenerate"),
                 "storagetexttorequest": (STORAGE_SVC, "/text_to_audio"),
                 "networkdevicescanrequest": (EXECUTION_SVC, "/execute/network_scan"),
                 "ghrequest": (EXECUTION_SVC, "/execute/gh"),
@@ -4478,9 +4480,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                             "patch" if lookup_action == "workspacesettingsupdaterequest" else "post"
                         )
                         # Image edits run an img2img diffusion pass (can take
-                        # 5-10 min on CPU-offloaded SD); every other tool stays on
-                        # the standard 120s ceiling.
-                        _dispatch_timeout = 590.0 if lookup_action == "imageeditrequest" else 120.0
+                        # 5-10 min on CPU-offloaded SD); audiobook regeneration
+                        # re-synthesizes every chapter (min 5-10 min, up to
+                        # ~20 min for a long book). Everything else stays on the
+                        # standard 120s ceiling.
+                        _dispatch_timeout = (
+                            590.0
+                            if lookup_action == "imageeditrequest"
+                            else 1800.0
+                            if lookup_action == "audiobookregeneraterequest"
+                            else 120.0
+                        )
                         resp = await getattr(client, _http_method)(
                             f"{svc_base}{endpoint}",
                             json=payload,

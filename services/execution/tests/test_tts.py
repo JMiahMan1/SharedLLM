@@ -137,3 +137,112 @@ async def test_synthesis_inserts_structure_pause_silence(mocker):
     assert len(out) == 2000 + expected_silence
     # The interior silence samples are all zeros.
     assert np.all(out[1000:1000 + expected_silence] == 0)
+
+
+# ─── audiobook/regenerate endpoint ────────────────────────────────────────────
+
+def _import_audiobook_app():
+    import os
+    os.environ.setdefault("INTERNAL_SECRET", "test-secret")
+    os.environ.setdefault("EXECUTION_EXTERNAL_HOST", "localhost")
+    os.environ.setdefault("DEVICE_REGISTRY_PATH", ":memory:")
+    from services.config import INTERNAL_SECRET
+    from services.execution.main import app
+    return app, INTERNAL_SECRET
+
+
+def test_audiobook_regenerate_requires_text_files(mocker):
+    from fastapi.testclient import TestClient
+
+    app, secret = _import_audiobook_app()
+    client = TestClient(app)
+    resp = client.post(
+        "/execute/audiobook/regenerate",
+        headers={"X-Internal-Secret": secret},
+        json={"user_context": {"user": "testuser", "is_admin": True}, "text_files": []},
+    )
+    # Pydantic min_length=1 rejects an empty list before the handler runs.
+    assert resp.status_code == 422
+
+
+def test_audiobook_regenerate_full_pipeline(mocker, tmp_path):
+    import subprocess as _sp
+
+    from fastapi.testclient import TestClient
+
+    day1 = tmp_path / "scripture_day_01.txt"
+    day2 = tmp_path / "scripture_day_02.txt"
+    day1.write_text("Week 2: Scripture\n\nIn the beginning was the Word.")
+    day2.write_text("Day 1: Introduction\n\nHonor God's Name.")
+
+    app, secret = _import_audiobook_app()
+    client = TestClient(app)
+
+    # Workspace resolution returns the tmp_path as the resolved root.
+    mocker.patch(
+        "services.execution.handlers.workspace._resolve_workspace_info",
+        return_value=(str(tmp_path), {}),
+    )
+    # TTS synthesizes fake-but-valid relative WAV bytes for every chapter.
+    async def fake_tts(text, voice=None, storybook=False):
+        wav = bytes("RIFF" + text[:8], "utf-8")
+        return wav
+
+    mocker.patch("services.execution.main._text_to_speech", side_effect=fake_tts)
+
+    # Fake ffmpeg via subprocess.run: touch the output MP3 instead of encoding.
+    def fake_run(cmd, **kwargs):
+        # cmd ends with the output MP3 path (last argv entry).
+        mp3_target = cmd[-1]
+        with open(mp3_target, "wb") as f:
+            f.write(b"ID3fake")
+        return _sp.CompletedProcess(cmd, 0, "", "")
+
+    # The endpoint runs the ffmpeg subprocess through asyncio.to_thread; run it
+    # synchronously in the test and stub out subprocess.run itself.
+    mocker.patch("asyncio.to_thread", side_effect=lambda fn, *a, **k: fn(*a, **k))
+    mocker.patch("subprocess.run", side_effect=fake_run)
+
+    resp = client.post(
+        "/execute/audiobook/regenerate",
+        headers={"X-Internal-Secret": secret},
+        json={
+            "user_context": {"user": "testuser", "is_admin": True},
+            "workspace_id": "ws-abc",
+            "text_files": ["scripture_day_01.txt", "scripture_day_02.txt"],
+            "output_mp3": "audiobook_scripture.mp3",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "SUCCESS"
+    assert (tmp_path / "scripture_day_01.wav").exists()
+    assert (tmp_path / "scripture_day_02.wav").exists()
+    assert (tmp_path / "audiobook_scripture.mp3").exists()
+    assert body["detail"]["mp3"] == "audiobook_scripture.mp3"
+    assert len(body["detail"]["wavs"]) == 2
+    assert all(w.get("status") == "SUCCESS" for w in body["detail"]["wavs"])
+
+
+def test_audiobook_regenerate_missing_file_reports_failure(mocker, tmp_path):
+    from fastapi.testclient import TestClient
+
+    app, secret = _import_audiobook_app()
+    client = TestClient(app)
+    mocker.patch(
+        "services.execution.handlers.workspace._resolve_workspace_info",
+        return_value=(str(tmp_path), {}),
+    )
+    resp = client.post(
+        "/execute/audiobook/regenerate",
+        headers={"X-Internal-Secret": secret},
+        json={
+            "user_context": {"user": "testuser", "is_admin": True},
+            "workspace_id": "ws-abc",
+            "text_files": ["missing_day_01.txt"],
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "FAILURE"
+    assert "no audio was synthesized" in body["message"]
