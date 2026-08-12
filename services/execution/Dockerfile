@@ -91,4 +91,13 @@ RUN mkdir -p /home/sharedllm/.cache && playwright install chromium && chmod -R a
 # and the fontconfig cache.
 RUN mkdir -p /home/sharedllm && chown -R 1000:1000 /home/sharedllm && chmod -R a+rwX /home/sharedllm
 
+# Pre-download the Whisper base model so realtime STT verification
+# (audiobook audio->text feedback loop, STTRequest tool) works offline at runtime.
+# whisper.base_model download writes to $HOME/.cache/whisper; force the directory
+# into the runtime home and leave it world-writable so uid 1000 can read it.
+RUN python3 -c \
+    "import whisper; _ = whisper.load_model('base')" \
+    && mkdir -p /home/sharedllm/.cache/whisper \
+    && chown -R 1000:1000 /home/sharedllm/.cache && chmod -R a+rwX /home/sharedllm/.cache
+
 CMD ["uvicorn", "services.execution.main:app", "--host", "0.0.0.0", "--port", "8003"]
