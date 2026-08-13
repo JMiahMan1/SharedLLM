@@ -10,6 +10,7 @@ import traceback
 from fastapi import HTTPException
 
 from services.config import INTERNAL_SECRET, WORKSPACE_ROOT, WORKSPACE_RUNTIME_SVC_URL
+from services.execution.document_text import is_text_file
 from services.execution.schemas import (
     ExecutionResult,
     WorkspaceFilePatchRequest,
@@ -372,6 +373,22 @@ async def handle_workspace_read(req: WorkspaceFileReadRequest) -> ExecutionResul
             return _fail_with_discovery(req.path, f"File not found: {req.path}")
         if not os.path.isfile(abs_path):
             return _fail(f"Path is not a file: {req.path}")
+
+        # Non-plain formats (PDF, EPUB, DOCX, RTF, HTML, ...) can't be read as
+        # UTF-8 text; extract the embedded text layer so Raven can work with the
+        # source material (TTSRequest text_file mode, creating narration .txt
+        # files, etc.) directly.
+        if not is_text_file(req.path):
+            try:
+                from services.execution.document_text import extract_document_text
+
+                content_str = await extract_document_text(abs_path)
+                source = "pdf-extract" if req.path.lower().endswith(".pdf") else "document-extract"
+                message = f"Read text from {req.path} ({len(content_str)} chars)"
+                return _ok(message, {"content": content_str, "path": req.path, "source": source, "total_lines": content_str.count("\n") + 1})
+            except Exception as e:
+                log.error(f"Document read failed for {req.path}: {e}")
+                return _fail(f"Failed to extract text from {req.path}: {e}")
 
         with open(abs_path, encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
