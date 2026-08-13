@@ -12,47 +12,54 @@ def mock_write(file, data, samplerate, **kwargs):
 
 mock_sf.write.side_effect = mock_write
 
+from services.config import DEFAULT_TTS_VOICE
 from services.execution.tts import (
     _PAUSE_MARK,
-    PAUSE_STRUCTURE,
     KokoroTTSEngine,
+    _structure_break,
 )
+
+
+def _mock_result(n: int = 1000):
+    import numpy as np
+
+    result = MagicMock()
+    result.audio = np.zeros(n, dtype=np.float32)
+    result.sample_rate = 24000
+    return result
 
 
 @pytest.mark.asyncio
 async def test_kokoro_engine_generate_non_blocking(mocker):
-    # Mock the ONNX Kokoro object
-    mock_kokoro = MagicMock()
-    # Create returns (samples, sample_rate)
-    import numpy as np
-    mock_kokoro.create.return_value = (np.zeros(1000), 24000)
+    # Mock the pykokoro pipeline object
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = _mock_result()
 
     engine = KokoroTTSEngine()
-    engine._kokoro = mock_kokoro
+    engine._pipeline = mock_pipeline
 
-    audio_bytes = await engine.generate("Hello world")
+    audio_bytes = await engine.generate("Hello world is a testing sentence.")
 
     assert len(audio_bytes) > 0
-    mock_kokoro.create.assert_called_once()
+    mock_pipeline.run.assert_called_once()
 
-    # Verify it was called with the normalized text
-    args, kwargs = mock_kokoro.create.call_args
-    assert args[0] == "Hello world"
-    assert kwargs["voice"] == "af_heart"
+    # Verify it was called with the normalized text and the resolved voice
+    args, kwargs = mock_pipeline.run.call_args
+    assert args[0] == "Hello world is a testing sentence."
+    assert kwargs["voice"] == (DEFAULT_TTS_VOICE or "af_heart")
 
 @pytest.mark.asyncio
 async def test_storybook_mode_switches_voices(mocker):
-    mock_kokoro = MagicMock()
-    import numpy as np
-    mock_kokoro.create.return_value = (np.zeros(500), 24000)
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = _mock_result(500)
 
     engine = KokoroTTSEngine()
-    engine._kokoro = mock_kokoro
+    engine._pipeline = mock_pipeline
 
     text = 'She said "Hello" and he said "Hi"'
     await engine.generate(text, storybook=True)
 
-    assert mock_kokoro.create.call_count >= 2
+    assert mock_pipeline.run.call_count >= 2
 
 
 @pytest.mark.parametrize(
@@ -119,24 +126,24 @@ def test_structure_pauses_do_not_mark_body_sentences():
 
 
 @pytest.mark.asyncio
-async def test_synthesis_inserts_structure_pause_silence(mocker):
-    import numpy as np
+async def test_synthesis_maps_structure_marker_to_ssmd_break(mocker):
+    mock_pipeline = MagicMock()
+    mock_pipeline.run.return_value = _mock_result()
 
-    mock_kokoro = MagicMock()
-    sample = np.zeros(1000, dtype=np.float32)
-    mock_kokoro.create.return_value = (sample, 24000)
     engine = KokoroTTSEngine()
-    engine._kokoro = mock_kokoro
+    engine._pipeline = mock_pipeline
 
     out, sr = await engine._synthesize(
         f"Chapter One.{_PAUSE_MARK}In the beginning was the Word.", "am_michael"
     )
-    # Two text segments synthesized plus a PAUSE_STRUCTURE silence in between.
-    assert mock_kokoro.create.call_count == 2
-    expected_silence = int(PAUSE_STRUCTURE * sr)
-    assert len(out) == 2000 + expected_silence
-    # The interior silence samples are all zeros.
-    assert np.all(out[1000:1000 + expected_silence] == 0)
+    # The interior structure marker must be converted to an SSMD break so the
+    # pipeline renders a pause instead of voicing the control character.
+    assert sr == 24000
+    assert len(out) == 1000
+    args, kwargs = mock_pipeline.run.call_args
+    assert _PAUSE_MARK not in args[0]
+    assert _structure_break() in args[0]
+    assert kwargs["voice"] == "am_michael"
 
 
 # ─── audiobook/regenerate endpoint ────────────────────────────────────────────

@@ -13,13 +13,16 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("execution.tts")
 
-# Kokoro ONNX caps input at ~510 tokens. Docket-TTS learned to chunk at sentence
-# boundaries with inter-chunk pauses; the same approach lives here.
-MAX_TTS_CHUNK_CHARS = 1500  # ~375 tokens — safely under the 510-token cap
-PAUSE_SENTENCE = 0.5  # seconds of silence after . ? !
-PAUSE_SEMI = 0.3      # after ; :
-PAUSE_COMMA = 0.2     # between other chunks
-PAUSE_STRUCTURE = 0.55  # seconds of silence after titles/headers, list items, and references
+# pykokoro (Kokoro ONNX) resolves the ~510-token cap internally by auto-splitting
+# phoneme batches and re-joining segments with clause/sentence-level pauses, so
+# no manual chunking with inter-chunk silence is needed here. Pause pacing is
+# delegated to GenerationConfig(pause_mode="auto", ...); explicit structure
+# beats (after titles/headers, list items, and scripture references) are mapped
+# to an SSMD break of PAUSE_STRUCTURE seconds.
+PAUSE_STRUCTURE = 0.55  # seconds of pause after titles/headers, list items, and references
+PAUSE_CLAUSE = 0.3      # pause after clause-boundary splits (; : ,)
+PAUSE_SENTENCE = 0.5    # pause after sentence boundaries (. ? !)
+PAUSE_PARAGRAPH = 1.0   # pause between paragraphs
 SAMPLE_RATE_HZ = 24000
 
 # Internal marker used to flag narrator-structure boundaries (paragraph
@@ -27,6 +30,11 @@ SAMPLE_RATE_HZ = 24000
 # inserted before normalization and split out again during synthesis, so it is
 # NEVER passed to Kokoro (which would otherwise try to speak it).
 _PAUSE_MARK = "\x02"
+
+
+def _structure_break() -> str:
+    """Return the SSMD break token for the narrator-structure beat."""
+    return f"...{int(PAUSE_STRUCTURE * 1000)}ms"
 
 # Bible books (with cardinal prefixes like "1 Corinthians") used to expand
 # scripture references into natural narration. Longest-first ordering so
@@ -103,7 +111,7 @@ class TTSEngine(Protocol):
         ...
 
 class KokoroTTSEngine:
-    """Local-first TTS using Kokoro-v1.0 (ONNX). Includes Storybook Mode logic."""
+    """Local-first TTS using Kokoro-v1.0 (ONNX) via pykokoro. Includes Storybook Mode logic."""
     def __init__(self, model_path: str = "", voices_path: str = ""):
         if not model_path:
             model_path = os.path.join(MODELS_DIR, "kokoro-v1.0.onnx")
@@ -111,16 +119,36 @@ class KokoroTTSEngine:
             voices_path = os.path.join(MODELS_DIR, "voices-v1.0.bin")
         self.model_path = model_path
         self.voices_path = voices_path
-        self._kokoro = None
-        self._voices = None
+        self._pipeline = None
 
     def _ensure_loaded(self):
-        if self._kokoro is None:
-            from kokoro_onnx import Kokoro  # pyright: ignore[reportMissingImports]
+        if self._pipeline is None:
+            from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
             if not os.path.exists(self.model_path):
                 log.error(f"Kokoro model not found at {self.model_path}")
                 raise FileNotFoundError(f"Kokoro model missing: {self.model_path}")
-            self._kokoro = Kokoro(self.model_path, self.voices_path)
+            if not os.path.exists(self.voices_path):
+                log.error(f"Kokoro voices not found at {self.voices_path}")
+                raise FileNotFoundError(f"Kokoro voices missing: {self.voices_path}")
+            config = PipelineConfig(
+                voice=(DEFAULT_TTS_VOICE or "am_michael"),
+                model_path=self.model_path,
+                voices_path=self.voices_path,
+                model_source="github",
+                model_variant="v1.0",
+                model_quality="fp32",
+                provider="cpu",
+                return_trace=False,
+                retain_segment_audio=False,
+                cache_dir=os.path.join(os.path.expanduser("~"), ".cache", "pykokoro"),
+                generation=GenerationConfig(
+                    pause_mode="auto",
+                    pause_clause=PAUSE_CLAUSE,
+                    pause_sentence=PAUSE_SENTENCE,
+                    pause_paragraph=PAUSE_PARAGRAPH,
+                ),
+            )
+            self._pipeline = KokoroPipeline(config)
 
     def list_voices(self) -> list[str]:
         """Returns a list of available voice styles in the current model."""
@@ -146,74 +174,24 @@ class KokoroTTSEngine:
         return self._samples_to_bytes(samples, sample_rate)
 
     async def _synthesize(self, text: str, voice: str) -> tuple[np.ndarray, int]:
-        """Synthesize text in sentence-sized chunks with natural pauses between them.
+        """Synthesize text with the pykokoro pipeline.
 
-        Ported from Docket-TTS: the Kokoro ONNX engine caps input at ~510 tokens,
-        so long texts MUST be split at sentence boundaries and re-joined. Pauses
-        (0.5s after .?!, 0.3s after ;:, 0.2s otherwise) make the result sound like
-        a human narrator instead of a run-on stream.
+        pykokoro auto-splits long inputs at the model's ~510-phoneme cap and
+        re-joins the pieces with clause-level pauses, so long texts no longer
+        need manual chunking with spliced silence. Structured narration beats
+        (titles, list items, scripture references) are inserted as SSMD breaks
+        so they read as deliberate pauses instead of robotic gaps.
         """
-        assert self._kokoro is not None
-        # Split on the structure marker: everything before it is one narration
-        # unit (a title, list item, or reference) that ends in a longer beat
-        # (PAUSE_STRUCTURE) before the next unit begins.
-        segments = text.split(_PAUSE_MARK)
-        pieces: list[np.ndarray] = []
-        sample_rate = SAMPLE_RATE_HZ
-        for seg_i, segment in enumerate(segments):
-            if not segment.strip():
-                continue
-            chunks = self._chunk_text(segment)
-            for i, chunk in enumerate(chunks):
-                samples, sample_rate = await asyncio.to_thread(
-                    self._kokoro.create, chunk, voice=voice, speed=1.0, lang="en-us"
-                )
-                pieces.append(samples)
-                if i < len(chunks) - 1:
-                    pause = self._pause_between(chunk)
-                    if pause > 0:
-                        pieces.append(np.zeros(int(pause * sample_rate), dtype=samples.dtype))
-            if seg_i < len(segments) - 1:
-                # Explicit structure beat after a title/list-item/reference.
-                pieces.append(np.zeros(int(PAUSE_STRUCTURE * sample_rate), dtype=np.float32))
-        if not pieces:
-            return np.array([], dtype=np.float32), sample_rate
-        return np.concatenate(pieces), sample_rate
-
-    @staticmethod
-    def _pause_between(chunk: str) -> float:
-        stripped = chunk.strip()
-        tail = stripped[-1] if stripped else ""
-        if tail in ".?!":
-            return PAUSE_SENTENCE
-        if tail in ";:":
-            return PAUSE_SEMI
-        return PAUSE_COMMA
-
-    @staticmethod
-    def _chunk_text(text: str, max_chars: int = MAX_TTS_CHUNK_CHARS) -> list[str]:
-        text = text.strip()
-        if not text:
-            return []
-        sentences = re.split(r"(?<=[.!?;:])\s+", text)
-        chunks: list[str] = []
-        current = ""
-        for sent in sentences:
-            if len(sent) > max_chars:
-                if current:
-                    chunks.append(current)
-                    current = ""
-                for i in range(0, len(sent), max_chars):
-                    chunks.append(sent[i:i + max_chars])
-                continue
-            if current and len(current) + 1 + len(sent) > max_chars:
-                chunks.append(current)
-                current = sent
-            else:
-                current = f"{current} {sent}" if current else sent
-        if current:
-            chunks.append(current)
-        return chunks
+        assert self._pipeline is not None
+        # Map the internal structure marker to an explicit SSMD break so the
+        # beat survives the pipeline (it would otherwise be phonemized).
+        text = text.replace(_PAUSE_MARK, _structure_break())
+        result = await asyncio.to_thread(self._pipeline.run, text, voice=voice)
+        samples = np.asarray(result.audio, dtype=np.float32)
+        sample_rate = int(result.sample_rate)
+        if len(samples) == 0:
+            return np.array([], dtype=np.float32), SAMPLE_RATE_HZ
+        return samples, sample_rate
 
 
     async def _generate_storybook(self, text: str, primary_voice: str) -> bytes:
@@ -232,15 +210,16 @@ class KokoroTTSEngine:
                 voice = "am_adam" if gender == "male" else "af_bella"
 
             normalized = self._normalize_text(content)
-            if not normalized.strip(): continue
+            if not normalized.strip():
+                continue
 
-            assert self._kokoro is not None
-            samples, last_sample_rate = await asyncio.to_thread(
-                self._kokoro.create, normalized, voice=voice, speed=1.0, lang="en-us"
-            )
-            all_samples.append(samples)
+            assert self._pipeline is not None
+            result = await asyncio.to_thread(self._pipeline.run, normalized, voice=voice)
+            all_samples.append(np.asarray(result.audio, dtype=np.float32))
+            last_sample_rate = int(result.sample_rate)
 
-        if not all_samples: return b""
+        if not all_samples:
+            return b""
         combined = np.concatenate(all_samples)
         return self._samples_to_bytes(combined, last_sample_rate)
 
@@ -249,7 +228,8 @@ class KokoroTTSEngine:
         parts = re.split(r'("[^"]+")', text)
         result = []
         for p in parts:
-            if not p.strip(): continue
+            if not p.strip():
+                continue
             is_dialogue = p.startswith('"') and p.endswith('"')
             result.append((p.strip('"'), is_dialogue))
         return result
