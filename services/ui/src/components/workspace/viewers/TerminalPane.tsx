@@ -139,6 +139,17 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     term.loadAddon(fit);
     term.open(ref.current);
 
+    // Grab keyboard focus so keystrokes reach the terminal immediately.
+    // Without this, freshly-mounted/opened terminals swallow keys until
+    // the user clicks inside them.
+    const focusTerminal = () => {
+      try {
+        term.focus();
+      } catch {
+        /* not attached yet */
+      }
+    };
+
     // Attach context menu handler to terminal element
     term.element!.addEventListener('contextmenu', handleContextMenu);
 
@@ -159,8 +170,12 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     };
 
     // Initial fit after DOM paint
-    requestAnimationFrame(() => fitTerminal());
+    requestAnimationFrame(() => {
+      fitTerminal();
+      focusTerminal();
+    });
     termRef.current = term;
+    focusTerminal();
 
     // Build the WebSocket connection URL
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -176,6 +191,7 @@ export function TerminalPane({ workspace }: TerminalPaneProps) {
     ws.onopen = () => {
       term.writeln('\x1b[32mInteractive terminal session established.\x1b[0m\r\n');
       fitTerminal();
+      focusTerminal();
     };
 
     ws.onmessage = async (event) => {
