@@ -2633,6 +2633,7 @@ async def execute_audiobook_regenerate(req: AudiobookRegenerateRequest):
     """
     import subprocess as _sp
 
+    from services.execution.document_text import extract_document_text, is_text_file
     from services.execution.handlers.workspace import _resolve_workspace_info, resolve_safe_path
 
     if not req.text_files:
@@ -2656,8 +2657,19 @@ async def execute_audiobook_regenerate(req: AudiobookRegenerateRequest):
                 results.append({"file": text_file, "status": "FAILURE", "message": "text file not found in workspace"})
                 all_ok = False
                 continue
-            with open(absolute_path, encoding="utf-8", errors="replace") as f:
-                text = f.read()
+            if is_text_file(text_file):
+                with open(absolute_path, encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            else:
+                # PDF / EPUB / DOCX / HTML source: extract the embedded text
+                # layer before synthesizing (Raven workspaces store the source
+                # material as documents, not pre-extracted .txt narration).
+                try:
+                    text = await extract_document_text(absolute_path)
+                except Exception as extract_err:
+                    results.append({"file": text_file, "status": "FAILURE", "message": f"document text extraction failed: {extract_err}"})
+                    all_ok = False
+                    continue
             if not text.strip():
                 results.append({"file": text_file, "status": "FAILURE", "message": "text file is empty"})
                 all_ok = False

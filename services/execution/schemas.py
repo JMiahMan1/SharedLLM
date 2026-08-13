@@ -782,11 +782,18 @@ class SystemLearningRequest(BaseRequest):
 
 class TTSRequest(BaseRequest):
     """
-    Converts text to speech using the local Kokoro engine or Edge-TTS.
+    Converts text to speech using the local Kokoro engine.
     Set storybook=True for multi-speaker narration with dialogue detection.
+
+    The engine auto-inserts natural pauses after headings/titles, list items,
+    and scripture references, and expands scripture references / years /
+    small numbers into natural spoken English. You can also pass SSMD markup
+    (Speech Synthesis Markdown) directly — explicit breaks like ``...p``,
+    ``...500ms``, say-as annotations ``[123]{as="cardinal"}``, and voice-bound
+    blocks ``<div voice="...">`` are rendered verbatim by the engine.
     """
     user_context: UserContext
-    text: str = Field(..., description="The text to convert to speech")
+    text: str = Field(..., description="The text (or SSMD-marked text) to convert to speech")
     voice: str | None = Field("af_heart", description="Voice ID (e.g. af_heart, am_adam, en-US-GuyNeural)")
     storybook: bool = Field(False, description="Enable multi-speaker narration for stories/dialogue")
     workspace_id: str | None = Field(None, description="Workspace where the generated audio file should be saved")
@@ -808,7 +815,8 @@ class AudiobookRegenerateRequest(BaseRequest):
     """
     Regenerates narration audio for a whole audiobook within a workspace.
 
-    Given a set of per-chapter text files (e.g. ``scripture_day_01.txt`` ...),
+    Given a set of per-chapter source files (``scripture_day_01.txt`` ... or
+    workspaces where the source material is the PDF/EPUB/DOCX/HTML itself),
     re-synthesizes each to a ``.wav`` with the Kokoro engine using the current
     TTS engine (which auto-inserts natural pauses after headings/titles, list
     items, and scripture references), then concatenates the WAVs in the given
@@ -816,7 +824,7 @@ class AudiobookRegenerateRequest(BaseRequest):
     """
     user_context: UserContext
     workspace_id: str | None = Field(None, description="Workspace where the text files live and audio should be saved")
-    text_files: list[str] = Field(..., min_length=1, description="Workspace-relative paths of the per-chapter narration text files, in concatenation order")
+    text_files: list[str] = Field(..., min_length=1, description="Workspace-relative paths of the per-chapter narration text files (or PDF/EPUB/DOCX source documents), in concatenation order")
     voice: str | None = Field("af_heart", description="Voice ID (e.g. af_heart, am_adam, en-US-GuyNeural)")
     storybook: bool = Field(False, description="Enable multi-speaker narration for stories/dialogue")
     output_mp3: str | None = Field(None, description="Workspace-relative output MP3 filename (e.g. 'audiobook_scripture.mp3'). Defaults to 'audiobook.mp3'.")

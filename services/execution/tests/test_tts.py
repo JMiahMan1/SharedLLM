@@ -16,6 +16,7 @@ from services.config import DEFAULT_TTS_VOICE
 from services.execution.tts import (
     _PAUSE_MARK,
     KokoroTTSEngine,
+    _has_ssmd_markup,
     _structure_break,
 )
 
@@ -123,6 +124,57 @@ def test_structure_pauses_do_not_mark_body_sentences():
     engine = KokoroTTSEngine.__new__(KokoroTTSEngine)
     body = "Scripture is a term used to primarily reference the Bible. There are different versions."
     assert _PAUSE_MARK not in engine._mark_structure_pauses(body)
+
+
+# ─── SSMD awareness ───────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Welcome! ...p This is a long pause.",
+        "It is ...500ms time to breathe.",
+        "Use ...c a comma pause here.",
+        "And ...s a sentence pause.",
+        "...w weak ...n none.",
+        "[123]{as='cardinal'} apples",
+        '<div voice="af_sarah">Hello there.</div>',
+    ],
+)
+def test_has_ssmd_markup_detects_constructs(text):
+    assert _has_ssmd_markup(text), f"expected SSMD markup detection for: {text!r}"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Just a plain sentence about the Bible.",
+        "There are 66 books in the Bible.",
+        "Chapter One. In the beginning was the Word.",
+        "This closes with a real ellipsis ...",
+    ],
+)
+def test_has_ssmd_markup_ignores_plain_text(text):
+    # A bare "..." is phonemized normally by pykokoro and must NOT be treated
+    # as an SSMD break.
+    assert not _has_ssmd_markup(text), f"expected no SSMD detection for: {text!r}"
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        # SSMD breaks, say-as annotations, and voice-bound blocks survive the
+        # deterministic normalization regex passes verbatim.
+        ("It took ...500ms to sync.", "It took ...500ms to sync."),
+        ("[123]{as='cardinal'} apples", "[123]{as='cardinal'} apples"),
+        ("John 3:16 ...p says", "John chapter three, verse sixteen ...p says"),
+        ('<div voice="am_michael">There are 66 books.</div>',
+         '<div voice="am_michael">There are 66 books.</div>'),
+        ("Chapter 5 ...p I am Klaus.", "Chapter five ...p I am Klaus."),
+    ],
+)
+def test_normalize_preserves_ssmd_markup(raw, expected):
+    engine = KokoroTTSEngine.__new__(KokoroTTSEngine)
+    assert engine._normalize_text(raw) == expected
 
 
 @pytest.mark.asyncio
@@ -253,3 +305,63 @@ def test_audiobook_regenerate_missing_file_reports_failure(mocker, tmp_path):
     body = resp.json()
     assert body["status"] == "FAILURE"
     assert "no audio was synthesized" in body["message"]
+
+
+def test_audiobook_regenerate_accepts_pdf_source(mocker, tmp_path):
+    """A PDF source chapter is text-extracted before synthesis."""
+    import subprocess as _sp
+
+    from fastapi.testclient import TestClient
+
+    # A fake PDF in the workspace.
+    pdf = tmp_path / "Week 2 - Scripture.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+
+    app, secret = _import_audiobook_app()
+    client = TestClient(app)
+
+    mocker.patch(
+        "services.execution.handlers.workspace._resolve_workspace_info",
+        return_value=(str(tmp_path), {}),
+    )
+    mocker.patch("subprocess.run", side_effect=lambda cmd, **kw: _sp.CompletedProcess(cmd, 0, "", ""))
+
+    async def fake_extract(path):
+        return "Week 2: Scripture\n\nJohn 3:16 says..."
+
+    mock_extract = mocker.patch(
+        "services.execution.document_text.extract_document_text",
+        side_effect=fake_extract,
+    )
+
+    async def fake_tts(text, voice=None, storybook=False):
+        return bytes("RIFF" + text[:8], "utf-8")
+
+    mocker.patch("services.execution.main._text_to_speech", side_effect=fake_tts)
+
+    def fake_run(cmd, **kwargs):
+        mp3_target = cmd[-1]
+        with open(mp3_target, "wb") as f:
+            f.write(b"ID3fake")
+        return _sp.CompletedProcess(cmd, 0, "", "")
+
+    mocker.patch("asyncio.to_thread", side_effect=lambda fn, *a, **k: fn(*a, **k))
+    mocker.patch("subprocess.run", side_effect=fake_run)
+
+    resp = client.post(
+        "/execute/audiobook/regenerate",
+        headers={"X-Internal-Secret": secret},
+        json={
+            "user_context": {"user": "testuser", "is_admin": True},
+            "workspace_id": "ws-abc",
+            "text_files": ["Week 2 - Scripture.pdf"],
+            "output_mp3": "audiobook_scripture.mp3",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "SUCCESS"
+    assert (tmp_path / "Week 2 - Scripture.wav").exists()
+    assert (tmp_path / "audiobook_scripture.mp3").exists()
+    # The extracted text must reach the TTS engine.
+    mock_extract.assert_called_once()

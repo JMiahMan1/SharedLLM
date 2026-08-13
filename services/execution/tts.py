@@ -31,10 +31,61 @@ SAMPLE_RATE_HZ = 24000
 # NEVER passed to Kokoro (which would otherwise try to speak it).
 _PAUSE_MARK = "\x02"
 
+# SSMD (Speech Synthesis Markdown) is the pause/emphasis markup language
+# pykokoro renders natively — break tokens like ``...p`` (paragraph pause),
+# ``...500ms`` (custom duration), say-as annotations ``[123]{as="cardinal"}``,
+# and voice-bound ``<div voice="...">`` blocks. Our deterministic scripture/
+# year/number normalization runs as regex passes over the RAW text, so any of
+# those constructs would otherwise be mangled (the digits inside say-as tags,
+# for example). We shield SSMD constructs with placeholder tokens before
+# normalizing and restore them afterwards.
+_SSMD_SHUFFLE_START = "\x07"
+_SSMD_SHUFFLE_END = "\x08"
+_SSMD_ANNOTATION_RE = re.compile(r"\[(?:[^\[\]]*)\]\{[^{}]*\}")
+_SSMD_DIV_RE = re.compile(r"<div\b[^>]*>.*?</div>", re.DOTALL)
+
 
 def _structure_break() -> str:
     """Return the SSMD break token for the narrator-structure beat."""
     return f"...{int(PAUSE_STRUCTURE * 1000)}ms"
+
+
+_SSMD_BREAK_RE = re.compile(r"\.\.\.(?:\d+(?:ms|s)|[nwcsp])")
+
+
+def _has_ssmd_markup(text: str) -> bool:
+    """Return True when the text already contains SSMD markup (breaks, say-as,
+    or voice-bound blocks) that pykokoro will render directly."""
+    return bool(_SSMD_BREAK_RE.search(text) or _SSMD_ANNOTATION_RE.search(text) or _SSMD_DIV_RE.search(text))
+
+
+def _shield_ssmd(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """Replace SSMD constructs with placeholder tokens so the deterministic
+    normalization passes cannot mangle them.
+
+    Returns ``(shielded_text, replacements)`` where each replacement is a
+    ``(placeholder, original)`` pair that ``_unshield_ssmd`` restores.
+    """
+    replacements: list[tuple[str, str]] = []
+
+    def _repl(m: re.Match) -> str:
+        placeholder = f"{_SSMD_SHUFFLE_START}ssmd{len(replacements)}{_SSMD_SHUFFLE_END}"
+        replacements.append((placeholder, m.group(0)))
+        return placeholder
+
+    # Voice-bound <div> blocks first (they can span lines), then inline say-as
+    # annotations, then break tokens.
+    text = _SSMD_DIV_RE.sub(_repl, text)
+    text = _SSMD_ANNOTATION_RE.sub(_repl, text)
+    text = _SSMD_BREAK_RE.sub(_repl, text)
+    return text, replacements
+
+
+def _unshield_ssmd(text: str, replacements: list[tuple[str, str]]) -> str:
+    """Restore the original SSMD constructs after normalization ran."""
+    for placeholder, original in replacements:
+        text = text.replace(placeholder, original)
+    return text
 
 # Bible books (with cardinal prefixes like "1 Corinthians") used to expand
 # scripture references into natural narration. Longest-first ordering so
@@ -246,9 +297,19 @@ class KokoroTTSEngine:
         return "male" if m_count > f_count else "female"
 
     def _normalize_text(self, text: str) -> str:
-        """Robust normalization for high-quality TTS. Ported/expanded from Docket-TTS."""
-        # Common Abbreviations
-        replacements = {
+        """Robust normalization for high-quality TTS. Ported/expanded from Docket-TTS.
+
+        SSMD constructs (breaks, say-as annotations, voice-bound blocks) are
+        shielded with placeholder tokens first so the regex passes below cannot
+        mangle their digits or bindings, then restored verbatim before return.
+        Plain narrative text moves through unchanged, and scripture references /
+        years / small numbers are still expanded for natural speech.
+        """
+        # Shield SSMD constructs so any pre-existing markup survives untouched.
+        shielded, replacements = _shield_ssmd(text)
+
+        # Common Abbreviations + Roman Numerals (Simple cases for chapters)
+        abbr_map = {
             r"\bDr\.\b": "Doctor",
             r"\bMr\.\b": "Mister",
             r"\bMrs\.\b": "Missus",
@@ -268,10 +329,6 @@ class KokoroTTSEngine:
             r"\bvs\.\b": "versus",
             r"\betc\.\b": "et cetera",
             r"\bapprox\.\b": "approximately",
-        }
-
-        # Roman Numerals (Simple cases for chapters)
-        roman_map = {
             r"\bChapter I\b": "Chapter 1",
             r"\bChapter II\b": "Chapter 2",
             r"\bChapter III\b": "Chapter 3",
@@ -283,20 +340,18 @@ class KokoroTTSEngine:
             r"\bChapter IX\b": "Chapter 9",
             r"\bChapter X\b": "Chapter 10",
         }
-        replacements.update(roman_map)
-
-        for pattern, replacement in replacements.items():
+        for pattern, replacement in abbr_map.items():
             # Remove trailing \b because the period already acts as a boundary
             # and \b after a period won't match if followed by a space.
             pattern = pattern.rstrip(r"\b")
-            text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+            shielded = re.sub(pattern, replacement, shielded, flags=re.IGNORECASE)
 
         # Scripture references, years, then remaining small numbers.
-        text = self._expand_scripture_refs(text)
-        text = self._expand_years(text)
-        text = self._expand_small_numbers(text)
+        shielded = self._expand_scripture_refs(shielded)
+        shielded = self._expand_years(shielded)
+        shielded = self._expand_small_numbers(shielded)
 
-        return text
+        return _unshield_ssmd(shielded, replacements)
 
     def _mark_structure_pauses(self, text: str) -> str:
         """Insert narrator-structure pause markers around structural units.

@@ -346,7 +346,7 @@ _PROTOCOL_LESSONS: list[dict] = [
     {
         "id": "lesson-proto-media",
         "topic": "Raven scenario: media and audio creation",
-        "rule": "Media creation: to generate speech use TTSRequest — it converts text to speech locally (Kokoro) and SAVES the audio to the workspace automatically when you include a relative_path (e.g. 'narration.wav') AND workspace_id; it returns the saved path. Do NOT pip-install or script external TTS libraries (gTTS/espeak) — TTSRequest is the intended tool. StorageTextToAudioRequest converts a Nextcloud text file to audio; ffmpeg is available for audio format conversion and trimming. For image/media generation, use the text-to-image tool if available. Always mention what format the output is in.",
+        "rule": "Media creation: to generate speech use TTSRequest — it converts text to speech locally (Kokoro) and SAVES the audio to the workspace automatically when you include a relative_path (e.g. 'narration.wav') AND workspace_id; it returns the saved path. You can pass raw text, a workspace text file via text_file, OR a workspace PDF/EPUB/DOCX (its text layer is extracted automatically). The engine reads Bible verses (John 3:16 -> 'John chapter 3, verse 16'), years, and small numbers naturally and accepts SSMD markup for pause control (e.g. '...p' paragraph pause, '...500ms' custom). Do NOT pip-install or script external TTS libraries (gTTS/espeak) — TTSRequest is the intended tool. StorageTextToAudioRequest converts a Nextcloud text file to audio; ffmpeg is available for audio format conversion and trimming. For image/media generation, use the text-to-image tool if available. Always mention what format the output is in.",
         "tags": ["protocol", "media", "audio", "tts"],
     },
     {
