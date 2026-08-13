@@ -15,7 +15,7 @@ playwright
 Pillow>=10.0.0
 html2text
 docker>=7.0.0
-kokoro-onnx
+pykokoro[cpu]
 soundfile
 yt-dlp
 aiosqlite>=0.20.0

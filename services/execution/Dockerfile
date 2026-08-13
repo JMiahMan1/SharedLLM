@@ -9,6 +9,9 @@ ENV SERVICE_NAME=${SERVICE_NAME}
 WORKDIR /app
 ENV PYTHONPATH=/app
 COPY . .
+# TTS runtime: pykokoro (Kokoro ONNX) replaces the legacy kokoro-onnx engine.
+# Installed explicitly here because the shared base image still ships kokoro-onnx.
+RUN pip install --no-cache-dir "pykokoro[cpu]"
 EXPOSE 8003
 ENV PYTHONUNBUFFERED=1
 
