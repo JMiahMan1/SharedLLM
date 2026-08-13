@@ -1113,6 +1113,33 @@ def _next_batch_step(pending_batch: list[dict]) -> tuple[bool, dict | None]:
     return False, None
 
 
+def compose_timeout_partial_result(
+    successful_tool_calls: int,
+    action_log: list[str],
+    written_files: set[str],
+    verified_files: set[str],
+    max_steps: int = 8,
+) -> str:
+    """Build a meaningful partial-result summary when a mission hard-times-out.
+
+    The raw final model response at timeout may be an internal batch-continuation
+    placeholder ("[batch] <tool>") or empty — neither tells the user what actually
+    got done. Compose a readable summary from the real progress signals the loop
+    tracks: verified/written workspace artifacts and the recent action log.
+    """
+    artifacts = sorted(verified_files | written_files)
+    steps = (
+        [ln for ln in action_log[-max_steps:] if ln.strip() and not ln.strip().startswith("ITERATION")]
+        if action_log else []
+    )
+    parts = [f"{successful_tool_calls} tool call(s) completed across {len(action_log)} logged step(s)."]
+    if artifacts:
+        parts.append("Produced artifacts: " + ", ".join(a[:120] for a in artifacts[:8]))
+    if steps:
+        parts.append("Recent actions:\n" + "\n".join(f"- {s[:200]}" for s in steps))
+    return "\n".join(parts)
+
+
 def _repair_json_control_chars(text: str) -> str:
     """Escape raw newlines/tabs/carriage-returns that leaked inside JSON string
     values so ``json.loads`` can parse otherwise-valid tool-call payloads.
@@ -3064,7 +3091,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
         elapsed_total = iter_start - loop_start
         if elapsed_total > raven_max_total:
             log.error(f"[AgentLoop] HARD TIMEOUT after {elapsed_total:.0f}s at iteration {iter_num}")
-            ans = f"ERROR: Raven job exceeded time limit of {raven_max_total}s. Partial result: {ans or 'No output yet'}"
+            # Surface what actually got done. The raw `ans` may hold an internal
+            # batch-continuation placeholder ("[batch] <tool>") or be empty, which
+            # is useless to the user — compose a meaningful partial result from the
+            # action log and any verified workspace artifacts instead.
+            _partial_result = compose_timeout_partial_result(
+                successful_tool_calls, action_log, _written_files, _verified_files
+            )
+            ans = (
+                f"ERROR: Raven job exceeded time limit of {raven_max_total}s. "
+                f"Partial result: {_partial_result}"
+            )
             await _clear_checkpoint()
             break
 
@@ -4481,13 +4518,17 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         )
                         # Image edits run an img2img diffusion pass (can take
                         # 5-10 min on CPU-offloaded SD); audiobook regeneration
-                        # re-synthesizes every chapter (min 5-10 min, up to
-                        # ~20 min for a long book). Everything else stays on the
-                        # standard 120s ceiling.
+                        # re-synthesizes every chapter (up to ~60 min for a long
+                        # book on CPU Kokoro). Dispatch timeouts MUST exceed the
+                        # actual synth time: a spurious client-side timeout while
+                        # the exec service keeps working makes the model believe
+                        # the job failed, so it re-dispatches the identical tool
+                        # and burns the whole mission budget redundantly.
+                        # Everything else stays on the standard 120s ceiling.
                         _dispatch_timeout = (
                             590.0
                             if lookup_action == "imageeditrequest"
-                            else 1800.0
+                            else 5400.0
                             if lookup_action == "audiobookregeneraterequest"
                             else 120.0
                         )

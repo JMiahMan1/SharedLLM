@@ -5,11 +5,46 @@ from services.gateway.agent_loop import (
     _next_batch_step,
     action_signature,
     build_adaptive_guidance,
+    compose_timeout_partial_result,
     extract_action_batch,
     guidance_branch,
     is_verification_action,
     outcome_digest,
 )
+
+
+def test_timeout_partial_result_surfaces_real_progress_not_batch_placeholder():
+    """Regression: a hard-timeout mission reported 'Partial result: [batch]
+    TTSRequest' — the internal batch-continuation placeholder — because the raw
+    model response was used directly. The timeout partial result must instead
+    summarize what was actually accomplished (tool calls, artifacts, steps).
+    """
+    written = {"audiobook.mp3", "pray_day_00.wav"}
+    verified = {"audiobook.mp3"}
+    log = [
+        "Step 3: audiobookregeneraterequest -> Success",
+        "ITERATION 4: this is an internal nudge, not a result",
+        "Step 4: ttsrequest -> Success",
+    ]
+    summary = compose_timeout_partial_result(2, log, written, verified)
+
+    assert "[batch] TTSRequest" not in summary
+    assert "2 tool call(s) completed across 3 logged step(s)" in summary
+    assert "audiobook.mp3" in summary
+    assert "pray_day_00.wav" in summary
+    # Action-log nudges must be excluded from the user-facing summary.
+    assert "internal nudge" not in summary
+    assert "audiobookregeneraterequest -> Success" in summary
+
+
+def test_timeout_partial_result_empty_state():
+    """Empty mission state should still yield a readable, non-crashy summary."""
+    summary = compose_timeout_partial_result(0, [], set(), set())
+    assert "0 tool call(s) completed" in summary
+
+    # Only nudge lines in the log -> no 'Recent actions' filler.
+    summary2 = compose_timeout_partial_result(0, ["ITERATION 2: nudge"], set(), set())
+    assert "Recent actions:" not in summary2
 
 
 def test_ollama_sock_read_not_capped_at_60_for_large_context_prefill():
