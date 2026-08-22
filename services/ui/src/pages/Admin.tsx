@@ -48,15 +48,17 @@ import HelpTooltip from '../components/ui/HelpTooltip';
 import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
 import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
+import HardwarePanel from '../components/settings/HardwarePanel';
 import RavenOpsPanel from '../components/settings/RavenOpsPanel';
 import DnsManagementPanel from '../components/settings/DnsManagementPanel';
 import TelemetryAdminPanel from '../components/settings/TelemetryAdminPanel';
 
-type AdminTab = 'users' | 'groups' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database' | 'services';
+type AdminTab = 'users' | 'groups' | 'hardware' | 'telemetry' | 'intercom' | 'raven' | 'settings' | 'database' | 'services';
 
 const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string }[] = [
   { id: 'users', label: 'Users & Devices', icon: Shield, path: '/admin/users' },
   { id: 'groups', label: 'Device Groups', icon: Layers, path: '/admin/groups' },
+  { id: 'hardware', label: 'Hardware', icon: Cpu, path: '/admin/hardware' },
   { id: 'telemetry', label: 'Telemetry', icon: Activity, path: '/admin/monitor' },
   { id: 'intercom', label: 'Intercom', icon: Phone, path: '/admin/intercom' },
   { id: 'raven', label: 'Raven Ops', icon: ShieldAlert, path: '/admin/ops' },
@@ -68,6 +70,7 @@ const tabs: { id: AdminTab; label: string; icon: React.ElementType; path: string
 const adminTabFromPathname = (pathname: string): AdminTab => {
   if (pathname.startsWith('/admin/ops')) return 'raven';
   if (pathname.startsWith('/admin/groups')) return 'groups';
+  if (pathname.startsWith('/admin/hardware')) return 'hardware';
   if (pathname.startsWith('/admin/monitor')) return 'telemetry';
   if (pathname.startsWith('/admin/integrations')) return 'settings';
   if (pathname.startsWith('/admin/sounds')) return 'database';
@@ -1352,6 +1355,21 @@ const Admin = () => {
       {activeTab === 'raven' && (
         <section className="glass-panel p-8 border-red-500/20">
           <RavenOpsPanel />
+        </section>
+      )}
+
+      {activeTab === 'hardware' && (
+        <section className="glass-panel p-8 border-emerald-500/20 space-y-6">
+          <div className="flex items-center gap-3">
+            <Cpu size={24} className="text-emerald-400" />
+            <div>
+              <h3 className="text-xl font-bold text-white">Hardware Registry</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Unified hardware management: Home Assistant first, direct ESPHome fallback.
+              </p>
+            </div>
+          </div>
+          <HardwarePanel />
         </section>
       )}
 

@@ -128,6 +128,15 @@ export interface GlobalSetting {
   description?: string;
 }
 
+export interface EsphomeDevice {
+  name: string;
+  host: string;
+  port?: number;
+  noise_psk?: string;
+  /** Optional HA entity (e.g. light.office_light) this device mirrors for unified routing */
+  ha_entity_id?: string;
+}
+
 export interface SearchResult {
   answer?: string;
   files?: Array<{ name: string; path: string }>;
