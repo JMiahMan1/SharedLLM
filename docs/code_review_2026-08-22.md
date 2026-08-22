@@ -43,14 +43,14 @@ Talks to: Identity (auth/settings/missions), Execution (all tools), RAG, Storage
 Workspace Runtime, Control Plane, Redis, MA/ABS/HA, Ollama/OpenRouter.
 Users/UI reach it through Caddy for nearly all `/api/*`, `/v1/*`, websockets.
 
-### HIGH
+### Gateway — HIGH
 - **G1 BUG/AUTHZ** Mission control has no ownership check — any authenticated user can kill/cancel/pause/refine/delete anyone's missions (`main.py:5740-5743` and same pattern :5800, :5856, :5879, :5905, :5982).
 - **G2 BUG/AUTH** Mission stream WebSocket accepts connections without a token (`token: str = ""` with no else-rejection, `main.py:6094-6110`) then replays full mission history — contrast terminal WS which correctly rejects (:8469-8473).
 - ~~G3 BUG Chat streaming race~~ **RETRACTED after verification**: `LRANGE` then `ltrim(key, len(chunks), -1)` (`messaging.py:199-208`) keeps everything `LRANGE` did not see, so chunks the producer `RPUSH`es between the two calls survive for the next poll. For the single-consumer drain used here, no tokens are lost. Empirically proven safe by test (`test_g3_lrange_ltrim_drain_is_safe_for_single_consumer`). Only cosmetic issue: the misleading `# Atomic pop all` comment.
 - **G4 GAP** Chat history dead in main pipeline: `update_history` only called in time/date + fast-path branches; queued-job path never persists; Tier 2 runs with `short_term = []` placeholder (`orchestrator.py:293`); `extract_and_store_user_facts` has zero callers.
 - **G5 DESIGN** All inference serialized behind Raven: worker claims jobs serially (`background_worker.py:271-276`); TIER2_SEMAPHORE(3)/TIER3_LOCK are decorative; one Raven mission head-of-line-blocks every chat job up to its wall-clock cap.
 
-### MEDIUM
+### Gateway — MEDIUM
 - **G6 BUG** Streaming retry re-emits already-streamed content: `buf = ""` reset per attempt but partial chunks already delivered via callback (`agent_loop.py:479-518`) → duplicated SSE text.
 - **G7 BUG** Job loss → silent truncation (stream gen breaks with no done/[DONE], `main.py:3160-3207`) or bogus "queued" 202 after TTL expiry (non-stream path :3215-3229; TTL 3600 s).
 - **G8 BUG** FastPath never checks exec HTTP status → failures reported as "Action completed." (`main.py:2966-2968`); non-JSON error escapes to global handler. Contrast proper formatting in orchestrator.py:790-792.
@@ -64,7 +64,7 @@ Users/UI reach it through Caddy for nearly all `/api/*`, `/v1/*`, websockets.
 - **G16 PERF/BLOCKING** Sync redis client used in async paths: history.py (lrange/rpush/ltrim) and cache.py get/set called from chat fast path & entity enrichment → event-loop stalls under Redis latency (messaging/agent_loop correctly use redis.asyncio).
 - **G17 PERF/DESIGN** Uncached per-chat threshold fetch hits Identity every request (5 s timeout, no TTL) and mutates shared matcher state (`main.py:2864-2868`, :224-238) despite SETTINGS_CACHE_TTL infra existing.
 
-### LOW
+### Gateway — LOW
 - **G18 DEAD** ~540-line duplicate `AgentLoop` in main.py:2209-2747 with hardcoded mission residue ("IMMEDIATELY apply the WorkspaceFilePatchRequest for get_collection_docs", :2235); `state_machine.py` unreferenced; INFERENCE_LOCK only used inside the dead function.
 - **G19 DESIGN** Two divergent `OllamaProvider`s: llm_providers.py returns errors as content ("[PROVIDER ERROR: …]", :177/:204) while agent_loop.py raises RuntimeError (:432/:495) — Tier 2 can treat error strings as assistant answers.
 - **G20 BUG** Coroutine objects logged instead of bodies (`resp.text` unawaited: agent_loop.py:4936/:4970, llm_providers.py:333) — useless diagnostics in exactly the failure paths.
@@ -87,13 +87,13 @@ decrypted per-user credentials with mass_token→admin-ID-1 fallback. Serves UI
 Settings/auth/users/devices/widgets via Caddy. Talks to HA and Nextcloud;
 every service pulls boot config from it.
 
-### HIGH
+### Identity — HIGH
 - **I1 BUG/AUTHZ** Privilege escalation via self-update: `is_admin`/`is_system_default` exposed on UserUpdate (schemas.py:121-122) and applied verbatim via setattr loop (main.py:564-603) → any valid API key can become admin.
 - **I2 BUG/AUTH** `GET /api/settings/{key}` takes no admin/internal dependency (main.py:1263-1277); masking covers exactly one key; Caddy routes /api/settings* publicly → anonymous read of all raw settings incl. plaintext `huggingface_token` (seed.py:303-315).
 - **I3 HIGH/DESIGN** mass_token_enc→admin ID-1 fallback also returns the admin's decrypted session api_key to the caller (main.py:478) → any INTERNAL_SECRET holder obtains admin's key; combined with I1 blast radius is total. Recommendation: never echo api_key; make fallback explicit opt-in; log WARNING (currently INFO, :452).
 - **I4 BUG** Password sent as URL query param: bare scalar `new_password` on POST /api/auth/change-password (main.py:853-858) → lands in Caddy/access logs.
 
-### MEDIUM
+### Identity — MEDIUM
 - **I5** CORS reflects any origin with allow_credentials=True (main.py:236-242).
 - **I6** Non-constant-time secret comparisons throughout (main.py:69,340,345,354,360; seed.py:32) — use hmac.compare_digest.
 - **I7 BUG** GitHub branch of test_connection references undefined user/password locals → always fails with NameError, swallowed by broad except (main.py:909-957).
@@ -104,7 +104,7 @@ every service pulls boot config from it.
 - **I12 BUG** Settings write accepts arbitrary keys with no allowlist/type checks (main.py:1238-1261) — injected keys distribute to all services via config resolution.
 - **I13 GAP** Raven mission CRUD has zero auth (only Depends(get_session)) — mitigated by Caddy routing to gateway, but violates defense-in-depth for bridge-network callers (main.py:1689-1765).
 
-### LOW
+### Identity — LOW
 - **I14** No login rate limiting (PBKDF2-260k fine offline; online guesses unthrottled, main.py:831-851).
 - **I15 GAP** Voice enrollment is a mock (sha256 prefix stored, never checked; voice matching = username equality, main.py:550-554, 429-435).
 - **I16 BUG** Dead migration branch in `_find_user_by_hash` (`if not user.api_key_hash:` unreachable after hash match, :300-302); writes during auth GET paths; UserRead.api_key still in schema (schemas.py:150).
@@ -166,20 +166,20 @@ Git ops run inside per-workspace Docker sandboxes (docker.sock mounted);
 WebSocket PTY terminals. All endpoints internal-secret gated; redaction ASGI
 middleware. Exposed raw via Caddy :8007 and /api/workspace*, /api/webhook*.
 
-### HIGH
+### Workspace Runtime — HIGH
 - **W1 HIGH/BUG** pytest and lint run on the privileged HOST, not in sandbox: `_run_command` = subprocess.run(cwd=workspace_path) on runtime host (main.py:1229,1261,1268,2665-2671) executing attacker-controllable repo code in the docker.sock-holding container — contradicts git_ops.py:1-6 policy.
 - **W2 HIGH/BUG** Full service environment (INTERNAL_SECRET, FERNET_KEY) copied into every sandbox exec: `env = os.environ.copy()` (git_ops.py:85-87) → sandbox `full_env = dict(os.environ)` in exec_run (workspace_sandbox.py:472-484) → same-uid execs can read /proc/self/environ.
 - **W3 HIGH/GAP** Absolute paths bypass containment: `resolve_safe_path` returns any absolute path as-is with no scope check (main.py:819-825) → file APIs reach arbitrary filesystem paths.
 - **W4 HIGH/DESIGN** Ad-hoc workspaces resolve to workspace ROOT with default full capabilities incl. write+pytest (main.py:951-956,974-975,1139) → trusted-caller chain to CI script execution (/api/admin/tests/unit :2701).
 
-### MEDIUM
+### Workspace Runtime — MEDIUM
 - **W5 BUG** create_workspace accepts arbitrary local_path + caller-supplied owner_user → cross-user workspace takeover via ownership checks (main.py:1878-1880,1040,968-971).
 - **W6 BUG** Webhook secret: plain string compare (:2738-2741); compose default 'change-me-in-production' live because .env sets empty GIT_WEBHOOK_SECRET (docker-compose.yml:435, .env:106, main.py:2733); token also accepted as URL query param (:2715).
 - **W7 GAP** Slug collisions: distinct ids map to identical wsbox-* container/network names → cross-wire between workspaces (main.py:3005, workspace_sandbox.py:142-144).
 - **W8 BUG** Redaction middleware buffers entire response bodies incl. FileResponse/zip streams → memory DoS (main.py:242-247,2047,2076).
 - **W9 GAP** /ports/expose skips capability enforcement; binds host ports 9000-9199 and TCP proxies on 0.0.0.0 (main.py:2108-2114, workspace_sandbox.py:752-772).
 
-### LOW
+### Workspace Runtime — LOW
 - **W10** Unbounded read_text before max_bytes slice OOMs on multi-GB files (main.py:2024-2030).
 - **W11 BUG** `select().where(Workspace.webhook_token is not None)` is vacuously true (InstrumentedAttribute truthiness) — should be `.isnot(None)` (main.py:665).
 - **W12 GAP** Quarantine counters keyed by relative path only — cross-workspace cross-quarantine (main.py:299).
@@ -193,7 +193,7 @@ Positive: secret-redaction middleware, pytest arg sanitization, protected-branch
 
 ## 6. Control Plane (port 8008)
 
-**Purpose:** Privileged Docker management: list/restart/recreate sharedllm_* containers, background image pulls + GHCR update checks, log retrieval, arbitrary exec into stack containers, hourly orphaned-sandbox reaper. Single shared INTERNAL_SECRET; exposed via Caddy /control_plane* and :8008.
+**Purpose:** Privileged Docker management: list/restart/recreate `sharedllm_*` containers, background image pulls + GHCR update checks, log retrieval, arbitrary exec into stack containers, hourly orphaned-sandbox reaper. Single shared INTERNAL_SECRET; exposed via Caddy /control_plane* and :8008.
 
 - **C1 HIGH/BUG** Reaper destroys ALL active sandboxes: `_workspace_exists` GETs `/workspaces/{id}` — a route that does not exist (405 → False for everything) → stops/removes every wsbox-* container and network hourly; compounding: ws_id derived from slugified name so even a working endpoint would 404 for non-slug ids (main.py:31-36,42-82,25,60; workspace_sandbox.py:142-144).
 - **C2 MED/GAP** /api/webhooks/dns-sync is the sole unauthenticated endpoint on a privileged service (main.py:1158-1159).
@@ -211,7 +211,7 @@ Positive: secret-redaction middleware, pytest arg sanitization, protected-branch
 - **S1 HIGH/GAP** Zero authentication on ANY endpoint (contrast outbound-only use of INTERNAL_SECRET, main.py:10,56) + unconfined `upload_directory(local_path)` → unauthenticated exfiltration of any readable directory to attacker-controlled WebDAV (providers.py:27-50, nextcloud_client.py:259-311, Caddyfile:36-38).
 - **S2 MED/HIGH/GAP** Transient DAV failure wipes user's RAG index: list_files swallows errors → [], purge executes BEFORE sync regardless (nextcloud_client.py:115-117, main.py:94-141 esp.132-137). Purge should be skipped when scan failed/empty.
 - **S3 MED/BUG** Write "verification" fabricated: `"verified": True if verify else None, # Simplified` — no follow-up GET/PROPFIND; callers report it upstream as fact (nextcloud_client.py:242; workspace_runtime/main.py:2390-2397).
-- **S4 MED/BUG** Per-request aiohttp ClientSession created in sync __init__, never closed, provider rebuilt every request → socket/FD leak + deprecation (nextcloud_client.py:37-41, providers.py:50).
+- **S4 MED/BUG** Per-request aiohttp ClientSession created in sync `__init__`, never closed, provider rebuilt every request → socket/FD leak + deprecation (nextcloud_client.py:37-41, providers.py:50).
 - **S5 LOW/BUG** Unencoded f-string query interpolation of user-derived user_id (main.py:203).
 - **S6 LOW/BUG** Prefix stripping collides on sibling usernames ("/user" strips from "/user2/x" leaving "2/x") (nextcloud_client.py:46,141-142).
 - **S7 LOW/GAP** Indexer declares pdf_parser capability but extraction feeds raw binary resp.text() into chunker; checkpoint JSON rewritten per item (O(n²)); chunk_text infinite-loops if overlap>=chunk_size ever configured; search returns HTTP 200 + status:"ERROR" (indexer.py:88-103,170,186-200; main.py:244-246).
@@ -243,17 +243,17 @@ OAuth/PKCE, Whisper STT, audiobook regenerate. Second uvicorn instance on :8888
 serves media to HA devices. Auth: single shared internal secret;
 verify_entity_access is an allow-all stub.
 
-### HIGH (several empirically reproduced)
+### Execution — HIGH (several empirically reproduced)
 - **E1 BUG (reproduced)** Path traversal: `os.path.join(root, rel)` never normalizes `..` before startswith check (handlers/workspace.py:291-293) → read/write/patch/search/shell cwd escape for all consumers incl. transcribe/audiobook paths (workspace.py:371,554,591,663,865; main.py:2585,2655,2683,2703). Fix direction: realpath + commonpath.
 - **E2 BUG (reproduced)** `len(resp.content)` on aiohttp StreamReader raises TypeError → all 5 self-verification attempts fail → every Kokoro announcement returns FAILURE "Media endpoint not accessible" (main.py:1454,1460,1466-1468). Should be len(await resp.read()). Test masks it by mocking TTS empty (test_execution_main.py:156).
-- **E3 BUG (verified)** Broken bare imports under uvicorn PYTHONPATH=/app: `from ha_client import call_service` (announce_handlers.py:204 + 10 more sites), `from announce_handlers import dispatch_announce` (main.py:1476), `from schemas import …` (main.py:2757), `import device_discovery` (main.py:1785/1807; device_profiler.py:262,368,415), `from schemas_groups import …` (main.py:2451/2464/2477) → ModuleNotFoundError. Effects: announcements silently degrade to MA/Piper; /execute/voice/command guaranteed 500; /discovery/* refresh/scan/profile and /execute/groups/* 500. Correct pattern exists in git.py:36-39/talk.py:9-16.
+- **E3 BUG (verified)** Broken bare imports under uvicorn PYTHONPATH=/app: `from ha_client import call_service` (announce_handlers.py:204 + 10 more sites), `from announce_handlers import dispatch_announce` (main.py:1476), `from schemas import …` (main.py:2757), `import device_discovery` (main.py:1785/1807; device_profiler.py:262,368,415), `from schemas_groups import …` (main.py:2451/2464/2477) → ModuleNotFoundError. Effects: announcements silently degrade to MA/Piper; /execute/voice/command guaranteed 500; `/discovery/*` refresh/scan/profile and /execute/groups/* 500. Correct pattern exists in git.py:36-39/talk.py:9-16.
 - **E4 BUG** Discovery probes inert: `resp.content.lower()` on StreamReader (device_discovery.py:789), ET.fromstring(StreamReader) (:792), unawaited `resp.text` coroutine passed to .lower()/re.search (:827-840) — all swallowed by blanket except (:865-866) → Roku/Tasmota/ESPHome probe identification and bulk_scan mapping silently broken.
 - **E5 BUG** Invalid pandoc flag `--split-level=paragraph` (takes a number; meaningless for -t plain) → RuntimeError exit 2 for EVERY EPUB/DOCX/RTF/ODT extraction (document_text.py:59) — workspace doc reads + audiobook regeneration from such sources broken; tests mock subprocess so never catch it.
 - **E6 BUG** Timer creation via time_str always fails: aware expires_at minus naive now → TypeError swallowed into generic "Timer error" (handlers/timer.py:28,44-52,152-154); mixed datetime.now() vs datetime.now(UTC) is root cause; keys stored without TTL; KEYS per request.
 - **E7 BUG/GAP** Presence pipeline fully inert: paho thread calls asyncio.create_task (RuntimeError, swallowed) (presence.py:147-171); init_presence_tracker never invoked anywhere; /execute/presence/* serve GPS fallback only. Needs run_coroutine_threadsafe + lifespan wiring.
 
-### MEDIUM
-- **E8 BLOCKING** Sync subprocess/Docker/socket calls freeze the event loop: docker-compose build in async def (main.py:890), 300 MB model download curl (main.py:1322), sync Docker SDK restart/logs (deployment.py:98,136,157; docker_logs.py:68), no-timeout subprocess (diagnostics.py:24,40), arp-scan/snmpwalk/SSDP recvfrom loops (device_discovery.py:503-506,429,568-571,682-696), subnet detect (network_scan.py:32), toolchain probes ×20, _check_ports 16 ports ×0.5 s per profiled device (device_profiler.py:300) — combined ≫60 s full-service freeze possible during discovery.
+### Execution — MEDIUM
+- **E8 BLOCKING** Sync subprocess/Docker/socket calls freeze the event loop: docker-compose build in async def (main.py:890), 300 MB model download curl (main.py:1322), sync Docker SDK restart/logs (deployment.py:98,136,157; docker_logs.py:68), no-timeout subprocess (diagnostics.py:24,40), arp-scan/snmpwalk/SSDP recvfrom loops (device_discovery.py:503-506,429,568-571,682-696), subnet detect (network_scan.py:32), toolchain probes ×20, `_check_ports` 16 ports ×0.5 s per profiled device (device_profiler.py:300) — combined ≫60 s full-service freeze possible during discovery.
 - **E9 SEC** Plaintext GitHub tokens: CLI args visible in ps AND logged verbatim (code_search.py:51-63); token embedded in remote URLs persisted into .git/config and workspace metadata (git.py:640,650,661,694,697,740,742); redaction only catches ghp_/github_pat_ prefixes in logs. gh.py:193-198 shows the correct GH_TOKEN-env pattern.
 - **E10 BUG** Capability escalation in gh handler: missing git_write falls back to checking mere `read` for WRITE_ACTIONS (pr merge, release create…) defeating capability model (handlers/gh.py:183-190).
 - **E11 BUG** Stale normalized_command after `cd x &&` strip → destructive commands classified as read-capability (e.g. `cd /ws && rm -rf build/` → required_cap=read) (handlers/workspace.py:685,699-719); SYSTEM_BLOCKLIST exact-token matches bypassable via sh -c.
@@ -263,7 +263,7 @@ verify_entity_access is an allow-all stub.
 - **E15 BUG** save_path writes mojibake: WAV bytes .decode('utf-8', errors='replace') into StorageFileWriteRequest.content:str (main.py:1485).
 - **E16 BUG** Composite broadcast announces storage-read log message ("Read N bytes…") instead of document content (composite.py:49 vs storage.py:30 detail["content"]).
 
-### LOW / DESIGN
+### Execution — LOW / DESIGN
 - **E17 BUG** Voice messages uploaded MP3-labeled but are WAV (talk.py:275-289; tts.py:504).
 - **E18 BUG** webOS notify shows the media URL instead of the message text (announce_handlers.py:273-275).
 - **E19 LOGIC** Samsung/webOS double power-on + doubled boot waits (pre-power state re-evaluated in handler) (main.py:1413-1415; announce_handlers.py:315-322).
@@ -276,7 +276,7 @@ verify_entity_access is an allow-all stub.
 - **E26 GAP** Inconsistent error contracts: failures wrapped in _ok/SUCCESS (timer trigger :774-820; MA browse :2224-2246; ABS :2321-2323); some routes raise HTTPException while siblings return FAILURE bodies; GET /execute/timers exposes any user's timers by user_id param (timer.py:156-165; main.py:752-754).
 - **E27 GAP** Misc: webscraper tautology forces --mobile always + wrong timeout message (webscraper.py:33,76,146-150); voice routing stop==pause and unmatched verbs return None, "on"-substring matches "song" (main.py:2807-2821,2776); ha_client digit-penalty tests a list instead of chars (ha_client.py:381); storybook gender context uses find-first (tts.py:259); pointless POST-failure GET to services URL in bare except (ha_client.py:102-108); git diff/checkout path option-injection (--output=…) (git.py:526-527,550); os.system at import time (git.py:44-45); websockets imported but absent from requirements (network_scan.py:288); device_registry read-modify-write races (109-165); diagnostics ls -la arbitrary paths; double auth declarations on Skylight routes.
 - **E28 DESIGN** Per-request TTS engine construction defeats lazy-load cache (fresh KokoroTTSEngine per call; pipeline always rebuilt; init race, no lock) (tts.py:508-517,175-202).
-- **E29 DESIGN** bulk_scan binds same-type entities to first matching IP (two Rokus → same IP) despite _discover_via_network_scan comment saying prevented (device_discovery.py:941-956,708-711).
+- **E29 DESIGN** bulk_scan binds same-type entities to first matching IP (two Rokus → same IP) despite `_discover_via_network_scan` comment saying prevented (device_discovery.py:941-956,708-711).
 - **E30 GAP** Workspace lint silently degrades to UNSANDBOXED host execution on resolution failure (workspace.py:944-955,355-356).
 
 ---
@@ -291,13 +291,13 @@ AuthContext stores api key + internal_secret in localStorage; single axios clien
 with retry interceptor; five separate hand-rolled WS lifecycles (a generic
 wsManager.ts exists but most components bypass it).
 
-### HIGH
+### UI — HIGH
 - **U1 BUG** Terminal context menu force-closes 300 ms after opening: inverted `if (!menuLeaveRef.current)` closes while cursor is over menu (TerminalPane.tsx:56-60, commit 3bed4a20; no e2e coverage of the menu).
 - **U2 BUG** Menu items unclickable via mouse: mousedown-outside check uses document.activeElement which hasn't moved yet at dispatch time (TerminalPane.tsx:40-50) — WorkspaceIDE.tsx:1884-1893 shows the correct event.target containment pattern.
 - **U3 BUG** Browser geolocation synced to nonexistent endpoint `/api/identity/users/location` (context/LocationContext.tsx:58; real route is /api/users/{user_id}/location) with bare catch hiding every 404 → web location never reaches geo service.
 - **U4 SEC/GAP** Biometric login reads plaintext `jarvis_saved_password` from storage — dead feature (nothing ever writes it) but dangerous pattern; remove or replace with server-issued refresh token (pages/Login.tsx:98).
 
-### MEDIUM
+### UI — MEDIUM
 - **U5 SEC** Bearer tokens in WS query strings everywhere (terminal/RavenTrace/sendspin/jsonrpc/logstream) + localStorage-stored api key and internal_secret shipped from browser (TerminalPane.tsx:184; RavenLiveTrace.tsx:47; maWebPlayer.ts:91,103; api.ts:415,174-176; lib/storage.ts:22).
 - **U6 BUG** JarvisLab log-stream reconnect loop survives unmount: cleanup closes socket, onclose unconditionally schedules reconnect → zombie chain calling setState forever; JSON.parse unguarded (JarvisLab.tsx:308-336).
 - **U7 GAP** Media player sockets have no auto-reconnect despite header comment claiming it; manual recovery only (maWebPlayer.ts:352,432 vs 8,456-461,842-870).
@@ -306,7 +306,7 @@ wsManager.ts exists but most components bypass it).
 - **U10 BUG** 3 s init timeout permanently locks out valid sessions: success path never clears initError; ProtectedRoute treats any initError as logged out (AuthContext.tsx:27-31; App.tsx:42).
 - **U11 DESIGN** Retry interceptor re-fires non-idempotent POSTs on ERR_NETWORK (chat/media/timers/intercom duplicated up to 3×) (services/api.ts:212-240).
 
-### LOW
+### UI — LOW
 - **U12** isLoggingOut flag never resets; window.location redirect breaks Capacitor webview (api.ts:181,289-297).
 - **U13 BUG** Blob URLs leak on IDE unmount (revoked only in closeTab); setActiveTab called inside setTabs updater (impure, StrictMode double-invoke) (WorkspaceIDE.tsx:405-435,576-600).
 - **U14 BUG** Cleanup skips CONNECTING sockets (`readyState === 1` should be `<= 1`) (RavenLiveTrace.tsx:113).
