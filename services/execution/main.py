@@ -46,6 +46,7 @@ from services.execution.handlers import (
     climate,
     composite,
     diagnostics,
+    esphome,
     groups,
     learning,
     light,
@@ -75,6 +76,7 @@ from services.execution.schemas import (
     DockerComposeRequest,
     DockerLogsRequest,
     EntitySearchRequest,
+    EsphomeRequest,
     ExecutionLogRequest,
     ExecutionResult,
     GhRequest,
@@ -589,6 +591,11 @@ async def execute_light(req: LightControlRequest):
     if not await verify_entity_access(req.user_context, req.entity_id):
         raise HTTPException(status_code=403, detail="Access denied to this device")
     return await light.handle_light(req)
+
+@app.post("/execute/esphome", response_model=ExecutionResult)
+async def execute_esphome(req: EsphomeRequest):
+    """Control ESPHome devices directly via their native API (no HA hop)."""
+    return await esphome.handle_esphome(req)
 
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
