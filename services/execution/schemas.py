@@ -229,6 +229,20 @@ class LightControlRequest(BaseRequest):
     rgb_color: tuple[int, int, int] | None = None
 
 
+# ─── ESPHome direct control ─────────────────────────────────────────────────────
+
+class EsphomeRequest(BaseRequest):
+    """Control an ESPHome device directly over its native API.
+
+    Devices are configured in Identity GlobalSetting 'esphome_devices'.
+    """
+    user_context: UserContext
+    action: Literal["list", "call"]
+    device: str = Field(..., description="Device name from esphome_devices setting")
+    entity: str | None = Field(None, description="Entity name/object_id on the device")
+    params: dict | None = Field(None, description="Command parameters (state, brightness_pct, mode, ...)")
+
+
 # ─── Generic HA Service Call ────────────────────────────────────────────────────
 
 class HAServiceRequest(BaseRequest):
