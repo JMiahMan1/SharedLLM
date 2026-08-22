@@ -931,7 +931,11 @@ async def emit_log(level: str, message: str, context: dict | None = None):
 @app.get("/api/logs")
 async def get_api_logs(limit: int = 50):
     async with shared_http_client() as client:
-      resp = await client.get(f"{LOGGING_SVC}/logs", params={"limit": limit})
+      resp = await client.get(
+        f"{LOGGING_SVC}/logs",
+        params={"limit": limit},
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+      )
       return await resp.json()
 
 # --- Contextualization Logic ---

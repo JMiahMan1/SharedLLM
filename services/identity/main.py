@@ -566,6 +566,16 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
     log.info(f"[update_me] Received update for {user.username}: {body.model_dump(exclude_unset=True)}")
     update_data = body.model_dump(exclude_unset=True)
 
+    # Privilege fields are never self-assignable here; admins use
+    # PATCH /api/users/{username} which enforces is_admin.
+    for privilege_field in ("is_admin", "is_system_default"):
+        if privilege_field in update_data:
+            log.warning(
+                f"[update_me] {user.username} attempted self-update of "
+                f"'{privilege_field}'; ignored"
+            )
+            del update_data[privilege_field]
+
     # Prevent non-default users from changing system skylight integration credentials
     if any(k in update_data for k in ["skylight_url", "skylight_email", "skylight_pass"]) and user.id != 1 and user.username != "default":
         raise HTTPException(status_code=403, detail="Only the default system user (User 1) can configure Skylight system integration.")

@@ -1459,12 +1459,13 @@ async def execute_announce(req: AnnouncementRequest):
                 try:
                     async with get_client() as client:
                         resp = await client.get(media_url, timeout=aiohttp.ClientTimeout(total=2.0))
-                        if resp.status == 200 and len(resp.content) > 0:
+                        body = await resp.read()
+                        if resp.status == 200 and len(body) > 0:
                             media_ready = True
-                            log.info(f"[announce] Media endpoint verified: {len(resp.content)} bytes, content-type={resp.headers.get('content-type')}")
+                            log.info(f"[announce] Media endpoint verified: {len(body)} bytes, content-type={resp.headers.get('content-type')}")
                             break
                         else:
-                            log.warning(f"[announce] Media check attempt {attempt+1}/5: status={resp.status}, size={len(resp.content)}")
+                            log.warning(f"[announce] Media check attempt {attempt+1}/5: status={resp.status}, size={len(body)}")
                 except Exception as e:
                     log.warning(f"[announce] Media check attempt {attempt+1}/5 failed: {e}")
 
