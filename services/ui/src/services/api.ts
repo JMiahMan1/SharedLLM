@@ -15,6 +15,7 @@ import type {
   DeviceAssignment,
   GlobalSetting,
   GatewayConfig,
+  EsphomeDevice,
   ExecutionResponse,
   TimerRecord,
   SmokeTestResult,
@@ -82,6 +83,7 @@ export type {
   APIKey,
   GlobalSetting,
   HealthStatus,
+  EsphomeDevice,
   LogEntry,
   RavenMission,
   RavenConfig,
@@ -1275,6 +1277,40 @@ export const api = {
       service_data: null,
     });
     return resp.data;
+  },
+
+  // Direct ESPHome native-API control (bypasses Home Assistant)
+  async esphomeList(device: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/esphome', {
+      action: 'list',
+      device,
+    });
+    return resp.data;
+  },
+
+  async esphomeCommand(device: string, entity: string, params?: Record<string, unknown>): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/execute/esphome', {
+      action: 'call',
+      device,
+      entity,
+      params: params ?? null,
+    });
+    return resp.data;
+  },
+
+  async getEsphomeDevices(): Promise<EsphomeDevice[]> {
+    const settings = await api.getSettings();
+    const raw = settings.find(s => s.key === 'esphome_devices')?.value ?? '[]';
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  },
+
+  async saveEsphomeDevices(devices: EsphomeDevice[]): Promise<GlobalSetting> {
+    return api.updateSetting('esphome_devices', JSON.stringify(devices));
   },
 
   // Mobile-local audio streaming
