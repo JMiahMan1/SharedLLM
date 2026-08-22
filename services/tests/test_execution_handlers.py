@@ -30,7 +30,9 @@ async def test_light_handler_success(user_ctx):
         res = await light.handle_light(req)
 
         assert res.status == "SUCCESS"
-        assert "light.test" in res.message
+        # Router reports the executed HA service and the route taken
+        assert "light.turn_on" in res.message
+        assert res.detail is not None and res.detail.get("route") == "ha"
         mock_call.assert_called_once_with(
             "http://ha", "test_tok", "light", "turn_on", "light.test", {"brightness_pct": 50}
         )
