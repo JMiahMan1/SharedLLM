@@ -44,19 +44,21 @@ def is_text_file(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in _TEXT_EXTS
 
 
-async def _pandoc(path: str, split_level: str = "paragraph") -> str:
-    """Extract text via pandoc at the ``--split-level`` granularity.
+async def _pandoc(path: str) -> str:
+    """Extract text via pandoc as plain text.
 
-    Split at paragraphs so headings (chapter titles, Week/Day headers, list
-    structure) survive as their own lines — the TTS structure-pause pass relies
-    on headings/list items being line-delimited.
+    The plain writer already emits every block element (heading, list item,
+    paragraph) on its own line — the TTS structure-pause pass relies on that
+    line-delimited structure. Note: ``--split-level`` is an EPUB/HTML chunking
+    option taking a heading NUMBER, not a style name, so it has no place here
+    (passing e.g. ``paragraph`` makes pandoc reject the whole conversion).
     """
     if not shutil.which(PANDOC_BIN):
         raise RuntimeError(
             "pandoc is not installed in this container; cannot extract embedded text. "
             "Install pandoc or convert the file to text another way."
         )
-    return await _run([PANDOC_BIN, path, "-t", "plain", f"--split-level={split_level}", "-s"])
+    return await _run([PANDOC_BIN, path, "-t", "plain", "-s"])
 
 
 async def _pdftotext(path: str) -> str:

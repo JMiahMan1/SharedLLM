@@ -1,5 +1,6 @@
 # services/logging/main.py
 import asyncio
+import hmac
 import json
 import logging as py_logging
 import os
@@ -10,12 +11,13 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
+import aiohttp
 import redis.asyncio as redis
 from fastapi import FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from services.config import INTERNAL_SECRET, LOG_MAX_ENTRIES, LOG_RETENTION_DAYS, REDIS_URL
+from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET, LOG_MAX_ENTRIES, LOG_RETENTION_DAYS, REDIS_URL
 from services.shared.info_endpoint import info_router
 
 _redis_client: redis.Redis | None = None
@@ -149,16 +151,41 @@ async def _fetch_logs(
 
     return results
 
+async def _token_is_valid_user_api_key(token: str) -> bool:
+    """Validate a browser-supplied user API key against the Identity service."""
+    try:
+        async with aiohttp.ClientSession() as client:
+            resp = await client.post(
+                f"{IDENTITY_SVC_URL}/api/resolve",
+                json={"api_key": token},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            )
+            if resp.status == 200:
+                data = await resp.json()
+                return bool(data.get("user_id"))
+    except Exception as e:
+        py_logging.warning(f"[logs] API key validation failed: {e}")
+    return False
+
+def _require_read_secret(x_internal_secret: str | None):
+    """Log reads expose every user's entries; gate them like deletes."""
+    if not x_internal_secret or not hmac.compare_digest(x_internal_secret, INTERNAL_SECRET):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
 @app.get("/logs")
-async def get_logs(user_id: str | None = None, service: str | None = None, limit: int | None = None, lines: int | None = None):
+async def get_logs(user_id: str | None = None, service: str | None = None, limit: int | None = None, lines: int | None = None, x_internal_secret: str | None = Header(default=None)):
+    _require_read_secret(x_internal_secret)
     return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
 
 @app.get("/api/logs")
-async def get_logs_api(user_id: str | None = None, service: str | None = None, limit: int | None = None, lines: int | None = None):
+async def get_logs_api(user_id: str | None = None, service: str | None = None, limit: int | None = None, lines: int | None = None, x_internal_secret: str | None = Header(default=None)):
+    _require_read_secret(x_internal_secret)
     return await _fetch_logs(service=service, user_id=user_id, limit=_resolve_limit(limit, lines))
 
 @app.get("/api/admin/logs")
-async def get_logs_admin_api(service: str | None = None, limit: int | None = None, lines: int | None = None):
+async def get_logs_admin_api(service: str | None = None, limit: int | None = None, lines: int | None = None, x_internal_secret: str | None = Header(default=None)):
+    _require_read_secret(x_internal_secret)
     return await _fetch_logs(service=service, user_id="admin", limit=_resolve_limit(limit, lines))
 
 @app.delete("/api/logs")
@@ -211,7 +238,24 @@ async def log_event(entry: LogEntry, x_internal_secret: str | None = Header(defa
 # --- WebSocket Streaming via Redis PubSub ---
 active_ws: list[WebSocket] = []
 
+async def _ws_authorized(websocket: WebSocket) -> bool:
+    """Accept the shared internal secret or a valid user API key (?token=...).
+
+    Browsers cannot set custom headers on WebSocket connections, so the
+    stream is authenticated via the query token: either the shared secret
+    itself or an api key resolvable through Identity.
+    """
+    token = websocket.query_params.get("token") or ""
+    if not token:
+        return False
+    if hmac.compare_digest(token, INTERNAL_SECRET):
+        return True
+    return await _token_is_valid_user_api_key(token)
+
 async def _ws_handler(websocket: WebSocket):
+    if not await _ws_authorized(websocket):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     active_ws.append(websocket)
     r = await get_redis()

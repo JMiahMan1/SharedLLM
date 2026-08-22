@@ -25,18 +25,34 @@ NETWORK_PREFIX = "wsnet-"
 SANDBOX_REAP_INTERVAL = int(__import__("os").getenv("SANDBOX_REAP_INTERVAL", "3600"))
 
 
-def _workspace_exists(workspace_id: str) -> bool:
-    """Return True if the workspace DB record still exists in workspace_runtime."""
+def _slugify_workspace_id(workspace_id: str) -> str:
+    """Mirror workspace_sandbox._slug so container-name suffixes match ids."""
+    s = re.sub(r"[^a-z0-9]+", "-", (workspace_id or "").strip().lower()).strip("-")
+    return s or "workspace"
+
+
+def _known_workspace_slugs() -> set[str] | None:
+    """Slug set of every registered workspace id, or None if lookup failed.
+
+    Returns None on any error so the reaper can skip the sweep entirely —
+    failing closed (keep everything) instead of destroying live sandboxes.
+    """
     try:
         resp = requests.get(
-            f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces/{workspace_id}",
+            f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces/internal/ids",
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=10.0,
         )
-        return resp.status_code == 200
+        if resp.status_code != 200:
+            log.warning(
+                f"[reap] workspace id list returned {resp.status_code}; skipping sweep"
+            )
+            return None
+        ids = resp.json().get("ids") or []
+        return {_slugify_workspace_id(str(i)) for i in ids}
     except Exception as e:
-        log.warning(f"[reap] workspace lookup failed for {workspace_id}: {e}")
-        return True  # assume alive on error to avoid destroying a live workspace
+        log.warning(f"[reap] workspace id list failed: {e}")
+        return None  # assume alive on error to avoid destroying a live workspace
 
 
 def _reap_orphan_sandboxes() -> int:
@@ -53,12 +69,15 @@ def _reap_orphan_sandboxes() -> int:
     except Exception as e:
         log.warning(f"[reap] list failed: {e}")
         return 0
+    known_slugs = _known_workspace_slugs()
+    if known_slugs is None:
+        return 0
     for c in containers:
         name = c.name
         if not name.startswith(CONTAINER_PREFIX):
             continue
-        ws_id = name[len(CONTAINER_PREFIX):]
-        if _workspace_exists(ws_id):
+        ws_slug = name[len(CONTAINER_PREFIX):]
+        if ws_slug in known_slugs:
             continue
         log.info(f"[reap] removing orphaned sandbox container {name}")
         try:
@@ -70,12 +89,12 @@ def _reap_orphan_sandboxes() -> int:
             log.warning(f"[reap] failed to remove {name}: {e}")
             continue
         try:
-            net = client.networks.get(f"{NETWORK_PREFIX}{ws_id}")
+            net = client.networks.get(f"{NETWORK_PREFIX}{ws_slug}")
             net.remove()
         except NotFound:
             pass
         except Exception as e:
-            log.warning(f"[reap] failed to remove network for {ws_id}: {e}")
+            log.warning(f"[reap] failed to remove network for {ws_slug}: {e}")
         removed += 1
     if removed:
         log.info(f"[reap] removed {removed} orphaned sandbox container(s)")

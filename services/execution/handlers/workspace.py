@@ -288,8 +288,10 @@ def resolve_safe_path(path: str, workspace_root: str | None = None) -> str:
     if len(parts) > 1 and parts[0] in ("workspace", os.path.basename(actual_root.rstrip("/"))):
         parts = parts[1:]
         rel_path = "/".join(parts)
-    abs_path = os.path.join(workspace_root_abs, rel_path)
-    if not abs_path.startswith(workspace_root_abs):
+    # Resolve symlinks and '..' segments before the containment check; a plain
+    # join leaves '../outside' unnormalized, which slips past a startswith test.
+    abs_path = os.path.realpath(os.path.join(workspace_root_abs, rel_path))
+    if abs_path != workspace_root_abs and not abs_path.startswith(workspace_root_abs + os.sep):
         raise ValueError(f"Path traversal detected: {path}")
     return abs_path
 

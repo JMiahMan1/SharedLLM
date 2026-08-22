@@ -662,7 +662,7 @@ async def lifespan(app: FastAPI):
     _seed_db_from_json()
 
     with Session(engine) as session:
-        pending = session.exec(select(Workspace).where(Workspace.webhook_token is not None)).all()
+        pending = session.exec(select(Workspace).where(Workspace.webhook_token.isnot(None))).all()
         migrated = 0
         for workspace in pending:
             if workspace.webhook_token_enc:
@@ -1657,6 +1657,19 @@ def list_workspaces(
             item["resolved_identity"] = identity
         items.append(item)
     return {"status": "SUCCESS", "workspaces": items}
+
+
+@app.get("/workspaces/internal/ids")
+def list_workspace_ids_internal(x_internal_secret: str | None = Header(default=None)):
+    """All workspace ids, unfiltered by user context.
+
+    Internal-secret-gated: used by control-plane maintenance jobs (sandbox
+    reaper) that must see every workspace regardless of ownership.
+    """
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        ids = [row for row in session.exec(select(Workspace.id)).all()]
+    return {"status": "SUCCESS", "ids": ids}
 
 
 @app.post("/workspace/resolve")

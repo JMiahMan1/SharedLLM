@@ -25,7 +25,9 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
     try:
         if action == "add":
             # 1. Resolve Time
-            now = datetime.now()
+            # Single timestamp convention: UTC-aware everywhere. Legacy Redis
+            # entries written as naive-local are handled by the scheduler.
+            now = datetime.now(UTC)
             expires_at = now
 
             if req.duration_str:
@@ -41,9 +43,11 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
             elif req.time_str:
                 dt = dateparser.parse(req.time_str, settings={"PREFER_DATES_FROM": "future"})
                 if dt:
+                    # Naive wall-clock input ("3pm") means the container's
+                    # local zone; normalize everything to UTC for storage.
                     if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=UTC)
-                    expires_at = dt
+                        dt = dt.astimezone()
+                    expires_at = dt.astimezone(UTC)
 
             if expires_at == now:
                 return ExecutionResult(status="FAILURE", message="Could not determine timer duration/time.", service="timer_add")

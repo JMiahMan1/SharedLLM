@@ -57,7 +57,8 @@ async def test_extract_epub_uses_pandoc(mocker):
     assert "Chapter One." in text
     args, _kwargs = mock_create.call_args
     assert args[0] == "pandoc"
-    assert any("split-level" in a for a in args)
+    assert "-t" in args and "plain" in args
+    assert not any("split-level" in a for a in args)
 
 
 @pytest.mark.asyncio
