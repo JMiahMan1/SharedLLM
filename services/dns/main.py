@@ -221,7 +221,7 @@ class DNSResolver:
 
             # Check if it's a .docker suffix query
             if name.endswith('.docker'):
-                container_name = name[:-6]  # Remove .docker
+                container_name = name[:-len('.docker')]  # Remove '.docker' (7 chars)
                 ip = self.registry.get_ip(container_name)
                 if ip:
                     logger.debug(f"Found .docker match: {name} -> {ip}")
