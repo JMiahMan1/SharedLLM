@@ -8,6 +8,11 @@ except ImportError:
     from .. import ha_client
     from ..schemas import ExecutionResult, LightControlRequest
 
+try:
+    import hardware_router
+except ImportError:
+    from .. import hardware_router  # type: ignore[attr-defined]
+
 log = logging.getLogger("execution.light")
 
 ACTIVE_STATES = {"on", "playing", "idle", "standby", "home", "cooling", "heating", "drying", "cleaning"}
@@ -55,23 +60,8 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
         service_data["rgb_color"] = list(req.rgb_color)
 
     assert ctx.ha_url is not None and ctx.ha_token is not None
-    result = await ha_client.call_service(
-        ctx.ha_url, ctx.ha_token,
-        domain, req.action,
-        full_entity_id, service_data or None,
-    )
-
-    log.info(f"[light] RESULT: {result.get('ok')} | entity={full_entity_id} | error={result.get('error')}")
-
-    if result.get("ok"):
-        return ExecutionResult(
-            status="SUCCESS",
-            message=f"Command '{req.action}' executed on {full_entity_id}.",
-            service="light_control"
-        )
-    return ExecutionResult(
-        status="FAILURE",
-        message=f"Light command failed: {result.get('error')}",
-        service="light_control",
-        detail=result
+    # Unified hardware routing: HA first, direct ESPHome when HA unreachable.
+    return await hardware_router.execute_device_command(
+        ctx, domain, req.action, full_entity_id, service_data or None,
+        service_name="light_control",
     )

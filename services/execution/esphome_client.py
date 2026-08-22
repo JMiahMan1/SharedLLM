@@ -10,11 +10,15 @@ Device registry lives in the Identity service as the GlobalSetting
 ``esphome_devices`` — a JSON list:
 
     [{"name": "office-light", "host": "192.168.2.87",
-      "port": 6053, "noise_psk": "base64-key-from-device-yaml"}]
+      "port": 6053, "noise_psk": "base64-key-from-device-yaml",
+      "ha_entity_id": "light.office_light"}]
 
 ``port`` defaults to 6053 and ``noise_psk`` is optional (only needed when
-the device YAML enables ``api: encryption``). Per repo rules there is no
-hardcoded fallback device list: an empty/unset setting raises immediately.
+the device YAML enables ``api: encryption``). ``ha_entity_id`` is the
+optional Home Assistant entity that exposes this device; when set, the
+hardware router knows the device is reachable via both paths. Per repo
+rules there is no hardcoded fallback device list: an empty/unset setting
+raises immediately.
 """
 
 import asyncio
@@ -41,9 +45,13 @@ DEFAULT_ESPHOME_PORT = 6053
 _SETTINGS_TTL_SECONDS = 60.0
 _CONNECT_TIMEOUT_SECONDS = 10.0
 
-# Cached device configs: {"name": {"host": ..., "port": ..., "noise_psk": ...}}
+# Cached device configs: {"name": {"host": ..., "port": ..., "noise_psk": ..., "ha_entity_id": ...}}
 _device_cache: dict[str, dict] = {}
 _cache_loaded_at: float = 0.0
+
+# Cached per-device entity summaries from list_entities: name -> (loaded_at, entities)
+_entity_list_cache: dict[str, tuple[float, list[dict]]] = {}
+_ENTITY_LIST_TTL_SECONDS = 300.0
 
 
 class EsphomeConfigError(RuntimeError):
@@ -96,6 +104,9 @@ async def _load_devices_from_identity() -> dict[str, dict]:
             "port": int(item.get("port") or DEFAULT_ESPHOME_PORT),
             "noise_psk": (str(item["noise_psk"]).strip() or None)
             if item.get("noise_psk")
+            else None,
+            "ha_entity_id": (str(item["ha_entity_id"]).strip().lower() or None)
+            if item.get("ha_entity_id")
             else None,
         }
     return devices
@@ -190,6 +201,55 @@ async def list_entities(device_name: str) -> dict:
 
     device, entities = await _with_connection(cfg, op)
     return {"device": device, "entities": entities}
+
+
+async def get_device_entities_cached(device_name: str) -> list[dict]:
+    """Entity summaries for a device with a short TTL cache.
+
+    Used by the hardware router for HA-entity correlation so repeated
+    routing decisions don't reconnect to every device on every call.
+    """
+    now = time.monotonic()
+    cached = _entity_list_cache.get(device_name)
+    if cached and (now - cached[0]) <= _ENTITY_LIST_TTL_SECONDS:
+        return cached[1]
+    data = await list_entities(device_name)
+    entities = data["entities"]
+    _entity_list_cache[device_name] = (now, entities)
+    return entities
+
+
+async def find_device_for_ha_entity(ha_entity_id: str) -> str | None:
+    """Map an HA entity_id to a configured ESPHome device name.
+
+    Order: explicit ``ha_entity_id`` mapping in the esphome_devices
+    setting first; then object-id/domain correlation against each
+    configured device's entity list (HA names ESPHome-backed entities
+    ``<domain>.<object_id>``). Returns None when no device matches.
+    """
+    wanted = str(ha_entity_id or "").strip().lower()
+    if not wanted or "." not in wanted:
+        return None
+    ha_domain, ha_object_id = wanted.split(".", 1)
+    devices = await get_devices()
+    for name, cfg in devices.items():
+        if (cfg.get("ha_entity_id") or "").lower() == wanted:
+            return name
+    for name in devices:
+        try:
+            entities = await get_device_entities_cached(name)
+        except Exception as e:
+            # Correlation is best-effort: an unreachable/misconfigured device
+            # must be skipped, never break routing for the others.
+            log.debug(f"[esphome] entity correlation skipped for '{name}': {e}")
+            continue
+        for entity in entities:
+            if (
+                entity.get("domain") == ha_domain
+                and str(entity.get("object_id", "")).lower() == ha_object_id.lower()
+            ):
+                return name
+    return None
 
 
 def _climate_mode(value: str):

@@ -38,6 +38,7 @@ from services.config import (
 
 # Now import everything from sibling modules
 from services.execution import device_registry, ha_client
+from services.execution import hardware_router
 from services.execution.announce_handlers import detect_tv_type as _detect_tv_type
 from services.execution.handlers import (
     audiobookshelf,
@@ -1708,10 +1709,10 @@ async def execute_entity_search(req: EntitySearchRequest):
 @app.post("/execute/ha_service", response_model=ExecutionResult)
 async def execute_ha_service(req: HAServiceRequest):
     ctx = req.user_context
-    result = await ha_client.call_service(ctx.ha_url or "", ctx.ha_token or "", req.domain, req.service, req.entity_id, req.service_data)
-    if result.get("ok"):
-        return _ok(f"{req.domain}.{req.service} executed.", "ha_service")
-    return _fail(f"Service call failed: {result.get('error')}", "ha_service", result)
+    # Unified hardware routing: HA first, direct ESPHome fallback when HA is unreachable.
+    return await hardware_router.execute_device_command(
+        ctx, req.domain, req.service, req.entity_id, req.service_data, service_name="ha_service"
+    )
 
 def _detect_media_platform(entity_id: str, attrs: dict) -> str:
     """Detect the TV/media platform type from entity attributes."""
