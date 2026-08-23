@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import datetime
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -82,9 +81,10 @@ async def run_git(
     env_overrides: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run a git (or git-adjacent) command inside the workspace sandbox."""
-    env = os.environ.copy()
-    if env_overrides:
-        env.update(env_overrides)
+    # Only forward explicit overrides; the sandbox layer applies its own
+    # safe baseline (_SANDBOX_BASE_ENV_KEYS) plus scoped credentials, so the
+    # service environment never leaks into containers wholesale.
+    env = dict(env_overrides) if env_overrides else None
     return await run_workspace_cmd(
         str(workspace_id),
         str(workspace_path),

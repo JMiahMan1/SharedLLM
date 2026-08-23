@@ -7,12 +7,15 @@ Listens on host network port 5353 and resolves container names/IPs.
 """
 
 import asyncio
+import hmac
 import json
 import logging
 import os
 import socket
 import struct
 import time
+
+from aiohttp import web
 
 import docker
 from services.common.http import get_client
@@ -583,8 +586,20 @@ async def health_check(request):
     return web.json_response({'status': 'healthy'})
 
 
+def _require_internal_secret(request) -> web.StreamResponse | None:
+    """Return a 403 response when the caller lacks the internal secret."""
+    expected = os.environ.get('INTERNAL_SECRET', '')
+    provided = request.headers.get('X-Internal-Secret', '')
+    if not expected or not hmac.compare_digest(provided, expected):
+        return web.json_response({'error': 'Unauthorized'}, status=403)
+    return None
+
+
 async def registry_status(request):
     """Registry status endpoint"""
+    denied = _require_internal_secret(request)
+    if denied is not None:
+        return denied
     registry = request.app['registry']
     return web.json_response({
         'containers': len(registry.containers),
@@ -594,6 +609,11 @@ async def registry_status(request):
 
 async def register_container(request):
     """Manually register a container"""
+    # Registry answers are consulted BEFORE upstream DNS; an unauthenticated
+    # write here would let any container spoof names for the whole stack.
+    denied = _require_internal_secret(request)
+    if denied is not None:
+        return denied
     registry = request.app['registry']
     data = await request.json()
     name = data.get('name')

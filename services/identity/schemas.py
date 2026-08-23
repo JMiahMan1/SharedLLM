@@ -23,6 +23,7 @@ class ResolvedCredentials(BaseModel):
     code requires zero changes.
     """
     user: str
+    id: int | None = None              # numeric PK, needed for ownership checks
     is_admin: bool = False
     api_key: str | None = None         # decrypted at resolution time for tool usage
     nextcloud_url: str | None = None
@@ -172,6 +173,9 @@ class LoginResponse(BaseModel):
     api_key: str
     username: str
     is_admin: bool
+
+class ChangePasswordRequest(BaseModel):
+    new_password: str
 
 class DiscoverUser(BaseModel):
     username: str

@@ -1,9 +1,10 @@
 # services/storage/main.py
+import hmac
 import logging
 import re
 
 import aiohttp
-from fastapi import BackgroundTasks, Body, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from services.common.http import get_client
@@ -43,7 +44,25 @@ def health():
         "start_time": START_TIME
     }
 
-@app.get("/status")
+
+def _require_internal_secret(
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+) -> None:
+    """Every data-bearing endpoint requires the shared internal secret.
+
+    This service can list/write/mirror arbitrary provider content and is
+    exposed on a host port; without this gate any LAN caller could read
+    files or exfiltrate directories to their own WebDAV server.
+    """
+    if (
+        not INTERNAL_SECRET
+        or not x_internal_secret
+        or not hmac.compare_digest(x_internal_secret, INTERNAL_SECRET)
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
+@app.get("/status", dependencies=[Depends(_require_internal_secret)])
 async def get_storage_status():
     """Retrieves the current indexing status and file counts."""
     indexer_state = "PAUSED" if is_indexer_paused() else "IDLE"
@@ -82,7 +101,7 @@ async def get_storage_status():
         "message": "Storage system healthy. Ready for discovery." if indexer_state == "IDLE" else "Indexing paused."
     }
 
-@app.post("/index/full", status_code=202)
+@app.post("/index/full", status_code=202, dependencies=[Depends(_require_internal_secret)])
 async def sync_folder_to_chroma(req: IndexScanRequest, background_tasks: BackgroundTasks):
     """Scan structure, extract content, chunk, and sync to RAG in the background."""
     background_tasks.add_task(_run_full_index_task, req)
@@ -175,18 +194,18 @@ async def _run_full_index_task(req: IndexScanRequest):
         import traceback
         log.error(traceback.format_exc())
 
-@app.post("/index/pause")
+@app.post("/index/pause", dependencies=[Depends(_require_internal_secret)])
 def pause_indexing():
     set_indexer_pause(True)
     return {"status": "PAUSED"}
 
-@app.post("/index/resume")
+@app.post("/index/resume", dependencies=[Depends(_require_internal_secret)])
 def resume_indexing():
     set_indexer_pause(False)
     return {"status": "RESUMED"}
 
 
-@app.post("/providers/list")
+@app.post("/providers/list", dependencies=[Depends(_require_internal_secret)])
 async def list_provider_entries(req: IndexScanRequest):
     try:
         provider = build_provider(req.provider)
@@ -221,7 +240,7 @@ async def list_provider_entries(req: IndexScanRequest):
         log.error(f"List failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/providers/search")
+@app.post("/providers/search", dependencies=[Depends(_require_internal_secret)])
 async def search_provider(query: str = Query(...), req: IndexScanRequest = Body(...)):
     try:
         provider = build_provider(req.provider)
@@ -246,7 +265,7 @@ async def search_provider(query: str = Query(...), req: IndexScanRequest = Body(
         return {"status": "ERROR", "matches": []}
 
 
-@app.post("/providers/write")
+@app.post("/providers/write", dependencies=[Depends(_require_internal_secret)])
 async def write_provider_content(req: ProviderWriteRequest):
     try:
         import base64
@@ -274,7 +293,7 @@ async def write_provider_content(req: ProviderWriteRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/providers/mirror")
+@app.post("/providers/mirror", dependencies=[Depends(_require_internal_secret)])
 async def mirror_provider_directory(req: ProviderMirrorRequest):
     try:
         provider = build_provider(req.provider)

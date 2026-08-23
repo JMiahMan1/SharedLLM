@@ -58,8 +58,16 @@ async def test_raven_mission_stream_websocket(monkeypatch):
 
     mock_resp = _aio_resp(200, {"id": 999, "status": "executing", "output_log": "[]"})
 
-    with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)), client.websocket_connect("/api/raven/missions/999/stream") as websocket:
+    with patch("aiohttp.ClientSession.get", new=AsyncMock(return_value=mock_resp)), client.websocket_connect("/api/raven/missions/999/stream?token=test-token") as websocket:
             data1 = websocket.receive_text()
             assert "Thinking..." in data1
             data2 = websocket.receive_text()
             assert "Testing tool" in data2
+
+
+def test_raven_mission_stream_rejects_missing_token():
+    """A stream connection without a token must be closed, not silently accepted."""
+    from starlette.websockets import WebSocketDisconnect
+
+    with pytest.raises(WebSocketDisconnect), client.websocket_connect("/api/raven/missions/999/stream"):
+        pass
