@@ -817,9 +817,17 @@ def resolve_safe_path(base: Path, relative: str, must_exist: bool = True) -> Pat
     workspace root, but allows absolute paths for system workspaces.
     """
     try:
-        # If path is already absolute, use it directly (system workspaces)
+        # If path is already absolute, use it directly (system workspaces) —
+        # but still confined to the workspace root. Absolute inputs come from
+        # models echoing back resolved_path values, which always live under
+        # the root; anything else is traversal.
         if os.path.isabs(relative):
             target = Path(relative).resolve()
+            try:
+                target.relative_to(get_workspace_root())
+            except (ValueError, RuntimeError):
+                log.warning(f"SECURITY ALERT: Absolute path outside workspace root blocked! Root='{get_workspace_root()}', Path='{relative}'")
+                raise HTTPException(status_code=403, detail="Forbidden: Path outside the workspace root") from None
             if must_exist and not target.exists():
                 raise HTTPException(status_code=404, detail=f"Path not found: {relative}")
             return target
@@ -953,6 +961,10 @@ def _resolve_workspace(ref: WorkspaceRef, check_recovery: bool = False) -> dict[
             None
         )
         if match is None:
+            # Unknown local paths must not silently resolve to the shared
+            # workspace root with full write capabilities.
+            if not is_admin:
+                raise HTTPException(status_code=403, detail="Unknown workspace local_path (admin identity required for ad-hoc access)")
             match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace"}
     else:
         raise HTTPException(status_code=400, detail="workspace_id or local_path is required")
@@ -1014,6 +1026,9 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
     elif ref.local_path:
         match = next((item for item in registry if item.get("local_path") == ref.local_path), None)
         if match is None:
+            # Same rule as _resolve_workspace: no silent root-level ad-hoc access.
+            if not is_admin:
+                raise HTTPException(status_code=403, detail="Unknown workspace local_path (admin identity required for ad-hoc access)")
             match = {"id": "ad_hoc", "display_name": "Ad Hoc Workspace"}
     else:
         raise HTTPException(status_code=400, detail="workspace_id or local_path is required")
@@ -1506,6 +1521,7 @@ async def _storage_post(path: str, payload: dict[str, Any]) -> dict[str, Any]:
             resp = await client.post(
                 f"{STORAGE_SVC_URL}{path}" if not path.startswith("http") else path,
                 json=payload,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
                 timeout=aiohttp.ClientTimeout(total=30.0),
             )
             if resp.status != 200:

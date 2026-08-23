@@ -256,6 +256,24 @@ _SANDBOX_CRED_ENV_KEYS = (
     "HA_URL",
 )
 
+# Non-secret environment keys copied into sandbox execs. The sandbox runs
+# arbitrary repo code, so the service's full environment (INTERNAL_SECRET,
+# FERNET_KEY, cloud keys, ...) must never be passed through wholesale —
+# only this baseline plus the scoped _SANDBOX_CRED_ENV_KEYS overlay.
+_SANDBOX_BASE_ENV_KEYS = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "TMPDIR",
+    "TERM",
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+)
+
 
 def _sandbox_credential_env() -> dict[str, str]:
     """Collect integration credentials from the host env to inject into sandboxes."""
@@ -469,7 +487,7 @@ def _exec_blocking(
     elif c.status != "running":
         c.start()
 
-    full_env = dict(os.environ)
+    full_env = {k: os.environ[k] for k in _SANDBOX_BASE_ENV_KEYS if k in os.environ}
     # Guarantee the sandbox shell inherits integration credentials even when the
     # caller did not explicitly pass them, so `gh`/`git push` always authenticate.
     for _k, _v in _sandbox_credential_env().items():

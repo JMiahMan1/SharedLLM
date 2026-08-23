@@ -5740,6 +5740,18 @@ async def get_mission_details(request: Request, id_or_slug: str):
             raise HTTPException(status_code=resp.status, detail="Mission not found")
         return await resp.json()
 
+def _ensure_mission_owner(creds: dict, mission_data: dict) -> None:
+    """403 unless the caller owns the mission or is an admin.
+
+    Missions with user_id=None are system/shared missions that any
+    authenticated caller may act on (legacy behavior).
+    """
+    is_admin = bool(creds.get("is_admin"))
+    user_id = creds.get("id")
+    mission_user_id = mission_data.get("user_id")
+    if not is_admin and mission_user_id is not None and mission_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You are not the owner of this mission.")
+
 @app.post("/api/raven/missions/{id_or_slug}/kill")
 async def kill_mission(request: Request, id_or_slug: str):
     creds = await _resolve_identity_from_request(request)
@@ -5759,6 +5771,7 @@ async def kill_mission(request: Request, id_or_slug: str):
             raise HTTPException(status_code=m_resp.status, detail="Mission not found")
         mission_data = await m_resp.json()
         real_id = mission_data["id"]
+        _ensure_mission_owner(creds, mission_data)
 
         # 1. Update status in database — only if mission is still active.
         # Never overwrite a terminal state (completed / failed / cancelled).
@@ -5826,6 +5839,7 @@ async def cancel_mission(request: Request, id_or_slug: str):
             raise HTTPException(status_code=m_resp.status, detail="Mission not found")
         mission_data = await m_resp.json()
         real_id = mission_data["id"]
+        _ensure_mission_owner(creds, mission_data)
 
         # 1. Remove any pending/processing job from Redis.
         dropped = 0
@@ -5868,6 +5882,7 @@ async def pause_mission(request: Request, id_or_slug: str):
             raise HTTPException(status_code=m_resp.status, detail="Mission not found")
         mission_data = await m_resp.json()
         real_id = mission_data["id"]
+        _ensure_mission_owner(creds, mission_data)
 
         import redis.asyncio as redis
 
@@ -5891,6 +5906,7 @@ async def resume_mission(request: Request, id_or_slug: str):
             raise HTTPException(status_code=m_resp.status, detail="Mission not found")
         mission_data = await m_resp.json()
         real_id = mission_data["id"]
+        _ensure_mission_owner(creds, mission_data)
 
         import redis.asyncio as redis
 
@@ -5922,11 +5938,7 @@ async def refine_mission(request: Request, id_or_slug: str, body: MissionRefineR
         real_id = mission_data["id"]
 
         # Ownership authorization check
-        is_admin = bool(creds.get("is_admin"))
-        user_id = creds.get("id")
-        mission_user_id = mission_data.get("user_id")
-        if not is_admin and mission_user_id is not None and mission_user_id != user_id:
-            raise HTTPException(status_code=403, detail="Forbidden: You are not the owner of this mission.")
+        _ensure_mission_owner(creds, mission_data)
 
         # Capture history log before resetting database fields
         history_log = mission_data.get("output_log")
@@ -5989,6 +6001,9 @@ async def delete_mission(request: Request, id_or_slug: str):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     async with borrow_http_client() as client:
+        m_resp = await client.get(f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}", headers={"X-Internal-Secret": INTERNAL_SECRET})
+        if m_resp.status == 200:
+            _ensure_mission_owner(creds, await m_resp.json())
         resp = await client.delete(
             f"{IDENTITY_SVC}/api/raven/missions/{id_or_slug}",
             headers={"X-Internal-Secret": INTERNAL_SECRET}
@@ -6096,22 +6111,25 @@ async def get_mission_logs(id_or_slug: str, request: Request):
 
 @app.websocket("/api/raven/missions/{id_or_slug}/stream")
 async def raven_mission_stream(websocket: WebSocket, id_or_slug: str, token: str = ""):
-    # Validate auth token
-    if token:
-        try:
-            async with borrow_http_client() as client:
-                auth_resp = await client.get(
-                    f"{IDENTITY_SVC}/api/users/me",
-                    headers={"Authorization": f"Bearer {token}"}
-                )
-                if auth_resp.status != 200:
-                    log.warning(f"[WebSocket] Token validation failed for mission {id_or_slug}: {auth_resp.status}")
-                    await websocket.close(code=1008, reason="Invalid token")
-                    return
-        except Exception as e:
-            log.warning(f"[WebSocket] Token validation error: {e}")
-            await websocket.close(code=1011, reason="Auth service unavailable")
-            return
+    # Validate auth token — a missing token must be rejected, not silently
+    # allowed to replay mission history and subscribe to the live feed.
+    if not token:
+        await websocket.close(code=1008, reason="Missing token")
+        return
+    try:
+        async with borrow_http_client() as client:
+            auth_resp = await client.get(
+                f"{IDENTITY_SVC}/api/users/me",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+            if auth_resp.status != 200:
+                log.warning(f"[WebSocket] Token validation failed for mission {id_or_slug}: {auth_resp.status}")
+                await websocket.close(code=1008, reason="Invalid token")
+                return
+    except Exception as e:
+        log.warning(f"[WebSocket] Token validation error: {e}")
+        await websocket.close(code=1011, reason="Auth service unavailable")
+        return
 
     try:
         await websocket.accept()

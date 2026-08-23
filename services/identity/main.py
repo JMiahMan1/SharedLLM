@@ -34,6 +34,7 @@ from services.identity.models import (
     UserWidget,
 )
 from services.identity.schemas import (
+    ChangePasswordRequest,
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
     DiscoverResponse,
@@ -474,6 +475,7 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
 
     return ResolvedCredentials(
         user=user.username,
+        id=user.id,
         is_admin=user.is_admin,
         api_key=decrypt(user.api_key_enc) if user.api_key_enc else req.api_key,
         nextcloud_url=user.nextcloud_url,
@@ -861,8 +863,10 @@ def login(req: LoginRequest, session: Session = Depends(get_session)):
     )
 
 @app.post("/api/auth/change-password")
-def change_password(new_password: str, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
-    user.password_hash = hash_password(new_password)
+def change_password(body: ChangePasswordRequest, session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    # Body model, not query param: the gateway proxies JSON bodies here and a
+    # bare scalar would put the new password in URLs/access logs.
+    user.password_hash = hash_password(body.new_password)
     session.add(user)
     session.commit()
     return {"status": "SUCCESS", "message": "Password updated"}
@@ -1274,6 +1278,7 @@ def update_settings_bulk(
 def get_setting(
     key: str,
     session: Session = Depends(get_session),
+    auth: bool = Depends(require_admin_or_internal),
     x_internal_secret: str = Header(None, alias="X-Internal-Secret")
 ):
     setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
