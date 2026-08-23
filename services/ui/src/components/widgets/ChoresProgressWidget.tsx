@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Check, Star, Sun, Moon } from 'lucide-react';
+import { Check, Star, Sun, Moon, User } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useWidgetData } from '../../hooks/useWidgetData';
 import { useDarkModeSync } from '../../hooks/useDarkModeSync';
@@ -159,6 +159,39 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
 
   const colorForAssignee = (name: string) => assigneeMeta[name] || colorForName(name);
 
+  const choreAssignees = (chore: ChoreItem): string[] =>
+    chore.assignees && chore.assignees.length > 0 ? chore.assignees : ['Unassigned'];
+
+  /** Overlapping mini initials avatars so each chore row shows its owner(s). */
+  const AssigneeAvatars = ({ names, size = 24 }: { names: string[]; size?: number }) => (
+    <span
+      className="flex shrink-0 items-center"
+      title={`Assigned to ${names.join(', ')}`}
+      aria-label={`Assigned to ${names.join(', ')}`}
+    >
+      {names.slice(0, 3).map((n, i) => {
+        const color = n === 'Unassigned' ? '#64748b' : colorForAssignee(n);
+        return (
+          <span
+            key={n}
+            className="flex items-center justify-center rounded-full border border-slate-800 font-extrabold"
+            style={{
+              width: size,
+              height: size,
+              marginLeft: i === 0 ? 0 : -size * 0.3,
+              background: color,
+              color: textOn(color),
+              fontSize: Math.max(9, size * 0.4),
+              zIndex: names.length - i,
+            }}
+          >
+            {n === 'Unassigned' ? <User size={size * 0.55} aria-hidden /> : initials(n)}
+          </span>
+        );
+      })}
+    </span>
+  );
+
   const handleToggleComplete = async (chore: ChoreItem) => {
     if (!user?.username) return;
 
@@ -223,6 +256,9 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
         {chore.emoji_icon ? `${chore.emoji_icon} ` : ''}
         {chore.title}
       </span>
+      {(!chore.assignees || chore.assignees.length !== 1) && (
+        <AssigneeAvatars names={choreAssignees(chore)} size={26} />
+      )}
       {chore.reward ? <StarBadge count={chore.reward} /> : null}
     </button>
   );
@@ -352,6 +388,7 @@ const ChoresProgressWidget = ({ settingsButton }: IWidgetProps) => {
           </p>
         ) : null}
       </div>
+      <AssigneeAvatars names={choreAssignees(chore)} size={22} />
     </button>
   );
 
