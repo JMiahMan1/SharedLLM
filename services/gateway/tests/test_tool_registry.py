@@ -18,7 +18,7 @@ from services.gateway.tool_registry import (
 def test_get_tool_schemas_returns_all_seven_tools():
     schemas = get_tool_schemas()
     names = {s["function"]["name"] for s in schemas}
-    assert names == {
+    assert {
         TOOL_GH,
         TOOL_GIT,
         TOOL_WRITE_FILE,
@@ -29,7 +29,18 @@ def test_get_tool_schemas_returns_all_seven_tools():
         TOOL_WEBSCRAPER,
         TOOL_OCR,
         "workspaceportexposerequest",
-    }
+    } <= names
+    # Full Raven action surface must be exposed alongside the curated tools.
+    for raven_tool in (
+        "WorkspaceShellRequest",
+        "WorkspaceFileReadRequest",
+        "SystemLearningRequest",
+        "RedisInspectRequest",
+        "TTSRequest",
+        "ContextSearchRequest",
+        "ControlPlaneRequest",
+    ):
+        assert raven_tool in names
     # Every tool must declare JSON-schema parameters.
     for s in schemas:
         assert s["type"] == "function"
