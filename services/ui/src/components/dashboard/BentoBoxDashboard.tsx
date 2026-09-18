@@ -118,7 +118,7 @@ const BentoBoxDashboard = () => {
   const totalWidgets = widgets.length;
 
   // Show a gentle loading state while syncing widget settings on first render
-  if (mounting && totalWidgets === 0) {
+  if (mounting) {
     return (
       <div
         className="grid gap-5"
@@ -127,9 +127,35 @@ const BentoBoxDashboard = () => {
           gridAutoRows: '200px',
         }}
       >
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="skeleton rounded-2xl" style={{ gridRow: i % 3 === 0 ? 'span 2' : 'span 1' }} />
-        ))}
+        {widgets.length === 0 ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="skeleton rounded-2xl" style={{ gridRow: i % 3 === 0 ? 'span 2' : 'span 1' }} />
+          ))
+        ) : (
+          widgets.map((widget) => {
+            const LazyWidget = LazyWidgets[widget.def.key];
+            const size = (widget.userSettings.size as WidgetSize) || 'medium';
+            const sizeClass = SIZE_CLASSES[size] ?? SIZE_CLASSES.medium;
+            return (
+              <div key={widget.def.key} className={`${sizeClass.col} ${sizeClass.row}`}>
+                <WidgetErrorBoundary widgetKey={widget.def.key}>
+                  <Suspense fallback={<WidgetSkeletonSelector widgetKey={widget.def.key} />}>
+                    {LazyWidget ? (
+                      <LazyWidget
+                        settingsButton={
+                          <div className="glass-button p-2 animate-pulse rounded-lg" />
+                        }
+                        userSettings={widget.userSettings}
+                        onTogglePin={() => handleTogglePin(widget.def.key)}
+                        onMediaStop={NOOP}
+                      />
+                    ) : null}
+                  </Suspense>
+                </WidgetErrorBoundary>
+              </div>
+            );
+          })
+        )}
       </div>
     );
   }
