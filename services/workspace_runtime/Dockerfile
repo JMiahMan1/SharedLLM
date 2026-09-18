@@ -66,12 +66,11 @@ RUN pip install --no-cache-dir \
 # sandbox environment at command time — never from a .env file.
 # ===========================================================================
 
-# --- Google Cloud SDK + GitHub CLI apt repositories ---
-RUN curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud-google.gpg \
- && echo "deb [signed-by=/usr/share/keyrings/cloud-google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" > /etc/apt/sources.list.d/google-cloud-sdk.list \
- && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
- && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
- && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
+# --- GitHub CLI apt repository (Google Cloud SDK installs via tarball below:
+#     packages.cloud.google.com has no candidate for current Debian) ---
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list
 
 # --- System packages: language runtimes, linters, media/CLI tooling ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -99,9 +98,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     maven \
     gradle \
     ruby-full \
-    google-cloud-sdk \
     gh \
     && rm -rf /var/lib/apt/lists/*
+
+# --- Google Cloud CLI via tarball (no apt candidate on current Debian) ---
+RUN set -eux; \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz" -o /tmp/gcloud.tgz; \
+    tar -xzf /tmp/gcloud.tgz -C /opt; \
+    /opt/google-cloud-sdk/install.sh --quiet --usage-reporting=false --path-update=false --bash-completion=false; \
+    ln -sf /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud; \
+    ln -sf /opt/google-cloud-sdk/bin/gsutil /usr/local/bin/gsutil; \
+    ln -sf /opt/google-cloud-sdk/bin/bq /usr/local/bin/bq; \
+    rm -f /tmp/gcloud.tgz; \
+    gcloud --version
 
 # --- Python linters / checkers ---
 RUN pip install --no-cache-dir \
