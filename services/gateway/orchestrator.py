@@ -523,9 +523,19 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
         try:
             from services.gateway.main import shared_http_client
             async with shared_http_client() as client:
+                _user_context = {"user": user_id, "is_admin": bool(creds and creds.is_admin)}
+                if creds:
+                    for _field in (
+                        "ha_url", "ha_token", "nextcloud_url", "nextcloud_user", "nextcloud_pass",
+                        "github_token", "gitlab_token", "git_token", "api_key",
+                        "audiobookshelf_url", "audiobookshelf_user", "audiobookshelf_pass",
+                    ):
+                        _val = getattr(creds, _field, None)
+                        if _val:
+                            _user_context[_field] = _val
                 _wr = await client.post(
                     f"{EXECUTION_SVC}/execute/workspace_file_read",
-                    json={"workspace_id": workspace_id, "path": "raven_memory.md"},
+                    json={"workspace_id": workspace_id, "path": "raven_memory.md", "user_context": _user_context},
                     headers={"X-Internal-Secret": INTERNAL_SECRET},
                     timeout=aiohttp.ClientTimeout(total=10.0),
                 )
@@ -548,6 +558,45 @@ async def _fetch_rag_context(query: str, user_id: str, creds: ResolvedCredential
         weather_ctx = await _fetch_weather_context(creds)
         if weather_ctx:
             rag_context += f"\n[WEATHER]\n{weather_ctx}\n"
+
+    # ── DREAM FEEDBACK — RSI self-test loop ─────────────────────────
+    # After dreaming consolidates lessons, this injects two things:
+    # 1. VALIDATION CHECKLIST: lessons that have been applied (used) but
+    #    never tested — Raven should run them as verification tasks
+    #    before completing the current mission. Results go to
+    #    POST /rag/dream/validate so future dreaming can weight them.
+    # 2. PRIORITY HITS: top-scoring lessons (by applied_count +
+    #    confidence + recency) for quick reference during the mission.
+    # This creates a verify→learn→re-verify RSI cycle.
+    if workspace_id or workspace_id == "":
+        try:
+            from services.gateway.main import shared_http_client as _gw_client
+            async with _gw_client() as _dc:
+                _dp = await _dc.get(
+                    f"{RAG_SVC}/rag/dream/pending",
+                    params={"user_id": user_id},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=5.0),
+                )
+                if _dp.status == 200:
+                    _pending = (await _dp.json()).get("validations_pending") or []
+                    if _pending:
+                        rag_context += (
+                            "\n[DREAM — VALIDATE ON NEXT MISSION: "
+                            "before completing, self-test each of these "
+                            "consolidated lessons by running its rule as "
+                            "a command/test in the workspace. Report "
+                            "results via POST /rag/dream/validate]\n"
+                        )
+                        for _v in _pending[:5]:
+                            rag_context += (
+                                f"- Validate {_v['id']}: {_v['rule']} "
+                                f"(applied {_v['applied_count']}x)"
+                                + (f" | last: {_v['last_validated']}" if _v.get("last_validated") else "")
+                                + "\n"
+                            )
+        except Exception as _de:
+            log.debug(f"[Orchestrator] dream feedback skipped: {_de}")
 
     return rag_context.strip()
 

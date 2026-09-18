@@ -642,9 +642,9 @@ async def search(req: SearchRequest):
 async def ingest(req: IngestRequest):
     import uuid
 
-    doc_id = str(uuid.uuid4())
     meta = dict(req.metadata)
     meta["user_id"] = req.user_id.lower()
+    doc_id = meta.get("id") or str(uuid.uuid4())
     meta["indexed_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     now = int(time.time())
     try:
@@ -878,6 +878,29 @@ def _reembed_doc(doc_id: str, new_content: str, meta: dict, vector: list[float] 
 
 
 @app.post("/rag/dream", dependencies=[Depends(require_internal)])
+# --- Priority scoring for RSI self-improvement ---
+
+
+def _lesson_priority_score(d: dict) -> float:
+    """Composite score balancing reuse, confidence, recency, and benchmark performance."""
+    age_seconds = max(0, int(time.time()) - int(d.get("created_at") or 0))
+    age_days = age_seconds / 86400.0
+    recency_factor = max(0.25, 1.0 - (age_days / 90.0) * 0.75)
+    meta = d.get("metadata") or {}
+    if isinstance(meta, str):
+        try:
+            meta = json.loads(meta)
+        except Exception:
+            meta = {}
+    benchmark_score = float(meta.get("benchmark_score", meta.get("score", 0) or 0))
+    return (
+        (d.get("applied_count") or 0) * 3.0
+        + (d.get("usage_count") or 0) * 1.0
+        + float(d.get("confidence") or 0.5) * 10.0
+        + benchmark_score * 2.0
+    ) * recency_factor
+
+
 async def dream_learnings(user_id: str = "default", compact_at: int = 600, summary_len: int = 400):
     """Dreaming mode: review Raven lessons and consolidate memory.
 
@@ -961,7 +984,7 @@ async def dream_learnings(user_id: str = "default", compact_at: int = 600, summa
         for key, group in by_rule.items():
             if len(group) < 2:
                 continue
-            survivor = max(group, key=lambda d: (d["confidence"], d["created_at"]))
+            survivor = max(group, key=_lesson_priority_score)
             others = [d for d in group if d["id"] != survivor["id"]]
             for o in others:
                 survivor["usage_count"] += o["usage_count"]
@@ -996,6 +1019,75 @@ async def dream_learnings(user_id: str = "default", compact_at: int = 600, summa
                 pruned.append(doc_id)
         if pruned:
             _delete_items(pruned)
+        _conn().commit()
+
+        # Pass 4: VALIDATE — check structural integrity of surviving lessons
+        # and generate a validation checklist for RSI (lessons that have been
+        # applied/used but never verified against current workspace state are
+        # flagged as candidates for the next mission to test).
+        degraded: list[str] = []
+        validation_checklist: list[dict] = []
+        all_remaining: list[dict] = []
+        for d in docs:
+            if d["id"] in deleted or d["id"] in pruned:
+                continue
+            all_remaining.append(d)
+            parsed: dict[str, Any] = {}
+            if d["content"].strip().startswith("{"):
+                try:
+                    parsed = json.loads(d["content"])
+                except Exception:
+                    pass
+            critical = ["rule", "root_cause", "outcome"]
+            missing = [f for f in critical if not parsed.get(f)]
+            if missing:
+                degraded.append(d["id"])
+                log.warning(f"[Dream] lesson {d['id']} degraded, missing: {missing}")
+            else:
+                _pri = _lesson_priority_score(d)
+                if (d.get("applied_count") or 0) > 0 and (d.get("usage_count") or 0) == 0:
+                    validation_checklist.append({
+                        "id": d["id"],
+                        "rule": parsed.get("rule", ""),
+                        "applied_count": d.get("applied_count", 0),
+                        "priority": round(_pri, 2),
+                    })
+                else:
+                    validation_checklist.append({
+                        "id": d["id"],
+                        "rule": parsed.get("rule", ""),
+                        "applied_count": d.get("applied_count", 0),
+                        "priority": round(_pri, 2),
+                    })
+        # Sort validation checklist by priority descending; keep top 20
+        validation_checklist.sort(key=lambda v: v["priority"], reverse=True)
+        validation_checklist = validation_checklist[:20]
+
+        # Priority-ranked lessons for mission prompt injection
+        priority_hits: list[dict] = []
+        for d in sorted(all_remaining, key=_lesson_priority_score, reverse=True)[:15]:
+            _p = _lesson_priority_score(d)
+            _c = d["content"]
+            _rule = ""
+            _out = ""
+            _conf = float(d.get("confidence") or 0.5)
+            if _c.strip().startswith("{"):
+                try:
+                    _pc = json.loads(_c)
+                    _rule = _pc.get("rule", "")
+                    _out = _pc.get("outcome", "")
+                    _conf = float(_pc.get("confidence", _conf))
+                except Exception:
+                    pass
+            priority_hits.append({
+                "id": d["id"],
+                "rule": _rule,
+                "outcome": _out,
+                "confidence": _conf,
+                "applied_count": d.get("applied_count", 0),
+                "usage_count": d.get("usage_count", 0),
+                "priority": round(_p, 2),
+            })
 
         kept = _conn().execute(
             "SELECT COUNT(*) AS c FROM rag_items WHERE collection_name = ? AND user_id = ?",
@@ -1009,9 +1101,315 @@ async def dream_learnings(user_id: str = "default", compact_at: int = 600, summa
             "merged": merged,
             "pruned": pruned,
             "kept": kept,
+            "degraded": degraded,
+            "validation_checklist": validation_checklist,
+            "priority_hits": priority_hits,
         }
     except Exception as e:
         log.error(f"Dream failed: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.post("/rag/dream/validate", dependencies=[Depends(require_internal)])
+async def validate_lessons(
+    payload: dict,
+    user_id: str = "default",
+):
+    """Report validation results for lessons tested during a mission.
+
+    Payload: {"lesson_id": "lesson-abc", "passed": true, "evidence": "..."}
+    Updates the lesson's metadata with the latest validation outcome
+    so future dreaming passes can weight it appropriately.
+    """
+    try:
+        target_user = user_id.lower()
+        lesson_id = (payload or {}).get("lesson_id", "")
+        if not lesson_id:
+            return JSONResponse(status_code=400, content={"status": "ERROR", "message": "lesson_id required"})
+        passed = bool((payload or {}).get("passed", False))
+        evidence = str((payload or {}).get("evidence", ""))[:500]
+        conn = _conn()
+        row = conn.execute(
+            "SELECT metadata FROM rag_items WHERE id = ? AND collection_name = ? AND user_id = ?",
+            [lesson_id, "system_learnings", target_user],
+        ).fetchone()
+        if not row:
+            return JSONResponse(status_code=404, content={"status": "ERROR", "message": "lesson not found"})
+        meta = json.loads(row["metadata"]) if row["metadata"] else {}
+        validations = meta.setdefault("validations", [])
+        validations.insert(0, {
+            "passed": passed,
+            "evidence": evidence,
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        })
+        validations[:5] = validations[:5]
+        if passed:
+            meta.setdefault("validation_success_count", 0)
+            meta["validation_success_count"] = meta["validation_success_count"] + 1
+        else:
+            meta.setdefault("validation_fail_count", 0)
+            meta["validation_fail_count"] = meta["validation_fail_count"] + 1
+        conn.execute(
+            "UPDATE rag_items SET metadata = ? WHERE id = ? AND user_id = ?",
+            [json.dumps(meta), lesson_id, target_user],
+        )
+        conn.commit()
+        return {"status": "SUCCESS", "lesson_id": lesson_id, "passed": passed}
+    except Exception as e:
+        log.error(f"Dream validation failed: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.get("/rag/dream/pending", dependencies=[Depends(require_internal)])
+async def pending_validations(user_id: str = "default"):
+    """Return a compact checklist of lessons to validate on next mission.
+
+    Lessons with applied_count > 0 but no validation record (or last validation failed)
+    are candidates. Sorted by priority score. Used by the gateway to inject
+    a validation checklist into mission prompts (RSI self-test loop).
+    """
+    try:
+        target_user = user_id.lower()
+        rows = _conn().execute(
+            "SELECT id, content, metadata, applied_count, usage_count, confidence "
+            "FROM rag_items WHERE collection_name = ? AND user_id = ?",
+            ["system_learnings", target_user],
+        ).fetchall()
+        candidates: list[dict] = []
+        for r in rows:
+            meta = json.loads(r["metadata"]) if r["metadata"] else {}
+            validations = meta.get("validations", [])
+            last_passed = validations[0].get("passed") if validations else None
+            if (r["applied_count"] or 0) > 0 and last_passed is not False:
+                parsed: dict[str, Any] = {}
+                if r["content"].strip().startswith("{"):
+                    try:
+                        parsed = json.loads(r["content"])
+                    except Exception:
+                        pass
+                candidates.append({
+                    "id": r["id"],
+                    "rule": parsed.get("rule", ""),
+                    "outcome": parsed.get("outcome", ""),
+                    "applied_count": r["applied_count"],
+                    "last_validated": validations[0].get("at") if validations else None,
+                })
+        candidates.sort(key=lambda c: c["applied_count"], reverse=True)
+        return {"status": "SUCCESS", "validations_pending": candidates[:10]}
+    except Exception as e:
+        log.error(f"Dream pending failed: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+# --- Alpaca benchmark integration ---
+
+BENCHMARKS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "..", "..", "alpaca", "benchmark_tests.json",
+)
+BENCHMARK_RESULTS_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "..", "..", "alpaca", "data", "llm_benchmarks", "models",
+)
+BENCHMARK_CAT_LABELS = {
+    "coding": "Python/code execution", "reasoning": "Logical reasoning",
+    "instruction": "Instruction following", "creative": "Creative writing",
+    "home_automation": "Home automation", "knowledge": "Knowledge/MMLU",
+    "mmlu_pro": "MMLU-Pro", "gpqa_diamond": "GPQA-Diamond",
+    "hle": "HLE", "math_hard": "Math-Hard", "ifeval": "IFEval",
+    "multimodal": "Multimodal", "gamedev": "Game dev", "appdev": "App dev",
+    "linux_admin": "Linux admin", "webdev": "Web dev", "database": "Database",
+    "cpp": "C++", "java": "Java", "debugging": "Debugging",
+}
+
+
+@app.post("/rag/benchmark/ingest-curriculum", dependencies=[Depends(require_internal)])
+async def ingest_benchmark_curriculum(path: str | None = None):
+    """Ingest benchmark test categories as Raven curriculum lessons.
+
+    Reads benchmark_tests.json and creates one lesson per category.
+    Each lesson encodes the category's rules, test names, and (if available)
+    expected answers as ground-truth validation criteria. Lessons tagged
+    ``benchmark`` are auto-validated against expected answers when available.
+    """
+    try:
+        _path = path or BENCHMARKS_PATH
+        if not os.path.exists(_path):
+            return JSONResponse(
+                status_code=404,
+                content={"status": "ERROR", "message": f"benchmark file not found: {_path}"},
+            )
+        with open(_path) as f:
+            categories = json.load(f)
+        target_user = "default"
+        now = int(time.time())
+        now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        ingested = []
+        for cat_name, tests in categories.items():
+            if not isinstance(tests, list) or not tests:
+                continue
+            labels = [t.get("label", t.get("id", "")) for t in tests]
+            expected_ids = [t.get("expected") for t in tests if t.get("expected")]
+            rule = f"Category {cat_name}: {', '.join(labels[:5])}"
+            content = json.dumps({
+                "id": f"benchmark-{cat_name}",
+                "topic": f"benchmark-{cat_name}",
+                "rule": rule,
+                "root_cause": f"Validate capabilities in {BENCHMARK_CAT_LABELS.get(cat_name, cat_name)}",
+                "outcome": f"{len(tests)} tasks, {len(expected_ids)} with ground truth",
+                "confidence": 0.5,
+                "expected_answers": expected_ids[:10],
+                "test_ids": [t.get("id", "") for t in tests[:20]],
+                "summary": f"Benchmark category covering {len(tests)} tasks in {BENCHMARK_CAT_LABELS.get(cat_name, cat_name)}",
+            }, ensure_ascii=False)
+            doc_id = f"benchmark-{cat_name}"
+            meta = {
+                "id": f"benchmark-{cat_name}",
+                "topic": f"benchmark-{cat_name}",
+                "rule": rule,
+                "type": "benchmark_curriculum",
+                "benchmark_score": 0.0,
+                "category": cat_name,
+                "task_count": len(tests),
+                "ground_truth_count": len(expected_ids),
+                "indexed_at": now_ts,
+            }
+            _add_item("system_learnings", doc_id, target_user, content, meta, now, now_ts)
+            ingested.append(doc_id)
+        _conn().commit()
+        return {
+            "status": "SUCCESS",
+            "categories_ingested": len(ingested),
+            "lesson_ids": ingested,
+        }
+    except Exception as e:
+        log.error(f"Benchmark curriculum ingest failed: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.post("/rag/benchmark/ingest-results", dependencies=[Depends(require_internal)])
+async def ingest_benchmark_results(models: list[str] | None = None):
+    """Ingest model benchmark results to update lesson confidence.
+
+    Reads per-model result files from alpaca data dir. For each model and
+    category, updates the matching benchmark lesson's metadata with:
+    benchmark_score, success_rate, and validation evidence from the
+    highest-scoring model's responses. This feeds directly into
+    priority scoring so Raven knows which capabilities are proven.
+    """
+    try:
+        results_dir = BENCHMARK_RESULTS_DIR
+        if not os.path.isdir(results_dir):
+            return JSONResponse(
+                status_code=404,
+                content={"status": "ERROR", "message": f"benchmark results dir not found: {results_dir}"},
+            )
+        target_user = "default"
+        now = int(time.time())
+        now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        model_names = models or sorted(
+            f for f in os.listdir(results_dir) if f.endswith(".json")
+        )
+        updates: dict[str, dict] = {}  # lesson_id -> best result
+        for model_file in model_names:
+            filepath = os.path.join(results_dir, model_file)
+            try:
+                data = json.load(open(filepath))
+            except Exception:
+                continue
+            model_name = data.get("model", model_file.replace(".json", ""))
+            results = data.get("results", [])
+            for entry in results:
+                cats = {k.replace("category_", ""): v for k, v in entry.items() if isinstance(v, dict) and "tests_run" in v}
+                for cat, info in cats.items():
+                    lesson_id = f"benchmark-{cat}"
+                    score = info.get("score", 0)
+                    passed = info.get("tests_passed", 0)
+                    total = info.get("tests_run", 1)
+                    if total == 0:
+                        total = 1
+                    success_rate = passed / total
+                    if lesson_id not in updates or score > updates[lesson_id].get("score", 0):
+                        updates[lesson_id] = {
+                            "benchmark_score": score,
+                            "success_rate": success_rate,
+                            "model": model_name,
+                            "category": cat,
+                            "tests_passed": passed,
+                            "tests_total": total,
+                        }
+        applied = 0
+        for lesson_id, result in updates.items():
+            meta = {
+                "id": lesson_id,
+                "benchmark_score": result["benchmark_score"],
+                "success_rate": result["success_rate"],
+                "model": result["model"],
+                "category": result["category"],
+                "type": "benchmark_result",
+                "tests_passed": result["tests_passed"],
+                "tests_total": result["tests_total"],
+                "indexed_at": now_ts,
+            }
+            try:
+                _conn().execute(
+                    "UPDATE rag_items SET metadata = ? WHERE id = ? AND user_id = ?",
+                    [json.dumps(meta), lesson_id, target_user],
+                )
+                applied += 1
+            except Exception as _e:
+                log.warning(f"[benchmark] update failed for {lesson_id}: {_e}")
+        _conn().commit()
+        return {"status": "SUCCESS", "models_processed": len(model_names), "lessons_updated": applied}
+    except Exception as e:
+        log.error(f"Benchmark results ingest failed: {e}")
+        return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+@app.get("/rag/benchmark/insights", dependencies=[Depends(require_internal)])
+async def benchmark_insights(user_id: str = "default"):
+    """Return benchmark-driven learning insights.
+
+    Top proven capabilities (high benchmark score), top gaps (low score
+    with high task count), and validation candidates (benchmark lessons
+    not yet validated). Used by the gateway to inject capability guidance
+    into mission prompts.
+    """
+    try:
+        target_user = user_id.lower()
+        rows = _conn().execute(
+            "SELECT id, content, metadata FROM rag_items "
+            "WHERE collection_name = 'system_learnings' AND user_id = ? "
+            "AND metadata LIKE '%benchmark%'",
+            [target_user],
+        ).fetchall()
+        proven: list[dict] = []
+        gaps: list[dict] = []
+        for r in rows:
+            meta = json.loads(r["metadata"]) if r["metadata"] else {}
+            score = float(meta.get("benchmark_score", meta.get("score", 0) or 0))
+            task_count = meta.get("task_count", 0)
+            lesson_id = meta.get("id", r["id"])
+            cat = meta.get("category", "unknown")
+            entry = {"id": lesson_id, "category": cat, "score": score, "task_count": task_count}
+            if score >= 70:
+                proven.append(entry)
+            elif score < 50 and task_count >= 3:
+                gaps.append(entry)
+        proven.sort(key=lambda x: x["score"], reverse=True)
+        gaps.sort(key=lambda x: x["score"])
+        return {
+            "status": "SUCCESS",
+            "proven_capabilities": proven[:10],
+            "priority_gaps": gaps[:10],
+            "guidance": (
+                "Focus missions on priority_gaps before attempting advanced tasks. "
+                "Proven capabilities can be assumed as available tools."
+                if gaps else "All benchmark capabilities are performing well."
+            ),
+        }
+    except Exception as e:
+        log.error(f"Benchmark insights failed: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
 
 

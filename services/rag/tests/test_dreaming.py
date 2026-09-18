@@ -52,7 +52,7 @@ def _lesson_content(rule: str, summary: str = "default summary") -> str:
     )
 
 
-async def _ingest(rule: str, summary: str, confidence: float = 0.5) -> str:
+async def _ingest(rule: str, summary: str, lesson_id: str, confidence: float = 0.5) -> str:
     req = IngestRequest(
         user_id="default",
         content=_lesson_content(rule, summary),
@@ -65,10 +65,11 @@ async def _ingest(rule: str, summary: str, confidence: float = 0.5) -> str:
             "confidence": confidence,
             "tags": ["test"],
             "type": "learning",
-            "id": "unused",
+            "id": lesson_id,
         },
     )
     resp = await rag_main.ingest(req)
+    assert resp["id"] == lesson_id
     return resp["id"]
 
 
@@ -79,9 +80,9 @@ async def _learnings() -> list[dict]:
 @pytest.mark.asyncio
 async def test_dream_merges_same_rule_lessons(tmp_path):
     _install_fakes(tmp_path)
-    low = await _ingest("Always verify with tests", "low-confidence version", 0.6)
-    high = await _ingest("Always verify with tests", "high-confidence version", 0.95)
-    other = await _ingest("Different rule entirely", "untouched", 0.8)
+    low = await _ingest("Always verify with tests", "low-confidence version", "lesson-low", 0.6)
+    high = await _ingest("Always verify with tests", "high-confidence version", "lesson-high", 0.95)
+    other = await _ingest("Different rule entirely", "untouched", "lesson-other", 0.8)
 
     report = await rag_main.dream_learnings()
 
@@ -102,7 +103,7 @@ async def test_dream_merges_same_rule_lessons(tmp_path):
 @pytest.mark.asyncio
 async def test_dream_compacts_oversized_lessons(tmp_path):
     _install_fakes(tmp_path)
-    big = await _ingest("Keep lessons short", "A" * 900, 0.7)
+    big = await _ingest("Keep lessons short", "A" * 900, "lesson-big", 0.7)
 
     report = await rag_main.dream_learnings(compact_at=600, summary_len=400)
 
@@ -117,8 +118,8 @@ async def test_dream_compacts_oversized_lessons(tmp_path):
 @pytest.mark.asyncio
 async def test_dream_prunes_superseded_lessons(tmp_path):
     conn = _install_fakes(tmp_path)
-    keep = await _ingest("Use the current approach", "keeper", 0.9)
-    old = await _ingest("Old approach superseded", "old version", 0.5)
+    keep = await _ingest("Use the current approach", "keeper", "lesson-keep", 0.9)
+    old = await _ingest("Old approach superseded", "old version", "lesson-old", 0.5)
     # Make lesson-old superseded by lesson-keep.
     conn.execute(
         "UPDATE rag_items SET supersedes = ? WHERE id = ?",
@@ -137,8 +138,8 @@ async def test_dream_prunes_superseded_lessons(tmp_path):
 @pytest.mark.asyncio
 async def test_dream_sums_usage_and_applied_counts(tmp_path):
     conn = _install_fakes(tmp_path)
-    low = await _ingest("Counts accumulate", "first", 0.6)
-    high = await _ingest("Counts accumulate", "second", 0.9)
+    low = await _ingest("Counts accumulate", "first", "lesson-low", 0.6)
+    high = await _ingest("Counts accumulate", "second", "lesson-high", 0.9)
     conn.execute(
         "UPDATE rag_items SET usage_count = 5, applied_count = 2 WHERE id = ?", [low]
     )
@@ -149,7 +150,9 @@ async def test_dream_sums_usage_and_applied_counts(tmp_path):
 
     await rag_main.dream_learnings()
 
-    survivor = next(i for i in await _learnings() if i["id"] == high)
+    # Priority scoring favors higher applied+usage (RSI self-improvement signal)
+    # over raw confidence — lesson-low has more reuse evidence.
+    survivor = next(i for i in await _learnings() if i["id"] == low)
     assert survivor["usage_count"] == 8
     assert survivor["applied_count"] == 3
 
@@ -157,8 +160,8 @@ async def test_dream_sums_usage_and_applied_counts(tmp_path):
 @pytest.mark.asyncio
 async def test_dream_keeps_unrelated_lessons(tmp_path):
     _install_fakes(tmp_path)
-    await _ingest("Rule one", "a", 0.5)
-    await _ingest("Rule two", "b", 0.5)
+    await _ingest("Rule one", "a", "lesson-a", 0.5)
+    await _ingest("Rule two", "b", "lesson-b", 0.5)
 
     report = await rag_main.dream_learnings()
 

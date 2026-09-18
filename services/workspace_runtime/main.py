@@ -1692,14 +1692,25 @@ def list_workspace_ids_internal(x_internal_secret: str | None = Header(default=N
 def resolve_workspace(req: WorkspaceRef, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
     workspace = _resolve_workspace(req)
-    # Trusted internal endpoint: attach the DECRYPTED per-workspace env/secret
-    # map so the execution layer can inject it into the sandbox. Public list
-    # endpoints only receive masked key names (see _workspace_to_dict).
-    _env_enc = workspace.pop("env_enc", None)
+    # Re-fetch the raw DB model to access env_enc (public serializers
+    # strip it for security). Trusted internal endpoint: attach the
+    # DECRYPTED per-workspace env/secret map so the execution layer
+    # can inject it into the sandbox. Public list endpoints only
+    # receive masked key names (see _workspace_to_dict).
+    _env_enc = ""
     try:
-        _env = json.loads(decrypt(_env_enc) or "{}") if _env_enc else {}
-    except Exception:
-        _env = {}
+        with Session(engine) as session:
+            ws_model = session.get(Workspace, workspace.get("id"))
+            if ws_model and getattr(ws_model, "env_enc", None):
+                _env_enc = decrypt(ws_model.env_enc) or ""
+    except Exception as _e:
+        log.warning(f"[workspace_runtime] resolve_workspace env decrypt failed: {_e}")
+    _env = {}
+    if _env_enc:
+        try:
+            _env = json.loads(_env_enc) if isinstance(_env_enc, str) else {}
+        except Exception:
+            _env = {}
     workspace["env"] = _env if isinstance(_env, dict) else {}
     return {"status": "SUCCESS", "workspace": workspace}
 
