@@ -160,9 +160,15 @@ if ssh $SSH_OPTS "$HOST" << EOF
     SUCCESS=0
 
     # Check logs until success message or timeout
-    GATEWAY_CONTAINER=\$(docker ps --filter 'name=sharedllm_gateway' --format '{{.Names}}' | head -1 || echo "sharedllm_gateway")
+    # NOTE: this heredoc uses unquoted EOF, so EVERY dollar below must be backslash-escaped
+    # to evaluate on the REMOTE host. Bare expansions evaluate LOCALLY and break the deploy.
+    GATEWAY_CONTAINER=\$(docker ps --filter 'name=sharedllm_gateway' --format '{{.Names}}' | head -1)
+    if [ -z "\$GATEWAY_CONTAINER" ]; then
+        echo "[WARN] Gateway container not found via 'docker ps'; defaulting to 'sharedllm_gateway'."
+        GATEWAY_CONTAINER="sharedllm_gateway"
+    fi
     while [ \$ELAPSED -lt \$TIMEOUT ]; do
-        if docker logs --tail 200 \$GATEWAY_CONTAINER 2>&1 | grep -q "Application startup complete"; then
+        if docker logs --tail 200 "\$GATEWAY_CONTAINER" 2>&1 | grep -q "Application startup complete"; then
             echo "[OK] Application started successfully!"
             SUCCESS=1
             break
