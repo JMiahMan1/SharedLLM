@@ -9,10 +9,37 @@ from services.config import INTERNAL_SECRET, RAG_SVC_URL
 from services.execution.schemas import ExecutionResult, SystemLearningRequest
 
 log = logging.getLogger("execution.learning")
-
 RAG_SVC = RAG_SVC_URL
 
+
+async def _validate_lesson(req: SystemLearningRequest) -> ExecutionResult:
+    """Report a lesson self-test result via RAG /rag/dream/validate."""
+    if not req.lesson_id:
+        return ExecutionResult(status="FAILURE", message="lesson_id required for validate action.", service="learning")
+    payload = {
+        "lesson_id": req.lesson_id,
+        "passed": bool(req.passed),
+        "evidence": (req.evidence or "")[:500],
+    }
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10.0)) as client, client.post(
+        f"{RAG_SVC}/rag/dream/validate",
+        json=payload,
+        params={"user_id": req.user_context.user},
+        headers={"X-Internal-Secret": INTERNAL_SECRET}
+    ) as resp:
+        body = await resp.text()
+        if resp.status == 200:
+            return ExecutionResult(status="SUCCESS", message=f"Validation reported for {req.lesson_id}: passed={req.passed}.", service="learning")
+        return ExecutionResult(status="FAILURE", message=f"Dream validation failed ({resp.status}): {body}", service="learning")
+
+
 async def handle_system_learning(req: SystemLearningRequest) -> ExecutionResult:
+    try:
+        if (req.action or "ingest").lower() == "validate":
+            return await _validate_lesson(req)
+    except Exception as e:
+        log.error(f"System learning validation failed: {e}")
+        return ExecutionResult(status="FAILURE", message=str(e), service="learning")
     try:
         # Stable, citable lesson id derived from the rule so re-ingests of the
         # same lesson converge and `Apply: [id]` citations stay valid.

@@ -785,8 +785,12 @@ class SystemLearningRequest(BaseRequest):
     truth instead of returning contradictory entries.
     """
     user_context: UserContext
-    topic: str = Field(..., description="Subject of the learning (e.g. 'Fixing 502 error in Gateway')")
-    content: str = Field(..., description="Detailed description / evidence of the root cause and the fix applied.")
+    action: str = Field(default="ingest", description="Action: 'ingest' persists a new lesson; 'validate' reports a self-test result for an existing lesson via /rag/dream/validate.")
+    lesson_id: str = Field(default="", description="Validate-only: id of the existing lesson under test (e.g. 'lesson-abc123').")
+    passed: bool = Field(default=False, description="Validate-only: whether the self-test passed.")
+    evidence: str = Field(default="", description="Validate-only: short evidence string for the validation outcome (<=500 chars).")
+    topic: str = Field(default="", description="Ingest-only, required: Subject of the learning (e.g. 'Fixing 502 error in Gateway')")
+    content: str = Field(default="", description="Ingest-only, required: Detailed description / evidence of the root cause and the fix applied.")
     rule: str = Field(default="", description="Reusable rule: 'When <situation>, do <action>'. The transferable takeaway.")
     root_cause: str = Field(default="", description="WHY the previous approach failed or what was misunderstood.")
     outcome: str = Field(default="success", description="Honest outcome: 'success' | 'failure' | 'partial'.")
