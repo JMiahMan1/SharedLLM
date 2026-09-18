@@ -901,7 +901,12 @@ def _lesson_priority_score(d: dict) -> float:
 
 
 @app.post("/rag/dream", dependencies=[Depends(require_internal)])
-async def dream_learnings(user_id: str = "default", compact_at: int = 600, summary_len: int = 400):
+async def dream_learnings(
+    user_id: str = "default",
+    compact_at: int = 600,
+    summary_len: int = 400,
+    body: dict | None = None,
+):
     """Dreaming mode: review Raven lessons and consolidate memory.
 
     Runs three deterministic passes over ``system_learnings`` for the user:
