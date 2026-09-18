@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import Any
 
@@ -124,8 +125,68 @@ def _parse_tool_calls(message: dict) -> list[dict]:
                 args = {"_raw": args}
         if not isinstance(args, dict):
             args = {"_raw": args}
-        parsed.append({"name": name, "arguments": args, "id": tc.get("id")})
+        parsed.append({"name": name, "arguments": args, "id": tc.get("id"), "source": "native"})
     return parsed
+
+
+_TEXT_CALL_RE = re.compile(r"call:(?:default_api:)?([A-Za-z][A-Za-z0-9_]*)\s*\{", re.DOTALL)
+
+
+def _parse_text_tool_calls(content: str) -> list[dict]:
+    """Fallback: some GGUF tool templates emit a text protocol like
+    ``call:default_api:ToolName{...json args...}`` instead of native
+    tool_calls. Parse those lines into executable calls (Raven's agent_loop
+    does the same kind of content-mining for non-tool-emitting models)."""
+    parsed: list[dict] = []
+    if not content:
+        return parsed
+    for m in _TEXT_CALL_RE.finditer(content):
+        name = m.group(1)
+        start = m.end() - 1  # opening brace
+        depth = 0
+        end = None
+        for i in range(start, min(len(content), start + 4000)):
+            ch = content[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        raw = content[start:end] if end else "{}"
+        try:
+            args = json.loads(raw)
+            if not isinstance(args, dict):
+                args = {}
+        except Exception:
+            args = {}
+        parsed.append({"name": name, "arguments": args, "id": None, "source": "text_protocol"})
+    return parsed
+
+
+def _strip_text_calls(content: str) -> str:
+    """Remove executed text-protocol call spans so the final chat answer is clean."""
+    if not content:
+        return content
+    spans: list[tuple[int, int]] = []
+    for m in _TEXT_CALL_RE.finditer(content):
+        start = m.start()
+        depth = 0
+        end = None
+        for i in range(m.end() - 1, min(len(content), m.end() + 3999)):
+            ch = content[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        spans.append((start, end or m.end()))
+    for start, end in reversed(spans):
+        content = content[:start] + content[end:]
+    return re.sub(r"\n{3,}", "\n\n", content).strip()
 
 
 async def run_external_agent(
@@ -169,6 +230,8 @@ async def run_external_agent(
                 "You are Raven, the SharedLLM autonomous assistant. You have function "
                 "tools — use them to complete the user's task. When a task needs a "
                 "tool, emit native tool_calls (never describe the call in prose). "
+                "If you cannot emit native tool_calls, write one call per line as "
+                "call:ToolName{\"arg\": value} and it will be executed for you. "
                 "After a tool result arrives, use it: either call the next tool or "
                 "give the final answer. Keep thinking concise."
             ),
@@ -176,6 +239,7 @@ async def run_external_agent(
     tool_trace: list[dict] = []
     thinking_parts: list[str] = []
     content = ""
+    reprompts = 0
 
     timeout = aiohttp.ClientTimeout(total=request_timeout)
     async with aiohttp.ClientSession() as session:
@@ -211,28 +275,35 @@ async def run_external_agent(
             if thinking:
                 thinking_parts.append(thinking)
             calls = _parse_tool_calls(message)
+            text_source = False
+            if not calls:
+                calls = _parse_text_tool_calls(content)
+                text_source = bool(calls)
             log.info(
-                "[ExternalAgent] iter %d: content_chars=%d thinking_chars=%d tool_calls=%s",
+                "[ExternalAgent] iter %d: content_chars=%d thinking_chars=%d tool_calls=%s%s",
                 iteration, len(content), len(thinking), [c["name"] for c in calls],
+                " (text_protocol)" if text_source else "",
             )
             if not calls:
-                # Thinking-only reply while tools are available: nudge once more
-                # (thinking models sometimes reason without emitting the call).
-                if tools and thinking and iteration < max_iterations:
-                    log.info("[ExternalAgent] iter %d: thinking-only, re-prompting for tool_calls", iteration)
+                # Thinking-only reply while tools are available: nudge at most
+                # twice (thinking models sometimes reason without emitting the
+                # call; more re-prompts just decay the reasoning).
+                if tools and thinking and reprompts < 2 and iteration < max_iterations:
+                    reprompts += 1
+                    log.info("[ExternalAgent] iter %d: thinking-only, re-prompting for tool_calls (%d/2)", iteration, reprompts)
                     convo.append({"role": "assistant", "content": content or thinking})
                     convo.append({"role": "user", "content": "Proceed: emit the required tool call(s) now as native tool_calls, with no further prose."})
                     continue
                 break
 
-            convo.append({
-                "role": "assistant",
-                "content": content,
-                "tool_calls": [
+            assistant_msg: dict[str, Any] = {"role": "assistant", "content": content}
+            native_calls = [c for c in calls if c.get("source") != "text_protocol"]
+            if native_calls:
+                assistant_msg["tool_calls"] = [
                     {"function": {"name": c["name"], "arguments": c["arguments"]}}
-                    for c in calls
-                ],
-            })
+                    for c in native_calls
+                ]
+            convo.append(assistant_msg)
             for c in calls:
                 name, args = c["name"], c["arguments"]
                 try:
@@ -255,6 +326,7 @@ async def run_external_agent(
                     "iteration": iteration,
                     "name": name,
                     "arguments": args,
+                    "source": c.get("source") or "native",
                     "status": result.get("status"),
                     "ok": ok,
                     "summary": summary,
@@ -274,6 +346,8 @@ async def run_external_agent(
         "[ExternalAgent] done model=%s user=%s iters_used=%d tools_executed=%d elapsed=%.1fs",
         model, user, min(iteration, max_iterations), len(tool_trace), elapsed,
     )
+    if any(t.get("source") == "text_protocol" for t in tool_trace):
+        content = _strip_text_calls(content)
     return {
         "content": content,
         "thinking": "\n".join(thinking_parts),
