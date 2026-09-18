@@ -948,6 +948,36 @@ async def dream_learnings(
         ]
         reviewed = len(docs)
 
+        # Pass 0: WEB SEARCH — enrich lessons with real-world context.
+        web_searched: list[str] = []
+        seen_rules: set[str] = set()
+        for d in docs:
+            parsed: dict[str, Any] = {}
+            if d["content"].strip().startswith("{"):
+                try:
+                    parsed = json.loads(d["content"])
+                except Exception:
+                    pass
+            rule = parsed.get("rule", parsed.get("topic", ""))
+            if not rule or rule in seen_rules:
+                continue
+            seen_rules.add(rule)
+            if len(seen_rules) > 10:
+                break
+            try:
+                web_results = _search_web(rule, num_results=3)
+            except Exception:
+                web_results = []
+            if web_results:
+                meta = d["metadata"] if isinstance(d.get("metadata"), dict) else {}
+                meta["web_context"] = web_results
+                _conn().execute(
+                    "UPDATE rag_items SET metadata = ? WHERE id = ? AND user_id = ?",
+                    [json.dumps(meta), d["id"], target_user],
+                )
+                web_searched.append(d["id"])
+        _conn().commit()
+
         # Pass 1: COMPACT oversized JSON lessons.
         compacted: list[str] = []
         pending_reembed: list[tuple[str, str, dict]] = []
@@ -1346,8 +1376,54 @@ async def ingest_benchmark_results(models: list[str] | None = None):
         target_user = "default"
         now = int(time.time())
         now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        updates: dict[str, dict] = {}
+
         if results_dir.startswith("http://") or results_dir.startswith("https://"):
-            model_names = models or _list_benchmark_result_files(results_dir)
+            base = results_dir.rstrip("/")
+            if base.endswith("/api/tests"):
+                tests_data = _fetch_source(base)
+                tests = tests_data.get("tests", []) if isinstance(tests_data, dict) else []
+                for test in tests:
+                    cat = test.get("category", "unknown")
+                    lesson_id = f"benchmark-{cat}"
+                    scores_raw = test.get("models_scores", {})
+                    if isinstance(scores_raw, dict) and scores_raw:
+                        scores = [v for v in scores_raw.values() if isinstance(v, (int, float))]
+                        if scores:
+                            avg_score = sum(scores) / len(scores)
+                            passed = test.get("models_passed", 0)
+                            total = test.get("models_tested", len(scores))
+                            if total == 0:
+                                total = 1
+                            best_score = max(scores)
+                            if lesson_id not in updates or best_score > updates[lesson_id].get("score", 0):
+                                updates[lesson_id] = {
+                                    "benchmark_score": round(avg_score, 2),
+                                    "success_rate": round(passed / total, 4) if isinstance(passed, (int, float)) else 0,
+                                    "model": "multi",
+                                    "category": cat,
+                                    "tests_passed": passed,
+                                    "tests_total": total,
+                                }
+            elif base.endswith("/api/results"):
+                results_data = _fetch_source(base)
+                results_list = results_data.get("results", []) if isinstance(results_data, dict) else []
+                for r in results_list:
+                    models_tested = r.get("models", [])
+                    status = r.get("status", "cancelled")
+                    score = 100 if status == "completed" else 0
+                    for model in models_tested:
+                        cat = model.split(":")[-1] if ":" in model else model
+                        lesson_id = f"benchmark-{cat.lower()}"
+                        if lesson_id not in updates or score > updates[lesson_id].get("score", 0):
+                            updates[lesson_id] = {
+                                "benchmark_score": score,
+                                "success_rate": 1.0 if score > 0 else 0,
+                                "model": model,
+                                "category": cat,
+                                "tests_passed": score,
+                                "tests_total": 100,
+                            }
         else:
             if not os.path.isdir(results_dir):
                 return JSONResponse(
@@ -1357,40 +1433,33 @@ async def ingest_benchmark_results(models: list[str] | None = None):
             model_names = models or sorted(
                 f for f in os.listdir(results_dir) if f.endswith(".json")
             )
-        updates: dict[str, dict] = {}
-        for model_file in model_names:
-            if results_dir.startswith("http://") or results_dir.startswith("https://"):
-                base = results_dir.rstrip("/")
-                if not base.endswith("/"):
-                    base += "/"
-                filepath = base + model_file
-            else:
+            for model_file in model_names:
                 filepath = os.path.join(results_dir, model_file)
-            try:
-                data = _fetch_source(filepath)
-            except Exception:
-                continue
-            model_name = data.get("model", model_file.replace(".json", ""))
-            results = data.get("results", [])
-            for entry in results:
-                cats = {k.replace("category_", ""): v for k, v in entry.items() if isinstance(v, dict) and "tests_run" in v}
-                for cat, info in cats.items():
-                    lesson_id = f"benchmark-{cat}"
-                    score = info.get("score", 0)
-                    passed = info.get("tests_passed", 0)
-                    total = info.get("tests_run", 1)
-                    if total == 0:
-                        total = 1
-                    success_rate = passed / total
-                    if lesson_id not in updates or score > updates[lesson_id].get("score", 0):
-                        updates[lesson_id] = {
-                            "benchmark_score": score,
-                            "success_rate": success_rate,
-                            "model": model_name,
-                            "category": cat,
-                            "tests_passed": passed,
-                            "tests_total": total,
-                        }
+                try:
+                    data = _fetch_source(filepath)
+                except Exception:
+                    continue
+                model_name = data.get("model", model_file.replace(".json", ""))
+                results = data.get("results", [])
+                for entry in results:
+                    cats = {k.replace("category_", ""): v for k, v in entry.items() if isinstance(v, dict) and "tests_run" in v}
+                    for cat, info in cats.items():
+                        lesson_id = f"benchmark-{cat}"
+                        score = info.get("score", 0)
+                        passed = info.get("tests_passed", 0)
+                        total = info.get("tests_run", 1)
+                        if total == 0:
+                            total = 1
+                        if lesson_id not in updates or score > updates[lesson_id].get("score", 0):
+                            updates[lesson_id] = {
+                                "benchmark_score": score,
+                                "success_rate": passed / total,
+                                "model": model_name,
+                                "category": cat,
+                                "tests_passed": passed,
+                                "tests_total": total,
+                            }
+
         applied = 0
         for lesson_id, result in updates.items():
             meta = {
@@ -1413,7 +1482,7 @@ async def ingest_benchmark_results(models: list[str] | None = None):
             except Exception as _e:
                 log.warning(f"[benchmark] update failed for {lesson_id}: {_e}")
         _conn().commit()
-        return {"status": "SUCCESS", "models_processed": len(model_names), "lessons_updated": applied}
+        return {"status": "SUCCESS", "models_processed": len(updates), "lessons_updated": applied}
     except Exception as e:
         log.error(f"Benchmark results ingest failed: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
@@ -1479,6 +1548,33 @@ def _redis() -> redis.Redis | None:
             log.warning(f"[redis] connection failed: {e}")
             return None
     return _redis_client
+
+def _search_web(query: str, num_results: int = 3) -> list[dict[str, str]]:
+    try:
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+        import re as _re
+        results = []
+        for m in _re.finditer(r'<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html):
+            href = m.group(1)
+            title = _re.sub(r"<[^>]+>", "", m.group(2))
+            results.append({"title": title, "url": href})
+            if len(results) >= num_results:
+                break
+        for m in _re.finditer(r'<a[^>]+href="(http[^"]+)"[^>]*>(.*?)</a>', html):
+            href = m.group(1)
+            title = _re.sub(r"<[^>]+>", "", m.group(2))
+            if not any(r["url"] == href for r in results):
+                results.append({"title": title, "url": href})
+                if len(results) >= num_results:
+                    break
+        return results
+    except Exception as e:
+        log.warning(f"[websearch] {e}")
+        return []
+
 
 def _ingest_redis_data(user_id: str = "default") -> dict:
     client = _redis()
