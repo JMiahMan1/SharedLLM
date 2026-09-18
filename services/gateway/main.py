@@ -62,6 +62,7 @@ from services.gateway.prompts import (
 )
 from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas
+from services.gateway.external_agent import run_external_agent
 from services.shared.info_endpoint import info_router
 
 START_TIME = time.time()
@@ -172,6 +173,44 @@ def _make_openai_chunk(content: str, model: str, finish_reason: str | None = Non
         "model": model,
         "choices": [{"delta": {"content": content} if content else {}, "index": 0, "finish_reason": finish_reason}]
     }
+
+
+def _make_openai_agentic_response(content: str, thinking: str, tool_trace: list, model: str, iterations: int):
+    """OpenAI-compatible response for the agentic path: reasoning + tool trace.
+
+    ``reasoning_content`` carries thinking (OpenRouter-style, rendered by
+    OpenWebUI); ``sharedllm_tool_trace`` preserves the executed Raven tool
+    calls for training-data harvesting.
+    """
+    import time
+    message: dict = {"role": "assistant", "content": content}
+    if thinking:
+        message["reasoning_content"] = thinking
+    return JSONResponse({
+        "id": f"chatcmpl-{int(time.time())}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": [{"message": message, "finish_reason": "stop", "index": 0}],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        "sharedllm_iterations": iterations,
+        "sharedllm_tool_trace": tool_trace,
+    })
+
+
+def _make_ollama_agentic_response(content: str, thinking: str, tool_trace: list, model: str, iterations: int):
+    """Ollama-compatible response for the agentic path (message.thinking)."""
+    message: dict = {"role": "assistant", "content": content}
+    if thinking:
+        message["thinking"] = thinking
+    return JSONResponse({
+        "model": model,
+        "created_at": datetime.now().isoformat() + "Z",
+        "message": message,
+        "done": True,
+        "sharedllm_iterations": iterations,
+        "sharedllm_tool_trace": tool_trace,
+    })
 
 def _make_ollama_error(message: str, model: str) -> Any:
     """Create an Ollama-compatible error response."""
@@ -2778,7 +2817,7 @@ async def chat_handler(request: Request, background_tasks=None):
     is_openai = "/v1/chat/completions" in str(request.url)
     should_stream = body.get("stream", False)
     explicit_model = str(body.get("model") or "").strip()
-    show_thinking = body.get("show_thinking", False)
+    show_thinking = body.get("show_thinking", False) or body.get("think", False)
 
     # Expose SharedLLM's agent tool surface (gh, git, file write, Stable Diffusion
     # image tools) to external OpenAI/Ollama/OpenWebUI clients that request tools.
@@ -3121,6 +3160,67 @@ async def chat_handler(request: Request, background_tasks=None):
                 json.dumps(result_payload, indent=2), selected_model, "raven_mission"
             )
         return JSONResponse(status_code=202, content=result_payload)
+
+    # Agentic path: standard OpenAI/Ollama clients that send `tools` (or
+    # explicit `"agentic": true`) get a bounded multi-turn loop where the
+    # model can invoke the FULL Raven tool surface with thinking visible.
+    # This is the endpoint to point chat windows at for Raven teaching data.
+    _req_tools = body.get("tools") if isinstance(body.get("tools"), list) else []
+    _wants_agentic = bool(body.get("agentic")) or len(_req_tools) > 0
+    _std_client = (
+        is_openai
+        or body.get("standard_client", False)
+        or ("/api/chat" in str(request.url) and not body.get("async_job", False) and body.get("client") != "voice")
+    )
+    if _wants_agentic and _std_client and isinstance(body.get("messages"), list) and body["messages"]:
+        _msgs: list[dict] = []
+        if body.get("system"):
+            _msgs.append({"role": "system", "content": str(body["system"])})
+        for _m in body["messages"]:
+            if isinstance(_m, dict) and _m.get("role"):
+                _msgs.append({k: _m.get(k) for k in ("role", "content", "tool_calls", "tool_call_id", "name") if _m.get(k) is not None})
+        log.info(f"[ChatHandler] Agentic loop: model={selected_model} tools={len(body['tools']) if isinstance(body.get('tools'), list) else 0} think={show_thinking}")
+        async with INFERENCE_LOCK:
+            outcome = await run_external_agent(
+                model=selected_model,
+                messages=_msgs,
+                tools=body["tools"] if isinstance(body.get("tools"), list) else None,
+                creds=creds.model_dump(),
+                think=bool(show_thinking),
+            )
+        try:
+            await update_history(user_id, "user", query)
+            await update_history(user_id, "assistant", outcome["content"])
+        except Exception:
+            pass
+        if should_stream:
+            _chunks = [outcome["content"][i:i + 200] for i in range(0, len(outcome["content"]), 200)] or [""]
+            if is_openai:
+                async def _agentic_openai_stream():
+                    if outcome["thinking"]:
+                        yield f"data: {json.dumps(_make_openai_chunk('', selected_model))}\n\n".replace('"delta": {}', f'"delta": {json.dumps({"reasoning_content": outcome["thinking"][:2000]})}')
+                    for _c in _chunks:
+                        yield f"data: {json.dumps(_make_openai_chunk(_c, selected_model))}\n\n"
+                    yield f"data: {json.dumps(_make_openai_chunk('', selected_model, 'stop'))}\n\n"
+                    yield "data: [DONE]\n\n"
+                return StreamingResponse(_agentic_openai_stream(), media_type="text/event-stream")
+            async def _agentic_ollama_stream():
+                for _c in _chunks:
+                    yield json.dumps(_make_ollama_chunk(_c, selected_model)) + "\n"
+                _final = _make_ollama_chunk("", selected_model, True)
+                if outcome["thinking"]:
+                    _final["message"]["thinking"] = outcome["thinking"]
+                yield json.dumps(_final) + "\n"
+            return StreamingResponse(_agentic_ollama_stream(), media_type="application/x-ndjson")
+        if is_openai:
+            return _make_openai_agentic_response(
+                outcome["content"], outcome["thinking"], outcome["tool_trace"],
+                selected_model, outcome["iterations"],
+            )
+        return _make_ollama_agentic_response(
+            outcome["content"], outcome["thinking"], outcome["tool_trace"],
+            selected_model, outcome["iterations"],
+        )
 
     settings = await get_all_settings()
     _vram_params = await get_vram_safe_params(selected_model, settings)

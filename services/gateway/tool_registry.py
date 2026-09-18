@@ -37,6 +37,9 @@ SVC_EXECUTION = "execution"
 SVC_WORKSPACE = "workspace_runtime"
 SVC_ALPACA_SD = "alpaca_sd"
 SVC_GATEWAY = "gateway"
+SVC_RAG = "rag"
+SVC_STORAGE = "storage"
+SVC_CONTROL_PLANE = "control_plane"
 
 
 _GH_TOOL = {
@@ -287,7 +290,222 @@ def get_tool_schemas() -> list[dict]:
         _WEBSCRAPER_TOOL,
         _OCR_TOOL,
         _WORKSPACE_EXPOSE_PORT_TOOL,
+        *get_raven_tool_schemas(),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Full Raven action surface.
+#
+# Every entry mirrors one Raven AgentLoop action (same tool name Raven itself
+# emits) so external OpenAI/Ollama chat clients — and the training transcripts
+# they produce — map 1:1 onto Raven's native tool calls.
+# Entry: (tool_name, service, method, path, requires_workspace, description,
+#         payload_hint)
+# ---------------------------------------------------------------------------
+
+_RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
+    ("LightControlRequest", SVC_EXECUTION, "POST", "/execute/light", False,
+     "Control Home Assistant lights (on/off/brightness/color).",
+     "payload fields: action, entity_id, brightness, color, transition."),
+    ("MediaPlayRequest", SVC_EXECUTION, "POST", "/execute/media/play", False,
+     "Play media via Music Assistant / HA (playlists, favorites, stream).",
+     "payload fields: action, entity_id/player, media_id, playlist, query."),
+    ("MediaTransportRequest", SVC_EXECUTION, "POST", "/execute/media/transport", False,
+     "Media transport controls: play, pause, stop, next, previous, volume.",
+     "payload fields: action, entity_id/player, volume_level."),
+    ("MediaStatusRequest", SVC_EXECUTION, "POST", "/execute/media/status", False,
+     "Query current media player status/state.",
+     "payload fields: entity_id/player."),
+    ("VideoPlayRequest", SVC_EXECUTION, "POST", "/execute/video/play", False,
+     "Play a video file or stream on a target device.",
+     "payload fields: action, path/url, entity_id/player."),
+    ("TVCastRequest", SVC_EXECUTION, "POST", "/execute/tv_cast", False,
+     "Cast media or a URL to a TV/Chromecast device.",
+     "payload fields: action, url, entity_id/device."),
+    ("ClimateRequest", SVC_EXECUTION, "POST", "/execute/climate", False,
+     "Control thermostats and climate entities (temperature, HVAC mode).",
+     "payload fields: action, entity_id, temperature, hvac_mode."),
+    ("SecurityRequest", SVC_EXECUTION, "POST", "/execute/security", False,
+     "Arm/disarm alarm panels and query security state.",
+     "payload fields: action, entity_id, code."),
+    ("AnnouncementRequest", SVC_EXECUTION, "POST", "/execute/announce", False,
+     "Broadcast a text announcement to speakers/displays.",
+     "payload fields: message, entity_id/target, volume."),
+    ("HAServiceRequest", SVC_EXECUTION, "POST", "/execute/ha_service", False,
+     "Call any Home Assistant service directly (domain.service + data).",
+     "payload fields: domain, service, entity_id, service_data."),
+    ("CalendarRequest", SVC_EXECUTION, "POST", "/execute/calendar", False,
+     "Calendar CRUD: list, create, update, delete events.",
+     "payload fields: action, title, start, end, event_id, calendar."),
+    ("NoteRequest", SVC_EXECUTION, "POST", "/execute/note", False,
+     "Notes: create, read, append, delete, list.",
+     "payload fields: action, title, content, note_id."),
+    ("TimerRequest", SVC_EXECUTION, "POST", "/execute/timer", False,
+     "Timers: create, list, cancel.",
+     "payload fields: action, duration, label, timer_id."),
+    ("TalkRequest", SVC_EXECUTION, "POST", "/execute/talk", False,
+     "Conversations/voice: list conversations, read messages, send.",
+     "payload fields: action, conversation_id, message."),
+    ("WebSearchRequest", SVC_EXECUTION, "POST", "/execute/web_search", False,
+     "Web search for current/external information.",
+     "payload fields: query, max_results."),
+    ("WebReadRequest", SVC_EXECUTION, "POST", "/execute/web_read", False,
+     "Fetch and extract readable text from a URL.",
+     "payload fields: url."),
+    ("CodeSearchRequest", SVC_EXECUTION, "POST", "/execute/code_search", False,
+     "Semantic search over indexed workspace code.",
+     "payload fields: query, workspace_id, max_results."),
+    ("DockerLogsRequest", SVC_EXECUTION, "POST", "/execute/docker_logs", False,
+     "Fetch logs from a Docker container.",
+     "payload fields: container/service, tail/lines."),
+    ("DockerComposeRequest", SVC_EXECUTION, "POST", "/execute/docker", False,
+     "Docker/compose operations on SharedLLM services.",
+     "payload fields: action, service."),
+    ("DeploymentRequest", SVC_EXECUTION, "POST", "/execute/deploy", False,
+     "Deploy/restart SharedLLM services.",
+     "payload fields: action, service."),
+    ("CapabilityIndexRequest", SVC_EXECUTION, "POST", "/execute/index_capabilities", False,
+     "Re-index device/capability catalog after environment changes.",
+     "payload fields: (none required)."),
+    ("VolumeInventoryRequest", SVC_EXECUTION, "POST", "/execute/volumes", False,
+     "Inventory Docker volumes and disk usage.",
+     "payload fields: (none required)."),
+    ("WorkspaceFileReadRequest", SVC_EXECUTION, "POST", "/execute/workspace_file_read", True,
+     "Read a file (text, PDF text, binary info) from a workspace.",
+     "payload fields: file_path/relative_path."),
+    ("WorkspaceFileWriteRequest", SVC_EXECUTION, "POST", "/execute/workspace_file_write", True,
+     "Write a full file into a workspace.",
+     "payload fields: relative_path/file_path, content."),
+    ("WorkspaceFilePatchRequest", SVC_EXECUTION, "POST", "/execute/workspace_file_patch", True,
+     "Surgically patch a workspace file with old_text/new_text chunks.",
+     "payload fields: relative_path, chunks:[{old_text,new_text}]."),
+    ("WorkspaceLintRequest", SVC_EXECUTION, "POST", "/execute/workspace_lint", True,
+     "Lint/typecheck a workspace file or tree.",
+     "payload fields: relative_path, language."),
+    ("WorkspaceSearchRequest", SVC_EXECUTION, "POST", "/execute/workspace_search", True,
+     "Grep/regex search across workspace files.",
+     "payload fields: pattern, path, include."),
+    ("WorkspaceShellRequest", SVC_EXECUTION, "POST", "/execute/workspace_shell", True,
+     "Run a shell command (or command list) in the workspace sandbox.",
+     "payload fields: command or commands, cwd, timeout."),
+    ("WorkspaceCreateRequest", SVC_WORKSPACE, "POST", "/workspaces", False,
+     "Create a new workspace (user or system scope).",
+     "payload fields: id, local_path, scope, display_name."),
+    ("WorkspaceSettingsUpdateRequest", SVC_WORKSPACE, "PATCH", "/workspaces/{workspace_id}", True,
+     "Update workspace settings (repo_url, branch, display_name...).",
+     "payload fields: any settings keys; workspace_id fills the path."),
+    ("WorkspaceBootstrapRequest", SVC_WORKSPACE, "POST", "/workspaces/bootstrap", True,
+     "Clone/pull a workspace's git repo and prime its directory.",
+     "payload fields: workspace_id, repo_url, branch."),
+    ("StorageFileReadRequest", SVC_EXECUTION, "POST", "/execute/storage_file_read", False,
+     "Read a file from SharedLLM storage volumes.",
+     "payload fields: path/volume, file_path."),
+    ("StorageFileWriteRequest", SVC_EXECUTION, "POST", "/execute/storage_file_write", False,
+     "Write a file into SharedLLM storage volumes.",
+     "payload fields: path/volume, file_path, content."),
+    ("StorageListRequest", SVC_EXECUTION, "POST", "/execute/storage_list", False,
+     "List resources in SharedLLM storage.",
+     "payload fields: path/volume, pattern."),
+    ("SystemLearningRequest", SVC_EXECUTION, "POST", "/execute/learning", False,
+     "Teach Raven: ingest/list/validate lessons learned.",
+     "payload fields: action (ingest/list/validate/get/status), lesson, lesson_id."),
+    ("RedisInspectRequest", SVC_EXECUTION, "POST", "/execute/redis", False,
+     "Read-only Redis inspection: ping, get, keys, ttl.",
+     "payload fields: operation (ping/get/keys/ttl), key, pattern."),
+    ("DiscoverySyncRequest", SVC_EXECUTION, "POST", "/execute/discovery_sync", False,
+     "Sync Home Assistant entities/devices into SharedLLM discovery.",
+     "payload fields: (none required)."),
+    ("IdentityRequest", SVC_EXECUTION, "POST", "/execute/identity", False,
+     "Identity lookup: resolve users and credentials context.",
+     "payload fields: action, user."),
+    ("IdentityManageRequest", SVC_EXECUTION, "POST", "/execute/identity/manage", False,
+     "Admin identity management (users, passwords, API keys).",
+     "payload fields: action, user, password."),
+    ("AudiobookshelfRequest", SVC_EXECUTION, "POST", "/execute/audiobookshelf", False,
+     "Audiobookshelf: libraries, search, status.",
+     "payload fields: action, query, library."),
+    ("LLMInfoRequest", SVC_EXECUTION, "POST", "/execute/llm/info", False,
+     "LLM backend info: loaded models, VRAM, Ollama state.",
+     "payload fields: (none required)."),
+    ("ContextSearchRequest", SVC_RAG, "POST", "/rag/search", False,
+     "Semantic RAG search over indexed knowledge.",
+     "payload fields: query, collection, top_k."),
+    ("HAConfigRequest", SVC_EXECUTION, "POST", "/execute/ha_config", False,
+     "Read Home Assistant configuration snapshot.",
+     "payload fields: (none required)."),
+    ("EntitySearchRequest", SVC_EXECUTION, "POST", "/execute/entity_search", False,
+     "Search known HA entities by name/domain.",
+     "payload fields: query, domain."),
+    ("LogbookRequest", SVC_EXECUTION, "POST", "/execute/ha_logbook", False,
+     "Query the Home Assistant logbook.",
+     "payload fields: entity_id, start, end."),
+    ("ExecutionLogRequest", SVC_EXECUTION, "POST", "/execute/logs", False,
+     "Fetch SharedLLM service/container logs.",
+     "payload fields: service/container, tail/lines."),
+    ("DocumentBroadcastRequest", SVC_EXECUTION, "POST", "/execute/composite/broadcast", False,
+     "Composite broadcast: announcement + displays + lights scene.",
+     "payload fields: message, targets."),
+    ("NightModeRequest", SVC_EXECUTION, "POST", "/execute/composite/night_mode", False,
+     "Run the night-mode composite scene.",
+     "payload fields: (none required, or options)."),
+    ("TTSRequest", SVC_EXECUTION, "POST", "/execute/tts", False,
+     "Text-to-speech synthesis to an audio file.",
+     "payload fields: text, voice, engine, output_path."),
+    ("STTRequest", SVC_EXECUTION, "POST", "/execute/stt/transcribe_workspace", True,
+     "Speech-to-text: transcribe an audio file in a workspace.",
+     "payload fields: audio_path/file_path, language."),
+    ("AudiobookRegenerateRequest", SVC_EXECUTION, "POST", "/execute/audiobook/regenerate", False,
+     "Regenerate an audiobook chapter or full book via TTS pipeline.",
+     "payload fields: workspace_id, chapter, voice."),
+    ("StorageIndexRequest", SVC_STORAGE, "POST", "/index/full", False,
+     "Full storage re-index into RAG.",
+     "payload fields: path/volume."),
+    ("StorageTextToAudioRequest", SVC_STORAGE, "POST", "/text_to_audio", False,
+     "Storage TTS: synthesize stored text to audio.",
+     "payload fields: text_path, voice."),
+    ("NetworkDeviceScanRequest", SVC_EXECUTION, "POST", "/execute/network_scan", False,
+     "Scan the LAN for devices.",
+     "payload fields: subnet."),
+    ("ImageEditRequest", SVC_EXECUTION, "POST", "/execute/image_edit", False,
+     "Edit an image via the execution image pipeline.",
+     "payload fields: prompt, image, model."),
+    ("ControlPlaneRequest", SVC_CONTROL_PLANE, "POST", "/api/restart/{service_name}", False,
+     "Restart a SharedLLM service via the control plane.",
+     "payload fields: service_name (fills the path)."),
+)
+
+
+def get_raven_tool_schemas() -> list[dict]:
+    """Build OpenAI ``tools`` schemas for the full Raven action surface."""
+    schemas: list[dict] = []
+    for name, _svc, _method, _path, requires_ws, desc, hint in _RAVEN_TOOL_TABLE:
+        props: dict = {
+            "payload": {
+                "type": "object",
+                "description": f"Raven-style fields for {name}. {hint}",
+            }
+        }
+        required: list[str] = ["payload"]
+        if requires_ws:
+            props["workspace_id"] = {
+                "type": "string",
+                "description": "Target workspace id.",
+            }
+            required.append("workspace_id")
+        schemas.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": f"[Raven] {desc} Pass arguments as `payload` using Raven's native field names. {hint}",
+                "parameters": {
+                    "type": "object",
+                    "properties": props,
+                    "required": required,
+                },
+            },
+        })
+    return schemas
 
 
 @dataclass
@@ -446,6 +664,37 @@ def resolve_tool_call(
                 "host_port": int(arguments.get("host_port")) if arguments.get("host_port") else None,
             },
             requires_workspace=True,
+        )
+
+    # Generic Raven-action branch: every entry in _RAVEN_TOOL_TABLE resolves
+    # here. Raven-style `payload` fields pass straight through (execution
+    # schemas ignore unknown extras), with user_context/workspace_id injected.
+    raven_entry = next((e for e in _RAVEN_TOOL_TABLE if e[0] == name), None)
+    if raven_entry is not None:
+        _, service, method, path, requires_ws, _, _ = raven_entry
+        payload = arguments.get("payload")
+        if not isinstance(payload, dict):
+            # Tolerate models that inline Raven fields at the top level.
+            payload = {k: v for k, v in arguments.items() if k != "workspace_id"}
+        body: dict[str, Any] = {"user_context": uc}
+        if ws:
+            body["workspace_id"] = ws
+        body.update(payload)
+        # Substitute {placeholders} in the path from payload/arguments.
+        for key in ("workspace_id", "service_name"):
+            if f"{{{key}}}" in path:
+                val = ws if key == "workspace_id" else payload.get(key) or arguments.get(key)
+                if val is None:
+                    raise ValueError(f"Tool {name} requires '{key}' for path {path}")
+                path = path.replace(f"{{{key}}}", str(val))
+        if requires_ws and not ws:
+            raise ValueError(f"Tool {name} requires workspace_id")
+        return ResolvedToolCall(
+            method=method,
+            service=service,
+            path=path,
+            json=body,
+            requires_workspace=requires_ws,
         )
 
     raise ValueError(f"Unknown SharedLLM tool: {name}")
