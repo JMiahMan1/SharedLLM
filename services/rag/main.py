@@ -24,6 +24,8 @@ import logging
 import os
 import time
 import traceback
+import urllib.request
+import urllib.error
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
@@ -1208,6 +1210,40 @@ async def pending_validations(user_id: str = "default"):
 
 # --- Alpaca benchmark integration ---
 
+def _fetch_source(source: str) -> Any:
+    if source.startswith("http://") or source.startswith("https://"):
+        req = urllib.request.Request(source, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    with open(source) as f:
+        return json.load(f)
+
+def _list_benchmark_result_files(results_url: str) -> list[str]:
+    try:
+        api_url = results_url.rstrip("/") + "/api/results"
+        data = _fetch_source(api_url)
+        results = data.get("results", data if isinstance(data, list) else [])
+        filenames = []
+        for r in results:
+            if r.get("status") != "completed":
+                continue
+            fn = r.get("filename", "")
+            if fn and fn.endswith(".json"):
+                filenames.append(fn)
+        return sorted(filenames)
+    except Exception as e:
+        log.warning(f"[benchmark] failed to list result files via API: {e}")
+        return []
+
+def _group_tests_by_category(data: dict) -> dict:
+    if "tests" in data and isinstance(data["tests"], list):
+        grouped: dict = {}
+        for t in data["tests"]:
+            cat = t.get("category", "unknown")
+            grouped.setdefault(cat, []).append(t)
+        return grouped
+    return data
+
 BENCHMARKS_PATH = os.environ.get(
     "ALPACA_BENCHMARKS_PATH",
     os.path.join(
@@ -1245,13 +1281,9 @@ async def ingest_benchmark_curriculum(path: str | None = None):
     """
     try:
         _path = path or BENCHMARKS_PATH
-        if not os.path.exists(_path):
-            return JSONResponse(
-                status_code=404,
-                content={"status": "ERROR", "message": f"benchmark file not found: {_path}"},
-            )
-        with open(_path) as f:
-            categories = json.load(f)
+        categories = _fetch_source(_path)
+        if "tests" in categories and isinstance(categories["tests"], list):
+            categories = _group_tests_by_category(categories)
         target_user = "default"
         now = int(time.time())
         now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -1310,22 +1342,31 @@ async def ingest_benchmark_results(models: list[str] | None = None):
     """
     try:
         results_dir = BENCHMARK_RESULTS_DIR
-        if not os.path.isdir(results_dir):
-            return JSONResponse(
-                status_code=404,
-                content={"status": "ERROR", "message": f"benchmark results dir not found: {results_dir}"},
-            )
         target_user = "default"
         now = int(time.time())
         now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        model_names = models or sorted(
-            f for f in os.listdir(results_dir) if f.endswith(".json")
-        )
-        updates: dict[str, dict] = {}  # lesson_id -> best result
+        if results_dir.startswith("http://") or results_dir.startswith("https://"):
+            model_names = models or _list_benchmark_result_files(results_dir)
+        else:
+            if not os.path.isdir(results_dir):
+                return JSONResponse(
+                    status_code=404,
+                    content={"status": "ERROR", "message": f"benchmark results dir not found: {results_dir}"},
+                )
+            model_names = models or sorted(
+                f for f in os.listdir(results_dir) if f.endswith(".json")
+            )
+        updates: dict[str, dict] = {}
         for model_file in model_names:
-            filepath = os.path.join(results_dir, model_file)
+            if results_dir.startswith("http://") or results_dir.startswith("https://"):
+                base = results_dir.rstrip("/")
+                if not base.endswith("/"):
+                    base += "/"
+                filepath = base + model_file
+            else:
+                filepath = os.path.join(results_dir, model_file)
             try:
-                data = json.load(open(filepath))
+                data = _fetch_source(filepath)
             except Exception:
                 continue
             model_name = data.get("model", model_file.replace(".json", ""))
