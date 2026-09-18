@@ -239,7 +239,7 @@ async def run_external_agent(
     tool_trace: list[dict] = []
     thinking_parts: list[str] = []
     content = ""
-    reprompts = 0
+    coercions = 0
 
     timeout = aiohttp.ClientTimeout(total=request_timeout)
     async with aiohttp.ClientSession() as session:
@@ -285,14 +285,20 @@ async def run_external_agent(
                 " (text_protocol)" if text_source else "",
             )
             if not calls:
-                # Thinking-only reply while tools are available: nudge at most
-                # twice (thinking models sometimes reason without emitting the
-                # call; more re-prompts just decay the reasoning).
-                if tools and thinking and reprompts < 2 and iteration < max_iterations:
-                    reprompts += 1
-                    log.info("[ExternalAgent] iter %d: thinking-only, re-prompting for tool_calls (%d/2)", iteration, reprompts)
-                    convo.append({"role": "assistant", "content": content or thinking})
-                    convo.append({"role": "user", "content": "Proceed: emit the required tool call(s) now as native tool_calls, with no further prose."})
+                # No callable emitted (prose-only or thinking-only) while tools
+                # are available: coerce at most twice with a strict format
+                # instruction, then give up and return what we have.
+                if tools and coercions < 2 and iteration < max_iterations:
+                    coercions += 1
+                    log.info("[ExternalAgent] iter %d: no tool call emitted, coercing (%d/2)", iteration, coercions)
+                    prior = (content or thinking)[:1500]
+                    if prior:
+                        convo.append({"role": "assistant", "content": prior})
+                    convo.append({"role": "user", "content": (
+                        "Your reply contained no executable tool call. Reply now with "
+                        "ONLY one tool-call line and no other prose, e.g. "
+                        "call:ToolName{\"arg\": value} using one of the provided tools."
+                    )})
                     continue
                 break
 
