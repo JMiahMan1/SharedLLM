@@ -26,6 +26,7 @@ import time
 import traceback
 import urllib.request
 import urllib.error
+import redis
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 
@@ -1463,6 +1464,97 @@ async def benchmark_insights(user_id: str = "default"):
     except Exception as e:
         log.error(f"Benchmark insights failed: {e}")
         return JSONResponse(status_code=500, content={"status": "ERROR", "message": str(e)})
+
+
+REDIS_URL = os.environ.get("REDIS_URL", os.environ.get("HOST_REDIS_URL", "redis://127.0.0.1:6379/0"))
+_redis_client: redis.Redis | None = None
+
+def _redis() -> redis.Redis | None:
+    global _redis_client
+    if _redis_client is None:
+        try:
+            _redis_client = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=3)
+            _redis_client.ping()
+        except Exception as e:
+            log.warning(f"[redis] connection failed: {e}")
+            return None
+    return _redis_client
+
+def _ingest_redis_data(user_id: str = "default") -> dict:
+    client = _redis()
+    if client is None:
+        return {"status": "ERROR", "message": "Redis not available"}
+    target_user = user_id.lower()
+    now = int(time.time())
+    now_ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    ingested = 0
+    source_counts: dict[str, int] = {}
+    try:
+        for key in client.keys("jarvis:talk:last_msg:*"):
+            try:
+                data = client.get(key)
+                if not data:
+                    continue
+                content = data[:5000] if isinstance(data, str) else str(data)[:5000]
+                doc_id = f"redis-chat:{key}"
+                meta = {
+                    "id": doc_id, "topic": "redis-chat-history",
+                    "rule": f"Chat history from {key}",
+                    "type": "redis_chat_history",
+                    "source": key,
+                    "user_id": target_user,
+                    "indexed_at": now_ts,
+                }
+                _add_item("system_learnings", doc_id, target_user, content, meta, now, now_ts)
+                ingested += 1
+                source_counts["chat_history"] = source_counts.get("chat_history", 0) + 1
+            except Exception:
+                continue
+        total_logs = client.zcard("logs:entries")
+        if total_logs > 0:
+            logs = client.zrange("logs:entries", 0, min(99, total_logs-1))
+            content = "\n".join(str(l) for l in logs if l)[:5000]
+            doc_id = "redis-logs:entries"
+            meta = {
+                "id": doc_id, "topic": "redis-system-logs",
+                "rule": "System logs from Redis",
+                "type": "redis_logs",
+                "source": "logs:entries",
+                "user_id": target_user,
+                "indexed_at": now_ts,
+            }
+            _add_item("system_learnings", doc_id, target_user, content, meta, now, now_ts)
+            ingested += 1
+            source_counts["logs"] = source_counts.get("logs", 0) + 1
+        for key in client.keys("raven:job:*"):
+            try:
+                data = client.get(key)
+                if not data:
+                    continue
+                content = data[:5000] if isinstance(data, str) else str(data)[:5000]
+                doc_id = f"redis-job:{key}"
+                meta = {
+                    "id": doc_id, "topic": "raven-job-data",
+                    "rule": f"Job data from {key}",
+                    "type": "redis_jobs",
+                    "source": key,
+                    "user_id": target_user,
+                    "indexed_at": now_ts,
+                }
+                _add_item("system_learnings", doc_id, target_user, content, meta, now, now_ts)
+                ingested += 1
+                source_counts["jobs"] = source_counts.get("jobs", 0) + 1
+            except Exception:
+                continue
+        _conn().commit()
+    except Exception as e:
+        log.error(f"[redis] ingest failed: {e}")
+    return {"status": "SUCCESS", "ingested": ingested, "sources": source_counts}
+
+@app.post("/rag/ingest/redis", dependencies=[Depends(require_internal)])
+async def ingest_redis(payload: dict):
+    user_id = payload.get("user_id", "default")
+    return _ingest_redis_data(user_id)
 
 
 @app.get("/rag/indexed-paths", dependencies=[Depends(require_internal)])
