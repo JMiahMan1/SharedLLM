@@ -137,12 +137,22 @@ async def run_external_agent(
     think: bool = False,
     max_iterations: int = 6,
     request_timeout: float = 600.0,
+    ollama_url: str | None = None,
 ) -> dict:
     """Run a bounded agentic tool loop against Ollama and return the outcome.
 
     Returns {"content", "thinking", "tool_trace", "iterations", "model"}.
     ``tool_trace`` entries: {iteration, name, arguments, status, summary}.
     """
+    base = (ollama_url or OLLAMA_URL or "").rstrip("/")
+    if not base:
+        return {
+            "content": "[ExternalAgent] Ollama URL not configured (llm_local_url).",
+            "thinking": "",
+            "tool_trace": [],
+            "iterations": 0,
+            "model": model,
+        }
     t0 = time.time()
     user = creds.get("user", "default")
     api_key = creds.get("api_key")
@@ -172,7 +182,7 @@ async def run_external_agent(
                 iteration, max_iterations, model, user, think, len(tools or []), len(convo),
             )
             try:
-                async with session.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=timeout) as resp:
+                async with session.post(f"{base}/api/chat", json=payload, timeout=timeout) as resp:
                     if resp.status != 200:
                         err = (await resp.text())[:500]
                         log.warning("[ExternalAgent] Ollama HTTP %s: %s", resp.status, err)

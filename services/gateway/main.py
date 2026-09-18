@@ -3180,6 +3180,7 @@ async def chat_handler(request: Request, background_tasks=None):
             if isinstance(_m, dict) and _m.get("role"):
                 _msgs.append({k: _m.get(k) for k in ("role", "content", "tool_calls", "tool_call_id", "name") if _m.get(k) is not None})
         log.info(f"[ChatHandler] Agentic loop: model={selected_model} tools={len(body['tools']) if isinstance(body.get('tools'), list) else 0} think={show_thinking}")
+        _ag_settings = await get_all_settings()
         async with INFERENCE_LOCK:
             outcome = await run_external_agent(
                 model=selected_model,
@@ -3187,6 +3188,7 @@ async def chat_handler(request: Request, background_tasks=None):
                 tools=body["tools"] if isinstance(body.get("tools"), list) else None,
                 creds=creds.model_dump(),
                 think=bool(show_thinking),
+                ollama_url=_get(_ag_settings, "llm_local_url"),
             )
         try:
             await update_history(user_id, "user", query)
