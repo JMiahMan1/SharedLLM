@@ -145,6 +145,8 @@ Available tools and their required fields:
   `{"@type": "SystemLearningRequest", "topic": "Workspace nested writes", "content": "workspace_runtime file write does not create parent dirs; top-level writes succeed", "rule": "When writing workspace files, write top-level only or create parent dirs first", "outcome": "success", "confidence": 0.9}`
   `{"@type": "SystemLearningRequest", "action": "validate", "lesson_id": "lesson-abc123", "passed": true, "evidence": "self-test re-ran top-level write OK"}`
   When a mission asks you to validate past lessons (e.g. via `/rag/dream/pending`), use the validate form — do NOT try to POST to RAG directly.
+- `RedisInspectRequest` — read-only Redis inspection for self-tests (your workspace container cannot reach Redis itself, so NEVER use `redis-cli`/pip/apt for this). Actions: `ping`, `get` (needs `key`), `keys` (needs prefixed `pattern` like `redis-chat:*`), `ttl` (needs `key`). Example:
+  `{"@type": "RedisInspectRequest", "action": "get", "key": "redis-chat:jarvis:talk:last_msg:abc123"}`
 
 - `WebSearchRequest` — performs a web search via SearXNG (aggregates results from Google, Bing, DuckDuckGo, etc.). Fields: `query` (string, the search query), `category` (optional string: `"general"`, `"images"`, `"videos"`, `"news"`, `"music"`, `"files"`, `"it"`, `"science"`, `"social_media"`), `engines` (optional string, comma-separated engines like `"google,bing"`), `language` (optional string, locale code like `"en"`), `max_results` (optional integer). Example:
   `{"@type": "WebSearchRequest", "query": "RTX 4060 12GB price", "max_results": 10}`

@@ -208,6 +208,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {
     "storagelistrequest": "/execute/storage_list",
     "workspacebootstraprequest": "/workspaces/bootstrap",
     "systemlearningrequest": "/execute/learning",
+    "redisinspectrequest": "/execute/redis",
     "discoverysyncrequest": "/execute/discovery_sync",
     "storageindexrequest": "/index/full",
     "logbookrequest": "/execute/ha_logbook",

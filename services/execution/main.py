@@ -53,6 +53,7 @@ from services.execution.handlers import (
     light,
     media,
     note,
+    redis_inspect,
     security,
     storage,
     talk,
@@ -97,6 +98,7 @@ from services.execution.schemas import (
     NoteRequest,
     OcrRequest,
     ImageEditRequest,
+    RedisInspectRequest,
     ResolveStreamRequest,
     StorageFileReadRequest,
     StorageFileWriteRequest,
@@ -1254,6 +1256,14 @@ async def execute_system_learning(req: SystemLearningRequest):
     Persist architectural insights and bug resolutions to the RAG ledger.
     """
     return await learning.handle_system_learning(req)
+
+
+@app.post("/execute/redis", response_model=ExecutionResult)
+async def execute_redis_inspect(req: RedisInspectRequest):
+    """
+    Read-only Redis inspection (ping/get/keys/ttl) for Raven self-tests.
+    """
+    return await redis_inspect.handle_redis_inspect(req)
 
 
 @app.post("/execute/index_capabilities", response_model=ExecutionResult)

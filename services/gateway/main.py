@@ -2628,6 +2628,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "storagefilewriterequest": (EXECUTION_SVC, "/execute/storage_file_write"),
                 "workspacebootstraprequest": (WORKSPACE_RUNTIME_SVC, "/workspaces/bootstrap"),
                 "systemlearningrequest": (EXECUTION_SVC, "/execute/learning"),
+                "redisinspectrequest": (EXECUTION_SVC, "/execute/redis"),
                 "discoverysyncrequest": (EXECUTION_SVC, "/execute/discovery_sync"),
                 "storageindexrequest": (STORAGE_SVC, "/index/full"),
             }
