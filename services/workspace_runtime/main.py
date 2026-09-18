@@ -1919,6 +1919,10 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
     if not ws.local_path:
         ws.local_path = _derive_workspace_container_path(ws.id, ws.scope, ws.owner_user)
 
+    # Derive display_name if not provided (required by the NOT NULL column)
+    if not ws.display_name:
+        ws.display_name = ws.id
+
     # Validate local_path: user scopes must use relative paths; absolute paths
     # are only allowed for system scopes and must live under workspace root.
     if os.path.isabs(ws.local_path):
