@@ -877,7 +877,6 @@ def _reembed_doc(doc_id: str, new_content: str, meta: dict, vector: list[float] 
         log.warning(f"Re-embed during dream failed for {doc_id}: {e}")
 
 
-@app.post("/rag/dream", dependencies=[Depends(require_internal)])
 # --- Priority scoring for RSI self-improvement ---
 
 
@@ -901,6 +900,7 @@ def _lesson_priority_score(d: dict) -> float:
     ) * recency_factor
 
 
+@app.post("/rag/dream", dependencies=[Depends(require_internal)])
 async def dream_learnings(user_id: str = "default", compact_at: int = 600, summary_len: int = 400):
     """Dreaming mode: review Raven lessons and consolidate memory.
 
