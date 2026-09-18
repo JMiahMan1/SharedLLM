@@ -798,6 +798,18 @@ class SystemLearningRequest(BaseRequest):
     tags: list[str] = Field(default_factory=list, description="Keywords for retrieval (e.g. ['gateway', 'bugfix'])")
     supersedes: list[str] = Field(default_factory=list, description="IDs of older lessons this one replaces (conflict resolution).")
 
+class RedisInspectRequest(BaseRequest):
+    """
+    Read-only Redis inspection for self-tests and diagnostics (workspace
+    containers cannot reach Redis themselves). Actions: 'ping' (connectivity),
+    'get' (fetch one key, value truncated), 'keys' (list keys for a prefixed
+    pattern, max 50; bare '*' refused), 'ttl' (key TTL). No writes.
+    """
+    user_context: UserContext
+    action: str = Field(default="ping", description="Action: 'ping' | 'get' | 'keys' | 'ttl'.")
+    key: str = Field(default="", description="Get/ttl: exact Redis key (e.g. 'redis-chat:jarvis:talk:last_msg:abc').")
+    pattern: str = Field(default="", description="Keys: prefixed match pattern (e.g. 'redis-job:*'). Bare '*' is refused.")
+
 class TTSRequest(BaseRequest):
     """
     Converts text to speech using the local Kokoro engine.
