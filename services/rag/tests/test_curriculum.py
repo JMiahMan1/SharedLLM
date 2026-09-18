@@ -3,6 +3,7 @@ filter, toolchain inventory sync, and resource inventory endpoints."""
 
 import json
 import os
+import time
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 
@@ -265,3 +266,45 @@ async def test_ha_resources_inventory(tmp_path):
     assert entity["entity_id"] == "sensor.office_temperature"
     assert entity["friendly_name"] == "Office Temperature"
     assert entity["state"] == "21.5"
+
+
+@pytest.mark.asyncio
+async def test_priority_score_with_benchmark_boost(tmp_path):
+    _install_fakes(tmp_path)
+    from services.rag.main import _lesson_priority_score
+    base = {"applied_count": 2, "usage_count": 3, "confidence": 0.7, "created_at": time.time()}
+    base_score = _lesson_priority_score(base)
+    with_bench = dict(base)
+    with_bench["metadata"] = {"benchmark_score": 85}
+    bench_score = _lesson_priority_score(with_bench)
+    assert bench_score > base_score, f"benchmark should boost score: {bench_score} <= {base_score}"
+    no_bench = dict(base)
+    no_bench["metadata"] = {"benchmark_score": 0}
+    no_score = _lesson_priority_score(no_bench)
+    assert no_score == base_score or abs(no_score - base_score) < 0.01
+
+
+@pytest.mark.asyncio
+async def test_ingest_benchmark_curriculum(tmp_path):
+    _install_fakes(tmp_path)
+    resp = await rag_main.ingest_benchmark_curriculum()
+    assert resp["status"] == "SUCCESS"
+    assert resp["categories_ingested"] > 0
+    items = (await rag_main.list_learnings())["items"]
+    benchmark_items = [i for i in items if i["metadata"].get("type") == "benchmark_curriculum"]
+    assert len(benchmark_items) == resp["categories_ingested"]
+    for item in benchmark_items:
+        meta = item["metadata"]
+        assert meta.get("id", "").startswith("benchmark-")
+        assert meta.get("ground_truth_count", 0) >= 0
+
+
+@pytest.mark.asyncio
+async def test_benchmark_insights(tmp_path):
+    _install_fakes(tmp_path)
+    await rag_main.ingest_benchmark_curriculum()
+    insights = await rag_main.benchmark_insights()
+    assert insights["status"] == "SUCCESS"
+    assert "proven_capabilities" in insights
+    assert "priority_gaps" in insights
+    assert "guidance" in insights

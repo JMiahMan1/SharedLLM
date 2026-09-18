@@ -697,6 +697,32 @@ class RavenWorker:
                         )
                         if status == "completed":
                             await self._dispatch_chained_missions(client, mission_id, payload)
+                            # Auto-dream RSI trigger: after a meaningful
+                            # mission, check if it involved benchmark or
+                            # curriculum learning and trigger dreaming so
+                            # newly applied lessons get consolidated and
+                            # validated. Creates a verify→learn→re-verify
+                            # self-improvement loop.
+                            try:
+                                _q = str(payload.get("query") or "").lower()
+                                _r = str(result_str or "").lower()
+                                _learn_signals = [
+                                    "benchmark", "curriculum", "learn",
+                                    "study", "self-test", "validate",
+                                    "lesson", "training", "practice",
+                                ]
+                                _is_learning_mission = any(
+                                    _s in _q or _s in _r for _s in _learn_signals
+                                )
+                                if _is_learning_mission:
+                                    _dc = aiohttp.ClientTimeout(total=30.0)
+                                    asyncio.ensure_future(
+                                        self._trigger_dream_after_learning(
+                                            client, mission_id, payload, user_id=str(payload.get("user_id") or "default"),
+                                        )
+                                    )
+                            except Exception:
+                                pass  # best-effort, never block mission completion
                 except Exception as patch_e:
                     log.error(f"Failed to update mission {mission_id} status: {patch_e}")
 
@@ -885,6 +911,89 @@ class RavenWorker:
                     log.error(f"[Worker] Failed to launch next_mission_query follow-up after mission {completed_mission_id}: {chain_e}")
         except Exception as dispatch_e:
             log.error(f"[Worker] Chained mission dispatch failed after mission {completed_mission_id}: {dispatch_e}")
+
+    async def _trigger_dream_after_learning(
+        self,
+        client: aiohttp.ClientSession,
+        mission_id: int,
+        payload: dict[str, Any],
+        user_id: str,
+    ) -> None:
+        """RSI self-improvement: trigger dreaming after a learning mission.
+
+        Called asynchronously after mission completion when the mission
+        involved benchmark/curriculum/learning material. Triggers
+        /rag/dream to consolidate and validate newly applied lessons,
+        then submits any validation failures as follow-up missions so
+        Raven tests what it learned before the next mission.
+        """
+        try:
+            log.info(f"[Worker] Auto-dream triggered after learning mission {mission_id}")
+            _dp = await client.get(
+                f"{RAG_SVC}/rag/dream/pending",
+                params={"user_id": user_id},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            _pending = []
+            if _dp.status == 200:
+                _pending = (await _dp.json()).get("validations_pending") or []
+
+            _dr = await client.post(
+                f"{RAG_SVC}/rag/dream",
+                json={},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=60.0),
+            )
+            _report = await _dr.json() if _dr.status == 200 else {}
+            _degraded = _report.get("degraded") or []
+            _compacted = _report.get("compacted") or 0
+            _merged = _report.get("merged") or {}
+            _validated = _report.get("validation_checklist") or []
+
+            dream_summary = (
+                f"Post-learning dream: compacted={_compacted}, "
+                f"merged={len(_merged)}, degraded={len(_degraded)}, "
+                f"validations={len(_validated)}"
+            )
+            log.info(f"[Worker] Dream after mission {mission_id}: {dream_summary}")
+
+            if _degraded or _pending:
+                try:
+                    from services.gateway.main import (
+                        _enqueue_user_mission,
+                        resolve_first_user,
+                        _build_raven_system_prompt,
+                    )
+                    _q = str(payload.get("query") or "").lower()
+                    _workspace_id = str(payload.get("workspace_id") or "")
+                    followup = (
+                        f"Review your benchmark learning from mission {mission_id}. "
+                        f"These lessons need re-validation: {', '.join(_degraded[:5])}. "
+                        f"Complete self-tests on each and report results via POST /rag/dream/validate. "
+                        f"Workspace: {_workspace_id or 'use assigned'}. "
+                        f"Focus on applying: {', '.join(p.get('rule', p['id']) for p in _pending[:3])}."
+                    )
+                    _system = (
+                        "You are Raven. Your teacher flagged gaps in your benchmark "
+                        "learning. Re-validate each item by running it as a concrete "
+                        "test in the workspace and report PASS/FAIL."
+                    )
+                    followup_creds = await resolve_first_user()
+                    asyncio.ensure_future(
+                        _enqueue_user_mission(
+                            query=followup,
+                            system=_system,
+                            creds=followup_creds,
+                            coding_model=None,
+                            workspace_id=_workspace_id or None,
+                        )
+                    )
+                    log.info(f"[Worker] Follow-up validation mission queued after mission {mission_id}")
+                except Exception as _qe:
+                    log.warning(f"[Worker] Could not queue validation follow-up for mission {mission_id}: {_qe}")
+        except Exception as _de:
+            log.debug(f"[Worker] Auto-dream after mission {mission_id} skipped: {_de}")
 
     async def _get_upgrade_model(self, current_model: str) -> str:
         """
