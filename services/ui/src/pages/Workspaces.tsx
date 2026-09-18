@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -45,7 +45,6 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [zipping, setZipping] = useState(false);
-  const initialLoadDone = useRef(false);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -65,9 +64,13 @@ function AllArtifacts({ workspaces, onOpenInIDE }: { workspaces: Workspace[]; on
     setLoading(false);
   }, [workspaces]);
 
+  // Load artifacts when workspace list changes (tracked by ID comparison)
+  const workspaceIds = useRef<string[]>([]);
   useEffect(() => {
-    if (!initialLoadDone.current && workspaces.length > 0) {
-      initialLoadDone.current = true;
+    const currentIds = workspaces.map((w) => w.id).sort();
+    const lastIds = workspaceIds.current;
+    if (currentIds.length !== lastIds.length || currentIds.some((id, i) => id !== lastIds[i])) {
+      workspaceIds.current = currentIds;
       void loadAll();
     }
   }, [workspaces, loadAll]);
@@ -276,8 +279,11 @@ const Workspaces = () => {
     sync_mode: 'local_git_authoritative',
     auto_pull_enabled: false,
     webhook_token: '',
-    repo_url: ''
+    repo_url: '',
+    scope: 'user',
   });
+
+  const [pathError, setPathError] = useState<string | null>(null);
 
   const { data: workspaces = [], isLoading } = useQuery({
     queryKey: ['workspaces'],
@@ -358,7 +364,8 @@ const Workspaces = () => {
       sync_mode: 'local_git_authoritative',
       auto_pull_enabled: false,
       webhook_token: generateWebhookToken(),
-      repo_url: ''
+      repo_url: '',
+      scope: 'user',
     });
     setIsModalOpen(true);
   };
@@ -777,12 +784,21 @@ const Workspaces = () => {
               <input 
                 type="text" 
                 value={form.local_path || ''}
-                onChange={(e) => setForm({ ...form, local_path: e.target.value })}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setForm({ ...form, local_path: val });
+                  if (form.scope === 'user' && /^\//.test(val)) {
+                    setPathError('User workspaces must use relative paths (e.g. "my-project")');
+                  } else {
+                    setPathError(null);
+                  }
+                }}
                 placeholder="your/repository/folder (relative) or /absolute/path (system)"
-                className="glass-input w-full pl-10"
+                className={`glass-input w-full pl-10 ${pathError ? 'border-red-500/50' : ''}`}
               />
             </div>
             <p className="text-[10px] text-slate-600 italic">Relative path for user workspaces, absolute path for system workspaces (e.g. /host-repo). Used for all internal operations.</p>
+            {pathError && <p className="text-[10px] text-red-400 italic mt-1">{pathError}</p>}
           </label>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -820,7 +836,7 @@ const Workspaces = () => {
                 <button 
                   type="button"
                   aria-label="Toggle automated sync"
-                  onClick={() => setForm({ ...form, auto_pull_enabled: !form.auto_pull_enabled })}
+                  onClick={() => { setForm({ ...form, auto_pull_enabled: !form.auto_pull_enabled }); setPathError(null); }}
                   className={`w-12 h-6 rounded-full transition-colors relative ${form.auto_pull_enabled ? 'bg-indigo-500' : 'bg-slate-800'}`}
                 >
                   <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${form.auto_pull_enabled ? 'left-7' : 'left-1'}`} />
@@ -991,6 +1007,10 @@ const Workspaces = () => {
               onClick={() => {
                 if (!form.id || !form.display_name || !form.local_path) {
                   toast.error('Required fields: ID, Name, Path');
+                  return;
+                }
+                if (form.scope === 'user' && /^\//.test(form.local_path)) {
+                  toast.error('User workspaces must use relative paths (e.g. "my-project"), not absolute paths');
                   return;
                 }
                 saveMutation.mutate(form);

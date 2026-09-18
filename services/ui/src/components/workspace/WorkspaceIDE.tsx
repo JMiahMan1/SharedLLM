@@ -160,14 +160,13 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
   const terminalRedirectHandledRef = useRef(false);
 
   useEffect(() => {
-    if (activeView === 'terminal' && terminalPosition === 'bottom' && !terminalRedirectHandledRef.current) {
+    if (activeView === 'terminal' && !terminalRedirectHandledRef.current) {
       terminalRedirectHandledRef.current = true;
       setTerminalOpen(true);
-      setActiveView('explorer');
     } else if (activeView !== 'terminal') {
       terminalRedirectHandledRef.current = false;
     }
-  }, [activeView, terminalPosition]);
+  }, [activeView]);
   const hasGit = useMemo(
     () => workspace.capabilities.some((c) => c === 'git_status' || c === 'git_write' || c.startsWith('git')),
     [workspace.capabilities],
@@ -567,6 +566,20 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
       await Promise.all([loadDir(dir), openByPath(initialPath)]);
     })();
   }, [workspace.id, initialPath, baseDirOf, loadDir, openByPath]);
+
+  // Revoke all blob/image URLs on unmount to prevent memory leaks.
+  // Uses a ref updated in an effect so cleanup always sees the current tabs.
+  const tabsRef = useRef<OpenTab[]>([]);
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+  useEffect(() => {
+    return () => {
+      const currentTabs = tabsRef.current;
+      currentTabs.forEach((t) => {
+        if (t.imageUrl) URL.revokeObjectURL(t.imageUrl);
+        if (t.blobUrl) URL.revokeObjectURL(t.blobUrl);
+      });
+    };
+  }, []);
 
   // Close a tab (confirm if it has unsaved edits). Revokes image object URLs.
   const closeTab = useCallback(

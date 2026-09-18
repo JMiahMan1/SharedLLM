@@ -1919,6 +1919,22 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
     if not ws.local_path:
         ws.local_path = _derive_workspace_container_path(ws.id, ws.scope, ws.owner_user)
 
+    # Validate local_path: user scopes must use relative paths; absolute paths
+    # are only allowed for system scopes and must live under workspace root.
+    if os.path.isabs(ws.local_path):
+        if ws.scope != "system":
+            raise HTTPException(
+                status_code=400,
+                detail="User workspaces must use relative paths (e.g. 'my-project'). Absolute paths are only allowed for system workspaces.",
+            )
+        try:
+            Path(ws.local_path).resolve().relative_to(get_workspace_root())
+        except (ValueError, RuntimeError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Absolute local_path must be within workspace root ({get_workspace_root()}).",
+            )
+
     with Session(engine) as session:
         existing = session.get(Workspace, ws.id)
         if existing:

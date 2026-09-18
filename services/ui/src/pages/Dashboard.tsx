@@ -308,7 +308,7 @@ const Dashboard = () => {
       }
 
       // 2. Check if it's an ingestion / upload / import event (all users can see)
-      const isIngest = ['ingest', 'upload', 'import', 'document', 'file', 'rag'].some(
+      const isIngest = ['ingest', 'upload', 'import', 'document', 'document_upload', 'file_upload', 'rag', 'ingestion', 'rag_sync', 'rag_index'].some(
         kw => msg.includes(kw) || service.includes(kw)
       );
       if (isIngest) {
@@ -316,7 +316,7 @@ const Dashboard = () => {
       }
 
       // 3. Check if it's a communication (Nextcloud Talk, messages, mentions, chats)
-      const isComm = ['talk', 'nextcloud', 'message', 'chat', 'mention', 'communication', 'notification'].some(
+      const isComm = ['nextcloud_talk', 'nextcloud', 'talk_message', 'chat_message', 'mention', 'communication', 'notification'].some(
         kw => msg.includes(kw) || service.includes(kw)
       );
 
