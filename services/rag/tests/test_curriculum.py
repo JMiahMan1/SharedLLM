@@ -6,6 +6,7 @@ import os
 import time
 
 os.environ.setdefault("INTERNAL_SECRET", "test-secret")
+os.environ.setdefault("FERNET_KEY", "test-fernet-key-for-unit-tests-only")
 
 import pytest
 

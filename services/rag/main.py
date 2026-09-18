@@ -1203,13 +1203,19 @@ async def pending_validations(user_id: str = "default"):
 
 # --- Alpaca benchmark integration ---
 
-BENCHMARKS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "..", "..", "alpaca", "benchmark_tests.json",
+BENCHMARKS_PATH = os.environ.get(
+    "ALPACA_BENCHMARKS_PATH",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "..", "..", "alpaca", "benchmark_tests.json",
+    ),
 )
-BENCHMARK_RESULTS_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "..", "..", "alpaca", "data", "llm_benchmarks", "models",
+BENCHMARK_RESULTS_DIR = os.environ.get(
+    "ALPACA_BENCHMARK_RESULTS_DIR",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "..", "..", "alpaca", "data", "llm_benchmarks", "models",
+    ),
 )
 BENCHMARK_CAT_LABELS = {
     "coding": "Python/code execution", "reasoning": "Logical reasoning",
