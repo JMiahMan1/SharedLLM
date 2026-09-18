@@ -162,6 +162,17 @@ async def run_external_agent(
         **({"api_key": api_key} if api_key else {}),
     }
     convo: list[dict] = [dict(m) for m in messages if isinstance(m, dict)]
+    if tools and not any(m.get("role") == "system" and (m.get("content") or "").strip() for m in convo):
+        convo.insert(0, {
+            "role": "system",
+            "content": (
+                "You are Raven, the SharedLLM autonomous assistant. You have function "
+                "tools — use them to complete the user's task. When a task needs a "
+                "tool, emit native tool_calls (never describe the call in prose). "
+                "After a tool result arrives, use it: either call the next tool or "
+                "give the final answer. Keep thinking concise."
+            ),
+        })
     tool_trace: list[dict] = []
     thinking_parts: list[str] = []
     content = ""
@@ -205,6 +216,13 @@ async def run_external_agent(
                 iteration, len(content), len(thinking), [c["name"] for c in calls],
             )
             if not calls:
+                # Thinking-only reply while tools are available: nudge once more
+                # (thinking models sometimes reason without emitting the call).
+                if tools and thinking and iteration < max_iterations:
+                    log.info("[ExternalAgent] iter %d: thinking-only, re-prompting for tool_calls", iteration)
+                    convo.append({"role": "assistant", "content": content or thinking})
+                    convo.append({"role": "user", "content": "Proceed: emit the required tool call(s) now as native tool_calls, with no further prose."})
+                    continue
                 break
 
             convo.append({
