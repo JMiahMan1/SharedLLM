@@ -194,6 +194,7 @@ services:
       - EMBEDDING_MODEL=nomic-ai/nomic-embed-text-v1.5
       - ALPACA_BENCHMARKS_PATH=http://192.168.2.43:5000/api/tests
       - ALPACA_BENCHMARK_RESULTS_DIR=http://192.168.2.43:5000/api/results
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - chroma_data:/data
       - huggingface_cache:/root/.cache/huggingface
