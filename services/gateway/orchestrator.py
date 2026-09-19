@@ -6,6 +6,7 @@ import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, cast
+import uuid
 
 import aiohttp
 
@@ -208,6 +209,8 @@ SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {
     "storagefilewriterequest": "/execute/storage_file_write",
     "storagelistrequest": "/execute/storage_list",
     "workspacebootstraprequest": "/workspaces/bootstrap",
+    "workspacecreaterequest": "/workspaces",
+    "ravenmissionrequest": "/api/raven/missions",
     "systemlearningrequest": "/execute/learning",
     "redisinspectrequest": "/execute/redis",
     "discoverysyncrequest": "/execute/discovery_sync",
@@ -226,6 +229,8 @@ SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {
 # Tool → service mapping (resolved at runtime)
 _TOOL_SERVICE_MAP = {
     "workspacebootstraprequest": "workspace_runtime_svc_url",
+    "workspacecreaterequest": "workspace_runtime_svc_url",
+    "ravenmissionrequest": "identity_svc_url",
     "contextsearchrequest": "rag_svc_url",
 }
 
@@ -823,11 +828,45 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     payload["device_name"] = device_name
                     log.info(f"[_execute_single_tool] Auto-resolved device_name='{device_name}' from query")
 
+            if action == "workspacecreaterequest":
+                payload.pop("user_context", None)
+                _wid = payload.get("id") or payload.get("workspace_id")
+                _display = (
+                    payload.get("display_name")
+                    or payload.get("name")
+                    or payload.get("displayName")
+                    or str(_wid or "")
+                )
+                if not _wid:
+                    _wid = _display
+                if _wid:
+                    _slug = re.sub(r"[^a-zA-Z0-9_\-]+", "-", str(_wid).strip().lower()).strip("-")
+                    if _slug:
+                        _wid = _slug
+                if not _wid:
+                    _wid = uuid.uuid4().hex[:16]
+                payload = {
+                    "id": str(_wid),
+                    "display_name": str(_display) if _display else str(_wid),
+                    "scope": payload.get("scope") or "user",
+                    "owner_user": creds.user,
+                    "description": payload.get("description") or "",
+                    "is_default": False,
+                }
+
             from services.gateway.main import shared_http_client
             async with shared_http_client() as client:
                 resp = await client.post(f"{svc_base}{endpoint}", json=payload, headers={"X-Internal-Secret": INTERNAL_SECRET}, timeout=aiohttp.ClientTimeout(total=60.0))
                 if resp.status == 200:
                     result = await resp.json()
+                    if action == "workspacecreaterequest":
+                        ws_id = result.get("id")
+                        ws_name = result.get("display_name", ws_id)
+                        return f"Created workspace environment '{ws_name}' (id: `{ws_id}`) successfully."
+                    if action == "ravenmissionrequest":
+                        mid = result.get("id")
+                        mtitle = result.get("title", f"Mission #{mid}")
+                        return f"Raven mission #{mid} ('{mtitle}') queued successfully."
                     if action == "executionlogrequest":
                         detail = result.get("detail") or {}
                         logs = detail.get("logs", "")

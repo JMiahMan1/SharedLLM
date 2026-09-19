@@ -5,8 +5,8 @@ from sqlmodel import JSON, Column, Field, SQLModel
 
 
 class Workspace(SQLModel, table=True):
-    id: str = Field(primary_key=True)
-    display_name: str
+    id: str = Field(default="", primary_key=True)
+    display_name: str = Field(default="")
     access_policy: str = Field(default="authenticated")
     local_path: str | None = None  # User-facing path: relative for user workspaces, absolute for system
     nextcloud_path: str | None = None
