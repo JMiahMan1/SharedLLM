@@ -593,6 +593,12 @@ async def verify_entity_access(ctx: UserContext, entity_id: str) -> bool:
 async def execute_light(req: LightControlRequest):
     if not await verify_entity_access(req.user_context, req.entity_id):
         raise HTTPException(status_code=403, detail="Access denied to this device")
+    ctx = req.user_context
+    if not ctx.ha_url or not ctx.ha_token:
+        creds = await resolve_first_user()
+        if creds:
+            ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
+            ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
     return await light.handle_light(req)
 
 @app.post("/execute/esphome", response_model=ExecutionResult)
@@ -1638,6 +1644,7 @@ async def execute_announce(req: AnnouncementRequest):
         return _ok(f"Announcement sent successfully to {target_player}.", "announce")
     return _fail(f"Announcement failed: {result.get('error')}", "announce", result)
 
+@app.post("/execute/entity_search", response_model=ExecutionResult)
 @app.post("/execute/entity/search", response_model=ExecutionResult)
 async def execute_entity_search(req: EntitySearchRequest):
     """Search for HA entities by name, domain, area, or state."""
@@ -1720,6 +1727,36 @@ async def execute_entity_search(req: EntitySearchRequest):
 @app.post("/execute/ha_service", response_model=ExecutionResult)
 async def execute_ha_service(req: HAServiceRequest):
     ctx = req.user_context
+
+    # Pre-flight check: detect unavailable/unknown entities before calling HA
+    if req.entity_id and ctx.ha_url and ctx.ha_token:
+        try:
+            current = await ha_client.get_state(ctx.ha_url, ctx.ha_token, req.entity_id)
+            if current:
+                state = current.get("state", "").lower()
+                friendly = current.get("attributes", {}).get("friendly_name", req.entity_id)
+                if state == "unavailable":
+                    return ExecutionResult(
+                        status="FAILURE",
+                        message=(
+                            f"The device '{friendly}' ({req.entity_id}) is currently unavailable. "
+                            "It may be powered off, disconnected from WiFi, or not responding. "
+                            "Please check the physical device and its network connection."
+                        ),
+                        service="ha_service",
+                    )
+                if state == "unknown":
+                    return ExecutionResult(
+                        status="FAILURE",
+                        message=(
+                            f"The device '{friendly}' ({req.entity_id}) has an unknown state. "
+                            "It may be initializing or misconfigured."
+                        ),
+                        service="ha_service",
+                    )
+        except Exception as e:
+            log.warning(f"[ha_service] Pre-flight state check failed for {req.entity_id}: {e}")
+
     # Unified hardware routing: HA first, direct ESPHome fallback when HA is unreachable.
     return await hardware_router.execute_device_command(
         ctx, req.domain, req.service, req.entity_id, req.service_data, service_name="ha_service"

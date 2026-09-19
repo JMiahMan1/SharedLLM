@@ -735,7 +735,17 @@ def _normalize_tool(obj: dict) -> dict | None:
     # Hoist common nested payload keys (incl. 'params', used by some clients)
     for nest_key in ("arguments", "payload", "args", "json", "tool_call", "parameters", "request", "params"):
         if nest_key in obj and isinstance(obj[nest_key], dict):
-            obj.update(obj.pop(nest_key))
+            nested_data = obj.pop(nest_key)
+            if "action" in nested_data and "action" in obj:
+                obj_act_norm = re.sub(r'[\s_]+', '', str(obj["action"])).lower()
+                nest_act_norm = re.sub(r'[\s_]+', '', str(nested_data["action"])).lower()
+                if (obj_act_norm in ALLOWED_TOOLS or obj_act_norm.endswith("request")) and nest_act_norm not in ALLOWED_TOOLS:
+                    device_verb = nested_data.pop("action")
+                    obj.update(nested_data)
+                    obj["sub_action"] = device_verb
+                    obj["device_action"] = device_verb
+                    continue
+            obj.update(nested_data)
 
     # Last-resort: pull command/commands out of any deeper nesting so the shell
     # handler never sees "Neither 'command' nor 'commands' provided".
@@ -751,6 +761,19 @@ def _normalize_tool(obj: dict) -> dict | None:
             if pk in obj:
                 obj["file_path"] = obj.pop(pk)
                 break
+
+    # Prioritize tool class name from discriminator over device verb action
+    for t_key in ("tool", "@type", "type"):
+        if t_key in obj and isinstance(obj[t_key], str) and obj[t_key] not in ("function",):
+            cand_tool = obj[t_key]
+            cand_tool_norm = re.sub(r'[\s_]+', '', cand_tool).lower()
+            if cand_tool_norm in ALLOWED_TOOLS or cand_tool_norm.endswith("request"):
+                act_norm = re.sub(r'[\s_]+', '', str(obj.get("action", ""))).lower()
+                if act_norm not in ALLOWED_TOOLS:
+                    if "action" in obj:
+                        obj["sub_action"] = obj["action"]
+                        obj["device_action"] = obj["action"]
+                    obj["action"] = cand_tool
 
     # Set action from any known discriminator
     if "action" not in obj:
@@ -950,6 +973,36 @@ def _extract_tool_candidates(text: str) -> list:
             for pm in re.finditer(r"<parameter=([^>]+)>(.*?)</parameter>", block, re.DOTALL):
                 params[pm.group(1).strip()] = pm.group(2).strip()
             candidates.append({"@type": func_m.group(1).strip(), **params})
+
+    # Qwen-style <tool_code>JSON</tool_code> tags
+    for m in re.finditer(r"<tool_code>\s*(.*?)\s*</tool_code>", text, re.DOTALL):
+        inner = m.group(1).strip()
+        if inner:
+            with contextlib.suppress(Exception):
+                parsed = json.loads(inner)
+                if isinstance(parsed, dict):
+                    candidates.append(parsed)
+
+    # GGUF text-protocol: call:default_api:ToolName{...} or call:ToolName{...}
+    for m in re.finditer(r"call:(?:default_api:)?([A-Za-z][A-Za-z0-9_]*)\s*\{", text):
+        name = m.group(1)
+        start = m.end() - 1
+        depth = 0
+        end = None
+        for i in range(start, min(len(text), start + 4000)):
+            ch = text[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i + 1
+                    break
+        raw = text[start:end] if end else "{}"
+        with contextlib.suppress(Exception):
+            args = json.loads(raw)
+            if isinstance(args, dict):
+                candidates.append({"action": name, "payload": args})
 
     # Any JSON object carrying a tool discriminator (@type/action/tool/type)
     for m in re.finditer(r'\{\s*"(@type|action|tool|type)"\s*:\s*"[^"]+"[^}]*\}', text, re.DOTALL):
@@ -3898,6 +3951,14 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         payload["_outer_action"] = tool_data.get("action") or tool_data.get("operation") or ""
                     _normalize_git_payload_action(payload)
                     payload.pop("_outer_action", None)
+
+                # RECOVERY: ensure light/climate/ha_service payload has the device action
+                if lookup_action in ("lightcontrolrequest", "climaterequest", "haservicerequest") and isinstance(payload, dict):
+                    act_val = str(payload.get("action", "")).lower().replace("_", "")
+                    if act_val in ALLOWED_TOOLS or not payload.get("action"):
+                        sub = payload.pop("sub_action", None) or payload.pop("device_action", None) or tool_data.get("sub_action") or tool_data.get("device_action")
+                        if sub:
+                            payload["action"] = sub
 
                 # Special handling: WorkspaceSettingsUpdateRequest PATCHes an existing
                 # workspace's settings (repo_url, git_remote, default_branch, display_name,

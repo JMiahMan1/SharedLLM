@@ -134,9 +134,8 @@ _TEXT_CALL_RE = re.compile(r"call:(?:default_api:)?([A-Za-z][A-Za-z0-9_]*)\s*\{"
 
 def _parse_text_tool_calls(content: str) -> list[dict]:
     """Fallback: some GGUF tool templates emit a text protocol like
-    ``call:default_api:ToolName{...json args...}`` instead of native
-    tool_calls. Parse those lines into executable calls (Raven's agent_loop
-    does the same kind of content-mining for non-tool-emitting models)."""
+    ``call:default_api:ToolName{...json args...}`` or ``<tool_code>{...}</tool_code>``
+    instead of native tool_calls. Parse those lines into executable calls."""
     parsed: list[dict] = []
     if not content:
         return parsed
@@ -162,6 +161,28 @@ def _parse_text_tool_calls(content: str) -> list[dict]:
         except Exception:
             args = {}
         parsed.append({"name": name, "arguments": args, "id": None, "source": "text_protocol"})
+
+    for m in re.finditer(r"<tool_code>\s*(.*?)\s*</tool_code>", content, re.DOTALL):
+        inner = m.group(1).strip()
+        if inner:
+            try:
+                data = json.loads(inner)
+                if isinstance(data, dict):
+                    name = data.pop("tool", None) or data.pop("name", None) or data.pop("@type", None) or data.pop("action", "")
+                    parsed.append({"name": str(name), "arguments": data, "id": None, "source": "tool_code"})
+            except Exception:
+                pass
+
+    if not parsed:
+        for m in re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.DOTALL):
+            try:
+                data = json.loads(m.group(1))
+                if isinstance(data, dict) and any(k in data for k in ("tool", "name", "@type", "action")):
+                    name = data.pop("tool", None) or data.pop("name", None) or data.pop("@type", None) or data.pop("action", "")
+                    parsed.append({"name": str(name), "arguments": data, "id": None, "source": "fenced_json"})
+            except Exception:
+                pass
+
     return parsed
 
 
@@ -169,6 +190,7 @@ def _strip_text_calls(content: str) -> str:
     """Remove executed text-protocol call spans so the final chat answer is clean."""
     if not content:
         return content
+    content = re.sub(r"<tool_code>\s*.*?\s*</tool_code>", "", content, flags=re.DOTALL)
     spans: list[tuple[int, int]] = []
     for m in _TEXT_CALL_RE.finditer(content):
         start = m.start()
@@ -186,6 +208,7 @@ def _strip_text_calls(content: str) -> str:
         spans.append((start, end or m.end()))
     for start, end in reversed(spans):
         content = content[:start] + content[end:]
+    content = re.sub(r"```(?:json)?\s*\{[^`]*?(?:\"tool\"|\"action\"|\"@type\")[^`]*?\}\s*```", "", content, flags=re.DOTALL)
     return re.sub(r"\n{3,}", "\n\n", content).strip()
 
 
@@ -220,6 +243,19 @@ async def run_external_agent(
     user_context = {
         "user": user,
         "is_admin": bool(creds.get("is_admin", False)),
+        "ha_url": creds.get("ha_url"),
+        "ha_token": creds.get("ha_token"),
+        "nextcloud_url": creds.get("nextcloud_url"),
+        "nextcloud_user": creds.get("nextcloud_user"),
+        "nextcloud_pass": creds.get("nextcloud_pass"),
+        "github_token": creds.get("github_token"),
+        "gitlab_token": creds.get("gitlab_token"),
+        "git_token": creds.get("git_token"),
+        "audiobookshelf_url": creds.get("audiobookshelf_url"),
+        "audiobookshelf_user": creds.get("audiobookshelf_user"),
+        "audiobookshelf_pass": creds.get("audiobookshelf_pass"),
+        "mass_url": creds.get("mass_url"),
+        "mass_token": creds.get("mass_token"),
         **({"api_key": api_key} if api_key else {}),
     }
     convo: list[dict] = [dict(m) for m in messages if isinstance(m, dict)]

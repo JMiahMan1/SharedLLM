@@ -165,3 +165,21 @@ def test_resolve_web_scraper_uses_defaults():
     assert r.json["browser_engine"] is None
     assert r.json["headless"] is True
     assert r.json["mobile"] is False
+
+
+def test_resolve_tool_call_case_insensitive_and_aliases():
+    for name in ("LightControlRequest", "light_control", "light_control_request", "lightcontrol"):
+        r = resolve_tool_call(name, {"entity_id": "light.hall_lamp", "action": "turn_off"})
+        assert r.service == "execution"
+        assert r.path == "/execute/light"
+        assert r.json["entity_id"] == "light.hall_lamp"
+        assert r.json["action"] == "turn_off"
+
+
+def test_resolve_entity_search():
+    for name in ("EntitySearchRequest", "entity_search", "entity_search_request", "entitysearch"):
+        r = resolve_tool_call(name, {"query": "lamp", "domain": "light"})
+        assert r.service == "execution"
+        assert r.path == "/execute/entity_search"
+        assert r.json["query"] == "lamp"
+

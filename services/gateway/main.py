@@ -2820,9 +2820,10 @@ async def chat_handler(request: Request, background_tasks=None):
     show_thinking = body.get("show_thinking", False) or body.get("think", False)
 
     # Expose SharedLLM's agent tool surface (gh, git, file write, Stable Diffusion
-    # image tools) to external OpenAI/Ollama/OpenWebUI clients that request tools.
-    # This is additive: it only augments a request that already includes `tools`.
-    if isinstance(body.get("tools"), list):
+    # image tools) to external OpenAI/Ollama/OpenWebUI clients that explicitly
+    # request SharedLLM tools or agentic mode. Never pollute empty tool arrays
+    # or external voice pipelines with all 66 internal developer tools.
+    if isinstance(body.get("tools"), list) and len(body["tools"]) > 0 and (body.get("agentic") or body.get("sharedllm_tools")):
         existing = {t.get("function", {}).get("name") for t in body["tools"] if isinstance(t, dict)}
         for tool in get_tool_schemas():
             if tool["function"]["name"] not in existing:
@@ -3165,7 +3166,7 @@ async def chat_handler(request: Request, background_tasks=None):
     # explicit `"agentic": true`) get a bounded multi-turn loop where the
     # model can invoke the FULL Raven tool surface with thinking visible.
     # This is the endpoint to point chat windows at for Raven teaching data.
-    _req_tools = body.get("tools") if isinstance(body.get("tools"), list) else []
+    _req_tools = [t for t in body.get("tools", []) if isinstance(t, dict)] if isinstance(body.get("tools"), list) else []
     _wants_agentic = bool(body.get("agentic")) or len(_req_tools) > 0
     _std_client = (
         is_openai
@@ -3176,10 +3177,15 @@ async def chat_handler(request: Request, background_tasks=None):
         _msgs: list[dict] = []
         if body.get("system"):
             _msgs.append({"role": "system", "content": str(body["system"])})
+        if rag_context:
+            if _msgs and _msgs[0].get("role") == "system":
+                _msgs[0]["content"] += f"\n\nContext & Known Entities:\n{rag_context}"
+            else:
+                _msgs.append({"role": "system", "content": f"Context & Known Entities:\n{rag_context}"})
         for _m in body["messages"]:
             if isinstance(_m, dict) and _m.get("role"):
                 _msgs.append({k: _m.get(k) for k in ("role", "content", "tool_calls", "tool_call_id", "name") if _m.get(k) is not None})
-        log.info(f"[ChatHandler] Agentic loop: model={selected_model} tools={len(body['tools']) if isinstance(body.get('tools'), list) else 0} think={show_thinking}")
+        log.info(f"[ChatHandler] Agentic loop: model={selected_model} tools={len(_req_tools)} think={show_thinking}")
         _ag_settings = await get_all_settings()
         async with INFERENCE_LOCK:
             outcome = await run_external_agent(
