@@ -390,6 +390,8 @@ async def run_external_agent(
     )
     if any(t.get("source") == "text_protocol" for t in tool_trace):
         content = _strip_text_calls(content)
+    from services.gateway.llm_providers import strip_thinking_blocks
+    content = strip_thinking_blocks(content)
     return {
         "content": content,
         "thinking": "\n".join(thinking_parts),

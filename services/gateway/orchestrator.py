@@ -900,9 +900,18 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
         # In single-turn mode, do not stream intermediate tool emission (Turn 1) live
         # because the user/voice-assistant should never hear raw JSON tool calls.
-        # If Turn 1 turns out to be the final answer (no tool executed), we flush it to chunk_callback.
-        # If a tool IS executed, Turn 2 is the final answer and streams via chunk_callback.
-        turn_callback = chunk_callback if turn > 0 else None
+        # If show_thinking is True, thinking chunks are streamed to the UI.
+        if turn == 0:
+            if show_thinking and chunk_callback:
+                async def turn_callback(chunk):
+                    if isinstance(chunk, dict) and chunk.get("type") == "thinking":
+                        await chunk_callback(chunk)
+                    elif isinstance(chunk, str) and chunk.startswith('{"type": "thinking"'):
+                        await chunk_callback(chunk)
+            else:
+                turn_callback = None
+        else:
+            turn_callback = chunk_callback
 
         for retry_count in range(MAX_INFERENCE_RETRIES):
             try:
@@ -959,8 +968,10 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
             # No tool call — this is our final answer
             if chunk_callback and turn == 0:
                 clean_ans = strip_json_from_response(ans)
+                from services.gateway.llm_providers import strip_thinking_blocks
+                clean_ans = strip_thinking_blocks(clean_ans)
                 if clean_ans:
-                    await chunk_callback(clean_ans)
+                    await chunk_callback({"type": "content", "text": clean_ans})
             break
 
         # Normalize tool_data keys
@@ -1086,4 +1097,6 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
 
     # Final answer processing — strip JSON/thinking artifacts for clean natural language
     log.info(f"[_single_turn_inference] Final answer length: {len(ans)} chars, preview: {ans[:200]}")
-    return strip_json_from_response(ans)
+    final_clean = strip_json_from_response(ans)
+    from services.gateway.llm_providers import strip_thinking_blocks
+    return strip_thinking_blocks(final_clean)
