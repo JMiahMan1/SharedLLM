@@ -76,9 +76,14 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
                 service="light_control"
             )
 
+        has_attributes = (
+            req.brightness_pct is not None
+            or req.color_temp is not None
+            or req.rgb_color is not None
+        )
         if req.action in ("turn_on", "turn_off"):
             target_state = "on" if req.action == "turn_on" else "off"
-            if current_state == target_state:
+            if current_state == target_state and not (req.action == "turn_on" and has_attributes):
                 return ExecutionResult(
                     status="SUCCESS",
                     message=f"{friendly} is already {target_state}.",
