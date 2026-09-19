@@ -17,6 +17,7 @@ Services targeted:
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -669,7 +670,17 @@ def resolve_tool_call(
     # Generic Raven-action branch: every entry in _RAVEN_TOOL_TABLE resolves
     # here. Raven-style `payload` fields pass straight through (execution
     # schemas ignore unknown extras), with user_context/workspace_id injected.
-    raven_entry = next((e for e in _RAVEN_TOOL_TABLE if e[0] == name), None)
+    norm_target = re.sub(r'[\s_]+', '', name).lower()
+    norm_target_noreq = norm_target[:-7] if norm_target.endswith("request") else norm_target
+    raven_entry = next(
+        (
+            e for e in _RAVEN_TOOL_TABLE
+            if e[0] == name
+            or re.sub(r'[\s_]+', '', e[0]).lower() == norm_target
+            or (re.sub(r'[\s_]+', '', e[0]).lower()[:-7] if re.sub(r'[\s_]+', '', e[0]).lower().endswith("request") else re.sub(r'[\s_]+', '', e[0]).lower()) == norm_target_noreq
+        ),
+        None,
+    )
     if raven_entry is not None:
         _, service, method, path, requires_ws, _, _ = raven_entry
         payload = arguments.get("payload")

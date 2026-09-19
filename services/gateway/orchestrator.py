@@ -776,6 +776,13 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
             payload = tool_data.get("payload", tool_data)
             payload["user_context"] = creds.model_dump()
 
+            if action in ("lightcontrolrequest", "climaterequest", "haservicerequest"):
+                act_val = str(payload.get("action", "")).lower().replace("_", "")
+                if act_val in SINGLE_TURN_TOOL_ENDPOINTS or not payload.get("action"):
+                    sub = payload.pop("sub_action", None) or payload.pop("device_action", None) or tool_data.get("sub_action") or tool_data.get("device_action")
+                    if sub:
+                        payload["action"] = sub
+
             if action == "storageindexrequest":
                 payload = {
                     "provider": {
@@ -836,16 +843,30 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                         if detail:
                             return f"{result.get('message', '')}\n\nDetail:\n{json.dumps(detail, indent=2)}"
                         return result.get("message", "Action completed successfully.")
-                    return result.get("message", "Action completed successfully.")
+                    msg = result.get("message", "Action completed successfully.")
+                    status = result.get("status", "SUCCESS")
+                    if status == "FAILURE":
+                        return f"Sorry, I couldn't complete that action: {msg}"
+                    return msg
                 else:
                     err_body = await resp.text()
-                    return f"Tool execution failed ({resp.status}): {err_body}"
+                    log.warning(f"[_execute_single_tool] HTTP {resp.status} from {endpoint}: {err_body[:300]}")
+                    try:
+                        err_json = json.loads(err_body)
+                        detail = err_json.get("detail", {})
+                        if isinstance(detail, dict):
+                            err_msg = detail.get("message") or detail.get("error") or err_body
+                        else:
+                            err_msg = str(detail) or err_body
+                        return f"Sorry, I couldn't complete that action: {err_msg}"
+                    except Exception:
+                        return f"Sorry, I couldn't complete that action. The service returned an error (HTTP {resp.status})."
         except Exception as e:
             log.error(f"Single-turn tool execution error: {e}")
-            return f"I encountered an error while executing the tool: {e}"
+            return f"Sorry, I encountered an error while trying to perform that action: {e}"
     else:
         log.warning(f"[_execute_single_tool] Unsupported tool for single-turn: {action}")
-        return f"I found a tool call for '{action}', but it is not supported in the standard path. Please ask Raven to perform this task."
+        return f"I don't have a handler for the '{action}' action yet. Could you try rephrasing, or let me know what you'd like me to do?"
 
 async def _single_turn_inference(query: str, model: str, system_prompt: str, rag_context: str, history: list[dict[str, str]], creds: ResolvedCredentials, chunk_callback: Callable[[str], Awaitable[None]] | None = None, show_thinking: bool = False) -> str:
     now = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p %Z")
@@ -903,18 +924,19 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 tool_data = _prose[0]
                 log.info(f"[_single_turn_inference] Recovered prose tool call: {tool_data.get('action')}")
         if not tool_data:
+            # Detect empty tool_code tags — model tried but produced nothing
+            if "<tool_code>" in ans and "</tool_code>" in ans:
+                import re as _re
+                _tc_inner = _re.search(r"<tool_code>\s*(.*?)\s*</tool_code>", ans, _re.DOTALL)
+                if not _tc_inner or not _tc_inner.group(1).strip():
+                    log.warning(f"[_single_turn_inference] Empty tool_code detected, retrying with explicit format reminder")
+                    messages.append({"role": "assistant", "content": ans})
+                    messages.append({"role": "user", "content": "You output empty tool tags. You MUST emit a JSON object like {\"tool\": \"LightControlRequest\", \"entity_id\": \"light.hall_lamp\", \"action\": \"turn_off\"}. Do not output anything else."})
+                    continue
             # No tool call — this is our final answer
             break
 
         # Normalize tool_data keys
-        if "tool" in tool_data and "action" not in tool_data:
-            tool_data["action"] = tool_data.pop("tool")
-        if "operation" in tool_data and "action" not in tool_data:
-            tool_data["action"] = tool_data.pop("operation")
-        if "command" in tool_data and "action" not in tool_data:
-            tool_data["action"] = tool_data.pop("command")
-        if "name" in tool_data and "action" not in tool_data:
-            tool_data["action"] = tool_data.pop("name")
         if "arguments" in tool_data and "payload" not in tool_data:
             tool_data["payload"] = tool_data.pop("arguments")
         if "parameters" in tool_data and "payload" not in tool_data:
@@ -922,6 +944,75 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         if "function" in tool_data and "action" not in tool_data:
             tool_data["action"] = tool_data["function"].get("name", "")
             tool_data["payload"] = tool_data["function"].get("arguments", {})
+        if "operation" in tool_data and "action" not in tool_data:
+            tool_data["action"] = tool_data.pop("operation")
+        if "command" in tool_data and "action" not in tool_data:
+            tool_data["action"] = tool_data.pop("command")
+
+        # Normalize "state" to "action" for light/climate/HA payloads
+        payload_for_state = tool_data.get("payload", tool_data)
+        if isinstance(payload_for_state, dict) and "state" in payload_for_state and "action" not in payload_for_state:
+            state_val = payload_for_state.pop("state")
+            payload_for_state["action"] = state_val
+        if "state" in tool_data and "action" not in tool_data and "payload" not in tool_data:
+            tool_data["action"] = tool_data.pop("state")
+
+        # Smart routing: separate tool-name (for endpoint lookup) from HA action (for payload)
+        # The model emits several shapes:
+        #   {"name": "LightControlRequest", "arguments": {"action": "turn_off"}}
+        #   {"tool": "LightControlRequest", "action": "turn_off", "entity_id": "..."}
+        #   {"name": "LightControlRequest", "arguments": {"state": "off"}}
+        # We need: action = normalized tool name for routing, payload.action = HA action.
+        _candidate = str(tool_data.get("action", "")).strip()
+        _cand_norm = re.sub(r'[\s_]+', '', _candidate).lower()
+        _is_ha_action = _cand_norm in ("turnon", "turnoff", "toggle", "play", "pause", "stop", "send", "messages", "list")
+
+        _META_KEYS = {"action", "tool", "name", "@type", "type", "payload", "function", "id", "operation", "command"}
+
+        if _is_ha_action:
+            # action is an HA action — look for a tool/name/@type to route with
+            for _k in ("tool", "name", "@type"):
+                if _k in tool_data:
+                    _tn = tool_data.pop(_k)
+                    _tn_norm = re.sub(r'[\s_]+', '', str(_tn)).lower()
+                    if _tn_norm in SINGLE_TURN_TOOL_ENDPOINTS or _tn_norm == "controlplanerequest":
+                        _pl = tool_data.get("payload", {})
+                        if not isinstance(_pl, dict):
+                            _pl = {}
+                        _pl["action"] = _candidate
+                        # Merge remaining top-level fields (entity_id, brightness, etc.) into payload
+                        for _fk, _fv in list(tool_data.items()):
+                            if _fk not in _META_KEYS:
+                                _pl.setdefault(_fk, _fv)
+                        tool_data["payload"] = _pl
+                        tool_data["action"] = _tn_norm
+                        log.info(f"[_single_turn_inference] Remapped routing: {tool_data['action']} payload.action={_candidate}")
+                        break
+        else:
+            # action is a tool name (routing key) — ensure payload has valid HA action
+            if _cand_norm in SINGLE_TURN_TOOL_ENDPOINTS or _cand_norm == "controlplanerequest":
+                _pl = tool_data.get("payload")
+                if not isinstance(_pl, dict):
+                    _pl = {}
+                if "action" in _pl and _pl["action"] in SINGLE_TURN_TOOL_ENDPOINTS:
+                    # payload.action is also a tool name, not an HA action — remove it
+                    _pl.pop("action")
+                if "action" not in _pl:
+                    sub = _pl.get("sub_action") or _pl.get("device_action") or tool_data.get("sub_action") or tool_data.get("device_action")
+                    if sub:
+                        _pl["action"] = sub
+                # Merge any top-level fields (e.g. hoisted by _normalize_tool) into payload
+                for _fk, _fv in list(tool_data.items()):
+                    if _fk not in _META_KEYS and _fk not in _pl:
+                        _pl[_fk] = _fv
+                tool_data["payload"] = _pl
+
+        # Last normalization: tool/name → action (only if action still unset)
+        if "action" not in tool_data:
+            if "tool" in tool_data:
+                tool_data["action"] = tool_data.pop("tool")
+            elif "name" in tool_data:
+                tool_data["action"] = tool_data.pop("name")
 
         # Normalize hallucinated/shortened action names
         action_aliases = {
