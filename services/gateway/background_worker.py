@@ -532,7 +532,9 @@ class RavenWorker:
                         except Exception:
                             pass
 
-                    async def chunk_callback(chunk: str):
+                    async def chunk_callback(chunk: Any):
+                        if isinstance(chunk, dict):
+                            chunk = json.dumps(chunk)
                         await self.job_queue.push_chunk(job_id, chunk)
                     payload["_job_id"] = job_id  # traceability
 
@@ -608,7 +610,9 @@ class RavenWorker:
                         except Exception:
                             pass
 
-                    async def chunk_callback(chunk: str):
+                    async def chunk_callback(chunk: Any):
+                        if isinstance(chunk, dict):
+                            chunk = json.dumps(chunk)
                         await self.job_queue.push_chunk(job_id, chunk)
                     payload["_job_id"] = job_id
 

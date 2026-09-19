@@ -89,13 +89,16 @@ QWEN_GROUNDING_INSTRUCTION = """
 6. **TERMINAL EXECUTION**: Continue until the task is verified fixed. If you stall, you are in violation of protocol.
 """
 
-def _make_ollama_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False):
+def _make_ollama_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
     if not stream:
+        msg: dict[str, Any] = {"role": "assistant", "content": message}
+        if thinking:
+            msg["thinking"] = thinking
         res = {
             "model": model,
             "created_at": datetime.now().isoformat() + "Z",
-            "message": {"role": "assistant", "content": message},
+            "message": msg,
             "done": True,
             "status": "SUCCESS"
         }
@@ -106,10 +109,13 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
         return JSONResponse(res)
 
     async def gen():
+        msg: dict[str, Any] = {"role": "assistant", "content": message}
+        if thinking:
+            msg["thinking"] = thinking
         chunk = {
             "model": model,
             "created_at": datetime.now().isoformat() + "Z",
-            "message": {"role": "assistant", "content": message},
+            "message": msg,
             "done": False
         }
         yield json.dumps(chunk) + "\n"
@@ -117,24 +123,30 @@ def _make_ollama_response(message: str, model: str, intent: str | None = None, d
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
 
-def _make_ollama_chunk(content: str, model: str, done: bool = False):
+def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: str | None = None):
+    msg: dict[str, Any] = {"role": "assistant", "content": content}
+    if thinking:
+        msg["thinking"] = thinking
     return {
         "model": model,
         "created_at": datetime.now().isoformat() + "Z",
-        "message": {"role": "assistant", "content": content},
+        "message": msg,
         "done": done
     }
 
 
-def _make_openai_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False):
+def _make_openai_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
     if not stream:
+        msg: dict[str, Any] = {"role": "assistant", "content": message}
+        if thinking:
+            msg["reasoning_content"] = thinking
         res = {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion",
             "created": int(time.time()),
             "model": model,
-            "choices": [{"message": {"role": "assistant", "content": message}, "finish_reason": "stop", "index": 0}],
+            "choices": [{"message": msg, "finish_reason": "stop", "index": 0}],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         }
         if intent:
@@ -144,12 +156,15 @@ def _make_openai_response(message: str, model: str, intent: str | None = None, d
         return JSONResponse(res)
 
     async def gen():
+        delta: dict[str, Any] = {"content": message}
+        if thinking:
+            delta["reasoning_content"] = thinking
         chunk = {
             "id": f"chatcmpl-{int(time.time())}",
             "object": "chat.completion.chunk",
             "created": int(time.time()),
             "model": model,
-            "choices": [{"delta": {"content": message}, "index": 0, "finish_reason": None}]
+            "choices": [{"delta": delta, "index": 0, "finish_reason": None}]
         }
         yield f"data: {json.dumps(chunk)}\n\n"
         stop_chunk = {
@@ -164,14 +179,19 @@ def _make_openai_response(message: str, model: str, intent: str | None = None, d
 
     return StreamingResponse(gen(), media_type="text/event-stream")
 
-def _make_openai_chunk(content: str, model: str, finish_reason: str | None = None):
+def _make_openai_chunk(content: str, model: str, finish_reason: str | None = None, reasoning_content: str | None = None):
     import time
+    delta: dict[str, Any] = {}
+    if content:
+        delta["content"] = content
+    if reasoning_content:
+        delta["reasoning_content"] = reasoning_content
     return {
         "id": f"chatcmpl-{int(time.time())}",
         "object": "chat.completion.chunk",
         "created": int(time.time()),
         "model": model,
-        "choices": [{"delta": {"content": content} if content else {}, "index": 0, "finish_reason": finish_reason}]
+        "choices": [{"delta": delta, "index": 0, "finish_reason": finish_reason}]
     }
 
 
@@ -2842,8 +2862,16 @@ async def chat_handler(request: Request, background_tasks=None):
     # through the canonical selector (code/autonomous -> coding/35B gatekeeper,
     # librarian/RAG -> librarian, everything else -> assistant).
     try:
-        if explicit_model:
-            selected_model = explicit_model
+        clean_req_model = explicit_model[:-7] if explicit_model.endswith(":latest") else explicit_model
+        model_lower = clean_req_model.lower()
+        if model_lower in ("jarvis", "assistant", "default", "auto"):
+            selected_model = await get_assistant_model()
+        elif model_lower in ("coding", "coder"):
+            selected_model = await get_coding_model()
+        elif model_lower in ("librarian", "rag"):
+            selected_model = await get_librarian_model()
+        elif clean_req_model:
+            selected_model = clean_req_model
         else:
             selected_model = await select_model_for_query(query)
         log.info(f"[ChatHandler] Model selection: explicit_model='{explicit_model}' selected_model='{selected_model}'")
@@ -3205,20 +3233,19 @@ async def chat_handler(request: Request, background_tasks=None):
             _chunks = [outcome["content"][i:i + 200] for i in range(0, len(outcome["content"]), 200)] or [""]
             if is_openai:
                 async def _agentic_openai_stream():
-                    if outcome["thinking"]:
-                        yield f"data: {json.dumps(_make_openai_chunk('', selected_model))}\n\n".replace('"delta": {}', f'"delta": {json.dumps({"reasoning_content": outcome["thinking"][:2000]})}')
+                    if outcome.get("thinking"):
+                        yield f"data: {json.dumps(_make_openai_chunk('', selected_model, reasoning_content=outcome['thinking']))}\n\n"
                     for _c in _chunks:
                         yield f"data: {json.dumps(_make_openai_chunk(_c, selected_model))}\n\n"
                     yield f"data: {json.dumps(_make_openai_chunk('', selected_model, 'stop'))}\n\n"
                     yield "data: [DONE]\n\n"
                 return StreamingResponse(_agentic_openai_stream(), media_type="text/event-stream")
             async def _agentic_ollama_stream():
+                if outcome.get("thinking"):
+                    yield json.dumps(_make_ollama_chunk('', selected_model, thinking=outcome['thinking'])) + "\n"
                 for _c in _chunks:
                     yield json.dumps(_make_ollama_chunk(_c, selected_model)) + "\n"
-                _final = _make_ollama_chunk("", selected_model, True)
-                if outcome["thinking"]:
-                    _final["message"]["thinking"] = outcome["thinking"]
-                yield json.dumps(_final) + "\n"
+                yield json.dumps(_make_ollama_chunk('', selected_model, done=True)) + "\n"
             return StreamingResponse(_agentic_ollama_stream(), media_type="application/x-ndjson")
         if is_openai:
             return _make_openai_agentic_response(
@@ -3281,10 +3308,29 @@ async def chat_handler(request: Request, background_tasks=None):
                     # Pop and yield chunks
                     chunks = await job_queue.get_chunks(job_id)
                     for chunk in chunks:
-                        if is_openai:
-                            yield f"data: {json.dumps(_make_openai_chunk(chunk, selected_model))}\n\n"
+                        chunk_type = "content"
+                        text = chunk
+                        if isinstance(chunk, str) and chunk.startswith('{"type":'):
+                            try:
+                                parsed = json.loads(chunk)
+                                chunk_type = parsed.get("type", "content")
+                                text = parsed.get("text", "")
+                            except Exception:
+                                pass
+
+                        if not text:
+                            continue
+
+                        if chunk_type == "thinking":
+                            if is_openai:
+                                yield f"data: {json.dumps(_make_openai_chunk('', selected_model, reasoning_content=text))}\n\n"
+                            else:
+                                yield json.dumps(_make_ollama_chunk('', selected_model, thinking=text)) + "\n"
                         else:
-                            yield json.dumps(_make_ollama_chunk(chunk, selected_model)) + "\n"
+                            if is_openai:
+                                yield f"data: {json.dumps(_make_openai_chunk(text, selected_model))}\n\n"
+                            else:
+                                yield json.dumps(_make_ollama_chunk(text, selected_model)) + "\n"
 
                     if job["status"] == JobStatus.COMPLETED:
                         if is_openai:
@@ -3331,9 +3377,14 @@ async def chat_handler(request: Request, background_tasks=None):
                     break
                 if job["status"] == JobStatus.COMPLETED:
                     ans = job["result"]
+                    from services.gateway.llm_providers import extract_thinking_and_content
+                    thinking = ""
+                    clean_ans = str(ans) if ans is not None else ""
+                    if isinstance(ans, str):
+                        thinking, clean_ans = extract_thinking_and_content(ans)
                     if is_openai:
-                        return _make_openai_response(ans, selected_model)
-                    return _make_ollama_response(ans, selected_model)
+                        return _make_openai_response(clean_ans, selected_model, thinking=thinking if show_thinking else None)
+                    return _make_ollama_response(clean_ans, selected_model, thinking=thinking if show_thinking else None)
                 if job["status"] == JobStatus.FAILED:
                     err_msg = job.get("error", "Job failed")
                     if is_openai:
@@ -5371,13 +5422,21 @@ async def list_openai_models(request: Request):
 
     # Map to OpenAI list format
     openai_models = []
-    for m in model_names:
+    for alias in ["jarvis", "assistant"]:
         openai_models.append({
-            "id": m,
+            "id": alias,
             "object": "model",
             "created": int(time.time()),
             "owned_by": "system"
         })
+    for m in model_names:
+        if m not in ("jarvis", "assistant"):
+            openai_models.append({
+                "id": m,
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "system"
+            })
 
     return JSONResponse(content={
         "object": "list",

@@ -29,56 +29,82 @@ def strip_thinking_blocks(text: str) -> str:
     return result.strip()
 
 
+def extract_thinking_and_content(text: str) -> tuple[str, str]:
+    """Separate thinking blocks from clean content. Returns (thinking, clean_content)."""
+    if not text:
+        return ("", "")
+    thinks = re.findall(r'<(?:think|thinking|reason)>([\s\S]*?)(?:</(?:think|thinking|reason)>|$)', text, flags=re.IGNORECASE)
+    thinking = "\n".join(t.strip() for t in thinks if t.strip())
+    content = strip_thinking_blocks(text)
+    return (thinking, content)
+
+
 class StreamingThinkingFilter:
     """Filters out <think>...</think> and <thinking>...</thinking> tags from a streaming token stream."""
     def __init__(self):
         self._in_think = False
         self._buf = ""
 
-    def process(self, chunk: str) -> str:
+    def process_with_thinking(self, chunk: str) -> tuple[str, str]:
         if not chunk:
-            return ""
+            return ("", "")
         self._buf += chunk
-        out = []
+        clean_out = []
+        think_out = []
         while self._buf:
             if not self._in_think:
-                # Look for opening tag
                 m = re.search(r'<(think|thinking|reason)>', self._buf, re.IGNORECASE)
                 if m:
-                    # Everything before tag is content
-                    out.append(self._buf[:m.start()])
+                    clean_out.append(self._buf[:m.start()])
                     self._in_think = True
                     self._buf = self._buf[m.end():]
                 else:
-                    # Check if buffer ends with partial opening tag e.g. "<thi"
                     partial = re.search(r'<[a-z]{0,8}$', self._buf, re.IGNORECASE)
                     if partial:
-                        out.append(self._buf[:partial.start()])
+                        clean_out.append(self._buf[:partial.start()])
                         self._buf = self._buf[partial.start():]
                         break
                     else:
-                        out.append(self._buf)
+                        clean_out.append(self._buf)
                         self._buf = ""
                         break
             else:
-                # Inside thinking: look for closing tag
                 m = re.search(r'</(think|thinking|reason)>', self._buf, re.IGNORECASE)
                 if m:
+                    think_out.append(self._buf[:m.start()])
                     self._in_think = False
                     self._buf = self._buf[m.end():]
                 else:
-                    # Discard thinking content from output
-                    self._buf = ""
-                    break
-        return "".join(out)
+                    partial = re.search(r'</[a-z]{0,8}$', self._buf, re.IGNORECASE)
+                    if partial:
+                        think_out.append(self._buf[:partial.start()])
+                        self._buf = self._buf[partial.start():]
+                        break
+                    else:
+                        think_out.append(self._buf)
+                        self._buf = ""
+                        break
+        return ("".join(clean_out), "".join(think_out))
+
+    def process(self, chunk: str) -> str:
+        clean, _ = self.process_with_thinking(chunk)
+        return clean
 
     def flush(self) -> str:
+        clean, _ = self.flush_both()
+        return clean
+
+    def flush_both(self) -> tuple[str, str]:
         if not self._in_think and self._buf:
             res = self._buf
             self._buf = ""
-            return res
+            return (res, "")
+        elif self._in_think and self._buf:
+            res = self._buf
+            self._buf = ""
+            return ("", res)
         self._buf = ""
-        return ""
+        return ("", "")
 
 
 class BaseLLMProvider(ABC):
@@ -239,9 +265,8 @@ class OllamaProvider(BaseLLMProvider):
                                 break
                         except json.JSONDecodeError:
                             continue
-                    # Strip thinking blocks from output
-                    if not show_thinking:
-                        content = strip_thinking_blocks(content)
+                    # Content must NEVER contain thinking blocks
+                    content = strip_thinking_blocks(content)
                     return content
 
                 try:
@@ -250,9 +275,8 @@ class OllamaProvider(BaseLLMProvider):
                         return f" [PROVIDER ERROR: {data['error']}] "
                     msg = data.get("message", {})
                     content = msg.get("content") or ""
-                    # Strip thinking blocks from output
-                    if not show_thinking:
-                        content = strip_thinking_blocks(content)
+                    # Content must NEVER contain thinking blocks
+                    content = strip_thinking_blocks(content)
                     return content
                 except json.JSONDecodeError as e:
                     log.error(f"[OllamaProvider] Failed to parse JSON: {raw_text[:100]}... Error: {e}")
@@ -285,11 +309,19 @@ class OllamaProvider(BaseLLMProvider):
                                 raise RuntimeError(f"Provider error: {chunk_json['error']}")
                             msg = chunk_json.get("message", {})
                             piece = msg.get("content") or ""
-                            if piece:
-                                full_content += piece
-                                clean_piece = think_filter.process(piece) if not show_thinking else piece
-                                if clean_piece:
-                                    await chunk_callback(clean_piece)
+                            thinking_piece = msg.get("thinking") or ""
+
+                            clean_piece, think_from_piece = think_filter.process_with_thinking(piece)
+                            full_thinking = thinking_piece or think_from_piece
+
+                            if show_thinking and full_thinking and chunk_callback:
+                                await chunk_callback({"type": "thinking", "text": full_thinking})
+
+                            if clean_piece:
+                                full_content += clean_piece
+                                if chunk_callback:
+                                    await chunk_callback({"type": "content", "text": clean_piece})
+
                             if chunk_json.get("done"):
                                 stream_done = True
                                 break
@@ -306,21 +338,28 @@ class OllamaProvider(BaseLLMProvider):
                         chunk_json = json.loads(tail)
                         msg = chunk_json.get("message", {})
                         piece = msg.get("content") or ""
-                        if piece:
-                            full_content += piece
-                            clean_piece = think_filter.process(piece) if not show_thinking else piece
-                            if clean_piece:
-                                await chunk_callback(clean_piece)
+                        thinking_piece = msg.get("thinking") or ""
+                        clean_piece, think_from_piece = think_filter.process_with_thinking(piece)
+                        full_thinking = thinking_piece or think_from_piece
+                        if show_thinking and full_thinking and chunk_callback:
+                            await chunk_callback({"type": "thinking", "text": full_thinking})
+                        if clean_piece:
+                            full_content += clean_piece
+                            if chunk_callback:
+                                await chunk_callback({"type": "content", "text": clean_piece})
                     except Exception as e:
                         log.error(f"Error parsing trailing streaming chunk: {e} | Raw: {tail!r}")
-                if not show_thinking:
-                    tail_clean = think_filter.flush()
-                    if tail_clean:
-                        await chunk_callback(tail_clean)
-        # Strip thinking blocks from final content unless explicitly requested
-        if not show_thinking:
-            full_content = strip_thinking_blocks(full_content)
-        return full_content
+
+                tail_clean, tail_think = think_filter.flush_both()
+                if show_thinking and tail_think and chunk_callback:
+                    await chunk_callback({"type": "thinking", "text": tail_think})
+                if tail_clean:
+                    full_content += tail_clean
+                    if chunk_callback:
+                        await chunk_callback({"type": "content", "text": tail_clean})
+        # Content returned must NEVER contain thinking blocks
+        full_content = strip_thinking_blocks(full_content)
+        return full_content.strip()
 
 
 class OpenRouterProvider(BaseLLMProvider):
