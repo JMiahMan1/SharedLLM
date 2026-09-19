@@ -29,6 +29,58 @@ def strip_thinking_blocks(text: str) -> str:
     return result.strip()
 
 
+class StreamingThinkingFilter:
+    """Filters out <think>...</think> and <thinking>...</thinking> tags from a streaming token stream."""
+    def __init__(self):
+        self._in_think = False
+        self._buf = ""
+
+    def process(self, chunk: str) -> str:
+        if not chunk:
+            return ""
+        self._buf += chunk
+        out = []
+        while self._buf:
+            if not self._in_think:
+                # Look for opening tag
+                m = re.search(r'<(think|thinking|reason)>', self._buf, re.IGNORECASE)
+                if m:
+                    # Everything before tag is content
+                    out.append(self._buf[:m.start()])
+                    self._in_think = True
+                    self._buf = self._buf[m.end():]
+                else:
+                    # Check if buffer ends with partial opening tag e.g. "<thi"
+                    partial = re.search(r'<[a-z]{0,8}$', self._buf, re.IGNORECASE)
+                    if partial:
+                        out.append(self._buf[:partial.start()])
+                        self._buf = self._buf[partial.start():]
+                        break
+                    else:
+                        out.append(self._buf)
+                        self._buf = ""
+                        break
+            else:
+                # Inside thinking: look for closing tag
+                m = re.search(r'</(think|thinking|reason)>', self._buf, re.IGNORECASE)
+                if m:
+                    self._in_think = False
+                    self._buf = self._buf[m.end():]
+                else:
+                    # Discard thinking content from output
+                    self._buf = ""
+                    break
+        return "".join(out)
+
+    def flush(self) -> str:
+        if not self._in_think and self._buf:
+            res = self._buf
+            self._buf = ""
+            return res
+        self._buf = ""
+        return ""
+
+
 class BaseLLMProvider(ABC):
     @abstractmethod
     async def generate(
@@ -150,6 +202,11 @@ class OllamaProvider(BaseLLMProvider):
             "stream": chunk_callback is not None,  # Only stream when caller expects chunks
             "options": opts
         }
+        if not show_thinking:
+            payload["think"] = False
+            payload["enable_thinking"] = False
+            opts["think"] = False
+            opts["enable_thinking"] = False
 
         full_content = ""
         async with shared_http_client() as client:
@@ -182,18 +239,7 @@ class OllamaProvider(BaseLLMProvider):
                                 break
                         except json.JSONDecodeError:
                             continue
-                    # Only fall back to thinking when the caller explicitly requested it;
-                    # otherwise a thinking-only response (e.g. a degenerate internal
-                    # "draft" loop) must NOT be surfaced as the final answer.
-                    if not content.strip() and show_thinking:
-                        for line in lines:
-                            try:
-                                data = json.loads(line)
-                                msg = data.get("message", {})
-                                content += msg.get("thinking") or ""
-                            except json.JSONDecodeError:
-                                continue
-                    # Strip thinking blocks unless explicitly requested
+                    # Strip thinking blocks from output
                     if not show_thinking:
                         content = strip_thinking_blocks(content)
                     return content
@@ -204,11 +250,7 @@ class OllamaProvider(BaseLLMProvider):
                         return f" [PROVIDER ERROR: {data['error']}] "
                     msg = data.get("message", {})
                     content = msg.get("content") or ""
-                    # Only fall back to thinking when the caller explicitly requested it;
-                    # otherwise a thinking-only response must not be surfaced as the answer.
-                    if not content.strip() and show_thinking:
-                        content = msg.get("thinking") or ""
-                    # Strip thinking blocks unless explicitly requested
+                    # Strip thinking blocks from output
                     if not show_thinking:
                         content = strip_thinking_blocks(content)
                     return content
@@ -229,6 +271,7 @@ class OllamaProvider(BaseLLMProvider):
                 # tokens -> garbled/truncated tool-call JSON (real mission failure).
                 buffer = ""
                 stream_done = False
+                think_filter = StreamingThinkingFilter()
                 async for chunk in response.content.iter_any():
                     buffer += chunk.decode("utf-8", errors="replace")
                     while "\n" in buffer:
@@ -242,12 +285,11 @@ class OllamaProvider(BaseLLMProvider):
                                 raise RuntimeError(f"Provider error: {chunk_json['error']}")
                             msg = chunk_json.get("message", {})
                             piece = msg.get("content") or ""
-                            # Only include thinking if explicitly requested
-                            if not piece and show_thinking:
-                                piece = msg.get("thinking") or ""
                             if piece:
                                 full_content += piece
-                                await chunk_callback(piece)
+                                clean_piece = think_filter.process(piece) if not show_thinking else piece
+                                if clean_piece:
+                                    await chunk_callback(clean_piece)
                             if chunk_json.get("done"):
                                 stream_done = True
                                 break
@@ -264,13 +306,17 @@ class OllamaProvider(BaseLLMProvider):
                         chunk_json = json.loads(tail)
                         msg = chunk_json.get("message", {})
                         piece = msg.get("content") or ""
-                        if not piece and show_thinking:
-                            piece = msg.get("thinking") or ""
                         if piece:
                             full_content += piece
-                            await chunk_callback(piece)
+                            clean_piece = think_filter.process(piece) if not show_thinking else piece
+                            if clean_piece:
+                                await chunk_callback(clean_piece)
                     except Exception as e:
                         log.error(f"Error parsing trailing streaming chunk: {e} | Raw: {tail!r}")
+                if not show_thinking:
+                    tail_clean = think_filter.flush()
+                    if tail_clean:
+                        await chunk_callback(tail_clean)
         # Strip thinking blocks from final content unless explicitly requested
         if not show_thinking:
             full_content = strip_thinking_blocks(full_content)

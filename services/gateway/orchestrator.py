@@ -898,6 +898,12 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
         log.info(f"[_single_turn_inference] Turn {turn + 1}/{MAX_TURNS}")
         ans = ""
 
+        # In single-turn mode, do not stream intermediate tool emission (Turn 1) live
+        # because the user/voice-assistant should never hear raw JSON tool calls.
+        # If Turn 1 turns out to be the final answer (no tool executed), we flush it to chunk_callback.
+        # If a tool IS executed, Turn 2 is the final answer and streams via chunk_callback.
+        turn_callback = chunk_callback if turn > 0 else None
+
         for retry_count in range(MAX_INFERENCE_RETRIES):
             try:
                 data = await call_ollama(
@@ -905,7 +911,7 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                         "model": model,
                         "messages": messages,
                         "options": options,
-                        "chunk_callback": chunk_callback,
+                        "chunk_callback": turn_callback,
                     },
                     use_chat=True,
                 )
@@ -951,6 +957,10 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 continue
 
             # No tool call — this is our final answer
+            if chunk_callback and turn == 0:
+                clean_ans = strip_json_from_response(ans)
+                if clean_ans:
+                    await chunk_callback(clean_ans)
             break
 
         # Normalize tool_data keys

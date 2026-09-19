@@ -27,7 +27,7 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
-from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider
+from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider, StreamingThinkingFilter
 from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION, load_prompt
 from services.gateway.schemas import ResolvedCredentials
 from services.shared.media_validation import MEDIA_EXTS, media_extension, rewrite_media_extension, validate_media_bytes
@@ -406,6 +406,11 @@ class OllamaProvider(BaseLLMProvider):
             "stream": True,  # Hardened: Always stream
             "options": opts
         }
+        if not show_thinking:
+            payload["think"] = False
+            payload["enable_thinking"] = False
+            opts["think"] = False
+            opts["enable_thinking"] = False
 
         full_content = ""
         async with shared_http_client() as client:
@@ -478,6 +483,7 @@ class OllamaProvider(BaseLLMProvider):
             last_err: Exception | None = None
             for _attempt in range(3):
                 buf = ""
+                think_filter = StreamingThinkingFilter()
                 try:
                     async with client.post(
                         f"{self.base_url}/api/chat", json=payload,
@@ -494,17 +500,21 @@ class OllamaProvider(BaseLLMProvider):
                                 if "error" in chunk_json:
                                     raise RuntimeError(f"Provider error: {chunk_json['error']}")
                                 content = chunk_json.get("message", {}).get("content") or ""
-                                if not content and show_thinking:
-                                    content = chunk_json.get("message", {}).get("thinking") or ""
                                 if content:
                                     buf += content
-                                    await chunk_callback(content)
+                                    clean_content = think_filter.process(content) if not show_thinking else content
+                                    if clean_content:
+                                        await chunk_callback(clean_content)
                                 if chunk_json.get("done"):
                                     break
                             except RuntimeError:
                                 raise
                             except Exception as e:
                                 log.error(f"Error parsing streaming chunk: {e} | Raw line: {clean_line!r}")
+                        if not show_thinking:
+                            tail_clean = think_filter.flush()
+                            if tail_clean:
+                                await chunk_callback(tail_clean)
                     full_content = buf
                     break  # success
                 except RuntimeError:
