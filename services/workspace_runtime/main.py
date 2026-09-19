@@ -955,6 +955,9 @@ def _resolve_workspace(ref: WorkspaceRef, check_recovery: bool = False) -> dict[
 
     if ref.workspace_id:
         match = next((item for item in registry if item.get("id") == ref.workspace_id), None)
+        if match is None:
+            norm_id = _normalize_workspace_slug(ref.workspace_id)
+            match = next((item for item in registry if item.get("id") == norm_id or _normalize_workspace_slug(str(item.get("display_name", ""))) == norm_id), None)
     elif ref.local_path:
         match = next(
             (item for item in registry if item.get("local_path") == ref.local_path),
@@ -1023,6 +1026,9 @@ def _resolve_workspace_for_bootstrap(ref: WorkspaceBootstrapRequest) -> dict[str
 
     if ref.workspace_id:
         match = next((item for item in registry if item.get("id") == ref.workspace_id), None)
+        if match is None:
+            norm_id = _normalize_workspace_slug(ref.workspace_id)
+            match = next((item for item in registry if item.get("id") == norm_id or _normalize_workspace_slug(str(item.get("display_name", ""))) == norm_id), None)
     elif ref.local_path:
         match = next((item for item in registry if item.get("local_path") == ref.local_path), None)
         if match is None:
@@ -1900,15 +1906,26 @@ def bootstrap_workspace(req: WorkspaceBootstrapRequest, x_internal_secret: str |
 def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(default=None)):
     _require_internal_secret(x_internal_secret)
 
-    # Guard: a workspace MUST have a non-empty id. Storing an empty string id
-    # creates an un-deletable, un-referenceable row (session.get(Workspace, "")
-    # cannot locate it and the DELETE route redirects on the trailing slash).
-    # Reject up front with a clear error instead of persisting a broken record.
+    # Guard / derive: a workspace MUST have a non-empty id.
+    # If id was omitted (not in model_fields_set) and display_name is present, derive it.
+    # If id was explicitly provided as empty/whitespace, reject with 400.
     if not ws.id or not str(ws.id).strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Workspace 'id' is required and must be a non-empty string.",
-        )
+        if "id" not in getattr(ws, "model_fields_set", set()) and ws.display_name and str(ws.display_name).strip():
+            ws.id = _normalize_workspace_slug(ws.display_name)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Workspace 'id' is required and must be a non-empty string.",
+            )
+
+    # Derive display_name if not provided (required by the NOT NULL column)
+    if not ws.display_name or not str(ws.display_name).strip():
+        ws.display_name = ws.id
+
+    # If id contains spaces or uppercase characters, normalize it to a slug
+    # while keeping display_name intact.
+    if any(c.isspace() or c.isupper() for c in ws.id):
+        ws.id = _normalize_workspace_slug(ws.id)
 
     # Reserved name validation
     slug = _normalize_workspace_slug(ws.id)
@@ -1918,10 +1935,6 @@ def create_workspace(ws: Workspace, x_internal_secret: str | None = Header(defau
     # Derive local_path if not provided (required by the NOT NULL column)
     if not ws.local_path:
         ws.local_path = _derive_workspace_container_path(ws.id, ws.scope, ws.owner_user)
-
-    # Derive display_name if not provided (required by the NOT NULL column)
-    if not ws.display_name:
-        ws.display_name = ws.id
 
     # Validate local_path: user scopes must use relative paths; absolute paths
     # are only allowed for system scopes and must live under workspace root.
@@ -2002,6 +2015,8 @@ def update_workspace(workspace_id: str, updates: dict, x_internal_secret: str | 
     with Session(engine) as session:
         ws = session.get(Workspace, workspace_id)
         if not ws:
+            ws = session.get(Workspace, _normalize_workspace_slug(workspace_id))
+        if not ws:
             raise HTTPException(status_code=404, detail="Workspace not found")
 
         for key, value in updates.items():
@@ -2058,7 +2073,10 @@ def delete_workspace(workspace_id: str, x_internal_secret: str | None = Header(d
     with Session(engine) as session:
         ws = session.get(Workspace, workspace_id)
         if not ws:
+            ws = session.get(Workspace, _normalize_workspace_slug(workspace_id))
+        if not ws:
             raise HTTPException(status_code=404, detail="Workspace not found")
+        real_id = ws.id
         session.delete(ws)
         session.commit()
     # Tear down the sandbox container + private network so deletion does not leak
@@ -2067,8 +2085,8 @@ def delete_workspace(workspace_id: str, x_internal_secret: str | None = Header(d
     # container/network is not an error.
     from services.workspace_sandbox import remove_workspace_container
 
-    remove_workspace_container(workspace_id)
-    return {"status": "SUCCESS", "message": f"Workspace {workspace_id} deleted"}
+    remove_workspace_container(real_id)
+    return {"status": "SUCCESS", "message": f"Workspace {real_id} deleted"}
 
 
 @app.post("/files/read")

@@ -4,7 +4,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine
 
+from services.workspace_runtime.models import Workspace
+
 os.environ["INTERNAL_SECRET"] = "test-secret"
+_TEST_WS_ROOT = os.path.abspath(".tmp/workspaces")
+os.environ["WORKSPACE_RUNTIME_ROOT"] = _TEST_WS_ROOT
+os.makedirs(_TEST_WS_ROOT, exist_ok=True)
 
 # Setup in-memory database for testing
 @pytest.fixture(name="session")
@@ -19,12 +24,19 @@ def session_fixture():
 @pytest.fixture(name="client")
 def client_fixture(session: Session):
     import services.workspace_runtime.main as main
+    import services.workspace_runtime.database as database
     from services.workspace_runtime.main import app
     original_engine = main.engine
+    original_db_engine = database.engine
+    original_ws_root = main.WORKSPACE_ROOT
     main.engine = session.bind
+    database.engine = session.bind
+    main.WORKSPACE_ROOT = main.Path(_TEST_WS_ROOT)
     client = TestClient(app)
     yield client
     main.engine = original_engine
+    database.engine = original_db_engine
+    main.WORKSPACE_ROOT = original_ws_root
 
 def test_health_check(client: TestClient):
     resp = client.get("/health")
@@ -61,7 +73,7 @@ def test_workspace_crud(client: TestClient):
     ws_data = {
         "id": "test_ws",
         "display_name": "Test Workspace",
-        "local_path": "/tmp/test_ws",
+        "local_path": "test_ws",
         "sync_mode": "git",
         "scope": "user",
         "capabilities": ["read", "write"]
@@ -100,7 +112,7 @@ def test_delete_workspace_tears_down_sandbox(client: TestClient):
     ws_data = {
         "id": "teardown_ws",
         "display_name": "Teardown Workspace",
-        "local_path": "/tmp/teardown_ws",
+        "local_path": "teardown_ws",
         "sync_mode": "git",
         "scope": "user",
         "capabilities": ["read", "write"],
@@ -155,5 +167,48 @@ def test_list_entries_skips_git_tree(tmp_path):
     assert ".git" not in names
     assert not any(e["path"].startswith(".git") for e in entries)
     assert truncated is False
+
+
+def test_create_workspace_spaced_name_and_slugification(client: TestClient):
+    headers = {"X-Internal-Secret": "test-secret"}
+    # Create with spaces and capital letters in ID
+    resp = client.post(
+        "/workspaces",
+        json={"id": "Home Work", "display_name": "Home Work", "scope": "user"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    ws = resp.json()["workspace"]
+    # id normalized to slug
+    assert ws["id"] == "home-work"
+    assert ws["display_name"] == "Home Work"
+    assert "users/default/home-work" in ws["local_path"]
+
+    # Resolution by original name "Home Work" or slug "home-work"
+    resp2 = client.get("/workspaces", headers=headers)
+    assert resp2.status_code == 200
+    found = [w for w in resp2.json()["workspaces"] if w["id"] == "home-work"]
+    assert len(found) == 1
+
+    # Cleanup
+    resp_del = client.delete("/workspaces/Home Work", headers=headers)
+    assert resp_del.status_code == 200
+
+
+def test_create_workspace_derived_id_from_display_name(client: TestClient):
+    headers = {"X-Internal-Secret": "test-secret"}
+    # Create omitting id but providing display_name
+    resp = client.post(
+        "/workspaces",
+        json={"display_name": "Project Alpha", "scope": "user"},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    ws = resp.json()["workspace"]
+    assert ws["id"] == "project-alpha"
+    assert ws["display_name"] == "Project Alpha"
+
+    # Cleanup
+    client.delete("/workspaces/project-alpha", headers=headers)
 
 

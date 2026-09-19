@@ -3,7 +3,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from services.config import WORKSPACE_DATABASE_URL
 
-DATABASE_URL = WORKSPACE_DATABASE_URL
+DATABASE_URL = WORKSPACE_DATABASE_URL or "sqlite:////data/workspace_runtime.db"
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in DATABASE_URL else {}

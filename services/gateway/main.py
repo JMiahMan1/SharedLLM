@@ -8,6 +8,7 @@ import re
 import threading
 import time
 import traceback
+import uuid
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from pathlib import Path
@@ -1240,10 +1241,55 @@ def wants_workspace_readme_generation(query: str) -> bool:
     return action_requested and workspace_scoped
 
 
+def wants_workspace_creation(query: str) -> bool:
+    q = (query or "").strip().lower()
+    if "raven" in q:
+        return False
+    if any(sig in q for sig in (
+        ".py", ".js", ".ts", ".tsx", ".jsx", ".md", ".json", ".yaml", ".yml",
+        ".txt", ".sh", ".html", ".css", "file", "pytest", "readme", "script"
+    )):
+        return False
+    create_verbs = ("create", "make", "setup", "set up", "init", "initialize", "new", "add", "provision", "start")
+    if not any(v in q for v in create_verbs):
+        return False
+    return any(
+        term in q
+        for term in (
+            "workspace",
+            "work space",
+            "workspace environment",
+            "work environment",
+            "dev environment",
+            "development environment",
+        )
+    )
+
+
+def extract_workspace_name_from_query(query: str) -> str:
+    q = (query or "").strip()
+    m = re.search(r"['\"`]([^'\"`]+)['\"`]", q)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"(?:named|called|for)\s+([a-zA-Z0-9_\- ]+)", q, re.IGNORECASE)
+    if m:
+        name = m.group(1).strip()
+        name = re.sub(r"[.?!,;]+$", "", name).strip()
+        return name
+    m = re.search(r"(?:workspace|work space)(?:\s+environment)?\s+([a-zA-Z0-9_\- ]+)", q, re.IGNORECASE)
+    if m:
+        name = m.group(1).strip()
+        name = re.sub(r"[.?!,;]+$", "", name).strip()
+        return name
+    return ""
+
+
 def wants_direct_code_orchestration(query: str) -> bool:
     q = (query or "").strip().lower()
     # Raven autonomous tasks must go through AgentLoop, not the Librarian's fast code path
     if "raven" in q:
+        return False
+    if wants_workspace_creation(q):
         return False
     action_requested = any(
         signal in q
@@ -1262,7 +1308,6 @@ def wants_direct_code_orchestration(query: str) -> bool:
             "named ",
             "file ",
             "temp/",
-            "workspace",
             "repo",
             "repository",
         )
@@ -1287,6 +1332,49 @@ async def workspace_runtime_request(method: str, path: str, *, json_payload: dic
     if not isinstance(data, dict):
       raise HTTPException(status_code=500, detail=f"Workspace runtime returned invalid payload for {path}")
     return data
+
+
+async def handle_workspace_creation(
+    body: dict,
+    user_id: str,
+    query: str,
+    selected_model: str,
+    should_stream: bool,
+    is_openai: bool,
+) -> JSONResponse | dict | StreamingResponse:
+    raw_name = extract_workspace_name_from_query(query)
+    if not raw_name:
+        raw_name = f"workspace-{uuid.uuid4().hex[:8]}"
+
+    display_name = raw_name
+    slug = re.sub(r"[^a-zA-Z0-9_\-]+", "-", raw_name.strip().lower()).strip("-")
+    if not slug:
+        slug = f"workspace-{uuid.uuid4().hex[:8]}"
+
+    payload = {
+        "id": slug,
+        "display_name": display_name,
+        "owner_user": user_id,
+        "scope": "user",
+        "description": f"Workspace created for {display_name}",
+        "is_default": False,
+    }
+
+    try:
+        data = await workspace_runtime_request("POST", "/workspaces", json_payload=payload)
+        created_id = data.get("id", slug)
+        created_name = data.get("display_name", display_name)
+        msg = f"Created workspace environment '{created_name}' (id: `{created_id}`) successfully."
+    except Exception as e:
+        log.error(f"Failed to create workspace: {e}", exc_info=True)
+        msg = f"Failed to create workspace '{display_name}': {e}"
+
+    await update_history(user_id, "user", query)
+    await update_history(user_id, "assistant", msg)
+
+    if is_openai:
+        return _make_openai_response(msg, selected_model, intent="workspace_creation", stream=should_stream)
+    return _make_ollama_response(msg, selected_model, intent="workspace_creation", stream=should_stream)
 
 
 async def resolve_chat_workspace(body: dict, user_id: str) -> dict | None:
@@ -2914,6 +3002,16 @@ async def chat_handler(request: Request, background_tasks=None):
             body=body,
             user_id=user_id,
             refined_query=query,
+            selected_model=selected_model,
+            should_stream=should_stream,
+            is_openai=is_openai,
+        )
+
+    if wants_workspace_creation(query):
+        return await handle_workspace_creation(
+            body=body,
+            user_id=user_id,
+            query=query,
             selected_model=selected_model,
             should_stream=should_stream,
             is_openai=is_openai,

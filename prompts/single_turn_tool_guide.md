@@ -36,6 +36,10 @@ Set timers. Required: `tool`, `action`, `duration`, `label`.
 ### NoteRequest
 Manage notes. Required: `tool`, `action`.
 
+### WorkspaceCreateRequest
+Create a new workspace environment. Fields: `tool`, `display_name` (or `name`), optional `id`.
+- Example: `{"tool": "WorkspaceCreateRequest", "display_name": "Home Work"}`
+
 ## Output Format
 
 When you need to call a tool, output ONLY a JSON object in a fenced code block:

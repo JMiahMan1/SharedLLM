@@ -3986,17 +3986,23 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 _skip_user_context = False
                 if lookup_action == "workspacecreaterequest" and isinstance(payload, dict):
                     _wid = payload.get("id") or payload.get("workspace_id")
-                    if not _wid:
-                        _wid = uuid.uuid4().hex[:16]
                     _display = (
                         payload.get("display_name")
                         or payload.get("name")
                         or payload.get("displayName")
-                        or str(_wid)
+                        or str(_wid or "")
                     )
+                    if not _wid:
+                        _wid = _display
+                    if _wid:
+                        _slug = re.sub(r"[^a-zA-Z0-9_\-]+", "-", str(_wid).strip().lower()).strip("-")
+                        if _slug:
+                            _wid = _slug
+                    if not _wid:
+                        _wid = uuid.uuid4().hex[:16]
                     payload = {
                         "id": str(_wid),
-                        "display_name": str(_display),
+                        "display_name": str(_display) if _display else str(_wid),
                         "scope": payload.get("scope") or "user",
                         "owner_user": creds.user,
                         "description": payload.get("description") or "",
