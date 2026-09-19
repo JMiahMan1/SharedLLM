@@ -184,6 +184,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {
     "ttsrequest": "/execute/tts",
     "audiobookregeneraterequest": "/execute/audiobook/regenerate",
     "haservicerequest": "/execute/ha_service",
+    "entitysearchrequest": "/execute/entity_search",
     "calendarrequest": "/execute/calendar",
     "noterequest": "/execute/note",
     "timerrequest": "/execute/timer",
@@ -838,6 +839,13 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                             return "No relevant context found. Try a different query or collection."
                         context_text = "\n".join([f"- {r.get('content', '')}" for r in results])
                         return f"Found {len(results)} relevant results:\n{context_text}"
+                    if action == "entitysearchrequest":
+                        detail = result.get("detail", {})
+                        entities = detail.get("entities") or result.get("entities") or []
+                        if not entities:
+                            return result.get("message", "No matching entities found.")
+                        lines = [f"- {e.get('name', e.get('entity_id', ''))} ({e.get('entity_id', '')}): {e.get('state', '')}" for e in entities[:10]]
+                        return f"Found {len(entities)} matching entities:\n" + "\n".join(lines)
                     if action == "haconfigrequest":
                         detail = result.get("detail", {})
                         if detail:
@@ -933,6 +941,15 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                     messages.append({"role": "assistant", "content": ans})
                     messages.append({"role": "user", "content": "You output empty tool tags. You MUST emit a JSON object like {\"tool\": \"LightControlRequest\", \"entity_id\": \"light.hall_lamp\", \"action\": \"turn_off\"}. Do not output anything else."})
                     continue
+
+            # Detect thinking-only response where content was empty outside <think>
+            clean_text = strip_json_from_response(ans).strip()
+            if not clean_text and turn < MAX_TURNS - 1:
+                log.warning("[_single_turn_inference] Thinking-only response without tool call, prompting model to conclude")
+                messages.append({"role": "assistant", "content": ans})
+                messages.append({"role": "user", "content": "You must emit your tool call as a JSON object now, or provide a brief final answer."})
+                continue
+
             # No tool call — this is our final answer
             break
 
