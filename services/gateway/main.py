@@ -3133,6 +3133,7 @@ async def chat_handler(request: Request, background_tasks=None):
                 clean_q = media_query or query
                 if clean_q.lower().startswith("the "):
                     clean_q = clean_q[4:].strip()
+                clean_q = re.sub(r'\bSaint\b', 'St.', clean_q, flags=re.IGNORECASE)
                 exec_payload = {
                     "user_context": creds.model_dump(),
                     "entity_id": resolved_entity,

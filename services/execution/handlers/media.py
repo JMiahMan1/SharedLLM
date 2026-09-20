@@ -422,36 +422,51 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
         if result.get("ok"):
             return ExecutionResult(status="SUCCESS", message=f"Playing podcast on {entity_id}.", service="media_play")
 
+    # Generate search query variations (e.g. "Saint" vs "St.", stripping "podcast")
+    q_clean = (req.query or "").strip()
+    search_queries = [q_clean]
+    q_alt = re.sub(r'\bSaint\b', 'St.', q_clean, flags=re.IGNORECASE)
+    q_alt = re.sub(r'\bpodcast\b', '', q_alt, flags=re.IGNORECASE).strip()
+    if q_alt and q_alt not in search_queries:
+        search_queries.append(q_alt)
+    q_no_pod = re.sub(r'\bpodcast\b', '', q_clean, flags=re.IGNORECASE).strip()
+    if q_no_pod and q_no_pod not in search_queries:
+        search_queries.append(q_no_pod)
+
     # 1. Search Audiobookshelf for podcasts
     try:
         from . import audiobookshelf as abs_handler
         from services.execution.schemas import AudiobookshelfRequest
         abs_uctx = ctx.user_context if hasattr(ctx, "user_context") else ctx
-        abs_res = await abs_handler.handle_audiobookshelf(
-            AudiobookshelfRequest(
-                action="search",
-                query=req.query,
-                entity_id=entity_id,
-                user_context=abs_uctx,
-            )
-        )
-        if abs_res.status == "SUCCESS" and abs_res.detail:
-            podcasts = abs_res.detail.get("podcasts", [])
-            if podcasts:
-                pod = podcasts[0]
-                pod_id = pod.get("id")
-                pod_title = pod.get("title", req.query)
-                log.info(f"[media/podcast] Found podcast in Audiobookshelf: '{pod_title}' (id={pod_id})")
-                play_res = await abs_handler.handle_audiobookshelf(
-                    AudiobookshelfRequest(
-                        action="play",
-                        book_id=pod_id,
-                        entity_id=entity_id,
-                        user_context=abs_uctx,
-                    )
+        podcasts = []
+        for sq in search_queries:
+            abs_res = await abs_handler.handle_audiobookshelf(
+                AudiobookshelfRequest(
+                    action="search",
+                    query=sq,
+                    entity_id=entity_id,
+                    user_context=abs_uctx,
                 )
-                if play_res.status == "SUCCESS":
-                    return ExecutionResult(status="SUCCESS", message=f"Playing podcast '{pod_title}' from Audiobookshelf on {entity_id}.", service="media_play")
+            )
+            if abs_res.status == "SUCCESS" and abs_res.detail:
+                podcasts = abs_res.detail.get("podcasts", [])
+                if podcasts:
+                    break
+        if podcasts:
+            pod = podcasts[0]
+            pod_id = pod.get("id")
+            pod_title = pod.get("title", req.query)
+            log.info(f"[media/podcast] Found podcast in Audiobookshelf: '{pod_title}' (id={pod_id})")
+            play_res = await abs_handler.handle_audiobookshelf(
+                AudiobookshelfRequest(
+                    action="play",
+                    book_id=pod_id,
+                    entity_id=entity_id,
+                    user_context=abs_uctx,
+                )
+            )
+            if play_res.status == "SUCCESS":
+                return ExecutionResult(status="SUCCESS", message=f"Playing podcast '{pod_title}' from Audiobookshelf on {entity_id}.", service="media_play")
     except Exception as e:
         log.debug(f"[media/podcast] Audiobookshelf podcast check error: {e}")
 
@@ -468,16 +483,23 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
         )
 
     mass_entity = await resolve_mass_entity(ctx, entity_id)
-    search_result = await ha_client.call_service(
-        ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
-        service_data={
-            "config_entry_id": mass_entry,
-            "name": req.query,
-            "media_type": ["podcast", "episode"],
-            "limit": 5,
-        },
-        return_response=True,
-    )
+    search_result = {}
+    for sq in search_queries:
+        search_result = await ha_client.call_service(
+            ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
+            service_data={
+                "config_entry_id": mass_entry,
+                "name": sq,
+                "media_type": ["podcast", "episode"],
+                "limit": 5,
+            },
+            return_response=True,
+        )
+        if search_result.get("ok") and search_result.get("service_response"):
+            raw = search_result["service_response"]
+            resp = raw.get("service_response", raw)
+            if any(resp.get(cat) for cat in ["podcasts", "episodes", "tracks"]):
+                break
 
     if search_result.get("ok") and search_result.get("service_response"):
         raw = search_result["service_response"]
