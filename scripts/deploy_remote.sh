@@ -17,57 +17,42 @@ DIR="${2:-/home/jeremiah/SharedLLM}"
 # It does NOT wait for E2E/test pipelines — those run independently and do not
 # block deployment.
 wait_for_build() {
-    echo "Waiting for 'Build & Push Images' to finish (not waiting on E2E/tests)..."
-    local max_attempts=60
+    local local_sha
+    local_sha=$(git rev-parse HEAD)
+    echo "Waiting for 'Build & Push Images' for commit ${local_sha:0:8} to finish..."
+    local max_attempts=90
     local attempt=0
     local wait_time=10
 
     while [ $attempt -lt $max_attempts ]; do
+        local run_info
+        run_info=$(gh run list --branch=microservices --limit 10 --json headSha,status,conclusion,name \
+            --jq ".[] | select(.name==\"Build & Push Images\" and .headSha==\"$local_sha\")")
         local latest_status latest_conclusion
-        latest_status=$(gh run list --branch=microservices --limit 5 --json status,name \
-            --jq '.[] | select(.name=="Build & Push Images") | .status' | head -1)
-        latest_conclusion=$(gh run list --branch=microservices --limit 5 --json conclusion,name \
-            --jq '.[] | select(.name=="Build & Push Images") | .conclusion' | head -1)
+        latest_status=$(echo "$run_info" | jq -r '.status // empty' | head -1)
+        latest_conclusion=$(echo "$run_info" | jq -r '.conclusion // empty' | head -1)
 
         if [ "$latest_status" = "completed" ] && [ "$latest_conclusion" = "success" ]; then
-            echo "[OK] Build & Push Images completed successfully."
+            echo "[OK] Build & Push Images for ${local_sha:0:8} completed successfully."
             return 0
         fi
 
-        # Latest BPI run completed without success (e.g. unrelated workflow_dispatch failure).
-        # Check if any BPI run on this branch succeeded at all — images may already be built.
         if [ "$latest_status" = "completed" ] && [ "$latest_conclusion" != "success" ]; then
-            local any_success
-            any_success=$(gh run list --branch=microservices --limit 5 --json conclusion,name \
-                --jq '.[] | select(.name=="Build & Push Images" and .conclusion=="success") | .conclusion' | head -1)
-            if [ "$any_success" = "success" ]; then
-                echo "[OK] Build & Push Images completed successfully (earlier run succeeded)."
-                return 0
-            fi
-            echo "[FAIL] Build & Push Images finished with conclusion: ${latest_conclusion:-none}. No successful runs found."
-            gh run list --branch=microservices --json name,conclusion \
-                --jq '.[] | select(.name=="Build & Push Images")'
+            echo "[FAIL] Build & Push Images for ${local_sha:0:8} failed with conclusion: $latest_conclusion"
             exit 1
         fi
 
-        case "$latest_status" in
-            "")
-                echo "Build & Push Images not started yet... (${attempt}/${max_attempts})"
-                ;;
-            failure|cancelled|timed_out)
-                echo "[FAIL] Build & Push Images $latest_status."
-                exit 1
-                ;;
-            *)
-                echo "Build & Push Images status: $latest_status... (${attempt}/${max_attempts})"
-                ;;
-        esac
+        if [ -n "$latest_status" ]; then
+            echo "Build & Push Images status: $latest_status... (${attempt}/${max_attempts})"
+        else
+            echo "Build & Push Images for ${local_sha:0:8} not detected yet... (${attempt}/${max_attempts})"
+        fi
 
         sleep $wait_time
         attempt=$((attempt + 1))
     done
 
-    echo "[FAIL] Timeout waiting for Build & Push Images."
+    echo "[FAIL] Timeout waiting for Build & Push Images for ${local_sha:0:8}."
     exit 1
 }
 
