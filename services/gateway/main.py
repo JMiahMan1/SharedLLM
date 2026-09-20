@@ -1112,13 +1112,15 @@ def extract_media_request(query: str) -> tuple[str | None, str | None]:
 
 def is_likely_video_request(query: str) -> bool:
     q = (query or "").lower()
+    if "podcast" in q or "audiobook" in q or "audio" in q or "song" in q or "music" in q:
+        return False
     video_signals = (
       "watch ",
       " video",
       "youtube",
       "youtu.be",
       "movie",
-      "episode",
+      "tv show",
       "netflix",
       "hulu",
       "disney",
@@ -3069,16 +3071,23 @@ async def chat_handler(request: Request, background_tasks=None):
             resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
             resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [], cached_device=cached_device_id)
+            if not resolved_entity and media_entities:
+                for e in media_entities:
+                    if e.get("entity_id", "").startswith("media_player.") and e.get("state") in ("playing", "paused"):
+                        resolved_entity = e.get("entity_id")
+                        log.info(f"[FastPath] Auto-targeting active {e.get('state')} player: {resolved_entity}")
+                        break
         else:
             resolved_entity = engine.extract_entity(query, intent)
 
         # If cached device was unavailable, bypass to LLM to ask user
-        if cached_device_unavailable and not resolved_entity:
+        if cached_device_unavailable and not resolved_entity and intent in ["turn_on", "turn_off"]:
             log.info(f"[FastPath] BYPASSED for {intent}: Cached device unavailable, LLM should ask for target")
             is_fast_path = False
-        # If the intent requires an entity (light, media, transport) but we couldn't resolve one,
-        # fallback to the slow-path (LLM) to avoid executing without a target.
-        elif intent in ["turn_on", "turn_off", "play_media", "pause_media", "media_transport"] and not resolved_entity:
+        # If the intent requires an entity (lights) but we couldn't resolve one,
+        # fallback to the slow-path (LLM) to avoid turning on unknown devices.
+        # Media intents DO NOT require resolved_entity because Execution service resolves it.
+        elif intent in ["turn_on", "turn_off"] and not resolved_entity:
             log.info(f"[FastPath] BYPASSED for {intent}: Could not resolve entity from '{query}'")
             is_fast_path = False
         else:
@@ -3115,19 +3124,31 @@ async def chat_handler(request: Request, background_tasks=None):
             elif intent == "play_media":
                 media_query, _ = extract_media_request(query)
                 media_type = "video" if is_likely_video_request(query) else None
+                if not media_type:
+                    q_lower = query.lower()
+                    if "podcast" in q_lower:
+                        media_type = "podcast"
+                    elif any(w in q_lower for w in ["audiobook", "book", "audio book"]):
+                        media_type = "audiobook"
+                clean_q = media_query or query
+                if clean_q.lower().startswith("the "):
+                    clean_q = clean_q[4:].strip()
                 exec_payload = {
                     "user_context": creds.model_dump(),
                     "entity_id": resolved_entity,
-                    "query": media_query or query,
-                    "media_content_type": "artist",
+                    "query": clean_q,
+                    "media_content_type": media_type or "artist",
                     "media_type": media_type,
                 }
                 svc_base = EXECUTION_SVC
             elif intent in ["pause_media", "media_transport"]:
+                transport_cmd = extract_media_transport_command(query) or "pause"
+                if transport_cmd == "resume":
+                    transport_cmd = "play"
                 exec_payload = {
                     "user_context": creds.model_dump(),
                     "entity_id": resolved_entity,
-                    "command": "pause",
+                    "command": transport_cmd,
                 }
                 svc_base = EXECUTION_SVC
             else:
@@ -3420,10 +3441,11 @@ async def chat_handler(request: Request, background_tasks=None):
                             continue
 
                         if chunk_type == "thinking":
-                            if is_openai:
-                                yield f"data: {json.dumps(_make_openai_chunk('', selected_model, reasoning_content=text))}\n\n"
-                            else:
-                                yield json.dumps(_make_ollama_chunk('', selected_model, thinking=text)) + "\n"
+                            if show_thinking:
+                                if is_openai:
+                                    yield f"data: {json.dumps(_make_openai_chunk('', selected_model, reasoning_content=text))}\n\n"
+                                else:
+                                    yield json.dumps(_make_ollama_chunk('', selected_model, thinking=text)) + "\n"
                         else:
                             if is_openai:
                                 yield f"data: {json.dumps(_make_openai_chunk(text, selected_model))}\n\n"

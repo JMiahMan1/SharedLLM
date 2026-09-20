@@ -28,7 +28,15 @@
     "listen to radio paradise",
     "play classical music in the study",
     "shuffle my favorites",
-    "play music"
+    "play music",
+    "play the Heidi Saint John podcast",
+    "play the Heidi St. John podcast",
+    "play the podcast",
+    "play a podcast",
+    "listen to podcast",
+    "play podcast on office tv",
+    "play audiobook",
+    "listen to audiobookshelf"
   ],
   "media_transport": [
     "resume the music",
@@ -40,7 +48,14 @@
     "fast forward to the end",
     "pause",
     "stop",
-    "resume"
+    "resume",
+    "unpause",
+    "next track",
+    "next song",
+    "skip",
+    "previous track",
+    "volume up",
+    "volume down"
   ],
   "workspace_coding": [
     "fix the bug in services/identity/main.py",
