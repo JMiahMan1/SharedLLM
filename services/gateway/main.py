@@ -278,7 +278,7 @@ async def get_job_queue() -> InferenceJobQueue:
 # --- Ouroboros Worker ---
 log.info("Successfully imported Raven background worker.")
 
-_DEFAULT_FAST_PATH_THRESHOLD = 0.85
+_DEFAULT_FAST_PATH_THRESHOLD = 0.65
 
 # Global Inference Lock (Strategy 8: Singleton Queue)
 async def fetch_global_setting(key: str, default: str = "") -> str:
@@ -3070,15 +3070,29 @@ async def chat_handler(request: Request, background_tasks=None):
         elif intent in ["turn_on", "turn_off"]:
             resolved_entity = engine.extract_entity(query, intent)
             if not resolved_entity and media_entities:
-                q_clean = query.lower()
-                target_phrase = re.sub(r'^(?:turn|switch|power)\s+(?:on|off)\s+(?:the\s+)?', '', q_clean).strip()
-                target_phrase = re.sub(r'\b(?:please|now|right away)\b', '', target_phrase).strip()
+                q_clean = query.lower().strip().strip("?.!")
+                if "," in q_clean:
+                    q_clean = q_clean.split(",")[0].strip()
+                m_a = re.search(r'^(?:turn|switch|power|shut)\s+(?:on|off)\s+(?:the\s+)?(.+)$', q_clean)
+                m_b = re.search(r'^(?:turn|switch|power|shut)\s+(?:the\s+)?(.+?)\s+(?:on|off)$', q_clean)
+                target_phrase = ""
+                if m_a:
+                    target_phrase = m_a.group(1).strip()
+                elif m_b:
+                    target_phrase = m_b.group(1).strip()
+                else:
+                    target_phrase = re.sub(r'^(?:turn|switch|power|shut)\s+(?:the\s+)?', '', q_clean).strip()
+                    target_phrase = re.sub(r'\b(?:on|off|please|now|right away)\b', '', target_phrase).strip()
+
+                target_norm = re.sub(r'[^a-z0-9]+', '', target_phrase)
                 for ent in media_entities:
                     eid = ent.get("entity_id", "")
                     if eid.startswith(("light.", "switch.")):
                         friendly = (ent.get("attributes", {}).get("friendly_name") or "").lower()
                         short_id = eid.split(".", 1)[-1].replace("_", " ")
-                        if target_phrase and (target_phrase == friendly or target_phrase in friendly or friendly in target_phrase or target_phrase == short_id):
+                        friendly_norm = re.sub(r'[^a-z0-9]+', '', friendly)
+                        short_norm = re.sub(r'[^a-z0-9]+', '', short_id)
+                        if target_norm and (target_norm == friendly_norm or target_norm in friendly_norm or friendly_norm in target_norm or target_norm == short_norm):
                             resolved_entity = eid
                             log.info(f"[FastPath] Resolved light/switch '{target_phrase}' to '{resolved_entity}'")
                             break
