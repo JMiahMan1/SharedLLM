@@ -851,15 +851,14 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   }, [sendJsonRpc]);
 
   const setVolume = useCallback((volume: number) => {
-    console.log('[MAWebPlayer] setVolume called:', volume);
     try {
-      if (playerRef.current) {
+      if (playerRef.current && (playerRef.current as unknown as { core?: { isConnected?: boolean } })?.core?.isConnected) {
         playerRef.current.setVolume(volume);
       }
       if (audioRef.current) {
         audioRef.current.volume = Math.max(0, Math.min(1, volume / 100));
       }
-      setStateLocal(s => ({ ...s, volume }));
+      setStateLocal(s => (s.volume === volume ? s : { ...s, volume }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] setVolume failed:', msg);
@@ -868,15 +867,14 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   }, [setError]);
 
   const setMuted = useCallback((muted: boolean) => {
-    console.log('[MAWebPlayer] setMuted called:', muted);
     try {
-      if (playerRef.current) {
+      if (playerRef.current && (playerRef.current as unknown as { core?: { isConnected?: boolean } })?.core?.isConnected) {
         playerRef.current.setMuted(muted);
       }
       if (audioRef.current) {
         audioRef.current.muted = muted;
       }
-      setStateLocal(s => ({ ...s, muted }));
+      setStateLocal(s => (s.muted === muted ? s : { ...s, muted }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] setMuted failed:', msg);

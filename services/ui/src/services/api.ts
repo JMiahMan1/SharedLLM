@@ -1085,23 +1085,39 @@ export const api = {
   },
 
   async getMusicAssistantPlaylists(): Promise<{ status: string; playlists: Array<{ name: string; items: number; uri: string }> }> {
-    const resp = await apiClient.get('/api/media/music-assistant/playlists');
-    return resp.data;
+    try {
+      const resp = await apiClient.get('/api/media/music-assistant/playlists', { timeout: 6000 });
+      return resp.data;
+    } catch {
+      return { status: 'ERROR', playlists: [] };
+    }
   },
 
   async getMusicAssistantRecent(): Promise<{ status: string; recent: Array<{ name: string; artist: string; uri: string; last_played: string }> }> {
-    const resp = await apiClient.get('/api/media/music-assistant/recent');
-    return resp.data;
+    try {
+      const resp = await apiClient.get('/api/media/music-assistant/recent', { timeout: 6000 });
+      return resp.data;
+    } catch {
+      return { status: 'ERROR', recent: [] };
+    }
   },
 
   async getAudiobookshelfLibraries(): Promise<{ status: string; libraries: Array<{ id: string; name: string; media_type: string }> }> {
-    const resp = await apiClient.get('/api/media/audiobookshelf/libraries');
-    return resp.data;
+    try {
+      const resp = await apiClient.get('/api/media/audiobookshelf/libraries', { timeout: 6000 });
+      return resp.data;
+    } catch {
+      return { status: 'ERROR', libraries: [] };
+    }
   },
 
   async getAudiobookshelfLastPlayed(): Promise<{ status: string; books: Array<{ id: string; title: string; author: string; progress: number; last_played: string; library_id: string }> }> {
-    const resp = await apiClient.get('/api/media/audiobookshelf/last-played');
-    return resp.data;
+    try {
+      const resp = await apiClient.get('/api/media/audiobookshelf/last-played', { timeout: 6000 });
+      return resp.data;
+    } catch {
+      return { status: 'ERROR', books: [] };
+    }
   },
 
   async playAudiobook(payload: {
@@ -1137,8 +1153,12 @@ export const api = {
   },
 
   async getAudiobookshelfLibrary(libraryId: string, limit = 50): Promise<{ status: string; books: Array<{ id: string; title: string; author: string }> }> {
-    const resp = await apiClient.get(`/api/media/audiobookshelf/library/${encodeURIComponent(libraryId)}?limit=${limit}`);
-    return resp.data;
+    try {
+      const resp = await apiClient.get(`/api/media/audiobookshelf/library/${encodeURIComponent(libraryId)}?limit=${limit}`, { timeout: 6000 });
+      return resp.data;
+    } catch {
+      return { status: 'ERROR', books: [] };
+    }
   },
 
   async searchAudiobookshelf(query: string, limit = 20): Promise<{
