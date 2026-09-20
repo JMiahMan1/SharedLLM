@@ -1109,20 +1109,6 @@ const Media = () => {
     return detailedMetadata?.name || baseTitle || 'Unknown Title';
   }, [localMode, localTrack, mediaStatus, detailedMetadata]);
 
-  // Sync volume with sendspin player
-  useEffect(() => {
-    if (maPlayer.isConnected) {
-      console.log('[Media] Syncing volume:', localVolume);
-      maPlayer.setVolume(localVolume);
-    }
-  }, [localVolume, maPlayer.isConnected, maPlayer]);
-
-  // Sync mute with sendspin player
-  useEffect(() => {
-    if (maPlayer.isConnected) {
-      maPlayer.setMuted(localMuted);
-    }
-  }, [localMuted, maPlayer.isConnected, maPlayer]);
 
   const localSyncDataRef = useRef({ localTrack, localCurrentTime, localDuration, localVolume, localMuted });
   useEffect(() => {
@@ -1227,20 +1213,26 @@ const Media = () => {
       console.log('[Media] Switching back to local mode, reconnecting WebPlayer...');
       maPlayer.connect().catch(err => console.error('[Media] Reconnect failed:', err));
     }
-  }, [localMode, localTrack, localDuration, localVolume, localMuted, localIsPlaying, maPlayer]);
+  }, [localMode, localTrack, localDuration, localVolume, localMuted, localIsPlaying, maPlayer.isConnected, maPlayer.connect]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const { data: maPlaylists, isLoading: maPlaylistsLoading } = useQuery({
     queryKey: ['ma-playlists'],
     queryFn: () => api.getMusicAssistantPlaylists(),
+    retry: false,
+    staleTime: 60000,
   });
   const { data: maRecent, isLoading: maRecentLoading } = useQuery({
     queryKey: ['ma-recent'],
     queryFn: () => api.getMusicAssistantRecent(),
+    retry: false,
+    staleTime: 60000,
   });
   const { data: absLastPlayed, isLoading: absLoading } = useQuery({
     queryKey: ['abs-last-played'],
     queryFn: () => api.getAudiobookshelfLastPlayed(),
+    retry: false,
+    staleTime: 60000,
   });
 
   const { data: entities = [] } = useQuery({
@@ -1748,7 +1740,7 @@ const Media = () => {
         }).catch(err => console.error('[Media] Failed to sync volume:', err));
       }
     }, 200);
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, maPlayer]);
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, maPlayer.setVolume]);
 
   const toggleLocalMute = useCallback(() => {
     const nextMuted = !localMuted;
@@ -1770,7 +1762,7 @@ const Media = () => {
         is_volume_muted: nextMuted
       }).catch(err => console.error('[Media] Failed to sync mute:', err));
     }
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted, maPlayer]);
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted, maPlayer.setMuted]);
 
   const handleLocalSeek = useCallback((time: number) => {
     console.log('[Media] Seek to:', time);
@@ -1790,7 +1782,7 @@ const Media = () => {
         is_volume_muted: localMuted
       }).catch(err => console.error('[Media] Failed to sync seek:', err));
     }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer.seek]);
 
   const handleRemoteSeek = useCallback(async (time: number) => {
     if (!selectedTarget) return;
@@ -1806,7 +1798,7 @@ const Media = () => {
     try {
       await api.mediaTransport({ entity_id: selectedTarget, command: 'seek', position: time });
     } catch { /* ignore */ }
-  }, [selectedTarget, maPlayer]);
+  }, [selectedTarget, maPlayer.isConnected, maPlayer.connect, maPlayer.maCommand]);
 
   const handleStopPlayback = useCallback(() => {
     console.log('[Media] Stop playback');
@@ -1819,23 +1811,20 @@ const Media = () => {
         media_content_id: localTrack.id,
         media_title: localTrack.title,
         media_artist: localTrack.subtitle,
-        position: 0,
+        position: localCurrentTime,
         duration: localDuration,
         volume_level: localVolume / 100,
         is_volume_muted: localMuted
-      }).catch(err => console.error('[Media] Failed to sync stop:', err));
+      }).catch(err => console.error('[Media] Failed to sync stop playback:', err));
     }
-    setLocalTrack(null);
-    setLocalIsPlaying(false);
-    setLocalCurrentTime(0);
-    setLocalDuration(0);
-    maPlayer.disconnect();
-  }, [localTrack, localDuration, localVolume, localMuted, maPlayer, releaseControl]);
+    togglePlay(false);
+  }, [localTrack, releaseControl, togglePlay, localCurrentTime, localDuration, localVolume, localMuted]);
 
   const handleVolume = useCallback((v: number) => {
     if (!selectedTarget) return;
     lastVolumeChangeTimeRef.current = Date.now();
     setVolume(v);
+    setMuted(false);
     if (volumeDebounceTimerRef.current) {
       clearTimeout(volumeDebounceTimerRef.current);
     }
@@ -1844,15 +1833,14 @@ const Media = () => {
         const pid = selectedTarget.slice(3);
         try {
           if (!maPlayer.isConnected) await maPlayer.connect();
-          await maPlayer.maCommand('players/cmd_volume_set', { player_id: pid, volume_level: v / 100 });
+          await maPlayer.maCommand('players/cmd_volume_set', { player_id: pid, volume_level: v });
         } catch { /* ignore */ }
         return;
       }
-      try {
-        await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_set', volume_level: v / 100 });
-      } catch { /* ignore */ }
+      try { await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_set', volume_level: v / 100 }); }
+      catch { /* ignore */ }
     }, 150);
-  }, [selectedTarget, maPlayer]);
+  }, [selectedTarget, maPlayer.isConnected, maPlayer.connect, maPlayer.maCommand]);
 
   const toggleMute = useCallback(async () => {
     if (!selectedTarget) return;
@@ -1869,7 +1857,7 @@ const Media = () => {
     }
     try { await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_mute', volume_level: newMuted ? 0 : volume / 100 }); }
     catch { /* ignore */ }
-  }, [selectedTarget, muted, volume, maPlayer]);
+  }, [selectedTarget, muted, volume, maPlayer.isConnected, maPlayer.connect, maPlayer.maCommand]);
 
   /* ── render ───────────────────────────────────────────────────── */
 
