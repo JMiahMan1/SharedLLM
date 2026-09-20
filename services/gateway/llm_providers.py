@@ -14,10 +14,7 @@ from services.gateway.config import OLLAMA_SLOT_POLL_INTERVAL, OLLAMA_SLOT_POLL_
 log = logging.getLogger("gateway.providers")
 
 THINKING_PATTERNS = [
-    re.compile(r'<think>.*?</think>', re.DOTALL),
-    re.compile(r'<think>.*?</think>', re.DOTALL),
-    re.compile(r'<thinking>.*?</thinking>', re.DOTALL),
-    re.compile(r'<reason>.*?</reason>', re.DOTALL),
+    re.compile(r'<(?:think|thinking|reason|thought)>.*?(?:</(?:think|thinking|reason|thought)>|$)', re.DOTALL | re.IGNORECASE),
 ]
 
 

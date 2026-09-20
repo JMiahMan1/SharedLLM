@@ -145,8 +145,8 @@ class IntentEngine:
         patterns = {
             "turn_on": [r"turn on (?:the )?(.+)", r"power on (?:the )?(.+)", r"switch on (?:the )?(.+)"],
             "turn_off": [r"turn off (?:the )?(.+)", r"power off (?:the )?(.+)", r"switch off (?:the )?(.+)"],
-            "play_media": [r"play (?:the )?(.+)", r"start (?:the )?(.+)", r"put on (?:the )?(.+)"],
-            "pause_media": [r"pause (?:the )?(?:music|video|media )?(?:on )?(.+)", r"stop (?:the )?(?:music|video|media )?(?:on )?(.+)"],
+            "play_media": [r"play .*(?:on|in|at) (.+)", r"listen to .*(?:on|in|at) (.+)", r"put on .*(?:on|in|at) (.+)"],
+            "pause_media": [r"pause (?:the )?(?:music|video|media )?(?:on|in|at) (.+)", r"stop (?:the )?(?:music|video|media )?(?:on|in|at) (.+)"],
             "media_transport": [r"(?:pause|stop|resume|skip|next|rewind|fast forward).*(?:on|in|at) (.+)", r"(?:pause|stop|resume).*(?:the )?(.+)", r"(?:skip|next|rewind|fast forward).*(?:the )?(.+)"],
         }
 
@@ -181,19 +181,43 @@ class IntentEngine:
         """
         q = query.lower().strip()
 
-        # 1. Hardcoded Keyword Fallbacks (Safety/Test logic)
-        # We only use these for VERY simple queries to avoid hijacking complex ones.
-        if q in ["play", "play music", "start playing", "resume music"]:
-            return "play_media", 1.0
-        if q in ["pause", "pause music", "stop the music", "stop playing"]:
-            return "pause_media", 1.0
-        if q in ["turn on", "power on", "switch on"]:
+        # 0. Autonomous / Raven check: if query explicitly invokes Raven, never fast-path
+        if is_raven_intent(q):
+            return "raven_mission", 0.0
+
+        # 1. Fast Pattern & Keyword Detection (immediate 1.0 confidence for media/home control)
+        # Media Transport: pause, stop, resume, next, skip, previous, volume
+        transport_words = {"pause", "stop", "resume", "unpause", "next", "skip", "prev", "previous", "next track", "next song", "skip song", "previous track", "volume up", "volume down", "louder", "quieter"}
+        if q in transport_words:
+            return "media_transport", 1.0
+
+        if re.search(r"^(?:pause|stop|resume|unpause|skip|next|prev|previous)(?:\s+(?:the\s+)?(?:music|playback|audio|podcast|track|song|video|media))?(?:\s+(?:on|in|at)\s+.+)?$", q):
+            return "media_transport", 1.0
+
+        if re.search(r"^(?:next|skip|prev|previous)\s+(?:(?:this|the)\s+)?(?:track|song|music|audio|episode|item)\b", q):
+            return "media_transport", 1.0
+
+        if re.search(r"^(?:volume\s+(?:up|down)|turn\s+(?:it\s+)?(?:up|down)|louder|quieter|mute|unmute)\b", q):
+            return "media_transport", 1.0
+
+        # Media Play: "play <content>", "listen to <content>", "put on <content>", "stream <content>"
+        if re.search(r"^(?:play|listen to|put on|stream|start playing)\b", q):
+            if not re.search(r"^(?:play\s+(?:a\s+game|roles|dumb))\b", q):
+                return "play_media", 1.0
+
+        # Lights & Switches
+        if re.search(r"^(?:turn\s+on|switch\s+on|power\s+on|lights\s+on)\b", q):
             return "turn_on", 1.0
-        if q in ["turn off", "power off", "switch off"]:
+
+        if re.search(r"^(?:turn\s+off|switch\s+off|power\s+off|lights\s+off)\b", q):
             return "turn_off", 1.0
-        if q in ["index", "reindex", "scan my library"]:
+
+        # Storage & Indexing
+        if re.search(r"^(?:index|reindex|scan)\s+(?:my\s+)?(?:storage|nextcloud|library|files)\b", q):
             return "index_storage", 1.0
-        if q in ["sync home assistant", "refresh devices"]:
+
+        # HA Status / Health
+        if q in ["sync home assistant", "refresh devices", "ha status", "sync ha"]:
             return "sync_ha", 1.0
 
         # 2. Semantic Routing (if active)
@@ -203,10 +227,10 @@ class IntentEngine:
             turn_off_patterns = [r"turn\s+off", r"power\s+off", r"switch\s+off"]
             for p in turn_on_patterns:
                 if re.search(p, q):
-                    return "light", 0.8
+                    return "turn_on", 0.8
             for p in turn_off_patterns:
                 if re.search(p, q):
-                    return "light", 0.8
+                    return "turn_off", 0.8
             log.debug(f"[FastPath] Semantic router not active, returning unknown (is_active={self.is_active}, model={self.model is not None}, embeddings={len(self.intent_embeddings) if np is not None else 0}, np={np is not None})")
             return "unknown", 0.0
 

@@ -1199,15 +1199,40 @@ async def _single_turn_inference(query: str, model: str, system_prompt: str, rag
                 if lint_feedback:
                     tool_result = f"{tool_result}\n\n{lint_feedback}"
 
+        # Direct physical/media control actions already yield an actionable, human-friendly message.
+        # Returning it immediately saves 2 minutes of second-turn LLM inference and prevents voice assistant JSON reading.
+        action_norm = action.lower()
+        if action_norm in ("mediaplayrequest", "mediatransportrequest", "lightcontrolrequest", "climatecontrolrequest"):
+            try:
+                res_obj = json.loads(tool_result)
+                if isinstance(res_obj, dict) and res_obj.get("message"):
+                    return res_obj["message"]
+            except Exception:
+                pass
+
         # Append tool result to conversation for next turn
         messages.append({"role": "user", "content": f"Tool result:\n{tool_result}"})
 
         # If this was the last turn, return the tool result directly
         if turn == MAX_TURNS - 1:
+            try:
+                res_obj = json.loads(tool_result)
+                if isinstance(res_obj, dict) and res_obj.get("message"):
+                    return res_obj["message"]
+            except Exception:
+                pass
             return tool_result
 
     # Final answer processing — strip JSON/thinking artifacts for clean natural language
     log.info(f"[_single_turn_inference] Final answer length: {len(ans)} chars, preview: {ans[:200]}")
     final_clean = strip_json_from_response(ans)
     from services.gateway.llm_providers import strip_thinking_blocks
-    return strip_thinking_blocks(final_clean)
+    cleaned = strip_thinking_blocks(final_clean)
+    if not cleaned.strip() and 'tool_result' in locals() and tool_result:
+        try:
+            res_obj = json.loads(tool_result)
+            if isinstance(res_obj, dict) and res_obj.get("message"):
+                return res_obj["message"]
+        except Exception:
+            return tool_result
+    return cleaned
