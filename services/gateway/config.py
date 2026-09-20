@@ -14,6 +14,7 @@ import os
 from services.config import (
     CONTROL_PLANE_URL,
     EXECUTION_SVC_URL,
+    GEO_SVC_URL,
     IDENTITY_SVC_URL,
     LOGGING_SVC_URL,
     OLLAMA_URL,
@@ -32,6 +33,7 @@ ALPACA_SD_URL = os.getenv("ALPACA_SD_URL", "http://jeremiah-home-desktop.local:8
 # Use runtime-resolved values (or fallback to env vars)
 IDENTITY_SVC = IDENTITY_SVC_URL
 EXECUTION_SVC = EXECUTION_SVC_URL
+GEO_SVC = GEO_SVC_URL
 RAG_SVC = RAG_SVC_URL
 STORAGE_SVC = STORAGE_SVC_URL
 LOGGING_SVC = LOGGING_SVC_URL

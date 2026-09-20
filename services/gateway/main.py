@@ -38,6 +38,7 @@ from services.gateway.config import (
     CONFIG,
     CONTROL_PLANE_URL,
     EXECUTION_SVC,
+    GEO_SVC,
     IDENTITY_SVC,
     INTERNAL_SECRET,
     LOGGING_SVC,
@@ -6893,6 +6894,116 @@ async def get_user_location(user_id: str):
         if resp.status == 200:
             return await resp.json()
     raise HTTPException(status_code=404, detail="Location not found")
+
+
+# --- Life360 & Vehicle Telemetry Endpoints ---
+
+@app.get("/api/geo/vehicles")
+async def get_geo_vehicles():
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/vehicles",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Geo service unavailable")
+
+
+@app.post("/api/geo/vehicles")
+async def save_geo_vehicle(request: Request):
+    body = await request.json()
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/vehicles",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to save vehicle")
+
+
+@app.delete("/api/geo/vehicles/{vehicle_id}")
+async def delete_geo_vehicle(vehicle_id: str):
+    async with shared_http_client() as client:
+        resp = await client.delete(
+            f"{GEO_SVC}/vehicles/{vehicle_id}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to delete vehicle")
+
+
+@app.get("/api/geo/vehicles/assigned/{user_id}")
+async def get_geo_assigned_vehicle(user_id: str):
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/vehicles/assigned/{user_id}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Geo service unavailable")
+
+
+@app.post("/api/geo/vehicles/assign")
+async def assign_geo_vehicle(request: Request):
+    body = await request.json()
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/vehicles/assign",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to assign vehicle")
+
+
+@app.get("/api/geo/telemetry/{user_id}")
+async def get_geo_telemetry(user_id: str, hours: float = 24.0):
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/people/{user_id}/telemetry?hours={hours}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Geo telemetry unavailable")
+
+
+@app.get("/api/geo/people")
+async def get_geo_people():
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/people",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Geo people unavailable")
+
+
+@app.get("/api/geo/zones")
+async def get_geo_zones():
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/zones",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Geo zones unavailable")
 
 
 @app.post("/api/stt/transcribe")

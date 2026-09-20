@@ -125,10 +125,13 @@ async def handle_location(req: LocationRequest) -> ExecutionResult:
         else:
             msg = f"{name} has spent the day {f'at {current_zone}' if current_zone else 'at their current location'}."
     elif detail_type in ("cost", "vehicle"):
-        veh_name = vehicle.get("name", "designated vehicle")
-        veh_mpg = vehicle.get("mpg", 22.0)
-        cost = vehicle.get("estimated_cost_usd", 0.0)
-        msg = f"{name} has traveled {dist_miles} miles today in {veh_name} ({veh_mpg} MPG). Estimated fuel cost is ${cost:.2f}."
+        if vehicle:
+            veh_name = vehicle.get("name", "designated vehicle")
+            veh_mpg = vehicle.get("mpg", 0.0)
+            cost = vehicle.get("estimated_cost_usd", 0.0)
+            msg = f"{name} has traveled {dist_miles} miles today in {veh_name} ({veh_mpg} MPG). Estimated fuel cost is ${cost:.2f}."
+        else:
+            msg = f"{name} has traveled {dist_miles} miles today. No vehicle is currently designated. You can add and assign your vehicle in Settings > Location & Vehicles to calculate MPG and travel costs."
     else:
         # Default full query response ("Where is Jeremiah?")
         msg = default_speech
