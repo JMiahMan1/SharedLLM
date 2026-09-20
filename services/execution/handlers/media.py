@@ -422,7 +422,40 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
         if result.get("ok"):
             return ExecutionResult(status="SUCCESS", message=f"Playing podcast on {entity_id}.", service="media_play")
 
-    # Resolve MA config entry at runtime if not seeded
+    # 1. Search Audiobookshelf for podcasts
+    try:
+        from . import audiobookshelf as abs_handler
+        from services.execution.schemas import AudiobookshelfRequest
+        abs_uctx = ctx.user_context if hasattr(ctx, "user_context") else ctx
+        abs_res = await abs_handler.handle_audiobookshelf(
+            AudiobookshelfRequest(
+                action="search",
+                query=req.query,
+                entity_id=entity_id,
+                user_context=abs_uctx,
+            )
+        )
+        if abs_res.status == "SUCCESS" and abs_res.detail:
+            podcasts = abs_res.detail.get("podcasts", [])
+            if podcasts:
+                pod = podcasts[0]
+                pod_id = pod.get("id")
+                pod_title = pod.get("title", req.query)
+                log.info(f"[media/podcast] Found podcast in Audiobookshelf: '{pod_title}' (id={pod_id})")
+                play_res = await abs_handler.handle_audiobookshelf(
+                    AudiobookshelfRequest(
+                        action="play",
+                        book_id=pod_id,
+                        entity_id=entity_id,
+                        user_context=abs_uctx,
+                    )
+                )
+                if play_res.status == "SUCCESS":
+                    return ExecutionResult(status="SUCCESS", message=f"Playing podcast '{pod_title}' from Audiobookshelf on {entity_id}.", service="media_play")
+    except Exception as e:
+        log.debug(f"[media/podcast] Audiobookshelf podcast check error: {e}")
+
+    # 2. Search Music Assistant for podcast
     mass_entry = MASS_CONFIG_ENTRY_ID
     if not mass_entry:
         mass_entry = await ha_client.find_mass_config_entry(ctx.ha_url, ctx.ha_token)
