@@ -45,6 +45,20 @@ def _make(verify: bool) -> aiohttp.ClientSession:
     )
 
 
+def _retire_session(client: aiohttp.ClientSession | None) -> None:
+    """Safely close or retire an obsolete session."""
+    if client is not None and not client.closed:
+        try:
+            current_loop = asyncio.get_running_loop()
+            if current_loop.is_running():
+                current_loop.create_task(client.close())
+            elif client.connector is not None and not client.connector.closed:
+                client.connector.close()
+        except RuntimeError:
+            if client.connector is not None and not client.connector.closed:
+                client.connector.close()
+
+
 def _session_dead(client: aiohttp.ClientSession | None) -> bool:
     """A session can report ``closed == False`` while its underlying connector
     has been closed (e.g. after a transient upstream disconnect). Reusing such a
@@ -60,10 +74,13 @@ def _session_dead(client: aiohttp.ClientSession | None) -> bool:
     # Treat the session as dead if its associated event loop is closed or different
     # from the current active event loop context.
     try:
-        if client.loop.is_closed():
+        client_loop = getattr(client, "_loop", None)
+        if client_loop is None:
+            client_loop = client.loop
+        if client_loop.is_closed():
             return True
         current_loop = asyncio.get_running_loop()
-        if client.loop is not current_loop:
+        if client_loop is not current_loop:
             return True
     except RuntimeError:
         pass
@@ -74,6 +91,7 @@ def get_client() -> aiohttp.ClientSession:
     """Return a process-wide pooled aiohttp client (verifies TLS)."""
     global _client
     if _session_dead(_client):
+        _retire_session(_client)
         _client = _make(True)
     return NonClosingSessionWrapper(_client)
 
@@ -86,5 +104,19 @@ def get_client_insecure() -> aiohttp.ClientSession:
     """
     global _client_insecure
     if _session_dead(_client_insecure):
+        _retire_session(_client_insecure)
         _client_insecure = _make(False)
     return NonClosingSessionWrapper(_client_insecure)
+
+
+async def close_client() -> None:
+    """Close shared pooled aiohttp sessions on service shutdown."""
+    global _client, _client_insecure
+    for c in (_client, _client_insecure):
+        if c is not None and not c.closed:
+            try:
+                await c.close()
+            except Exception:
+                pass
+    _client = None
+    _client_insecure = None

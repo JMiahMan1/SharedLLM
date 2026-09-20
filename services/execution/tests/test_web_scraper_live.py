@@ -12,7 +12,7 @@ Requires:
 
 import os
 
-os.environ["INTERNAL_SECRET"] = "RAVEN_SECURE_2026"
+os.environ.setdefault("INTERNAL_SECRET", "RAVEN_SECURE_2026")
 
 import pytest
 import httpx

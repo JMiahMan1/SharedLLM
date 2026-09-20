@@ -5,8 +5,11 @@ import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Must be set before importing workspace_runtime modules
 os.environ["INTERNAL_SECRET"] = "test-secret"
+_TEST_WS_ROOT = os.path.abspath(".tmp/workspaces")
+os.environ["WORKSPACE_RUNTIME_ROOT"] = _TEST_WS_ROOT
+os.makedirs(_TEST_WS_ROOT, exist_ok=True)
+_TEST_DB_PATH = os.path.abspath(".tmp/workspaces/workspace_term_test.db")
 
 import contextlib
 
@@ -14,6 +17,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import SQLModel, create_engine
 from starlette.websockets import WebSocketDisconnect
+
+from services.workspace_runtime.models import Workspace
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -23,11 +28,12 @@ from starlette.websockets import WebSocketDisconnect
 @pytest.fixture(name="db_file", scope="session")
 def _db_file():
     """Session-scoped file-based SQLite so every engine shares the same DB."""
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
-    yield "sqlite:///" + tmp.name
+    if os.path.exists(_TEST_DB_PATH):
+        with contextlib.suppress(OSError):
+            os.unlink(_TEST_DB_PATH)
+    yield f"sqlite:///{_TEST_DB_PATH}"
     with contextlib.suppress(OSError):
-        os.unlink(tmp.name)
+        os.unlink(_TEST_DB_PATH)
 
 
 @pytest.fixture(name="db_engine")
@@ -42,11 +48,18 @@ def _db_engine(db_file):
 def _patch_engine(db_engine):
     """Replace the workspace_runtime database engine with our test engine."""
     from services.workspace_runtime import database as db_mod
+    import services.workspace_runtime.main as main_mod
 
-    original = db_mod.engine
+    orig_db_engine = db_mod.engine
+    orig_main_engine = main_mod.engine
+    orig_ws_root = main_mod.WORKSPACE_ROOT
     db_mod.engine = db_engine
+    main_mod.engine = db_engine
+    main_mod.WORKSPACE_ROOT = main_mod.Path(_TEST_WS_ROOT)
     yield
-    db_mod.engine = original
+    db_mod.engine = orig_db_engine
+    main_mod.engine = orig_main_engine
+    main_mod.WORKSPACE_ROOT = orig_ws_root
 
 
 @pytest.fixture(name="client")
@@ -72,8 +85,11 @@ def _make_mock_docker_api(
     api.exec_create = MagicMock(return_value={"Id": exec_id})
 
     mock_sock = MagicMock()
-    # Return empty bytes by default so read_socket() exits on first recv (EOF)
+    mock_sock._sock = mock_sock
+    mock_sock.read = MagicMock(return_value=b"")
     mock_sock.recv = MagicMock(return_value=b"")
+    mock_sock.write = MagicMock()
+    mock_sock.sendall = MagicMock()
     # Use same socket instance for every exec_start call
     api.exec_start = MagicMock(return_value=mock_sock)
 
@@ -104,7 +120,7 @@ def _make_mock_docker_client(container_status: str = "running"):
     return mock_client
 
 
-def _setup_test_workspace(client, workspace_id: str = "ws1", local_path: str = "/tmp/ws1"):
+def _setup_test_workspace(client, workspace_id: str = "ws1", local_path: str = "ws1"):
     """Create a test workspace in the DB and return its data."""
     ws_data = {
         "id": workspace_id,
@@ -209,28 +225,34 @@ def test_terminal_auth_service_unavailable(client):
 # ---------------------------------------------------------------------------
 
 
-def test_terminal_docker_unavailable(client, caplog):
+def test_terminal_docker_unavailable(client):
     """Docker daemon down → close(1011, 'Docker unavailable')."""
     _setup_test_workspace(client)
 
     with _mock_auth_context(), patch("docker.from_env", side_effect=Exception("no daemon")):
-        with client.websocket_connect("/ws/workspace/ws1/terminal?token=ok"):
-            pass
-    assert "Docker unavailable" in caplog.text
+        with pytest.raises(WebSocketDisconnect) as exc, client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
+            ws.receive_text()
+    assert exc.value.code == 1011
+    assert "Docker unavailable" in exc.value.reason
 
 
-def test_terminal_container_not_found(client, caplog):
+def test_terminal_container_not_found(client):
     """Container doesn't exist → close(1011, 'Container unavailable')."""
     import docker
 
     _setup_test_workspace(client)
+    mock_client = _make_mock_docker_client()
+    mock_client.containers.get.side_effect = docker.errors.NotFound("No such container")
 
     with _mock_auth_context(), patch(
         "docker.from_env",
-        side_effect=docker.errors.NotFound("not found", message="No such container"),
-    ), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok"):
-        pass
-    assert "Container unavailable" in caplog.text
+        return_value=mock_client,
+    ), patch("services.workspace_sandbox.ensure_workspace_container"), pytest.raises(
+        WebSocketDisconnect
+    ) as exc, client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
+        ws.receive_text()
+    assert exc.value.code == 1011
+    assert "Container unavailable" in exc.value.reason
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +260,7 @@ def test_terminal_container_not_found(client, caplog):
 # ---------------------------------------------------------------------------
 
 
-def test_terminal_creates_exec_for_bash(client, caplog):
+def test_terminal_creates_exec_for_bash(client):
     """exec_create is called; bash is preferred."""
     _setup_test_workspace(client)
 
@@ -246,8 +268,10 @@ def test_terminal_creates_exec_for_bash(client, caplog):
 
     with _mock_auth_context(), patch(
         "docker.from_env", return_value=mock_client
-    ), patch("services.workspace_sandbox.ensure_workspace_container"), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok"):
-        pass
+    ), patch("services.workspace_sandbox.ensure_workspace_container"), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
+        import time
+
+        time.sleep(0.2)
 
     assert mock_client.api.exec_create.call_count >= 1
 
@@ -257,7 +281,7 @@ def test_terminal_creates_exec_for_bash(client, caplog):
 # ---------------------------------------------------------------------------
 
 
-def test_terminal_forwards_websocket_input_to_exec(client, caplog):
+def test_terminal_forwards_websocket_input_to_exec(client):
     """Text input from WebSocket is forwarded to exec stdin."""
     _setup_test_workspace(client)
 
@@ -299,9 +323,7 @@ def test_terminal_resize_calls_exec_resize(client):
 
         with patch(
             "docker.from_env", return_value=mock_client
-        ), patch("services.workspace_sandbox.ensure_workspace_container"), pytest.raises(
-            WebSocketDisconnect
-        ), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
+        ), patch("services.workspace_sandbox.ensure_workspace_container"), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
             ws.send_text(json.dumps({"type": "resize", "width": 120, "height": 40}))
             import time
 
@@ -320,9 +342,7 @@ def test_terminal_resize_failure_doesnt_crash(client):
 
         with patch(
             "docker.from_env", return_value=mock_client
-        ), patch("services.workspace_sandbox.ensure_workspace_container"), pytest.raises(
-            WebSocketDisconnect
-        ), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
+        ), patch("services.workspace_sandbox.ensure_workspace_container"), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
             ws.send_text(json.dumps({"type": "resize", "width": 120, "height": 40}))
             import time
 
@@ -345,9 +365,7 @@ def test_terminal_exec_kill_on_close(client):
 
         with patch(
             "docker.from_env", return_value=mock_client
-        ), patch("services.workspace_sandbox.ensure_workspace_container"), pytest.raises(
-            WebSocketDisconnect
-        ), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
+        ), patch("services.workspace_sandbox.ensure_workspace_container"), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok") as ws:
             import time
 
             time.sleep(0.2)
@@ -364,13 +382,12 @@ def test_terminal_socket_close_on_error(client):
         mock_client = _make_mock_docker_client()
 
         mock_sock = mock_client.api.exec_start.return_value
-        mock_sock.recv = MagicMock(side_effect=Exception("connection reset"))
+        mock_sock.read = MagicMock(side_effect=Exception("connection reset"))
 
         with patch(
             "docker.from_env", return_value=mock_client
-        ), patch("services.workspace_sandbox.ensure_workspace_container"), pytest.raises(
-            WebSocketDisconnect
-        ), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok"):
-            pass
+        ), patch("services.workspace_sandbox.ensure_workspace_container"), client.websocket_connect("/ws/workspace/ws1/terminal?token=ok"):
+            import time
+            time.sleep(0.2)
 
         mock_client.api.exec_kill.assert_called()

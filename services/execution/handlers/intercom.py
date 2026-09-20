@@ -15,17 +15,15 @@ from services.shared.rag_client import push_conversation
 log = logging.getLogger("execution/intercom")
 
 
-async def _get_identity_session() -> aiohttp.ClientSession:
-    from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-    return aiohttp.ClientSession(
-        base_url=IDENTITY_SVC_URL,
-        headers={"X-Internal-Secret": INTERNAL_SECRET},
-        timeout=aiohttp.ClientTimeout(total=10.0),
-    )
-
-
 async def _call_identity(method: str, path: str, json_data: dict | None = None) -> dict:
-    async with await _get_identity_session() as client, client.request(method, path, json=json_data) as resp:
+    from services.common.http import get_client
+    from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
+
+    url = f"{IDENTITY_SVC_URL.rstrip('/')}{path}"
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with get_client() as client, client.request(
+        method, url, json=json_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)
+    ) as resp:
         resp.raise_for_status()
         return await resp.json()
 

@@ -58,7 +58,7 @@ def test_telemetry_summary_peak_duration(test_client: TestClient, session: Sessi
     # Call the API
     resp = test_client.get(
         f"/api/telemetry/summary/{entity_id}",
-        headers={"X-Internal-Secret": "test-secret"}
+        headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "test-secret")}
     )
     assert resp.status_code == 200
     summary = resp.json()["summary"]
@@ -83,7 +83,7 @@ def test_telemetry_summary_peak_duration(test_client: TestClient, session: Sessi
 
     resp = test_client.get(
         f"/api/telemetry/summary/{entity_id}",
-        headers={"X-Internal-Secret": "test-secret"}
+        headers={"X-Internal-Secret": os.getenv("INTERNAL_SECRET", "test-secret")}
     )
     assert resp.status_code == 200
     summary = resp.json()["summary"]

@@ -40,6 +40,8 @@ def test_auth_body_merges_bearer_token():
 
 @pytest.mark.asyncio
 async def test_proxy_execution_with_identity_posts_talk_payload(mocker):
+    from contextlib import asynccontextmanager
+
     request = _request_with_auth()
     mocker.patch(
         "services.gateway.main._resolve_identity_from_request",
@@ -52,15 +54,25 @@ async def test_proxy_execution_with_identity_posts_talk_payload(mocker):
             "nextcloud_pass": "secret",
         },
     )
-    execution_post = mocker.patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+
     execution_response = mocker.Mock()
-    execution_response.status_code = 200
-    execution_response.json.return_value = {
-        "status": "SUCCESS",
-        "message": "Chat message sent.",
-        "service": "talk_send",
-    }
-    execution_post.return_value = execution_response
+    execution_response.status = 200
+    execution_response.text = AsyncMock(
+        return_value=json.dumps({
+            "status": "SUCCESS",
+            "message": "Chat message sent.",
+            "service": "talk_send",
+        })
+    )
+
+    mock_client = mocker.Mock()
+    mock_client.post = AsyncMock(return_value=execution_response)
+
+    @asynccontextmanager
+    async def mock_shared_client():
+        yield mock_client
+
+    mocker.patch("services.gateway.main.shared_http_client", mock_shared_client)
 
     response = await gateway_main._proxy_execution_with_identity(
         request,
@@ -71,8 +83,8 @@ async def test_proxy_execution_with_identity_posts_talk_payload(mocker):
 
     assert response.status_code == 200
     assert payload["service"] == "talk_send"
-    execution_post.assert_awaited_once()
-    _, kwargs = execution_post.await_args
+    mock_client.post.assert_awaited_once()
+    _, kwargs = mock_client.post.await_args
     assert kwargs["json"]["action"] == "send"
     assert kwargs["json"]["token"] == "room-alpha"
     assert kwargs["json"]["message"] == "hello world"

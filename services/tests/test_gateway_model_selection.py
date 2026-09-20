@@ -95,7 +95,7 @@ for ep in LIVE_GATEWAY_ENDPOINTS:
     except Exception:
         continue
 
-LIVE_GATEWAY_AVAILABLE = bool(LIVE_GATEWAY_URL)
+LIVE_GATEWAY_AVAILABLE = bool(LIVE_GATEWAY_URL and os.getenv("RUN_LIVE_GATEWAY_TESTS"))
 
 import pytest
 from dotenv import dotenv_values

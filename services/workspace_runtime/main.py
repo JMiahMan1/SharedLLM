@@ -6,7 +6,9 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -85,12 +87,19 @@ async def _get_workspace_root_async() -> Path:
     except Exception as e:
         log.debug(f"Failed to fetch workspace_runtime_root from identity: {e}")
 
-    return _DEFAULT_WORKSPACE_ROOT
+    return Path(os.getenv("WORKSPACE_RUNTIME_ROOT", "/workspace")).resolve()
+
+
+_WORKSPACE_ROOT_CACHE: dict[str, Any] = {"ts": 0.0}
 
 
 def get_workspace_root() -> Path:
     """Fetch the current workspace root from global settings or fallback to env/default."""
     global WORKSPACE_ROOT
+    now = time.time()
+    if now - _WORKSPACE_ROOT_CACHE.get("ts", 0.0) < 3600 and WORKSPACE_ROOT is not None and WORKSPACE_ROOT != Path("/workspace"):
+        return WORKSPACE_ROOT
+
     try:
         try:
             loop = asyncio.get_running_loop()
@@ -100,6 +109,7 @@ def get_workspace_root() -> Path:
             pass
         val = asyncio.run(_get_workspace_root_async())
         WORKSPACE_ROOT = val
+        _WORKSPACE_ROOT_CACHE["ts"] = now
         return val
     except Exception as e:
         log.debug(f"Failed to fetch workspace_runtime_root from identity: {e}")
@@ -532,7 +542,9 @@ class WorkspaceBootstrapRequest(WorkspaceRef):
 
 
 def _require_internal_secret(x_internal_secret: str | None) -> None:
-    if x_internal_secret != INTERNAL_SECRET:
+    import hmac
+    expected = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
+    if not expected or not x_internal_secret or not hmac.compare_digest(x_internal_secret, expected):
         raise HTTPException(status_code=403, detail="Invalid internal secret")
 
 
@@ -697,6 +709,11 @@ async def lifespan(app: FastAPI):
         _toolchain_task.cancel()
         with suppress(Exception):
             await _toolchain_task
+    with suppress(Exception):
+        await _shutdown_identity_loop()
+    with suppress(Exception):
+        from services.common.http import close_client
+        await close_client()
     log.info("Workspace Runtime service shutting down.")
 
 app = FastAPI(title="Jarvis Workspace Runtime", version="1.0.0", lifespan=lifespan)
@@ -746,6 +763,27 @@ def _get_identity_loop() -> asyncio.AbstractEventLoop:
             # Give the loop thread a moment to start.
             _IDENTITY_LOOP.call_soon_threadsafe(lambda: None)
         return _IDENTITY_LOOP
+
+
+async def _shutdown_identity_loop() -> None:
+    global _IDENTITY_LOOP, _IDENTITY_SESSION
+    with _IDENTITY_LOCK:
+        loop = _IDENTITY_LOOP
+        session = _IDENTITY_SESSION
+        _IDENTITY_LOOP = None
+        _IDENTITY_SESSION = None
+
+    if loop is not None and not loop.is_closed():
+        if session is not None and not session.closed:
+            try:
+                future = asyncio.run_coroutine_threadsafe(session.close(), loop)
+                future.result(timeout=5.0)
+            except Exception as e:
+                log.debug("Error closing identity session on shutdown: %s", e)
+        try:
+            loop.call_soon_threadsafe(loop.stop)
+        except Exception as e:
+            log.debug("Error stopping identity loop on shutdown: %s", e)
 
 
 def _resolve_identity_context(ref: WorkspaceRef) -> dict[str, Any] | None:
@@ -2740,7 +2778,8 @@ def run_pytest(req: PytestRequest, x_internal_secret: str | None = Header(defaul
     _require_workspace_capability(workspace, "pytest")
     workspace_path = Path(workspace["resolved_path"])
     targets = _sanitize_targets(req.targets)
-    args = ["python", "-m", "pytest", "-q", *targets] if targets else ["python", "-m", "pytest", "-q"]
+    py_bin = sys.executable or shutil.which("python3") or shutil.which("python") or "python"
+    args = [py_bin, "-m", "pytest", "-q", *targets] if targets else [py_bin, "-m", "pytest", "-q"]
     result = _run_command(
         workspace_path,
         args,
@@ -2984,7 +3023,11 @@ async def _trigger_nextcloud_sync(workspace_id: str, owner_user: str, local_path
 # every git command runs inside the workspace's dedicated container. This import
 # is placed at the very bottom so that all shared helpers referenced by
 # git_ops.py already exist on this module when it is imported (avoids a cycle).
-from services.workspace_runtime.git_ops import git_router  # noqa: E402
+from services.workspace_runtime.git_ops import (  # noqa: E402
+    GitPushRequest,
+    git_push,
+    git_router,
+)
 
 app.include_router(git_router)
 

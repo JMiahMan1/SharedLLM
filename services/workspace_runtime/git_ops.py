@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 # Shared helpers / models live in main.py. Importing them here is safe because
 # main.py imports this router only at the very bottom of the file, by which
 # point every name below already exists on the (partially initialized) module.
+import services.workspace_runtime.main as main_mod
 from services.workspace_runtime.main import (
     DiffRequest,
     GitAddRequest,
@@ -51,7 +52,6 @@ from services.workspace_runtime.main import (
     _slugify_branch_component,
     _trigger_nextcloud_sync,
     _validate_branch_name,
-    engine,
 )
 from services.workspace_sandbox import run_workspace_cmd
 
@@ -524,7 +524,7 @@ async def git_pull(req: GitPullRequest, background_tasks: BackgroundTasks, x_int
             raise HTTPException(status_code=400, detail=stderr or "git pull failed")
 
     if result["returncode"] == 0:
-        with Session(engine) as session:
+        with Session(main_mod.engine) as session:
             match = session.get(Workspace, workspace["id"])
             if match and match.auto_backup_enabled and match.nextcloud_path:
                 background_tasks.add_task(
@@ -570,7 +570,7 @@ async def git_revert(req: GitRevertRequest, x_internal_secret: str | None = Head
         if result["returncode"] != 0:
             return JSONResponse(status_code=400, content={"status": "ERROR", "message": result["stderr"] or result["stdout"]})
 
-    with Session(engine) as session:
+    with Session(main_mod.engine) as session:
         ws = session.get(Workspace, ws_id)
         if ws:
             ws.quarantined = False

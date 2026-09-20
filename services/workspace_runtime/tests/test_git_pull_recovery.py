@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
+os.environ["WORKSPACE_RUNTIME_ROOT"] = os.path.abspath(".tmp")
 
 # Import the service module at collection time so SQLModel metadata (Workspace table)
 # is registered before we call create_all() in the fixtures below.
@@ -22,17 +23,25 @@ def session_fixture():
         yield session
 
 
+_TEST_WS_ROOT = os.path.abspath(".tmp/workspaces")
+os.makedirs(_TEST_WS_ROOT, exist_ok=True)
+
+
 @pytest.fixture(name="client")
 def client_fixture(session):
     from services.workspace_runtime.main import app
 
     original_engine = main.engine
+    original_ws_root = main.WORKSPACE_ROOT
     main.engine = session.bind
+    main.WORKSPACE_ROOT = main.Path(_TEST_WS_ROOT)
+    main._WORKSPACE_ROOT_CACHE["ts"] = 0.0
     # The identity service is unavailable in unit tests; act as admin.
     main._resolve_identity_context = lambda ref: {"user": "test", "is_admin": True}
     client = TestClient(app)
     yield client
     main.engine = original_engine
+    main.WORKSPACE_ROOT = original_ws_root
 
 
 def _git(cwd: str, *args: str) -> None:
@@ -71,24 +80,25 @@ def _make_remote_with_conflict(base: str) -> str:
 def test_pull_recovers_dirty_tree(client: TestClient):
     import tempfile
 
-    base = tempfile.mkdtemp()
+    base = tempfile.mkdtemp(dir=_TEST_WS_ROOT)
     work = _make_remote_with_conflict(base)
 
     # Uncommitted local change that the incoming pull would overwrite
     with open(os.path.join(work, "file.txt"), "w") as f:
         f.write("local-uncommitted\n")
 
-    client.post(
+    create_res = client.post(
         "/workspaces",
         json={
             "id": "pulltest",
             "display_name": "Pull Test",
             "local_path": work,
             "access_policy": "authenticated",
-            "scope": "user",
+            "scope": "system",
         },
         headers={"X-Internal-Secret": "test-secret"},
     )
+    assert create_res.status_code == 200, create_res.text
 
     resp = client.post(
         "/git/pull",
@@ -115,7 +125,7 @@ def test_pull_recovers_dirty_tree(client: TestClient):
 def test_pull_clean_repo_no_recovery(client: TestClient):
     import tempfile
 
-    base = tempfile.mkdtemp()
+    base = tempfile.mkdtemp(dir=_TEST_WS_ROOT)
     remote = os.path.join(base, "remote.git")
     work = os.path.join(base, "work")
     subprocess.run(["git", "init", "--bare", "-b", "main", remote], check=True, capture_output=True)
@@ -127,17 +137,18 @@ def test_pull_clean_repo_no_recovery(client: TestClient):
     _git(work, "commit", "-m", "init")
     _git(work, "push", "origin", "main")
 
-    client.post(
+    create_res = client.post(
         "/workspaces",
         json={
             "id": "pullclean",
             "display_name": "Pull Clean",
             "local_path": work,
             "access_policy": "authenticated",
-            "scope": "user",
+            "scope": "system",
         },
         headers={"X-Internal-Secret": "test-secret"},
     )
+    assert create_res.status_code == 200, create_res.text
 
     resp = client.post(
         "/git/pull",

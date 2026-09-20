@@ -104,7 +104,7 @@ async def call_service(
                 resp_detail = await client.get(url, headers=headers, json=payload, timeout=_TIMEOUT)
                 await resp_detail.release()
                 detail = str(e)
-            except:
+            except Exception:
                 detail = str(e)
             if e.status in (401, 403):
                 return {"ok": False, "error": "Your Home Assistant token is invalid or expired. Please update it in Jarvis.", "status_code": e.status}

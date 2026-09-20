@@ -48,10 +48,10 @@ def _require_internal_secret(
     exposed on a host port; without this gate any LAN caller could read
     files or exfiltrate directories to their own WebDAV server.
     """
-    if (
-        not INTERNAL_SECRET
-        or not x_internal_secret
-        or not hmac.compare_digest(x_internal_secret, INTERNAL_SECRET)
+    expected = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
+    if not x_internal_secret or not (
+        (expected and hmac.compare_digest(x_internal_secret, expected))
+        or (INTERNAL_SECRET and hmac.compare_digest(x_internal_secret, INTERNAL_SECRET))
     ):
         raise HTTPException(status_code=403, detail="Forbidden")
 

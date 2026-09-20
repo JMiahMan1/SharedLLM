@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import hashlib
+import hmac
 import logging
 import os
 import re
@@ -169,13 +170,21 @@ async def require_internal(request: Request, x_internal_secret: str = Header(Non
     if request.url.path == "/health" or request.url.path.startswith("/media/"):
         return
 
-    if x_internal_secret != INTERNAL_SECRET:
+    expected_secret = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
+    if not x_internal_secret or not (
+        hmac.compare_digest(x_internal_secret, expected_secret)
+        or (INTERNAL_SECRET and hmac.compare_digest(x_internal_secret, INTERNAL_SECRET))
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 async def _check_internal_secret(x_internal_secret: str | None):
     """Simple secret check for endpoints without Request dependency."""
-    if x_internal_secret != INTERNAL_SECRET:
+    expected_secret = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
+    if not x_internal_secret or not (
+        hmac.compare_digest(x_internal_secret, expected_secret)
+        or (INTERNAL_SECRET and hmac.compare_digest(x_internal_secret, INTERNAL_SECRET))
+    ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
@@ -432,6 +441,12 @@ async def lifespan(app: FastAPI):
     with suppress(Exception):
         await telemetry_task
     media_server.join(timeout=5)
+    with suppress(Exception):
+        from services.execution.http_client import close_all_sessions
+        await close_all_sessions()
+    with suppress(Exception):
+        from services.common.http import close_client
+        await close_client()
     log.info("Execution Bridge shutting down.")
 
 

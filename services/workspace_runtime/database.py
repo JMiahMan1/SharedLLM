@@ -1,9 +1,27 @@
+import os
+from pathlib import Path
 from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
 from services.config import WORKSPACE_DATABASE_URL
 
-DATABASE_URL = WORKSPACE_DATABASE_URL or "sqlite:////data/workspace_runtime.db"
+
+def _default_db_url() -> str:
+    data_dir = Path("/data")
+    try:
+        if data_dir.is_dir():
+            return "sqlite:////data/workspace_runtime.db"
+        if not data_dir.exists() and os.access("/", os.W_OK):
+            data_dir.mkdir(parents=True, exist_ok=True)
+            return "sqlite:////data/workspace_runtime.db"
+    except (OSError, PermissionError):
+        pass
+    tmp_dir = Path(".tmp")
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{tmp_dir.resolve() / 'workspace_runtime.db'}"
+
+
+DATABASE_URL = WORKSPACE_DATABASE_URL or _default_db_url()
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in DATABASE_URL else {}

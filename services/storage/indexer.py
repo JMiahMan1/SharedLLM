@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import os
@@ -167,7 +168,8 @@ async def extract_and_chunk_contents(
         # Optionally index full text
         if not item.is_dir and "full_text" in item.extractable_capabilities:
             log.info(f"Extracting full text for: {item.path}")
-            content = await provider.get_content(item.path)
+            res = provider.get_content(item.path)
+            content = await res if inspect.isawaitable(res) else res
             if content:
                 file_chunks = chunk_text(content)
                 for i, text in enumerate(file_chunks):

@@ -33,12 +33,25 @@ class NextCloudClient:
             self.base_path = self.dav_prefix + self.base_path
 
         self.base_url = f"{self.protocol}://{self.host}"
+        self._client: aiohttp.ClientSession | None = None
 
-        self.client = aiohttp.ClientSession(
-            auth=aiohttp.BasicAuth(self.username, self.password),
-            timeout=aiohttp.ClientTimeout(total=15.0, sock_read=60.0),
-            headers={"User-Agent": "JarvisOS-Storage/1.0"}
-        )
+    @property
+    def client(self) -> aiohttp.ClientSession:
+        if self._client is None or self._client.closed:
+            auth_header = (
+                aiohttp.encode_basic_auth(self.username, self.password)
+                if hasattr(aiohttp, "encode_basic_auth")
+                else aiohttp.BasicAuth(self.username, self.password).encode()
+            )
+            self._client = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=15.0, sock_read=60.0),
+                headers={"User-Agent": "JarvisOS-Storage/1.0", "Authorization": auth_header},
+            )
+        return self._client
+
+    @client.setter
+    def client(self, session: aiohttp.ClientSession) -> None:
+        self._client = session
 
     async def _full_url(self, remote_path: str) -> str:
         clean_path = "/" + str(remote_path).lstrip("/")
@@ -311,7 +324,8 @@ class NextCloudClient:
         }
 
     async def close(self):
-        await self.client.close()
+        if self._client is not None and not self._client.closed:
+            await self._client.close()
 
     async def __aenter__(self):
         return self

@@ -2,7 +2,7 @@
 No mocks. These tests validate real HTTP communication with each service."""
 import os
 
-os.environ["INTERNAL_SECRET"] = "RAVEN_SECURE_2026"
+os.environ.setdefault("INTERNAL_SECRET", "RAVEN_SECURE_2026")
 
 import httpx
 import pytest

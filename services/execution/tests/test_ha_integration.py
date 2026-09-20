@@ -443,10 +443,14 @@ class TestIdentity:
 class TestHealth:
     """Test service health."""
 
-    def test_health_endpoint(self):
+    def test_health_endpoint(self, mocker):
         """Test health endpoint returns OK."""
+        mocker.patch(
+            "services.execution.main._check_dependency",
+            return_value={"healthy": True, "status": "ok"},
+        )
         resp = client.get("/health")
         assert resp.status_code == 200
         result = resp.json()
-        assert result["status"] == "ok"
+        assert result["status"] == "healthy"
         assert result["service"] == "execution"

@@ -8,7 +8,11 @@ from urllib.parse import urlencode
 
 import aiohttp
 import html2text
-from playwright.async_api import async_playwright
+
+try:
+    from playwright.async_api import async_playwright
+except ImportError:
+    async_playwright = None
 
 try:
     from schemas import ExecutionResult, WebReadRequest, WebSearchRequest
