@@ -19,7 +19,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -33,6 +33,12 @@ try:
     import redis.asyncio as aioredis
 except ImportError:
     aioredis = None
+
+
+def _verify_internal_secret(header_secret: str | None, query_secret: str | None = None) -> bool:
+    if not INTERNAL_SECRET:
+        return True
+    return header_secret == INTERNAL_SECRET or query_secret == INTERNAL_SECRET
 
 log = logging.getLogger(__name__)
 
@@ -280,9 +286,14 @@ class LocationUpdate(BaseModel):
 
 
 @app.post("/people/{entity_id:path}/see")
-async def post_see(entity_id: str, update: LocationUpdate, x_internal_secret: str | None = None):
+async def post_see(
+    entity_id: str,
+    update: LocationUpdate,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
     """Push a location into HA via the device_tracker.see service and record telemetry breadcrumb."""
-    if x_internal_secret != INTERNAL_SECRET:
+    if not _verify_internal_secret(x_internal_secret, query_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     if not HA_URL:
         raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
@@ -322,9 +333,14 @@ async def post_see(entity_id: str, update: LocationUpdate, x_internal_secret: st
 
 
 @app.post("/people/{entity_id:path}/record")
-async def post_record(entity_id: str, update: LocationUpdate, x_internal_secret: str | None = None):
+async def post_record(
+    entity_id: str,
+    update: LocationUpdate,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
     """Directly record a telemetry breadcrumb without requiring HA."""
-    if x_internal_secret != INTERNAL_SECRET:
+    if not _verify_internal_secret(x_internal_secret, query_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     await record_point(
         entity_id=entity_id,
@@ -632,8 +648,12 @@ async def get_vehicles():
 
 
 @app.post("/vehicles")
-async def save_vehicle(vehicle: VehiclePayload, x_internal_secret: str | None = None):
-    if x_internal_secret != INTERNAL_SECRET:
+async def save_vehicle(
+    vehicle: VehiclePayload,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    if not _verify_internal_secret(x_internal_secret, query_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     r = await get_redis()
     if not r:
@@ -643,8 +663,12 @@ async def save_vehicle(vehicle: VehiclePayload, x_internal_secret: str | None = 
 
 
 @app.delete("/vehicles/{vehicle_id}")
-async def delete_vehicle(vehicle_id: str, x_internal_secret: str | None = None):
-    if x_internal_secret != INTERNAL_SECRET:
+async def delete_vehicle(
+    vehicle_id: str,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    if not _verify_internal_secret(x_internal_secret, query_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     r = await get_redis()
     if not r:
@@ -672,8 +696,12 @@ async def get_assigned_vehicle(user_id: str):
 
 
 @app.post("/vehicles/assign")
-async def assign_vehicle(assign: VehicleAssignPayload, x_internal_secret: str | None = None):
-    if x_internal_secret != INTERNAL_SECRET:
+async def assign_vehicle(
+    assign: VehicleAssignPayload,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    if not _verify_internal_secret(x_internal_secret, query_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
     r = await get_redis()
     if not r:

@@ -133,3 +133,79 @@ def test_vehicles_empty_by_default(client):
     data = r.json()
     assert "vehicles" in data
     assert isinstance(data["vehicles"], list)
+
+
+def test_vehicle_crud_with_internal_secret_header(client, monkeypatch):
+    import json
+    import services.geo.main as geo
+
+    # In-memory fake Redis
+    store = {}
+
+    class FakeRedis:
+        async def hset(self, key, field, value):
+            if key not in store:
+                store[key] = {}
+            store[key][field] = value
+
+        async def hget(self, key, field):
+            return store.get(key, {}).get(field)
+
+        async def hgetall(self, key):
+            return store.get(key, {})
+
+        async def hdel(self, key, field):
+            store.get(key, {}).pop(field, None)
+
+        async def set(self, key, value):
+            store[key] = value
+
+        async def get(self, key):
+            return store.get(key)
+
+        async def delete(self, key):
+            store.pop(key, None)
+
+    async def fake_get_redis():
+        return FakeRedis()
+
+    monkeypatch.setattr(geo, "get_redis", fake_get_redis)
+
+    # 1. Unauthorized without header
+    r = client.post("/vehicles", json={"id": "truck", "name": "Ford F-150", "mpg": 18.5, "cost_per_gallon": 3.75, "fuel_type": "regular"})
+    assert r.status_code == 403
+
+    # 2. Authorized with X-Internal-Secret header
+    r = client.post(
+        "/vehicles",
+        json={"id": "truck", "name": "Ford F-150", "mpg": 18.5, "cost_per_gallon": 3.75, "fuel_type": "regular"},
+        headers={"X-Internal-Secret": geo.INTERNAL_SECRET},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+
+    # 3. List vehicles
+    r = client.get("/vehicles")
+    assert r.status_code == 200
+    assert len(r.json()["vehicles"]) == 1
+    assert r.json()["vehicles"][0]["name"] == "Ford F-150"
+
+    # 4. Assign vehicle with header
+    r = client.post(
+        "/vehicles/assign",
+        json={"user_id": "jeremiah", "vehicle_id": "truck"},
+        headers={"X-Internal-Secret": geo.INTERNAL_SECRET},
+    )
+    assert r.status_code == 200
+
+    # 5. Check assigned vehicle
+    r = client.get("/vehicles/assigned/jeremiah")
+    assert r.status_code == 200
+    assert r.json()["vehicle_id"] == "truck"
+    assert r.json()["vehicle"]["name"] == "Ford F-150"
+
+    # 6. Delete vehicle with header
+    r = client.delete("/vehicles/truck", headers={"X-Internal-Secret": geo.INTERNAL_SECRET})
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+
