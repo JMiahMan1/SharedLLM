@@ -2585,6 +2585,15 @@ async def get_presence_rooms(x_internal_secret: str = Header(None)):
     return {"status": "SUCCESS", "rooms": rooms}
 
 
+@app.post("/execute/location")
+async def execute_location(req: dict, x_internal_secret: str = Header(None)):
+    """Handle Location, Zone matching, and Life360 Telemetry queries."""
+    await _check_internal_secret(x_internal_secret)
+    from services.execution.handlers.location import LocationRequest, handle_location
+    parsed = LocationRequest(**req)
+    return await handle_location(parsed)
+
+
 # ─── Speech-to-Text (Section 3.9) ─────────────────────────────────────────────
 
 @app.post("/execute/stt/transcribe")

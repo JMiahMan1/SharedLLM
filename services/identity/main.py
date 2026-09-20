@@ -2653,13 +2653,46 @@ async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
         log.warning(f"[location] Error forwarding location to Home Assistant: {e}")
 
 
+async def _forward_location_to_geo(user_id: str, location: LocationUpdate):
+    """Forward location update to Geo service to record telemetry breadcrumbs."""
+    try:
+        from services.common.http import get_client_insecure
+        from services.config import GEO_SVC_URL, INTERNAL_SECRET
+        if not GEO_SVC_URL:
+            return
+        geo_url = GEO_SVC_URL.rstrip("/")
+        clean_user = user_id.split(".")[-1].lower()
+        payload = {
+            "latitude": location.latitude,
+            "longitude": location.longitude,
+            "gps_accuracy": int(location.accuracy) if location.accuracy is not None else None,
+            "speed": location.speed,
+            "bearing": location.bearing,
+            "battery": int(location.battery) if location.battery is not None else None,
+            "timestamp": location.timestamp,
+        }
+        async with get_client_insecure() as client:
+            async with client.post(
+                f"{geo_url}/people/{clean_user}/record",
+                headers={"X-Internal-Secret": INTERNAL_SECRET, "Content-Type": "application/json"},
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=3.0),
+            ) as resp:
+                if resp.status < 300:
+                    log.info(f"[location] Recorded breadcrumb in Geo service for {clean_user}")
+                else:
+                    log.warning(f"[location] Geo record status {resp.status} for {clean_user}")
+    except Exception as e:
+        log.warning(f"[location] Failed to record breadcrumb in Geo service: {e}")
+
+
 @app.post("/api/users/{user_id}/location")
 def update_user_location(
     user_id: str,
     location: LocationUpdate,
     x_internal_secret: str = Header(...),
 ):
-    """Store user GPS location from mobile app and forward to Home Assistant."""
+    """Store user GPS location from mobile app, forward to Home Assistant, and record in Geo service."""
     _require_internal_secret(x_internal_secret)
     import asyncio
     import time
@@ -2691,9 +2724,11 @@ def update_user_location(
     try:
         loop = asyncio.get_running_loop()
         loop.create_task(_forward_location_to_ha(user_id, location))
+        loop.create_task(_forward_location_to_geo(user_id, location))
     except RuntimeError:
         try:
             asyncio.run(_forward_location_to_ha(user_id, location))
+            asyncio.run(_forward_location_to_geo(user_id, location))
         except Exception:
             pass
 

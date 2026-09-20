@@ -2921,6 +2921,7 @@ async def chat_handler(request: Request, background_tasks=None):
             "index_storage": "/index/full",
             "sync_ha": "/health",
             "ha_status": "/health",
+            "location_query": "/execute/location",
         }
         endpoint = endpoint_map.get(intent)
         if endpoint:
@@ -2930,13 +2931,33 @@ async def chat_handler(request: Request, background_tasks=None):
                 "entity_id": resolved_entity
             }
 
-            # Add specialized payload for storage/ha
+            # Add specialized payload for storage/ha/location
             if intent == "index_storage":
                 exec_payload = {
                     "provider": {"kind": "nextcloud", "settings": {"url": creds.nextcloud_url, "username": creds.nextcloud_user, "password": creds.nextcloud_pass}},
                     "path": "/", "recursive": True
                 }
                 svc_base = STORAGE_SVC
+            elif intent == "location_query":
+                q_lower = query.lower()
+                m = re.search(r"(?:where is|where's|how fast is|speed of)\s+([A-Za-z]+)", query, re.IGNORECASE)
+                user_target = m.group(1).strip() if m else creds.user
+                detail = None
+                if any(k in q_lower for k in ("speed", "fast", "mph", "driving")):
+                    detail = "speed"
+                elif any(k in q_lower for k in ("still", "dwell", "stationary", "how long")):
+                    detail = "dwell"
+                elif any(k in q_lower for k in ("frequent", "often", "most visited", "places")):
+                    detail = "frequented"
+                elif any(k in q_lower for k in ("cost", "mpg", "vehicle", "fuel", "gas")):
+                    detail = "cost"
+
+                exec_payload = {
+                    "user_context": creds.model_dump(),
+                    "user": user_target,
+                    "detail": detail,
+                }
+                svc_base = EXECUTION_SVC
             elif intent == "play_media":
                 media_query, _ = extract_media_request(query)
                 media_type = "video" if is_likely_video_request(query) else None

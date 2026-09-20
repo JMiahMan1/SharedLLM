@@ -224,6 +224,7 @@ SINGLE_TURN_TOOL_ENDPOINTS: dict[str, str] = {
     "haconfigrequest": "/execute/ha_config",
     "llminforequest": "/execute/llm_info",
     "networkdevicescanrequest": "/execute/network_scan",
+    "locationrequest": "/execute/location",
 }
 
 # Tool → service mapping (resolved at runtime)
@@ -831,6 +832,24 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     payload["action"] = "create"
                 else:
                     payload["action"] = "list"
+
+            if action == "locationrequest":
+                if not payload.get("user") and not payload.get("person"):
+                    m = re.search(r"(?:where is|where's|how fast is|speed of)\s+([A-Za-z]+)", query, re.IGNORECASE)
+                    if m:
+                        payload["user"] = m.group(1).strip()
+                    else:
+                        payload["user"] = creds.user
+                if not payload.get("detail"):
+                    q_lower = query.lower()
+                    if any(k in q_lower for k in ("speed", "fast", "mph", "driving")):
+                        payload["detail"] = "speed"
+                    elif any(k in q_lower for k in ("still", "dwell", "stationary", "how long")):
+                        payload["detail"] = "dwell"
+                    elif any(k in q_lower for k in ("frequent", "often", "most visited", "places")):
+                        payload["detail"] = "frequented"
+                    elif any(k in q_lower for k in ("cost", "mpg", "vehicle", "fuel", "gas")):
+                        payload["detail"] = "cost"
 
             _ws_file_actions = {
                 "workspacefilereadrequest",
