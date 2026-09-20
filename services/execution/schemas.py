@@ -994,3 +994,13 @@ class ImageEditRequest(BaseRequest):
     model: str | None = Field(None, description="Override image edit model name (default: image_edit_model setting)")
     proxy_url: str | None = Field(None, description="Override LLM proxy URL (default: llm_local_url setting)")
 
+
+class LocationRequest(BaseRequest):
+    """Request to query family location, HA zone matching, speed, dwell time, and travel telemetry."""
+    user_context: UserContext | None = None
+    user: str | None = Field(None, description="Person or user to locate (e.g. 'Jeremiah', 'Michele', 'me')")
+    person: str | None = Field(None, description="Alias for user")
+    target: str | None = Field(None, description="Alias for user")
+    detail: str | None = Field(None, description="Type of detail: 'summary', 'speed', 'dwell', 'frequented', 'cost', 'vehicle'")
+    hours: float | None = Field(24.0, description="Hours of history to analyze for telemetry (default: 24.0)")
+

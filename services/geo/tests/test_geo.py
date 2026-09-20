@@ -89,3 +89,48 @@ def test_see_requires_secret(client):
         json={"latitude": 1.0, "longitude": 2.0},
     )
     assert r.status_code == 403
+
+
+def test_telemetry_at_zone(client):
+    r = client.get("/people/summers/telemetry")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "ok"
+    assert data["friendly_name"] == "Summers"
+    assert data["current_zone"] == "Home"
+    assert "Summers is at Home" in data["speech"]
+
+
+def test_telemetry_moving(client, monkeypatch):
+    import time
+    import services.geo.main as geo
+
+    # Mock get_points_in_window to return moving points
+    t_now = time.time()
+    moving_points = [
+        {"t": t_now - 60, "lat": 33.2000, "lon": -111.5000, "acc": 5.0, "spd": 15.0, "brg": 45.0, "bat": 85},
+        {"t": t_now, "lat": 33.2080, "lon": -111.4900, "acc": 5.0, "spd": 22.0, "brg": 45.0, "bat": 85},
+    ]
+
+    async def fake_points(*args, **kwargs):
+        return moving_points
+
+    monkeypatch.setattr(geo, "get_points_in_window", fake_points)
+
+    r = client.get("/people/jeremiah/telemetry")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["status"] == "ok"
+    assert data["is_moving"] is True
+    assert data["current_speed_mph"] > 30.0
+    assert data["top_speed_mph"] >= data["current_speed_mph"]
+    assert "traveling at" in data["speech"]
+
+
+def test_vehicles_list(client):
+    r = client.get("/vehicles")
+    assert r.status_code == 200
+    data = r.json()
+    assert "vehicles" in data
+    assert len(data["vehicles"]) >= 1
+    assert any(v["name"] == "Jeremiah's Truck" for v in data["vehicles"])

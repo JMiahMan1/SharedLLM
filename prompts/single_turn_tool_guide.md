@@ -80,6 +80,14 @@ Search for Home Assistant entities/devices by name, domain, or area.
 Generic Home Assistant service call.
 - Fields: `tool`, `domain`, `service`, `entity_id`.
 
+### LocationRequest
+Query person/family location, Home Assistant zone presence, speed, dwell time, and travel telemetry (Life360 features).
+- Fields: `tool`, `user` (name or person, e.g. "Jeremiah", "Michele", "me"), optional `detail` ("summary", "speed", "dwell", "frequented", "cost", "vehicle").
+- Examples:
+  - `{"tool": "LocationRequest", "user": "Jeremiah"}`
+  - `{"tool": "LocationRequest", "user": "Jeremiah", "detail": "speed"}`
+  - `{"tool": "LocationRequest", "user": "me", "detail": "frequented"}`
+
 ### WebSearchRequest
 Search the public internet for web information. (Do NOT use to play music or podcasts).
 - Fields: `tool`, `query`.

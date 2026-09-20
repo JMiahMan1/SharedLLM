@@ -102,5 +102,19 @@
     "check the status of the home assistant connection",
     "are the lights on?",
     "status of the heater"
+  ],
+  "location_query": [
+    "where is Jeremiah",
+    "where's Jeremiah",
+    "where is Michele",
+    "where am I",
+    "where is my phone",
+    "how fast is Jeremiah driving",
+    "how fast is Jeremiah moving",
+    "what was my top speed today",
+    "what is my top speed",
+    "how long have I been still",
+    "locations I frequent the most",
+    "where do I spend the most time"
   ]
 }
