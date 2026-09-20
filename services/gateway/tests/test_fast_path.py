@@ -20,6 +20,10 @@ def test_fast_path_intent_classification():
         ("volume up", "media_transport", 1.0),
         ("turn on kitchen light", "turn_on", 1.0),
         ("turn off the living room lights", "turn_off", 1.0),
+        ("turn the piano lamp off", "turn_off", 1.0),
+        (" Turn the piano lamp off, turn the piano lamp off.", "turn_off", 1.0),
+        ("turn the office light on", "turn_on", 1.0),
+        ("piano lamp off", "turn_off", 1.0),
         ("reindex my storage files", "index_storage", 1.0),
         ("sync home assistant", "sync_ha", 1.0),
     ]

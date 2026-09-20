@@ -143,16 +143,37 @@ class IntentEngine:
 
         # Regex patterns for common control intents
         patterns = {
-            "turn_on": [r"turn on (?:the )?(.+)", r"power on (?:the )?(.+)", r"switch on (?:the )?(.+)"],
-            "turn_off": [r"turn off (?:the )?(.+)", r"power off (?:the )?(.+)", r"switch off (?:the )?(.+)"],
-            "play_media": [r"play .*(?:on|in|at) (.+)", r"listen to .*(?:on|in|at) (.+)", r"put on .*(?:on|in|at) (.+)"],
-            "pause_media": [r"pause (?:the )?(?:music|video|media )?(?:on|in|at) (.+)", r"stop (?:the )?(?:music|video|media )?(?:on|in|at) (.+)"],
-            "media_transport": [r"(?:pause|stop|resume|skip|next|rewind|fast forward).*(?:on|in|at) (.+)", r"(?:pause|stop|resume).*(?:the )?(.+)", r"(?:skip|next|rewind|fast forward).*(?:the )?(.+)"],
+            "turn_on": [
+                r"^(?:turn|switch|power)\s+on\s+(?:the\s+)?(.+)$",
+                r"^(?:turn|switch|power)\s+(?:the\s+)?(.+?)\s+on$",
+                r"^(?:the\s+)?(.+?)\s+on$",
+            ],
+            "turn_off": [
+                r"^(?:turn|switch|power|shut)\s+off\s+(?:the\s+)?(.+)$",
+                r"^(?:turn|switch|power|shut)\s+(?:the\s+)?(.+?)\s+off$",
+                r"^(?:the\s+)?(.+?)\s+off$",
+            ],
+            "play_media": [
+                r"play .*(?:on|in|at) (.+)",
+                r"listen to .*(?:on|in|at) (.+)",
+                r"put on .*(?:on|in|at) (.+)",
+            ],
+            "pause_media": [
+                r"pause (?:the )?(?:music|video|media )?(?:on|in|at) (.+)",
+                r"stop (?:the )?(?:music|video|media )?(?:on|in|at) (.+)",
+            ],
+            "media_transport": [
+                r"(?:pause|stop|resume|skip|next|rewind|fast forward).*(?:on|in|at) (.+)",
+            ],
         }
+
+        q_clean = query.lower().strip().strip("?.!")
+        if "," in q_clean:
+            q_clean = q_clean.split(",")[0].strip()
 
         if intent in patterns:
             for p in patterns[intent]:
-                match = re.search(p, q)
+                match = re.search(p, q_clean)
                 if match:
                     target = match.group(1).strip()
                     # Clean up common trailers
@@ -179,11 +200,17 @@ class IntentEngine:
         Classifies the query into an intent.
         Returns (intent_name, confidence_score).
         """
-        q = query.lower().strip()
-
         # 0. Autonomous / Raven check: if query explicitly invokes Raven, never fast-path
-        if is_raven_intent(q):
+        if is_raven_intent(query):
             return "raven_mission", 0.0
+
+        q = query.lower().strip().strip("?.!")
+        if "," in q:
+            parts = [p.strip() for p in q.split(",") if p.strip()]
+            if len(parts) > 1 and (parts[0] in parts[1] or parts[1] in parts[0]):
+                q = parts[0]
+            elif len(parts) > 1 and any(w in parts[0] for w in ["turn", "play", "pause", "resume", "stop", "switch", "lights", "light", "skip", "next"]):
+                q = parts[0]
 
         # 1. Fast Pattern & Keyword Detection (immediate 1.0 confidence for media/home control)
         # Media Transport: pause, stop, resume, next, skip, previous, volume
@@ -206,10 +233,11 @@ class IntentEngine:
                 return "play_media", 1.0
 
         # Lights & Switches
-        if re.search(r"^(?:turn\s+on|switch\s+on|power\s+on|lights\s+on)\b", q):
+        # Matches: "turn on lights", "turn the piano lamp off", "turn off the lamp", "piano lamp off", "lights on", etc.
+        if re.search(r"^(?:turn|switch|power|shut)\s+on\b", q) or re.search(r"^(?:turn|switch|power|shut)\s+.*?\bon\b", q) or re.search(r"\b(?:lights?|lamps?)\s+on$", q):
             return "turn_on", 1.0
 
-        if re.search(r"^(?:turn\s+off|switch\s+off|power\s+off|lights\s+off)\b", q):
+        if re.search(r"^(?:turn|switch|power|shut)\s+off\b", q) or re.search(r"^(?:turn|switch|power|shut)\s+.*?\boff\b", q) or re.search(r"\b(?:lights?|lamps?)\s+off$", q):
             return "turn_off", 1.0
 
         # Storage & Indexing
