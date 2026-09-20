@@ -6923,7 +6923,9 @@ async def save_geo_vehicle(request: Request):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to save vehicle")
+        err_msg = await resp.text()
+        log.error(f"[geo/vehicles] Save vehicle failed: {resp.status} - {err_msg}")
+    raise HTTPException(status_code=resp.status if resp.status < 500 else 502, detail=f"Failed to save vehicle: {err_msg}")
 
 
 @app.delete("/api/geo/vehicles/{vehicle_id}")
@@ -6936,7 +6938,9 @@ async def delete_geo_vehicle(vehicle_id: str):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to delete vehicle")
+        err_msg = await resp.text()
+        log.error(f"[geo/vehicles] Delete vehicle failed: {resp.status} - {err_msg}")
+    raise HTTPException(status_code=resp.status if resp.status < 500 else 502, detail=f"Failed to delete vehicle: {err_msg}")
 
 
 @app.get("/api/geo/vehicles/assigned/{user_id}")
@@ -6964,7 +6968,9 @@ async def assign_geo_vehicle(request: Request):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to assign vehicle")
+        err_msg = await resp.text()
+        log.error(f"[geo/vehicles] Assign vehicle failed: {resp.status} - {err_msg}")
+    raise HTTPException(status_code=resp.status if resp.status < 500 else 502, detail=f"Failed to assign vehicle: {err_msg}")
 
 
 @app.get("/api/geo/telemetry/{user_id}")
