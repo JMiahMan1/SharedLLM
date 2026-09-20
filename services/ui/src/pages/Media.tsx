@@ -275,7 +275,7 @@ const NowPlayingCard = ({
   onFavoriteToggle?: () => void;
   onSeek?: (time: number) => void;
   onStopPlayback?: () => void;
-  maPlayer?: { isConnected: boolean; connectionState: string; reconnect: () => void; mediaTitle?: string | null; mediaArtist?: string | null; mediaImage?: string | null };
+  maPlayer?: { isConnected: boolean; connectionState: string; reconnect: () => void; mediaTitle?: string | null; mediaArtist?: string | null; mediaImage?: string | null; mediaUri?: string | null; mediaFavorite?: boolean | null };
 }) => {
   const nowPlaying = mediaStatus?.state === 'playing' || mediaStatus?.state === 'paused';
   const isWebPlayer = !selectedTarget;
@@ -996,14 +996,20 @@ const Media = () => {
     if (playerState.duration !== undefined) {
       setLocalDuration(playerState.duration);
     }
-    if (playerState.mediaTitle || playerState.mediaArtist) {
+    if (playerState.mediaTitle || playerState.mediaArtist || playerState.mediaUri) {
       setLocalTrack(prev => {
-        if (!prev) return null;
-        if (prev.title === playerState.mediaTitle && prev.subtitle === playerState.mediaArtist) return prev;
+        const nextId = playerState.mediaUri || prev?.id || '';
+        const nextTitle = playerState.mediaTitle || prev?.title || 'Unknown Title';
+        const nextSubtitle = playerState.mediaArtist || prev?.subtitle || 'Unknown Artist';
+        if (prev && prev.id === nextId && prev.title === nextTitle && prev.subtitle === nextSubtitle) {
+          return prev;
+        }
         return {
-          ...prev,
-          title: playerState.mediaTitle || prev.title,
-          subtitle: playerState.mediaArtist || prev.subtitle,
+          id: nextId,
+          title: nextTitle,
+          subtitle: nextSubtitle,
+          type: prev?.type || 'music',
+          source: prev?.source || 'ma',
         };
       });
     }
@@ -1042,16 +1048,19 @@ const Media = () => {
 
   const activeUri = useMemo(() => {
     if (localMode) {
+      if (maPlayer.mediaUri && maPlayer.mediaUri.includes('://')) {
+        return maPlayer.mediaUri;
+      }
       return localTrack?.source === 'ma' ? localTrack.id : null;
     } else {
       return mediaStatus?.media_content_id || null;
     }
-  }, [localMode, localTrack, mediaStatus]);
+  }, [localMode, localTrack, mediaStatus, maPlayer.mediaUri]);
 
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
+    setDetailedMetadata(null);
     if (!activeUri || !activeUri.includes('://')) {
-      setDetailedMetadata(null);
       return;
     }
     let active = true;
@@ -1072,46 +1081,62 @@ const Media = () => {
   }, [activeUri]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  const isFavorite = useMemo(() => {
+    if (!activeUri) return false;
+    if (detailedMetadata) {
+      if (detailedMetadata.uri && detailedMetadata.uri !== activeUri) {
+        return false;
+      }
+      return Boolean(detailedMetadata.favorite);
+    }
+    if (localMode && maPlayer.mediaFavorite !== undefined && maPlayer.mediaFavorite !== null) {
+      return Boolean(maPlayer.mediaFavorite);
+    }
+    return false;
+  }, [detailedMetadata, activeUri, localMode, maPlayer.mediaFavorite]);
+
   const handleFavoriteToggle = useCallback(async () => {
     if (!activeUri) return;
-    const currentFavorite = Boolean(detailedMetadata?.favorite);
+    const currentFavorite = isFavorite;
     const targetFavorite = !currentFavorite;
     
     // Optimistic update
-    setDetailedMetadata((prev) => prev ? { ...prev, favorite: targetFavorite } : null);
+    setDetailedMetadata((prev) => prev ? { ...prev, uri: activeUri, favorite: targetFavorite } : { item_id: '', name: '', uri: activeUri, favorite: targetFavorite, media_type: 'track' });
     
     try {
       const resp = await api.setMediaFavorite(activeUri, targetFavorite);
       if (resp && (resp.status === 'SUCCESS' || resp.favorite !== undefined)) {
-        setDetailedMetadata((prev) => prev ? { ...prev, favorite: resp.favorite } : null);
+        setDetailedMetadata((prev) => prev ? { ...prev, uri: activeUri, favorite: resp.favorite } : null);
       }
     } catch (err) {
       console.error('Failed to toggle favorite:', err);
-      setDetailedMetadata((prev) => prev ? { ...prev, favorite: currentFavorite } : null);
+      setDetailedMetadata((prev) => prev ? { ...prev, uri: activeUri, favorite: currentFavorite } : null);
       setError('Failed to update favorite status');
     }
-  }, [activeUri, detailedMetadata]);
+  }, [activeUri, isFavorite]);
 
   const detailedSubtitle = useMemo(() => {
     const baseArtist = localMode ? localTrack?.subtitle : mediaStatus?.media_artist;
     const baseAlbum = localMode ? '' : mediaStatus?.media_album;
     
-    const artist = detailedMetadata?.artists?.map((a) => a.name).join(', ') || baseArtist || '';
-    const album = detailedMetadata?.album?.name || baseAlbum || '';
+    const isStale = detailedMetadata?.uri && activeUri && detailedMetadata.uri !== activeUri;
+    const artist = (!isStale && detailedMetadata?.artists?.map((a) => a.name).join(', ')) || baseArtist || '';
+    const album = (!isStale && detailedMetadata?.album?.name) || baseAlbum || '';
     
-    const podcast = detailedMetadata?.podcast?.name;
+    const podcast = !isStale ? detailedMetadata?.podcast?.name : undefined;
     const albumOrPodcast = podcast || album;
 
     if (artist && albumOrPodcast) {
       return `${artist} • ${albumOrPodcast}`;
     }
     return artist || albumOrPodcast || '';
-  }, [localMode, localTrack, mediaStatus, detailedMetadata]);
+  }, [localMode, localTrack, mediaStatus, detailedMetadata, activeUri]);
 
   const detailedTitle = useMemo(() => {
     const baseTitle = localMode ? localTrack?.title : mediaStatus?.media_title;
-    return detailedMetadata?.name || baseTitle || 'Unknown Title';
-  }, [localMode, localTrack, mediaStatus, detailedMetadata]);
+    const isStale = detailedMetadata?.uri && activeUri && detailedMetadata.uri !== activeUri;
+    return (!isStale && detailedMetadata?.name) || baseTitle || 'Unknown Title';
+  }, [localMode, localTrack, mediaStatus, detailedMetadata, activeUri]);
 
 
   const localSyncDataRef = useRef({ localTrack, localCurrentTime, localDuration, localVolume, localMuted });
@@ -1624,6 +1649,7 @@ const Media = () => {
     setError(null);
     const idClean = id.replace('abs-', '').replace('ma-', '');
     setLocalTrack({ id: idClean, title, subtitle, type, source });
+    setDetailedMetadata(null);
     setLocalVolume((prev) => { setLocalIsPlaying(true); return prev; });
 
     // Initialize player if not connected (establishes Sendspin + JSON-RPC)
@@ -1922,13 +1948,13 @@ const Media = () => {
       <NowPlayingCard
         mediaStatus={
           localMode
-            ? localTrack
+            ? (localTrack || maPlayer.isPlaying || maPlayer.mediaTitle)
               ? {
                   entity_id: 'web_player',
                   state: localIsPlaying ? 'playing' : 'paused',
                   media_title: detailedTitle,
                   media_artist: detailedSubtitle,
-                  media_type: localTrack.type,
+                  media_type: localTrack?.type || 'music',
                   volume_level: localVolume / 100,
                   is_volume_muted: localMuted,
                 }
@@ -1948,7 +1974,7 @@ const Media = () => {
         loading={localMode ? null : loading}
         currentTime={localMode ? localCurrentTime : remoteCurrentTime}
         duration={localMode ? localDuration : remoteDuration}
-        isFavorite={Boolean(detailedMetadata?.favorite)}
+        isFavorite={isFavorite}
         onPrevious={localMode ? () => maPlayer.previous() : isWebPlayer ? () => maPlayer.previous() : () => sendTransport('previous')}
         onTogglePlay={
           localMode
@@ -1962,7 +1988,7 @@ const Media = () => {
         onMuteToggle={localMode ? toggleLocalMute : toggleMute}
         onFavoriteToggle={activeUri ? handleFavoriteToggle : undefined}
         onSeek={localMode ? handleLocalSeek : (selectedTarget ? handleRemoteSeek : undefined)}
-        onStopPlayback={localMode && localTrack ? handleStopPlayback : undefined}
+        onStopPlayback={localMode && (localTrack || maPlayer.isPlaying) ? handleStopPlayback : undefined}
         maPlayer={maPlayer}
       />
 
