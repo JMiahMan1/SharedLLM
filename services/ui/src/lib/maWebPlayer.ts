@@ -150,6 +150,30 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     onStateChangeRef.current = onStateChange;
   }, [onStateChange]);
 
+  // Eagerly unlock Web Audio Context & audio element on first user interaction (touch/click)
+  useEffect(() => {
+    const unlockAudio = () => {
+      try {
+        if (audioRef.current && audioRef.current.paused) {
+          void audioRef.current.play().catch(() => {});
+        }
+        const sched = (playerRef.current as unknown as { scheduler?: { resumeAudioContext?: () => Promise<void>; audioContext?: AudioContext } })?.scheduler;
+        if (sched?.resumeAudioContext) {
+          void sched.resumeAudioContext();
+        } else if (sched?.audioContext && sched.audioContext.state === 'suspended') {
+          void sched.audioContext.resume();
+        }
+      } catch {}
+    };
+
+    window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
+    window.addEventListener('click', unlockAudio, { once: true, passive: true });
+    return () => {
+      window.removeEventListener('touchstart', unlockAudio);
+      window.removeEventListener('click', unlockAudio);
+    };
+  }, []);
+
   // Smoothly advance the playback position while playing, so the seek bar /
   // elapsed-time readout doesn't jump in coarse steps between MA's
   // player_updated / queue_time_updated events. MA only pushes position on
@@ -710,6 +734,17 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const play = useCallback(async (mediaUri?: string) => {
     console.log('[MAWebPlayer] play called, player exists:', !!playerRef.current);
     try {
+      // Eagerly unlock audio during direct user tap
+      if (audioRef.current && audioRef.current.paused) {
+        void audioRef.current.play().catch(() => {});
+      }
+      const sched = (playerRef.current as unknown as { scheduler?: { resumeAudioContext?: () => Promise<void>; audioContext?: AudioContext } })?.scheduler;
+      if (sched?.resumeAudioContext) {
+        void sched.resumeAudioContext();
+      } else if (sched?.audioContext && sched.audioContext.state === 'suspended') {
+        void sched.audioContext.resume();
+      }
+
       if (!playerRef.current) {
         console.log('[MAWebPlayer] Initializing player before play...');
         await initPlayer();

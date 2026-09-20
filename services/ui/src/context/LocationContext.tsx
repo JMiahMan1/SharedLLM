@@ -1,7 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
-import { storageGet } from '../lib/storage';
+import { storageGet, storageSet } from '../lib/storage';
+import { getServerOrigin } from '../lib/serverUrl';
 
 interface LocationState {
   latitude: number | null;
@@ -53,13 +54,46 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const syncToGateway = useCallback(async (lat: number, lng: number, accuracy: number | null, speed: number | null) => {
     try {
       const token = await storageGet('jarvis_api_key');
-      const serverUrl = await storageGet('jarvis_server_url');
+      const rawServerUrl = await storageGet('jarvis_server_url');
+      const serverUrl = rawServerUrl || getServerOrigin();
       if (!token || !serverUrl) return;
-      await fetch(`${serverUrl}/api/identity/users/location`, {
+
+      const user = (await storageGet('jarvis_user')) || (await storageGet('username')) || 'me';
+
+      let battery: number | undefined;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (typeof navigator !== 'undefined' && 'getBattery' in navigator) {
+          const b = await (navigator as any).getBattery();
+          if (b && typeof b.level === 'number') {
+            battery = Math.round(b.level * 100);
+          }
+        }
+      } catch {}
+
+      const payload = {
+        latitude: lat,
+        longitude: lng,
+        accuracy: accuracy ?? 0,
+        speed: speed ?? 0,
+        battery,
+        timestamp: Date.now() / 1000,
+        user_id: user,
+      };
+
+      const resp = await fetch(`${serverUrl}/api/users/${encodeURIComponent(user)}/location`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ latitude: lat, longitude: lng, accuracy, speed, timestamp: Date.now() }),
+        body: JSON.stringify(payload),
       });
+
+      if (!resp.ok && resp.status === 404) {
+        await fetch(`${serverUrl}/api/users/location`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(payload),
+        });
+      }
     } catch {
       // Will retry on next update
     }
@@ -94,6 +128,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   const startTracking = useCallback(async () => {
     setState((s) => ({ ...s, isTracking: true, error: null }));
+    void storageSet('jarvis_location_tracking_enabled', 'true');
 
     if (!Capacitor.isNativePlatform()) {
       if (!navigator.geolocation) {
@@ -146,6 +181,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   }, [handleLocationUpdate]);
 
   const stopTracking = useCallback(() => {
+    void storageSet('jarvis_location_tracking_enabled', 'false');
     if (watchIdRef.current !== null) {
       if (typeof watchIdRef.current === 'number') {
         navigator.geolocation.clearWatch(watchIdRef.current);
@@ -156,6 +192,18 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }
     setState((s) => ({ ...s, isTracking: false }));
   }, []);
+
+  // Auto-resume tracking if previously enabled or if running on mobile
+  useEffect(() => {
+    async function initTracking() {
+      const saved = await storageGet('jarvis_location_tracking_enabled');
+      const shouldTrack = saved === 'true' || (saved === null && Capacitor.isNativePlatform());
+      if (shouldTrack) {
+        void startTracking();
+      }
+    }
+    void initTracking();
+  }, [startTracking]);
 
   useEffect(() => {
     return () => {

@@ -6838,6 +6838,28 @@ async def update_user_location(user_id: str, request: Request):
     raise HTTPException(status_code=502, detail="Identity service unavailable")
 
 
+@app.post("/api/users/location")
+@app.post("/api/identity/users/location")
+async def update_current_user_location(request: Request):
+    """Update current user GPS location (resolving user_id from body, params, or default)."""
+    body = await request.json()
+    user_id = "default"
+    if isinstance(body, dict) and body.get("user_id"):
+        user_id = body["user_id"]
+    elif request.query_params.get("user_id"):
+        user_id = request.query_params["user_id"]
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/users/{user_id}/location",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Identity service unavailable")
+
+
 @app.get("/api/users/{user_id}/location")
 async def get_user_location(user_id: str):
     """Get user GPS location."""

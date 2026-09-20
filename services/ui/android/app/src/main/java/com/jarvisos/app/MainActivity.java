@@ -6,6 +6,8 @@ import android.os.Bundle;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -31,5 +33,36 @@ public class MainActivity extends BridgeActivity {
 
         getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(Color.TRANSPARENT);
+
+        configureWebView();
+    }
+
+    @Override
+    public void onStart() {
+        super.onStart();
+        configureWebView();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        configureWebView();
+    }
+
+    private void configureWebView() {
+        try {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                WebView webView = getBridge().getWebView();
+                WebSettings settings = webView.getSettings();
+                // Allow audio streaming and playback without requiring synchronous user gestures
+                // (crucial for Sendspin / Music Assistant WebSocket streaming audio)
+                settings.setMediaPlaybackRequiresUserGesture(false);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+                }
+            }
+        } catch (Exception e) {
+            // Guard against any lifecycle timing errors
+        }
     }
 }
