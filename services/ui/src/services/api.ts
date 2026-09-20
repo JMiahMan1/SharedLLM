@@ -544,7 +544,7 @@ export const api = {
     return resp.data;
   },
 
-  async saveVehicle(vehicle: { id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type?: string }): Promise<{ status: string; vehicle: any }> {
+  async saveVehicle(vehicle: { id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type?: string }): Promise<{ status: string; vehicle: Record<string, unknown> }> {
     const resp = await apiClient.post('/api/geo/vehicles', vehicle);
     return resp.data;
   },
@@ -554,7 +554,7 @@ export const api = {
     return resp.data;
   },
 
-  async getAssignedVehicle(userId: string): Promise<{ user_id: string; vehicle_id: string | null; vehicle: any | null }> {
+  async getAssignedVehicle(userId: string): Promise<{ user_id: string; vehicle_id: string | null; vehicle: Record<string, unknown> | null }> {
     const resp = await apiClient.get(`/api/geo/vehicles/assigned/${encodeURIComponent(userId)}`);
     return resp.data;
   },
@@ -598,12 +598,12 @@ export const api = {
     return resp.data;
   },
 
-  async getGeoPeople(): Promise<any> {
+  async getGeoPeople(): Promise<Record<string, unknown>> {
     const resp = await apiClient.get('/api/geo/people');
     return resp.data;
   },
 
-  async getGeoZones(): Promise<any> {
+  async getGeoZones(): Promise<Record<string, unknown>> {
     const resp = await apiClient.get('/api/geo/zones');
     return resp.data;
   },

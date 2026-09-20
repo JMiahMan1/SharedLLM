@@ -126,6 +126,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const jsonrpcWsRef = useRef<WebSocket | null>(null);
   const sendspinWsRef = useRef<WebSocket | null>(null);
   const playerIdRef = useRef<string>(getPlayerId() || '');
+  const [playerId, setPlayerId] = useState<string>(() => getPlayerId() || '');
   const reconnectAttemptsRef = useRef(0);
   const msgIdRef = useRef(0);
   const [state, setStateLocal] = useState<MAWebPlayerState>({
@@ -163,7 +164,9 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         } else if (sched?.audioContext && sched.audioContext.state === 'suspended') {
           void sched.audioContext.resume();
         }
-      } catch {}
+      } catch {
+        // AudioContext unlock error ignored
+      }
     };
 
     window.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
@@ -209,6 +212,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       setState({ player_id: id });
     }
     playerIdRef.current = id;
+    setPlayerId(id);
     return id;
   }, []);
 
@@ -982,7 +986,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
   return {
     ...state,
-    playerId: playerIdRef.current,
+    playerId,
     connect,
     play,
     pause,
