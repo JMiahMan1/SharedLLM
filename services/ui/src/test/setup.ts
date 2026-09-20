@@ -660,12 +660,55 @@ export const server = setupServer(
   })),
 );
 
+class MockLocalStorage {
+  private store: Record<string, string> = {};
+
+  getItem(key: string): string | null {
+    return this.store[key] ?? null;
+  }
+
+  setItem(key: string, value: string): void {
+    this.store[key] = String(value);
+  }
+
+  removeItem(key: string): void {
+    delete this.store[key];
+  }
+
+  clear(): void {
+    this.store = {};
+  }
+
+  get length(): number {
+    return Object.keys(this.store).length;
+  }
+
+  key(index: number): string | null {
+    const keys = Object.keys(this.store);
+    return keys[index] ?? null;
+  }
+}
+
+const mockLocalStorage = new MockLocalStorage();
+if (typeof window !== 'undefined') {
+  Object.defineProperty(window, 'localStorage', {
+    value: mockLocalStorage,
+    writable: true,
+  });
+}
+if (typeof globalThis !== 'undefined') {
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: mockLocalStorage,
+    writable: true,
+  });
+}
+
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 
 beforeEach(() => {
   resetMockState();
-  localStorage.clear();
-  localStorage.setItem('jarvis_api_key', 'test-token');
+  mockLocalStorage.clear();
+  mockLocalStorage.setItem('jarvis_api_key', 'test-token');
   class MockMediaRecorder {
     static isTypeSupported() {
       return true;

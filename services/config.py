@@ -330,7 +330,7 @@ CONFIG = {
     "assistant_model": ASSISTANT_MODEL or "",
     "librarian_model": LIBRARIAN_MODEL or "",
     "coding_model": CODING_MODEL or "",
-    "mass_config_entry_id": MASS_CONFIG_ENTRY_ID,
+    "mass_config_entry_id": MASS_CONFIG_ENTRY_ID or "",
 }
 
 # --- Special variables required for application startup ---

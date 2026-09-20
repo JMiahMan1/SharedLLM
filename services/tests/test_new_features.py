@@ -197,30 +197,35 @@ def test_quarantine_config_defaults():
 @pytest.mark.asyncio
 async def test_storage_status_returns_real_data():
     """Verify /status endpoint returns structured data with real fields."""
+    import os
+    from contextlib import asynccontextmanager
     from fastapi.testclient import TestClient
-
+    from services.config import INTERNAL_SECRET
     from services.storage.main import app
 
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "total_chunks": 1500,
-            "total_documents": 200,
-            "last_indexed": "2026-05-15T10:00:00Z",
-            "breakdown": {
-                "nextcloud_files": {"chunks": 800, "documents": 100},
-                "ha_entities": {"chunks": 500, "documents": 80},
-            },
-        }
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client_cls.return_value = mock_client
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value={
+        "total_chunks": 1500,
+        "total_documents": 200,
+        "last_indexed": "2026-05-15T10:00:00Z",
+        "breakdown": {
+            "nextcloud_files": {"chunks": 800, "documents": 100},
+            "ha_entities": {"chunks": 500, "documents": 80},
+        },
+    })
 
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=mock_resp)
+
+    @asynccontextmanager
+    async def mock_get_client():
+        yield mock_session
+
+    with patch("services.storage.main.get_client", mock_get_client):
         client = TestClient(app)
-        resp = client.get("/status")
+        secret = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
+        resp = client.get("/status", headers={"X-Internal-Secret": secret})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -235,22 +240,27 @@ async def test_storage_status_returns_real_data():
 @pytest.mark.asyncio
 async def test_storage_status_paused_state():
     """Verify /status endpoint includes indexer state field."""
+    import os
+    from contextlib import asynccontextmanager
     from fastapi.testclient import TestClient
-
+    from services.config import INTERNAL_SECRET
     from services.storage.main import app
 
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"total_chunks": 0, "total_documents": 0}
-        mock_client.get = AsyncMock(return_value=mock_response)
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client_cls.return_value = mock_client
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value={"total_chunks": 0, "total_documents": 0})
 
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=mock_resp)
+
+    @asynccontextmanager
+    async def mock_get_client():
+        yield mock_session
+
+    with patch("services.storage.main.get_client", mock_get_client):
         client = TestClient(app)
-        resp = client.get("/status")
+        secret = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
+        resp = client.get("/status", headers={"X-Internal-Secret": secret})
 
         assert resp.status_code == 200
         data = resp.json()
@@ -263,19 +273,23 @@ async def test_storage_status_paused_state():
 @pytest.mark.asyncio
 async def test_storage_status_rag_unavailable():
     """Verify /status still works when RAG service is unreachable."""
+    import os
+    from contextlib import asynccontextmanager
     from fastapi.testclient import TestClient
-
+    from services.config import INTERNAL_SECRET
     from services.storage.main import app
 
-    with patch("httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client.get = AsyncMock(side_effect=Exception("Connection refused"))
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=None)
-        mock_client_cls.return_value = mock_client
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(side_effect=Exception("Connection refused"))
 
+    @asynccontextmanager
+    async def mock_get_client():
+        yield mock_session
+
+    with patch("services.storage.main.get_client", mock_get_client):
         client = TestClient(app)
-        resp = client.get("/status")
+        secret = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
+        resp = client.get("/status", headers={"X-Internal-Secret": secret})
 
         assert resp.status_code == 200
         data = resp.json()

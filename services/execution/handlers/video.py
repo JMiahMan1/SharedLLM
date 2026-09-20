@@ -269,8 +269,8 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
             if info_out:
                 info = json.loads(info_out.decode())
                 title = info.get("title", video_url)
-        except:
-            pass
+        except Exception as e:
+            log.debug(f"[video] Failed to extract video title via yt-dlp: {e}")
 
         return media_id, title
 

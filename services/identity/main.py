@@ -3,6 +3,7 @@
 Microservice 1: Identity & Profile Service
 Manages user profiles, device assignments, and secure credential resolution.
 """
+import hmac
 import json
 import logging
 import os
@@ -67,7 +68,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] [%(n
 
 
 def _require_internal_secret(x_internal_secret: str | None) -> None:
-    if x_internal_secret != INTERNAL_SECRET:
+    expected = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
+    if not x_internal_secret or not (
+        (expected and hmac.compare_digest(x_internal_secret, expected))
+        or (INTERNAL_SECRET and hmac.compare_digest(x_internal_secret, INTERNAL_SECRET))
+    ):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 DATABASE_URL = IDENTITY_DATABASE_URL or "sqlite:///default.db"
@@ -337,13 +342,22 @@ def _migrate_api_key_material(session: Session) -> None:
     if dirty:
         session.commit()
 
+def _matches_internal_secret(val: str | None) -> bool:
+    if not val:
+        return False
+    expected = os.getenv("INTERNAL_SECRET", INTERNAL_SECRET)
+    return bool(
+        (expected and hmac.compare_digest(val, expected))
+        or (INTERNAL_SECRET and hmac.compare_digest(val, INTERNAL_SECRET))
+    )
+
 def require_internal(authorization: str = Header(None), x_internal_secret: str = Header(None, alias="X-Internal-Secret")):
-    if x_internal_secret == INTERNAL_SECRET:
+    if _matches_internal_secret(x_internal_secret):
         return
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing internal token")
     token = authorization.split(" ")[1]
-    if token != INTERNAL_SECRET:
+    if not _matches_internal_secret(token):
         raise HTTPException(status_code=403, detail="Invalid internal token")
 
 def require_admin_or_internal(
@@ -352,13 +366,13 @@ def require_admin_or_internal(
     session: Session = Depends(get_session)
 ):
     # Trust internal services
-    if x_internal_secret == INTERNAL_SECRET:
+    if _matches_internal_secret(x_internal_secret):
         return True
 
     # Trust bearer tokens matching internal secret
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
-        if token == INTERNAL_SECRET:
+        if _matches_internal_secret(token):
             return True
 
     # Check if user is admin via API key

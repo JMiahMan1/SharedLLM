@@ -125,7 +125,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const jsonrpcWsRef = useRef<WebSocket | null>(null);
   const sendspinWsRef = useRef<WebSocket | null>(null);
-  const playerIdRef = useRef<string>('');
+  const playerIdRef = useRef<string>(getPlayerId() || '');
   const reconnectAttemptsRef = useRef(0);
   const msgIdRef = useRef(0);
   const [state, setStateLocal] = useState<MAWebPlayerState>({
@@ -210,6 +210,22 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   // Handle MA JSON-RPC events (queue_updated, player_updated)
   const handleMaEvent = useCallback((eventType: string, data: Record<string, unknown>) => {
     console.log('[MAWebPlayer] MA event:', eventType, data);
+
+    const myPid = playerIdRef.current;
+    if (myPid) {
+      if (eventType === 'player_updated') {
+        const eventPlayerId = String(data?.player_id ?? data?.id ?? '');
+        if (eventPlayerId && eventPlayerId !== myPid && !eventPlayerId.includes(myPid) && !myPid.includes(eventPlayerId)) {
+          return;
+        }
+      }
+      if (eventType === 'queue_updated') {
+        const eventQueueId = String(data?.queue_id ?? data?.player_id ?? '');
+        if (eventQueueId && eventQueueId !== myPid && !eventQueueId.includes(myPid) && !myPid.includes(eventQueueId)) {
+          return;
+        }
+      }
+    }
 
     setStateLocal(prev => {
       const next = { ...prev };
@@ -415,6 +431,16 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       }
       sendspinWs = (player as unknown as { core: { wsManager: { ws: WebSocket } } }).core.wsManager.ws;
       sendspinWsRef.current = sendspinWs;
+      try {
+        player.setVolume(state.volume);
+        player.setMuted(state.muted);
+        if (audioRef.current) {
+          audioRef.current.volume = Math.max(0, Math.min(1, state.volume / 100));
+          audioRef.current.muted = state.muted;
+        }
+      } catch (volErr) {
+        console.warn('[MAWebPlayer] Initial volume sync failed:', volErr);
+      }
       console.log('[MAWebPlayer] player.connect() completed, volume:', player.volume, 'muted:', player.muted);
 
       // Set up onclose handler AFTER adopt() to avoid being overwritten
@@ -788,9 +814,13 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const setVolume = useCallback((volume: number) => {
     console.log('[MAWebPlayer] setVolume called:', volume);
     try {
+      if (playerRef.current) {
+        playerRef.current.setVolume(volume);
+      }
       if (audioRef.current) {
         audioRef.current.volume = Math.max(0, Math.min(1, volume / 100));
       }
+      setStateLocal(s => ({ ...s, volume }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] setVolume failed:', msg);
@@ -801,9 +831,13 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const setMuted = useCallback((muted: boolean) => {
     console.log('[MAWebPlayer] setMuted called:', muted);
     try {
+      if (playerRef.current) {
+        playerRef.current.setMuted(muted);
+      }
       if (audioRef.current) {
         audioRef.current.muted = muted;
       }
+      setStateLocal(s => ({ ...s, muted }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] setMuted failed:', msg);

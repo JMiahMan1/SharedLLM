@@ -1,6 +1,6 @@
-import httpx
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
-import respx
 
 from services.storage.models import StorageEntry
 from services.storage.nextcloud_client import NextCloudClient
@@ -8,9 +8,12 @@ from services.storage.nextcloud_client import NextCloudClient
 
 @pytest.fixture
 def client():
-    return NextCloudClient("http://nextcloud.local", "user", "pass")
+    c = NextCloudClient("http://nextcloud.local", "user", "pass")
+    mock_session = MagicMock()
+    c.client = mock_session
+    return c
 
-@respx.mock
+
 @pytest.mark.asyncio
 async def test_list_files_parsing(client):
     xml_content = b"""<?xml version="1.0" encoding="utf-8"?>
@@ -39,9 +42,10 @@ async def test_list_files_parsing(client):
  </d:response>
 </d:multistatus>
 """
-    respx.request("PROPFIND", "http://nextcloud.local/remote.php/dav/files/user/").mock(
-        return_value=httpx.Response(207, content=xml_content)
-    )
+    mock_resp = MagicMock()
+    mock_resp.status = 207
+    mock_resp.read = AsyncMock(return_value=xml_content)
+    client.client.request = AsyncMock(return_value=mock_resp)
 
     items = await client.list_files("/")
     assert len(items) == 2
@@ -51,7 +55,7 @@ async def test_list_files_parsing(client):
     assert items[1]["props"]["is_dir"] is False
     assert items[1]["props"]["size"] == "123"
 
-@respx.mock
+
 @pytest.mark.asyncio
 async def test_list_entries(client):
     xml_content = b"""<?xml version="1.0" encoding="utf-8"?>
@@ -72,9 +76,10 @@ async def test_list_entries(client):
  </d:response>
 </d:multistatus>
 """
-    respx.request("PROPFIND", "http://nextcloud.local/remote.php/dav/files/user/").mock(
-        return_value=httpx.Response(207, content=xml_content)
-    )
+    mock_resp = MagicMock()
+    mock_resp.status = 207
+    mock_resp.read = AsyncMock(return_value=xml_content)
+    client.client.request = AsyncMock(return_value=mock_resp)
 
     entries = await client.list_entries("/")
     assert len(entries) == 1
@@ -83,26 +88,27 @@ async def test_list_entries(client):
     assert entries[0].path == "/test.txt"
     assert entries[0].size == 500
 
-@respx.mock
+
 @pytest.mark.asyncio
 async def test_get_file_content(client):
-    respx.get("http://nextcloud.local/remote.php/dav/files/user/test.txt").mock(
-        return_value=httpx.Response(200, text="hello world")
-    )
+    mock_resp = MagicMock()
+    mock_resp.status = 200
+    mock_resp.text = AsyncMock(return_value="hello world")
+    client.client.get = AsyncMock(return_value=mock_resp)
+
     content = await client.get_file_content("/test.txt")
     assert content == "hello world"
 
-@respx.mock
+
 @pytest.mark.asyncio
 async def test_write_file_content(client):
-    # Mock MKCOL for parent dir
-    respx.request("MKCOL", "http://nextcloud.local/remote.php/dav/files/user/folder").mock(
-        return_value=httpx.Response(201)
-    )
-    # Mock PUT for file
-    respx.put("http://nextcloud.local/remote.php/dav/files/user/folder/test.txt").mock(
-        return_value=httpx.Response(201)
-    )
+    mock_mkcol = MagicMock()
+    mock_mkcol.status = 201
+    client.client.request = AsyncMock(return_value=mock_mkcol)
+
+    mock_put = MagicMock()
+    mock_put.raise_for_status = MagicMock()
+    client.client.put = AsyncMock(return_value=mock_put)
 
     res = await client.write_file_content("/folder/test.txt", "content")
     assert res["bytes_written"] == 7

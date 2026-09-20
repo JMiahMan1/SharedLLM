@@ -268,14 +268,18 @@ class TestPlayPodcast:
             "service_response": track_api_response,
         }
         import services.execution.ha_client as ha_client_module
+
+        async def _mock_call_service(ha_url, ha_token, domain, service, entity_id=None, service_data=None, return_response=False):
+            if service == "search":
+                if (service_data or {}).get("media_type") == ["track"]:
+                    return track_response
+                return empty_response
+            return {"ok": True}
+
         with (
             patch.object(
                 ha_client_module, 'call_service',
-                new=AsyncMock(side_effect=[
-                    empty_response,  # podcast search
-                    track_response,  # track search
-                    {"ok": True},  # play_media
-                ]),
+                new=_mock_call_service,
             ),
             patch(
                 "services.execution.handlers.media.resolve_mass_entity",
@@ -331,36 +335,30 @@ class TestABSHandlers:
             query="The Hobbit",
             limit=5,
         )
-        mock_search_result = {
-            "book": [
-                {
-                    "libraryItem": {
-                        "id": "abc123",
-                        "media": {
-                            "metadata": {
-                                "title": "The Hobbit",
-                                "authorName": "J.R.R. Tolkien",
-                                "narratorName": "Rob Inglis",
-                                "series": "The Hobbit",
-                                "publishedYear": "1937",
-                                "genres": ["Fantasy", "Adventure"],
-                                "description": "A classic fantasy adventure novel.",
-                                "tags": ["classic", "fantasy"],
-                                "language": "en",
-                            },
-                            "duration": 54000,
-                            "chapters": [
-                                {"id": "ch1", "title": "An Unexpected Party", "startTime": 0},
-                                {"id": "ch2", "title": "Roof and Floor", "startTime": 600},
-                            ],
-                        },
-                        "status": "active",
-                        "progress": 0.45,
-                    }
-                }
-            ],
-        }
-        with patch("services.execution.handlers.audiobookshelf.abs_client.search_library", new=AsyncMock(return_value=mock_search_result)):
+        mock_libraries = {"libraries": [{"id": "lib_audiobooks", "name": "Audiobooks", "mediaType": "book"}]}
+        mock_items = [
+            {
+                "id": "abc123",
+                "media": {
+                    "metadata": {
+                        "title": "The Hobbit",
+                        "authorName": "J.R.R. Tolkien",
+                        "narratorName": "Rob Inglis",
+                        "seriesName": "The Hobbit",
+                        "publishedYear": "1937",
+                        "genres": ["Fantasy", "Adventure"],
+                        "description": "A classic fantasy adventure novel.",
+                        "tags": ["classic", "fantasy"],
+                        "language": "en",
+                    },
+                    "duration": 54000,
+                },
+            }
+        ]
+        with (
+            patch("services.execution.handlers.audiobookshelf.abs_client.get_libraries", new=AsyncMock(return_value=mock_libraries)),
+            patch("services.execution.handlers.audiobookshelf.abs_client.get_all_library_items", new=AsyncMock(return_value=mock_items)),
+        ):
             result = await _handle_search(abs_url, abs_key, req)
 
         assert result.status == "SUCCESS"
@@ -373,9 +371,8 @@ class TestABSHandlers:
         assert book["series"] == "The Hobbit"
         assert book["publishedYear"] == "1937"
         assert book["genres"] == ["Fantasy", "Adventure"]
-        assert book["chapter_count"] == 2
-        assert book["status"] == "active"
-        assert book["progress"] == 0.45
+        assert book["duration"] == 54000
+        assert book["type"] == "book"
 
     @pytest.mark.asyncio
     async def test_last_played_returns_complete_details(self, ctx):
@@ -448,7 +445,11 @@ class TestABSHandlers:
             query="Nonexistent Book XYZ",
             limit=5,
         )
-        with patch("services.execution.handlers.audiobookshelf.abs_client.search_library", new=AsyncMock(return_value={"book": []})):
+        mock_libraries = {"libraries": [{"id": "lib_audiobooks", "name": "Audiobooks", "mediaType": "book"}]}
+        with (
+            patch("services.execution.handlers.audiobookshelf.abs_client.get_libraries", new=AsyncMock(return_value=mock_libraries)),
+            patch("services.execution.handlers.audiobookshelf.abs_client.get_all_library_items", new=AsyncMock(return_value=[])),
+        ):
             result = await _handle_search(abs_url, abs_key, req)
 
         assert result.status == "SUCCESS"
@@ -468,15 +469,11 @@ class TestABSHandlers:
             query="Test Query",
             limit=5,
         )
-        with (
-            patch("services.execution.handlers.audiobookshelf.abs_client.search_library", new=AsyncMock(return_value={"error": "API key invalid"})),
-            patch("services.execution.handlers.audiobookshelf.abs_client.search_all", new=AsyncMock(return_value={"books": [], "podcasts": [], "authors": []})),
-        ):
+        with patch("services.execution.handlers.audiobookshelf.abs_client.get_libraries", new=AsyncMock(return_value={"error": "API key invalid"})):
             result = await _handle_search(abs_url, abs_key, req)
 
-        # Falls through to external search which also returns no results
-        assert result.status == "SUCCESS"
-        assert "Found 0 result(s)" in result.message
+        assert result.status == "FAILURE"
+        assert "API key invalid" in result.message
 
     @pytest.mark.asyncio
     async def test_last_played_no_results(self, ctx):
@@ -611,14 +608,18 @@ class TestFullMediaPlayFlow:
         }
 
         import services.execution.ha_client as ha_client_module
+
+        async def _mock_call_service(ha_url, ha_token, domain, service, entity_id=None, service_data=None, return_response=False):
+            if service == "search":
+                if (service_data or {}).get("media_type") == ["track"]:
+                    return track_result
+                return empty_podcast
+            return {"ok": True}
+
         with (
             patch.object(
                 ha_client_module, 'call_service',
-                new=AsyncMock(side_effect=[
-                    empty_podcast,  # podcast search
-                    track_result,  # track search
-                    {"ok": True},  # play_media
-                ]),
+                new=_mock_call_service,
             ),
             patch(
                 "services.execution.handlers.media.resolve_mass_entity",
@@ -702,16 +703,22 @@ class TestGatewayStreamEndpoint:
             async def json(self):
                 return {}
 
+        from contextlib import asynccontextmanager
+
+        mock_client = AsyncMock()
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.json = AsyncMock(return_value=[])
+        mock_client.post = AsyncMock(return_value=mock_resp)
+
+        @asynccontextmanager
+        async def mock_http():
+            yield mock_client
+
         with (
             mock_patch("services.gateway.main._resolve_identity_from_request", new=mock_resolve),
-            mock_patch("services.gateway.main.httpx.AsyncClient") as mock_client_cls,
+            mock_patch("services.gateway.main.shared_http_client", new=mock_http),
         ):
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client.post = AsyncMock(return_value=MM(status_code=200, json=MM(return_value={"players": []})))
-            mock_client_cls.return_value = mock_client
-
             with pytest.raises(HTTPException) as exc_info:
                 await stream_music_assistant("music://track/12345", cast(Request, FakeRequest()))
 
@@ -721,6 +728,7 @@ class TestGatewayStreamEndpoint:
     @pytest.mark.asyncio
     async def test_stream_ma_prefers_browser_player(self, ctx):
         """Stream endpoint should prefer the browser Sendspin player."""
+        from contextlib import asynccontextmanager
         from fastapi import Request
 
         from services.gateway.ma_ws_client import MAWebSocketClient
@@ -755,39 +763,41 @@ class TestGatewayStreamEndpoint:
             async def json(self):
                 return {}
 
+        async def mock_post(url, json=None, headers=None, timeout=None):
+            if (json or {}).get("command") == "players/all":
+                resp = AsyncMock()
+                resp.status = 200
+                resp.json = AsyncMock(return_value=[
+                    {"player_id": "office_tv", "name": "Office TV"},
+                    {"player_id": "browser_player", "name": "Sendspin JS Client (test)"},
+                ])
+                return resp
+            resp = AsyncMock()
+            resp.status = 500
+            return resp
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=mock_post)
+
+        @asynccontextmanager
+        async def mock_http():
+            yield mock_client
+
         with (
             patch("services.gateway.main._resolve_identity_from_request", new=mock_resolve),
+            patch("services.gateway.main.shared_http_client", new=mock_http),
             patch.object(MAWebSocketClient, "connect", new=mock_connect),
             patch.object(MAWebSocketClient, "disconnect", new=mock_disconnect),
             patch.object(MAWebSocketClient, "send_command", new=mock_send_command),
         ):
-            # Mock player list and status
-            async def mock_post(url, json=None, headers=None, timeout=15.0):
-                if (json or {}).get("command") == "players/all":
-                    return MM(
-                        status_code=200,
-                        json=MM(return_value=[
-                            {"player_id": "office_tv", "name": "Office TV"},
-                            {"player_id": "browser_player", "name": "Sendspin JS Client (test)"},
-                        ]),
-                    )
-                return MM(status_code=500)
+            # This will fail once the stream URL loop times out, but we can
+            # verify that the browser player was selected first.
+            with pytest.raises(Exception):
+                await stream_music_assistant("music://track/12345", cast(Request, FakeRequest()))
 
-            with patch("services.gateway.main.httpx.AsyncClient") as mock_client_cls:
-                mock_client = AsyncMock()
-                mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client.__aexit__ = AsyncMock(return_value=False)
-                mock_client.post = AsyncMock(side_effect=mock_post)
-                mock_client_cls.return_value = mock_client
-
-                # This will fail once the stream URL loop times out, but we can
-                # verify that the browser player was selected first.
-                with pytest.raises(Exception):
-                    await stream_music_assistant("music://track/12345", cast(Request, FakeRequest()))
-
-                assert sent_commands, "Expected at least one MA command to be sent"
-                assert sent_commands[0][0] == "player_queues/play_media"
-                assert sent_commands[0][1].get("queue_id") == "browser_player"
+            assert sent_commands, "Expected at least one MA command to be sent"
+            assert sent_commands[0][0] == "player_queues/play_media"
+            assert sent_commands[0][1].get("queue_id") == "browser_player"
 
 
 

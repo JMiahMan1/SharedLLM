@@ -393,13 +393,13 @@ const NowPlayingCard = ({
               if (!onSeek) return;
               const rect = e.currentTarget.getBoundingClientRect();
               const x = e.clientX - rect.left;
-              const percent = x / rect.width;
+              const percent = Math.max(0, Math.min(1, x / rect.width));
               onSeek(percent * duration);
             }}
           >
             <div
               className="h-full bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full transition-all relative"
-              style={{ width: `${Math.min(100, (currentTime / duration) * 100)}%` }}
+              style={{ width: `${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%` }}
             >
               {onSeek && (
                 <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
@@ -970,6 +970,8 @@ const Media = () => {
   const [localDuration, setLocalDuration] = useState(0);
   const localProgressTimerRef = useRef<number | null>(null);
   const connectAttemptedRef = useRef(false);
+  const lastVolumeChangeTimeRef = useRef<number>(0);
+  const volumeDebounceTimerRef = useRef<number | null>(null);
 
   // MA Web Player (sendspin-js)
   const maPlayer = useMAWebPlayer(useCallback((playerState) => {
@@ -977,7 +979,9 @@ const Media = () => {
       setLocalIsPlaying(playerState.isPlaying);
     }
     if (playerState.volume !== undefined) {
-      setLocalVolume(playerState.volume);
+      if (Date.now() - lastVolumeChangeTimeRef.current >= 4000) {
+        setLocalVolume(playerState.volume);
+      }
     }
     if (playerState.muted !== undefined) {
       setLocalMuted(playerState.muted);
@@ -1120,40 +1124,35 @@ const Media = () => {
     }
   }, [localMuted, maPlayer.isConnected, maPlayer]);
 
-  // Handle local playback progress tracking
+  const localSyncDataRef = useRef({ localTrack, localCurrentTime, localDuration, localVolume, localMuted });
   useEffect(() => {
-    if (localIsPlaying && maPlayer.audioRef.current) {
-      let counter = 0;
-      localProgressTimerRef.current = window.setInterval(() => {
-        if (maPlayer.audioRef.current && !maPlayer.audioRef.current.paused) {
-          const pos = maPlayer.audioRef.current.currentTime;
-          setLocalCurrentTime(pos);
-          
-          counter++;
-          if (counter >= 5 && localTrack) {
-            counter = 0;
-            api.syncMediaState({
-              entity_id: 'web_player',
-              state: 'playing',
-              media_type: localTrack.type,
-              media_content_id: localTrack.id,
-              media_title: localTrack.title,
-              media_artist: localTrack.subtitle,
-              position: pos,
-              duration: maPlayer.audioRef.current.duration || 0,
-              volume_level: localVolume / 100,
-              is_volume_muted: localMuted
-            }).catch(err => console.error('Failed to sync progress:', err));
-          }
-        }
-      }, 1000);
-    }
+    localSyncDataRef.current = { localTrack, localCurrentTime, localDuration, localVolume, localMuted };
+  }, [localTrack, localCurrentTime, localDuration, localVolume, localMuted]);
+
+  // Periodic local playback state sync to backend (uses true track position and duration)
+  useEffect(() => {
+    if (!localIsPlaying) return;
+    const timer = window.setInterval(() => {
+      const data = localSyncDataRef.current;
+      if (!data.localTrack) return;
+      api.syncMediaState({
+        entity_id: 'web_player',
+        state: 'playing',
+        media_type: data.localTrack.type,
+        media_content_id: data.localTrack.id,
+        media_title: data.localTrack.title,
+        media_artist: data.localTrack.subtitle,
+        position: data.localCurrentTime,
+        duration: data.localDuration,
+        volume_level: data.localVolume / 100,
+        is_volume_muted: data.localMuted
+      }).catch(err => console.error('Failed to sync progress:', err));
+    }, 5000);
+
     return () => {
-      if (localProgressTimerRef.current) {
-        clearInterval(localProgressTimerRef.current);
-      }
+      clearInterval(timer);
     };
-  }, [localIsPlaying, maPlayer.audioRef, localTrack, localVolume, localMuted]);
+  }, [localIsPlaying]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1173,8 +1172,10 @@ const Media = () => {
   // Sync remote time when mediaStatus changes
   useEffect(() => {
     if (mediaStatus) {
-      setRemoteCurrentTime(mediaStatus.position || 0);
-      setRemoteDuration(mediaStatus.duration || 0);
+      const pos = mediaStatus.position ?? (mediaStatus as unknown as { media_position?: number }).media_position ?? 0;
+      const dur = mediaStatus.duration ?? (mediaStatus as unknown as { media_duration?: number }).media_duration ?? 0;
+      setRemoteCurrentTime(pos);
+      setRemoteDuration(dur);
     } else {
       setRemoteCurrentTime(0);
       setRemoteDuration(0);
@@ -1187,7 +1188,7 @@ const Media = () => {
     if (mediaStatus?.state === 'playing' && !localMode) {
       timer = window.setInterval(() => {
         setRemoteCurrentTime((prev) => {
-          const dur = mediaStatus.duration || 0;
+          const dur = remoteDuration || mediaStatus.duration || (mediaStatus as unknown as { media_duration?: number }).media_duration || 0;
           if (dur > 0 && prev >= dur) return dur;
           return prev + 1;
         });
@@ -1196,7 +1197,7 @@ const Media = () => {
     return () => {
       if (timer) clearInterval(timer);
     };
-  }, [mediaStatus?.state, mediaStatus?.duration, localMode]);
+  }, [mediaStatus?.state, mediaStatus?.duration, remoteDuration, localMode]);
 
   // If localMode is turned off, pause the local player automatically so it doesn't leak audio
   // When switching back to localMode, restore WebPlayer state and resume if it was playing
@@ -1322,10 +1323,11 @@ const Media = () => {
                 }
               }
               
-              if (active.volume_level !== undefined && active.volume_level !== null) {
+              const inGrace = Date.now() - lastVolumeChangeTimeRef.current < 4000;
+              if (!inGrace && active.volume_level !== undefined && active.volume_level !== null) {
                 setLocalVolume(Math.round(active.volume_level * 100));
               }
-              if (active.is_volume_muted !== undefined) {
+              if (!inGrace && active.is_volume_muted !== undefined) {
                 setLocalMuted(active.is_volume_muted);
               }
             } else {
@@ -1334,20 +1336,22 @@ const Media = () => {
               const targetPlayer = allPlayers.find(p => p.entity_id === selectedTarget);
               if (targetPlayer) {
                 setMediaStatus(targetPlayer);
-                if (targetPlayer.volume_level !== undefined && targetPlayer.volume_level !== null) {
+                const inGrace = Date.now() - lastVolumeChangeTimeRef.current < 4000;
+                if (!inGrace && targetPlayer.volume_level !== undefined && targetPlayer.volume_level !== null) {
                   setVolume(Math.round(Number(targetPlayer.volume_level) * 100));
                 }
-                if (targetPlayer.is_volume_muted !== undefined) {
+                if (!inGrace && targetPlayer.is_volume_muted !== undefined) {
                   setMuted(Boolean(targetPlayer.is_volume_muted));
                 }
               }
             }
           } else {
             setMediaStatus(active);
-            if (active.volume_level !== undefined && active.volume_level !== null) {
+            const inGrace = Date.now() - lastVolumeChangeTimeRef.current < 4000;
+            if (!inGrace && active.volume_level !== undefined && active.volume_level !== null) {
               setVolume(Math.round(Number(active.volume_level) * 100));
             }
-            if (active.is_volume_muted !== undefined) {
+            if (!inGrace && active.is_volume_muted !== undefined) {
               setMuted(Boolean(active.is_volume_muted));
             }
           }
@@ -1356,10 +1360,11 @@ const Media = () => {
           const targetPlayer = selectedTarget ? allPlayers.find(p => p.entity_id === selectedTarget) : null;
           if (targetPlayer) {
             setMediaStatus(targetPlayer);
-            if (targetPlayer.volume_level !== undefined && targetPlayer.volume_level !== null) {
+            const inGrace = Date.now() - lastVolumeChangeTimeRef.current < 4000;
+            if (!inGrace && targetPlayer.volume_level !== undefined && targetPlayer.volume_level !== null) {
               setVolume(Math.round(Number(targetPlayer.volume_level) * 100));
             }
-            if (targetPlayer.is_volume_muted !== undefined) {
+            if (!inGrace && targetPlayer.is_volume_muted !== undefined) {
               setMuted(Boolean(targetPlayer.is_volume_muted));
             }
           } else {
@@ -1719,28 +1724,35 @@ const Media = () => {
   }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, localCurrentTime, maPlayer, setLocalIsPlaying]);
 
   const handleLocalVolume = useCallback((v: number) => {
+    lastVolumeChangeTimeRef.current = Date.now();
     setLocalVolume(v);
     setLocalMuted(false);
     console.log('[Media] Setting volume to:', v);
     maPlayer.setVolume(v);
-    if (localTrack) {
-      api.syncMediaState({
-        entity_id: 'web_player',
-        state: localIsPlaying ? 'playing' : 'paused',
-        media_type: localTrack.type,
-        media_content_id: localTrack.id,
-        media_title: localTrack.title,
-        media_artist: localTrack.subtitle,
-        position: localCurrentTime,
-        duration: localDuration,
-        volume_level: v / 100,
-        is_volume_muted: false
-      }).catch(err => console.error('[Media] Failed to sync volume:', err));
+    if (volumeDebounceTimerRef.current) {
+      clearTimeout(volumeDebounceTimerRef.current);
     }
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, maPlayer, setLocalVolume, setLocalMuted]);
+    volumeDebounceTimerRef.current = window.setTimeout(() => {
+      if (localTrack) {
+        api.syncMediaState({
+          entity_id: 'web_player',
+          state: localIsPlaying ? 'playing' : 'paused',
+          media_type: localTrack.type,
+          media_content_id: localTrack.id,
+          media_title: localTrack.title,
+          media_artist: localTrack.subtitle,
+          position: localCurrentTime,
+          duration: localDuration,
+          volume_level: v / 100,
+          is_volume_muted: false
+        }).catch(err => console.error('[Media] Failed to sync volume:', err));
+      }
+    }, 200);
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, maPlayer]);
 
   const toggleLocalMute = useCallback(() => {
     const nextMuted = !localMuted;
+    lastVolumeChangeTimeRef.current = Date.now();
     setLocalMuted(nextMuted);
     console.log('[Media] Muting:', nextMuted);
     maPlayer.setMuted(nextMuted);
@@ -1758,7 +1770,7 @@ const Media = () => {
         is_volume_muted: nextMuted
       }).catch(err => console.error('[Media] Failed to sync mute:', err));
     }
-  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted, maPlayer, setLocalMuted]);
+  }, [localTrack, localIsPlaying, localCurrentTime, localDuration, localVolume, localMuted, maPlayer]);
 
   const handleLocalSeek = useCallback((time: number) => {
     console.log('[Media] Seek to:', time);
@@ -1778,7 +1790,23 @@ const Media = () => {
         is_volume_muted: localMuted
       }).catch(err => console.error('[Media] Failed to sync seek:', err));
     }
-  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer, setLocalCurrentTime]);
+  }, [localTrack, localIsPlaying, localDuration, localVolume, localMuted, maPlayer]);
+
+  const handleRemoteSeek = useCallback(async (time: number) => {
+    if (!selectedTarget) return;
+    setRemoteCurrentTime(time);
+    if (selectedTarget.startsWith('ma:')) {
+      const pid = selectedTarget.slice(3);
+      try {
+        if (!maPlayer.isConnected) await maPlayer.connect();
+        await maPlayer.maCommand('players/cmd_seek', { player_id: pid, position: time });
+      } catch { /* ignore */ }
+      return;
+    }
+    try {
+      await api.mediaTransport({ entity_id: selectedTarget, command: 'seek', position: time });
+    } catch { /* ignore */ }
+  }, [selectedTarget, maPlayer]);
 
   const handleStopPlayback = useCallback(() => {
     console.log('[Media] Stop playback');
@@ -1802,26 +1830,34 @@ const Media = () => {
     setLocalCurrentTime(0);
     setLocalDuration(0);
     maPlayer.disconnect();
-  }, [localTrack, localDuration, localVolume, localMuted, maPlayer, releaseControl, setLocalTrack, setLocalIsPlaying, setLocalCurrentTime, setLocalDuration]);
+  }, [localTrack, localDuration, localVolume, localMuted, maPlayer, releaseControl]);
 
-  const handleVolume = useCallback(async (v: number) => {
+  const handleVolume = useCallback((v: number) => {
     if (!selectedTarget) return;
+    lastVolumeChangeTimeRef.current = Date.now();
     setVolume(v);
-    if (selectedTarget.startsWith('ma:')) {
-      const pid = selectedTarget.slice(3);
-      try {
-        if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('players/cmd_volume_set', { player_id: pid, volume_level: v / 100 });
-      } catch { /* ignore */ }
-      return;
+    if (volumeDebounceTimerRef.current) {
+      clearTimeout(volumeDebounceTimerRef.current);
     }
-    try { await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_set', volume_level: v / 100 }); }
-    catch { /* ignore */ }
+    volumeDebounceTimerRef.current = window.setTimeout(async () => {
+      if (selectedTarget.startsWith('ma:')) {
+        const pid = selectedTarget.slice(3);
+        try {
+          if (!maPlayer.isConnected) await maPlayer.connect();
+          await maPlayer.maCommand('players/cmd_volume_set', { player_id: pid, volume_level: v / 100 });
+        } catch { /* ignore */ }
+        return;
+      }
+      try {
+        await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_set', volume_level: v / 100 });
+      } catch { /* ignore */ }
+    }, 150);
   }, [selectedTarget, maPlayer]);
 
   const toggleMute = useCallback(async () => {
     if (!selectedTarget) return;
     const newMuted = !muted;
+    lastVolumeChangeTimeRef.current = Date.now();
     setMuted(newMuted);
     if (selectedTarget.startsWith('ma:')) {
       const pid = selectedTarget.slice(3);
@@ -1918,7 +1954,7 @@ const Media = () => {
         onVolumeChange={localMode ? handleLocalVolume : handleVolume}
         onMuteToggle={localMode ? toggleLocalMute : toggleMute}
         onFavoriteToggle={activeUri ? handleFavoriteToggle : undefined}
-        onSeek={localMode ? handleLocalSeek : undefined}
+        onSeek={localMode ? handleLocalSeek : (selectedTarget ? handleRemoteSeek : undefined)}
         onStopPlayback={localMode && localTrack ? handleStopPlayback : undefined}
         maPlayer={maPlayer}
       />

@@ -1833,6 +1833,11 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str | Non
     return best_eid if best_score > 0 else None
 
 
+def resolve_video_target(query: str, entities: list[dict], fallback: str | None = None) -> str | None:
+    """Resolve target media player specifically for video playback."""
+    return resolve_media_target(query, entities, media_type="video") or fallback
+
+
 # --- Helper Functions ---
 async def decompose_command_query(query: str) -> list[str]:
     if " and " not in query.lower() and " then " not in query.lower():
@@ -7961,7 +7966,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
         try:
             creds = await _resolve_identity_from_request(request)
             if not isinstance(creds, dict):
-                creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
+                creds = creds.model_dump() if hasattr(creds, "model_dump") else (creds.dict() if hasattr(creds, "dict") else dict(creds))
             log.info(f"[stream/ma] Identity resolved for user: {creds.get('user')}")
         except HTTPException as e:
             log.error(f"[stream/ma] Identity resolution failed: {e.detail}")

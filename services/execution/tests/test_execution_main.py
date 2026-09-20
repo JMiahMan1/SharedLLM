@@ -206,11 +206,13 @@ def test_transcribe_workspace_success(mocker, tmp_path):
         "services.execution.handlers.workspace._resolve_workspace_info",
         return_value=(str(tmp_path), {}),
     )
+    fake_whisper = mocker.MagicMock()
     fake_model = mocker.MagicMock()
     fake_model.transcribe.return_value = {
         "text": "John chapter 3, verse 16. Nineteen ninety-five. Fourteen hundred B.C.",
     }
-    mocker.patch("whisper.load_model", return_value=fake_model)
+    fake_whisper.load_model.return_value = fake_model
+    mocker.patch.dict("sys.modules", {"whisper": fake_whisper})
 
     resp = client.post(
         "/execute/stt/transcribe_workspace",

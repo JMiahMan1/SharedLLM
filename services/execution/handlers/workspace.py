@@ -287,14 +287,12 @@ def _require_capability(workspace: dict, capability: str):
 def resolve_safe_path(path: str, workspace_root: str | None = None) -> str:
     """Ensure the path stays within workspace_root."""
     actual_root = workspace_root or WORKSPACE_ROOT or "/workspace"
-    workspace_root_abs = os.path.abspath(actual_root)
+    workspace_root_abs = os.path.realpath(actual_root)
 
     # If the path is already an absolute path inside the workspace root (agents often
     # write to the exact resolved_path they were told), use it directly.
-    cand = os.path.abspath(path)
+    cand = os.path.realpath(path)
     if cand == workspace_root_abs or cand.startswith(workspace_root_abs + os.sep):
-        if not cand.startswith(workspace_root_abs):
-            raise ValueError(f"Path traversal detected: {path}")
         return cand
 
     # Otherwise treat the path as relative to the workspace root.

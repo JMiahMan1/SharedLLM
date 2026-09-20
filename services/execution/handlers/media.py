@@ -498,13 +498,13 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
         if search_result.get("ok") and search_result.get("service_response"):
             raw = search_result["service_response"]
             resp = raw.get("service_response", raw)
-            if any(resp.get(cat) for cat in ["podcasts", "episodes", "tracks"]):
+            if any(resp.get(cat) for cat in ["podcasts", "episodes"]):
                 break
 
     if search_result.get("ok") and search_result.get("service_response"):
         raw = search_result["service_response"]
         resp = raw.get("service_response", raw)
-        for category in ["podcasts", "episodes", "tracks"]:
+        for category in ["podcasts", "episodes"]:
             items = resp.get(category, [])
             if items:
                 uri = items[0].get("uri")

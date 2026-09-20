@@ -82,8 +82,8 @@ for ep in GATEWAY_ENDPOINTS:
 
 GATEWAY_URL: str = gateway_url or ""  # type: ignore[assignment]
 
-if not GATEWAY_URL:
-    pytest.skip("Gateway unreachable — skip live tests", allow_module_level=True)
+if not GATEWAY_URL or not os.getenv("RUN_RAVEN_LIVE_TESTS"):
+    pytest.skip("Raven live integration tests require RUN_RAVEN_LIVE_TESTS=1 and reachable gateway", allow_module_level=True)
 
 print(f"[LIVE TESTS] Using gateway: {GATEWAY_URL}")
 

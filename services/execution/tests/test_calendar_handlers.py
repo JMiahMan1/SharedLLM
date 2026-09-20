@@ -65,9 +65,9 @@ async def test_calendar_read_merges_and_sorts_all_calendars():
         )
 
     assert result.status == "SUCCESS"
-    assert "Upcoming Events:" in result.message
-    assert "Alpha" in result.message
-    assert "Beta" in result.message
+    summaries = [e["summary"] for e in (result.events or [])]
+    assert "Alpha" in summaries
+    assert "Beta" in summaries
 
 
 async def test_calendar_read_survives_one_failing_calendar():
@@ -97,7 +97,8 @@ async def test_calendar_read_survives_one_failing_calendar():
         )
 
     assert result.status == "SUCCESS"
-    assert "No events found." in result.message
+    assert len(result.events or []) == 0
+    assert "Loaded 0 event(s)." in result.message
 
 
 async def test_calendar_read_skips_noise_calendars():
@@ -119,5 +120,6 @@ async def test_calendar_read_skips_noise_calendars():
         )
 
     assert result.status == "SUCCESS"
-    assert "Keep" in result.message
-    assert "Should Skip" not in result.message
+    summaries = [e["summary"] for e in (result.events or [])]
+    assert "Keep" in summaries
+    assert "Should Skip" not in summaries
