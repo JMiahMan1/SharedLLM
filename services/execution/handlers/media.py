@@ -66,6 +66,22 @@ async def resolve_entity(req: MediaPlayRequest, ha_url: str, ha_token: str, medi
         if entity_id:
             return entity_id
 
+    # Fallback to active or available media_player from Home Assistant
+    states = await ha_client.get_states(ha_url, ha_token)
+    if states:
+        for s in states:
+            eid = s.get("entity_id", "")
+            if eid.startswith("media_player.") and s.get("state") in ("playing", "paused"):
+                return eid
+        for s in states:
+            eid = s.get("entity_id", "")
+            if eid.startswith("media_player.") and s.get("state") in ("idle", "on"):
+                return eid
+        for s in states:
+            eid = s.get("entity_id", "")
+            if eid.startswith("media_player."):
+                return eid
+
     raise ValueError("entity_id or device_name is required")
 
 async def resolve_mass_entity(ctx, original_entity: str) -> str:
@@ -406,18 +422,23 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
         if result.get("ok"):
             return ExecutionResult(status="SUCCESS", message=f"Playing podcast on {entity_id}.", service="media_play")
 
+    # Resolve MA config entry at runtime if not seeded
+    mass_entry = MASS_CONFIG_ENTRY_ID
+    if not mass_entry:
+        mass_entry = await ha_client.find_mass_config_entry(ctx.ha_url, ctx.ha_token)
+
     # Try MASS search for podcast
     is_roku = await roku_handler.is_roku_device(ctx.ha_url, ctx.ha_token, entity_id)
     if is_roku:
         return await roku_handler.roku_play_music(
-            ctx.ha_url, ctx.ha_token, entity_id, req.query or "", MASS_CONFIG_ENTRY_ID,
+            ctx.ha_url, ctx.ha_token, entity_id, req.query or "", mass_entry,
         )
 
     mass_entity = await resolve_mass_entity(ctx, entity_id)
     search_result = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
         service_data={
-            "config_entry_id": MASS_CONFIG_ENTRY_ID,
+            "config_entry_id": mass_entry,
             "name": req.query,
             "media_type": ["podcast", "episode"],
             "limit": 5,
@@ -445,7 +466,7 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
     track_search = await ha_client.call_service(
         ctx.ha_url, ctx.ha_token, "music_assistant", "search", entity_id="",
         service_data={
-            "config_entry_id": MASS_CONFIG_ENTRY_ID,
+            "config_entry_id": mass_entry,
             "name": req.query,
             "media_type": ["track"],
             "limit": 5,
@@ -465,6 +486,35 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
                 )
                 if result.get("ok"):
                     return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' as track on {entity_id}.", service="media_play")
+
+    # Fallback 2: Check Nextcloud storage for audio/podcast files
+    try:
+        from ..nextcloud_client import resolve_credentials, webdav_url
+        from ..http_client import request as http_request
+        nc_url, nc_user, nc_pass = resolve_credentials(ctx.user_context)
+        if nc_url and nc_user and nc_pass:
+            podcasts_url = webdav_url(nc_url, nc_user, "Podcasts")
+            resp = await http_request("PROPFIND", podcasts_url, auth=(nc_user, nc_pass), headers={"Depth": "1"}, timeout=10, verify=False)
+            if resp.get("status_code") in (200, 207):
+                xml_text = resp.get("text", "")
+                query_slug = re.sub(r'[^a-zA-Z0-9]+', '', (req.query or "").lower())
+                import xml.etree.ElementTree as ET
+                root = ET.fromstring(xml_text)
+                for elem in root.iter():
+                    if elem.tag.endswith("href") and elem.text:
+                        href = elem.text
+                        clean_href = re.sub(r'[^a-zA-Z0-9]+', '', href.lower())
+                        if query_slug in clean_href and any(href.lower().endswith(ext) for ext in (".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav")):
+                            full_file_url = f"{nc_url.rstrip('/')}{href}"
+                            log.info(f"[media/podcast] Found podcast in Nextcloud: {full_file_url}")
+                            res = await ha_client.call_service(
+                                ctx.ha_url, ctx.ha_token, "media_player", "play_media", entity_id,
+                                {"media_content_id": full_file_url, "media_content_type": "music"}
+                            )
+                            if res.get("ok"):
+                                return ExecutionResult(status="SUCCESS", message=f"Playing podcast '{req.query}' from Nextcloud on {entity_id}.", service="media_play")
+    except Exception as e:
+        log.debug(f"[media/podcast] Nextcloud podcast search error: {e}")
 
     return ExecutionResult(status="FAILURE", message=f"Could not play podcast '{req.query}' on {entity_id}. Try providing a direct URL.", service="media_play")
 

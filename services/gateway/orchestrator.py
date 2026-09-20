@@ -828,6 +828,66 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                     payload["device_name"] = device_name
                     log.info(f"[_execute_single_tool] Auto-resolved device_name='{device_name}' from query")
 
+            if action == "mediaplayrequest":
+                if not payload.get("query"):
+                    m = re.search(r"(?:play|put on|listen to)\s+(?:podcast\s+)?['\"`]([^'\"`]+)['\"`]", query, re.IGNORECASE)
+                    if m:
+                        payload["query"] = m.group(1).strip()
+                if "podcast" in query.lower() and not payload.get("media_type"):
+                    payload["media_type"] = "podcast"
+                if not payload.get("entity_id") and not payload.get("device_name"):
+                    device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?([A-Za-z\s]+?)\s+\b(speaker|tv|device|display|cast|chrome)\b", query, re.IGNORECASE)
+                    if device_match:
+                        device_base = device_match.group(1).strip().title()
+                        device_type = device_match.group(2).strip().title()
+                        payload["device_name"] = f"{device_base} {device_type}"
+                    else:
+                        device_match = re.search(r"(?:on|to|via|at|using)\s+(?:the\s+)?\b((?:Office|Living Room|Loft|Bedroom|Kitchen|Bathroom)[A-Za-z\s]*?)\b", query, re.IGNORECASE)
+                        if device_match:
+                            payload["device_name"] = device_match.group(1).strip().title()
+
+            if action == "noterequest" and not payload.get("action"):
+                if payload.get("content") or payload.get("title"):
+                    payload["action"] = "create"
+                else:
+                    payload["action"] = "list"
+
+            _ws_file_actions = {
+                "workspacefilereadrequest",
+                "workspacefilewriterequest",
+                "workspacefilepatchrequest",
+                "workspacesearchrequest",
+                "workspaceshellrequest",
+                "workspacelintrequest",
+            }
+            if action in _ws_file_actions:
+                if not payload.get("workspace_id"):
+                    try:
+                        from services.gateway.main import shared_http_client
+                        async with shared_http_client() as ws_client:
+                            ws_url = f"{_get(settings, 'workspace_runtime_svc_url')}/workspaces"
+                            resp = await ws_client.get(
+                                ws_url,
+                                params={"rag_user": creds.user},
+                                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                                timeout=aiohttp.ClientTimeout(total=5.0),
+                            )
+                            if resp.status == 200:
+                                ws_list = (await resp.json()).get("workspaces", [])
+                                for w in ws_list:
+                                    wid = w.get("id", "")
+                                    wdisp = (w.get("display_name") or "").lower()
+                                    if (wid and wid in query.lower()) or (wdisp and wdisp in query.lower()):
+                                        payload["workspace_id"] = wid
+                                        break
+                                if not payload.get("workspace_id") and ws_list:
+                                    user_ws = next((w for w in ws_list if w.get("scope") == "user"), ws_list[0])
+                                    payload["workspace_id"] = user_ws.get("id")
+                    except Exception as ex:
+                        log.debug(f"Failed to auto-resolve workspace_id: {ex}")
+                elif payload.get("workspace_id"):
+                    payload["workspace_id"] = re.sub(r"[^a-zA-Z0-9_\-]+", "-", str(payload["workspace_id"]).strip().lower()).strip("-")
+
             if action == "workspacecreaterequest":
                 payload.pop("user_context", None)
                 _wid = payload.get("id") or payload.get("workspace_id")
@@ -863,6 +923,18 @@ async def _execute_single_tool(action: str, tool_data: dict, query: str, creds: 
                         ws_id = result.get("id")
                         ws_name = result.get("display_name", ws_id)
                         return f"Created workspace environment '{ws_name}' (id: `{ws_id}`) successfully."
+                    if action == "workspacefilereadrequest":
+                        detail = result.get("detail") or {}
+                        content = detail.get("content", "")
+                        return f"File content of '{payload.get('path', '')}':\n\n{content}"
+                    if action == "noterequest":
+                        detail = result.get("detail") or {}
+                        if "notes" in detail:
+                            notes_list = detail["notes"]
+                            lines = [f"- {n.get('title', 'Untitled')}: {n.get('content', '')[:100]}" for n in notes_list]
+                            return f"Notes:\n" + "\n".join(lines) if lines else "No notes found."
+                        if "content" in detail:
+                            return f"Note '{detail.get('title', '')}':\n{detail['content']}"
                     if action == "ravenmissionrequest":
                         mid = result.get("id")
                         mtitle = result.get("title", f"Mission #{mid}")
