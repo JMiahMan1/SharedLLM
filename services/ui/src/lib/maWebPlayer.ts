@@ -352,10 +352,11 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
             ws.removeEventListener('message', onMessage);
             resolve(data.result);
           }
-          if (data?.message_id === id && data?.error) {
+          if (data?.message_id === id && (data?.error !== undefined || data?.error_code !== undefined)) {
             clearTimeout(timeout);
             ws.removeEventListener('message', onMessage);
-            reject(new Error(`JSON-RPC error: ${JSON.stringify(data.error)}`));
+            const errStr = data.details || (typeof data.error === 'string' ? data.error : JSON.stringify(data.error || `Error code ${data.error_code}`));
+            reject(new Error(`JSON-RPC error: ${errStr}`));
           }
         } catch {
           // Not our response
@@ -416,8 +417,20 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
       // 3. Create SendspinPlayer
       const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-      const storedUser = storageGetSync('jarvis_user') || storageGetSync('username') || '';
-      const clientName = `${storedUser ? storedUser + "'s " : ""}Web Player (${isMobile ? 'Mobile' : 'Desktop'})`;
+      let userName = '';
+      try {
+        const rawUser = storageGetSync('jarvis_user');
+        if (rawUser) {
+          const parsed = typeof rawUser === 'string' ? JSON.parse(rawUser) : rawUser;
+          userName = parsed.display_name || parsed.username || '';
+        }
+      } catch {
+        // Not JSON
+      }
+      if (!userName) {
+        userName = storageGetSync('username') || '';
+      }
+      const clientName = `${userName ? userName + "'s " : ''}Web Player (${isMobile ? 'Mobile' : 'Desktop'})`;
       console.log('[MAWebPlayer] [3/6] Creating SendspinPlayer with playerId:', playerId, 'clientName:', clientName);
       player = new SendspinPlayer({
         audioElement: audio,
@@ -612,6 +625,21 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       return;
     }
 
+    // Eagerly unlock audio during direct user tap
+    try {
+      if (audioRef.current && audioRef.current.paused) {
+        void audioRef.current.play().catch(() => {});
+      }
+      const sched = (playerRef.current as unknown as { scheduler?: { resumeAudioContext?: () => Promise<void>; audioContext?: AudioContext } })?.scheduler;
+      if (sched?.resumeAudioContext) {
+        void sched.resumeAudioContext();
+      } else if (sched?.audioContext && sched.audioContext.state === 'suspended') {
+        void sched.audioContext.resume();
+      }
+    } catch {
+      // Audio unlock error ignored
+    }
+
     let resolvedUri = mediaUri;
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -628,17 +656,21 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
 
     try {
-      console.log('[MAWebPlayer] play_media:', resolvedUri, 'player:', pid);
+      console.log('[MAWebPlayer] play_media:', resolvedUri, 'player/queue:', pid);
       await sendJsonRpc('player_queues/play_media', {
         queue_id: pid,
         media: resolvedUri,
         option: 'replace',
         radio_mode: false,
-      }, false);
+      }, true);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] play_media failed:', msg);
-      setError('play_media failed: ' + msg);
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      const userMsg = (rawMsg.includes('Cannot connect to host') || rawMsg.includes('Connect call failed'))
+        ? `Upstream media provider unreachable: ${rawMsg}`
+        : rawMsg;
+      console.error('[MAWebPlayer] play_media failed:', userMsg, err);
+      setError(userMsg);
+      throw new Error(userMsg, { cause: err });
     }
   }, [sendJsonRpc, setError]);
 
@@ -646,89 +678,95 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   const cmdPlay = useCallback(async (player_id?: string) => {
     const pid = player_id || playerIdRef.current;
     if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmd_play');
+      console.error('[MAWebPlayer] No player_id for cmdPlay');
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd_play:', pid);
+      if (audioRef.current && audioRef.current.paused) {
+        void audioRef.current.play().catch(() => {});
+      }
+      const sched = (playerRef.current as unknown as { scheduler?: { resumeAudioContext?: () => Promise<void>; audioContext?: AudioContext } })?.scheduler;
+      if (sched?.resumeAudioContext) {
+        void sched.resumeAudioContext();
+      } else if (sched?.audioContext && sched.audioContext.state === 'suspended') {
+        void sched.audioContext.resume();
+      }
+      console.log('[MAWebPlayer] cmd/play:', pid);
       playerRef.current?.sendCommand('play');
+      await sendJsonRpc('players/cmd/play', { player_id: pid }, false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] cmd_play failed:', msg);
-      setError('cmd_play failed: ' + msg);
+      console.error('[MAWebPlayer] cmdPlay failed:', msg);
+      setError('cmdPlay failed: ' + msg);
     }
-  }, [setError]);
+  }, [sendJsonRpc, setError]);
 
   // Pause local browser playback.
   const cmdPause = useCallback(async (player_id?: string) => {
     const pid = player_id || playerIdRef.current;
     if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmd_pause');
+      console.error('[MAWebPlayer] No player_id for cmdPause');
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd_pause:', pid);
+      console.log('[MAWebPlayer] cmd/pause:', pid);
       playerRef.current?.sendCommand('pause');
+      await sendJsonRpc('players/cmd/pause', { player_id: pid }, false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] cmd_pause failed:', msg);
-      setError('cmd_pause failed: ' + msg);
+      console.error('[MAWebPlayer] cmdPause failed:', msg);
+      setError('cmdPause failed: ' + msg);
     }
-  }, [setError]);
+  }, [sendJsonRpc, setError]);
 
-  // Send players/cmd_seek to seek to a position
+  // Send players/cmd/seek to seek to a position
   const cmdSeek = useCallback(async (position: number, player_id?: string) => {
     const pid = player_id || playerIdRef.current;
     if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmd_seek');
+      console.error('[MAWebPlayer] No player_id for cmdSeek');
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd_seek:', position, 'player:', pid);
-      await sendJsonRpc('players/cmd_seek', { player_id: pid, position });
+      console.log('[MAWebPlayer] cmd/seek:', position, 'player:', pid);
+      await sendJsonRpc('players/cmd/seek', { player_id: pid, position });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] cmd_seek failed:', msg);
-      setError('cmd_seek failed: ' + msg);
+      console.error('[MAWebPlayer] cmdSeek failed:', msg);
+      setError('cmdSeek failed: ' + msg);
     }
   }, [sendJsonRpc, setError]);
 
-  // Skip to the next track. Use MA's canonical players/cmd_next (the same call
-  // MA's own web player uses — see music-assistant/frontend SendspinPlayer.vue)
-  // with the browser/sendspin player id. This advances the MA queue for the web
-  // player so the next item is streamed over sendspin. A raw sendspin controller
-  // `client/command` "next" does NOT reliably advance the MA queue, which left
-  // Next/Previous stuck on the same track.
+  // Skip to the next track via MA canonical players/cmd/next
   const cmdNext = useCallback(async (_player_id?: string) => {
     const pid = _player_id || playerIdRef.current;
     if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmd_next');
+      console.error('[MAWebPlayer] No player_id for cmdNext');
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd_next (players/cmd_next):', pid);
-      await sendJsonRpc('players/cmd_next', { player_id: pid }, false);
+      console.log('[MAWebPlayer] cmd/next:', pid);
+      await sendJsonRpc('players/cmd/next', { player_id: pid }, false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] cmd_next failed:', msg);
-      setError('cmd_next failed: ' + msg);
+      console.error('[MAWebPlayer] cmdNext failed:', msg);
+      setError('cmdNext failed: ' + msg);
     }
   }, [sendJsonRpc, setError]);
 
-  // Skip to the previous track via MA players/cmd_previous (see cmdNext).
+  // Skip to the previous track via MA players/cmd/previous
   const cmdPrevious = useCallback(async (_player_id?: string) => {
     const pid = _player_id || playerIdRef.current;
     if (!pid) {
-      console.error('[MAWebPlayer] No player_id for cmd_previous');
+      console.error('[MAWebPlayer] No player_id for cmdPrevious');
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd_previous (players/cmd_previous):', pid);
-      await sendJsonRpc('players/cmd_previous', { player_id: pid }, false);
+      console.log('[MAWebPlayer] cmd/previous:', pid);
+      await sendJsonRpc('players/cmd/previous', { player_id: pid }, false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error('[MAWebPlayer] cmd_previous failed:', msg);
-      setError('cmd_previous failed: ' + msg);
+      console.error('[MAWebPlayer] cmdPrevious failed:', msg);
+      setError('cmdPrevious failed: ' + msg);
     }
   }, [sendJsonRpc, setError]);
 
@@ -763,7 +801,8 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] play failed:', msg);
-      setError('play failed: ' + msg);
+      setError(msg);
+      throw err;
     }
   }, [initPlayer, playMedia, cmdPlay, setError]);
 
@@ -820,7 +859,24 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
   // player_id). Reuses the browser's ma-jsonrpc WebSocket, which reaches MA
   // directly and sidesteps the gateway's server-side hostname loop.
   const maCommand = useCallback(
-    (command: string, args: Record<string, unknown> = {}): Promise<unknown> => sendJsonRpc(command, args),
+    (command: string, args: Record<string, unknown> = {}): Promise<unknown> => {
+      let normalizedCmd = command;
+      const normalizedArgs = { ...args };
+      if (normalizedCmd.startsWith('players/cmd_')) {
+        normalizedCmd = 'players/cmd/' + normalizedCmd.slice(12);
+      } else if (normalizedCmd === 'players/play_media') {
+        normalizedCmd = 'player_queues/play_media';
+        if (!normalizedArgs.queue_id && normalizedArgs.player_id) {
+          normalizedArgs.queue_id = normalizedArgs.player_id;
+        }
+        if (!normalizedArgs.option) {
+          normalizedArgs.option = 'replace';
+        }
+      } else if (normalizedCmd.startsWith('player_queues/cmd_')) {
+        normalizedCmd = 'player_queues/' + normalizedCmd.slice(18);
+      }
+      return sendJsonRpc(normalizedCmd, normalizedArgs);
+    },
     [sendJsonRpc],
   );
 

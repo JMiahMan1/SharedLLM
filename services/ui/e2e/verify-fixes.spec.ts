@@ -186,16 +186,16 @@ test('Web Player playlist Next/Previous uses maPlayer (sendspin client/command)'
   await expect(nextBtn).toBeVisible({ timeout: 8000 });
   await nextBtn.click();
 
-  // Deterministic hard check: `players/cmd_next` was sent over the MA JSON-RPC
+  // Deterministic hard check: `players/cmd/next` was sent over the MA JSON-RPC
   // socket (the same call MA's own web player uses). This is the actual fix —
   // a raw sendspin controller `client/command` "next" does NOT advance the MA
   // queue, so the track stayed the same.
   await expect
-    .poll(() => jsonrpcFrames.some((f) => f.includes('players/cmd_next')), { timeout: 10000 })
+    .poll(() => jsonrpcFrames.some((f) => f.includes('players/cmd/next') || f.includes('players/cmd_next')), { timeout: 10000 })
     .toBeTruthy();
-  const nextSent = jsonrpcFrames.some((f) => f.includes('players/cmd_next'));
-  console.log(`[NP] 'players/cmd_next' observed on JSON-RPC: ${nextSent}`);
-  jsonrpcFrames.filter((f) => f.includes('players/cmd_next')).slice(0, 3).forEach((f) => console.log(`[NP]   ${f}`));
+  const nextSent = jsonrpcFrames.some((f) => f.includes('players/cmd/next') || f.includes('players/cmd_next'));
+  console.log(`[NP] 'players/cmd/next' observed on JSON-RPC: ${nextSent}`);
+  jsonrpcFrames.filter((f) => f.includes('players/cmd/next') || f.includes('players/cmd_next')).slice(0, 3).forEach((f) => console.log(`[NP]   ${f}`));
 
   // Functional check (soft): the track should advance within the playlist.
   try {
@@ -205,7 +205,7 @@ test('Web Player playlist Next/Previous uses maPlayer (sendspin client/command)'
   } catch { /* MA may not have advanced within the window; the frame check above is authoritative */ }
   const titleAfter = await cardText();
   console.log(`[NP] title after next:  ${titleAfter}`);
-  console.log(`[NP] PASS: players/cmd_next sent over JSON-RPC (${titleBefore} -> ${titleAfter})`);
+  console.log(`[NP] PASS: players/cmd/next sent over JSON-RPC (${titleBefore} -> ${titleAfter})`);
 
   // Let the current track play past MA's "previous restarts" threshold.
   await page.waitForTimeout(12000);
@@ -215,13 +215,13 @@ test('Web Player playlist Next/Previous uses maPlayer (sendspin client/command)'
   await expect(prevBtn).toBeVisible({ timeout: 8000 });
   await prevBtn.click();
 
-  // Deterministic hard check: `players/cmd_previous` was sent over the JSON-RPC socket.
+  // Deterministic hard check: `players/cmd/previous` was sent over the JSON-RPC socket.
   await expect
-    .poll(() => jsonrpcFrames.some((f) => f.includes('players/cmd_previous')), { timeout: 10000 })
+    .poll(() => jsonrpcFrames.some((f) => f.includes('players/cmd/previous') || f.includes('players/cmd_previous')), { timeout: 10000 })
     .toBeTruthy();
-  const prevSent = jsonrpcFrames.some((f) => f.includes('players/cmd_previous'));
-  console.log(`[NP] 'players/cmd_previous' observed on JSON-RPC: ${prevSent}`);
+  const prevSent = jsonrpcFrames.some((f) => f.includes('players/cmd/previous') || f.includes('players/cmd_previous'));
+  console.log(`[NP] 'players/cmd/previous' observed on JSON-RPC: ${prevSent}`);
   const titlePrev = await cardText();
   console.log(`[NP] title after previous: ${titlePrev}`);
-  console.log(`[NP] PASS: players/cmd_previous sent over JSON-RPC (${titleAfter} -> ${titlePrev})`);
+  console.log(`[NP] PASS: players/cmd/previous sent over JSON-RPC (${titleAfter} -> ${titlePrev})`);
 });
