@@ -370,17 +370,17 @@ const NowPlayingCard = ({
         </div>
 
         {/* volume control */}
-        <div className="flex sm:flex-col items-center sm:items-end gap-3 shrink-0">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between w-full sm:w-auto sm:flex-col sm:items-end gap-3 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-white/5">
+          <div className="flex items-center gap-2 w-full sm:w-auto">
             <button onClick={onMuteToggle}
-              className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5"
+              className="text-slate-400 hover:text-white transition-colors p-2 rounded-lg hover:bg-white/5 shrink-0"
               aria-label={muted ? 'Unmute' : 'Mute'}>
-              {muted || volume === 0 ? <VolumeX size={16} /> : volume < 50 ? <Volume1 size={16} /> : <Volume2 size={16} />}
+              {muted || volume === 0 ? <VolumeX size={18} /> : volume < 50 ? <Volume1 size={18} /> : <Volume2 size={18} />}
             </button>
             <input type="range" min="0" max="100" value={muted ? 0 : volume}
               onChange={(e) => onVolumeChange(Number(e.target.value))}
-              className="w-20 sm:w-24 accent-cyan-400" aria-label="Volume" />
-            <span className="text-xs text-slate-500 w-8 text-right tabular-nums">{muted ? 'M' : `${volume}`}</span>
+              className="flex-1 sm:w-24 accent-cyan-400 h-2 bg-white/10 rounded-lg cursor-pointer" aria-label="Volume" />
+            <span className="text-xs text-slate-400 w-9 text-right tabular-nums shrink-0 font-mono">{muted ? 'M' : `${volume}%`}</span>
           </div>
         </div>
       </div>
@@ -388,7 +388,7 @@ const NowPlayingCard = ({
       {nowPlaying && duration > 0 && (
         <div className="mt-4 pt-3 border-t border-white/5">
           <div
-            className={`w-full h-2 bg-white/10 rounded-full relative group ${onSeek ? 'cursor-pointer' : ''}`}
+            className={`w-full h-3 sm:h-2 bg-white/10 rounded-full relative group py-1 sm:py-0 ${onSeek ? 'cursor-pointer' : ''}`}
             onClick={(e) => {
               if (!onSeek) return;
               const rect = e.currentTarget.getBoundingClientRect();
@@ -402,7 +402,7 @@ const NowPlayingCard = ({
               style={{ width: `${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%` }}
             >
               {onSeek && (
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-3 sm:h-3 bg-white rounded-full shadow-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity pointer-events-none" />
               )}
             </div>
           </div>
