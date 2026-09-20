@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Capacitor } from '@capacitor/core';
@@ -64,7 +65,25 @@ const ProtectedRoute = ({ children, requireAdmin = false, isMobile = false }: { 
 };
 
 function App() {
-  const isNative = Capacitor.isNativePlatform();
+  const [isMobile, setIsMobile] = useState(() => {
+    if (Capacitor.isNativePlatform()) return true;
+    if (typeof window !== 'undefined') {
+      return window.innerWidth < 768 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(
+        Capacitor.isNativePlatform() ||
+        window.innerWidth < 768 ||
+        /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+      );
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -81,25 +100,25 @@ function App() {
         <Router>
           <Routes>
             <Route path="/login" element={<Login />} />
-            <Route path="/" element={<ProtectedRoute isMobile={isNative}><Dashboard /></ProtectedRoute>} />
+            <Route path="/" element={<ProtectedRoute isMobile={isMobile}><Dashboard /></ProtectedRoute>} />
             
             {/* Admin-only routes */}
-            <Route path="/admin/*" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
+            <Route path="/admin/*" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><Admin /></AdminElevation></ProtectedRoute>} />
 
             {/* Service routes */}
-            <Route path="/identity" element={<ProtectedRoute isMobile={isNative}><Identity /></ProtectedRoute>} />
-            <Route path="/communication" element={<ProtectedRoute isMobile={isNative}><Communication /></ProtectedRoute>} />
-            <Route path="/calendar" element={<ProtectedRoute isMobile={isNative}><Calendar /></ProtectedRoute>} />
-            <Route path="/media" element={<ProtectedRoute isMobile={isNative}><Media /></ProtectedRoute>} />
-            <Route path="/remote" element={<ProtectedRoute isMobile={isNative}><Remote /></ProtectedRoute>} />
-            <Route path="/settings" element={<ProtectedRoute isMobile={isNative}><Settings /></ProtectedRoute>} />
-            <Route path="/knowledge" element={<ProtectedRoute isMobile={isNative}><KnowledgeHub /></ProtectedRoute>} />
-            <Route path="/workspaces" element={<ProtectedRoute isMobile={isNative}><Workspaces /></ProtectedRoute>} />
-            <Route path="/docs" element={<ProtectedRoute isMobile={isNative}><Docs /></ProtectedRoute>} />
+            <Route path="/identity" element={<ProtectedRoute isMobile={isMobile}><Identity /></ProtectedRoute>} />
+            <Route path="/communication" element={<ProtectedRoute isMobile={isMobile}><Communication /></ProtectedRoute>} />
+            <Route path="/calendar" element={<ProtectedRoute isMobile={isMobile}><Calendar /></ProtectedRoute>} />
+            <Route path="/media" element={<ProtectedRoute isMobile={isMobile}><Media /></ProtectedRoute>} />
+            <Route path="/remote" element={<ProtectedRoute isMobile={isMobile}><Remote /></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute isMobile={isMobile}><Settings /></ProtectedRoute>} />
+            <Route path="/knowledge" element={<ProtectedRoute isMobile={isMobile}><KnowledgeHub /></ProtectedRoute>} />
+            <Route path="/workspaces" element={<ProtectedRoute isMobile={isMobile}><Workspaces /></ProtectedRoute>} />
+            <Route path="/docs" element={<ProtectedRoute isMobile={isMobile}><Docs /></ProtectedRoute>} />
 
             {/* Jarvis Lab — user view (admin-only access) and admin view */}
-            <Route path="/lab" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><JarvisLab /></AdminElevation></ProtectedRoute>} />
-            <Route path="/lab/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isNative}><AdminElevation><JarvisLabAdmin /></AdminElevation></ProtectedRoute>} />
+            <Route path="/lab" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLab /></AdminElevation></ProtectedRoute>} />
+            <Route path="/lab/admin" element={<ProtectedRoute requireAdmin={true} isMobile={isMobile}><AdminElevation><JarvisLabAdmin /></AdminElevation></ProtectedRoute>} />
           </Routes>
         </Router>
       </LocationProvider>
