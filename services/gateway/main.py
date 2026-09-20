@@ -3068,7 +3068,22 @@ async def chat_handler(request: Request, background_tasks=None):
             media_type = "video" if is_likely_video_request(query) else None
             resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id)
         elif intent in ["turn_on", "turn_off"]:
-            resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
+            resolved_entity = engine.extract_entity(query, intent)
+            if not resolved_entity and media_entities:
+                q_clean = query.lower()
+                target_phrase = re.sub(r'^(?:turn|switch|power)\s+(?:on|off)\s+(?:the\s+)?', '', q_clean).strip()
+                target_phrase = re.sub(r'\b(?:please|now|right away)\b', '', target_phrase).strip()
+                for ent in media_entities:
+                    eid = ent.get("entity_id", "")
+                    if eid.startswith(("light.", "switch.")):
+                        friendly = (ent.get("attributes", {}).get("friendly_name") or "").lower()
+                        short_id = eid.split(".", 1)[-1].replace("_", " ")
+                        if target_phrase and (target_phrase == friendly or target_phrase in friendly or friendly in target_phrase or target_phrase == short_id):
+                            resolved_entity = eid
+                            log.info(f"[FastPath] Resolved light/switch '{target_phrase}' to '{resolved_entity}'")
+                            break
+            if not resolved_entity:
+                resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
             resolved_entity = engine.extract_entity(query, intent) or resolve_media_target(query, media_entities or [], cached_device=cached_device_id)
             if not resolved_entity and media_entities:
