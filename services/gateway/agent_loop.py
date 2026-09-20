@@ -27,7 +27,13 @@ from services.gateway.config import (
     STORAGE_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
-from services.gateway.llm_providers import BaseLLMProvider, OpenRouterProvider, StreamingThinkingFilter
+from services.gateway.llm_providers import (
+    BaseLLMProvider,
+    OpenRouterProvider,
+    StreamingThinkingFilter,
+    get_provider,
+    strip_thinking_blocks,
+)
 from services.gateway.prompts import PROMPT_RAVEN_PLAN, PROMPT_RAVEN_REFLECTION, load_prompt
 from services.gateway.schemas import ResolvedCredentials
 from services.shared.media_validation import MEDIA_EXTS, media_extension, rewrite_media_extension, validate_media_bytes
@@ -264,14 +270,6 @@ def is_system_maintenance_task(query: str | None) -> bool:
     if any(k in q for k in ("build", "create a", "new ", "space shooter", "scaffold", "make a game", "make an app", "website")):
         return False
     return any(p.search(query) for p in _MAINTENANCE_PATTERNS)
-
-
-def strip_thinking_blocks(text: str) -> str:
-    """Remove thinking/reasoning blocks from LLM output."""
-    result = text
-    for pattern in THINKING_PATTERNS:
-        result = pattern.sub('', result)
-    return result.strip()
 
 
 def sanitize_for_llm(obj: Any, depth: int = 0) -> Any:
@@ -1820,27 +1818,6 @@ async def get_vram_safe_params(model: str, settings: dict) -> dict:
         log.warning(f"[AgentLoop] VRAM status check failed ({e!r}); using configured num_ctx={max_ctx}")
     return params
 
-
-async def get_provider(settings: dict) -> BaseLLMProvider:
-    """Instantiates the correct provider based on settings."""
-    from services.gateway.config import OLLAMA_TIMEOUT
-    active_provider = settings.get("active_llm_provider", "ollama")
-    timeout = float(settings.get("ollama_timeout", str(OLLAMA_TIMEOUT)))
-    if active_provider == "openrouter":
-        return OpenRouterProvider(
-            api_key=settings.get("llm_cloud_api_key", ""),
-            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions"),
-            timeout=timeout
-        )
-    else:
-        # Both ollama and llama_server use the same /api/chat compatible endpoint
-        local_url = settings.get("llm_local_url", "")
-        if not local_url:
-            raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
-        return OllamaProvider(
-            base_url=local_url,
-            timeout=timeout
-        )
 
 async def execute_inference(provider: BaseLLMProvider, model: str, messages: list, options: dict, chunk_callback: Callable[[str], Awaitable[None]] | None = None) -> dict:
     """Delegates inference to the specified provider."""

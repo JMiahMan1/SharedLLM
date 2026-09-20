@@ -160,6 +160,16 @@ class ExecutionResult(BaseModel):
     service: str
     detail: dict[str, Any] | None = None
     events: list[dict] | None = None  # structured calendar events (calendar_read)
+
+    @classmethod
+    def ok(cls, message: str, service: str = "execution", detail: dict[str, Any] | None = None, events: list[dict] | None = None) -> "ExecutionResult":
+        return cls(status="SUCCESS", message=message, service=service, detail=detail, events=events)
+
+    @classmethod
+    def fail(cls, message: str, service: str = "execution", detail: dict[str, Any] | None = None) -> "ExecutionResult":
+        return cls(status="FAILURE", message=message, service=service, detail=detail)
+
+
 class GitExecutionResult(ExecutionResult):
     """Specific result for Git operations."""
     pass

@@ -192,6 +192,15 @@ class IntentEngine:
             log.info(f"[FastPath] Resolved '{target}' to '{resolved_id}' (via fuzzy match '{matches[0]}')")
             return resolved_id
 
+        # Normalized Substring / Token Matching fallback
+        target_norm = re.sub(r'[^a-z0-9]+', '', target)
+        if target_norm:
+            for fname, eid in self.entity_cache.items():
+                fname_norm = re.sub(r'[^a-z0-9]+', '', fname)
+                if target_norm == fname_norm or target_norm in fname_norm or fname_norm in target_norm:
+                    log.info(f"[FastPath] Resolved '{target}' to '{eid}' (via normalized match '{fname}')")
+                    return eid
+
         log.warning(f"[FastPath] Could not resolve entity from target string: '{target}'")
         return None
 
