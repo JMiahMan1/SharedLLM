@@ -170,6 +170,24 @@ async def _resolve_workspace_info(workspace_id: str | None, user_context: dict |
     """
     import aiohttp
     if not workspace_id:
+        try:
+            rag_user = user_context.get("user") if isinstance(user_context, dict) else (getattr(user_context, "user", None) or "default")
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=3.0)) as client:
+                async with client.get(
+                    f"{WORKSPACE_RUNTIME_SVC_URL}/workspaces",
+                    params={"rag_user": rag_user},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET}
+                ) as ws_resp:
+                    if ws_resp.status == 200:
+                        data = await ws_resp.json()
+                        wspaces = data.get("workspaces", [])
+                        if wspaces:
+                            user_ws = next((w for w in wspaces if w.get("scope") == "user"), wspaces[0])
+                            workspace_id = user_ws.get("id")
+        except Exception:
+            pass
+
+    if not workspace_id:
         raise HTTPException(
             status_code=400,
             detail=(

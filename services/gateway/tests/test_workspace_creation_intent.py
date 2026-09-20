@@ -96,3 +96,74 @@ async def test_orchestrator_execute_workspace_create():
         assert payload["display_name"] == "Home Work"
         assert payload["owner_user"] == "testuser"
         assert "user_context" not in payload
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_execute_media_play_podcast():
+    creds = ResolvedCredentials(user="testuser", is_admin=True, api_key="key")
+    settings = {"execution_svc_url": "http://execution:8003"}
+    tool_data = {"action": "mediaplayrequest", "query": "Bright Heart"}
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value={"status": "SUCCESS", "message": "Playing podcast 'Bright Heart'."})
+
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=mock_resp)
+
+    with patch("services.gateway.orchestrator.get_llm_settings", AsyncMock(return_value=settings)), \
+         patch("services.gateway.main.shared_http_client") as mock_http_ctx:
+        mock_http_ctx.return_value.__aenter__.return_value = mock_client
+
+        result = await _execute_single_tool(
+            action="mediaplayrequest",
+            tool_data=tool_data,
+            query="play podcast Bright Heart on the office speaker",
+            creds=creds,
+        )
+
+        assert "Playing podcast 'Bright Heart'." in result
+        called_args, called_kwargs = mock_client.post.call_args
+        payload = called_kwargs.get("json")
+        assert payload["media_type"] == "podcast"
+        assert payload["device_name"] == "Office Speaker"
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_execute_workspace_file_read_auto_resolve():
+    creds = ResolvedCredentials(user="testuser", is_admin=True, api_key="key")
+    settings = {
+        "execution_svc_url": "http://execution:8003",
+        "workspace_runtime_svc_url": "http://workspace_runtime:8007",
+    }
+    tool_data = {"action": "workspacefilereadrequest", "path": "summary.md"}
+
+    mock_ws_resp = AsyncMock()
+    mock_ws_resp.status = 200
+    mock_ws_resp.json = AsyncMock(return_value={"workspaces": [{"id": "home-work", "scope": "user"}]})
+
+    mock_exec_resp = AsyncMock()
+    mock_exec_resp.status = 200
+    mock_exec_resp.json = AsyncMock(return_value={"status": "SUCCESS", "detail": {"content": "# Homework\nDone."}})
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_ws_resp)
+    mock_client.post = AsyncMock(return_value=mock_exec_resp)
+
+    with patch("services.gateway.orchestrator.get_llm_settings", AsyncMock(return_value=settings)), \
+         patch("services.gateway.main.shared_http_client") as mock_http_ctx:
+        mock_http_ctx.return_value.__aenter__.return_value = mock_client
+
+        result = await _execute_single_tool(
+            action="workspacefilereadrequest",
+            tool_data=tool_data,
+            query="read file summary.md",
+            creds=creds,
+        )
+
+        assert "File content of 'summary.md':" in result
+        assert "# Homework\nDone." in result
+        called_args, called_kwargs = mock_client.post.call_args
+        payload = called_kwargs.get("json")
+        assert payload["workspace_id"] == "home-work"
+
