@@ -749,7 +749,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
   }, [sendJsonRpc, setError]);
 
-  // Skip to the next track via MA canonical players/cmd/next
+  // Skip to the next track via MA player_queues/next
   const cmdNext = useCallback(async (_player_id?: string) => {
     const pid = _player_id || playerIdRef.current;
     if (!pid) {
@@ -757,8 +757,8 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd/next:', pid);
-      await sendJsonRpc('players/cmd/next', { player_id: pid }, false);
+      console.log('[MAWebPlayer] player_queues/next:', pid);
+      await sendJsonRpc('player_queues/next', { queue_id: pid, player_id: pid }, false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] cmdNext failed:', msg);
@@ -766,7 +766,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
   }, [sendJsonRpc, setError]);
 
-  // Skip to the previous track via MA players/cmd/previous
+  // Skip to the previous track via MA player_queues/previous
   const cmdPrevious = useCallback(async (_player_id?: string) => {
     const pid = _player_id || playerIdRef.current;
     if (!pid) {
@@ -774,8 +774,8 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       return;
     }
     try {
-      console.log('[MAWebPlayer] cmd/previous:', pid);
-      await sendJsonRpc('players/cmd/previous', { player_id: pid }, false);
+      console.log('[MAWebPlayer] player_queues/previous:', pid);
+      await sendJsonRpc('player_queues/previous', { queue_id: pid, player_id: pid }, false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] cmdPrevious failed:', msg);
@@ -875,7 +875,17 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     (command: string, args: Record<string, unknown> = {}): Promise<unknown> => {
       let normalizedCmd = command;
       const normalizedArgs = { ...args };
-      if (normalizedCmd.startsWith('players/cmd_')) {
+      if (normalizedCmd === 'players/cmd/next' || normalizedCmd === 'players/cmd_next' || normalizedCmd === 'player_queues/cmd_next') {
+        normalizedCmd = 'player_queues/next';
+        if (!normalizedArgs.queue_id && normalizedArgs.player_id) {
+          normalizedArgs.queue_id = normalizedArgs.player_id;
+        }
+      } else if (normalizedCmd === 'players/cmd/previous' || normalizedCmd === 'players/cmd_previous' || normalizedCmd === 'player_queues/cmd_previous') {
+        normalizedCmd = 'player_queues/previous';
+        if (!normalizedArgs.queue_id && normalizedArgs.player_id) {
+          normalizedArgs.queue_id = normalizedArgs.player_id;
+        }
+      } else if (normalizedCmd.startsWith('players/cmd_')) {
         normalizedCmd = 'players/cmd/' + normalizedCmd.slice(12);
       } else if (normalizedCmd === 'players/play_media') {
         normalizedCmd = 'player_queues/play_media';
