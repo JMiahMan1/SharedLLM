@@ -2548,7 +2548,109 @@ class LocationUpdate(BaseModel):
     accuracy: float | None = None
     speed: float | None = None
     bearing: float | None = None
+    battery: int | float | None = None
     timestamp: float | None = None
+
+
+async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
+    """Forward location to Home Assistant via device_tracker.see REST API."""
+    try:
+        ha_url = None
+        ha_token = None
+        dev_ids: list[str] = []
+
+        with Session(engine) as session:
+            # 1. Look up user
+            user = session.exec(select(User).where((User.id == user_id) | (User.username == user_id))).first()
+            if user:
+                ha_url = user.ha_url
+                if user.ha_token_enc:
+                    ha_token = decrypt(user.ha_token_enc)
+                if user.username:
+                    dev_ids.append(f"jarvis_{user.username.lower().replace('-', '_')}")
+                    dev_ids.append(user.username.lower().replace('-', '_'))
+                ha_ent = getattr(user, 'ha_entity_id', None)
+                if ha_ent:
+                    dev_ids.append(ha_ent.split(".")[-1])
+                if hasattr(user, 'ha_device_trackers') and user.ha_device_trackers:
+                    trackers = user.ha_device_trackers
+                    if isinstance(trackers, str):
+                        try:
+                            trackers = json.loads(trackers)
+                        except Exception:
+                            trackers = [trackers]
+                    if isinstance(trackers, list):
+                        for t in trackers:
+                            if isinstance(t, str):
+                                dev_ids.append(t.split(".")[-1])
+
+            # 2. Fallback to admin/default or global settings
+            if not ha_url or not ha_token:
+                admin = session.exec(select(User).where(User.role == "admin")).first()
+                default_user = session.exec(select(User).where(User.username == "default")).first()
+                if admin and admin.ha_url and admin.ha_token_enc:
+                    ha_url = ha_url or admin.ha_url
+                    ha_token = ha_token or decrypt(admin.ha_token_enc)
+                elif default_user and default_user.ha_url and default_user.ha_token_enc:
+                    ha_url = ha_url or default_user.ha_url
+                    ha_token = ha_token or decrypt(default_user.ha_token_enc)
+
+            if not ha_url or not ha_token:
+                url_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "ha_url")).first()
+                tok_setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "ha_token")).first()
+                if url_setting and url_setting.value:
+                    ha_url = ha_url or url_setting.value
+                if tok_setting and tok_setting.value:
+                    ha_token = ha_token or (decrypt(tok_setting.value) if tok_setting.value.startswith("gAAAAA") else tok_setting.value)
+
+            if not ha_url:
+                ha_url = os.getenv("HA_URL") or os.getenv("HOME_ASSISTANT_URL")
+            if not ha_token:
+                ha_token = os.getenv("HA_TOKEN") or os.getenv("HOME_ASSISTANT_TOKEN")
+
+        if not ha_url or not ha_token:
+            log.warning("[location] Cannot forward location to Home Assistant: HA_URL or HA_TOKEN not configured")
+            return
+
+        if not dev_ids:
+            clean_name = re.sub(r'[^a-zA-Z0-9_]', '_', user_id.lower())
+            dev_ids.append(f"jarvis_{clean_name}")
+
+        # Unique dev_ids
+        seen = set()
+        unique_dev_ids = [d for d in dev_ids if not (d in seen or seen.add(d))]
+
+        async with get_client_insecure() as client:
+            for dev_id in unique_dev_ids:
+                payload = {
+                    "dev_id": dev_id,
+                    "gps": [location.latitude, location.longitude],
+                    "gps_accuracy": int(location.accuracy or 0),
+                    "source_type": "gps",
+                }
+                if location.battery is not None:
+                    payload["battery"] = int(location.battery)
+                if location.speed is not None:
+                    payload["speed"] = location.speed
+                if location.bearing is not None:
+                    payload["course"] = location.bearing
+
+                try:
+                    async with client.post(
+                        f"{ha_url.rstrip('/')}/api/services/device_tracker/see",
+                        headers={"Authorization": f"Bearer {ha_token}", "Content-Type": "application/json"},
+                        json=payload,
+                        timeout=aiohttp.ClientTimeout(total=5.0),
+                    ) as resp:
+                        if resp.status < 300:
+                            log.info(f"[location] Forwarded location to Home Assistant for dev_id={dev_id}")
+                        else:
+                            resp_text = await resp.text()
+                            log.warning(f"[location] HA device_tracker.see status {resp.status} for dev_id={dev_id}: {resp_text}")
+                except Exception as post_err:
+                    log.warning(f"[location] Failed to post device_tracker.see to HA for dev_id={dev_id}: {post_err}")
+    except Exception as e:
+        log.warning(f"[location] Error forwarding location to Home Assistant: {e}")
 
 
 @app.post("/api/users/{user_id}/location")
@@ -2557,8 +2659,9 @@ def update_user_location(
     location: LocationUpdate,
     x_internal_secret: str = Header(...),
 ):
-    """Store user GPS location from mobile app."""
+    """Store user GPS location from mobile app and forward to Home Assistant."""
     _require_internal_secret(x_internal_secret)
+    import asyncio
     import time
     location_data = {
         "latitude": location.latitude,
@@ -2566,6 +2669,7 @@ def update_user_location(
         "accuracy": location.accuracy,
         "speed": location.speed,
         "bearing": location.bearing,
+        "battery": location.battery,
         "timestamp": location.timestamp or time.time(),
         "updated_at": time.time(),
     }
@@ -2583,6 +2687,16 @@ def update_user_location(
             session.add(new_location)
         session.commit()
     log.info(f"[location] Updated location for {user_id}: ({location.latitude}, {location.longitude})")
+
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_forward_location_to_ha(user_id, location))
+    except RuntimeError:
+        try:
+            asyncio.run(_forward_location_to_ha(user_id, location))
+        except Exception:
+            pass
+
     return {"status": "SUCCESS", "message": "Location updated"}
 
 
