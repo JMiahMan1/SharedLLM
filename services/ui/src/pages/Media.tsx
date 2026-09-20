@@ -977,6 +977,11 @@ const Media = () => {
     if (playerState.isPlaying !== undefined) {
       setLocalIsPlaying(playerState.isPlaying);
     }
+    if (playerState.error) {
+      setError(playerState.error);
+      setLocalIsPlaying(false);
+      setLoading(null);
+    }
     if (playerState.volume !== undefined) {
       if (Date.now() - lastVolumeChangeTimeRef.current >= 4000) {
         setLocalVolume(playerState.volume);
@@ -1416,8 +1421,8 @@ const Media = () => {
     if (selectedTarget.startsWith('ma:')) {
       const pid = selectedTarget.slice(3);
       const cmdMap: Record<string, string> = {
-        play: 'players/cmd_play', resume: 'players/cmd_play', pause: 'players/cmd_pause',
-        next: 'players/cmd_next', previous: 'players/cmd_previous', stop: 'players/cmd_stop',
+        play: 'players/cmd/play', resume: 'players/cmd/play', pause: 'players/cmd/pause',
+        next: 'players/cmd/next', previous: 'players/cmd/previous', stop: 'players/cmd/stop',
       };
       const maCmd = cmdMap[command];
       if (!maCmd) { setError(`Unsupported command: ${command}`); return; }
@@ -1459,8 +1464,8 @@ const Media = () => {
         }
         maPlayer.setVolume(localVolume);
         maPlayer.setMuted(localMuted);
-        console.log('[Media] Sending play_media for:', query);
-        await maPlayer.playMedia(query);
+        console.log('[Media] Sending play for:', query);
+        await maPlayer.play(query);
       } catch (err) {
         console.error('[Media] WebPlayer play failed:', err);
         setError(err instanceof Error ? err.message : 'Playback failed');
@@ -1477,7 +1482,7 @@ const Media = () => {
       setError(null);
       try {
         if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('players/play_media', { player_id: pid, media: query });
+        await maPlayer.maCommand('player_queues/play_media', { queue_id: pid, media: query, option: 'replace' });
       } catch (err) {
         console.error('[Media] MA player play failed:', err);
         setError(err instanceof Error ? err.message : 'Playback failed');
@@ -1515,8 +1520,8 @@ const Media = () => {
         }
         maPlayer.setVolume(localVolume);
         maPlayer.setMuted(localMuted);
-        console.log('[Media] Sending play_media for ABS book:', mediaUri);
-        await maPlayer.playMedia(mediaUri);
+        console.log('[Media] Sending play for ABS book:', mediaUri);
+        await maPlayer.play(mediaUri);
       } catch (err) {
         console.error('[Media] WebPlayer play failed:', err);
         setError(err instanceof Error ? err.message : 'Playback failed');
@@ -1535,7 +1540,7 @@ const Media = () => {
       setError(null);
       try {
         if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('players/play_media', { player_id: pid, media: mediaUri });
+        await maPlayer.maCommand('player_queues/play_media', { queue_id: pid, media: mediaUri, option: 'replace' });
       } catch (err) {
         console.error('[Media] MA player audiobook play failed:', err);
         setError(err instanceof Error ? err.message : 'Playback failed');
@@ -1571,8 +1576,8 @@ const Media = () => {
         }
         maPlayer.setVolume(localVolume);
         maPlayer.setMuted(localMuted);
-        console.log('[Media] Sending play_media for playlist:', uri);
-        await maPlayer.playMedia(uri);
+        console.log('[Media] Sending play for playlist:', uri);
+        await maPlayer.play(uri);
       } catch (err) {
         console.error('[Media] WebPlayer play failed:', err);
         setError(err instanceof Error ? err.message : 'Playback failed');
@@ -1589,7 +1594,7 @@ const Media = () => {
       setError(null);
       try {
         if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('players/play_media', { player_id: pid, media: uri });
+        await maPlayer.maCommand('player_queues/play_media', { queue_id: pid, media: uri, option: 'replace' });
       } catch (err) {
         console.error('[Media] MA player playlist play failed:', err);
         setError(err instanceof Error ? err.message : 'Playback failed');
@@ -1648,9 +1653,16 @@ const Media = () => {
       mediaUri = `audiobookshelf://${idClean}`;
     }
 
-    console.log('[Media] Sending play_media for:', mediaUri);
-    // Send play_media via JSON-RPC to tell MA to queue this track
-    await maPlayer.playMedia(mediaUri);
+    console.log('[Media] Sending play for:', mediaUri);
+    try {
+      await maPlayer.play(mediaUri);
+    } catch (err) {
+      console.error('[Media] playLocal failed:', err);
+      const errMsg = err instanceof Error ? err.message : 'Playback failed';
+      setError(errMsg);
+      setLocalIsPlaying(false);
+      return;
+    }
 
     try {
       await api.syncMediaState({
@@ -1693,12 +1705,16 @@ const Media = () => {
       } else {
         console.log('[Media] toggleLocalPlay: already connected, skipping connect');
       }
-      // Re-send play_media in case it was lost
+      // Re-send play in case it was paused/idle
       const mediaUri = localTrack.source === 'abs'
         ? `audiobookshelf://${localTrack.id}`
         : localTrack.id;
-      console.log('[Media] Re-sending play_media:', mediaUri);
-      maPlayer.playMedia(mediaUri);
+      console.log('[Media] Re-sending play:', mediaUri);
+      maPlayer.play(mediaUri).catch(err => {
+        console.error('[Media] toggleLocalPlay failed:', err);
+        setError(err instanceof Error ? err.message : 'Playback failed');
+        setLocalIsPlaying(false);
+      });
     }
     api.syncMediaState({
       entity_id: 'web_player',
@@ -1790,7 +1806,7 @@ const Media = () => {
       const pid = selectedTarget.slice(3);
       try {
         if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('players/cmd_seek', { player_id: pid, position: time });
+        await maPlayer.maCommand('players/cmd/seek', { player_id: pid, position: time });
       } catch { /* ignore */ }
       return;
     }
@@ -1836,7 +1852,7 @@ const Media = () => {
         const pid = selectedTarget.slice(3);
         try {
           if (!maPlayer.isConnected) await maPlayer.connect();
-          await maPlayer.maCommand('players/cmd_volume_set', { player_id: pid, volume_level: v });
+          await maPlayer.maCommand('players/cmd/volume_set', { player_id: pid, volume_level: v });
         } catch { /* ignore */ }
         return;
       }
@@ -1854,7 +1870,7 @@ const Media = () => {
       const pid = selectedTarget.slice(3);
       try {
         if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand('players/cmd_volume_mute', { player_id: pid, muted: newMuted });
+        await maPlayer.maCommand('players/cmd/volume_mute', { player_id: pid, muted: newMuted });
       } catch { /* ignore */ }
       return;
     }
