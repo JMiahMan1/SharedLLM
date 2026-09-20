@@ -238,7 +238,7 @@ const LocationPanel = () => {
   };
 
   const currentVehicle = vehicles.find((v) => v.id === assignedVehicleId);
-  const liveSpeedMph = speed ? (speed * 2.237).toFixed(1) : '0';
+  const liveSpeedMph = typeof speed === 'number' && !isNaN(speed) ? (speed * 2.237).toFixed(1) : '0';
   const isTransit = interval === 'transit' || telemetry?.is_moving;
 
   return (
@@ -281,8 +281,12 @@ const LocationPanel = () => {
           <div className="flex items-center justify-between pt-1 text-xs text-slate-400 border-t border-white/5">
             <div className="flex items-center gap-1.5">
               <MapPin size={13} className="text-purple-400" />
-              <span>{latitude ? `${latitude.toFixed(4)}, ${longitude?.toFixed(4)}` : 'Acquiring GPS...'}</span>
-              {accuracy && <span className="text-slate-500 font-mono">±{accuracy.toFixed(0)}m</span>}
+              <span>
+                {typeof latitude === 'number' && typeof longitude === 'number'
+                  ? `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`
+                  : 'Acquiring GPS...'}
+              </span>
+              {typeof accuracy === 'number' && <span className="text-slate-500 font-mono">±{accuracy.toFixed(0)}m</span>}
             </div>
 
             <button
@@ -301,11 +305,11 @@ const LocationPanel = () => {
           <div className="glass-card p-3 space-y-1.5 text-xs font-mono rounded-xl bg-slate-900/50">
             <div className="flex justify-between">
               <span className="text-slate-400">Latitude</span>
-              <span className="text-slate-200">{latitude?.toFixed(6) ?? '—'}</span>
+              <span className="text-slate-200">{typeof latitude === 'number' ? latitude.toFixed(6) : '—'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Longitude</span>
-              <span className="text-slate-200">{longitude?.toFixed(6) ?? '—'}</span>
+              <span className="text-slate-200">{typeof longitude === 'number' ? longitude.toFixed(6) : '—'}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Speed (Live)</span>
@@ -313,7 +317,7 @@ const LocationPanel = () => {
             </div>
             <div className="flex justify-between">
               <span className="text-slate-400">Accuracy</span>
-              <span className="text-slate-200">{accuracy?.toFixed(1) ?? '—'}m</span>
+              <span className="text-slate-200">{typeof accuracy === 'number' ? `${accuracy.toFixed(1)}m` : '—'}</span>
             </div>
           </div>
         )}
@@ -359,7 +363,7 @@ const LocationPanel = () => {
             </p>
             {telemetry?.closest_zone && !telemetry.current_zone && (
               <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                Near {telemetry.closest_zone} ({telemetry.closest_zone_distance_miles?.toFixed(1)} mi)
+                Near {telemetry.closest_zone} ({typeof telemetry.closest_zone_distance_miles === 'number' ? telemetry.closest_zone_distance_miles.toFixed(1) : '0.0'} mi)
               </p>
             )}
           </div>
@@ -376,7 +380,7 @@ const LocationPanel = () => {
             </div>
             <p className="text-white text-sm font-semibold truncate">
               {telemetry?.is_moving
-                ? `${telemetry.current_speed_mph.toFixed(0)} mph`
+                ? `${typeof telemetry?.current_speed_mph === 'number' ? telemetry.current_speed_mph.toFixed(0) : '0'} mph`
                 : telemetry?.dwell_time_formatted || 'Stationary'}
             </p>
             <p className="text-[11px] text-slate-400 truncate mt-0.5">
@@ -391,7 +395,7 @@ const LocationPanel = () => {
               <span>Top Speed Today</span>
             </div>
             <p className="text-white text-sm font-semibold">
-              {telemetry ? `${telemetry.top_speed_mph.toFixed(1)} mph` : '0.0 mph'}
+              {typeof telemetry?.top_speed_mph === 'number' ? `${telemetry.top_speed_mph.toFixed(1)} mph` : '0.0 mph'}
             </p>
           </div>
 
@@ -402,7 +406,7 @@ const LocationPanel = () => {
               <span>Traveled Today</span>
             </div>
             <p className="text-white text-sm font-semibold">
-              {telemetry ? `${telemetry.distance_traveled_miles.toFixed(1)} mi` : '0.0 mi'}
+              {typeof telemetry?.distance_traveled_miles === 'number' ? `${telemetry.distance_traveled_miles.toFixed(1)} mi` : '0.0 mi'}
             </p>
           </div>
         </div>
@@ -457,7 +461,7 @@ const LocationPanel = () => {
             <option value="none">None / Passenger / Walking</option>
             {vehicles.map((v) => (
               <option key={v.id} value={v.id}>
-                {v.name} ({v.mpg} MPG · ${v.cost_per_gallon.toFixed(2)}/{v.fuel_type === 'electric' ? 'kWh' : 'gal'})
+                {v.name} ({v.mpg} MPG · ${typeof v.cost_per_gallon === 'number' ? v.cost_per_gallon.toFixed(2) : '0.00'}/{v.fuel_type === 'electric' ? 'kWh' : 'gal'})
               </option>
             ))}
           </select>
@@ -480,13 +484,13 @@ const LocationPanel = () => {
               <div>
                 <p className="text-[10px] text-slate-400">Distance</p>
                 <p className="text-xs font-bold text-white">
-                  {telemetry?.distance_traveled_miles ? `${telemetry.distance_traveled_miles.toFixed(1)} mi` : '0.0 mi'}
+                  {typeof telemetry?.distance_traveled_miles === 'number' ? `${telemetry.distance_traveled_miles.toFixed(1)} mi` : '0.0 mi'}
                 </p>
               </div>
               <div>
                 <p className="text-[10px] text-slate-400">Fuel Used</p>
                 <p className="text-xs font-bold text-white">
-                  {telemetry?.vehicle?.gallons_used !== undefined
+                  {typeof telemetry?.vehicle?.gallons_used === 'number'
                     ? `${telemetry.vehicle.gallons_used.toFixed(2)} ${currentVehicle.fuel_type === 'electric' ? 'kWh' : 'gal'}`
                     : '0.00 gal'}
                 </p>
@@ -494,7 +498,7 @@ const LocationPanel = () => {
               <div>
                 <p className="text-[10px] text-slate-400">Est. Trip Cost</p>
                 <p className="text-xs font-bold text-emerald-400">
-                  {telemetry?.vehicle?.estimated_cost_usd !== undefined
+                  {typeof telemetry?.vehicle?.estimated_cost_usd === 'number'
                     ? `$${telemetry.vehicle.estimated_cost_usd.toFixed(2)}`
                     : '$0.00'}
                 </p>
@@ -628,7 +632,7 @@ const LocationPanel = () => {
                       <div className="min-w-0">
                         <p className="text-xs font-semibold text-white truncate">{v.name}</p>
                         <p className="text-[11px] text-slate-400 truncate">
-                          {v.mpg} MPG · ${v.cost_per_gallon.toFixed(2)}/{v.fuel_type === 'electric' ? 'kWh' : 'gal'} ·{' '}
+                          {v.mpg} MPG · ${typeof v.cost_per_gallon === 'number' ? v.cost_per_gallon.toFixed(2) : '0.00'}/{v.fuel_type === 'electric' ? 'kWh' : 'gal'} ·{' '}
                           <span className="capitalize">{v.fuel_type}</span>
                         </p>
                       </div>

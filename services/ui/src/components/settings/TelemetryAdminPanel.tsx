@@ -170,8 +170,8 @@ const TelemetryAdminPanel = () => {
     return new Date(ts * 1000).toLocaleString();
   };
 
-  const formatPower = (w: number | null) => {
-    if (w == null) return '--';
+  const formatPower = (w: number | null | undefined) => {
+    if (w == null || typeof w !== 'number' || isNaN(w)) return '--';
     return `${w.toFixed(1)} W`;
   };
 
@@ -443,7 +443,11 @@ const TelemetryAdminPanel = () => {
                         </div>
                         <div className="glass-card p-3 text-center">
                           <p className="text-[9px] font-black uppercase tracking-widest text-slate-500">Availability</p>
-                          <p className="text-base font-bold text-emerald-400">{enrolledEntitySummary.summary.availability_pct?.toFixed(1)}%</p>
+                          <p className="text-base font-bold text-emerald-400">
+                            {typeof enrolledEntitySummary.summary.availability_pct === 'number'
+                              ? `${enrolledEntitySummary.summary.availability_pct.toFixed(1)}%`
+                              : '--'}
+                          </p>
                         </div>
                       </div>
                     )}
@@ -459,7 +463,7 @@ const TelemetryAdminPanel = () => {
                                 <span>{formatTimestamp(dp.recorded_at)}</span>
                                 {dp.source && <span className="text-slate-600">{dp.source}</span>}
                               </div>
-                              {dp.power_w != null && (
+                              {typeof dp.power_w === 'number' && !isNaN(dp.power_w) && (
                                 <p className="font-medium text-amber-400">{dp.power_w.toFixed(1)} W</p>
                               )}
                               {dp.state && (

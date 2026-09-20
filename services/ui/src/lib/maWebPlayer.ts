@@ -25,9 +25,11 @@ interface MAWebPlayerState {
   muted: boolean;
   playerState: PlayerState | null;
   error: string | null;
+  mediaUri: string | null;
   mediaTitle: string | null;
   mediaArtist: string | null;
   mediaImage: string | null;
+  mediaFavorite?: boolean | null;
   position: number;
   duration: number;
   connectionState: ConnectionState;
@@ -136,9 +138,11 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     muted: false,
     playerState: null,
     error: null,
+    mediaUri: null,
     mediaTitle: null,
     mediaArtist: null,
     mediaImage: null,
+    mediaFavorite: null,
     position: 0,
     duration: 0,
     connectionState: 'DISCONNECTED',
@@ -263,12 +267,16 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         // for title/artist/cover — if the authoritative player_updated
         // current_media has already populated them, don't let a playlist/source
         // name in current_item override the real track.
-        const current = data?.current_item;
+        const current = data?.current_item as Record<string, unknown> | undefined;
         if (current) {
-          if (!next.mediaTitle) next.mediaTitle = current.name || null;
-          if (!next.mediaArtist) next.mediaArtist = current.artist || null;
+          const qUri = (current.uri || (current.media_item as Record<string, unknown> | undefined)?.uri || (current.streamdetails as Record<string, unknown> | undefined)?.uri) as string | undefined;
+          if (qUri && !next.mediaUri) next.mediaUri = qUri;
+          if (!next.mediaTitle) next.mediaTitle = (current.name as string) || null;
+          if (!next.mediaArtist) next.mediaArtist = (current.artist as string) || null;
           if (!next.mediaImage) next.mediaImage = extractMaImage(current.image) || next.mediaImage;
-          if (current.duration) next.duration = current.duration;
+          if (current.duration) next.duration = current.duration as number;
+          const qFav = (current.favorite ?? (current.media_item as Record<string, unknown> | undefined)?.favorite) as boolean | undefined;
+          if (qFav !== undefined && next.mediaFavorite === undefined) next.mediaFavorite = qFav;
         }
 
         // Update play state from queue state
@@ -283,14 +291,18 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       if (eventType === 'player_updated') {
         // current_media is MA's authoritative "now playing" track and updates on
         // every track change — this is what drives the title/artist/cover.
-        const media = data?.current_media;
+        const media = data?.current_media as Record<string, unknown> | undefined;
         if (media) {
-          if (media.title) next.mediaTitle = media.title;
-          if (media.artist) next.mediaArtist = media.artist;
+          const mUri = (media.uri || (media.media_item as Record<string, unknown> | undefined)?.uri) as string | undefined;
+          if (mUri) next.mediaUri = mUri;
+          if (media.title) next.mediaTitle = media.title as string;
+          if (media.artist) next.mediaArtist = media.artist as string;
           const img = extractMaImage(media.image_url || media.image);
           if (img) next.mediaImage = img;
-          if (media.duration) next.duration = media.duration;
-          if (typeof media.elapsed_time === 'number') next.position = media.elapsed_time;
+          if (media.duration) next.duration = media.duration as number;
+          if (typeof media.elapsed_time === 'number') next.position = media.elapsed_time as number;
+          const mFav = (media.favorite ?? (media.media_item as Record<string, unknown> | undefined)?.favorite) as boolean | undefined;
+          if (mFav !== undefined) next.mediaFavorite = mFav;
         }
         // Player-level state (volume, muted, position)
         if (data?.volume_level !== undefined && data?.volume_level !== null) {
@@ -663,6 +675,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         option: 'replace',
         radio_mode: false,
       }, true);
+      setStateLocal(s => ({ ...s, mediaUri: resolvedUri, mediaFavorite: null }));
     } catch (err) {
       const rawMsg = err instanceof Error ? err.message : String(err);
       const userMsg = (rawMsg.includes('Cannot connect to host') || rawMsg.includes('Connect call failed'))
