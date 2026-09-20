@@ -538,6 +538,76 @@ export const api = {
     return resp.data;
   },
 
+  // Life360 & Vehicle Telemetry
+  async getVehicles(): Promise<{ vehicles: Array<{ id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type: string }> }> {
+    const resp = await apiClient.get('/api/geo/vehicles');
+    return resp.data;
+  },
+
+  async saveVehicle(vehicle: { id: string; name: string; mpg: number; cost_per_gallon: number; fuel_type?: string }): Promise<{ status: string; vehicle: any }> {
+    const resp = await apiClient.post('/api/geo/vehicles', vehicle);
+    return resp.data;
+  },
+
+  async deleteVehicle(vehicleId: string): Promise<{ status: string; deleted: string }> {
+    const resp = await apiClient.delete(`/api/geo/vehicles/${encodeURIComponent(vehicleId)}`);
+    return resp.data;
+  },
+
+  async getAssignedVehicle(userId: string): Promise<{ user_id: string; vehicle_id: string | null; vehicle: any | null }> {
+    const resp = await apiClient.get(`/api/geo/vehicles/assigned/${encodeURIComponent(userId)}`);
+    return resp.data;
+  },
+
+  async assignVehicle(userId: string, vehicleId: string | null): Promise<{ status: string; user_id: string; vehicle_id: string | null }> {
+    const resp = await apiClient.post('/api/geo/vehicles/assign', { user_id: userId, vehicle_id: vehicleId });
+    return resp.data;
+  },
+
+  async getGeoTelemetry(userId: string, hours = 24): Promise<{
+    status: string;
+    entity_id: string;
+    friendly_name: string;
+    latitude: number;
+    longitude: number;
+    accuracy?: number;
+    battery?: number;
+    is_moving: boolean;
+    current_speed_mph: number;
+    top_speed_mph: number;
+    current_zone?: string | null;
+    closest_zone?: string | null;
+    closest_zone_distance_miles?: number | null;
+    distance_to_home_miles?: number | null;
+    dwell_time_seconds: number;
+    dwell_time_formatted: string;
+    distance_traveled_miles: number;
+    frequented_locations: Array<{ name: string; dwell_seconds: number; dwell_formatted: string }>;
+    vehicle?: {
+      id: string;
+      name: string;
+      mpg: number;
+      cost_per_gallon: number;
+      fuel_type: string;
+      gallons_used?: number;
+      estimated_cost_usd?: number;
+    } | null;
+    speech: string;
+  }> {
+    const resp = await apiClient.get(`/api/geo/telemetry/${encodeURIComponent(userId)}?hours=${hours}`);
+    return resp.data;
+  },
+
+  async getGeoPeople(): Promise<any> {
+    const resp = await apiClient.get('/api/geo/people');
+    return resp.data;
+  },
+
+  async getGeoZones(): Promise<any> {
+    const resp = await apiClient.get('/api/geo/zones');
+    return resp.data;
+  },
+
   // Speech-to-Text
   async transcribeAudio(audioBlob: Blob, model = 'base', language = 'en'): Promise<{ status: string; transcript: string }> {
     const formData = new FormData();

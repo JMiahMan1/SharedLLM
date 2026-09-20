@@ -519,21 +519,27 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
         reverse=True,
     )
 
-    # 9. Vehicle & travel cost
+    # 9. Vehicle & travel cost (computed only if an actual vehicle has been assigned)
     r = await get_redis()
-    vehicle = {"id": "default", "name": "Standard Vehicle", "mpg": 22.0, "cost_per_gallon": 3.75}
+    vehicle_info = None
     if r:
         try:
             assigned_id = await r.get(f"geo:user_vehicle:{clean_id}")
-            if assigned_id:
+            if assigned_id and assigned_id != "none":
                 raw_veh = await r.hget("geo:vehicles", assigned_id)
                 if raw_veh:
-                    vehicle = json.loads(raw_veh)
+                    veh_dict = json.loads(raw_veh)
+                    mpg = float(veh_dict.get("mpg", 0.0))
+                    cost_per_unit = float(veh_dict.get("cost_per_gallon", 0.0))
+                    gallons = (distance_traveled_miles / mpg) if mpg > 0 else 0.0
+                    cost = round(gallons * cost_per_unit, 2)
+                    vehicle_info = {
+                        **veh_dict,
+                        "gallons_used": round(gallons, 2),
+                        "estimated_cost_usd": cost,
+                    }
         except Exception as e:
             log.warning(f"[Geo] Redis vehicle read error: {e}")
-
-    gallons_used = distance_traveled_miles / vehicle["mpg"] if vehicle.get("mpg", 0) > 0 else 0.0
-    estimated_travel_cost = round(gallons_used * vehicle.get("cost_per_gallon", 3.75), 2)
 
     # 10. Natural speech human summary
     if is_moving:
@@ -580,11 +586,7 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
         "dwell_time_formatted": dwell_formatted,
         "distance_traveled_miles": distance_traveled_miles,
         "frequented_locations": frequented_locations,
-        "vehicle": {
-            **vehicle,
-            "gallons_used": round(gallons_used, 2),
-            "estimated_cost_usd": estimated_travel_cost,
-        },
+        "vehicle": vehicle_info,
         "speech": speech,
     }
 
@@ -603,36 +605,30 @@ async def get_telemetry_alias(entity_id: str, hours: float = Query(24.0, ge=0.1,
 class VehiclePayload(BaseModel):
     id: str
     name: str
-    mpg: float = 22.0
-    cost_per_gallon: float = 3.75
+    mpg: float
+    cost_per_gallon: float
     fuel_type: str = "regular"
 
 
 class VehicleAssignPayload(BaseModel):
     user_id: str
-    vehicle_id: str
+    vehicle_id: str | None = None
 
 
 @app.get("/vehicles")
 async def get_vehicles():
+    """List all user-configured vehicles (no mock data)."""
     r = await get_redis()
-    default_vehicles = [
-        {"id": "truck", "name": "Jeremiah's Truck", "mpg": 16.5, "cost_per_gallon": 3.75, "fuel_type": "regular"},
-        {"id": "suv", "name": "Family SUV", "mpg": 24.0, "cost_per_gallon": 3.75, "fuel_type": "regular"},
-        {"id": "sedan", "name": "Sedan", "mpg": 32.0, "cost_per_gallon": 3.75, "fuel_type": "regular"},
-    ]
     if not r:
-        return {"vehicles": default_vehicles}
+        return {"vehicles": []}
     try:
         data = await r.hgetall("geo:vehicles")
         if not data:
-            for v in default_vehicles:
-                await r.hset("geo:vehicles", v["id"], json.dumps(v))
-            return {"vehicles": default_vehicles}
+            return {"vehicles": []}
         return {"vehicles": [json.loads(v) for v in data.values()]}
     except Exception as e:
         log.warning(f"[Geo] Error listing vehicles: {e}")
-        return {"vehicles": default_vehicles}
+        return {"vehicles": []}
 
 
 @app.post("/vehicles")
@@ -646,6 +642,35 @@ async def save_vehicle(vehicle: VehiclePayload, x_internal_secret: str | None = 
     return {"status": "ok", "vehicle": vehicle.model_dump()}
 
 
+@app.delete("/vehicles/{vehicle_id}")
+async def delete_vehicle(vehicle_id: str, x_internal_secret: str | None = None):
+    if x_internal_secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    await r.hdel("geo:vehicles", vehicle_id)
+    return {"status": "ok", "deleted": vehicle_id}
+
+
+@app.get("/vehicles/assigned/{user_id}")
+async def get_assigned_vehicle(user_id: str):
+    r = await get_redis()
+    clean_user = user_id.split(".")[-1].lower()
+    if not r:
+        return {"user_id": clean_user, "vehicle_id": None, "vehicle": None}
+    vehicle_id = await r.get(f"geo:user_vehicle:{clean_user}")
+    vehicle = None
+    if vehicle_id and vehicle_id != "none":
+        raw_veh = await r.hget("geo:vehicles", vehicle_id)
+        if raw_veh:
+            try:
+                vehicle = json.loads(raw_veh)
+            except Exception:
+                vehicle = None
+    return {"user_id": clean_user, "vehicle_id": vehicle_id, "vehicle": vehicle}
+
+
 @app.post("/vehicles/assign")
 async def assign_vehicle(assign: VehicleAssignPayload, x_internal_secret: str | None = None):
     if x_internal_secret != INTERNAL_SECRET:
@@ -654,5 +679,9 @@ async def assign_vehicle(assign: VehicleAssignPayload, x_internal_secret: str | 
     if not r:
         raise HTTPException(status_code=503, detail="Redis unavailable")
     clean_user = assign.user_id.split(".")[-1].lower()
-    await r.set(f"geo:user_vehicle:{clean_user}", assign.vehicle_id)
+    if assign.vehicle_id and assign.vehicle_id != "none":
+        await r.set(f"geo:user_vehicle:{clean_user}", assign.vehicle_id)
+    else:
+        await r.delete(f"geo:user_vehicle:{clean_user}")
     return {"status": "ok", "user_id": clean_user, "vehicle_id": assign.vehicle_id}
+

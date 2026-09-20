@@ -127,10 +127,9 @@ def test_telemetry_moving(client, monkeypatch):
     assert "traveling at" in data["speech"]
 
 
-def test_vehicles_list(client):
+def test_vehicles_empty_by_default(client):
     r = client.get("/vehicles")
     assert r.status_code == 200
     data = r.json()
     assert "vehicles" in data
-    assert len(data["vehicles"]) >= 1
-    assert any(v["name"] == "Jeremiah's Truck" for v in data["vehicles"])
+    assert isinstance(data["vehicles"], list)
