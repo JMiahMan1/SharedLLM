@@ -732,16 +732,25 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
   }, [sendJsonRpc, setError]);
 
-  // Send players/cmd/seek to seek to a position
+  // Send player_queues/seek to seek to a position in the track
   const cmdSeek = useCallback(async (position: number, player_id?: string) => {
     const pid = player_id || playerIdRef.current;
     if (!pid) {
       console.error('[MAWebPlayer] No player_id for cmdSeek');
       return;
     }
+    const pos = Math.max(0, Math.round(position));
     try {
-      console.log('[MAWebPlayer] cmd/seek:', position, 'player:', pid);
-      await sendJsonRpc('players/cmd/seek', { player_id: pid, position });
+      console.log('[MAWebPlayer] player_queues/seek:', pos, 'queue/player:', pid);
+      await sendJsonRpc('player_queues/seek', { queue_id: pid, player_id: pid, position: pos }, false);
+      if (audioRef.current && Number.isFinite(pos)) {
+        try {
+          audioRef.current.currentTime = pos;
+        } catch {
+          // ignore
+        }
+      }
+      setStateLocal(s => ({ ...s, position: pos }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[MAWebPlayer] cmdSeek failed:', msg);
@@ -884,6 +893,14 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         normalizedCmd = 'player_queues/previous';
         if (!normalizedArgs.queue_id && normalizedArgs.player_id) {
           normalizedArgs.queue_id = normalizedArgs.player_id;
+        }
+      } else if (normalizedCmd === 'players/cmd/seek' || normalizedCmd === 'players/cmd_seek' || normalizedCmd === 'player_queues/cmd_seek') {
+        normalizedCmd = 'player_queues/seek';
+        if (!normalizedArgs.queue_id && normalizedArgs.player_id) {
+          normalizedArgs.queue_id = normalizedArgs.player_id;
+        }
+        if (typeof normalizedArgs.position === 'number') {
+          normalizedArgs.position = Math.round(normalizedArgs.position);
         }
       } else if (normalizedCmd.startsWith('players/cmd_')) {
         normalizedCmd = 'players/cmd/' + normalizedCmd.slice(12);
