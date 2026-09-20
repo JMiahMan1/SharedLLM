@@ -12,6 +12,7 @@ from services.config import INTERNAL_SECRET, RAG_SVC_URL
 from services.shared.info_endpoint import info_router
 from services.storage.indexer import CheckpointManager, build_content_index, extract_and_chunk_contents, is_indexer_paused, set_indexer_pause
 from services.storage.models import ProviderMirrorRequest, ProviderWriteRequest
+from services.storage.models import IndexScanRequest
 from services.storage.providers import ProviderConfig, build_provider
 
 log = logging.getLogger("storage")
@@ -22,13 +23,6 @@ app = FastAPI(title="Librarian Storage Service")
 app.include_router(info_router)
 
 RAG_SVC = RAG_SVC_URL
-
-class IndexScanRequest(BaseModel):
-    provider: ProviderConfig
-    path: str = "/"
-    recursive: bool = True
-    user_id: str | None = None
-    force: bool = False
 
 import os
 import time

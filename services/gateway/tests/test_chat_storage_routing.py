@@ -216,6 +216,7 @@ async def test_chat_storage_routing(auth_headers, monkeypatch):
 
     sess = _make_session(settings, ollama_iter)
     monkeypatch.setattr(gateway_main, "get_http_client", lambda: sess)
+    monkeypatch.setattr(gateway_main.engine, "is_fast_path", lambda *args: False)
 
     # Also cover orchestrator's direct aiohttp.ClientSession usage for /api/settings
     with patch("aiohttp.ClientSession", return_value=sess):

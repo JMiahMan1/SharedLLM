@@ -49,11 +49,17 @@ from services.gateway.config import (
 from services.gateway.config_validator import validate_config
 from services.gateway.history import get_history, get_long_term_memory, ping_redis, update_history
 from services.gateway.intent_engine import engine, is_raven_intent
-from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+from services.gateway.llm_providers import (
+    BaseLLMProvider,
+    OllamaProvider,
+    OpenRouterProvider,
+    get_provider,
+    strip_thinking_blocks,
+)
 from services.gateway.ma_ws_client import MAWebSocketClient
 from services.gateway.media_device_cache import get_last_used_device, set_last_used_device
 from services.gateway.messaging import InferenceJobQueue, JobStatus
-from services.gateway.orchestrator import _get, get_all_settings
+from services.gateway.orchestrator import _get, call_ollama, get_all_settings, get_llm_settings
 from services.gateway.prompts import (
     PROMPT_CODE_HELPER_SYSTEM_INSTRUCTION,
     PROMPT_MEDIA_TROUBLESHOOTING,
@@ -296,47 +302,6 @@ async def fetch_global_setting(key: str, default: str = "") -> str:
     except Exception as e:
         log.warning(f"Failed to fetch global setting '{key}': {e}")
     return default
-
-
-async def get_llm_settings() -> dict[str, str]:
-    """Fetches full LLM settings from Identity Service (cached)."""
-    return await get_all_settings()
-
-
-async def get_provider(settings: dict) -> BaseLLMProvider:
-    """Instantiates the correct provider based on settings."""
-    active_provider = settings.get("active_llm_provider", "ollama")
-    timeout = float(_get(settings, "ollama_timeout", "600"))
-    if active_provider == "openrouter":
-        return OpenRouterProvider(
-            api_key=settings.get("llm_cloud_api_key", ""),
-            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions"),
-            timeout=timeout
-        )
-    else:
-        local_url = _get(settings, "llm_local_url")
-        if not local_url:
-            raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
-        return OllamaProvider(
-            base_url=local_url,
-            timeout=timeout
-        )
-
-
-async def call_ollama(payload: dict[str, Any], use_chat: bool = True) -> dict[str, Any]:
-    """
-    Compatibility wrapper for the legacy chat-based inference path.
-    Existing tests still patch this symbol, so keep it as a stable seam.
-    """
-    settings = await get_llm_settings()
-    provider = await get_provider(settings)
-    content = await provider.generate(
-        payload["model"],
-        payload["messages"],
-        options=payload.get("options", {}),
-        chunk_callback=payload.get("chunk_callback"),
-    )
-    return {"message": {"content": content}}
 
 
 async def execute_inference(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1067,11 +1032,6 @@ def select_system_instruction_for_query(query: str, selected_model: str) -> str:
 def is_coding_query(query: str) -> bool:
     q = (query or "").lower()
     return any(token in q for token in CODING_SIGNALS)
-
-
-def is_librarian_query(query: str) -> bool:
-    q = (query or "").lower()
-    return not is_coding_query(q) and any(token in q for token in LIBRARIAN_SIGNALS)
 
 
 def should_search_storage_for_code_query(query: str) -> bool:
@@ -1873,118 +1833,6 @@ def resolve_media_target(query: str, entities: list[dict], media_type: str | Non
     return best_eid if best_score > 0 else None
 
 
-def resolve_video_target(query: str, entities: list[dict], cached_device: str | None = None) -> str | None:
-    """
-    Resolve a cast/video-capable media target for video-like requests.
-    Prefer entities whose friendly name matches the requested device and avoid
-    Music Assistant queues for video playback.
-    Returns None when no entity can be confidently resolved.
-    """
-    _, requested_device = extract_media_request(query)
-    requested_lower = requested_device.lower() if requested_device else ""
-
-    def _normalize_name(value: str) -> str:
-      cleaned = re.sub(r"[^a-z0-9]+", " ", (value or "").lower())
-      cleaned = re.sub(r"\b(remote)\b", " ", cleaned)
-      return " ".join(cleaned.split())
-
-    requested_normalized = _normalize_name(requested_lower)
-
-    def _matches_requested_device(entity: dict) -> bool:
-      eid = entity.get("entity_id", "")
-      if requested_normalized:
-          attrs = entity.get("attributes") or {}
-          friendly = str(attrs.get("friendly_name") or "")
-          friendly_normalized = _normalize_name(friendly)
-          if not friendly_normalized:
-              return False
-          return (
-              friendly_normalized == requested_normalized
-              or requested_normalized in friendly_normalized
-              or friendly_normalized in requested_normalized
-          )
-      return bool(cached_device and eid == cached_device)
-
-    def _score(entity: dict) -> tuple[int, str]:
-      eid = entity.get("entity_id", "")
-      attrs = entity.get("attributes") or {}
-      friendly = str(attrs.get("friendly_name") or "").lower()
-      friendly_normalized = _normalize_name(friendly)
-      source = str(attrs.get("source") or "").lower()
-      device_class = str(attrs.get("device_class") or "").lower()
-      state = str(entity.get("state") or "").lower()
-
-      score = 0
-      if requested_lower and requested_lower in friendly:
-          score += 100
-      if requested_normalized and requested_normalized == friendly_normalized:
-          score += 120
-      elif requested_normalized and requested_normalized in friendly_normalized:
-          score += 80
-      elif requested_normalized and friendly_normalized in requested_normalized:
-          score += 60
-      if "music assistant queue" in source:
-          score -= 200
-      if any(token in eid for token in ("cast", "android", "chromecast")):
-          score += 100
-      if any(token in friendly for token in ("cast", "android tv", "google tv", "tv")):
-          score += 60
-      if device_class in {"tv", "receiver"}:
-          score += 30
-      if state not in {"unavailable", "unknown"}:
-          score += 10
-      if cached_device and eid == cached_device:
-          score += 50
-      return score, eid
-
-    candidates = [e for e in entities if e.get("entity_id", "").startswith("media_player.")]
-    if not candidates:
-      return None
-
-    if requested_normalized or cached_device:
-      matched_candidates = [entity for entity in candidates if _matches_requested_device(entity)]
-      if matched_candidates:
-          candidates = matched_candidates
-      else:
-          return None
-    else:
-      return None
-
-    ranked = sorted((_score(e) for e in candidates), reverse=True)
-    best_score, best_eid = ranked[0]
-    return best_eid if best_score > 0 else None
-
-
-
-
-async def troubleshoot_media_failure(query: str, failure: str) -> dict | None:
-    media_prompt = await load_prompt(get_http_client(), PROMPT_MEDIA_TROUBLESHOOTING)
-    prompt = (
-      f"{media_prompt}\n"
-      f"User request: {query}\n"
-      f"Failure: {failure}"
-    )
-    try:
-      data = await execute_inference(
-          {"model": await get_assistant_model(), "messages": [{"role": "user", "content": prompt}], "stream": False}
-     )
-      raw = str(data.get("response", "")).strip()
-      start = raw.find("{")
-      end = raw.rfind("}")
-      if start == -1 or end == -1 or end <= start:
-          return None
-      json_data = _parse_llm_json_object(raw[start:end + 1])
-      if not isinstance(json_data, dict):
-          return None
-      query_value = str(json_data.get("query") or "").strip()
-      media_type = str(json_data.get("media_type") or "").strip().lower()
-      if not query_value or media_type not in {"artist", "search", "music"}:
-          return None
-      return {"query": query_value, "media_type": media_type}
-    except Exception as exc:
-      log.warning(f"[MediaFallback] Troubleshooting fallback failed: {exc}")
-      return None
-
 # --- Helper Functions ---
 async def decompose_command_query(query: str) -> list[str]:
     if " and " not in query.lower() and " then " not in query.lower():
@@ -2221,20 +2069,6 @@ async def get_entities(request: Request):
     except Exception:
         return {"entities": []}
 
-async def execute_command(endpoint: str, payload: dict) -> Any:
-    try:
-      resp = await get_http_client().post(
-          f"{EXECUTION_SVC}{endpoint}",
-          json=payload,
-          headers={"X-Internal-Secret": INTERNAL_SECRET},
-          timeout=aiohttp.ClientTimeout(total=120.0)
-      )
-      data = await resp.json()
-      if not isinstance(data, dict):
-          return {"status": "FAILURE", "message": str(data)}
-      return data
-    except Exception as e:
-      return {"status": "FAILURE", "message": str(e)}
 
 # --- Middleware & Security ---
 @app.middleware("http")
@@ -2272,31 +2106,6 @@ async def secure_logging_middleware(request: Request, call_next):
 # --- Core Handlers ---
 # Removed local extract_user_facts as it is now in history.py
 
-async def decompose_query(query: str) -> list[str]:
-    """
-    Splits a complex query into simpler sub-queries.
-    """
-    if len(query.split()) < 6: # Simple queries don't need decomposition
-        return [query]
-
-    try:
-        prompt = f"""Split this complex user request into individual, actionable sub-queries.
-Request: "{query}"
-Return a simple JSON list of strings.
-Example: ["Turn on the office light", "Play some jazz music"]
-"""
-        data = await execute_inference({"model": await get_assistant_model(), "messages": [{"role": "user", "content": prompt}], "stream": False})
-        text = data.get("message", {}).get("content", "").strip()
-        if "[" in text and "]" in text:
-            import json
-            try:
-                return json.loads(text[text.find("["):text.rfind("]")+1])
-            except (json.JSONDecodeError, ValueError):
-                pass
-        return [query]
-    except Exception as e:
-        log.warning(f"Decomposition failed: {e}")
-        return [query]
 
 async def perform_shadow_execution(query: str, creds: ResolvedCredentials, history: list, rag_context: str) -> str:
     """
@@ -3069,33 +2878,6 @@ async def chat_handler(request: Request, background_tasks=None):
             resolved_entity = resolve_media_target(query, media_entities or [], media_type, cached_device_id)
         elif intent in ["turn_on", "turn_off"]:
             resolved_entity = engine.extract_entity(query, intent)
-            if not resolved_entity and media_entities:
-                q_clean = query.lower().strip().strip("?.!")
-                if "," in q_clean:
-                    q_clean = q_clean.split(",")[0].strip()
-                m_a = re.search(r'^(?:turn|switch|power|shut)\s+(?:on|off)\s+(?:the\s+)?(.+)$', q_clean)
-                m_b = re.search(r'^(?:turn|switch|power|shut)\s+(?:the\s+)?(.+?)\s+(?:on|off)$', q_clean)
-                target_phrase = ""
-                if m_a:
-                    target_phrase = m_a.group(1).strip()
-                elif m_b:
-                    target_phrase = m_b.group(1).strip()
-                else:
-                    target_phrase = re.sub(r'^(?:turn|switch|power|shut)\s+(?:the\s+)?', '', q_clean).strip()
-                    target_phrase = re.sub(r'\b(?:on|off|please|now|right away)\b', '', target_phrase).strip()
-
-                target_norm = re.sub(r'[^a-z0-9]+', '', target_phrase)
-                for ent in media_entities:
-                    eid = ent.get("entity_id", "")
-                    if eid.startswith(("light.", "switch.")):
-                        friendly = (ent.get("attributes", {}).get("friendly_name") or "").lower()
-                        short_id = eid.split(".", 1)[-1].replace("_", " ")
-                        friendly_norm = re.sub(r'[^a-z0-9]+', '', friendly)
-                        short_norm = re.sub(r'[^a-z0-9]+', '', short_id)
-                        if target_norm and (target_norm == friendly_norm or target_norm in friendly_norm or friendly_norm in target_norm or target_norm == short_norm):
-                            resolved_entity = eid
-                            log.info(f"[FastPath] Resolved light/switch '{target_phrase}' to '{resolved_entity}'")
-                            break
             if not resolved_entity:
                 resolved_entity = resolve_media_target(query, media_entities or [], media_type="power", cached_device=cached_device_id)
         elif intent in ["pause_media", "media_transport"]:
@@ -7387,156 +7169,81 @@ async def _resolve_user_context(request: Request, body: dict) -> Any:
     return {"user": ""}
 
 
-@app.post("/execute/media/status")
-async def proxy_media_status(request: Request):
-    """Proxy media status requests from UI to execution service."""
+async def _forward_execution_request(
+    request: Request,
+    endpoint: str,
+    service_label: str,
+    timeout: float = 60.0,
+    transform_result: bool = False,
+):
+    """Unified proxy forwarding helper for execution service endpoints."""
     client = get_http_client()
+
     async def do_proxy():
         body = await request.json() if await request.body() else {}
         user_ctx = await _resolve_user_context(request, body)
         exec_body = {**body, "user_context": user_ctx}
         resp = await client.post(
-            f"{EXECUTION_SVC}/execute/media/status",
+            f"{EXECUTION_SVC}{endpoint}",
             json=exec_body,
             headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=aiohttp.ClientTimeout(total=15.0)
+            timeout=aiohttp.ClientTimeout(total=timeout),
         )
+        if transform_result:
+            data = await resp.json()
+            if isinstance(data, dict):
+                entities = data.get("detail", {}).get("entities", [])
+                data["result"] = entities
+            return JSONResponse(content=data, status_code=resp.status)
         return await _proxy_json_response(resp)
+
     try:
-        return await retry_http_request(do_proxy, "Execution service (media status)", max_retries=2, base_delay=0.1)
+        return await retry_http_request(do_proxy, f"Execution service ({service_label})", max_retries=2, base_delay=0.1)
     except (TimeoutError, aiohttp.ClientError) as e:
-        log.error(f"Execution service unreachable for media status: {e}")
+        log.error(f"Execution service unreachable for {service_label}: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable") from e
+
+
+@app.post("/execute/media/status")
+async def proxy_media_status(request: Request):
+    """Proxy media status requests from UI to execution service."""
+    return await _forward_execution_request(request, "/execute/media/status", "media status", timeout=15.0)
 
 
 @app.post("/execute/media/transport")
 async def proxy_media_transport(request: Request):
     """Proxy media transport requests from UI to execution service."""
-    client = get_http_client()
-    async def do_proxy():
-        body = await request.json() if await request.body() else {}
-        user_ctx = await _resolve_user_context(request, body)
-        exec_body = {**body, "user_context": user_ctx}
-        resp = await client.post(
-            f"{EXECUTION_SVC}/execute/media/transport",
-            json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return await _proxy_json_response(resp)
-    try:
-        return await retry_http_request(do_proxy, "Execution service (media transport)", max_retries=2, base_delay=0.1)
-    except aiohttp.ClientError as e:
-        log.error(f"Execution service unreachable for media transport: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
+    return await _forward_execution_request(request, "/execute/media/transport", "media transport")
 
 
 @app.post("/execute/media/play")
 async def proxy_media_play(request: Request):
     """Proxy media play requests from UI to execution service."""
-    client = get_http_client()
-    async def do_proxy():
-        body = await request.json() if await request.body() else {}
-        user_ctx = await _resolve_user_context(request, body)
-        exec_body = {**body, "user_context": user_ctx}
-        resp = await client.post(
-            f"{EXECUTION_SVC}/execute/media/play",
-            json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return await _proxy_json_response(resp)
-    try:
-        return await retry_http_request(do_proxy, "Execution service (media play)", max_retries=2, base_delay=0.1)
-    except aiohttp.ClientError as e:
-        log.error(f"Execution service unreachable for media play: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
+    return await _forward_execution_request(request, "/execute/media/play", "media play")
 
 
 @app.post("/execute/media/state/sync")
 async def proxy_media_state_sync(request: Request):
     """Proxy media state sync requests from UI to execution service."""
-    client = get_http_client()
-    async def do_proxy():
-        body = await request.json() if await request.body() else {}
-        user_ctx = await _resolve_user_context(request, body)
-        exec_body = {**body, "user_context": user_ctx}
-        resp = await client.post(
-            f"{EXECUTION_SVC}/execute/media/state/sync",
-            json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return await _proxy_json_response(resp)
-    try:
-        return await retry_http_request(do_proxy, "Execution service (media state sync)", max_retries=2, base_delay=0.1)
-    except aiohttp.ClientError as e:
-        log.error(f"Execution service unreachable for media state sync: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
+    return await _forward_execution_request(request, "/execute/media/state/sync", "media state sync")
 
 
 @app.post("/execute/entity/search")
 async def proxy_entity_search(request: Request):
     """Proxy entity search requests from UI to execution service."""
-    client = get_http_client()
-    async def do_proxy():
-        body = await request.json() if await request.body() else {}
-        user_ctx = await _resolve_user_context(request, body)
-        exec_body = {**body, "user_context": user_ctx}
-        resp = await client.post(
-            f"{EXECUTION_SVC}/execute/entity/search",
-            json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        data = await resp.json()
-        if isinstance(data, dict):
-            entities = data.get("detail", {}).get("entities", [])
-            data["result"] = entities
-        return JSONResponse(content=data, status_code=resp.status)
-    try:
-        return await retry_http_request(do_proxy, "Execution service (entity search)", max_retries=2, base_delay=0.1)
-    except aiohttp.ClientError as e:
-        log.error(f"Execution service unreachable for entity search: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
+    return await _forward_execution_request(request, "/execute/entity/search", "entity search", transform_result=True)
 
 
 @app.post("/execute/audiobookshelf")
 async def proxy_audiobookshelf(request: Request):
     """Proxy audiobookshelf requests from UI to execution service."""
-    client = get_http_client()
-    async def do_proxy():
-        body = await request.json() if await request.body() else {}
-        user_ctx = await _resolve_user_context(request, body)
-        exec_body = {**body, "user_context": user_ctx}
-        resp = await client.post(
-            f"{EXECUTION_SVC}/execute/audiobookshelf",
-            json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return await _proxy_json_response(resp)
-    try:
-        return await retry_http_request(do_proxy, "Execution service (audiobookshelf)", max_retries=2, base_delay=0.1)
-    except aiohttp.ClientError as e:
-        log.error(f"Execution service unreachable for audiobookshelf: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
+    return await _forward_execution_request(request, "/execute/audiobookshelf", "audiobookshelf")
 
 
 @app.post("/execute/ha_service")
 async def proxy_ha_service(request: Request):
     """Proxy Home Assistant service calls from the device-control widget to execution."""
-    client = get_http_client()
-    async def do_proxy():
-        body = await request.json() if await request.body() else {}
-        user_ctx = await _resolve_user_context(request, body)
-        exec_body = {**body, "user_context": user_ctx}
-        resp = await client.post(
-            f"{EXECUTION_SVC}/execute/ha_service",
-            json=exec_body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-        )
-        return await _proxy_json_response(resp)
-    try:
-        return await retry_http_request(do_proxy, "Execution service (ha_service)", max_retries=2, base_delay=0.1)
-    except aiohttp.ClientError as e:
-        log.error(f"Execution service unreachable for ha_service: {e}")
-        raise HTTPException(status_code=503, detail="Execution service unreachable") from e
+    return await _forward_execution_request(request, "/execute/ha_service", "ha_service")
 
 
 @app.get("/api/media/stream/audiobookshelf/{book_id}")

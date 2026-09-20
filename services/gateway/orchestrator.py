@@ -21,7 +21,7 @@ from services.gateway.config import (
     WORKSPACE_RUNTIME_SVC,
 )
 from services.gateway.intent_engine import is_raven_intent
-from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider
+from services.gateway.llm_providers import BaseLLMProvider, OllamaProvider, OpenRouterProvider, get_provider
 from services.gateway.prompts import PROMPT_SINGLE_TURN_TOOL_GUIDE, load_prompt_sync
 from services.gateway.schemas import ResolvedCredentials
 
@@ -238,26 +238,6 @@ _TOOL_SERVICE_MAP = {
 async def get_llm_settings() -> dict[str, str]:
     """Fetches full LLM settings from Identity service (cached)."""
     return await get_all_settings()
-
-
-async def get_provider(settings: dict[str, str]) -> BaseLLMProvider:
-    """Instantiates the correct provider based on settings."""
-    active_provider = settings.get("active_llm_provider", "ollama")
-    timeout = float(_get(settings, "ollama_timeout", "600"))
-    if active_provider == "openrouter":
-        return OpenRouterProvider(
-            api_key=settings.get("llm_cloud_api_key", ""),
-            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions"),
-            timeout=timeout
-        )
-    else:
-        local_url = _get(settings, "llm_local_url")
-        if not local_url:
-            raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
-        return OllamaProvider(
-            base_url=local_url,
-            timeout=timeout
-        )
 
 
 async def call_ollama(payload: dict[str, Any], use_chat: bool = True) -> dict[str, Any]:

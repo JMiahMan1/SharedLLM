@@ -443,3 +443,28 @@ class OpenRouterProvider(BaseLLMProvider):
                 log.warning("[OpenRouterProvider] No content chunks received; falling back to reasoning_content")
                 return full_reasoning
             return full_content
+
+
+async def get_provider(settings: dict[str, Any]) -> BaseLLMProvider:
+    """Instantiates the correct provider based on settings."""
+    active_provider = settings.get("active_llm_provider", "ollama")
+    timeout_raw = settings.get("ollama_timeout", "600")
+    try:
+        timeout = float(timeout_raw)
+    except (ValueError, TypeError):
+        timeout = 600.0
+    if active_provider == "openrouter":
+        return OpenRouterProvider(
+            api_key=settings.get("llm_cloud_api_key", ""),
+            base_url=settings.get("llm_cloud_url", "https://openrouter.ai/api/v1/chat/completions"),
+            timeout=timeout,
+        )
+    else:
+        local_url = settings.get("llm_local_url", "")
+        if not local_url:
+            raise RuntimeError("Ollama URL not configured in Identity settings. Set llm_local_url in Identity settings.")
+        return OllamaProvider(
+            base_url=local_url,
+            timeout=timeout,
+        )
+
