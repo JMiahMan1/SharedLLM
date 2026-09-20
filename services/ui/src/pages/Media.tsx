@@ -297,6 +297,10 @@ const NowPlayingCard = ({
   const displayTitle = isWebPlayer ? (maPlayer?.mediaTitle ?? undefined) : mediaStatus?.media_title;
   const displayArtist = isWebPlayer ? (maPlayer?.mediaArtist ?? undefined) : mediaStatus?.media_artist;
 
+  const [dragState, setDragState] = useState<{ title: string; time: number | null }>({ title: '', time: null });
+  const dragTime = dragState.title === (displayTitle || '') ? dragState.time : null;
+  const setDragTime = (time: number | null) => setDragState({ title: displayTitle || '', time });
+
   return (
     <div className="glass-panel rounded-2xl p-5 border border-cyan-500/20 relative overflow-visible">
       <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-purple-500/5 pointer-events-none rounded-2xl" />
@@ -387,27 +391,52 @@ const NowPlayingCard = ({
 
       {nowPlaying && duration > 0 && (
         <div className="mt-4 pt-3 border-t border-white/5">
-          <div
-            className={`w-full h-3 sm:h-2 bg-white/10 rounded-full relative group py-1 sm:py-0 ${onSeek ? 'cursor-pointer' : ''}`}
-            onClick={(e) => {
-              if (!onSeek) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              const x = e.clientX - rect.left;
-              const percent = Math.max(0, Math.min(1, x / rect.width));
-              onSeek(percent * duration);
-            }}
-          >
-            <div
-              className="h-full bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full transition-all relative"
-              style={{ width: `${Math.min(100, Math.max(0, (currentTime / duration) * 100))}%` }}
-            >
-              {onSeek && (
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3.5 h-3.5 sm:w-3 sm:h-3 bg-white rounded-full shadow-lg opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity pointer-events-none" />
-              )}
+          <div className="relative py-2 select-none touch-none">
+            {/* Visual track */}
+            <div className="w-full h-2.5 sm:h-2 bg-white/10 rounded-full overflow-hidden relative pointer-events-none">
+              <div
+                className="h-full bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full transition-[width] duration-75 relative"
+                style={{ width: `${Math.min(100, Math.max(0, (((dragTime !== null ? dragTime : currentTime) / duration) * 100)))}%` }}
+              />
             </div>
+            {/* Thumb knob */}
+            {onSeek && (
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-md shadow-cyan-500/50 pointer-events-none -ml-2 transition-transform active:scale-125"
+                style={{ left: `${Math.min(100, Math.max(0, (((dragTime !== null ? dragTime : currentTime) / duration) * 100)))}%` }}
+              />
+            )}
+            {/* Native range overlay for mobile touch, drag, and tap */}
+            {onSeek && (
+              <input
+                type="range"
+                min={0}
+                max={Math.max(1, Math.round(duration))}
+                step={1}
+                value={Math.round(dragTime !== null ? dragTime : currentTime)}
+                onChange={(e) => {
+                  setDragTime(Number(e.target.value));
+                }}
+                onPointerDown={(e) => {
+                  setDragTime(Number(e.currentTarget.value));
+                }}
+                onPointerUp={(e) => {
+                  const val = Number(e.currentTarget.value);
+                  setDragTime(null);
+                  onSeek(val);
+                }}
+                onTouchEnd={(e) => {
+                  const val = Number(e.currentTarget.value);
+                  setDragTime(null);
+                  onSeek(val);
+                }}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer touch-none m-0 p-0"
+                aria-label="Track progress scrubber"
+              />
+            )}
           </div>
-          <div className="flex justify-between mt-1.5 text-[10px] text-slate-500 font-mono">
-            <span>{formatTime(currentTime)}</span>
+          <div className="flex justify-between mt-1 text-[10px] text-slate-500 font-mono">
+            <span>{formatTime(dragTime !== null ? dragTime : currentTime)}</span>
             <span>{formatTime(duration)}</span>
           </div>
         </div>
