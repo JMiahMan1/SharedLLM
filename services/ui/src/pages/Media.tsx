@@ -1447,7 +1447,7 @@ const Media = () => {
       const pid = selectedTarget.slice(3);
       const cmdMap: Record<string, string> = {
         play: 'players/cmd/play', resume: 'players/cmd/play', pause: 'players/cmd/pause',
-        next: 'players/cmd/next', previous: 'players/cmd/previous', stop: 'players/cmd/stop',
+        next: 'player_queues/next', previous: 'player_queues/previous', stop: 'players/cmd/stop',
       };
       const maCmd = cmdMap[command];
       if (!maCmd) { setError(`Unsupported command: ${command}`); return; }
@@ -1456,7 +1456,10 @@ const Media = () => {
       setError(null);
       try {
         if (!maPlayer.isConnected) await maPlayer.connect();
-        await maPlayer.maCommand(maCmd, { player_id: pid });
+        const args: Record<string, unknown> = maCmd.startsWith('player_queues/')
+          ? { queue_id: pid, player_id: pid }
+          : { player_id: pid };
+        await maPlayer.maCommand(maCmd, args);
         // Refresh now-playing state so the UI reflects the advanced track
         // (the JSON-RPC event may lag or not update the HA media_status poll).
         await fetchMediaStatus();
