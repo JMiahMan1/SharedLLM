@@ -387,10 +387,14 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       };
 
       // 3. Create SendspinPlayer
-      console.log('[MAWebPlayer] [3/6] Creating SendspinPlayer with playerId:', playerId);
+      const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+      const storedUser = storageGetSync('jarvis_user') || storageGetSync('username') || '';
+      const clientName = `${storedUser ? storedUser + "'s " : ""}Web Player (${isMobile ? 'Mobile' : 'Desktop'})`;
+      console.log('[MAWebPlayer] [3/6] Creating SendspinPlayer with playerId:', playerId, 'clientName:', clientName);
       player = new SendspinPlayer({
         audioElement: audio,
         playerId,
+        clientName,
         webSocket: sendspinWs,
         onStateChange: (newState) => {
           try {
@@ -945,6 +949,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
 
   return {
     ...state,
+    playerId: playerIdRef.current,
     connect,
     play,
     pause,
