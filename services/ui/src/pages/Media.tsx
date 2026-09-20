@@ -968,7 +968,6 @@ const Media = () => {
   const [localMuted, setLocalMuted] = useState(false);
   const [localCurrentTime, setLocalCurrentTime] = useState(0);
   const [localDuration, setLocalDuration] = useState(0);
-  const localProgressTimerRef = useRef<number | null>(null);
   const connectAttemptedRef = useRef(false);
   const lastVolumeChangeTimeRef = useRef<number>(0);
   const volumeDebounceTimerRef = useRef<number | null>(null);
@@ -1817,8 +1816,12 @@ const Media = () => {
         is_volume_muted: localMuted
       }).catch(err => console.error('[Media] Failed to sync stop playback:', err));
     }
-    togglePlay(false);
-  }, [localTrack, releaseControl, togglePlay, localCurrentTime, localDuration, localVolume, localMuted]);
+    setLocalTrack(null);
+    setLocalIsPlaying(false);
+    setLocalCurrentTime(0);
+    setLocalDuration(0);
+    void maPlayer.pause();
+  }, [localTrack, releaseControl, localCurrentTime, localDuration, localVolume, localMuted, maPlayer.pause]);
 
   const handleVolume = useCallback((v: number) => {
     if (!selectedTarget) return;

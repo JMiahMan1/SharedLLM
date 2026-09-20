@@ -7,14 +7,11 @@ import toast from 'react-hot-toast';
 import {
   MapPin,
   Satellite,
-  Battery,
   Zap,
   Car,
   Plus,
   Trash2,
   Gauge,
-  Fuel,
-  DollarSign,
   Clock,
   Navigation,
   RefreshCw,
@@ -95,7 +92,7 @@ const LocationPanel = () => {
 
   const username = user?.username || 'jeremiah';
 
-  const loadData = useCallback(async () => {
+  const refreshData = useCallback(async () => {
     try {
       setLoadingTelemetry(true);
       const [vehRes, assignRes, telemRes] = await Promise.allSettled([
@@ -121,8 +118,34 @@ const LocationPanel = () => {
   }, [username]);
 
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    let active = true;
+    const init = async () => {
+      try {
+        const [vehRes, assignRes, telemRes] = await Promise.allSettled([
+          api.getVehicles(),
+          api.getAssignedVehicle(username),
+          api.getGeoTelemetry(username, 24)
+        ]);
+
+        if (!active) return;
+        if (vehRes.status === 'fulfilled' && vehRes.value?.vehicles) {
+          setVehicles(vehRes.value.vehicles);
+        }
+        if (assignRes.status === 'fulfilled' && assignRes.value) {
+          setAssignedVehicleId(assignRes.value.vehicle_id || null);
+        }
+        if (telemRes.status === 'fulfilled' && telemRes.value) {
+          setTelemetry(telemRes.value);
+        }
+      } catch (err) {
+        console.error('Failed to load location/vehicle data:', err);
+      }
+    };
+    void init();
+    return () => {
+      active = false;
+    };
+  }, [username]);
 
   const handleToggleTracking = () => {
     trigger('light');
@@ -190,7 +213,7 @@ const LocationPanel = () => {
         setAssignedVehicleId(vehicleId);
       }
 
-      await loadData();
+      await refreshData();
     } catch (err) {
       console.error('Failed to save vehicle:', err);
       toast.error('Could not save vehicle');
@@ -207,7 +230,7 @@ const LocationPanel = () => {
       if (assignedVehicleId === vehicleId) {
         setAssignedVehicleId(null);
       }
-      await loadData();
+      await refreshData();
     } catch (err) {
       console.error('Failed to delete vehicle:', err);
       toast.error('Could not delete vehicle');
@@ -313,7 +336,7 @@ const LocationPanel = () => {
           <button
             onClick={() => {
               trigger('light');
-              loadData();
+              refreshData();
             }}
             disabled={loadingTelemetry}
             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"

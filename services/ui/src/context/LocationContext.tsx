@@ -62,14 +62,16 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
       let battery: number | undefined;
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         if (typeof navigator !== 'undefined' && 'getBattery' in navigator) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const b = await (navigator as any).getBattery();
           if (b && typeof b.level === 'number') {
             battery = Math.round(b.level * 100);
           }
         }
-      } catch {}
+      } catch {
+        // Battery status unavailable
+      }
 
       const payload = {
         latitude: lat,
