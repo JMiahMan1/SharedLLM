@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { api } from '../services/api';
-import type { Trip, TripUpdatePayload, Workout, RoutePoint, StepsResponse, ActivityTrendsResponse } from '../types/api';
+import type { Trip, TripUpdatePayload, TripLocationsResponse, Workout, RoutePoint, StepsResponse, ActivityTrendsResponse } from '../types/api';
 import Modal from '../components/ui/Modal';
 import MiniRouteMap from '../components/geo/MiniRouteMap';
+import TripLocationsMap from '../components/geo/TripLocationsMap';
 import toast from 'react-hot-toast';
 import {
   Users,
@@ -120,6 +121,10 @@ const Wander = () => {
   const [routePoints, setRoutePoints] = useState<Record<string, RoutePoint[]>>({});
   const routeCache = useRef<Record<string, RoutePoint[]>>({});
 
+  // Trip locations modal (clickable start/destination)
+  const [tripLocations, setTripLocations] = useState<TripLocationsResponse | null>(null);
+  const [tripLocationsPath, setTripLocationsPath] = useState<RoutePoint[]>([]);
+  const [tripLocationsTitle, setTripLocationsTitle] = useState('');
   // Edit Trip Modal state
   const [editingTrip, setEditingTrip] = useState<Trip | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string>('');
@@ -306,9 +311,39 @@ const Wander = () => {
     }
   }, []);
 
+  // Open the trip-locations map modal for a given trip
+  const openTripLocations = useCallback(async (trip: Trip) => {
+    setTripLocationsTitle(`${trip.user_name || 'Trip'} — Route Map`);
+    setTripLocations(null);
+    setTripLocationsPath([]);
+    try {
+      const [locs, route] = await Promise.allSettled([
+        api.getTripLocations(trip.id),
+        api.getTripRoute(trip.id),
+      ]);
+      if (locs.status === 'fulfilled') {
+        setTripLocations(locs.value);
+        // Populate endpoint coords onto path endpoints if route is empty
+        const s = locs.value.start;
+        const e = locs.value.end;
+        if (s.lat != null && e.lat != null && s.lon != null && e.lon != null) {
+          if (route.status === 'fulfilled' && route.value.points.length > 0) {
+            setTripLocationsPath(route.value.points);
+          } else {
+            setTripLocationsPath([
+              { t: 0, lat: s.lat, lon: s.lon, spd: 0 },
+              { t: 1, lat: e.lat, lon: e.lon, spd: 0 },
+            ]);
+          }
+        }
+      }
+    } catch {
+      // Modal shows fallback coords display
+    }
+  }, []);
+
   // Check if current user is owner of a trip
-  const isTripOwner = useCallback(
-    (trip: Trip): boolean => {
+  const isTripOwner = useCallback(    (trip: Trip): boolean => {
       if (!currentUsername) return false;
       const tripOwner = (trip.user_id || '').split('.').pop()?.toLowerCase() || '';
       return tripOwner === currentUsername || currentUsername === 'admin';
@@ -1045,22 +1080,25 @@ const Wander = () => {
                       <div className="w-3 h-3 rounded-full bg-rose-400 shadow-sm shadow-rose-400/50" />
                     </div>
 
-                    <div className="flex-1 space-y-2">
+                    <div
+                      className="flex-1 space-y-2 cursor-pointer hover:bg-white/5 rounded px-1 -mx-1 transition-colors"
+                      onClick={() => openTripLocations(trip)}
+                    >
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase font-semibold">Start</span>
                         <p className="text-xs font-medium text-slate-200 truncate">
-                          {trip.start_location?.zone ||
-                            (trip.start_location?.lat
-                              ? `${trip.start_location.lat.toFixed(4)}, ${trip.start_location.lon.toFixed(4)}`
+                          {trip.start_location?.name ||
+                            (trip.start_location?.latitude
+                              ? `${trip.start_location.latitude.toFixed(4)}, ${trip.start_location.longitude.toFixed(4)}`
                               : 'Starting Point')}
                         </p>
                       </div>
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase font-semibold">Destination</span>
                         <p className="text-xs font-medium text-slate-200 truncate">
-                          {trip.end_location?.zone ||
-                            (trip.end_location?.lat
-                              ? `${trip.end_location.lat.toFixed(4)}, ${trip.end_location.lon.toFixed(4)}`
+                          {trip.end_location?.name ||
+                            (trip.end_location?.latitude
+                              ? `${trip.end_location.latitude.toFixed(4)}, ${trip.end_location.longitude.toFixed(4)}`
                               : 'Destination')}
                         </p>
                       </div>
@@ -1492,6 +1530,48 @@ const Wander = () => {
                 )}
               </button>
             </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Trip Locations Map Modal */}
+      <Modal
+        isOpen={Boolean(tripLocations)}
+        onClose={() => { setTripLocations(null); setTripLocationsPath([]); }}
+        title={tripLocationsTitle || 'Trip Map'}
+        size="lg"
+      >
+        {tripLocations && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="bg-black/30 rounded-lg p-3">
+                <div className="flex items-center gap-2 text-emerald-400 mb-1">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="font-semibold uppercase text-[10px]">{tripLocations.start.name}</span>
+                </div>
+                {tripLocations.start.lat != null && tripLocations.start.lon != null ? (
+                  <p className="text-slate-400">{tripLocations.start.lat.toFixed(4)}, {tripLocations.start.lon.toFixed(4)}</p>
+                ) : (
+                  <p className="text-slate-400">unknown</p>
+                )}
+              </div>
+              <div className="bg-black/30 rounded-lg p-3">
+                <div className="flex items-center gap-2 text-rose-400 mb-1">
+                  <div className="w-2 h-2 rounded-full bg-rose-400" />
+                  <span className="font-semibold uppercase text-[10px]">{tripLocations.end.name}</span>
+                </div>
+                {tripLocations.end.lat != null && tripLocations.end.lon != null ? (
+                  <p className="text-slate-400">{tripLocations.end.lat.toFixed(4)}, {tripLocations.end.lon.toFixed(4)}</p>
+                ) : (
+                  <p className="text-slate-400">unknown</p>
+                )}
+              </div>
+            </div>
+            <TripLocationsMap
+              start={tripLocations.start}
+              end={tripLocations.end}
+              path={tripLocationsPath}
+            />
           </div>
         )}
       </Modal>

@@ -7137,6 +7137,20 @@ async def get_geo_trip(trip_id: str):
     raise HTTPException(status_code=404, detail="Trip not found")
 
 
+@app.get("/api/geo/trips/{trip_id}/locations")
+async def get_geo_trip_locations(trip_id: str):
+    """Resolved start/end place names + coordinates for a trip."""
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/trips/{trip_id}/locations",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=12.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=404, detail="Trip locations not found")
+
+
 @app.patch("/api/geo/trips/{trip_id}")
 async def update_geo_trip(trip_id: str, request: Request):
     user = None
@@ -7338,6 +7352,23 @@ async def get_geo_steps(request: Request, user_id: str | None = None, days: int 
         if resp.status == 200:
             return await resp.json()
     raise HTTPException(status_code=502, detail="Failed to fetch steps")
+
+
+@app.post("/api/geo/steps")
+async def proxy_geo_steps(request: Request):
+    """Ingest hardware pedometer reading via Geo service (used by mobile app
+    with Bearer auth — gateway adds X-Internal-Secret when forwarding)."""
+    body = await request.json()
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/steps",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to record steps")
 
 
 @app.get("/api/geo/trends/activity")

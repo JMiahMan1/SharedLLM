@@ -80,6 +80,7 @@ import type {
   TripUpdatePayload,
   TripsResponse,
   TripRouteResponse,
+  TripLocationsResponse,
   Workout,
   WorkoutsResponse,
   StepsResponse,
@@ -691,6 +692,11 @@ export const api = {
 
   async getTrip(tripId: string): Promise<Trip> {
     const resp = await apiClient.get(`/api/geo/trips/${encodeURIComponent(tripId)}`);
+    return resp.data;
+  },
+
+  async getTripLocations(tripId: string): Promise<TripLocationsResponse> {
+    const resp = await apiClient.get(`/api/geo/trips/${encodeURIComponent(tripId)}/locations`);
     return resp.data;
   },
 

@@ -25,7 +25,8 @@ interface LocationContextValue extends LocationState {
 export const LocationContext = createContext<LocationContextValue | null>(null);
 
 const SPEED_THRESHOLD_MPH = 15;
-const GEOFENCE_RADIUS_M = 100;
+const GEOFENCE_RADIUS_M = 200; // ~1/8 mile — don't log routes under this when stationary
+const DAILY_STEPS_SYNC_INTERVAL_MS = 30000; // sync steps at least every 30s when stationary
 
 export function LocationProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<LocationState>({
@@ -41,10 +42,11 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   const watchIdRef = useRef<string | number | null>(null);
-  // Hardware pedometer: daily step count from the phone's step sensor (null = no sensor/permission)
   const dailyStepsRef = useRef<number | null>(null);
+  const lastSyncedStepsRef = useRef<number | null>(null);
   const stepsPluginReadyRef = useRef(false);
   const stepUpdateListenerRef = useRef<{ remove: () => Promise<void> } | null>(null);
+  const stationarySyncTimerRef = useRef<number | null>(null);
 
   const calculateDistance = useCallback((lat1: number, lng1: number, lat2: number, lng2: number) => {
     const R = 6371e3;
@@ -76,6 +78,39 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Sync steps independently of location updates (treadmill/stationary use)
+  const syncDailySteps = useCallback(async () => {
+    try {
+      const token = await storageGet('jarvis_api_key');
+      const rawServerUrl = await storageGet('jarvis_server_url');
+      const serverUrl = rawServerUrl || getServerOrigin();
+      if (!token || !serverUrl) return;
+      if (dailyStepsRef.current === null || dailyStepsRef.current === lastSyncedStepsRef.current) return;
+
+      let user: string;
+      const rawUser = await storageGet('jarvis_user');
+      if (rawUser) {
+        try {
+          const parsed = JSON.parse(rawUser);
+          user = parsed.username || parsed.user_id || parsed.id || 'me';
+        } catch {
+          user = rawUser;
+        }
+      } else {
+        user = (await storageGet('username')) || 'me';
+      }
+
+      await fetch(`${serverUrl}/api/geo/steps`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ user_id: user, steps: dailyStepsRef.current, timestamp: Date.now() / 1000 }),
+      });
+      lastSyncedStepsRef.current = dailyStepsRef.current;
+    } catch {
+      // Will retry next time
+    }
+  }, []);
+
   const syncToGateway = useCallback(async (lat: number, lng: number, accuracy: number | null, speed: number | null) => {
     try {
       const token = await storageGet('jarvis_api_key');
@@ -83,7 +118,18 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       const serverUrl = rawServerUrl || getServerOrigin();
       if (!token || !serverUrl) return;
 
-      const user = (await storageGet('jarvis_user')) || (await storageGet('username')) || 'me';
+      let user: string;
+      const rawUser = await storageGet('jarvis_user');
+      if (rawUser) {
+        try {
+          const parsed = JSON.parse(rawUser);
+          user = parsed.username || parsed.user_id || parsed.id || 'me';
+        } catch {
+          user = rawUser;
+        }
+      } else {
+        user = (await storageGet('username')) || 'me';
+      }
 
       let battery: number | undefined;
       try {
@@ -150,12 +196,16 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
     if (lastLocationRef.current) {
       const distance = calculateDistance(lastLocationRef.current.lat, lastLocationRef.current.lng, latitude, longitude);
-      if (distance < GEOFENCE_RADIUS_M && newInterval === 'stationary') return;
+      if (distance < GEOFENCE_RADIUS_M && newInterval === 'stationary') {
+        // Stationary under threshold — don't log a breadcrumb, but keep syncing steps
+        void syncDailySteps();
+        return;
+      }
     }
 
     lastLocationRef.current = { lat: latitude, lng: longitude };
     await syncToGateway(latitude, longitude, accuracy ?? null, speed ?? null);
-  }, [calculateDistance, syncToGateway]);
+  }, [calculateDistance, syncToGateway, syncDailySteps]);
 
   const startTracking = useCallback(async () => {
     setState((s) => ({ ...s, isTracking: true, error: null }));
@@ -214,6 +264,16 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await handleLocationUpdate(position as any);
 
+      // Sync steps immediately on tracking start
+      void syncDailySteps();
+
+      // Periodic step sync when stationary (treadmill etc.)
+      stationarySyncTimerRef.current = window.setInterval(() => {
+        if (state.interval === 'stationary') {
+          void syncDailySteps();
+        }
+      }, DAILY_STEPS_SYNC_INTERVAL_MS);
+
       watchIdRef.current = await Geolocation.watchPosition(
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
         (pos, err) => {
@@ -224,7 +284,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       setState((s) => ({ ...s, error: err instanceof Error ? err.message : 'Failed to start location tracking', isTracking: false }));
     }
-  }, [handleLocationUpdate, refreshDailySteps]);
+  }, [handleLocationUpdate, refreshDailySteps, syncDailySteps, state.interval]);
 
   const stopTracking = useCallback(() => {
     void storageSet('jarvis_location_tracking_enabled', 'false');
@@ -235,6 +295,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         Geolocation.clearWatch({ id: watchIdRef.current });
       }
       watchIdRef.current = null;
+    }
+    if (stationarySyncTimerRef.current !== null) {
+      clearInterval(stationarySyncTimerRef.current);
+      stationarySyncTimerRef.current = null;
     }
     void StepCounter.stopPolling();
     setState((s) => ({ ...s, isTracking: false }));
