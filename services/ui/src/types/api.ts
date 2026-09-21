@@ -774,12 +774,14 @@ export interface Trip {
   end_location?: TripLocation;
   fuel_used_gal: number;
   trip_cost_usd: number;
+  activity_type: string;
+  notes?: string | null;
   status: 'completed' | 'in_progress';
   created_at?: number;
   updated_at?: number;
   updated_by?: string | null;
   is_shared?: boolean;
-  shared_with?: string[];
+  shared_with?: Array<{ user_id: string; user_name: string }>;
   shared_group_id?: string;
 }
 
@@ -789,10 +791,77 @@ export interface TripUpdatePayload {
   fuel_type?: string;
   mpg?: number;
   cost_per_gallon?: number;
+  activity_type?: string;
+  notes?: string;
 }
 
 export interface TripsResponse {
   trips: Trip[];
   total_trips: number;
+}
+
+export interface RoutePoint {
+  t: number;
+  lat: number;
+  lon: number;
+  acc?: number | null;
+  spd?: number | null;
+  brg?: number | null;
+  bat?: number | null;
+}
+
+export interface TripRouteResponse {
+  trip_id?: string;
+  workout_id?: string;
+  points: RoutePoint[];
+}
+
+export interface Workout {
+  id: string;
+  user_id: string;
+  activity_type: string;
+  start_time: number;
+  end_time?: number;
+  duration_seconds?: number;
+  distance_miles?: number;
+  avg_speed_mph?: number | null;
+  top_speed_mph?: number | null;
+  steps?: number | null;
+  steps_source?: 'pedometer' | 'gps_estimate' | null;
+  notes?: string | null;
+  status: 'active' | 'completed';
+}
+
+export interface WorkoutsResponse {
+  workouts: Workout[];
+  total?: number;
+}
+
+export interface StepsResponse {
+  user_id: string;
+  daily_steps: Record<string, number>;
+  today: number;
+  goal: number;
+}
+
+export interface ActivityTrendsResponse {
+  user_id: string;
+  days: number;
+  steps_today: number;
+  steps_goal: number;
+  daily_steps: Record<string, number>;
+  steps_avg: number | null;
+  steps_best: { date: string; steps: number } | null;
+  workout_count: number;
+  workouts_by_type: Record<string, number>;
+  workout_distance_miles: number;
+  trip_count: number;
+  trip_distance_miles: number;
+  drive_fuel_gallons: number;
+  drive_cost_usd: number;
+  analysis: string | null;
+  analysis_available: boolean;
+  generated_at: number;
+  cached?: boolean;
 }
 
