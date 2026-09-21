@@ -17,6 +17,7 @@ import {
   handleVisibilityChange,
 } from '../lib/webPlayer';
 import { useMAWebPlayer } from '../lib/maWebPlayer';
+import { getServerOrigin } from '../lib/serverUrl';
 
 interface MediaStatus {
   entity_id?: string;
@@ -291,7 +292,8 @@ const NowPlayingCard = ({
   const coverUrl = useMemo(() => {
     if (!coverRaw) return null;
     const apiToken = storageGetSync('jarvis_api_key') ?? '';
-    return `/api/media/imageproxy?path=${encodeURIComponent(coverRaw)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
+    const base = getServerOrigin().replace(/\/+$/, '');
+    return `${base}/api/media/imageproxy?path=${encodeURIComponent(coverRaw)}${apiToken ? `&token=${encodeURIComponent(apiToken)}` : ''}`;
   }, [coverRaw]);
 
   const displayTitle = isWebPlayer ? (maPlayer?.mediaTitle ?? undefined) : mediaStatus?.media_title;
