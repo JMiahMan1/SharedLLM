@@ -942,7 +942,36 @@ def group_shared_trips(trips: list[dict]) -> list[dict]:
     return trips
 
 
-async def _resolve_zone_name(lat: float, lon: float) -> str:
+async def _nominatim_reverse(lat: float, lon: float) -> str | None:
+    """Reverse-geocode coordinates to a human-readable place name via OSM Nominatim."""
+    try:
+        url = (f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}"
+               f"&format=json&zoom=18&addressdetails=1")
+        client = get_client_insecure()
+        async with client.get(url, headers={"User-Agent": "SharedLLM/1.0"},
+                              timeout=aiohttp.ClientTimeout(total=6)) as resp:
+            data = await resp.json(content_type=None)
+        if not isinstance(data, dict) or not data.get("display_name"):
+            return None
+        addr = data.get("address", {})
+        # Prefer the most specific recognizable pieces, falling back gracefully
+        label_parts = []
+        for key in ("house_number", "road", "neighbourhood", "suburb", "city_town",
+                    "town", "village", "city", "county"):
+            val = addr.get(key)
+            if val and val not in label_parts:
+                label_parts.append(val)
+        if label_parts:
+            return ", ".join(label_parts[:3])
+        return data["display_name"].split(",")[0].strip()
+    except Exception as e:
+        log.warning(f"[Geo] Nominatim reverse geocode failed for ({lat}, {lon}): {e}")
+        return None
+
+
+async def _resolve_place_name(lat: float, lon: float) -> str:
+    """Resolve coordinates to a place name: HA zone first, then OSM Nominatim, then coords."""
+    # 1. Home Assistant zones (authoritative for known places)
     try:
         states = await _ha_get_states()
         for z in _filter_entities(states, "zone"):
@@ -955,7 +984,16 @@ async def _resolve_zone_name(lat: float, lon: float) -> str:
                     return attrs.get("friendly_name") or z.get("entity_id", "").replace("zone.", "").title()
     except Exception:
         pass
+    # 2. Open-source reverse geocoding (OpenStreetMap Nominatim)
+    nominatim = await _nominatim_reverse(lat, lon)
+    if nominatim:
+        return nominatim
+    # 3. Coordinates fallback
     return f"Location ({round(lat, 3)}, {round(lon, 3)})"
+
+
+# Back-compat alias
+_resolve_zone_name = _resolve_place_name
 
 
 async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: float | None, timestamp: float):
@@ -1314,6 +1352,52 @@ async def get_trip_route(trip_id: str):
             {"t": p.get("t"), "lat": p.get("lat"), "lon": p.get("lon"), "spd": p.get("spd", 0)}
             for p in points
         ],
+    }
+
+
+@app.get("/trips/{trip_id}/locations")
+async def get_trip_locations(trip_id: str):
+    """Resolved start/end locations for a trip: coordinates plus a human-readable
+    place name (HA zone first, then OSM Nominatim reverse geocoding)."""
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    raw = await r.get(f"geo:trip:{trip_id}")
+    if not raw:
+        active_keys = await r.keys("geo:active_trip:*")
+        for k in active_keys:
+            ar = await r.get(k)
+            if ar and trip_id in ar:
+                raw = ar
+                break
+    if not raw:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    trip = json.loads(raw)
+
+    async def _loc(entry: dict | None, default_label: str) -> dict:
+        if not entry:
+            return {"name": default_label, "lat": None, "lon": None, "source": None}
+        lat = entry.get("latitude", entry.get("lat"))
+        lon = entry.get("longitude", entry.get("lon"))
+        if lat is None or lon is None:
+            return {"name": default_label, "lat": None, "lon": None, "source": None}
+        stored_name = entry.get("name") or entry.get("zone")
+        # If the stored name is just a coordinate placeholder, re-resolve it
+        if stored_name and not stored_name.startswith("Location ("):
+            source = "stored"
+            name = stored_name
+        else:
+            name = await _resolve_place_name(float(lat), float(lon))
+            source = "ha_zone" if name and not (name.startswith("Location (") or ", " in name) else \
+                     ("osm" if name and not name.startswith("Location (") else "coords")
+        return {"name": name, "lat": float(lat), "lon": float(lon), "source": source}
+
+    start = await _loc(trip.get("start_location"), "Starting Point")
+    end = await _loc(trip.get("end_location"), "Destination")
+    return {
+        "trip_id": trip_id,
+        "start": start,
+        "end": end,
     }
 
 

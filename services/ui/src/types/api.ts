@@ -755,6 +755,19 @@ export interface TripLocation {
   zone: string;
 }
 
+export interface ResolvedTripLocation {
+  name: string;
+  lat: number | null;
+  lon: number | null;
+  source: 'ha_zone' | 'osm' | 'coords' | 'stored' | null;
+}
+
+export interface TripLocationsResponse {
+  trip_id: string;
+  start: ResolvedTripLocation;
+  end: ResolvedTripLocation;
+}
+
 export interface Trip {
   id: string;
   user_id: string;
