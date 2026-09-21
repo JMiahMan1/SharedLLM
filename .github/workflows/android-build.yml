@@ -65,6 +65,15 @@ jobs:
         path: services/ui/android/app/build/outputs/apk/debug/app-debug.apk
         retention-days: 30
 
+    - name: Upload OTA Web Bundle
+      uses: actions/upload-artifact@v4
+      with:
+        name: jarvis-os-web-bundle
+        path: |
+          services/ui/dist/bundle.zip
+          services/ui/dist/version.json
+        retention-days: 30
+
     - name: Build Release APK
       run: |
         cd android

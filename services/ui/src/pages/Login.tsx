@@ -32,11 +32,10 @@ const Login = () => {
       }
       if (Capacitor.isNativePlatform()) {
         const savedServer = await storageGet('jarvis_server_url');
-        if (savedServer) setServerUrl(savedServer);
-        if (savedServer) {
-          const result = await checkConnectivity(savedServer);
-          setConnectivity(result);
-        }
+        const activeServer = savedServer || 'https://jarvis.sumemail.com';
+        setServerUrl(activeServer);
+        const result = await checkConnectivity(activeServer);
+        setConnectivity(result);
         await checkAvailability();
       }
     };

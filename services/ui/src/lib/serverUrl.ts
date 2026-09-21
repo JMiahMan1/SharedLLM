@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { storageGetSync } from './storage';
 
+export const DEFAULT_SERVER_URL = 'https://jarvis.sumemail.com';
 const SERVER_URL_KEY = 'jarvis_server_url';
 
 /**
@@ -10,7 +11,8 @@ const SERVER_URL_KEY = 'jarvis_server_url';
  * gateway). Inside the Capacitor app the page is bundled and served from
  * `localhost`, so `window.location.origin` is useless for reaching the
  * backend — we must use the server URL the user configured in the app
- * (`jarvis_server_url`, set via the server-config banner / login).
+ * (`jarvis_server_url`, set via the server-config banner / login),
+ * defaulting to the public gateway https://jarvis.sumemail.com.
  */
 export function getServerOrigin(): string {
   if (Capacitor.isNativePlatform()) {
@@ -22,6 +24,7 @@ export function getServerOrigin(): string {
         return serverUrl;
       }
     }
+    return DEFAULT_SERVER_URL;
   }
   return window.location.origin;
 }

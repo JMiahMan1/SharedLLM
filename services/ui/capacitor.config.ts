@@ -15,6 +15,9 @@ const config: CapacitorConfig = {
     },
     CapacitorCookies: {
       enabled: true
+    },
+    CapacitorUpdater: {
+      autoUpdate: false
     }
   }
 };

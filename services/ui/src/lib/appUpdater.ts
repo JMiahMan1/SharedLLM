@@ -113,14 +113,26 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
       !remote.git_sha.startsWith(currentRuntimeSha)
     );
 
-    if (hasWebUpdate && remote.bundle_url && Capacitor.isNativePlatform()) {
+    const effectiveBundleUrl = remote.bundle_url
+      ? (remote.bundle_url.startsWith('http')
+          ? remote.bundle_url.replace(/^http:\/\/jarvis\.sumemail\.com/, 'https://jarvis.sumemail.com')
+          : `${origin}${remote.bundle_url.startsWith('/') ? '' : '/'}${remote.bundle_url}`)
+      : '';
+
+    const effectiveApkUrl = remote.apk_url
+      ? (remote.apk_url.startsWith('http')
+          ? remote.apk_url.replace(/^http:\/\/jarvis\.sumemail\.com/, 'https://jarvis.sumemail.com')
+          : `${origin}${remote.apk_url.startsWith('/') ? '' : '/'}${remote.apk_url}`)
+      : null;
+
+    if (hasWebUpdate && effectiveBundleUrl && Capacitor.isNativePlatform()) {
       if (!options.silent) {
         toast.loading('Downloading update...', { id: 'app-update' });
       }
 
-      console.log(`[AppUpdater] Downloading OTA bundle from ${remote.bundle_url} (version: ${remote.git_sha})`);
+      console.log(`[AppUpdater] Downloading OTA bundle from ${effectiveBundleUrl} (version: ${remote.git_sha})`);
       const bundle = await CapacitorUpdater.download({
-        url: remote.bundle_url,
+        url: effectiveBundleUrl,
         version: remote.git_sha,
       });
 
@@ -151,7 +163,7 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
         remoteVersion: remote.version,
         releaseNotes: remote.release_notes,
         apkUpdateAvailable,
-        apkUrl: remote.apk_url,
+        apkUrl: effectiveApkUrl,
       };
     }
 
@@ -171,7 +183,7 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
       remoteVersion: remote.version,
       releaseNotes: remote.release_notes,
       apkUpdateAvailable,
-      apkUrl: remote.apk_url,
+      apkUrl: effectiveApkUrl,
     };
   } catch (err) {
     if (!options.silent) {
