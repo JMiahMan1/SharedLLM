@@ -635,7 +635,8 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
             if history:
                 tz = ZoneInfo("America/Phoenix")
                 today = datetime.now(tz).strftime("%Y-%m-%d")
-                steps_today = history.get(today, 0)
+                if today in history and history[today] > 0:
+                    steps_today = history[today]
                 week_steps = history
         except Exception as e:
             log.warning(f"[Geo] Telemetry steps read failed for {clean_id}: {e}")
@@ -1806,12 +1807,21 @@ def _build_trends_context(user: str, days: int, daily_steps: dict, workouts: lis
         lines.append(f"Driving trips ({len(trips)} in window, {total_drive:.0f} total miles).")
 
     lines.append("")
-    lines.append(
-        "Analyze this family member's activity. In 3-5 sentences: note the trend in daily steps "
-        "(rising/falling/steady, vs the common 10,000-step goal), highlight notable workouts, and give "
-        "one specific, encouraging, actionable suggestion. Be warm and concrete — no generic advice, "
-        "no bullet points, no headings. Reference actual numbers from the data."
-    )
+    if daily_steps:
+        lines.append(
+            "Analyze this family member's activity. In 3-5 sentences: note the trend in daily steps "
+            "(rising/falling/steady, vs the common 10,000-step goal), highlight notable workouts, and give "
+            "one specific, encouraging, actionable suggestion. Be warm and concrete — no generic advice, "
+            "no bullet points, no headings. Reference actual numbers from the data. Use ONLY the numbers "
+            "provided above — never invent or assume values."
+        )
+    else:
+        lines.append(
+            "This family member has no pedometer or workout data recorded yet. In 2-3 sentences, "
+            "acknowledge that activity tracking hasn't started and encourage them to open the app "
+            "on their phone to begin syncing steps and recording their first workout. Do NOT invent "
+            "any statistics — no data exists yet."
+        )
     return "\n".join(lines)
 
 
@@ -1886,8 +1896,8 @@ async def get_activity_trends(
         "days": days,
         "window_start": (datetime.now(tz) - timedelta(days=days - 1)).strftime("%Y-%m-%d"),
         "daily_steps": daily_steps,
-        "steps_today": daily_steps.get(today, 0),
-        "steps_average": int(steps_sum / step_days) if step_days else 0,
+        "steps_today": daily_steps.get(today) if daily_steps.get(today, 0) > 0 else None,
+        "steps_average": int(steps_sum / step_days) if step_days else None,
         "steps_total": steps_sum,
         "workout_count": len(workouts),
         "workout_distance_miles": workout_distance,
