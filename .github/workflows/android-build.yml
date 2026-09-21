@@ -56,7 +56,7 @@ jobs:
       run: |
         cd android
         chmod +x ./gradlew
-        ./gradlew clean assembleDebug --no-daemon --stacktrace
+        ./gradlew clean assembleDebug -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m" --no-daemon --stacktrace
 
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
@@ -68,7 +68,7 @@ jobs:
     - name: Build Release APK
       run: |
         cd android
-        ./gradlew assembleRelease --no-daemon --stacktrace
+        ./gradlew assembleRelease -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m" --no-daemon --stacktrace
 
     - name: Upload Release APK artifact
       uses: actions/upload-artifact@v4
