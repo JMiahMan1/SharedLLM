@@ -150,7 +150,7 @@ const LogEntryCard = ({ log }: { log: LogEntry }) => (
     />
     <div className="min-w-0 flex-1">
       <div className="flex items-center justify-between gap-2 mb-0.5">
-        <p className="text-xs font-semibold text-slate-300 capitalize truncate">{log.service}</p>
+        <p className="text-xs font-semibold text-slate-300 capitalize truncate min-w-0">{log.service}</p>
         <span className={`text-[9px] font-bold uppercase tracking-widest shrink-0 ${LOG_LEVEL_COLORS[log.level?.toLowerCase()] ?? 'text-slate-500'}`}>
           {log.level}
         </span>
@@ -168,7 +168,7 @@ const WorkspaceCard = ({ workspace }: { workspace: Workspace }) => (
     <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${workspace.available ? 'bg-emerald-400' : 'bg-red-400'}`} />
     <div className="min-w-0 flex-1">
       <div className="flex items-center justify-between gap-2">
-        <p className="font-semibold text-sm text-white truncate">
+        <p className="font-semibold text-sm text-white truncate min-w-0">
           {workspace.display_name || workspace.id}
         </p>
         <span className={`text-[9px] font-black uppercase tracking-widest shrink-0 px-2 py-0.5 rounded-md border ${
@@ -658,11 +658,11 @@ const Dashboard = () => {
                   ) : activeMissions.length > 0 ? (
                     activeMissions.slice(0, 3).map((mission) => (
                       <div key={mission.id} className="glass-card p-4 space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-black uppercase tracking-widest text-purple-400">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] font-black uppercase tracking-widest text-purple-400 min-w-0 truncate">
                             Mission #{mission.id}
                           </span>
-                          <span className={`text-[10px] font-black uppercase tracking-widest ${
+                          <span className={`text-[10px] font-black uppercase tracking-widest shrink-0 ${
                             mission.status === 'running' ? 'text-orange-400' :
                             mission.status === 'queued' ? 'text-yellow-400' :
                             'text-blue-400'
@@ -670,9 +670,9 @@ const Dashboard = () => {
                             {mission.status}
                           </span>
                         </div>
-                        <p className="text-xs text-white truncate">{mission.proposed_mission}</p>
+                        <p className="text-xs text-white truncate min-w-0">{mission.proposed_mission}</p>
                         {mission.error_summary && (
-                          <p className="text-[10px] text-red-400 truncate">{mission.error_summary}</p>
+                          <p className="text-[10px] text-red-400 truncate min-w-0">{mission.error_summary}</p>
                         )}
                         {mission.progress > 0 && (
                           <div className="w-full bg-white/5 rounded-full h-1 mt-1">
