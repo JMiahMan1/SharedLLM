@@ -75,6 +75,23 @@ echo "Deploying to $HOST:$DIR"
 BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
 echo "Branch: $BRANCH"
 
+# Check if a latest Android APK artifact is available from CI and sync it to update directory
+if command -v gh >/dev/null 2>&1; then
+    echo "Checking for latest Android APK artifact from CI..."
+    APK_RUN_ID=$(gh run list --workflow=android-build.yml --branch="$BRANCH" --limit 1 --json databaseId,status,conclusion --jq '.[] | select(.conclusion=="success") | .databaseId' 2>/dev/null || true)
+    if [ -n "$APK_RUN_ID" ]; then
+        echo "Downloading APK artifact from CI run $APK_RUN_ID..."
+        mkdir -p .tmp/apk
+        rm -rf .tmp/apk/*
+        if gh run download "$APK_RUN_ID" -n jarvis-os-debug-apk -D .tmp/apk 2>/dev/null; then
+            echo "Syncing APK to remote $HOST:$DIR/data/app_updates/..."
+            ssh $SSH_OPTS "$HOST" "mkdir -p '$DIR/data/app_updates'"
+            rsync -a -e "ssh $SSH_OPTS" .tmp/apk/app-debug.apk "$HOST:$DIR/data/app_updates/app-debug.apk"
+            echo "[OK] Latest APK synced to remote update server."
+        fi
+    fi
+fi
+
 # shellcheck disable=SC2087
 if ssh $SSH_OPTS "$HOST" << EOF
     cd "$DIR"
@@ -188,7 +205,16 @@ if ssh $SSH_OPTS "$HOST" << EOF
         echo "Staging OTA update bundle from \$UI_CONTAINER to data/app_updates..."
         mkdir -p data/app_updates
         docker cp "\$UI_CONTAINER:/usr/share/nginx/html/bundle.zip" data/app_updates/bundle.zip 2>/dev/null || true
-        docker cp "\$UI_CONTAINER:/usr/share/nginx/html/version.json" data/app_updates/version.json 2>/dev/null || true
+        CURRENT_SHA=\$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        BUILD_TIME=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        cat << JSON_EOF > data/app_updates/version.json
+{
+  "version": "1.1.2",
+  "git_sha": "\$CURRENT_SHA",
+  "build_timestamp": "\$BUILD_TIME",
+  "release_notes": "Jarvis OS Over-The-Air Update"
+}
+JSON_EOF
     fi
 EOF
 then
