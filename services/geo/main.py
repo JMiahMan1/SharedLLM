@@ -15,9 +15,13 @@ import json
 import logging
 import math
 import os
+import re
 import time
+import urllib.parse
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+import aiohttp
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -713,3 +717,287 @@ async def assign_vehicle(
         await r.delete(f"geo:user_vehicle:{clean_user}")
     return {"status": "ok", "user_id": clean_user, "vehicle_id": assign.vehicle_id}
 
+
+# ---------------------------------------------------------------------------
+# Fuel Price Lookup & Vehicle MPG Lookup
+# ---------------------------------------------------------------------------
+
+_US_STATE_MAP = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "florida": "FL", "georgia": "GA", "hawaii": "HI", "idaho": "ID",
+    "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD",
+    "massachusetts": "MA", "michigan": "MI", "minnesota": "MN",
+    "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE",
+    "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
+    "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR",
+    "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "district of columbia": "DC",
+}
+
+_ABBR_TO_NAME = {v: k.title() for k, v in _US_STATE_MAP.items()}
+_FUEL_PRICE_CACHE_TTL = 43200   # 12 hours
+_VEHICLE_CACHE_TTL = 86400      # 24 hours
+_FUELECONOMY_BASE = "https://www.fueleconomy.gov/ws/rest"
+
+
+async def _nominatim_resolve(location: str) -> dict:
+    """Resolve a location string to city + state via Nominatim."""
+    location = location.strip()
+    if re.match(r"^\d{5}$", location):
+        url = f"https://nominatim.openstreetmap.org/search?postalcode={location}&country=us&format=json"
+    elif re.match(r"^-?\d+(\.\d+)?\s*,\s*-?\d+(\.\d+)?$", location):
+        lat, lon = [p.strip() for p in location.split(",")]
+        url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json"
+    else:
+        q = urllib.parse.quote(location)
+        url = f"https://nominatim.openstreetmap.org/search?q={q}&countrycodes=us&format=json"
+
+    client = get_client_insecure()
+    async with client.get(url, headers={"User-Agent": "SharedLLM/1.0"},
+                          timeout=aiohttp.ClientTimeout(total=6)) as resp:
+        data = await resp.json(content_type=None)
+
+    if isinstance(data, list):
+        if not data:
+            return {}
+        data = data[0]
+
+    display_name = data.get("display_name", "")
+    parts = [p.strip() for p in display_name.split(",")]
+
+    state_code = None
+    city = None
+    for p in parts:
+        pl = p.lower()
+        if pl in _US_STATE_MAP:
+            state_code = _US_STATE_MAP[pl]
+            break
+        if len(p) == 2 and p.upper() in _ABBR_TO_NAME:
+            state_code = p.upper()
+            break
+
+    for p in parts:
+        if (not re.match(r"^\d+$", p) and "county" not in p.lower()
+                and p.lower() not in _US_STATE_MAP and p != "United States"):
+            city = p
+            break
+
+    return {"display_name": display_name, "city": city, "state_code": state_code}
+
+
+def _clean_price(val: str) -> float | None:
+    cleaned = re.sub(r"[^\d.]", "", val)
+    return float(cleaned) if cleaned else None
+
+
+async def _fetch_aaa_prices(state_code: str) -> dict:
+    """Scrape AAA state page for state + metro fuel price averages."""
+    url = f"https://gasprices.aaa.com/?state={state_code}"
+    client = get_client_insecure()
+    async with client.get(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"},
+        timeout=aiohttp.ClientTimeout(total=10),
+    ) as resp:
+        html = await resp.text()
+
+    # State-level: first table
+    state_prices: dict = {}
+    tables = re.findall(r"<table[^>]*>(.*?)</table>", html, re.DOTALL)
+    if tables:
+        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", tables[0], re.DOTALL)
+        for r in rows:
+            cols = [re.sub(r"<[^>]+>", "", c).strip()
+                    for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", r, re.DOTALL)]
+            if cols and "Current Avg." in cols[0] and len(cols) >= 5:
+                state_prices = {
+                    "regular": _clean_price(cols[1]),
+                    "midgrade": _clean_price(cols[2]),
+                    "premium": _clean_price(cols[3]),
+                    "diesel": _clean_price(cols[4]),
+                }
+                break
+
+    # Metro-level
+    metros: dict[str, dict] = {}
+    # Match <h3>Metro Name</h3> ... <table>...</table>  (skipping "highest recorded")
+    h3_pattern = re.compile(
+        r"<h3[^>]*>(.*?)</h3>.*?<table[^>]*>(.*?)</table>", re.DOTALL
+    )
+    for m in h3_pattern.finditer(html):
+        metro_name = re.sub(r"<[^>]+>", "", m.group(1)).strip()
+        if not metro_name or "highest" in metro_name.lower():
+            continue
+        tbl = m.group(2)
+        rows = re.findall(r"<tr[^>]*>(.*?)</tr>", tbl, re.DOTALL)
+        for r in rows:
+            cols = [re.sub(r"<[^>]+>", "", c).strip()
+                    for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", r, re.DOTALL)]
+            if cols and "Current Avg." in cols[0] and len(cols) >= 5:
+                metros[metro_name] = {
+                    "regular": _clean_price(cols[1]),
+                    "midgrade": _clean_price(cols[2]),
+                    "premium": _clean_price(cols[3]),
+                    "diesel": _clean_price(cols[4]),
+                }
+                break
+
+    return {"state_prices": state_prices, "metros": metros}
+
+
+@app.get("/fuel-prices")
+async def get_fuel_prices(location: str = Query(..., min_length=1)):
+    """Look up current fuel prices by ZIP code, city/state, or lat,lon."""
+    cache_key = f"geo:fuel_prices:{location.strip().lower()}"
+    r = await get_redis()
+
+    # Check cache first
+    if r:
+        try:
+            cached = await r.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
+    # 1. Resolve location
+    try:
+        loc = await _nominatim_resolve(location)
+    except Exception as exc:
+        log.warning(f"[fuel-prices] Nominatim resolve failed for '{location}': {exc}")
+        raise HTTPException(status_code=400, detail=f"Could not resolve location: {location}")
+
+    state_code = loc.get("state_code")
+    city = loc.get("city")
+    if not state_code:
+        raise HTTPException(status_code=400, detail=f"Could not determine US state for: {location}")
+
+    # 2. Fetch AAA prices
+    try:
+        aaa = await _fetch_aaa_prices(state_code)
+    except Exception as exc:
+        log.warning(f"[fuel-prices] AAA fetch failed for {state_code}: {exc}")
+        raise HTTPException(status_code=502, detail="Unable to fetch fuel prices from upstream source")
+
+    # 3. Match metro
+    matched_metro = None
+    matched_prices = aaa.get("state_prices", {})
+    source_label = f"{_ABBR_TO_NAME.get(state_code, state_code)} state average"
+
+    if city:
+        city_lower = city.lower()
+        for metro_name, metro_prices in aaa.get("metros", {}).items():
+            metro_lower = metro_name.lower()
+            if city_lower in metro_lower or metro_lower.split("-")[0].strip() in city_lower:
+                matched_metro = metro_name
+                matched_prices = metro_prices
+                source_label = f"{metro_name} metro daily average"
+                break
+
+    result = {
+        "location": loc.get("display_name", location),
+        "source": source_label,
+        "prices": matched_prices,
+    }
+
+    # Cache
+    if r:
+        try:
+            await r.set(cache_key, json.dumps(result), ex=_FUEL_PRICE_CACHE_TTL)
+        except Exception:
+            pass
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# FuelEconomy.gov vehicle lookup proxies
+# ---------------------------------------------------------------------------
+
+async def _fueleconomy_get(path: str, params: dict | None = None, cache_ttl: int = _VEHICLE_CACHE_TTL) -> dict:
+    """Proxy a GET to FuelEconomy.gov with Redis caching."""
+    query = ""
+    if params:
+        query = "?" + urllib.parse.urlencode(params)
+    full_url = f"{_FUELECONOMY_BASE}{path}{query}"
+
+    cache_key = f"geo:fueleconomy:{path}{query}"
+    r = await get_redis()
+    if r:
+        try:
+            cached = await r.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
+    client = get_client_insecure()
+    async with client.get(
+        full_url,
+        headers={"Accept": "application/json", "User-Agent": "SharedLLM/1.0"},
+        timeout=aiohttp.ClientTimeout(total=8),
+    ) as resp:
+        if resp.status != 200:
+            raise HTTPException(status_code=502, detail="FuelEconomy.gov lookup failed")
+        data = await resp.json(content_type=None)
+
+    if r and data:
+        try:
+            await r.set(cache_key, json.dumps(data), ex=cache_ttl)
+        except Exception:
+            pass
+
+    return data
+
+
+@app.get("/vehicle-lookup/years")
+async def vehicle_lookup_years():
+    """Available model years from FuelEconomy.gov."""
+    return await _fueleconomy_get("/vehicle/menu/year", cache_ttl=86400 * 7)
+
+
+@app.get("/vehicle-lookup/makes")
+async def vehicle_lookup_makes(year: int = Query(...)):
+    """Makes available for a given model year."""
+    return await _fueleconomy_get("/vehicle/menu/make", {"year": year}, cache_ttl=86400 * 7)
+
+
+@app.get("/vehicle-lookup/models")
+async def vehicle_lookup_models(year: int = Query(...), make: str = Query(...)):
+    """Models for a given year + make."""
+    return await _fueleconomy_get("/vehicle/menu/model", {"year": year, "make": make})
+
+
+@app.get("/vehicle-lookup/options")
+async def vehicle_lookup_options(
+    year: int = Query(...), make: str = Query(...), model: str = Query(...)
+):
+    """Trim / engine options for a year + make + model."""
+    return await _fueleconomy_get("/vehicle/menu/options", {"year": year, "make": make, "model": model})
+
+
+@app.get("/vehicle-lookup/{vehicle_id}")
+async def vehicle_lookup_detail(vehicle_id: str):
+    """Full vehicle specs from FuelEconomy.gov by vehicle ID."""
+    data = await _fueleconomy_get(f"/vehicle/{vehicle_id}")
+    # Return a useful subset
+    return {
+        "year": data.get("year"),
+        "make": data.get("make"),
+        "model": data.get("model"),
+        "comb08": data.get("comb08"),
+        "city08": data.get("city08"),
+        "highway08": data.get("highway08"),
+        "fuelType1": data.get("fuelType1"),
+        "fuelType2": data.get("fuelType2"),
+        "cylinders": data.get("cylinders"),
+        "displ": data.get("displ"),
+        "trany": data.get("trany"),
+        "drive": data.get("drive"),
+    }
