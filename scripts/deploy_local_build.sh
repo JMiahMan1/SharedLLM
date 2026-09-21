@@ -100,13 +100,20 @@ ssh $SSH_OPTS "$HOST" << EOF
 
     echo "Building images locally on server..."
     for SVC in $SERVICES; do
+        # UI is built with services/ui as context (matches CI and docker-compose);
+        # other services use the repo root as context.
+        if [ "\$SVC" = "ui" ]; then
+            BUILD_CONTEXT="services/\$SVC"
+        else
+            BUILD_CONTEXT="."
+        fi
         echo "=== Building sharedllm-\$SVC ==="
         docker build \
             --build-arg GIT_SHA=\$(git rev-parse --short HEAD) \
             --build-arg BUILD_DATE=\$(date -u +%Y-%m-%dT%H:%M:%SZ) \
             --build-arg SERVICE_NAME=\$SVC \
             -t ghcr.io/jmiahman1/sharedllm-\$SVC:latest \
-            -f services/\$SVC/Dockerfile .
+            -f services/\$SVC/Dockerfile "\$BUILD_CONTEXT"
         echo "[OK] Built sharedllm-\$SVC"
     done
 
@@ -151,7 +158,16 @@ ssh $SSH_OPTS "$HOST" << EOF
         echo "Staging OTA update bundle from \$UI_CONTAINER to data/app_updates..."
         mkdir -p data/app_updates
         docker cp "\$UI_CONTAINER:/usr/share/nginx/html/bundle.zip" data/app_updates/bundle.zip 2>/dev/null || true
-        docker cp "\$UI_CONTAINER:/usr/share/nginx/html/version.json" data/app_updates/version.json 2>/dev/null || true
+        CURRENT_SHA=\$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        BUILD_TIME=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        cat << JSON_EOF > data/app_updates/version.json
+{
+  "version": "1.1.2",
+  "git_sha": "\$CURRENT_SHA",
+  "build_timestamp": "\$BUILD_TIME",
+  "release_notes": "Jarvis OS Over-The-Air Update"
+}
+JSON_EOF
     fi
 EOF
 
