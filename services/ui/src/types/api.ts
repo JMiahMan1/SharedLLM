@@ -748,3 +748,51 @@ export interface NetworkScanResponse {
     open_ports: number[];
   }>;
 }
+
+export interface TripLocation {
+  lat: number;
+  lon: number;
+  zone: string;
+}
+
+export interface Trip {
+  id: string;
+  user_id: string;
+  user_name: string;
+  vehicle_id?: string;
+  vehicle_name?: string;
+  fuel_type?: string;
+  mpg: number;
+  cost_per_gallon: number;
+  start_time: number;
+  end_time: number;
+  duration_seconds: number;
+  distance_miles: number;
+  top_speed_mph: number;
+  avg_speed_mph?: number;
+  start_location?: TripLocation;
+  end_location?: TripLocation;
+  fuel_used_gal: number;
+  trip_cost_usd: number;
+  status: 'completed' | 'in_progress';
+  created_at?: number;
+  updated_at?: number;
+  updated_by?: string | null;
+  is_shared?: boolean;
+  shared_with?: string[];
+  shared_group_id?: string;
+}
+
+export interface TripUpdatePayload {
+  vehicle_id?: string;
+  vehicle_name?: string;
+  fuel_type?: string;
+  mpg?: number;
+  cost_per_gallon?: number;
+}
+
+export interface TripsResponse {
+  trips: Trip[];
+  total_trips: number;
+}
+

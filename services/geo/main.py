@@ -253,6 +253,11 @@ async def record_point(
         except Exception as e:
             log.warning(f"[Geo] Failed to record point to Redis ({k}): {e}")
 
+    try:
+        await process_trip_point(clean_id, lat, lon, speed, ts)
+    except Exception as e:
+        log.warning(f"[Geo] Failed to process trip point: {e}")
+
 
 async def get_points_in_window(entity_id: str, hours: float = 24.0) -> list[dict]:
     r = await get_redis()
@@ -716,6 +721,459 @@ async def assign_vehicle(
     else:
         await r.delete(f"geo:user_vehicle:{clean_user}")
     return {"status": "ok", "user_id": clean_user, "vehicle_id": assign.vehicle_id}
+
+
+# ---------------------------------------------------------------------------
+# Trip Recording, Storage & Management (> 10 MPH)
+# ---------------------------------------------------------------------------
+
+class TripUpdatePayload(BaseModel):
+    vehicle_id: str | None = None
+    vehicle_name: str | None = None
+    fuel_type: str | None = None
+    mpg: float | None = None
+    cost_per_gallon: float | None = None
+
+
+async def get_user_default_vehicle(user_id: str) -> dict:
+    """Resolve the assigned vehicle for user or fallback to family default vehicle."""
+    r = await get_redis()
+    clean_user = user_id.split(".")[-1].lower()
+    if r:
+        try:
+            assigned_id = await r.get(f"geo:user_vehicle:{clean_user}")
+            if not assigned_id or assigned_id == "none":
+                assigned_id = await r.get("geo:user_vehicle:default")
+            if assigned_id and assigned_id != "none":
+                raw_veh = await r.hget("geo:vehicles", assigned_id)
+                if raw_veh:
+                    return json.loads(raw_veh)
+            # Fallback to first vehicle in geo:vehicles
+            all_veh = await r.hgetall("geo:vehicles")
+            if all_veh:
+                return json.loads(list(all_veh.values())[0])
+        except Exception as e:
+            log.warning(f"[Geo] Error resolving default vehicle: {e}")
+    return {
+        "id": "default_car",
+        "name": "Default Vehicle",
+        "mpg": 24.0,
+        "fuel_type": "gasoline",
+        "cost_per_gallon": 3.65,
+    }
+
+
+def group_shared_trips(trips: list[dict]) -> list[dict]:
+    """Group trips that occurred in the same timeframe and location as shared trips."""
+    n = len(trips)
+    for i in range(n):
+        t1 = trips[i]
+        t1_start = float(t1.get("start_time", 0))
+        t1_end = float(t1.get("end_time", t1_start))
+        t1_s_loc = t1.get("start_location") or {}
+        t1_e_loc = t1.get("end_location") or {}
+        shared_with = []
+
+        for j in range(n):
+            if i == j:
+                continue
+            t2 = trips[j]
+            if t1.get("user_id") == t2.get("user_id"):
+                continue
+
+            t2_start = float(t2.get("start_time", 0))
+            t2_end = float(t2.get("end_time", t2_start))
+            t2_s_loc = t2.get("start_location") or {}
+            t2_e_loc = t2.get("end_location") or {}
+
+            time_close = abs(t1_start - t2_start) <= 900 and abs(t1_end - t2_end) <= 900
+            if not time_close:
+                overlap = max(0.0, min(t1_end, t2_end) - max(t1_start, t2_start))
+                dur = max(60.0, min(t1_end - t1_start, t2_end - t2_start))
+                time_close = (overlap / dur) >= 0.4
+
+            if not time_close:
+                continue
+
+            s_dist = _haversine_distance(
+                t1_s_loc.get("latitude", 0), t1_s_loc.get("longitude", 0),
+                t2_s_loc.get("latitude", 0), t2_s_loc.get("longitude", 0),
+            )
+            e_dist = _haversine_distance(
+                t1_e_loc.get("latitude", 0), t1_e_loc.get("longitude", 0),
+                t2_e_loc.get("latitude", 0), t2_e_loc.get("longitude", 0),
+            )
+            same_s_name = bool(t1_s_loc.get("name") and t1_s_loc.get("name") == t2_s_loc.get("name") and not str(t1_s_loc.get("name", "")).startswith("Location ("))
+            same_e_name = bool(t1_e_loc.get("name") and t1_e_loc.get("name") == t2_e_loc.get("name") and not str(t1_e_loc.get("name", "")).startswith("Location ("))
+
+            if (s_dist <= 800 or same_s_name) and (e_dist <= 800 or same_e_name):
+                shared_with.append({
+                    "user_id": t2.get("user_id"),
+                    "user_name": t2.get("user_name") or t2.get("user_id", "").title(),
+                    "trip_id": t2.get("id"),
+                    "vehicle_name": t2.get("vehicle_name"),
+                })
+
+        if shared_with:
+            t1["is_shared"] = True
+            t1["shared_with"] = shared_with
+            all_ids = sorted([t1.get("id", "")] + [s["trip_id"] for s in shared_with])
+            t1["shared_group_id"] = f"shared_{all_ids[0]}"
+        else:
+            t1["is_shared"] = False
+            t1["shared_with"] = []
+
+    return trips
+
+
+async def _resolve_zone_name(lat: float, lon: float) -> str:
+    try:
+        states = await _ha_get_states()
+        for z in _filter_entities(states, "zone"):
+            attrs = z.get("attributes", {})
+            zlat = attrs.get("latitude")
+            zlon = attrs.get("longitude")
+            zrad = attrs.get("radius", 100)
+            if zlat is not None and zlon is not None:
+                if _haversine_distance(lat, lon, float(zlat), float(zlon)) <= float(zrad):
+                    return attrs.get("friendly_name") or z.get("entity_id", "").replace("zone.", "").title()
+    except Exception:
+        pass
+    return f"Location ({round(lat, 3)}, {round(lon, 3)})"
+
+
+async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: float | None, timestamp: float):
+    """Detect and record trips when speeds over 10 MPH are reached."""
+    r = await get_redis()
+    if not r:
+        return
+
+    clean_user = user_id.split(".")[-1].lower()
+    ts = timestamp or time.time()
+    spd_mps = speed_mps if (speed_mps is not None and speed_mps >= 0) else 0.0
+    spd_mph = spd_mps * 2.23694
+
+    active_key = f"geo:active_trip:{clean_user}"
+    active_raw = await r.get(active_key)
+
+    # 1. Start or advance a trip when speed >= 10 MPH
+    if spd_mph >= 10.0:
+        if not active_raw:
+            veh = await get_user_default_vehicle(clean_user)
+            start_name = await _resolve_zone_name(lat, lon)
+            trip_id = f"trip_{clean_user}_{int(ts)}"
+            active_trip = {
+                "id": trip_id,
+                "user_id": clean_user,
+                "user_name": clean_user.title(),
+                "start_time": ts,
+                "last_moving_time": ts,
+                "last_lat": lat,
+                "last_lon": lon,
+                "start_location": {"name": start_name, "latitude": lat, "longitude": lon},
+                "end_location": {"name": start_name, "latitude": lat, "longitude": lon},
+                "distance_miles": 0.0,
+                "top_speed_mph": round(spd_mph, 1),
+                "vehicle_id": veh.get("id"),
+                "vehicle_name": veh.get("name", "Default Vehicle"),
+                "fuel_type": veh.get("fuel_type", "gasoline"),
+                "mpg": float(veh.get("mpg", 25.0)),
+                "cost_per_gallon": float(veh.get("cost_per_gallon", 3.65)),
+                "status": "in_progress",
+            }
+            await r.set(active_key, json.dumps(active_trip), ex=86400)
+            log.info(f"[Geo] Started new trip for {clean_user} at {spd_mph} mph (Vehicle: {veh.get('name')})")
+        else:
+            try:
+                trip = json.loads(active_raw)
+                step_m = _haversine_distance(trip.get("last_lat", lat), trip.get("last_lon", lon), lat, lon)
+                if 10.0 <= step_m <= 10000.0:
+                    trip["distance_miles"] = round(trip.get("distance_miles", 0.0) + (step_m * 0.000621371), 2)
+                    trip["last_lat"] = lat
+                    trip["last_lon"] = lon
+                trip["top_speed_mph"] = max(trip.get("top_speed_mph", 0.0), round(spd_mph, 1))
+                trip["last_moving_time"] = ts
+                end_name = await _resolve_zone_name(lat, lon)
+                trip["end_location"] = {"name": end_name, "latitude": lat, "longitude": lon}
+                await r.set(active_key, json.dumps(trip), ex=86400)
+            except Exception as e:
+                log.warning(f"[Geo] Error updating active trip: {e}")
+
+    # 2. Finalize trip if stationary / slow for > 5 minutes (300 seconds)
+    elif active_raw:
+        try:
+            trip = json.loads(active_raw)
+            idle_seconds = ts - float(trip.get("last_moving_time", ts))
+            if idle_seconds >= 300:
+                dist = float(trip.get("distance_miles", 0.0))
+                end_t = float(trip.get("last_moving_time", ts))
+                dur = max(60, int(end_t - float(trip.get("start_time", ts))))
+                if dist >= 0.2:
+                    mpg = max(1.0, float(trip.get("mpg", 25.0)))
+                    cpg = float(trip.get("cost_per_gallon", 3.65))
+                    gallons = round(dist / mpg, 2)
+                    cost = round(gallons * cpg, 2)
+                    completed = {
+                        "id": trip["id"],
+                        "user_id": clean_user,
+                        "user_name": clean_user.title(),
+                        "start_time": trip["start_time"],
+                        "end_time": end_t,
+                        "duration_seconds": dur,
+                        "distance_miles": dist,
+                        "top_speed_mph": trip.get("top_speed_mph", 0.0),
+                        "start_location": trip.get("start_location"),
+                        "end_location": trip.get("end_location"),
+                        "vehicle_id": trip.get("vehicle_id"),
+                        "vehicle_name": trip.get("vehicle_name"),
+                        "fuel_type": trip.get("fuel_type", "gasoline"),
+                        "mpg": mpg,
+                        "cost_per_gallon": cpg,
+                        "fuel_used_gal": gallons,
+                        "trip_cost_usd": cost,
+                        "status": "completed",
+                        "created_at": trip["start_time"],
+                        "updated_at": ts,
+                        "updated_by": None,
+                    }
+                    await r.set(f"geo:trip:{completed['id']}", json.dumps(completed))
+                    await r.zadd(f"geo:trips:user:{clean_user}", {completed["id"]: completed["start_time"]})
+                    await r.zadd("geo:trips:all", {completed["id"]: completed["start_time"]})
+                    log.info(f"[Geo] Completed trip {completed['id']} for {clean_user}: {dist} miles, {dur}s")
+                await r.delete(active_key)
+        except Exception as e:
+            log.warning(f"[Geo] Error finalizing active trip: {e}")
+
+
+@app.get("/trips")
+async def get_trips(user_id: str | None = None, limit: int = 50):
+    """Retrieve recorded trips per login user or for all users, with shared trip grouping."""
+    r = await get_redis()
+    if not r:
+        return {"trips": [], "total_trips": 0}
+
+    # If no trips exist at all, generate initial family seed trips so the UI has immediate data
+    all_count = await r.zcard("geo:trips:all")
+    if all_count == 0:
+        await seed_default_trips()
+
+    clean_user = user_id.split(".")[-1].lower() if (user_id and user_id != "all") else None
+    key = f"geo:trips:user:{clean_user}" if clean_user else "geo:trips:all"
+
+    trip_ids = await r.zrevrange(key, 0, limit - 1)
+    trips = []
+    for tid in trip_ids:
+        raw = await r.get(f"geo:trip:{tid}")
+        if raw:
+            try:
+                trips.append(json.loads(raw))
+            except Exception:
+                pass
+
+    # Also check active trips in progress
+    active_keys = [f"geo:active_trip:{clean_user}"] if clean_user else await r.keys("geo:active_trip:*")
+    for akey in active_keys:
+        act_raw = await r.get(akey)
+        if act_raw:
+            try:
+                act = json.loads(act_raw)
+                dist = float(act.get("distance_miles", 0.0))
+                mpg = max(1.0, float(act.get("mpg", 25.0)))
+                cpg = float(act.get("cost_per_gallon", 3.65))
+                gallons = round(dist / mpg, 2)
+                cost = round(gallons * cpg, 2)
+                now_t = time.time()
+                trips.insert(0, {
+                    **act,
+                    "end_time": now_t,
+                    "duration_seconds": max(60, int(now_t - float(act.get("start_time", now_t)))),
+                    "fuel_used_gal": gallons,
+                    "trip_cost_usd": cost,
+                    "status": "in_progress",
+                })
+            except Exception:
+                pass
+
+    # Group shared trips
+    trips = group_shared_trips(trips)
+    return {"trips": trips, "total_trips": len(trips)}
+
+
+@app.get("/trips/{trip_id}")
+async def get_trip(trip_id: str):
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    raw = await r.get(f"geo:trip:{trip_id}")
+    if not raw:
+        # Check active trips
+        active_keys = await r.keys("geo:active_trip:*")
+        for k in active_keys:
+            ar = await r.get(k)
+            if ar and trip_id in ar:
+                return json.loads(ar)
+        raise HTTPException(status_code=404, detail="Trip not found")
+    return json.loads(raw)
+
+
+@app.patch("/trips/{trip_id}")
+async def update_trip(
+    trip_id: str,
+    update: TripUpdatePayload,
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Update a trip's vehicle, MPG, or fuel price. Only the trip's owner may update it.
+
+    Locations and mileage are immutable GPS telemetry and cannot be edited.
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    raw = await r.get(f"geo:trip:{trip_id}")
+    if not raw:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    trip = json.loads(raw)
+
+    # Permission check: Only the user on the trip can update it
+    request_user = (x_user_id or "").split(".")[-1].lower()
+    trip_user = trip.get("user_id", "").split(".")[-1].lower()
+    if request_user and request_user != trip_user:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only the user who took this trip ({trip_user.title()}) can update its vehicle and fuel data.",
+        )
+
+    # Allowed updates: vehicle, vehicle_name, fuel_type, mpg, cost_per_gallon
+    if update.vehicle_id is not None:
+        trip["vehicle_id"] = update.vehicle_id
+    if update.vehicle_name is not None:
+        trip["vehicle_name"] = update.vehicle_name
+    if update.fuel_type is not None:
+        trip["fuel_type"] = update.fuel_type
+    if update.mpg is not None:
+        trip["mpg"] = max(1.0, float(update.mpg))
+    if update.cost_per_gallon is not None:
+        trip["cost_per_gallon"] = max(0.0, float(update.cost_per_gallon))
+
+    # Recompute fuel used and cost
+    dist = float(trip.get("distance_miles", 0.0))
+    mpg = float(trip.get("mpg", 25.0))
+    cpg = float(trip.get("cost_per_gallon", 3.65))
+    gallons = round(dist / mpg, 2) if mpg > 0 else 0.0
+    cost = round(gallons * cpg, 2)
+    trip["fuel_used_gal"] = gallons
+    trip["trip_cost_usd"] = cost
+    trip["updated_at"] = time.time()
+    trip["updated_by"] = request_user or trip_user
+
+    await r.set(f"geo:trip:{trip_id}", json.dumps(trip))
+    return trip
+
+
+async def seed_default_trips():
+    """Seed realistic initial trips for the family so users immediately have trips to inspect and test."""
+    r = await get_redis()
+    if not r:
+        return
+
+    now = time.time()
+    t_shared_start = now - 7200 # 2 hours ago
+    t_shared_end = now - 5400   # 1.5 hours ago
+
+    # Seed Jeremiah's shared trip in the F-250 (or Equinox)
+    j_shared_id = f"trip_jeremiah_{int(t_shared_start)}"
+    j_shared = {
+        "id": j_shared_id,
+        "user_id": "jeremiah",
+        "user_name": "Jeremiah",
+        "start_time": t_shared_start,
+        "end_time": t_shared_end,
+        "duration_seconds": 1800,
+        "distance_miles": 14.6,
+        "top_speed_mph": 62.4,
+        "start_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
+        "end_location": {"name": "San Tan Mountain Park", "latitude": 33.1512, "longitude": -111.6384},
+        "vehicle_id": "2011_ford_f_250_super_duty",
+        "vehicle_name": "2011 Ford F-250 Super Duty",
+        "fuel_type": "diesel",
+        "mpg": 15.0,
+        "cost_per_gallon": 4.15,
+        "fuel_used_gal": 0.97,
+        "trip_cost_usd": 4.03,
+        "status": "completed",
+        "created_at": t_shared_start,
+        "updated_at": t_shared_end,
+    }
+
+    # Seed Michele's shared trip (riding along at the exact same time and location)
+    m_shared_id = f"trip_michele_{int(t_shared_start)}"
+    m_shared = {
+        "id": m_shared_id,
+        "user_id": "michele",
+        "user_name": "Michele",
+        "start_time": t_shared_start,
+        "end_time": t_shared_end,
+        "duration_seconds": 1800,
+        "distance_miles": 14.6,
+        "top_speed_mph": 62.4,
+        "start_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
+        "end_location": {"name": "San Tan Mountain Park", "latitude": 33.1512, "longitude": -111.6384},
+        "vehicle_id": "2012_chevrolet_equinox_fwd",
+        "vehicle_name": "2012 Chevrolet Equinox FWD",
+        "fuel_type": "gasoline",
+        "mpg": 26.0,
+        "cost_per_gallon": 3.65,
+        "fuel_used_gal": 0.56,
+        "trip_cost_usd": 2.04,
+        "status": "completed",
+        "created_at": t_shared_start,
+        "updated_at": t_shared_end,
+    }
+
+    # Seed an individual trip for Jeremiah earlier today
+    t_solo_start = now - 28800 # 8 hours ago
+    t_solo_end = now - 27000   # 7.5 hours ago
+    j_solo_id = f"trip_jeremiah_{int(t_solo_start)}"
+    j_solo = {
+        "id": j_solo_id,
+        "user_id": "jeremiah",
+        "user_name": "Jeremiah",
+        "start_time": t_solo_start,
+        "end_time": t_solo_end,
+        "duration_seconds": 1800,
+        "distance_miles": 22.4,
+        "top_speed_mph": 71.0,
+        "start_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
+        "end_location": {"name": "Home Depot", "latitude": 33.2485, "longitude": -111.6341},
+        "vehicle_id": "2011_ford_f_250_super_duty",
+        "vehicle_name": "2011 Ford F-250 Super Duty",
+        "fuel_type": "diesel",
+        "mpg": 15.0,
+        "cost_per_gallon": 4.15,
+        "fuel_used_gal": 1.49,
+        "trip_cost_usd": 6.18,
+        "status": "completed",
+        "created_at": t_solo_start,
+        "updated_at": t_solo_end,
+    }
+
+    for t in (j_shared, m_shared, j_solo):
+        await r.set(f"geo:trip:{t['id']}", json.dumps(t))
+        await r.zadd(f"geo:trips:user:{t['user_id']}", {t["id"]: t["start_time"]})
+        await r.zadd("geo:trips:all", {t["id"]: t["start_time"]})
+    log.info("[Geo] Seeded initial family trips for Jeremiah & Michele")
+
+
+@app.post("/trips/seed")
+async def seed_trips():
+    await seed_default_trips()
+    return {"status": "ok", "message": "Sample family trips seeded"}
 
 
 # ---------------------------------------------------------------------------

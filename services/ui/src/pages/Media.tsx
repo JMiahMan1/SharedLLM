@@ -299,9 +299,56 @@ const NowPlayingCard = ({
   const displayTitle = isWebPlayer ? (maPlayer?.mediaTitle ?? undefined) : mediaStatus?.media_title;
   const displayArtist = isWebPlayer ? (maPlayer?.mediaArtist ?? undefined) : mediaStatus?.media_artist;
 
+  const trackRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<{ title: string; time: number | null }>({ title: '', time: null });
   const dragTime = dragState.title === (displayTitle || '') ? dragState.time : null;
   const setDragTime = (time: number | null) => setDragState({ title: displayTitle || '', time });
+
+  const getTimeFromPointer = (clientX: number): number => {
+    if (!trackRef.current || duration <= 0) return 0;
+    const rect = trackRef.current.getBoundingClientRect();
+    if (rect.width <= 0) return 0;
+    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    return Math.round(ratio * duration);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!onSeek || duration <= 0) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch { /* ignore pointer capture error */ }
+    const time = getTimeFromPointer(e.clientX);
+    setDragTime(time);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragTime !== null && onSeek && duration > 0) {
+      const time = getTimeFromPointer(e.clientX);
+      setDragTime(time);
+    }
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragTime !== null && onSeek) {
+      const time = getTimeFromPointer(e.clientX);
+      setDragTime(null);
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      } catch { /* ignore */ }
+      onSeek(time);
+    }
+  };
+
+  const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
+    setDragTime(null);
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch { /* ignore */ }
+  };
 
   return (
     <div className="glass-panel rounded-2xl p-5 border border-cyan-500/20 relative overflow-visible">
@@ -393,7 +440,29 @@ const NowPlayingCard = ({
 
       {nowPlaying && duration > 0 && (
         <div className="mt-4 pt-3 border-t border-white/5">
-          <div className="relative py-2 select-none touch-none">
+          <div
+            ref={trackRef}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerCancel}
+            role={onSeek ? "slider" : undefined}
+            tabIndex={onSeek ? 0 : undefined}
+            aria-label="Track progress scrubber"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(duration)}
+            aria-valuenow={Math.round(dragTime !== null ? dragTime : currentTime)}
+            onKeyDown={onSeek ? (e) => {
+              if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                onSeek(Math.min(duration, currentTime + 5));
+              } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                onSeek(Math.max(0, currentTime - 5));
+              }
+            } : undefined}
+            className={`relative py-3 select-none touch-none ${onSeek ? 'cursor-pointer group' : ''}`}
+          >
             {/* Visual track */}
             <div className="w-full h-2.5 sm:h-2 bg-white/10 rounded-full overflow-hidden relative pointer-events-none">
               <div
@@ -404,36 +473,10 @@ const NowPlayingCard = ({
             {/* Thumb knob */}
             {onSeek && (
               <div
-                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-md shadow-cyan-500/50 pointer-events-none -ml-2 transition-transform active:scale-125"
+                className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-md shadow-cyan-500/50 pointer-events-none -ml-2 transition-transform ${
+                  dragTime !== null ? 'scale-125' : 'group-hover:scale-110'
+                }`}
                 style={{ left: `${Math.min(100, Math.max(0, (((dragTime !== null ? dragTime : currentTime) / duration) * 100)))}%` }}
-              />
-            )}
-            {/* Native range overlay for mobile touch, drag, and tap */}
-            {onSeek && (
-              <input
-                type="range"
-                min={0}
-                max={Math.max(1, Math.round(duration))}
-                step={1}
-                value={Math.round(dragTime !== null ? dragTime : currentTime)}
-                onChange={(e) => {
-                  setDragTime(Number(e.target.value));
-                }}
-                onPointerDown={(e) => {
-                  setDragTime(Number(e.currentTarget.value));
-                }}
-                onPointerUp={(e) => {
-                  const val = Number(e.currentTarget.value);
-                  setDragTime(null);
-                  onSeek(val);
-                }}
-                onTouchEnd={(e) => {
-                  const val = Number(e.currentTarget.value);
-                  setDragTime(null);
-                  onSeek(val);
-                }}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer touch-none m-0 p-0"
-                aria-label="Track progress scrubber"
               />
             )}
           </div>
@@ -1220,8 +1263,16 @@ const Media = () => {
     if (mediaStatus) {
       const pos = mediaStatus.position ?? (mediaStatus as unknown as { media_position?: number }).media_position ?? 0;
       const dur = mediaStatus.duration ?? (mediaStatus as unknown as { media_duration?: number }).media_duration ?? 0;
-      setRemoteCurrentTime(pos);
-      setRemoteDuration(dur);
+      setRemoteCurrentTime((prev) => {
+        // Do not revert to 0 or jump back while playing unless track changed or significant seek
+        if (mediaStatus.state === 'playing' && prev > 0 && (pos === 0 || Math.abs(pos - prev) < 3)) {
+          return prev;
+        }
+        return pos;
+      });
+      if (dur > 0) {
+        setRemoteDuration(dur);
+      }
     } else {
       setRemoteCurrentTime(0);
       setRemoteDuration(0);
@@ -1358,7 +1409,14 @@ const Media = () => {
               setSelectedTarget('');
               
               // Sync local player states
-              if (active.media_content_id && (!localTrack || localTrack.id !== active.media_content_id)) {
+              const activeCleanId = (active.media_content_id || '').replace(/^library:\/\/track\//, '').replace(/^ma-/, '').replace(/^abs-/, '');
+              const currentCleanId = (localTrack?.id || '').replace(/^library:\/\/track\//, '').replace(/^ma-/, '').replace(/^abs-/, '');
+              const isSameTrack = Boolean(localTrack && (
+                localTrack.id === active.media_content_id ||
+                (activeCleanId && currentCleanId && activeCleanId === currentCleanId)
+              ));
+
+              if (active.media_content_id && !isSameTrack) {
                 const idClean = active.media_content_id;
                 const title = active.media_title || 'Unknown Title';
                 const subtitle = active.media_artist || 'Unknown Artist';
@@ -1367,7 +1425,9 @@ const Media = () => {
                 
                 setLocalTrack({ id: idClean, title, subtitle, type, source });
                 setLocalIsPlaying(active.state === 'playing');
-                setLocalCurrentTime(active.position || 0);
+                if (typeof active.position === 'number' && active.position > 0) {
+                  setLocalCurrentTime(active.position);
+                }
               } else if (localTrack) {
                 const backendPlaying = active.state === 'playing';
                 if (backendPlaying !== localIsPlaying) {
@@ -2006,8 +2066,8 @@ const Media = () => {
         volume={localMode ? localVolume : volume}
         muted={localMode ? localMuted : muted}
         loading={localMode ? null : loading}
-        currentTime={localMode ? localCurrentTime : remoteCurrentTime}
-        duration={localMode ? localDuration : remoteDuration}
+        currentTime={isWebPlayer || localMode ? localCurrentTime : remoteCurrentTime}
+        duration={isWebPlayer || localMode ? localDuration : remoteDuration}
         isFavorite={isFavorite}
         onPrevious={localMode ? () => maPlayer.previous() : isWebPlayer ? () => maPlayer.previous() : () => sendTransport('previous')}
         onTogglePlay={
@@ -2021,7 +2081,7 @@ const Media = () => {
         onVolumeChange={localMode ? handleLocalVolume : handleVolume}
         onMuteToggle={localMode ? toggleLocalMute : toggleMute}
         onFavoriteToggle={activeUri ? handleFavoriteToggle : undefined}
-        onSeek={localMode ? handleLocalSeek : (selectedTarget ? handleRemoteSeek : undefined)}
+        onSeek={isWebPlayer || localMode ? handleLocalSeek : (selectedTarget ? handleRemoteSeek : undefined)}
         onStopPlayback={localMode && (localTrack || maPlayer.isPlaying) ? handleStopPlayback : undefined}
         maPlayer={maPlayer}
       />

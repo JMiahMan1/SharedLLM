@@ -21,6 +21,7 @@ import Login from './pages/Login';
 import Media from './pages/Media';
 import Remote from './pages/Remote';
 import Settings from './pages/Settings';
+import Wander from './pages/Wander';
 
 import { Toaster } from 'react-hot-toast';
 
@@ -110,6 +111,9 @@ function App() {
             <Route path="/communication" element={<ProtectedRoute isMobile={isMobile}><Communication /></ProtectedRoute>} />
             <Route path="/calendar" element={<ProtectedRoute isMobile={isMobile}><Calendar /></ProtectedRoute>} />
             <Route path="/media" element={<ProtectedRoute isMobile={isMobile}><Media /></ProtectedRoute>} />
+            <Route path="/wander" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
+            <Route path="/family" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
+            <Route path="/family-circle" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
             <Route path="/remote" element={<ProtectedRoute isMobile={isMobile}><Remote /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute isMobile={isMobile}><Settings /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute isMobile={isMobile}><KnowledgeHub /></ProtectedRoute>} />
