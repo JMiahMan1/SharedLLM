@@ -103,7 +103,7 @@ const LocationPanel = () => {
   const [fuelPriceSource, setFuelPriceSource] = useState('');
   const [fuelPriceZip, setFuelPriceZip] = useState('');
   const [isLoadingFuelPrice, setIsLoadingFuelPrice] = useState(false);
-  const [costManuallySet, setCostManuallySet] = useState(false);
+  const [lastFetchedPrices, setLastFetchedPrices] = useState<{ regular?: number | null; midgrade?: number | null; premium?: number | null; diesel?: number | null } | null>(null);
 
   const username = user?.username || 'jeremiah';
 
@@ -353,12 +353,13 @@ const LocationPanel = () => {
     try {
       setIsLoadingFuelPrice(true);
       const data = await api.getFuelPrices(loc);
+      setLastFetchedPrices(data.prices);
       const fuelMap: Record<string, string> = {
         gasoline: 'regular', diesel: 'diesel', hybrid: 'regular', electric: 'regular',
       };
       const priceKey = fuelMap[newVehicleFuelType] || 'regular';
       const price = data.prices[priceKey as keyof typeof data.prices];
-      if (price != null && !costManuallySet) {
+      if (price != null) {
         setNewVehicleCost(price.toFixed(2));
       }
       setFuelPriceSource(data.source || data.location || '');
@@ -671,9 +672,12 @@ const LocationPanel = () => {
 
                 {/* Vehicle Lookup Section */}
                 <div className="space-y-2 p-2.5 rounded-lg bg-slate-800/50 border border-slate-700/50">
-                  <p className="text-[11px] font-medium text-purple-300 flex items-center gap-1">
-                    <span>🔍</span> Look Up Vehicle (auto-fills MPG &amp; fuel type)
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[11px] font-medium text-purple-300 flex items-center gap-1">
+                      <span>🔍</span> Look Up Vehicle (auto-fills MPG &amp; fuel type)
+                    </p>
+                    <span className="text-[10px] text-slate-400">Class 2b/3 (F-250/2500) enter below</span>
+                  </div>
                   <div className="grid grid-cols-2 gap-2">
                     <select
                       value={lookupYear}
@@ -757,7 +761,20 @@ const LocationPanel = () => {
                     <label className="block text-[11px] text-slate-400 mb-1">Fuel Type</label>
                     <select
                       value={newVehicleFuelType}
-                      onChange={(e) => setNewVehicleFuelType(e.target.value)}
+                      onChange={(e) => {
+                        const ft = e.target.value;
+                        setNewVehicleFuelType(ft);
+                        if (lastFetchedPrices) {
+                          const fuelMap: Record<string, string> = {
+                            gasoline: 'regular', diesel: 'diesel', hybrid: 'regular', electric: 'regular',
+                          };
+                          const key = fuelMap[ft] || 'regular';
+                          const p = lastFetchedPrices[key as keyof typeof lastFetchedPrices];
+                          if (p != null) {
+                            setNewVehicleCost(p.toFixed(2));
+                          }
+                        }
+                      }}
                       className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-purple-500"
                     >
                       <option value="gasoline">Gasoline</option>
@@ -779,7 +796,7 @@ const LocationPanel = () => {
                       step="0.01"
                       placeholder="e.g. 3.49"
                       value={newVehicleCost}
-                      onChange={(e) => { setNewVehicleCost(e.target.value); setCostManuallySet(true); }}
+                      onChange={(e) => setNewVehicleCost(e.target.value)}
                       className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-purple-500"
                       required
                     />
