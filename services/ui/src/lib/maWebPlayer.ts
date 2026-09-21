@@ -190,6 +190,12 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     const id = setInterval(() => {
       setStateLocal(s => {
         if (!s.isPlaying || !s.duration) return s;
+        // If Sendspin player has synchronized trackProgress, use it for exact sync
+        const tp = playerRef.current?.trackProgress;
+        if (tp && typeof tp.positionMs === 'number' && tp.positionMs > 0) {
+          const sec = Math.min(s.duration, Math.round(tp.positionMs / 1000));
+          return { ...s, position: sec };
+        }
         const nextPos = s.position + 1;
         return nextPos >= s.duration ? s : { ...s, position: nextPos };
       });
@@ -294,13 +300,18 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         const media = data?.current_media as Record<string, unknown> | undefined;
         if (media) {
           const mUri = (media.uri || (media.media_item as Record<string, unknown> | undefined)?.uri) as string | undefined;
+          const isTrackChange = (media.title && media.title !== prev.mediaTitle) || (mUri && mUri !== prev.mediaUri);
           if (mUri) next.mediaUri = mUri;
           if (media.title) next.mediaTitle = media.title as string;
           if (media.artist) next.mediaArtist = media.artist as string;
           const img = extractMaImage(media.image_url || media.image);
           if (img) next.mediaImage = img;
           if (media.duration) next.duration = media.duration as number;
-          if (typeof media.elapsed_time === 'number') next.position = media.elapsed_time as number;
+          if (isTrackChange) {
+            next.position = typeof media.elapsed_time === 'number' ? (media.elapsed_time as number) : 0;
+          } else if (typeof media.elapsed_time === 'number' && media.elapsed_time > 0 && !next.isPlaying) {
+            next.position = media.elapsed_time as number;
+          }
           const mFav = (media.favorite ?? (media.media_item as Record<string, unknown> | undefined)?.favorite) as boolean | undefined;
           if (mFav !== undefined) next.mediaFavorite = mFav;
         }
@@ -315,10 +326,10 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         if (data?.is_volume_muted !== undefined) {
           next.muted = data.is_volume_muted;
         }
-        if (data?.position !== undefined) {
+        if (typeof data?.position === 'number' && data.position > 0 && !next.isPlaying) {
           next.position = data.position;
         }
-        if (data?.duration !== undefined) {
+        if (typeof data?.duration === 'number' && data.duration > 0) {
           next.duration = data.duration;
         }
       }

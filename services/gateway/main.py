@@ -7106,6 +7106,89 @@ async def get_geo_zones():
     raise HTTPException(status_code=502, detail="Geo zones unavailable")
 
 
+@app.get("/api/geo/trips")
+async def get_geo_trips(request: Request, user_id: str | None = None, limit: int = 50):
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"limit": limit}
+    if user_id and user_id != "all":
+        params["user_id"] = user_id
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/trips",
+            params=params,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=8.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to fetch trips")
+
+
+@app.get("/api/geo/trips/{trip_id}")
+async def get_geo_trip(trip_id: str):
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/trips/{trip_id}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=404, detail="Trip not found")
+
+
+@app.patch("/api/geo/trips/{trip_id}")
+async def update_geo_trip(trip_id: str, request: Request):
+    user = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header.split(" ")[1]
+        try:
+            from services.gateway.cache import get_cached_identity
+            ident = await get_cached_identity({"api_key": token})
+            if ident:
+                user = ident.get("user_id") or ident.get("username")
+        except Exception:
+            pass
+
+    if not user:
+        user = request.headers.get("X-User-Id")
+
+    body = await request.json()
+    headers = {
+        "X-Internal-Secret": INTERNAL_SECRET,
+        "X-User-Id": user or "",
+    }
+    async with shared_http_client() as client:
+        resp = await client.patch(
+            f"{GEO_SVC}/trips/{trip_id}",
+            json=body,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        elif resp.status == 403:
+            err = await resp.json()
+            raise HTTPException(status_code=403, detail=err.get("detail", "Forbidden"))
+        elif resp.status == 404:
+            raise HTTPException(status_code=404, detail="Trip not found")
+    raise HTTPException(status_code=502, detail="Failed to update trip")
+
+
+@app.post("/api/geo/trips/seed")
+async def seed_geo_trips():
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/trips/seed",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to seed trips")
+
+
 @app.post("/api/stt/transcribe")
 async def transcribe_audio(request: Request):
     """Transcribe audio using Whisper STT."""

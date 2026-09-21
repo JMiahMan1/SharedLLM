@@ -76,6 +76,9 @@ import type {
   DiscoveryProfileResponse,
   NetworkScanRequest,
   NetworkScanResponse,
+  Trip,
+  TripUpdatePayload,
+  TripsResponse,
 } from '../types/api';
 
 // Re-export domain types so consumers can import them from the api module.
@@ -104,6 +107,10 @@ export type {
   PullStatus,
   PullAndRestartResult,
   CheckUpdatesResponse,
+  Trip,
+  TripLocation,
+  TripUpdatePayload,
+  TripsResponse,
 } from '../types/api';
 
 declare module 'axios' {
@@ -662,6 +669,28 @@ export const api = {
 
   async getGeoZones(): Promise<Record<string, unknown>> {
     const resp = await apiClient.get('/api/geo/zones');
+    return resp.data;
+  },
+
+  // Family Circle & Vehicle Trips
+  async getTrips(userId?: string): Promise<TripsResponse> {
+    const query = userId && userId !== 'all' ? `?user_id=${encodeURIComponent(userId)}` : '';
+    const resp = await apiClient.get(`/api/geo/trips${query}`);
+    return resp.data;
+  },
+
+  async getTrip(tripId: string): Promise<Trip> {
+    const resp = await apiClient.get(`/api/geo/trips/${encodeURIComponent(tripId)}`);
+    return resp.data;
+  },
+
+  async updateTrip(tripId: string, update: TripUpdatePayload): Promise<Trip> {
+    const resp = await apiClient.patch(`/api/geo/trips/${encodeURIComponent(tripId)}`, update);
+    return resp.data;
+  },
+
+  async seedTrips(): Promise<{ status: string; seeded: number }> {
+    const resp = await apiClient.post('/api/geo/trips/seed');
     return resp.data;
   },
 
