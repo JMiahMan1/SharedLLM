@@ -441,7 +441,7 @@ class _DNSClient:
         """Parse a DNS name from the packet"""
         names = []
         visited = set()
-        original_offset = offset  # Save original position to return
+        ret_offset = None
 
         while offset < len(data):
             length = data[offset]
@@ -449,6 +449,8 @@ class _DNSClient:
                 offset += 1
                 break
             if length & 0xC0 == 0xC0:
+                if ret_offset is None:
+                    ret_offset = offset + 2
                 pointer = ((length & 0x3F) << 8) | data[offset + 1]
                 if pointer in visited:
                     break
@@ -459,7 +461,10 @@ class _DNSClient:
             names.append(data[offset:offset+length].decode('ascii', errors='ignore'))
             offset += length
 
-        return '.'.join(names), original_offset + 2
+        if ret_offset is None:
+            ret_offset = offset
+
+        return '.'.join(names), ret_offset
 
 
 class DNSQuery:
