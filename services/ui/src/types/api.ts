@@ -851,6 +851,7 @@ export interface ActivityTrendsResponse {
   steps_goal: number;
   daily_steps: Record<string, number>;
   steps_avg: number | null;
+  steps_average?: number | null;
   steps_best: { date: string; steps: number } | null;
   workout_count: number;
   workouts_by_type: Record<string, number>;

@@ -697,7 +697,9 @@ const Wander = () => {
                 <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
                   <span className="text-[10px] text-slate-400 uppercase font-semibold">Steps Avg/Day</span>
                   <p className="text-base font-bold text-purple-300 mt-0.5">
-                    {trends.steps_avg != null ? trends.steps_avg.toLocaleString() : '—'}
+                    {(trends.steps_avg ?? trends.steps_average) != null
+                      ? (trends.steps_avg ?? trends.steps_average)!.toLocaleString()
+                      : '—'}
                   </p>
                 </div>
                 <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
