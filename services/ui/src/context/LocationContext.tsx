@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { storageGet, storageSet } from '../lib/storage';
 import { getServerOrigin } from '../lib/serverUrl';
+import StepCounter from '../plugins/stepCounter';
 
 interface LocationState {
   latitude: number | null;
@@ -40,6 +41,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
 
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
   const watchIdRef = useRef<string | number | null>(null);
+  // Hardware pedometer: daily step count from the phone's step sensor (null = no sensor/permission)
+  const dailyStepsRef = useRef<number | null>(null);
+  const stepsPluginReadyRef = useRef(false);
+  const stepUpdateListenerRef = useRef<{ remove: () => Promise<void> } | null>(null);
 
   const calculateDistance = useCallback((lat1: number, lng1: number, lat2: number, lng2: number) => {
     const R = 6371e3;
@@ -49,6 +54,26 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     const Δλ = ((lng2 - lng1) * Math.PI) / 180;
     const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }, []);
+
+  const refreshDailySteps = useCallback(async () => {
+    try {
+      if (!stepsPluginReadyRef.current) {
+        const avail = await StepCounter.isAvailable();
+        if (!avail.available) return;
+        if (avail.permissionRequired && !avail.permissionGranted) {
+          const req = await StepCounter.requestPermission();
+          if (!req.granted) return;
+        }
+        stepsPluginReadyRef.current = true;
+      }
+      const reading = await StepCounter.getTodaySteps();
+      if (reading.available && typeof reading.steps === 'number' && reading.steps >= 0) {
+        dailyStepsRef.current = reading.steps;
+      }
+    } catch {
+      // Sensor or permission unavailable — leave null, never fake a value
+    }
   }, []);
 
   const syncToGateway = useCallback(async (lat: number, lng: number, accuracy: number | null, speed: number | null) => {
@@ -73,7 +98,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         // Battery status unavailable
       }
 
-      const payload = {
+      const payload: Record<string, unknown> = {
         latitude: lat,
         longitude: lng,
         accuracy: accuracy ?? 0,
@@ -82,6 +107,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         timestamp: Date.now() / 1000,
         user_id: user,
       };
+      // Attach hardware pedometer reading when present (real sensor data only)
+      if (dailyStepsRef.current !== null) {
+        payload.daily_steps = dailyStepsRef.current;
+      }
 
       const resp = await fetch(`${serverUrl}/api/users/${encodeURIComponent(user)}/location`, {
         method: 'POST',
@@ -132,6 +161,21 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     setState((s) => ({ ...s, isTracking: true, error: null }));
     void storageSet('jarvis_location_tracking_enabled', 'true');
 
+    // Kick off hardware step counting in parallel with location tracking
+    void refreshDailySteps();
+    try {
+      await StepCounter.startPolling();
+      if (!stepUpdateListenerRef.current) {
+        stepUpdateListenerRef.current = await StepCounter.addListener('stepUpdate', (reading) => {
+          if (reading.available && typeof reading.steps === 'number') {
+            dailyStepsRef.current = reading.steps;
+          }
+        });
+      }
+    } catch {
+      // Web platform or sensor absent — GPS stride model remains the fallback
+    }
+
     if (!Capacitor.isNativePlatform()) {
       if (!navigator.geolocation) {
         setState((s) => ({ ...s, error: 'Geolocation is not supported by this browser', isTracking: false }));
@@ -180,7 +224,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       setState((s) => ({ ...s, error: err instanceof Error ? err.message : 'Failed to start location tracking', isTracking: false }));
     }
-  }, [handleLocationUpdate]);
+  }, [handleLocationUpdate, refreshDailySteps]);
 
   const stopTracking = useCallback(() => {
     void storageSet('jarvis_location_tracking_enabled', 'false');
@@ -192,6 +236,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       }
       watchIdRef.current = null;
     }
+    void StepCounter.stopPolling();
     setState((s) => ({ ...s, isTracking: false }));
   }, []);
 
@@ -216,8 +261,24 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           Geolocation.clearWatch({ id: watchIdRef.current });
         }
       }
+      void StepCounter.stopPolling();
+      if (stepUpdateListenerRef.current) {
+        void stepUpdateListenerRef.current.remove();
+        stepUpdateListenerRef.current = null;
+      }
     };
   }, []);
+
+  // Refresh hardware step count when app returns to foreground
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshDailySteps();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [refreshDailySteps]);
 
   const contextValue = useMemo(() => ({
     ...state,

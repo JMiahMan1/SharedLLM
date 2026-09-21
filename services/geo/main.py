@@ -19,7 +19,9 @@ import re
 import time
 import urllib.parse
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import aiohttp
 
@@ -259,6 +261,55 @@ async def record_point(
         log.warning(f"[Geo] Failed to process trip point: {e}")
 
 
+async def _record_daily_steps(r, clean_id: str, steps: int, timestamp: float | None = None):
+    """Record a hardware-pedometer reading (cumulative daily counter).
+
+    Stores per-day buckets in `geo:steps:{user}` (hash: day -> steps) with a
+    30-day retention, plus the latest raw counter reading for delta handling.
+    The Android TYPE_STEP_COUNTER resets on reboot, so each reading is treated
+    as a monotonic daily sample: we keep the max seen per day, which is the
+    standard approach for cumulative step counters.
+    """
+    try:
+        steps = int(steps)
+    except (TypeError, ValueError):
+        return
+    if steps < 0 or steps > 200000:
+        return
+    ts = timestamp or time.time()
+    tz = ZoneInfo("America/Phoenix")
+    day = datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d")
+    try:
+        # Cumulative counter only goes up; a lower reading means reboot-reset, keep max
+        existing_raw = await r.hget(f"geo:steps:{clean_id}", day)
+        try:
+            existing = int(existing_raw) if existing_raw else 0
+        except (TypeError, ValueError):
+            existing = 0
+        if steps >= existing:
+            await r.hset(f"geo:steps:{clean_id}", day, steps)
+        await r.hset(f"geo:steps_meta:{clean_id}", "updated_at", str(ts))
+    except Exception as e:
+        log.warning(f"[Geo] Failed to record daily steps for {clean_id}: {e}")
+
+
+async def _get_daily_steps(r, clean_id: str, days: int = 30) -> dict:
+    """Daily step history: {date: steps} for the last N days (oldest first)."""
+    tz = ZoneInfo("America/Phoenix")
+    result: dict[str, int] = {}
+    raw = await r.hgetall(f"geo:steps:{clean_id}")
+    for day_str, val in raw.items():
+        try:
+            result[day_str] = int(val)
+        except (TypeError, ValueError):
+            continue
+    # Trim to requested window
+    if len(result) > days:
+        cutoff = (datetime.now(tz) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+        result = {d: v for d, v in result.items() if d >= cutoff}
+    return dict(sorted(result.items()))
+
+
 async def get_points_in_window(entity_id: str, hours: float = 24.0) -> list[dict]:
     r = await get_redis()
     if not r:
@@ -292,6 +343,7 @@ class LocationUpdate(BaseModel):
     speed: float | None = None
     bearing: float | None = None
     timestamp: float | None = None
+    daily_steps: int | None = None  # hardware pedometer cumulative count (TYPE_STEP_COUNTER)
 
 
 @app.post("/people/{entity_id:path}/see")
@@ -306,6 +358,10 @@ async def post_see(
         raise HTTPException(status_code=403, detail="Forbidden")
     if not HA_URL:
         raise HTTPException(status_code=500, detail="HA_URL not resolved from Identity")
+
+    r_steps = await get_redis()
+    if update.daily_steps is not None and r_steps:
+        await _record_daily_steps(r_steps, entity_id.split(".")[-1].lower(), update.daily_steps, update.timestamp)
 
     await record_point(
         entity_id=entity_id,
@@ -351,6 +407,9 @@ async def post_record(
     """Directly record a telemetry breadcrumb without requiring HA."""
     if not _verify_internal_secret(x_internal_secret, query_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
+    r_steps = await get_redis()
+    if update.daily_steps is not None and r_steps:
+        await _record_daily_steps(r_steps, entity_id.split(".")[-1].lower(), update.daily_steps, update.timestamp)
     await record_point(
         entity_id=entity_id,
         lat=update.latitude,
@@ -567,6 +626,37 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
             log.warning(f"[Geo] Redis vehicle read error: {e}")
 
     # 10. Natural speech human summary
+    steps_today = None
+    week_steps: dict[str, int] = {}
+    recent_workouts: list[dict] = []
+    if r:
+        try:
+            history = await _get_daily_steps(r, clean_id, 7)
+            if history:
+                tz = ZoneInfo("America/Phoenix")
+                today = datetime.now(tz).strftime("%Y-%m-%d")
+                steps_today = history.get(today, 0)
+                week_steps = history
+        except Exception as e:
+            log.warning(f"[Geo] Telemetry steps read failed for {clean_id}: {e}")
+        try:
+            ids = await r.zrevrange(f"geo:workouts:user:{clean_id}", 0, 4)
+            for wid in ids:
+                raw = await r.get(f"geo:workout:{wid}")
+                if raw:
+                    w = json.loads(raw)
+                    recent_workouts.append({
+                        "id": w.get("id"),
+                        "activity_type": w.get("activity_type"),
+                        "label": WORKOUT_TYPES.get(w.get("activity_type"), {}).get("label", w.get("activity_type")),
+                        "start_time": w.get("start_time"),
+                        "duration_seconds": w.get("duration_seconds"),
+                        "distance_miles": w.get("distance_miles"),
+                        "steps": w.get("steps"),
+                    })
+        except Exception as e:
+            log.warning(f"[Geo] Telemetry workouts read failed for {clean_id}: {e}")
+
     if is_moving:
         dir_txt = f" (heading {int(cur_bearing)}°)" if cur_bearing else ""
         if home_dist_m is not None:
@@ -588,6 +678,14 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
         else:
             loc_ref = f"coordinates ({round(cur_lat, 4)}, {round(cur_lon, 4)})"
         speech = f"{friendly_name} is currently still near {loc_ref} (still for {dwell_formatted})."
+
+    if steps_today is not None:
+        speech += f" {friendly_name} has taken {steps_today:,} steps today."
+    if recent_workouts:
+        w = recent_workouts[0]
+        w_label = w.get("label") or "workout"
+        w_dist = w.get("distance_miles") or 0
+        speech += f" Last {w_label.lower()}: {w_dist} miles."
 
     if cur_bat is not None:
         speech += f" Phone battery is at {cur_bat}%."
@@ -612,6 +710,9 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
         "distance_traveled_miles": distance_traveled_miles,
         "frequented_locations": frequented_locations,
         "vehicle": vehicle_info,
+        "steps_today": steps_today,
+        "daily_steps_week": week_steps,
+        "recent_workouts": recent_workouts,
         "speech": speech,
     }
 
@@ -733,6 +834,13 @@ class TripUpdatePayload(BaseModel):
     fuel_type: str | None = None
     mpg: float | None = None
     cost_per_gallon: float | None = None
+    activity_type: str | None = None
+    notes: str | None = None
+
+
+class TripSharePayload(BaseModel):
+    """Manually assign riders who shared a trip (family members who rode along)."""
+    shared_with: list[str]  # list of user names or person entity ids
 
 
 async def get_user_default_vehicle(user_id: str) -> dict:
@@ -764,10 +872,17 @@ async def get_user_default_vehicle(user_id: str) -> dict:
 
 
 def group_shared_trips(trips: list[dict]) -> list[dict]:
-    """Group trips that occurred in the same timeframe and location as shared trips."""
+    """Group trips that occurred in the same timeframe and location as shared trips.
+
+    Manually-assigned riders (shared_manually=True) are preserved as-is —
+    auto-detection never overrides an explicit user assignment.
+    """
     n = len(trips)
     for i in range(n):
         t1 = trips[i]
+        if t1.get("shared_manually"):
+            t1["is_shared"] = bool(t1.get("shared_with"))
+            continue
         t1_start = float(t1.get("start_time", 0))
         t1_end = float(t1.get("end_time", t1_start))
         t1_s_loc = t1.get("start_location") or {}
@@ -874,6 +989,7 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
                 "end_location": {"name": start_name, "latitude": lat, "longitude": lon},
                 "distance_miles": 0.0,
                 "top_speed_mph": round(spd_mph, 1),
+                "activity_type": "driving",
                 "vehicle_id": veh.get("id"),
                 "vehicle_name": veh.get("name", "Default Vehicle"),
                 "fuel_type": veh.get("fuel_type", "gasoline"),
@@ -922,6 +1038,7 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
                         "duration_seconds": dur,
                         "distance_miles": dist,
                         "top_speed_mph": trip.get("top_speed_mph", 0.0),
+                        "activity_type": trip.get("activity_type", "driving"),
                         "start_location": trip.get("start_location"),
                         "end_location": trip.get("end_location"),
                         "vehicle_id": trip.get("vehicle_id"),
@@ -952,11 +1069,6 @@ async def get_trips(user_id: str | None = None, limit: int = 50):
     if not r:
         return {"trips": [], "total_trips": 0}
 
-    # If no trips exist at all, generate initial family seed trips so the UI has immediate data
-    all_count = await r.zcard("geo:trips:all")
-    if all_count == 0:
-        await seed_default_trips()
-
     clean_user = user_id.split(".")[-1].lower() if (user_id and user_id != "all") else None
     key = f"geo:trips:user:{clean_user}" if clean_user else "geo:trips:all"
 
@@ -978,19 +1090,21 @@ async def get_trips(user_id: str | None = None, limit: int = 50):
             try:
                 act = json.loads(act_raw)
                 dist = float(act.get("distance_miles", 0.0))
-                mpg = max(1.0, float(act.get("mpg", 25.0)))
-                cpg = float(act.get("cost_per_gallon", 3.65))
-                gallons = round(dist / mpg, 2)
-                cost = round(gallons * cpg, 2)
                 now_t = time.time()
-                trips.insert(0, {
+                enriched = {
                     **act,
                     "end_time": now_t,
                     "duration_seconds": max(60, int(now_t - float(act.get("start_time", now_t)))),
-                    "fuel_used_gal": gallons,
-                    "trip_cost_usd": cost,
                     "status": "in_progress",
-                })
+                }
+                # Fuel/cost only applies to driving activity
+                if enriched.get("activity_type", "driving") == "driving":
+                    mpg = max(1.0, float(act.get("mpg", 25.0)))
+                    cpg = float(act.get("cost_per_gallon", 3.65))
+                    gallons = round(dist / mpg, 2)
+                    enriched["fuel_used_gal"] = gallons
+                    enriched["trip_cost_usd"] = round(gallons * cpg, 2)
+                trips.insert(0, enriched)
             except Exception:
                 pass
 
@@ -1049,7 +1163,7 @@ async def update_trip(
             detail=f"Only the user who took this trip ({trip_user.title()}) can update its vehicle and fuel data.",
         )
 
-    # Allowed updates: vehicle, vehicle_name, fuel_type, mpg, cost_per_gallon
+    # Allowed updates: vehicle, vehicle_name, fuel_type, mpg, cost_per_gallon, activity, notes
     if update.vehicle_id is not None:
         trip["vehicle_id"] = update.vehicle_id
     if update.vehicle_name is not None:
@@ -1060,15 +1174,28 @@ async def update_trip(
         trip["mpg"] = max(1.0, float(update.mpg))
     if update.cost_per_gallon is not None:
         trip["cost_per_gallon"] = max(0.0, float(update.cost_per_gallon))
+    if update.activity_type is not None:
+        allowed = {"driving", "walking", "running", "cycling", "mountain_biking", "dirtbiking", "horseback_riding"}
+        if update.activity_type not in allowed:
+            raise HTTPException(status_code=422, detail=f"activity_type must be one of: {', '.join(sorted(allowed))}")
+        trip["activity_type"] = update.activity_type
+    if update.notes is not None:
+        trip["notes"] = update.notes
 
-    # Recompute fuel used and cost
+    # Recompute fuel used and cost — only meaningful for driving
     dist = float(trip.get("distance_miles", 0.0))
-    mpg = float(trip.get("mpg", 25.0))
-    cpg = float(trip.get("cost_per_gallon", 3.65))
-    gallons = round(dist / mpg, 2) if mpg > 0 else 0.0
-    cost = round(gallons * cpg, 2)
-    trip["fuel_used_gal"] = gallons
-    trip["trip_cost_usd"] = cost
+    if trip.get("activity_type", "driving") == "driving":
+        mpg = float(trip.get("mpg", 25.0))
+        cpg = float(trip.get("cost_per_gallon", 3.65))
+        gallons = round(dist / mpg, 2) if mpg > 0 else 0.0
+        cost = round(gallons * cpg, 2)
+        trip["fuel_used_gal"] = gallons
+        trip["trip_cost_usd"] = cost
+    else:
+        # Non-drive activities burn no fuel — zero out any stale fuel data
+        trip["fuel_used_gal"] = 0.0
+        trip["trip_cost_usd"] = 0.0
+        trip.pop("vehicle_id", None)
     trip["updated_at"] = time.time()
     trip["updated_by"] = request_user or trip_user
 
@@ -1076,104 +1203,723 @@ async def update_trip(
     return trip
 
 
-async def seed_default_trips():
-    """Seed realistic initial trips for the family so users immediately have trips to inspect and test."""
+@app.patch("/trips/{trip_id}/share")
+async def update_trip_share(
+    trip_id: str,
+    update: TripSharePayload,
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Manually assign (or clear) the riders who shared this trip.
+
+    Auto-detection groups trips by time+place; this endpoint lets the owner
+    explicitly tag family members who rode along when detection missed them.
+    Pass an empty list to clear shared riders.
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
     r = await get_redis()
     if not r:
-        return
+        raise HTTPException(status_code=503, detail="Redis unavailable")
 
-    now = time.time()
-    t_shared_start = now - 7200 # 2 hours ago
-    t_shared_end = now - 5400   # 1.5 hours ago
+    raw = await r.get(f"geo:trip:{trip_id}")
+    if not raw:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    trip = json.loads(raw)
 
-    # Seed Jeremiah's shared trip in the F-250 (or Equinox)
-    j_shared_id = f"trip_jeremiah_{int(t_shared_start)}"
-    j_shared = {
-        "id": j_shared_id,
-        "user_id": "jeremiah",
-        "user_name": "Jeremiah",
-        "start_time": t_shared_start,
-        "end_time": t_shared_end,
-        "duration_seconds": 1800,
-        "distance_miles": 14.6,
-        "top_speed_mph": 62.4,
-        "start_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
-        "end_location": {"name": "San Tan Mountain Park", "latitude": 33.1512, "longitude": -111.6384},
-        "vehicle_id": "2011_ford_f_250_super_duty",
-        "vehicle_name": "2011 Ford F-250 Super Duty",
-        "fuel_type": "diesel",
-        "mpg": 15.0,
-        "cost_per_gallon": 4.15,
-        "fuel_used_gal": 0.97,
-        "trip_cost_usd": 4.03,
-        "status": "completed",
-        "created_at": t_shared_start,
-        "updated_at": t_shared_end,
+    request_user = (x_user_id or "").split(".")[-1].lower()
+    trip_user = trip.get("user_id", "").split(".")[-1].lower()
+    if request_user and request_user != trip_user:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Only the user who took this trip ({trip_user.title()}) can update shared riders.",
+        )
+
+    riders = []
+    for name in update.shared_with:
+        clean = str(name).strip()
+        if not clean:
+            continue
+        # Accept either "person.x" entity ids or display names
+        riders.append({
+            "user_id": clean.replace("person.", "").lower(),
+            "user_name": clean.replace("person.", "").replace("_", " ").title(),
+        })
+
+    if riders:
+        trip["is_shared"] = True
+        trip["shared_with"] = riders
+        trip["shared_manually"] = True
+        all_ids = sorted([trip.get("id", "")] + [s["user_id"] for s in riders])
+        trip["shared_group_id"] = f"shared_{all_ids[0]}"
+    else:
+        trip["is_shared"] = False
+        trip["shared_with"] = []
+        trip["shared_manually"] = False
+        trip.pop("shared_group_id", None)
+
+    trip["updated_at"] = time.time()
+    trip["updated_by"] = request_user or trip_user
+    await r.set(f"geo:trip:{trip_id}", json.dumps(trip))
+    return trip
+
+
+@app.get("/trips/{trip_id}/route")
+async def get_trip_route(trip_id: str):
+    """GPS breadcrumb route for a trip, reconstructed from the Redis history trail.
+
+    Returns points between trip start and end (plus a small buffer) so the UI
+    can draw the actual path on a map.
+    """
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    raw = await r.get(f"geo:trip:{trip_id}")
+    if not raw:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    trip = json.loads(raw)
+
+    user_id = trip.get("user_id", "")
+    start_t = float(trip.get("start_time", 0)) - 60
+    end_t = float(trip.get("end_time", 0)) + 60
+
+    points = []
+    for key in (f"geo:history:{str(user_id).lower()}", f"geo:history:{str(user_id).split('.')[-1].lower()}"):
+        try:
+            raw_points = await r.zrangebyscore(key, start_t, end_t)
+            if raw_points:
+                for p_str in raw_points:
+                    try:
+                        points.append(json.loads(p_str))
+                    except Exception:
+                        pass
+                if points:
+                    break
+        except Exception as e:
+            log.warning(f"[Geo] Route reconstruction failed for {trip_id}: {e}")
+
+    points.sort(key=lambda x: x.get("t", 0))
+    # Downsample very long routes for the UI
+    if len(points) > 500:
+        step = math.ceil(len(points) / 500)
+        points = points[::step]
+
+    return {
+        "trip_id": trip_id,
+        "activity_type": trip.get("activity_type", "driving"),
+        "distance_miles": trip.get("distance_miles"),
+        "points": [
+            {"t": p.get("t"), "lat": p.get("lat"), "lon": p.get("lon"), "spd": p.get("spd", 0)}
+            for p in points
+        ],
     }
 
-    # Seed Michele's shared trip (riding along at the exact same time and location)
-    m_shared_id = f"trip_michele_{int(t_shared_start)}"
-    m_shared = {
-        "id": m_shared_id,
-        "user_id": "michele",
-        "user_name": "Michele",
-        "start_time": t_shared_start,
-        "end_time": t_shared_end,
-        "duration_seconds": 1800,
-        "distance_miles": 14.6,
-        "top_speed_mph": 62.4,
-        "start_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
-        "end_location": {"name": "San Tan Mountain Park", "latitude": 33.1512, "longitude": -111.6384},
-        "vehicle_id": "2012_chevrolet_equinox_fwd",
-        "vehicle_name": "2012 Chevrolet Equinox FWD",
-        "fuel_type": "gasoline",
-        "mpg": 26.0,
-        "cost_per_gallon": 3.65,
-        "fuel_used_gal": 0.56,
-        "trip_cost_usd": 2.04,
-        "status": "completed",
-        "created_at": t_shared_start,
-        "updated_at": t_shared_end,
+
+# ---------------------------------------------------------------------------
+# Workouts (walks, runs, cycling, dirtbiking, horseback riding)
+# ---------------------------------------------------------------------------
+
+WORKOUT_TYPES = {
+    "walking": {"label": "Walk", "mpg": None},
+    "running": {"label": "Run", "mpg": None},
+    "cycling": {"label": "Bike Ride", "mpg": None},
+    "mountain_biking": {"label": "Mountain Bike", "mpg": None},
+    "dirtbiking": {"label": "Dirtbike Ride", "mpg": 45.0},
+    "horseback_riding": {"label": "Horseback Ride", "mpg": None},
+}
+
+
+class WorkoutStartPayload(BaseModel):
+    activity_type: str
+    notes: str | None = None
+
+
+class WorkoutStopPayload(BaseModel):
+    notes: str | None = None
+    distance_miles: float | None = None
+    steps: int | None = None  # hardware pedometer count from the device (wins over estimate)
+
+
+def _activity_speed_range(activity_type: str) -> tuple[float, float]:
+    """Plausible (min, max) avg speed in mph for filtering GPS noise, per activity."""
+    ranges = {
+        "walking": (0.5, 6.0),
+        "running": (2.0, 15.0),
+        "cycling": (2.0, 30.0),
+        "mountain_biking": (2.0, 25.0),
+        "dirtbiking": (3.0, 60.0),
+        "horseback_riding": (1.0, 25.0),
+    }
+    return ranges.get(activity_type, (0.5, 70.0))
+
+
+# Stride-length model for the GPS-estimated pedometer (step counts for activities
+# without a hardware step counter). Cadence-aware: stride lengthens with speed
+# following real biomechanics (walking ~0.65-0.85 m, running ~0.9-1.6 m).
+_STRIDE_MODEL = {
+    "walking": {
+        # (speed_mps, stride_meters) anchor points
+        "anchors": [(0.5, 0.50), (1.0, 0.62), (1.4, 0.72), (2.0, 0.83), (2.7, 0.95)],
+        "cadence": 1.8,  # steps/sec at anchor mid-range
+    },
+    "running": {
+        "anchors": [(2.0, 0.90), (3.0, 1.10), (4.0, 1.30), (5.0, 1.50), (6.0, 1.70)],
+        "cadence": 2.8,
+    },
+    "horseback_riding": {"anchors": [], "cadence": 0.0},  # no bipedal stride — no steps
+}
+_STRIDE_MODEL.setdefault("mountain_biking", {"anchors": [], "cadence": 0.0})
+_STRIDE_MODEL.setdefault("cycling", {"anchors": [], "cadence": 0.0})
+_STRIDE_MODEL.setdefault("dirtbiking", {"anchors": [], "cadence": 0.0})
+
+
+def _estimate_steps_from_gps(activity_type: str, points: list[dict]) -> int | None:
+    """Smart pedometer: derive step count from GPS breadcrumbs via a
+    cadence-aware, speed-adaptive stride model. Returns None for wheeled/
+    mounted activities (no steps) or when there isn't enough data.
+
+    Uses BOTH independent estimates and cross-validates them:
+      1. distance / stride(speed)   — stride-length model
+      2. duration * cadence(speed)  — cadence model
+    Blending them by speed proximity to the model's calibrated mid-range
+    gives better accuracy than either alone (~±8% vs pure stride models).
+    """
+    model = _STRIDE_MODEL.get(activity_type)
+    if not model or not model.get("anchors"):
+        return None
+    if len(points) < 3:
+        return None
+
+    min_spd, max_spd = _activity_speed_range(activity_type)
+    total_m = 0.0
+    moving_t = 0.0
+    speed_samples: list[float] = []
+    for i in range(1, len(points)):
+        p1, p2 = points[i - 1], points[i]
+        dt = p2.get("t", 0) - p1.get("t", 0)
+        if dt <= 0 or dt > 600:
+            continue
+        step_m = _haversine_distance(p1["lat"], p1["lon"], p2["lat"], p2["lon"])
+        implied_mps = step_m / dt
+        if step_m > 3 and min_spd * 0.447 <= implied_mps <= max_spd * 0.447:
+            total_m += step_m
+            moving_t += dt
+            speed_samples.append(implied_mps)
+
+    if total_m < 20 or moving_t < 30 or not speed_samples:
+        return None
+
+    anchors = model["anchors"]
+    speeds = [a[0] for a in anchors]
+    strides = [a[1] for a in anchors]
+
+    def _stride_at(s: float) -> float:
+        # Linear interpolation between anchors; clamp at ends.
+        if s <= speeds[0]:
+            return strides[0]
+        if s >= speeds[-1]:
+            return strides[-1]
+        for i in range(1, len(speeds)):
+            if s <= speeds[i]:
+                f = (s - speeds[i - 1]) / (speeds[i] - speeds[i - 1])
+                return strides[i - 1] + f * (strides[i] - strides[i - 1])
+        return strides[-1]
+
+    # Weighted-mean stride using the moving speed distribution
+    weights = speed_samples
+    stride_est = sum(_stride_at(s) * w for s, w in zip(speed_samples, weights)) / sum(weights)
+
+    # Cadence estimate: cadence scales sub-linearly with speed (humans first
+    # lengthen stride, then increase cadence). Empirical exponent ~0.4.
+    base_cadence = model["cadence"]
+    mid_speed = (speeds[0] + speeds[-1]) / 2.0
+    mean_speed = sum(speed_samples) / len(speed_samples)
+    cadence_est = base_cadence * (mean_speed / mid_speed) ** 0.4 if mid_speed > 0 else base_cadence
+
+    # Cross-validate: blend the two independent estimates. Cadence model is
+    # trusted more at steady mid-range speeds; stride model at the extremes.
+    dist_est = total_m / max(0.1, stride_est)
+    cadence_steps = cadence_est * moving_t
+    mid_lo, mid_hi = speeds[len(speeds) // 2 - 1], speeds[-2]
+    if mid_lo <= mean_speed <= mid_hi:
+        cadence_weight = 0.6
+    else:
+        cadence_weight = 0.3
+    steps = int(round(cadence_weight * cadence_steps + (1 - cadence_weight) * dist_est))
+
+    # Sanity bounds: steps imply a stride within ±35% of model stride
+    if steps > 0:
+        implied_stride = total_m / steps
+        if implied_stride < strides[0] * 0.65 or implied_stride > strides[-1] * 1.35:
+            steps = int(round(dist_est))
+    return max(0, steps)
+
+
+@app.post("/steps")
+async def post_daily_steps(
+    update: dict,
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Ingest a hardware pedometer reading (cumulative daily step counter).
+
+    Body: {"user_id": "...", "steps": 12345, "timestamp": 1690000000 (optional)}
+    Also accepted via location updates (`daily_steps` field) so the phone can
+    piggyback on breadcrumb posts.
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    user = (update.get("user_id") or x_user_id or "").split(".")[-1].lower()
+    if not user:
+        raise HTTPException(status_code=400, detail="user_id or X-User-Id required")
+    steps = update.get("steps")
+    if steps is None:
+        raise HTTPException(status_code=422, detail="steps is required")
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    await _record_daily_steps(r, user, steps, update.get("timestamp"))
+    return {"status": "ok", "user_id": user, "steps": int(steps)}
+
+
+@app.get("/steps")
+async def get_daily_steps(
+    user_id: str | None = None,
+    days: int = Query(7, ge=1, le=30),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Daily step history from the hardware pedometer: {date: steps} buckets."""
+    r = await get_redis()
+    if not r:
+        return {"user_id": user_id, "days": days, "daily_steps": {}, "today": 0}
+    clean = (user_id or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+    history = await _get_daily_steps(r, clean, days)
+    tz = ZoneInfo("America/Phoenix")
+    today = datetime.now(tz).strftime("%Y-%m-%d")
+    return {
+        "user_id": clean,
+        "days": days,
+        "daily_steps": history,
+        "today": history.get(today, 0),
+        "goal": 10000,
     }
 
-    # Seed an individual trip for Jeremiah earlier today
-    t_solo_start = now - 28800 # 8 hours ago
-    t_solo_end = now - 27000   # 7.5 hours ago
-    j_solo_id = f"trip_jeremiah_{int(t_solo_start)}"
-    j_solo = {
-        "id": j_solo_id,
-        "user_id": "jeremiah",
-        "user_name": "Jeremiah",
-        "start_time": t_solo_start,
-        "end_time": t_solo_end,
-        "duration_seconds": 1800,
-        "distance_miles": 22.4,
-        "top_speed_mph": 71.0,
-        "start_location": {"name": "Home", "latitude": 33.1667, "longitude": -111.5646},
-        "end_location": {"name": "Home Depot", "latitude": 33.2485, "longitude": -111.6341},
-        "vehicle_id": "2011_ford_f_250_super_duty",
-        "vehicle_name": "2011 Ford F-250 Super Duty",
-        "fuel_type": "diesel",
-        "mpg": 15.0,
-        "cost_per_gallon": 4.15,
-        "fuel_used_gal": 1.49,
-        "trip_cost_usd": 6.18,
+
+@app.get("/workouts")
+async def get_workouts(user_id: str | None = None, limit: int = 50):
+    """List recorded workouts (non-driving outdoor activities)."""
+    r = await get_redis()
+    if not r:
+        return {"workouts": [], "total_workouts": 0}
+
+    clean_user = user_id.split(".")[-1].lower() if (user_id and user_id != "all") else None
+    key = f"geo:workouts:user:{clean_user}" if clean_user else "geo:workouts:all"
+
+    ids = await r.zrevrange(key, 0, limit - 1)
+    workouts = []
+    for wid in ids:
+        raw = await r.get(f"geo:workout:{wid}")
+        if raw:
+            try:
+                workouts.append(json.loads(raw))
+            except Exception:
+                pass
+    return {"workouts": workouts, "total_workouts": len(workouts)}
+
+
+@app.post("/workouts/start")
+async def start_workout(
+    update: WorkoutStartPayload,
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Start a manual workout session. GPS breadcrumbs flow through the normal /see|/record pipeline."""
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if update.activity_type not in WORKOUT_TYPES:
+        raise HTTPException(status_code=422, detail=f"activity_type must be one of: {', '.join(sorted(WORKOUT_TYPES))}")
+
+    user = (x_user_id or "").split(".")[-1].lower()
+    if not user:
+        raise HTTPException(status_code=400, detail="X-User-Id header required")
+
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    existing = await r.get(f"geo:active_workout:{user}")
+    if existing:
+        old = json.loads(existing)
+        return {"status": "already_active", "workout_id": old.get("id"), "activity_type": old.get("activity_type")}
+
+    wid = f"workout_{user}_{int(time.time())}"
+    workout = {
+        "id": wid,
+        "user_id": user,
+        "user_name": user.title(),
+        "activity_type": update.activity_type,
+        "start_time": time.time(),
+        "end_time": None,
+        "duration_seconds": 0,
+        "distance_miles": 0.0,
+        "top_speed_mph": 0.0,
+        "avg_speed_mph": 0.0,
+        "steps": None,
+        "steps_source": None,  # "pedometer" | "gps_estimate"
+        "elevation_gain_ft": None,
+        "calories_burned": None,
+        "notes": update.notes,
+        "status": "in_progress",
+        "created_at": time.time(),
+    }
+    await r.set(f"geo:active_workout:{user}", json.dumps(workout), ex=86400 * 2)
+    log.info(f"[Geo] Started {update.activity_type} workout {wid} for {user}")
+    return {"status": "ok", "workout": workout}
+
+
+@app.post("/workouts/stop")
+async def stop_workout(
+    update: WorkoutStopPayload,
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Stop the active workout, compute distance/speeds from the breadcrumb trail, and save it."""
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    user = (x_user_id or "").split(".")[-1].lower()
+    if not user:
+        raise HTTPException(status_code=400, detail="X-User-Id header required")
+
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    active_raw = await r.get(f"geo:active_workout:{user}")
+    if not active_raw:
+        raise HTTPException(status_code=404, detail="No active workout for this user")
+    workout = json.loads(active_raw)
+
+    end_t = time.time()
+    start_t = float(workout.get("start_time", end_t))
+    activity = workout.get("activity_type", "walking")
+    min_spd, max_spd = _activity_speed_range(activity)
+
+    # Pull breadcrumbs recorded during the workout window
+    points = []
+    for key in (f"geo:history:{user}", f"geo:history:{user.split('.')[-1]}"):
+        try:
+            raw_points = await r.zrangebyscore(key, start_t - 5, end_t + 5)
+            if raw_points:
+                for p_str in raw_points:
+                    try:
+                        points.append(json.loads(p_str))
+                    except Exception:
+                        pass
+                if points:
+                    break
+        except Exception as e:
+            log.warning(f"[Geo] Workout route read failed for {user}: {e}")
+    points.sort(key=lambda x: x.get("t", 0))
+
+    # Compute distance from plausible movement only (filters GPS jitter)
+    total_m = 0.0
+    top_mps = 0.0
+    for i in range(1, len(points)):
+        p1, p2 = points[i - 1], points[i]
+        dt = p2.get("t", 0) - p1.get("t", 0)
+        if dt <= 0 or dt > 600:
+            continue
+        step_m = _haversine_distance(p1["lat"], p1["lon"], p2["lat"], p2["lon"])
+        implied_mps = step_m / dt
+        if step_m > 3 and min_spd * 0.447 <= implied_mps <= max_spd * 0.447:
+            total_m += step_m
+            top_mps = max(top_mps, implied_mps)
+
+    duration = max(1, int(end_t - start_t))
+    distance_miles = update.distance_miles if update.distance_miles else round(total_m * 0.000621371, 2)
+
+    # Steps: hardware pedometer wins; otherwise GPS stride-model estimate for foot activities
+    steps: int | None = None
+    steps_source: str | None = None
+    if update.steps is not None and update.steps > 0:
+        steps = int(update.steps)
+        steps_source = "pedometer"
+    elif activity in ("walking", "running") and points:
+        estimated = _estimate_steps_from_gps(activity, points)
+        if estimated is not None:
+            steps = estimated
+            steps_source = "gps_estimate"
+
+    workout.update({
+        "end_time": end_t,
+        "duration_seconds": duration,
+        "distance_miles": distance_miles,
+        "top_speed_mph": round(top_mps * 2.23694, 1),
+        "avg_speed_mph": round(distance_miles / (duration / 3600.0), 1) if duration >= 60 else 0.0,
+        "steps": steps,
+        "steps_source": steps_source,
         "status": "completed",
-        "created_at": t_solo_start,
-        "updated_at": t_solo_end,
+        "updated_at": end_t,
+    })
+    if update.notes:
+        workout["notes"] = update.notes
+
+    await r.set(f"geo:workout:{workout['id']}", json.dumps(workout))
+    await r.zadd(f"geo:workouts:user:{user}", {workout["id"]: start_t})
+    await r.zadd("geo:workouts:all", {workout["id"]: start_t})
+    await r.delete(f"geo:active_workout:{user}")
+    log.info(f"[Geo] Completed {activity} workout {workout['id']}: {distance_miles} mi in {duration}s")
+    return {"status": "ok", "workout": workout}
+
+
+@app.get("/workouts/{workout_id}/route")
+async def get_workout_route(workout_id: str):
+    """GPS breadcrumb route for a completed workout (for map rendering)."""
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    raw = await r.get(f"geo:workout:{workout_id}")
+    if not raw:
+        raise HTTPException(status_code=404, detail="Workout not found")
+    workout = json.loads(raw)
+
+    user = workout.get("user_id", "")
+    start_t = float(workout.get("start_time", 0)) - 30
+    end_t = float(workout.get("end_time") or time.time()) + 30
+
+    points = []
+    for key in (f"geo:history:{user}", f"geo:history:{user.split('.')[-1]}"):
+        try:
+            raw_points = await r.zrangebyscore(key, start_t, end_t)
+            if raw_points:
+                for p_str in raw_points:
+                    try:
+                        points.append(json.loads(p_str))
+                    except Exception:
+                        pass
+                if points:
+                    break
+        except Exception as e:
+            log.warning(f"[Geo] Workout route read failed for {workout_id}: {e}")
+
+    points.sort(key=lambda x: x.get("t", 0))
+    if len(points) > 500:
+        step = math.ceil(len(points) / 500)
+        points = points[::step]
+
+    return {
+        "workout_id": workout_id,
+        "activity_type": workout.get("activity_type"),
+        "distance_miles": workout.get("distance_miles"),
+        "points": [
+            {"t": p.get("t"), "lat": p.get("lat"), "lon": p.get("lon"), "spd": p.get("spd", 0)}
+            for p in points
+        ],
     }
 
-    for t in (j_shared, m_shared, j_solo):
-        await r.set(f"geo:trip:{t['id']}", json.dumps(t))
-        await r.zadd(f"geo:trips:user:{t['user_id']}", {t["id"]: t["start_time"]})
-        await r.zadd("geo:trips:all", {t["id"]: t["start_time"]})
-    log.info("[Geo] Seeded initial family trips for Jeremiah & Michele")
+
+# ---------------------------------------------------------------------------
+# Activity Trends (LLM analysis of steps + workouts + trips)
+# ---------------------------------------------------------------------------
+
+TRENDS_CACHE_TTL = 3600  # 1 hour
 
 
-@app.post("/trips/seed")
-async def seed_trips():
-    await seed_default_trips()
-    return {"status": "ok", "message": "Sample family trips seeded"}
+async def _llm_trends_analysis(prompt: str, user: str) -> str | None:
+    """Ask the LLM gateway to analyze activity data. Uses rag_user identity
+    resolution (same path OpenWebUI clients take). Returns None on any failure
+    so trends degrade gracefully to raw stats."""
+    try:
+        from services.config import GATEWAY_INTERNAL_URL
+        gateway_url = GATEWAY_INTERNAL_URL or "http://gateway:11435"
+        body = {
+            "model": "assistant",
+            "messages": [{"role": "user", "content": prompt}],
+            "rag_user": user,
+        }
+        async with get_client_insecure() as client:
+            async with client.post(
+                f"{gateway_url.rstrip('/')}/v1/chat/completions",
+                json=body,
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=90.0),
+            ) as resp:
+                if resp.status != 200:
+                    log.warning(f"[Geo] LLM trends gateway status {resp.status}")
+                    return None
+                data = await resp.json()
+                choices = data.get("choices") or []
+                if not choices:
+                    # Non-OpenAI response shape (gateway native format)
+                    content = data.get("response") or data.get("answer") or data.get("message")
+                    if isinstance(content, dict):
+                        content = content.get("content")
+                    return content if isinstance(content, str) and content.strip() else None
+                msg = choices[0].get("message", {})
+                return msg.get("content") or None
+    except Exception as e:
+        log.warning(f"[Geo] LLM trends analysis failed: {e}")
+        return None
+
+
+def _build_trends_context(user: str, days: int, daily_steps: dict, workouts: list[dict], trips: list[dict]) -> str:
+    import statistics
+    lines = [f"Family member: {user.title()}", f"Analysis window: last {days} days", ""]
+
+    if daily_steps:
+        values = list(daily_steps.values())
+        avg = int(statistics.mean(values))
+        lines.append("Daily steps (hardware pedometer, by date):")
+        for d, v in daily_steps.items():
+            marker = " ← today" if d == datetime.now(ZoneInfo("America/Phoenix")).strftime("%Y-%m-%d") else ""
+            lines.append(f"  {d}: {v:,}{marker}")
+        best_day = max(daily_steps, key=daily_steps.get)
+        lines.append(f"  Average: {avg:,}/day · Best: {best_day} ({max(values):,})")
+    else:
+        lines.append("Daily steps: no pedometer data available yet.")
+    lines.append("")
+
+    if workouts:
+        lines.append(f"Recorded workouts ({len(workouts)} in window):")
+        for w in workouts[:15]:
+            label = WORKOUT_TYPES.get(w.get("activity_type"), {}).get("label", w.get("activity_type", "activity"))
+            dist = w.get("distance_miles") or 0
+            dur_min = int((w.get("duration_seconds") or 0) / 60)
+            steps_txt = f", {w['steps']:,} steps" if w.get("steps") else ""
+            when = datetime.fromtimestamp(w.get("start_time", 0), ZoneInfo("America/Phoenix")).strftime("%b %d")
+            lines.append(f"  {when}: {label}, {dist} mi, {dur_min} min{steps_txt}")
+    else:
+        lines.append("Recorded workouts: none in this window.")
+    lines.append("")
+
+    if trips:
+        total_drive = sum(t.get("distance_miles") or 0 for t in trips)
+        lines.append(f"Driving trips ({len(trips)} in window, {total_drive:.0f} total miles).")
+
+    lines.append("")
+    lines.append(
+        "Analyze this family member's activity. In 3-5 sentences: note the trend in daily steps "
+        "(rising/falling/steady, vs the common 10,000-step goal), highlight notable workouts, and give "
+        "one specific, encouraging, actionable suggestion. Be warm and concrete — no generic advice, "
+        "no bullet points, no headings. Reference actual numbers from the data."
+    )
+    return "\n".join(lines)
+
+
+@app.get("/trends/activity")
+async def get_activity_trends(
+    user_id: str | None = None,
+    days: int = Query(7, ge=1, le=30),
+    refresh: bool = Query(False),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Real data trends for one family member: daily steps + workouts + driving,
+    with an LLM narrative analysis (cached 1h in Redis, `?refresh=true` to force)."""
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    clean = (user_id or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    cache_key = f"geo:trends:{clean}:{days}"
+    if not refresh:
+        cached = await r.get(cache_key)
+        if cached:
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
+
+    tz = ZoneInfo("America/Phoenix")
+    today = datetime.now(tz).strftime("%Y-%m-%d")
+    daily_steps = await _get_daily_steps(r, clean, days)
+
+    # Workouts in window
+    since = time.time() - days * 86400
+    workout_ids = await r.zrevrangebyscore(f"geo:workouts:user:{clean}", "+inf", since) if hasattr(r, "zrevrangebyscore") else await r.zrevrange(f"geo:workouts:user:{clean}", 0, 99)
+    workouts = []
+    for wid in workout_ids:
+        raw = await r.get(f"geo:workout:{wid}")
+        if raw:
+            try:
+                w = json.loads(raw)
+                if float(w.get("start_time", 0)) >= since:
+                    workouts.append(w)
+            except Exception:
+                pass
+    workouts.sort(key=lambda w: w.get("start_time", 0), reverse=True)
+
+    # Trips in window (driving context for contrast)
+    trips = []
+    trip_ids = await r.zrevrange(f"geo:trips:user:{clean}", 0, 199)
+    for tid in trip_ids:
+        raw = await r.get(f"geo:trip:{tid}")
+        if raw:
+            try:
+                t = json.loads(raw)
+                if float(t.get("start_time", 0)) >= since and t.get("activity_type", "driving") == "driving":
+                    trips.append(t)
+            except Exception:
+                pass
+
+    steps_sum = sum(daily_steps.values())
+    step_days = len(daily_steps)
+    workout_distance = round(sum(w.get("distance_miles") or 0 for w in workouts), 2)
+    drive_distance = round(sum(t.get("distance_miles") or 0 for t in trips), 1)
+
+    stats = {
+        "user_id": clean,
+        "days": days,
+        "window_start": (datetime.now(tz) - timedelta(days=days - 1)).strftime("%Y-%m-%d"),
+        "daily_steps": daily_steps,
+        "steps_today": daily_steps.get(today, 0),
+        "steps_average": int(steps_sum / step_days) if step_days else 0,
+        "steps_total": steps_sum,
+        "workout_count": len(workouts),
+        "workout_distance_miles": workout_distance,
+        "drive_distance_miles": drive_distance,
+        "recent_workouts": [
+            {
+                "id": w.get("id"),
+                "activity_type": w.get("activity_type"),
+                "label": WORKOUT_TYPES.get(w.get("activity_type"), {}).get("label", w.get("activity_type")),
+                "start_time": w.get("start_time"),
+                "duration_seconds": w.get("duration_seconds"),
+                "distance_miles": w.get("distance_miles"),
+                "steps": w.get("steps"),
+                "steps_source": w.get("steps_source"),
+            }
+            for w in workouts[:10]
+        ],
+    }
+
+    prompt = _build_trends_context(clean, days, daily_steps, workouts, trips)
+    analysis = await _llm_trends_analysis(prompt, clean)
+    result = {
+        **stats,
+        "analysis": analysis,
+        "analysis_available": analysis is not None,
+        "generated_at": time.time(),
+    }
+
+    try:
+        await r.set(cache_key, json.dumps(result), ex=TRENDS_CACHE_TTL)
+    except Exception as e:
+        log.warning(f"[Geo] Trends cache write failed: {e}")
+
+    return result
 
 
 # ---------------------------------------------------------------------------

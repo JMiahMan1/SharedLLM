@@ -79,6 +79,11 @@ import type {
   Trip,
   TripUpdatePayload,
   TripsResponse,
+  TripRouteResponse,
+  Workout,
+  WorkoutsResponse,
+  StepsResponse,
+  ActivityTrendsResponse,
 } from '../types/api';
 
 // Re-export domain types so consumers can import them from the api module.
@@ -111,6 +116,11 @@ export type {
   TripLocation,
   TripUpdatePayload,
   TripsResponse,
+  TripRouteResponse,
+  Workout,
+  WorkoutsResponse,
+  StepsResponse,
+  ActivityTrendsResponse,
 } from '../types/api';
 
 declare module 'axios' {
@@ -689,8 +699,53 @@ export const api = {
     return resp.data;
   },
 
-  async seedTrips(): Promise<{ status: string; seeded: number }> {
-    const resp = await apiClient.post('/api/geo/trips/seed');
+  async getTripRoute(tripId: string): Promise<TripRouteResponse> {
+    const resp = await apiClient.get(`/api/geo/trips/${encodeURIComponent(tripId)}/route`);
+    return resp.data;
+  },
+
+  async shareTrip(tripId: string, riderIds: string[]): Promise<Trip> {
+    const resp = await apiClient.patch(`/api/geo/trips/${encodeURIComponent(tripId)}/share`, { rider_ids: riderIds });
+    return resp.data;
+  },
+
+  // Workouts (manual activity tracking)
+  async startWorkout(activityType: string, userId?: string): Promise<{ status: string; workout: Workout }> {
+    const resp = await apiClient.post('/api/geo/workouts/start', { activity_type: activityType, user_id: userId });
+    return resp.data;
+  },
+
+  async stopWorkout(payload: { user_id?: string; notes?: string; steps?: number; distance_miles?: number }): Promise<{ status: string; workout: Workout }> {
+    const resp = await apiClient.post('/api/geo/workouts/stop', payload);
+    return resp.data;
+  },
+
+  async getWorkouts(userId?: string, limit = 20): Promise<WorkoutsResponse> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (userId && userId !== 'all') params.set('user_id', userId);
+    const resp = await apiClient.get(`/api/geo/workouts?${params.toString()}`);
+    return resp.data;
+  },
+
+  async getWorkoutRoute(workoutId: string): Promise<TripRouteResponse> {
+    const resp = await apiClient.get(`/api/geo/workouts/${encodeURIComponent(workoutId)}/route`);
+    return resp.data;
+  },
+
+  // Daily steps (hardware pedometer)
+  async getDailySteps(userId?: string, days = 7): Promise<StepsResponse> {
+    const params = new URLSearchParams({ days: String(days) });
+    if (userId && userId !== 'all') params.set('user_id', userId);
+    const resp = await apiClient.get(`/api/geo/steps?${params.toString()}`);
+    return resp.data;
+  },
+
+  // Activity trends (LLM-analyzed)
+  async getActivityTrends(userId?: string, days = 7, refresh = false): Promise<ActivityTrendsResponse> {
+    const params = new URLSearchParams({ days: String(days) });
+    if (userId && userId !== 'all') params.set('user_id', userId);
+    if (refresh) params.set('refresh', 'true');
+    const resp = await apiClient.get(`/api/geo/trends/activity?${params.toString()}`);
     return resp.data;
   },
 

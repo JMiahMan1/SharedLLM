@@ -2381,16 +2381,142 @@ def get_telemetry_summary(entity_id: str, x_internal_secret: str = Header(...)):
 
 
 @app.post("/api/telemetry/analyze")
-def trigger_telemetry_analysis(analysis_data: dict, x_internal_secret: str = Header(...)):
+async def trigger_telemetry_analysis(analysis_data: dict, x_internal_secret: str = Header(...)):
+    """Run a real LLM analysis over a enrolled entity's telemetry history.
+
+    Aggregates the stored power/availability data points, sends a stats-only
+    prompt through the LLM gateway (rag_user identity resolution, same path
+    OpenWebUI clients use), and persists the resulting insight as
+    telemetry_insight:{entity_id}. Returns analysis_available=false rather
+    than fabricating text when the gateway is unreachable.
+    """
     _require_internal_secret(x_internal_secret)
     entity_id = analysis_data.get("entity_id")
-    hours = analysis_data.get("hours", 168)
-    return {
-        "status": "SUCCESS",
-        "message": f"Telemetry analysis queued for '{entity_id or 'all enrolled'}' over {hours}h",
+    if not entity_id:
+        raise HTTPException(status_code=400, detail="entity_id is required")
+    hours = int(analysis_data.get("hours", 168) or 168)
+    if hours < 1 or hours > 2160:
+        raise HTTPException(status_code=422, detail="hours must be between 1 and 2160")
+
+    import time as _time
+    import statistics
+
+    key = f"telemetry_data:{entity_id}"
+    with Session(engine) as session:
+        snapshot = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not snapshot:
+            raise HTTPException(status_code=404, detail=f"No telemetry data for '{entity_id}'")
+        data_points = json.loads(snapshot.value)
+
+    cutoff = _time.time() - hours * 3600
+    window = [p for p in data_points if (p.get("recorded_at") or 0) >= cutoff]
+    if not window:
+        window = data_points[-100:]
+    if not window:
+        raise HTTPException(status_code=404, detail=f"No telemetry data for '{entity_id}'")
+
+    power_values = [p["power_w"] for p in window if p.get("power_w") is not None]
+    available_count = sum(1 for p in window if p.get("is_available", True))
+    total = len(window)
+
+    stats: dict = {
         "entity_id": entity_id,
-        "hours": hours,
+        "window_hours": hours,
+        "data_points": total,
+        "availability_pct": round(available_count / total * 100, 1) if total else 0.0,
     }
+    if power_values:
+        stats.update({
+            "current_power_w": power_values[-1],
+            "avg_power_w": round(statistics.mean(power_values), 1),
+            "peak_power_w": max(power_values),
+            "min_power_w": min(power_values),
+            "estimated_energy_kwh": round(
+                sum(power_values) / 3600 * (60 if total > 1 else 0) / 1000, 2
+            ) if total > 1 else None,
+        })
+
+    prompt_lines = [
+        f"Analyze the following power telemetry for Home Assistant entity '{entity_id}'",
+        f"covering the last {hours} hours. Produce a concise insight (3-5 sentences):",
+        "describe usage patterns, note anomalies or availability issues, and offer one",
+        "practical energy-saving suggestion. Reference the actual numbers.",
+        "",
+        json.dumps(stats, indent=2),
+    ]
+    prompt = "\n".join(prompt_lines)
+
+    analysis_text: str | None = None
+    try:
+        from services.config import GATEWAY_INTERNAL_URL, INTERNAL_SECRET as _INTERNAL_SECRET
+        gateway_url = GATEWAY_INTERNAL_URL or "http://gateway:11435"
+        enrollment_key = f"telemetry_enroll:{entity_id}"
+        rag_user = None
+        with Session(engine) as session:
+            enrollment = session.exec(
+                select(GlobalSetting).where(GlobalSetting.key == enrollment_key)
+            ).first()
+            if enrollment:
+                rag_user = (json.loads(enrollment.value) or {}).get("rag_user")
+        if not rag_user:
+            admin = session.exec(select(User).where(User.role == "admin")).first()
+            rag_user = admin.username if admin else "admin"
+
+        import aiohttp
+        body = {
+            "model": "assistant",
+            "messages": [{"role": "user", "content": prompt}],
+            "rag_user": rag_user,
+        }
+        timeout = aiohttp.ClientTimeout(total=90.0)
+        async with aiohttp.ClientSession() as client:
+            async with client.post(
+                f"{gateway_url.rstrip('/')}/v1/chat/completions",
+                json=body,
+                headers={"X-Internal-Secret": _INTERNAL_SECRET},
+                timeout=timeout,
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    choices = data.get("choices") or []
+                    if choices:
+                        analysis_text = (choices[0].get("message") or {}).get("content")
+                    else:
+                        content = data.get("response") or data.get("answer") or data.get("message")
+                        if isinstance(content, dict):
+                            content = content.get("content")
+                        if isinstance(content, str):
+                            analysis_text = content
+                else:
+                    log.warning(f"[telemetry] LLM gateway status {resp.status} for {entity_id}")
+    except Exception as e:
+        log.warning(f"[telemetry] LLM analysis failed for {entity_id}: {e}")
+
+    insight = {
+        "entity_id": entity_id,
+        "generated_at": _time.time(),
+        "window_hours": hours,
+        "stats": stats,
+        "analysis": analysis_text,
+        "analysis_available": analysis_text is not None,
+        "model": "assistant",
+    }
+
+    insight_key = f"telemetry_insight:{entity_id}"
+    with Session(engine) as session:
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == insight_key)).first()
+        if existing:
+            existing.value = json.dumps(insight)
+        else:
+            record = GlobalSetting(
+                key=insight_key,
+                value=json.dumps(insight),
+                description=f"Telemetry LLM insight: {entity_id}",
+            )
+            session.add(record)
+        session.commit()
+
+    return {"status": "SUCCESS", "entity_id": entity_id, "hours": hours, **insight}
 
 
 @app.get("/api/telemetry/insights")
@@ -2550,6 +2676,7 @@ class LocationUpdate(BaseModel):
     bearing: float | None = None
     battery: int | float | None = None
     timestamp: float | None = None
+    daily_steps: int | None = None
 
 
 async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
@@ -2671,6 +2798,8 @@ async def _forward_location_to_geo(user_id: str, location: LocationUpdate):
             "battery": int(location.battery) if location.battery is not None else None,
             "timestamp": location.timestamp,
         }
+        if location.daily_steps is not None:
+            payload["daily_steps"] = location.daily_steps
         async with get_client_insecure() as client:
             async with client.post(
                 f"{geo_url}/people/{clean_user}/record",
