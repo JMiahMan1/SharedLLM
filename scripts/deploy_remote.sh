@@ -181,6 +181,15 @@ if ssh $SSH_OPTS "$HOST" << EOF
         exit 1
     fi
     echo "[OK] Execution container (\$EXEC_CONTAINER) is running."
+
+    # Stage OTA web update bundle and version info for in-app mobile updates
+    UI_CONTAINER=\$(docker ps --filter 'name=sharedllm_ui' --format '{{.Names}}' | head -1)
+    if [ -n "\$UI_CONTAINER" ]; then
+        echo "Staging OTA update bundle from \$UI_CONTAINER to data/app_updates..."
+        mkdir -p data/app_updates
+        docker cp "\$UI_CONTAINER:/usr/share/nginx/html/bundle.zip" data/app_updates/bundle.zip 2>/dev/null || true
+        docker cp "\$UI_CONTAINER:/usr/share/nginx/html/version.json" data/app_updates/version.json 2>/dev/null || true
+    fi
 EOF
 then
     echo "[OK] Deployment Verification Successful."

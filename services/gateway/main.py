@@ -7230,6 +7230,8 @@ async def get_app_update_version(request: Request):
 
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    if "sumemail.com" in host or request.headers.get("x-forwarded-ssl") == "on":
+        scheme = "https"
     base_url = f"{scheme}://{host}"
 
     bundle_url = f"{base_url}/api/app-updates/bundle.zip"
@@ -7251,7 +7253,7 @@ async def get_app_update_version(request: Request):
     }
 
 
-@app.get("/api/app-updates/bundle.zip")
+@app.api_route("/api/app-updates/bundle.zip", methods=["GET", "HEAD"])
 async def get_app_update_bundle():
     """Stream or serve the OTA web bundle zip for live in-app updating."""
     local_bundle = APP_UPDATES_DIR / "bundle.zip"
@@ -7282,7 +7284,7 @@ async def get_app_update_bundle():
     raise HTTPException(status_code=404, detail="Update bundle not found")
 
 
-@app.get("/api/app-updates/app-debug.apk")
+@app.api_route("/api/app-updates/app-debug.apk", methods=["GET", "HEAD"])
 async def get_app_debug_apk():
     """Serve the latest debug APK for in-app native installation."""
     apk_file = APP_UPDATES_DIR / "app-debug.apk"

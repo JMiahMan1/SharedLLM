@@ -8,7 +8,11 @@ export async function storageInit(): Promise<void> {
   if (isNative) {
     const { value: apiKey } = await Preferences.get({ key: 'jarvis_api_key' });
     const { value: internalSecret } = await Preferences.get({ key: 'internal_secret' });
-    const { value: serverUrl } = await Preferences.get({ key: 'jarvis_server_url' });
+    let { value: serverUrl } = await Preferences.get({ key: 'jarvis_server_url' });
+    if (!serverUrl) {
+      serverUrl = 'https://jarvis.sumemail.com';
+      await Preferences.set({ key: 'jarvis_server_url', value: serverUrl });
+    }
     _cache['jarvis_api_key'] = apiKey;
     _cache['internal_secret'] = internalSecret;
     _cache['jarvis_server_url'] = serverUrl;
