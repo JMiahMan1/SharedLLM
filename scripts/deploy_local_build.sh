@@ -160,12 +160,17 @@ ssh $SSH_OPTS "$HOST" << EOF
         docker cp "\$UI_CONTAINER:/usr/share/nginx/html/bundle.zip" data/app_updates/bundle.zip 2>/dev/null || true
         CURRENT_SHA=\$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
         BUILD_TIME=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        # The native versionCode of the current build (keep in sync with
+        # services/ui/android/app/build.gradle) — the app compares this against
+        # its own to know when a newer APK must be installed manually.
+        APK_CODE=5
         cat << JSON_EOF > data/app_updates/version.json
 {
-  "version": "1.1.2",
+  "version": "1.2.0",
   "git_sha": "\$CURRENT_SHA",
   "build_timestamp": "\$BUILD_TIME",
-  "release_notes": "Jarvis OS Over-The-Air Update"
+  "release_notes": "Jarvis OS 1.2.0 — step tracking, workouts, activity trends, route maps",
+  "apk_version_code": \$APK_CODE
 }
 JSON_EOF
     fi

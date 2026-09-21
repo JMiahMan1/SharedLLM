@@ -7406,7 +7406,7 @@ async def get_app_update_version(request: Request):
     # 3. Fallback defaults if not populated yet
     if not version_data:
         version_data = {
-            "version": "1.1.2",
+            "version": "1.2.0",
             "git_sha": os.getenv("GIT_SHA", "unknown"),
             "build_timestamp": datetime.now(timezone.utc).isoformat(),
             "release_notes": "Jarvis OS Over-The-Air Update",
@@ -7424,7 +7424,7 @@ async def get_app_update_version(request: Request):
     apk_size = apk_file.stat().st_size if apk_available else 0
 
     return {
-        "version": version_data.get("version", "1.1.2"),
+        "version": version_data.get("version", "1.2.0"),
         "git_sha": version_data.get("git_sha", "unknown"),
         "build_timestamp": version_data.get("build_timestamp"),
         "release_notes": version_data.get("release_notes", "Jarvis OS live update"),
@@ -7433,7 +7433,7 @@ async def get_app_update_version(request: Request):
         "apk_available": apk_available,
         "apk_url": f"{base_url}/api/app-updates/app-debug.apk" if apk_available else None,
         "apk_size_bytes": apk_size,
-        "apk_version_code": version_data.get("apk_version_code", 1),
+        "apk_version_code": version_data.get("apk_version_code", 5),
     }
 
 
@@ -7493,7 +7493,7 @@ async def publish_app_update(request: Request):
     if secret != INTERNAL_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    version = form.get("version", "1.1.2")
+    version = form.get("version", "1.2.0")
     git_sha = form.get("git_sha", "unknown")
     notes = form.get("release_notes", "Jarvis OS update")
     apk_code = form.get("apk_version_code", "1")
@@ -7517,7 +7517,7 @@ async def publish_app_update(request: Request):
         "git_sha": str(git_sha),
         "build_timestamp": datetime.now(timezone.utc).isoformat(),
         "release_notes": str(notes),
-        "apk_version_code": int(apk_code) if str(apk_code).isdigit() else 1,
+        "apk_version_code": int(apk_code) if str(apk_code).isdigit() else 5,
     }
     (APP_UPDATES_DIR / "version.json").write_text(json.dumps(meta, indent=2))
     return {"status": "ok", "metadata": meta}

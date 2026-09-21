@@ -358,14 +358,17 @@ const SystemConfigSection = ({ isAdmin, onEdit }: { isAdmin: boolean; onEdit: ()
 const AppUpdatesSection = () => {
   const { trigger } = useHaptics();
   const [checking, setChecking] = useState(false);
+  const [lastChecked, setLastChecked] = useState<Date | null>(null);
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     gitSha: string;
     remoteSha?: string;
+    remoteVersion?: string;
+    releaseNotes?: string;
     apkUrl?: string | null;
     apkAvailable?: boolean;
     hasUpdate?: boolean;
-  }>({ version: '1.1.2', gitSha: 'unknown' });
+  }>({ version: '1.2.0', gitSha: 'unknown' });
 
   useEffect(() => {
     let active = true;
@@ -383,14 +386,23 @@ const AppUpdatesSection = () => {
       setUpdateInfo((prev) => ({
         ...prev,
         remoteSha: res.remoteGitSha,
+        remoteVersion: res.remoteVersion,
+        releaseNotes: res.releaseNotes,
         hasUpdate: res.hasUpdate,
         apkUrl: res.apkUrl,
         apkAvailable: res.apkUpdateAvailable,
       }));
+      setLastChecked(new Date());
     } finally {
       setChecking(false);
     }
   };
+
+  const updateState = updateInfo.hasUpdate
+    ? { label: 'Update Available', cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10' }
+    : updateInfo.remoteSha
+      ? { label: 'Up to Date', cls: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10' }
+      : { label: 'Not Checked', cls: 'text-slate-400 border-white/10 bg-white/5' };
 
   return (
     <div className="glass-panel rounded-2xl p-4 space-y-3">
@@ -403,17 +415,31 @@ const AppUpdatesSection = () => {
       </div>
 
       <div className="p-3.5 rounded-xl bg-white/5 space-y-2.5">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-white">Live Over-The-Air Updates</p>
-            <p className="text-xs text-slate-400">
-              Web UI, Wander, and player updates install silently in the background
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-white">Live Over-The-Air Updates</p>
+              <span className={`px-2 py-0.5 rounded-full border text-[9px] font-bold uppercase tracking-wider ${updateState.cls}`}>
+                {updateState.label}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Web UI updates install silently; background checks run on launch and every 6 hours
             </p>
+            {updateInfo.remoteSha && (
+              <p className="text-[10px] text-slate-500 font-mono mt-1">
+                Server: {updateInfo.remoteVersion || '1.2.0'} ({updateInfo.remoteSha.slice(0, 7)})
+                {lastChecked && ` · checked ${lastChecked.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+              </p>
+            )}
+            {updateInfo.releaseNotes && updateInfo.hasUpdate && (
+              <p className="text-[10px] text-slate-500 italic mt-0.5 truncate">{updateInfo.releaseNotes}</p>
+            )}
           </div>
           <button
             onClick={handleCheck}
             disabled={checking}
-            className="glass-button px-3 py-1.5 rounded-xl text-xs font-semibold text-purple-300 hover:text-white flex items-center gap-1.5 border-purple-500/30"
+            className="glass-button shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold text-purple-300 hover:text-white flex items-center gap-1.5 border-purple-500/30"
           >
             <RefreshCw size={13} className={checking ? 'animate-spin text-purple-400' : ''} />
             <span>{checking ? 'Checking...' : 'Check Now'}</span>
@@ -421,19 +447,19 @@ const AppUpdatesSection = () => {
         </div>
 
         {updateInfo.apkAvailable && updateInfo.apkUrl && (
-          <div className="mt-2 pt-2.5 border-t border-white/5 flex items-center justify-between">
-            <div>
+          <div className="mt-2 pt-2.5 border-t border-white/5 flex items-center justify-between gap-2">
+            <div className="min-w-0">
               <p className="text-xs font-semibold text-amber-300 flex items-center gap-1">
                 <span>📦 New Native APK Build Available</span>
               </p>
-              <p className="text-[10px] text-slate-400">Contains new Android plugins / permissions</p>
+              <p className="text-[10px] text-slate-400">Required for new plugins / native permissions (e.g. step counter)</p>
             </div>
             <button
               onClick={() => {
                 trigger('medium');
                 downloadAndInstallApk(updateInfo.apkUrl!);
               }}
-              className="px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5"
+              className="shrink-0 px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5"
             >
               <Download size={13} />
               <span>Download APK</span>

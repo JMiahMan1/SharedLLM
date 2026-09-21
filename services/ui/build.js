@@ -16,7 +16,7 @@ async function packageOtaBundle(distDir) {
     }
 
     const versionMeta = {
-      version: '1.1.2',
+      version: '1.2.0',
       git_sha: gitSha,
       build_timestamp: new Date().toISOString(),
       release_notes: 'Jarvis OS Over-The-Air Update',

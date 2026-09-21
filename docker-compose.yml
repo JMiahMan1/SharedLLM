@@ -496,6 +496,7 @@ services:
       - WORKSPACE_RUNTIME_SVC_URL=${BRIDGE_WORKSPACE_RUNTIME_SVC_URL}
       - GEO_SVC_URL=${BRIDGE_GEO_SVC_URL:-http://geo:8009}
       - REDIS_URL=${BRIDGE_REDIS_URL}
+      - GATEWAY_INTERNAL_URL=http://gateway:11435
       - TZ=America/Phoenix
     volumes:
       - /etc/localtime:/etc/localtime:ro
