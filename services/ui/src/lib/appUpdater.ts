@@ -30,21 +30,23 @@ export interface CheckUpdateResult {
 }
 
 let isInitialized = false;
-let currentRuntimeSha = 'unknown';
+let currentRuntimeSha: string = typeof __BUILD_SHA__ === 'string' ? __BUILD_SHA__ : 'unknown';
 
 /**
- * Get current runtime web SHA from version.json bundled with the web app
+ * Get current runtime web SHA from version.json bundled with the web app.
+ * Falls back to the __BUILD_SHA__ constant embedded at build time, so native
+ * builds always know their own SHA even if /version.json is unavailable.
  */
 export async function getRunningVersion(): Promise<{ version: string; gitSha: string }> {
   try {
     const res = await fetch('/version.json?t=' + Date.now(), { cache: 'no-cache' });
     if (res.ok) {
       const data = await res.json();
-      currentRuntimeSha = data.gitSha || data.git_sha || 'unknown';
+      currentRuntimeSha = data.gitSha || data.git_sha || currentRuntimeSha;
       return { version: data.version || '1.1.2', gitSha: currentRuntimeSha };
     }
   } catch {
-    // ignore
+    // ignore — fall back to embedded build SHA
   }
   return { version: '1.1.2', gitSha: currentRuntimeSha };
 }
@@ -71,6 +73,11 @@ export async function initAppUpdater(): Promise<void> {
     setTimeout(() => {
       void checkForAppUpdates({ silent: true });
     }, 3000);
+
+    // Periodic silent re-check (every 6 hours) for long-lived sessions
+    setInterval(() => {
+      void checkForAppUpdates({ silent: true });
+    }, 6 * 60 * 60 * 1000);
   }
 }
 
@@ -146,6 +153,7 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
             icon: '🚀',
             duration: 8000,
             id: 'app-update-ready',
+            onClick: () => void CapacitorUpdater.reload(),
           }
         );
       } else {

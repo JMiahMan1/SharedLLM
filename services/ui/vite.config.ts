@@ -2,9 +2,23 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
+import { execSync } from 'child_process'
+
+// Resolve the git SHA at config-load time so it can be embedded into the
+// bundle as __BUILD_SHA__ (used by the OTA updater as a runtime fallback).
+const buildSha: string = process.env.GIT_SHA || (() => {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim()
+  } catch {
+    return 'unknown'
+  }
+})()
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __BUILD_SHA__: JSON.stringify(buildSha),
+  },
   plugins: [
     react(),
     tailwindcss(),
