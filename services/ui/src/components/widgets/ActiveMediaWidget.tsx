@@ -4,10 +4,10 @@ import type { IActiveMediaWidgetProps, MediaState } from '../../types/widget';
 import { api } from '../../services/api';
 import toast from 'react-hot-toast';
 
-function formatTime(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
+function formatTime(seconds: number): string {
+  const totalSec = Math.max(0, Math.floor(seconds));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
@@ -73,12 +73,12 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     return () => clearInterval(interval);
   }, [onMediaStop, userSettings.is_pinned]);
 
-  // Tick local time while playing
+  // Tick local time while playing (HA position/duration are in seconds)
   useEffect(() => {
     let timer: number | null = null;
     if (media?.state === 'playing') {
       timer = window.setInterval(() => {
-        localTimeRef.current += 1000;
+        localTimeRef.current += 1;
         if (duration > 0 && localTimeRef.current >= duration) {
           localTimeRef.current = duration;
         }
@@ -90,13 +90,13 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     };
   }, [media, duration]);
 
-  const handleSeek = useCallback((timeMs: number) => {
-    const clamped = Math.max(0, duration > 0 ? Math.min(timeMs, duration) : timeMs);
+  const handleSeek = useCallback((timeSec: number) => {
+    const clamped = Math.max(0, duration > 0 ? Math.min(timeSec, duration) : timeSec);
     localTimeRef.current = clamped;
     setPosition(clamped);
     if (media?.entity_id) {
       try {
-        api.mediaTransport({ entity_id: media.entity_id, command: 'seek', position: Math.round(clamped / 1000) });
+        api.mediaTransport({ entity_id: media.entity_id, command: 'seek', position: Math.round(clamped) });
       } catch { /* ignore */ }
     }
   }, [media, duration]);
@@ -130,7 +130,7 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     };
     document.addEventListener('pointermove', moveHandler);
     document.addEventListener('pointerup', upHandler);
-  }, [duration, media?.entity_id, handleSeek]);
+  }, [duration, media, handleSeek]);
 
   const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
 
