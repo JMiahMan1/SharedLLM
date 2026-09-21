@@ -6973,6 +6973,88 @@ async def assign_geo_vehicle(request: Request):
     raise HTTPException(status_code=resp.status if resp.status < 500 else 502, detail=f"Failed to assign vehicle: {err_msg}")
 
 
+@app.get("/api/geo/fuel-prices")
+async def get_fuel_prices(location: str = ""):
+    """Proxy fuel price lookup to geo service."""
+    if not location:
+        raise HTTPException(status_code=400, detail="location parameter is required")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/fuel-prices",
+            params={"location": location},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        err_msg = await resp.text()
+        log.error(f"[geo/fuel-prices] Lookup failed: {resp.status} - {err_msg}")
+    raise HTTPException(status_code=resp.status if resp.status < 500 else 502, detail=f"Fuel price lookup failed: {err_msg}")
+
+
+@app.get("/api/geo/vehicle-lookup/years")
+async def vehicle_lookup_years():
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/vehicle-lookup/years",
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Vehicle lookup failed")
+
+
+@app.get("/api/geo/vehicle-lookup/makes")
+async def vehicle_lookup_makes(year: int = 0):
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/vehicle-lookup/makes",
+            params={"year": year},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Vehicle lookup failed")
+
+
+@app.get("/api/geo/vehicle-lookup/models")
+async def vehicle_lookup_models(year: int = 0, make: str = ""):
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/vehicle-lookup/models",
+            params={"year": year, "make": make},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Vehicle lookup failed")
+
+
+@app.get("/api/geo/vehicle-lookup/options")
+async def vehicle_lookup_options(year: int = 0, make: str = "", model: str = ""):
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/vehicle-lookup/options",
+            params={"year": year, "make": make, "model": model},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Vehicle lookup failed")
+
+
+@app.get("/api/geo/vehicle-lookup/{vehicle_id}")
+async def vehicle_lookup_detail(vehicle_id: str):
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/vehicle-lookup/{vehicle_id}",
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Vehicle lookup failed")
+
+
 @app.get("/api/geo/telemetry/{user_id}")
 async def get_geo_telemetry(user_id: str, hours: float = 24.0):
     async with shared_http_client() as client:

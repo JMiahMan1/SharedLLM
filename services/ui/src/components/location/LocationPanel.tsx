@@ -90,6 +90,21 @@ const LocationPanel = () => {
   const [newVehicleFuelType, setNewVehicleFuelType] = useState('gasoline');
   const [isSavingVehicle, setIsSavingVehicle] = useState(false);
 
+  // Vehicle lookup state
+  const [lookupYear, setLookupYear] = useState('');
+  const [lookupMake, setLookupMake] = useState('');
+  const [lookupModel, setLookupModel] = useState('');
+  const [lookupYears, setLookupYears] = useState<Array<{ text: string; value: string }>>([]);
+  const [lookupMakes, setLookupMakes] = useState<Array<{ text: string; value: string }>>([]);
+  const [lookupModels, setLookupModels] = useState<Array<{ text: string; value: string }>>([]);
+  const [lookupOptions, setLookupOptions] = useState<Array<{ text: string; value: string }>>([]);
+  const [lookupOption, setLookupOption] = useState('');
+  const [isLoadingLookup, setIsLoadingLookup] = useState(false);
+  const [fuelPriceSource, setFuelPriceSource] = useState('');
+  const [fuelPriceZip, setFuelPriceZip] = useState('');
+  const [isLoadingFuelPrice, setIsLoadingFuelPrice] = useState(false);
+  const [costManuallySet, setCostManuallySet] = useState(false);
+
   const username = user?.username || 'jeremiah';
 
   const refreshData = useCallback(async () => {
@@ -234,6 +249,124 @@ const LocationPanel = () => {
     } catch (err) {
       console.error('Failed to delete vehicle:', err);
       toast.error('Could not delete vehicle');
+    }
+  };
+
+  // --- Vehicle Lookup Handlers ---
+  const loadLookupYears = async () => {
+    try {
+      const data = await api.getVehicleLookupYears();
+      const items = Array.isArray(data.menuItem) ? data.menuItem : data.menuItem ? [data.menuItem] : [];
+      setLookupYears([...items].reverse());
+    } catch {
+      console.error('Failed to load vehicle years');
+    }
+  };
+
+  const handleYearChange = async (year: string) => {
+    setLookupYear(year);
+    setLookupMake('');
+    setLookupModel('');
+    setLookupOption('');
+    setLookupMakes([]);
+    setLookupModels([]);
+    setLookupOptions([]);
+    if (!year) return;
+    try {
+      setIsLoadingLookup(true);
+      const data = await api.getVehicleLookupMakes(parseInt(year));
+      const items = Array.isArray(data.menuItem) ? data.menuItem : data.menuItem ? [data.menuItem] : [];
+      setLookupMakes(items);
+    } catch {
+      console.error('Failed to load makes');
+    } finally {
+      setIsLoadingLookup(false);
+    }
+  };
+
+  const handleMakeChange = async (make: string) => {
+    setLookupMake(make);
+    setLookupModel('');
+    setLookupOption('');
+    setLookupModels([]);
+    setLookupOptions([]);
+    if (!make || !lookupYear) return;
+    try {
+      setIsLoadingLookup(true);
+      const data = await api.getVehicleLookupModels(parseInt(lookupYear), make);
+      const items = Array.isArray(data.menuItem) ? data.menuItem : data.menuItem ? [data.menuItem] : [];
+      setLookupModels(items);
+    } catch {
+      console.error('Failed to load models');
+    } finally {
+      setIsLoadingLookup(false);
+    }
+  };
+
+  const handleModelChange = async (model: string) => {
+    setLookupModel(model);
+    setLookupOption('');
+    setLookupOptions([]);
+    if (!model || !lookupMake || !lookupYear) return;
+    try {
+      setIsLoadingLookup(true);
+      const data = await api.getVehicleLookupOptions(parseInt(lookupYear), lookupMake, model);
+      const raw = data.menuItem;
+      const items = Array.isArray(raw) ? raw : raw ? [raw] : [];
+      setLookupOptions(items as Array<{ text: string; value: string }>);
+      if (items.length === 1) {
+        handleOptionChange((items[0] as { text: string; value: string }).value);
+      }
+    } catch {
+      console.error('Failed to load options');
+    } finally {
+      setIsLoadingLookup(false);
+    }
+  };
+
+  const handleOptionChange = async (optionId: string) => {
+    setLookupOption(optionId);
+    if (!optionId) return;
+    try {
+      setIsLoadingLookup(true);
+      const detail = await api.getVehicleLookupDetail(optionId);
+      setNewVehicleName(`${detail.year} ${detail.make} ${detail.model}`);
+      if (detail.comb08) setNewVehicleMpg(String(detail.comb08));
+      const ft = (detail.fuelType1 || '').toLowerCase();
+      if (ft.includes('diesel')) setNewVehicleFuelType('diesel');
+      else if (ft.includes('electri')) setNewVehicleFuelType('electric');
+      else if (ft.includes('hybrid') || ft.includes('e85')) setNewVehicleFuelType('hybrid');
+      else setNewVehicleFuelType('gasoline');
+    } catch {
+      console.error('Failed to load vehicle detail');
+    } finally {
+      setIsLoadingLookup(false);
+    }
+  };
+
+  const handleFetchFuelPrice = async () => {
+    const loc = fuelPriceZip.trim();
+    if (!loc) {
+      toast.error('Enter a ZIP code or city to look up fuel prices');
+      return;
+    }
+    try {
+      setIsLoadingFuelPrice(true);
+      const data = await api.getFuelPrices(loc);
+      const fuelMap: Record<string, string> = {
+        gasoline: 'regular', diesel: 'diesel', hybrid: 'regular', electric: 'regular',
+      };
+      const priceKey = fuelMap[newVehicleFuelType] || 'regular';
+      const price = data.prices[priceKey as keyof typeof data.prices];
+      if (price != null && !costManuallySet) {
+        setNewVehicleCost(price.toFixed(2));
+      }
+      setFuelPriceSource(data.source || data.location || '');
+      toast.success(`Fuel price loaded from ${data.source || 'local average'}`);
+    } catch {
+      toast.error('Could not fetch fuel prices for that location');
+    } finally {
+      setIsLoadingFuelPrice(false);
     }
   };
 
@@ -535,6 +668,66 @@ const LocationPanel = () => {
             {showAddForm && (
               <form onSubmit={handleSaveVehicle} className="glass-card p-3 rounded-xl bg-slate-900/60 border border-purple-500/30 space-y-3">
                 <p className="text-xs font-semibold text-white">New Vehicle Profile</p>
+
+                {/* Vehicle Lookup Section */}
+                <div className="space-y-2 p-2.5 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                  <p className="text-[11px] font-medium text-purple-300 flex items-center gap-1">
+                    <span>🔍</span> Look Up Vehicle (auto-fills MPG &amp; fuel type)
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={lookupYear}
+                      onChange={(e) => handleYearChange(e.target.value)}
+                      onFocus={() => lookupYears.length === 0 && loadLookupYears()}
+                      className="bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500"
+                    >
+                      <option value="">Year...</option>
+                      {lookupYears.map((y) => (
+                        <option key={y.value} value={y.value}>{y.text}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={lookupMake}
+                      onChange={(e) => handleMakeChange(e.target.value)}
+                      disabled={!lookupYear || lookupMakes.length === 0}
+                      className="bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500 disabled:opacity-40"
+                    >
+                      <option value="">Make...</option>
+                      {lookupMakes.map((m) => (
+                        <option key={m.value} value={m.value}>{m.text}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={lookupModel}
+                      onChange={(e) => handleModelChange(e.target.value)}
+                      disabled={!lookupMake || lookupModels.length === 0}
+                      className="bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500 disabled:opacity-40"
+                    >
+                      <option value="">Model...</option>
+                      {lookupModels.map((m) => (
+                        <option key={m.value} value={m.value}>{m.text}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={lookupOption}
+                      onChange={(e) => handleOptionChange(e.target.value)}
+                      disabled={!lookupModel || lookupOptions.length === 0}
+                      className="bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500 disabled:opacity-40"
+                    >
+                      <option value="">Trim / Engine...</option>
+                      {lookupOptions.map((o) => (
+                        <option key={o.value} value={o.value}>{o.text}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {isLoadingLookup && (
+                    <p className="text-[10px] text-purple-300 animate-pulse">Loading...</p>
+                  )}
+                </div>
+
+                {/* Manual / Auto-filled Fields */}
                 <div>
                   <label className="block text-[11px] text-slate-400 mb-1">Vehicle Name / Model</label>
                   <input
@@ -575,19 +768,44 @@ const LocationPanel = () => {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">
+                {/* Fuel Price Lookup */}
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] text-slate-400">
                     Cost per {newVehicleFuelType === 'electric' ? 'kWh' : 'Gallon'} ($)
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="e.g. 3.49"
-                    value={newVehicleCost}
-                    onChange={(e) => setNewVehicleCost(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-purple-500"
-                    required
-                  />
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      placeholder="e.g. 3.49"
+                      value={newVehicleCost}
+                      onChange={(e) => { setNewVehicleCost(e.target.value); setCostManuallySet(true); }}
+                      className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-purple-500"
+                      required
+                    />
+                    <div className="flex gap-1">
+                      <input
+                        type="text"
+                        placeholder="ZIP code"
+                        value={fuelPriceZip}
+                        onChange={(e) => setFuelPriceZip(e.target.value)}
+                        className="w-20 bg-slate-800 border border-slate-700 text-white rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:border-purple-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleFetchFuelPrice}
+                        disabled={isLoadingFuelPrice}
+                        className="px-2 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-medium whitespace-nowrap disabled:opacity-50"
+                      >
+                        {isLoadingFuelPrice ? '...' : '⛽ Fetch'}
+                      </button>
+                    </div>
+                  </div>
+                  {fuelPriceSource && (
+                    <p className="text-[10px] text-emerald-400/70 italic">
+                      Auto-filled from {fuelPriceSource}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-1">

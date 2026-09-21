@@ -564,6 +564,45 @@ export const api = {
     return resp.data;
   },
 
+  // Fuel Price & Vehicle Lookup
+  async getFuelPrices(location: string): Promise<{
+    location: string;
+    source: string;
+    prices: { regular: number | null; midgrade: number | null; premium: number | null; diesel: number | null };
+  }> {
+    const resp = await apiClient.get(`/api/geo/fuel-prices?location=${encodeURIComponent(location)}`);
+    return resp.data;
+  },
+
+  async getVehicleLookupYears(): Promise<{ menuItem: Array<{ text: string; value: string }> }> {
+    const resp = await apiClient.get('/api/geo/vehicle-lookup/years');
+    return resp.data;
+  },
+
+  async getVehicleLookupMakes(year: number): Promise<{ menuItem: Array<{ text: string; value: string }> }> {
+    const resp = await apiClient.get(`/api/geo/vehicle-lookup/makes?year=${year}`);
+    return resp.data;
+  },
+
+  async getVehicleLookupModels(year: number, make: string): Promise<{ menuItem: Array<{ text: string; value: string }> }> {
+    const resp = await apiClient.get(`/api/geo/vehicle-lookup/models?year=${year}&make=${encodeURIComponent(make)}`);
+    return resp.data;
+  },
+
+  async getVehicleLookupOptions(year: number, make: string, model: string): Promise<{ menuItem: Array<{ text: string; value: string }> | { text: string; value: string } }> {
+    const resp = await apiClient.get(`/api/geo/vehicle-lookup/options?year=${year}&make=${encodeURIComponent(make)}&model=${encodeURIComponent(model)}`);
+    return resp.data;
+  },
+
+  async getVehicleLookupDetail(vehicleId: string): Promise<{
+    year: number; make: string; model: string;
+    comb08: number; city08: number; highway08: number;
+    fuelType1: string;
+  }> {
+    const resp = await apiClient.get(`/api/geo/vehicle-lookup/${encodeURIComponent(vehicleId)}`);
+    return resp.data;
+  },
+
   async getGeoTelemetry(userId: string, hours = 24): Promise<{
     status: string;
     entity_id: string;
