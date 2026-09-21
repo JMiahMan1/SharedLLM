@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect  # pyright: ignore[reportUnusedImport]
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 
@@ -7187,6 +7187,154 @@ async def seed_geo_trips():
         if resp.status == 200:
             return await resp.json()
     raise HTTPException(status_code=502, detail="Failed to seed trips")
+
+
+# ---------------------------------------------------------------------------
+# Mobile App Over-The-Air (OTA) & APK In-App Updates
+# ---------------------------------------------------------------------------
+APP_UPDATES_DIR = Path(os.getenv("APP_UPDATES_DIR", "/app/data/app_updates"))
+APP_UPDATES_DIR.mkdir(parents=True, exist_ok=True)
+UI_SVC = os.getenv("UI_SVC", "http://ui:8008")
+
+
+@app.get("/api/app-updates/version")
+async def get_app_update_version(request: Request):
+    """Return version and bundle info for OTA live updates and native APK updates."""
+    # 1. Try to read version metadata from local disk first
+    local_version_file = APP_UPDATES_DIR / "version.json"
+    version_data = {}
+    if local_version_file.exists():
+        try:
+            version_data = json.loads(local_version_file.read_text())
+        except Exception as e:
+            log.warning(f"[AppUpdates] Failed reading local version.json: {e}")
+
+    # 2. If not on local disk, fetch from UI service container
+    if not version_data:
+        try:
+            async with shared_http_client() as client:
+                resp = await client.get(f"{UI_SVC}/version.json", timeout=aiohttp.ClientTimeout(total=3.0))
+                if resp.status == 200:
+                    version_data = await resp.json()
+        except Exception:
+            pass
+
+    # 3. Fallback defaults if not populated yet
+    if not version_data:
+        version_data = {
+            "version": "1.1.2",
+            "git_sha": os.getenv("GIT_SHA", "unknown"),
+            "build_timestamp": datetime.now(timezone.utc).isoformat(),
+            "release_notes": "Jarvis OS Over-The-Air Update",
+        }
+
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    base_url = f"{scheme}://{host}"
+
+    bundle_url = f"{base_url}/api/app-updates/bundle.zip"
+    apk_file = APP_UPDATES_DIR / "app-debug.apk"
+    apk_available = apk_file.exists()
+    apk_size = apk_file.stat().st_size if apk_available else 0
+
+    return {
+        "version": version_data.get("version", "1.1.2"),
+        "git_sha": version_data.get("git_sha", "unknown"),
+        "build_timestamp": version_data.get("build_timestamp"),
+        "release_notes": version_data.get("release_notes", "Jarvis OS live update"),
+        "bundle_url": bundle_url,
+        "bundle_available": True,
+        "apk_available": apk_available,
+        "apk_url": f"{base_url}/api/app-updates/app-debug.apk" if apk_available else None,
+        "apk_size_bytes": apk_size,
+        "apk_version_code": version_data.get("apk_version_code", 1),
+    }
+
+
+@app.get("/api/app-updates/bundle.zip")
+async def get_app_update_bundle():
+    """Stream or serve the OTA web bundle zip for live in-app updating."""
+    local_bundle = APP_UPDATES_DIR / "bundle.zip"
+    if local_bundle.exists():
+        return FileResponse(
+            str(local_bundle),
+            media_type="application/zip",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+            filename="bundle.zip",
+        )
+
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(f"{UI_SVC}/bundle.zip", timeout=aiohttp.ClientTimeout(total=20.0))
+            if resp.status == 200:
+                content = await resp.read()
+                return Response(
+                    content=content,
+                    media_type="application/zip",
+                    headers={
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Content-Disposition": "attachment; filename=bundle.zip",
+                    },
+                )
+    except Exception as e:
+        log.error(f"[AppUpdates] Failed to fetch bundle from UI service: {e}")
+
+    raise HTTPException(status_code=404, detail="Update bundle not found")
+
+
+@app.get("/api/app-updates/app-debug.apk")
+async def get_app_debug_apk():
+    """Serve the latest debug APK for in-app native installation."""
+    apk_file = APP_UPDATES_DIR / "app-debug.apk"
+    if not apk_file.exists():
+        raise HTTPException(status_code=404, detail="No APK build currently available on server")
+    return FileResponse(
+        str(apk_file),
+        media_type="application/vnd.android.package-archive",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Content-Disposition": "attachment; filename=app-debug.apk",
+        },
+        filename="app-debug.apk",
+    )
+
+
+@app.post("/api/app-updates/publish")
+async def publish_app_update(request: Request):
+    """Publish a new bundle.zip and/or app-debug.apk and update metadata."""
+    form = await request.form()
+    secret = request.headers.get("X-Internal-Secret") or form.get("secret")
+    if secret != INTERNAL_SECRET:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    version = form.get("version", "1.1.2")
+    git_sha = form.get("git_sha", "unknown")
+    notes = form.get("release_notes", "Jarvis OS update")
+    apk_code = form.get("apk_version_code", "1")
+
+    bundle_file = form.get("bundle")
+    if isinstance(bundle_file, UploadFile) and bundle_file.filename:
+        out_b = APP_UPDATES_DIR / "bundle.zip"
+        content = await bundle_file.read()
+        out_b.write_bytes(content)
+        log.info(f"[AppUpdates] Published new bundle.zip ({len(content)} bytes)")
+
+    apk_file = form.get("apk")
+    if isinstance(apk_file, UploadFile) and apk_file.filename:
+        out_a = APP_UPDATES_DIR / "app-debug.apk"
+        content = await apk_file.read()
+        out_a.write_bytes(content)
+        log.info(f"[AppUpdates] Published new app-debug.apk ({len(content)} bytes)")
+
+    meta = {
+        "version": str(version),
+        "git_sha": str(git_sha),
+        "build_timestamp": datetime.now(timezone.utc).isoformat(),
+        "release_notes": str(notes),
+        "apk_version_code": int(apk_code) if str(apk_code).isdigit() else 1,
+    }
+    (APP_UPDATES_DIR / "version.json").write_text(json.dumps(meta, indent=2))
+    return {"status": "ok", "metadata": meta}
 
 
 @app.post("/api/stt/transcribe")

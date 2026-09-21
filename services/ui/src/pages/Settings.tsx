@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
-import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X } from 'lucide-react';
+import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import type { GlobalSetting } from '../services/api';
 import LocationPanel from '../components/location/LocationPanel';
 import { isAdminPinSet, setAdminPin, clearAdminPin } from '../lib/adminPin';
+import { checkForAppUpdates, downloadAndInstallApk, getRunningVersion } from '../lib/appUpdater';
 import toast from 'react-hot-toast';
 
 const Settings = () => {
@@ -76,6 +77,8 @@ const Settings = () => {
           onChange={() => handleToggle(setNotifications, notifications)}
         />
       </div>
+
+      <AppUpdatesSection />
 
       <div className="glass-panel rounded-2xl p-4 space-y-1">
         <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider px-3 pt-1 mb-2">Location & Presence</h2>
@@ -348,6 +351,96 @@ const SystemConfigSection = ({ isAdmin, onEdit }: { isAdmin: boolean; onEdit: ()
           ))}
         </div>
       )}
+    </div>
+  );
+};
+
+const AppUpdatesSection = () => {
+  const { trigger } = useHaptics();
+  const [checking, setChecking] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{
+    version: string;
+    gitSha: string;
+    remoteSha?: string;
+    apkUrl?: string | null;
+    apkAvailable?: boolean;
+    hasUpdate?: boolean;
+  }>({ version: '1.1.2', gitSha: 'unknown' });
+
+  useEffect(() => {
+    let active = true;
+    void getRunningVersion().then((v) => {
+      if (active) setUpdateInfo((prev) => ({ ...prev, version: v.version, gitSha: v.gitSha }));
+    });
+    return () => { active = false; };
+  }, []);
+
+  const handleCheck = async () => {
+    trigger('light');
+    setChecking(true);
+    try {
+      const res = await checkForAppUpdates({ silent: false });
+      setUpdateInfo((prev) => ({
+        ...prev,
+        remoteSha: res.remoteGitSha,
+        hasUpdate: res.hasUpdate,
+        apkUrl: res.apkUrl,
+        apkAvailable: res.apkUpdateAvailable,
+      }));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <div className="glass-panel rounded-2xl p-4 space-y-3">
+      <div className="flex items-center justify-between px-3 pt-1">
+        <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-2">
+          <Smartphone size={16} className="text-purple-400" />
+          App &amp; OTA Updates
+        </h2>
+        <span className="text-[10px] text-slate-500 font-mono">v{updateInfo.version} ({updateInfo.gitSha.slice(0, 7)})</span>
+      </div>
+
+      <div className="p-3.5 rounded-xl bg-white/5 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-white">Live Over-The-Air Updates</p>
+            <p className="text-xs text-slate-400">
+              Web UI, Wander, and player updates install silently in the background
+            </p>
+          </div>
+          <button
+            onClick={handleCheck}
+            disabled={checking}
+            className="glass-button px-3 py-1.5 rounded-xl text-xs font-semibold text-purple-300 hover:text-white flex items-center gap-1.5 border-purple-500/30"
+          >
+            <RefreshCw size={13} className={checking ? 'animate-spin text-purple-400' : ''} />
+            <span>{checking ? 'Checking...' : 'Check Now'}</span>
+          </button>
+        </div>
+
+        {updateInfo.apkAvailable && updateInfo.apkUrl && (
+          <div className="mt-2 pt-2.5 border-t border-white/5 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-amber-300 flex items-center gap-1">
+                <span>📦 New Native APK Build Available</span>
+              </p>
+              <p className="text-[10px] text-slate-400">Contains new Android plugins / permissions</p>
+            </div>
+            <button
+              onClick={() => {
+                trigger('medium');
+                downloadAndInstallApk(updateInfo.apkUrl!);
+              }}
+              className="px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5"
+            >
+              <Download size={13} />
+              <span>Download APK</span>
+            </button>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
