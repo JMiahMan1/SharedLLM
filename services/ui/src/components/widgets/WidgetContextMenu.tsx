@@ -19,20 +19,30 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState<ContextMenuPosition>({ x: 0, y: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLDivElement>(null);
 
   const containerClassName = props.className !== undefined ? props.className : "relative z-20";
+
+  const getButtonPosition = useCallback((): ContextMenuPosition => {
+    const el = triggerRef.current;
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      return { x: rect.right, y: rect.bottom };
+    }
+    return { x: window.innerWidth - 200, y: window.innerHeight - 300 };
+  }, []);
 
   const handleRightClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setMenuPos({ x: e.clientX, y: e.clientY });
+    setMenuPos(getButtonPosition());
     setMenuOpen(true);
-  }, []);
+  }, [getButtonPosition]);
 
   const handleLongPressStart = useCallback((e: React.TouchEvent) => {
-    const touch = e.touches[0];
+    void e;
     const pressTimer = setTimeout(() => {
-      setMenuPos({ x: touch.clientX, y: touch.clientY });
+      setMenuPos(getButtonPosition());
       setMenuOpen(true);
     }, 500);
 
@@ -50,7 +60,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
 
     document.addEventListener('touchmove', handleMove, { passive: true });
     document.addEventListener('touchend', handleLongPressEnd);
-  }, []);
+  }, [getButtonPosition]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -78,6 +88,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
 
   const triggerButton = (
     <div
+      ref={triggerRef}
       onContextMenu={handleRightClick}
       onTouchStart={handleLongPressStart}
       className={containerClassName}
@@ -112,7 +123,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
   const menuContent = (
     <>
       <div
-        className="fixed inset-0 z-40"
+        className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-sm"
         onClick={() => setMenuOpen(false)}
       />
       <div

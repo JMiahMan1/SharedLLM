@@ -1,12 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { Music, Play, Pause, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import type { IActiveMediaWidgetProps, MediaState } from '../../types/widget';
 import { api } from '../../services/api';
 import toast from 'react-hot-toast';
 
+function formatTime(ms: number): string {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
 const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsButton }: IActiveMediaWidgetProps) => {
   const [media, setMedia] = useState<MediaState | null>(null);
+  const [position, setPosition] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const localTimeRef = useRef(0);
 
   useEffect(() => {
     const fetchMedia = async () => {
@@ -23,6 +33,8 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
               media_album?: string;
               volume_level?: number;
               is_volume_muted?: boolean;
+              position?: number;
+              duration?: number;
             } | null;
           };
         };
@@ -36,8 +48,17 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
             album: active.media_album || '',
             state: active.state || 'idle',
           });
+          if (active.duration && active.duration > 0) {
+            setDuration(active.duration);
+          }
+          if (active.position && active.position > 0) {
+            setPosition(active.position);
+            localTimeRef.current = active.position;
+          }
         } else {
           setMedia(null);
+          setPosition(0);
+          setDuration(0);
           if (!userSettings.is_pinned) onMediaStop?.();
         }
       } catch {
@@ -52,6 +73,34 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     return () => clearInterval(interval);
   }, [onMediaStop, userSettings.is_pinned]);
 
+  // Tick local time while playing
+  useEffect(() => {
+    let timer: number | null = null;
+    if (media?.state === 'playing') {
+      timer = window.setInterval(() => {
+        localTimeRef.current += 1000;
+        if (duration > 0 && localTimeRef.current >= duration) {
+          localTimeRef.current = duration;
+        }
+        setPosition(localTimeRef.current);
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [media, duration]);
+
+  const handleSeek = useCallback((timeMs: number) => {
+    const clamped = Math.max(0, duration > 0 ? Math.min(timeMs, duration) : timeMs);
+    localTimeRef.current = clamped;
+    setPosition(clamped);
+    if (media?.entity_id) {
+      try {
+        api.mediaTransport({ entity_id: media.entity_id, command: 'seek', position: Math.round(clamped / 1000) });
+      } catch { /* ignore */ }
+    }
+  }, [media, duration]);
+
   const playPause = async () => {
     if (!media?.entity_id) return;
     try {
@@ -64,6 +113,26 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
       toast.error('Failed to control playback');
     }
   };
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (!duration || !media?.entity_id) return;
+    const calculatePosition = (ev: PointerEvent) => {
+      const target = e.currentTarget as HTMLElement;
+      const rect = target.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+      handleSeek(ratio * duration);
+    };
+    calculatePosition(e);
+    const moveHandler = (ev: PointerEvent) => calculatePosition(ev);
+    const upHandler = () => {
+      document.removeEventListener('pointermove', moveHandler);
+      document.removeEventListener('pointerup', upHandler);
+    };
+    document.addEventListener('pointermove', moveHandler);
+    document.addEventListener('pointerup', upHandler);
+  }, [duration, media?.entity_id, handleSeek]);
+
+  const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
 
   return (
     <div className="glass-card h-full p-5 relative">
@@ -123,6 +192,35 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
               <SkipForward size={20} />
             </button>
           </div>
+
+          {duration > 0 && (
+            <div
+              onPointerDown={handlePointerDown}
+              role="slider"
+              tabIndex={0}
+              aria-label="Track progress scrubber"
+              aria-valuemin={0}
+              aria-valuemax={Math.round(duration)}
+              aria-valuenow={Math.round(position)}
+              className="relative py-2 select-none touch-none cursor-pointer group"
+            >
+              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative pointer-events-none">
+                <div
+                  className="h-full bg-gradient-to-r from-purple-500 to-pink-400 rounded-full transition-[width] duration-300"
+                  style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+                />
+              </div>
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-sm pointer-events-none -ml-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{ left: `${Math.min(100, Math.max(0, progressPercent))}%` }}
+              />
+            </div>
+          )}
+          {duration > 0 && (
+            <p className="text-[10px] text-slate-500 font-mono text-center -mt-2">
+              {formatTime(position)} / {formatTime(duration)}
+            </p>
+          )}
 
           <div className="flex items-center gap-2">
             <Volume2 size={16} className="text-slate-500" />

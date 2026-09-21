@@ -25,30 +25,27 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
     setError(null);
     try {
       const data = await api.listNotes();
-      // The notes API returns an ExecutionResponse with message containing the note list
-      // Parse titles from the message field if notes array not provided
       let loaded: NoteItem[] = [];
       if (typeof data === 'object' && data !== null) {
-        const resp = data as { status?: string; message?: string; notes?: Array<{ id?: string; title?: string; content?: string }> };
-        if (Array.isArray(resp.notes)) {
+        const resp = data as { status?: string; message?: string; detail?: { notes?: Array<{ title?: string; path?: string; modified?: string }> } };
+        if (Array.isArray(resp.detail?.notes)) {
+          loaded = resp.detail.notes.map((n, idx) => ({
+            id: n.path ?? n.title ?? `note-${idx}`,
+            title: n.title ?? 'Untitled',
+            content: '',
+            category: 'Quick',
+          }));
+        } else if (Array.isArray(resp.notes)) {
           loaded = resp.notes.map((n, idx) => ({
             id: n.id ?? `note-${idx}`,
             title: n.title ?? 'Untitled',
             content: n.content ?? '',
             category: 'Quick',
           }));
-        } else if (typeof resp.message === 'string' && resp.message) {
-          // Parse newline-separated titles
-          loaded = resp.message
-            .split('\n')
-            .map((line) => line.replace(/^[-*•]\s*/, '').trim())
-            .filter(Boolean)
-            .map((title, idx) => ({ id: `note-${idx}`, title, content: '', category: 'Quick' }));
         }
       }
       setNotes(loaded);
     } catch {
-      // Notes service may be unavailable — show graceful empty state, not error
       setNotes([]);
     } finally {
       setIsLoading(false);

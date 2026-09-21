@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { Timer, X, Plus, Loader2, Bell, BellOff } from 'lucide-react';
+import { Timer, X, Plus, Loader2, Bell, BellOff, Play, Pause, RotateCcw } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
 import { api } from '../../services/api';
 import toast from 'react-hot-toast';
@@ -11,6 +11,7 @@ interface ActiveTimer {
   remainingMs: number;
   createdAt: number;
   isRemote?: boolean;
+  paused?: boolean;
 }
 
 interface BackendTimer {
@@ -93,6 +94,7 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
       setTimers((prev) => {
         const next: ActiveTimer[] = [];
         for (const t of prev) {
+          if (t.paused) { next.push(t); continue; }
           const newRemaining = Math.max(0, t.remainingMs - 1000);
           // Detect transition to expired
           if (newRemaining <= 0 && t.remainingMs > 0 && !notifiedRef.current.has(t.id)) {
@@ -121,11 +123,12 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
     return () => clearInterval(interval);
   }, []);
 
-  // Request notification permission
-  useEffect(() => {
-    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
-      Notification.requestPermission().catch(() => {});
-    }
+  const togglePause = useCallback((id: string) => {
+    setTimers((prev) => prev.map((t) => t.id === id ? { ...t, paused: !t.paused } : t));
+  }, []);
+
+  const resetTimer = useCallback((id: string) => {
+    setTimers((prev) => prev.map((t) => t.id === id ? { ...t, remainingMs: t.durationMs, paused: false } : t));
   }, []);
 
   const formatTime = (ms: number) => {
@@ -234,12 +237,30 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-semibold text-white truncate">{timer.title}</span>
-                <button
-                  onClick={() => removeTimer(timer.id)}
-                  className="text-slate-500 hover:text-red-400 transition-colors shrink-0"
-                >
-                  <X size={14} />
-                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    onClick={() => togglePause(timer.id)}
+                    className="text-slate-500 hover:text-purple-400 transition-colors p-0.5"
+                    aria-label={timer.paused ? 'Resume' : 'Pause'}
+                    title={timer.paused ? 'Resume' : 'Pause'}
+                  >
+                    {timer.paused ? <Play size={13} /> : <Pause size={13} />}
+                  </button>
+                  <button
+                    onClick={() => resetTimer(timer.id)}
+                    className="text-slate-500 hover:text-cyan-400 transition-colors p-0.5"
+                    aria-label="Reset"
+                    title="Reset"
+                  >
+                    <RotateCcw size={13} />
+                  </button>
+                  <button
+                    onClick={() => removeTimer(timer.id)}
+                    className="text-slate-500 hover:text-red-400 transition-colors p-0.5"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
               </div>
               <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-1">
                 <div
@@ -285,6 +306,7 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
         {mediaPlayers.length > 0 && (
           <div className="flex items-center gap-2">
             {selectedDevice ? <Bell size={14} className="text-purple-400 shrink-0" /> : <BellOff size={14} className="text-slate-500 shrink-0" />}
+            <span className="text-xs text-slate-400">Alert via</span>
             <select
               value={selectedDevice}
               onChange={(e) => setSelectedDevice(e.target.value)}
