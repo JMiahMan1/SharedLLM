@@ -847,7 +847,7 @@ export interface StepsResponse {
 export interface ActivityTrendsResponse {
   user_id: string;
   days: number;
-  steps_today: number;
+  steps_today: number | null;
   steps_goal: number;
   daily_steps: Record<string, number>;
   steps_avg: number | null;
