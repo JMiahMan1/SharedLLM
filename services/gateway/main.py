@@ -7043,6 +7043,18 @@ async def vehicle_lookup_options(year: int = 0, make: str = "", model: str = "")
     raise HTTPException(status_code=502, detail="Vehicle lookup failed")
 
 
+@app.get("/api/geo/vehicle-lookup/vin/{vin}")
+async def vehicle_lookup_vin(vin: str):
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/vehicle-lookup/vin/{vin}",
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="VIN lookup failed")
+
+
 @app.get("/api/geo/vehicle-lookup/{vehicle_id}")
 async def vehicle_lookup_detail(vehicle_id: str):
     async with shared_http_client() as client:

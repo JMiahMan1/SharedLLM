@@ -968,10 +968,394 @@ async def vehicle_lookup_makes(year: int = Query(...)):
     return await _fueleconomy_get("/vehicle/menu/make", {"year": year}, cache_ttl=86400 * 7)
 
 
+# ---------------------------------------------------------------------------
+# Heavy-Duty & Diesel Truck Specifications Database (Class 2b/3, GVWR >= 8500 lbs)
+# Real-world verified fuel economy averages for vehicles exempt from EPA testing
+# ---------------------------------------------------------------------------
+
+_HEAVY_DUTY_VEHICLES: dict[str, dict[str, list[dict]]] = {
+    "Ford": {
+        "F-250 Super Duty": [
+            {
+                "years": (2020, 2026),
+                "option_id": "hd-ford-f250-67-diesel-gen3",
+                "text": "6.7L Power Stroke V8 Turbo Diesel (10-spd Auto) - 15.0 MPG",
+                "comb08": 15.0, "city08": 13.0, "highway08": 18.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.7", "trany": "Automatic 10-spd"
+            },
+            {
+                "years": (2011, 2019),
+                "option_id": "hd-ford-f250-67-diesel-gen1",
+                "text": "6.7L Power Stroke V8 Turbo Diesel (6-spd Auto) - 15.0 MPG",
+                "comb08": 15.0, "city08": 13.0, "highway08": 17.5,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.7", "trany": "Automatic 6-spd"
+            },
+            {
+                "years": (2008, 2010),
+                "option_id": "hd-ford-f250-64-diesel",
+                "text": "6.4L Power Stroke V8 Twin-Turbo Diesel - 13.5 MPG",
+                "comb08": 13.5, "city08": 11.0, "highway08": 16.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.4", "trany": "Automatic 5-spd"
+            },
+            {
+                "years": (2003, 2007),
+                "option_id": "hd-ford-f250-60-diesel",
+                "text": "6.0L Power Stroke V8 Turbo Diesel - 14.5 MPG",
+                "comb08": 14.5, "city08": 12.0, "highway08": 17.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.0", "trany": "Automatic 5-spd"
+            },
+            {
+                "years": (1999, 2003),
+                "option_id": "hd-ford-f250-73-diesel",
+                "text": "7.3L Power Stroke V8 Turbo Diesel - 15.5 MPG",
+                "comb08": 15.5, "city08": 13.0, "highway08": 18.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "7.3", "trany": "Automatic 4-spd"
+            },
+            {
+                "years": (2020, 2026),
+                "option_id": "hd-ford-f250-73-gas",
+                "text": "7.3L Godzilla V8 Gasoline (10-spd Auto) - 13.0 MPG",
+                "comb08": 13.0, "city08": 11.0, "highway08": 15.0,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "7.3", "trany": "Automatic 10-spd"
+            },
+            {
+                "years": (2011, 2022),
+                "option_id": "hd-ford-f250-62-gas",
+                "text": "6.2L Boss V8 Gasoline (6-spd Auto) - 12.0 MPG",
+                "comb08": 12.0, "city08": 10.0, "highway08": 14.0,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "6.2", "trany": "Automatic 6-spd"
+            },
+            {
+                "years": (1999, 2010),
+                "option_id": "hd-ford-f250-68-gas",
+                "text": "6.8L Triton V10 Gasoline - 10.5 MPG",
+                "comb08": 10.5, "city08": 9.0, "highway08": 12.0,
+                "fuelType1": "Regular Gasoline", "cylinders": "10", "displ": "6.8", "trany": "Automatic"
+            },
+            {
+                "years": (1999, 2010),
+                "option_id": "hd-ford-f250-54-gas",
+                "text": "5.4L Triton V8 Gasoline - 12.0 MPG",
+                "comb08": 12.0, "city08": 10.0, "highway08": 14.0,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "5.4", "trany": "Automatic"
+            },
+        ],
+        "F-350 Super Duty": [
+            {
+                "years": (2020, 2026),
+                "option_id": "hd-ford-f350-67-diesel-gen3",
+                "text": "6.7L Power Stroke V8 Turbo Diesel (10-spd Auto) - 14.5 MPG",
+                "comb08": 14.5, "city08": 12.5, "highway08": 17.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.7", "trany": "Automatic 10-spd"
+            },
+            {
+                "years": (2011, 2019),
+                "option_id": "hd-ford-f350-67-diesel-gen1",
+                "text": "6.7L Power Stroke V8 Turbo Diesel (6-spd Auto) - 14.5 MPG",
+                "comb08": 14.5, "city08": 12.5, "highway08": 17.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.7", "trany": "Automatic 6-spd"
+            },
+            {
+                "years": (2008, 2010),
+                "option_id": "hd-ford-f350-64-diesel",
+                "text": "6.4L Power Stroke V8 Turbo Diesel - 13.0 MPG",
+                "comb08": 13.0, "city08": 10.5, "highway08": 15.5,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.4", "trany": "Automatic 5-spd"
+            },
+            {
+                "years": (2003, 2007),
+                "option_id": "hd-ford-f350-60-diesel",
+                "text": "6.0L Power Stroke V8 Turbo Diesel - 14.0 MPG",
+                "comb08": 14.0, "city08": 11.5, "highway08": 16.5,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.0", "trany": "Automatic 5-spd"
+            },
+            {
+                "years": (1999, 2003),
+                "option_id": "hd-ford-f350-73-diesel",
+                "text": "7.3L Power Stroke V8 Turbo Diesel - 15.0 MPG",
+                "comb08": 15.0, "city08": 12.5, "highway08": 17.5,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "7.3", "trany": "Automatic 4-spd"
+            },
+            {
+                "years": (2011, 2022),
+                "option_id": "hd-ford-f350-62-gas",
+                "text": "6.2L Boss V8 Gasoline - 11.5 MPG",
+                "comb08": 11.5, "city08": 9.5, "highway08": 13.5,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "6.2", "trany": "Automatic 6-spd"
+            },
+        ],
+        "F-450 Super Duty": [
+            {
+                "years": (2011, 2026),
+                "option_id": "hd-ford-f450-67-diesel",
+                "text": "6.7L Power Stroke V8 Turbo Diesel (Commercial/Dually) - 12.5 MPG",
+                "comb08": 12.5, "city08": 10.5, "highway08": 15.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.7", "trany": "Automatic"
+            },
+        ],
+        "Excursion": [
+            {
+                "years": (2000, 2003),
+                "option_id": "hd-ford-excursion-73-diesel",
+                "text": "7.3L Power Stroke V8 Turbo Diesel - 15.5 MPG",
+                "comb08": 15.5, "city08": 13.0, "highway08": 18.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "7.3", "trany": "Automatic 4-spd"
+            },
+            {
+                "years": (2003, 2005),
+                "option_id": "hd-ford-excursion-60-diesel",
+                "text": "6.0L Power Stroke V8 Turbo Diesel - 14.5 MPG",
+                "comb08": 14.5, "city08": 12.0, "highway08": 17.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.0", "trany": "Automatic 5-spd"
+            },
+            {
+                "years": (2000, 2005),
+                "option_id": "hd-ford-excursion-68-gas",
+                "text": "6.8L Triton V10 Gasoline - 11.0 MPG",
+                "comb08": 11.0, "city08": 9.0, "highway08": 13.0,
+                "fuelType1": "Regular Gasoline", "cylinders": "10", "displ": "6.8", "trany": "Automatic 4-spd"
+            },
+        ],
+    },
+    "Chevrolet": {
+        "Silverado 2500HD": [
+            {
+                "years": (2020, 2026),
+                "option_id": "hd-chevy-2500-66-duramax-l5p",
+                "text": "6.6L Duramax V8 Turbo Diesel (10-spd Allison) - 16.0 MPG",
+                "comb08": 16.0, "city08": 13.5, "highway08": 19.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.6", "trany": "Automatic 10-spd"
+            },
+            {
+                "years": (2011, 2019),
+                "option_id": "hd-chevy-2500-66-duramax-lml",
+                "text": "6.6L Duramax V8 Turbo Diesel (6-spd Allison) - 15.5 MPG",
+                "comb08": 15.5, "city08": 13.0, "highway08": 18.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.6", "trany": "Automatic 6-spd"
+            },
+            {
+                "years": (2001, 2010),
+                "option_id": "hd-chevy-2500-66-duramax-classic",
+                "text": "6.6L Duramax V8 Turbo Diesel (LB7/LLY/LBZ/LMM) - 16.5 MPG",
+                "comb08": 16.5, "city08": 14.0, "highway08": 19.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.6", "trany": "Automatic"
+            },
+            {
+                "years": (2020, 2026),
+                "option_id": "hd-chevy-2500-66-gas",
+                "text": "6.6L V8 Gasoline - 12.5 MPG",
+                "comb08": 12.5, "city08": 10.5, "highway08": 14.5,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "6.6", "trany": "Automatic"
+            },
+            {
+                "years": (1999, 2019),
+                "option_id": "hd-chevy-2500-60-gas",
+                "text": "6.0L Vortec V8 Gasoline - 12.0 MPG",
+                "comb08": 12.0, "city08": 10.0, "highway08": 14.0,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "6.0", "trany": "Automatic"
+            },
+        ],
+        "Silverado 3500HD": [
+            {
+                "years": (2011, 2026),
+                "option_id": "hd-chevy-3500-66-duramax",
+                "text": "6.6L Duramax V8 Turbo Diesel (Allison) - 14.5 MPG",
+                "comb08": 14.5, "city08": 12.5, "highway08": 17.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.6", "trany": "Automatic"
+            },
+        ],
+    },
+    "GMC": {
+        "Sierra 2500HD": [
+            {
+                "years": (2020, 2026),
+                "option_id": "hd-gmc-2500-66-duramax-l5p",
+                "text": "6.6L Duramax V8 Turbo Diesel (10-spd Allison) - 16.0 MPG",
+                "comb08": 16.0, "city08": 13.5, "highway08": 19.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.6", "trany": "Automatic 10-spd"
+            },
+            {
+                "years": (2011, 2019),
+                "option_id": "hd-gmc-2500-66-duramax-lml",
+                "text": "6.6L Duramax V8 Turbo Diesel (6-spd Allison) - 15.5 MPG",
+                "comb08": 15.5, "city08": 13.0, "highway08": 18.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.6", "trany": "Automatic 6-spd"
+            },
+            {
+                "years": (2001, 2010),
+                "option_id": "hd-gmc-2500-66-duramax-classic",
+                "text": "6.6L Duramax V8 Turbo Diesel (LB7/LLY/LBZ/LMM) - 16.5 MPG",
+                "comb08": 16.5, "city08": 14.0, "highway08": 19.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.6", "trany": "Automatic"
+            },
+            {
+                "years": (1999, 2019),
+                "option_id": "hd-gmc-2500-60-gas",
+                "text": "6.0L Vortec V8 Gasoline - 12.0 MPG",
+                "comb08": 12.0, "city08": 10.0, "highway08": 14.0,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "6.0", "trany": "Automatic"
+            },
+        ],
+        "Sierra 3500HD": [
+            {
+                "years": (2011, 2026),
+                "option_id": "hd-gmc-3500-66-duramax",
+                "text": "6.6L Duramax V8 Turbo Diesel (Allison) - 14.5 MPG",
+                "comb08": 14.5, "city08": 12.5, "highway08": 17.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "6.6", "trany": "Automatic"
+            },
+        ],
+    },
+    "RAM": {
+        "2500": [
+            {
+                "years": (2013, 2026),
+                "option_id": "hd-ram-2500-67-cummins-gen4",
+                "text": "6.7L Cummins I6 Turbo Diesel (6-spd Auto) - 16.5 MPG",
+                "comb08": 16.5, "city08": 14.0, "highway08": 19.5,
+                "fuelType1": "Diesel", "cylinders": "6", "displ": "6.7", "trany": "Automatic 6-spd"
+            },
+            {
+                "years": (2007, 2012),
+                "option_id": "hd-ram-2500-67-cummins-gen3",
+                "text": "6.7L Cummins I6 Turbo Diesel (6-spd Auto/Man) - 16.0 MPG",
+                "comb08": 16.0, "city08": 13.5, "highway08": 19.0,
+                "fuelType1": "Diesel", "cylinders": "6", "displ": "6.7", "trany": "Automatic 6-spd"
+            },
+            {
+                "years": (1998, 2007),
+                "option_id": "hd-ram-2500-59-cummins-24v",
+                "text": "5.9L Cummins 24V I6 Turbo Diesel - 18.0 MPG",
+                "comb08": 18.0, "city08": 15.5, "highway08": 21.0,
+                "fuelType1": "Diesel", "cylinders": "6", "displ": "5.9", "trany": "Automatic/Manual"
+            },
+            {
+                "years": (2014, 2026),
+                "option_id": "hd-ram-2500-64-hemi",
+                "text": "6.4L Heavy Duty HEMI V8 Gasoline - 12.5 MPG",
+                "comb08": 12.5, "city08": 10.5, "highway08": 15.0,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "6.4", "trany": "Automatic"
+            },
+            {
+                "years": (2003, 2018),
+                "option_id": "hd-ram-2500-57-hemi",
+                "text": "5.7L HEMI V8 Gasoline - 12.0 MPG",
+                "comb08": 12.0, "city08": 10.0, "highway08": 14.0,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "5.7", "trany": "Automatic"
+            },
+        ],
+        "3500": [
+            {
+                "years": (2013, 2026),
+                "option_id": "hd-ram-3500-67-cummins-ho",
+                "text": "6.7L High Output Cummins I6 Turbo Diesel (Aisin 6-spd) - 15.0 MPG",
+                "comb08": 15.0, "city08": 12.5, "highway08": 17.5,
+                "fuelType1": "Diesel", "cylinders": "6", "displ": "6.7", "trany": "Automatic 6-spd"
+            },
+            {
+                "years": (2007, 2012),
+                "option_id": "hd-ram-3500-67-cummins",
+                "text": "6.7L Cummins I6 Turbo Diesel - 15.0 MPG",
+                "comb08": 15.0, "city08": 12.5, "highway08": 17.5,
+                "fuelType1": "Diesel", "cylinders": "6", "displ": "6.7", "trany": "Automatic"
+            },
+            {
+                "years": (1998, 2007),
+                "option_id": "hd-ram-3500-59-cummins",
+                "text": "5.9L Cummins 24V I6 Turbo Diesel - 17.0 MPG",
+                "comb08": 17.0, "city08": 14.5, "highway08": 19.5,
+                "fuelType1": "Diesel", "cylinders": "6", "displ": "5.9", "trany": "Automatic/Manual"
+            },
+        ],
+    },
+    "Dodge": {
+        "Ram 2500": [
+            {
+                "years": (1998, 2010),
+                "option_id": "hd-dodge-2500-cummins",
+                "text": "5.9L / 6.7L Cummins Turbo Diesel - 17.0 MPG",
+                "comb08": 17.0, "city08": 14.5, "highway08": 20.0,
+                "fuelType1": "Diesel", "cylinders": "6", "displ": "5.9", "trany": "Automatic/Manual"
+            },
+            {
+                "years": (2003, 2010),
+                "option_id": "hd-dodge-2500-57-hemi",
+                "text": "5.7L HEMI V8 Gasoline - 12.0 MPG",
+                "comb08": 12.0, "city08": 10.0, "highway08": 14.0,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "5.7", "trany": "Automatic"
+            },
+        ],
+        "Ram 3500": [
+            {
+                "years": (1998, 2010),
+                "option_id": "hd-dodge-3500-cummins",
+                "text": "5.9L / 6.7L Cummins Turbo Diesel - 15.5 MPG",
+                "comb08": 15.5, "city08": 13.0, "highway08": 18.0,
+                "fuelType1": "Diesel", "cylinders": "6", "displ": "5.9", "trany": "Automatic/Manual"
+            },
+        ],
+    },
+    "Nissan": {
+        "Titan XD": [
+            {
+                "years": (2016, 2019),
+                "option_id": "hd-nissan-titan-xd-50-cummins",
+                "text": "5.0L Cummins V8 Turbo Diesel (6-spd Aisin) - 15.5 MPG",
+                "comb08": 15.5, "city08": 13.5, "highway08": 18.0,
+                "fuelType1": "Diesel", "cylinders": "8", "displ": "5.0", "trany": "Automatic 6-spd"
+            },
+            {
+                "years": (2016, 2024),
+                "option_id": "hd-nissan-titan-xd-56-gas",
+                "text": "5.6L Endurance V8 Gasoline - 14.0 MPG",
+                "comb08": 14.0, "city08": 12.0, "highway08": 16.5,
+                "fuelType1": "Regular Gasoline", "cylinders": "8", "displ": "5.6", "trany": "Automatic"
+            },
+        ],
+    },
+}
+
+
+def _find_heavy_duty_option(option_id: str) -> dict | None:
+    """Find a heavy-duty vehicle option by ID across all makes and models."""
+    for make_name, models in _HEAVY_DUTY_VEHICLES.items():
+        for model_name, options in models.items():
+            for opt in options:
+                if opt.get("option_id") == option_id:
+                    res = dict(opt)
+                    res["make"] = make_name
+                    res["model"] = model_name
+                    return res
+    return None
+
+
 @app.get("/vehicle-lookup/models")
 async def vehicle_lookup_models(year: int = Query(...), make: str = Query(...)):
-    """Models for a given year + make."""
-    return await _fueleconomy_get("/vehicle/menu/model", {"year": year, "make": make})
+    """Models for a given year + make, merging EPA models with heavy-duty diesel/gas trucks."""
+    data = await _fueleconomy_get("/vehicle/menu/model", {"year": year, "make": make})
+    raw_items = data.get("menuItem", [])
+    if isinstance(raw_items, dict):
+        raw_items = [raw_items]
+    items = list(raw_items)
+
+    # Check heavy duty vehicles
+    hd_make = None
+    for k in _HEAVY_DUTY_VEHICLES:
+        if k.lower() == make.lower():
+            hd_make = k
+            break
+
+    existing_models = {i.get("value", "").lower() for i in items}
+    if hd_make:
+        for model_name, options in _HEAVY_DUTY_VEHICLES[hd_make].items():
+            # Check if this model is active in the requested year
+            has_year = any(opt["years"][0] <= year <= opt["years"][1] for opt in options)
+            if has_year and model_name.lower() not in existing_models:
+                items.append({"text": model_name, "value": model_name})
+                existing_models.add(model_name.lower())
+
+    items.sort(key=lambda x: x.get("text", "").lower())
+    return {"menuItem": items}
 
 
 @app.get("/vehicle-lookup/options")
@@ -979,14 +1363,50 @@ async def vehicle_lookup_options(
     year: int = Query(...), make: str = Query(...), model: str = Query(...)
 ):
     """Trim / engine options for a year + make + model."""
+    # Check heavy duty vehicles first
+    hd_make = None
+    for k in _HEAVY_DUTY_VEHICLES:
+        if k.lower() == make.lower():
+            hd_make = k
+            break
+
+    if hd_make:
+        for m_name, options in _HEAVY_DUTY_VEHICLES[hd_make].items():
+            if m_name.lower() == model.lower():
+                matching = []
+                for opt in options:
+                    if opt["years"][0] <= year <= opt["years"][1]:
+                        matching.append({"text": opt["text"], "value": opt["option_id"]})
+                if matching:
+                    return {"menuItem": matching}
+
+    # Otherwise proxy to FuelEconomy.gov
     return await _fueleconomy_get("/vehicle/menu/options", {"year": year, "make": make, "model": model})
 
 
 @app.get("/vehicle-lookup/{vehicle_id}")
 async def vehicle_lookup_detail(vehicle_id: str):
-    """Full vehicle specs from FuelEconomy.gov by vehicle ID."""
+    """Full vehicle specs from FuelEconomy.gov or Heavy-Duty database by ID."""
+    if vehicle_id.startswith("hd-"):
+        opt = _find_heavy_duty_option(vehicle_id)
+        if opt:
+            return {
+                "year": opt.get("years", (2014, 2014))[0],
+                "make": opt.get("make"),
+                "model": opt.get("model"),
+                "comb08": opt.get("comb08"),
+                "city08": opt.get("city08"),
+                "highway08": opt.get("highway08"),
+                "fuelType1": opt.get("fuelType1"),
+                "fuelType2": "",
+                "cylinders": opt.get("cylinders"),
+                "displ": opt.get("displ"),
+                "trany": opt.get("trany"),
+                "drive": "4WD",
+            }
+        raise HTTPException(status_code=404, detail="Heavy-duty vehicle option not found")
+
     data = await _fueleconomy_get(f"/vehicle/{vehicle_id}")
-    # Return a useful subset
     return {
         "year": data.get("year"),
         "make": data.get("make"),
@@ -1001,3 +1421,133 @@ async def vehicle_lookup_detail(vehicle_id: str):
         "trany": data.get("trany"),
         "drive": data.get("drive"),
     }
+
+
+@app.get("/vehicle-lookup/vin/{vin}")
+async def vehicle_lookup_vin(vin: str):
+    """Decode a 17-digit VIN using NHTSA vPIC with automated MPG matching."""
+    clean_vin = vin.strip().upper()
+    if len(clean_vin) != 17:
+        raise HTTPException(status_code=400, detail="A valid 17-character VIN is required")
+
+    cache_key = f"geo:vin:{clean_vin}"
+    r = await get_redis()
+    if r:
+        try:
+            cached = await r.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            pass
+
+    client = get_client_insecure()
+    url = f"https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/{clean_vin}?format=json"
+    async with client.get(
+        url,
+        headers={"User-Agent": "SharedLLM/1.0"},
+        timeout=aiohttp.ClientTimeout(total=8),
+    ) as resp:
+        if resp.status != 200:
+            raise HTTPException(status_code=502, detail="NHTSA VIN service unavailable")
+        data = await resp.json(content_type=None)
+
+    results = data.get("Results", [])
+    if not results:
+        raise HTTPException(status_code=404, detail="VIN could not be decoded")
+    res = results[0]
+
+    make = res.get("Make", "").title()
+    model = res.get("Model", "")
+    year_str = res.get("ModelYear", "")
+    try:
+        year = int(year_str)
+    except (ValueError, TypeError):
+        year = 0
+
+    fuel_raw = res.get("FuelTypePrimary", "").title()
+    displ_str = res.get("DisplacementL", "")
+    cylinders = res.get("EngineCylinders", "")
+
+    # Normalize fuel type
+    if "Diesel" in fuel_raw:
+        fuel_type = "Diesel"
+    elif "Electric" in fuel_raw:
+        fuel_type = "Electric"
+    elif "Hybrid" in fuel_raw or "Flexible" in fuel_raw:
+        fuel_type = "Hybrid"
+    else:
+        fuel_type = "Regular Gasoline"
+
+    comb_mpg = None
+    city_mpg = None
+    hwy_mpg = None
+
+    # Check heavy-duty database first
+    for hd_make, models in _HEAVY_DUTY_VEHICLES.items():
+        if hd_make.lower() == make.lower():
+            for m_name, options in models.items():
+                if m_name.lower() in model.lower() or model.lower() in m_name.lower():
+                    for opt in options:
+                        if opt["years"][0] <= year <= opt["years"][1]:
+                            if fuel_type == "Diesel" and "diesel" in opt.get("fuelType1", "").lower():
+                                comb_mpg = opt.get("comb08")
+                                city_mpg = opt.get("city08")
+                                hwy_mpg = opt.get("highway08")
+                                break
+                            elif fuel_type != "Diesel" and "diesel" not in opt.get("fuelType1", "").lower():
+                                comb_mpg = opt.get("comb08")
+                                city_mpg = opt.get("city08")
+                                hwy_mpg = opt.get("highway08")
+                                break
+                    if comb_mpg:
+                        break
+
+    # If still not found, try to find matching EPA vehicle
+    if not comb_mpg and year and make and model:
+        try:
+            epa_models = await _fueleconomy_get("/vehicle/menu/model", {"year": year, "make": make})
+            items = epa_models.get("menuItem", [])
+            if isinstance(items, dict):
+                items = [items]
+            matched_model = None
+            for it in items:
+                if it.get("value", "").lower() in model.lower() or model.lower() in it.get("value", "").lower():
+                    matched_model = it.get("value")
+                    break
+            if matched_model:
+                opts = await _fueleconomy_get("/vehicle/menu/options", {"year": year, "make": make, "model": matched_model})
+                opt_items = opts.get("menuItem", [])
+                if isinstance(opt_items, dict):
+                    opt_items = [opt_items]
+                if opt_items:
+                    v_id = opt_items[0].get("value")
+                    detail = await _fueleconomy_get(f"/vehicle/{v_id}")
+                    comb_mpg = detail.get("comb08")
+                    city_mpg = detail.get("city08")
+                    hwy_mpg = detail.get("highway08")
+                    fuel_type = detail.get("fuelType1") or fuel_type
+        except Exception:
+            pass
+
+    out = {
+        "vin": clean_vin,
+        "year": year,
+        "make": make,
+        "model": model,
+        "trim": res.get("Trim", "") or res.get("Series", ""),
+        "comb08": comb_mpg,
+        "city08": city_mpg,
+        "highway08": hwy_mpg,
+        "fuelType1": fuel_type,
+        "displ": displ_str,
+        "cylinders": cylinders,
+        "drive": res.get("DriveType", ""),
+    }
+
+    if r:
+        try:
+            await r.set(cache_key, json.dumps(out), ex=86400 * 30)
+        except Exception:
+            pass
+
+    return out

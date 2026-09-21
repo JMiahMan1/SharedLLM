@@ -103,6 +103,8 @@ const LocationPanel = () => {
   const [fuelPriceSource, setFuelPriceSource] = useState('');
   const [fuelPriceZip, setFuelPriceZip] = useState('');
   const [isLoadingFuelPrice, setIsLoadingFuelPrice] = useState(false);
+  const [lookupVin, setLookupVin] = useState('');
+  const [isLoadingVin, setIsLoadingVin] = useState(false);
   const [lastFetchedPrices, setLastFetchedPrices] = useState<{ regular?: number | null; midgrade?: number | null; premium?: number | null; diesel?: number | null } | null>(null);
 
   const username = user?.username || 'jeremiah';
@@ -341,6 +343,45 @@ const LocationPanel = () => {
       console.error('Failed to load vehicle detail');
     } finally {
       setIsLoadingLookup(false);
+    }
+  };
+
+  const handleVinLookup = async () => {
+    const vin = lookupVin.trim().toUpperCase();
+    if (vin.length !== 17) {
+      toast.error('Please enter a valid 17-character VIN');
+      return;
+    }
+    try {
+      setIsLoadingVin(true);
+      const data = await api.getVehicleLookupVin(vin);
+      const trimStr = data.trim ? ` ${data.trim}` : '';
+      setNewVehicleName(`${data.year} ${data.make} ${data.model}${trimStr}`.trim());
+      if (data.comb08) {
+        setNewVehicleMpg(String(data.comb08));
+      }
+      const ft = (data.fuelType1 || '').toLowerCase();
+      let resolvedFuelType = 'gasoline';
+      if (ft.includes('diesel')) resolvedFuelType = 'diesel';
+      else if (ft.includes('electri')) resolvedFuelType = 'electric';
+      else if (ft.includes('hybrid') || ft.includes('flex')) resolvedFuelType = 'hybrid';
+      setNewVehicleFuelType(resolvedFuelType);
+
+      if (lastFetchedPrices) {
+        const fuelMap: Record<string, string> = {
+          gasoline: 'regular', diesel: 'diesel', hybrid: 'regular', electric: 'regular',
+        };
+        const key = fuelMap[resolvedFuelType] || 'regular';
+        const p = lastFetchedPrices[key as keyof typeof lastFetchedPrices];
+        if (p != null) {
+          setNewVehicleCost(p.toFixed(2));
+        }
+      }
+      toast.success(`Decoded: ${data.year} ${data.make} ${data.model} (${resolvedFuelType.toUpperCase()})`);
+    } catch {
+      toast.error('Could not decode VIN or vehicle not found');
+    } finally {
+      setIsLoadingVin(false);
     }
   };
 
@@ -674,9 +715,35 @@ const LocationPanel = () => {
                 <div className="space-y-2 p-2.5 rounded-lg bg-slate-800/50 border border-slate-700/50">
                   <div className="flex items-center justify-between">
                     <p className="text-[11px] font-medium text-purple-300 flex items-center gap-1">
-                      <span>🔍</span> Look Up Vehicle (auto-fills MPG &amp; fuel type)
+                      <span>🔍</span> Vehicle &amp; Heavy-Duty Diesel Lookup
                     </p>
-                    <span className="text-[10px] text-slate-400">Class 2b/3 (F-250/2500) enter below</span>
+                    <span className="text-[10px] text-emerald-400/80">Includes F-250/3500 &amp; Diesels</span>
+                  </div>
+
+                  {/* VIN Lookup Row */}
+                  <div className="flex items-center gap-1.5 pb-1">
+                    <input
+                      type="text"
+                      placeholder="Enter 17-digit VIN to auto-fill..."
+                      value={lookupVin}
+                      onChange={(e) => setLookupVin(e.target.value)}
+                      maxLength={17}
+                      className="flex-1 bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs uppercase focus:outline-none focus:border-purple-500 font-mono tracking-wider"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleVinLookup}
+                      disabled={isLoadingVin || lookupVin.trim().length !== 17}
+                      className="px-2.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-medium whitespace-nowrap disabled:opacity-40 transition-colors"
+                    >
+                      {isLoadingVin ? '...' : 'Decode VIN'}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <div className="h-px bg-slate-700/50 flex-1" />
+                    <span className="text-[9px] text-slate-500 uppercase">OR SELECT YEAR / MAKE</span>
+                    <div className="h-px bg-slate-700/50 flex-1" />
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     <select

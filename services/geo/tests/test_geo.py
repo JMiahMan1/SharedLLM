@@ -209,3 +209,25 @@ def test_vehicle_crud_with_internal_secret_header(client, monkeypatch):
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
 
+
+def test_heavy_duty_vehicle_lookup(client):
+    # 1. Options for 2014 Ford F-250 Super Duty
+    r = client.get("/vehicle-lookup/options", params={"year": 2014, "make": "Ford", "model": "F-250 Super Duty"})
+    assert r.status_code == 200
+    items = r.json().get("menuItem", [])
+    assert len(items) >= 2
+    # Must have 6.7L Diesel option
+    diesel_opts = [i for i in items if "6.7L" in i["text"] and "Diesel" in i["text"]]
+    assert len(diesel_opts) == 1
+    diesel_id = diesel_opts[0]["value"]
+
+    # 2. Detail lookup for that heavy duty diesel option
+    r = client.get(f"/vehicle-lookup/{diesel_id}")
+    assert r.status_code == 200
+    detail = r.json()
+    assert detail["fuelType1"] == "Diesel"
+    assert detail["comb08"] == 15.0
+    assert detail["make"] == "Ford"
+    assert detail["model"] == "F-250 Super Duty"
+
+

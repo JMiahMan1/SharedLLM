@@ -603,6 +603,24 @@ export const api = {
     return resp.data;
   },
 
+  async getVehicleLookupVin(vin: string): Promise<{
+    vin: string;
+    year: number;
+    make: string;
+    model: string;
+    trim?: string;
+    comb08?: number | null;
+    city08?: number | null;
+    highway08?: number | null;
+    fuelType1: string;
+    displ?: string;
+    cylinders?: string;
+    drive?: string;
+  }> {
+    const resp = await apiClient.get(`/api/geo/vehicle-lookup/vin/${encodeURIComponent(vin.trim().toUpperCase())}`);
+    return resp.data;
+  },
+
   async getGeoTelemetry(userId: string, hours = 24): Promise<{
     status: string;
     entity_id: string;
