@@ -22,6 +22,7 @@ import {
   Zap,
   CheckCircle2,
   Compass,
+  Sparkles,
 } from 'lucide-react';
 
 interface VehicleOption {
