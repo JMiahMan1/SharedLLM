@@ -193,6 +193,7 @@ class KokoroTTSEngine:
                 retain_segment_audio=False,
                 cache_dir=os.path.join(os.path.expanduser("~"), ".cache", "pykokoro"),
                 generation=GenerationConfig(
+                    lang="en",
                     pause_mode="auto",
                     pause_clause=PAUSE_CLAUSE,
                     pause_sentence=PAUSE_SENTENCE,
