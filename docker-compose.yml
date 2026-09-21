@@ -503,8 +503,9 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:
-      - 172.26.0.254
       - 1.1.1.1
+      - 8.8.8.8
+      - 172.26.0.254
     networks:
       - sharedllm
 
