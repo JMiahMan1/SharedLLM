@@ -26,6 +26,7 @@ const BottomNav = () => {
   if (isAdmin) {
     navItems.push(
       { icon: Brain, label: 'Lab', path: '/lab', roles: ['admin'] as const },
+      { icon: Settings, label: 'Settings', path: '/settings', roles: ['admin'] as const },
     );
   } else {
     navItems.push(
