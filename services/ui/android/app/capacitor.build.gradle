@@ -16,6 +16,7 @@ dependencies {
     implementation project(':capacitor-haptics')
     implementation project(':capacitor-preferences')
     implementation project(':capawesome-capacitor-background-task')
+    implementation project(':capgo-capacitor-updater')
 
 }
 

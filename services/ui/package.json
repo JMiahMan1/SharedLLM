@@ -24,6 +24,7 @@
     "@capacitor/haptics": "^8.0.2",
     "@capacitor/preferences": "^8.0.1",
     "@capawesome/capacitor-background-task": "^8.0.2",
+    "@capgo/capacitor-updater": "^8.51.20",
     "@codemirror/autocomplete": "^6.20.3",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-css": "^6.3.1",

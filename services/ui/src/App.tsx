@@ -22,6 +22,7 @@ import Media from './pages/Media';
 import Remote from './pages/Remote';
 import Settings from './pages/Settings';
 import Wander from './pages/Wander';
+import { initAppUpdater } from './lib/appUpdater';
 
 import { Toaster } from 'react-hot-toast';
 
@@ -83,6 +84,7 @@ function App() {
       );
     };
     window.addEventListener('resize', handleResize);
+    void initAppUpdater();
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
