@@ -411,7 +411,7 @@ const AppUpdatesSection = () => {
           <Smartphone size={16} className="text-purple-400" />
           App &amp; OTA Updates
         </h2>
-        <span className="text-[10px] text-slate-500 font-mono">v{updateInfo.version} ({updateInfo.gitSha.slice(0, 7)})</span>
+        <span className="text-[10px] text-slate-500 font-mono">v{updateInfo.version} ({updateInfo.gitSha})</span>
       </div>
 
       <div className="p-3.5 rounded-xl bg-white/5 space-y-2.5">
@@ -428,7 +428,7 @@ const AppUpdatesSection = () => {
             </p>
             {updateInfo.remoteSha && (
               <p className="text-[10px] text-slate-500 font-mono mt-1">
-                Server: {updateInfo.remoteVersion || '1.2.0'} ({updateInfo.remoteSha.slice(0, 7)})
+                Server: {updateInfo.remoteVersion || '1.2.0'} ({updateInfo.remoteSha})
                 {lastChecked && ` · checked ${lastChecked.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
               </p>
             )}
