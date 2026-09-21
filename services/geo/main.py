@@ -1730,6 +1730,8 @@ async def get_workout_route(workout_id: str):
 # ---------------------------------------------------------------------------
 
 TRENDS_CACHE_TTL = 3600  # 1 hour
+TRENDS_FAILURE_CACHE_TTL = 120  # retry analysis quickly after a failure
+TRENDS_LLM_TIMEOUT = 300.0  # cold model load + RAG context can exceed 2 minutes
 
 
 async def _llm_trends_analysis(prompt: str, user: str) -> str | None:
@@ -1749,7 +1751,7 @@ async def _llm_trends_analysis(prompt: str, user: str) -> str | None:
                 f"{gateway_url.rstrip('/')}/v1/chat/completions",
                 json=body,
                 headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=90.0),
+                timeout=aiohttp.ClientTimeout(total=TRENDS_LLM_TIMEOUT),
             ) as resp:
                 if resp.status != 200:
                     log.warning(f"[Geo] LLM trends gateway status {resp.status}")
@@ -1915,7 +1917,11 @@ async def get_activity_trends(
     }
 
     try:
-        await r.set(cache_key, json.dumps(result), ex=TRENDS_CACHE_TTL)
+        await r.set(
+            cache_key,
+            json.dumps(result),
+            ex=TRENDS_CACHE_TTL if analysis is not None else TRENDS_FAILURE_CACHE_TTL,
+        )
     except Exception as e:
         log.warning(f"[Geo] Trends cache write failed: {e}")
 

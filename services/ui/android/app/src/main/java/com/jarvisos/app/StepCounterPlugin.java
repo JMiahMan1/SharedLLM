@@ -16,6 +16,8 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
+import com.getcapacitor.PermissionState;
 
 /**
  * Hardware pedometer bridge: exposes the phone's TYPE_STEP_COUNTER sensor to the
@@ -78,12 +80,19 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             call.resolve(ret);
             return;
         }
+        if (getPermissionState("activityRecognition") == PermissionState.GRANTED) {
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            call.resolve(ret);
+            return;
+        }
         requestPermissionForAlias("activityRecognition", call, "onPermissionResult");
     }
 
+    @PermissionCallback
     private void onPermissionResult(PluginCall call) {
         JSObject ret = new JSObject();
-        ret.put("granted", isPermissionGranted(call));
+        ret.put("granted", getPermissionState("activityRecognition") == PermissionState.GRANTED);
         call.resolve(ret);
     }
 
