@@ -9,6 +9,8 @@ SERVER_IP = os.getenv("SERVER_IP", "localhost")
 GATEWAY_URL = f"http://{SERVER_IP}:8080"
 WORKSPACE_RUNTIME_URL = f"http://{SERVER_IP}:8007"
 INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+# Per-workspace webhook secret this test sets on the workspace it creates.
+WEBHOOK_TOKEN = "integration-test-webhook-token"
 
 def wait_for_service(url, timeout=30):
     start_time = time.time()
@@ -53,7 +55,11 @@ def test_workspace_lifecycle(api_client):
         "default_branch": "microservices",
         "auto_pull_enabled": True,
         "auto_backup_enabled": True,
-        "nextcloud_path": f"/Tests/{workspace_id}"
+        "nextcloud_path": f"/Tests/{workspace_id}",
+        # The git-pull webhook authenticates against the workspace's own token
+        # (or the server's GIT_WEBHOOK_SECRET) — never INTERNAL_SECRET. Set one
+        # here so the test does not depend on the server's webhook config.
+        "webhook_token": WEBHOOK_TOKEN,
     }
 
     resp = api_client.post(f"{WORKSPACE_RUNTIME_URL}/workspaces", json=ws_data)
@@ -61,11 +67,10 @@ def test_workspace_lifecycle(api_client):
     print("   - Created successfully.")
 
     # 2. Trigger Git Pull (Webhook)
-    # We use the internal secret since we didn't set a webhook_token
     print(f"[2/3] Triggering git pull for {workspace_id}")
     resp = api_client.post(
         f"{WORKSPACE_RUNTIME_URL}/api/webhook/git-pull/{workspace_id}",
-        params={"token": INTERNAL_SECRET}
+        params={"token": WEBHOOK_TOKEN}
     )
     assert resp.status_code == 200, f"Git pull failed: {resp.text}"
     assert resp.json()["status"] == "SUCCESS"
