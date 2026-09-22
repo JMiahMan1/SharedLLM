@@ -165,6 +165,98 @@ def test_telemetry_at_zone(client):
     assert "Summers is at Home" in data["speech"]
 
 
+def test_is_street_only_name():
+    import services.geo.main as geo
+
+    assert geo._is_street_only_name("North Green Trail")
+    assert geo._is_street_only_name("30912, North Green Trail")
+    assert geo._is_street_only_name("E Rosebud Drive")
+    assert geo._is_street_only_name("Location (33.1, -111.5)")
+    assert not geo._is_street_only_name("Home")
+    assert not geo._is_street_only_name("Dawson's")
+    assert not geo._is_street_only_name("Kaleb Work - Discount Tire")
+    assert not geo._is_street_only_name("Fry's Food and Drug")
+    assert not geo._is_street_only_name("QCBC Church")
+    assert not geo._is_street_only_name(None)
+
+
+def test_poi_and_street_labels_from_nominatim():
+    import services.geo.main as geo
+
+    assert geo._poi_label_from_nominatim(
+        {"name": "Walmart", "address": {"road": "Main St"}}
+    ) == "Walmart"
+    # Name that just echoes the road is not a POI.
+    assert geo._poi_label_from_nominatim(
+        {"name": "Main St", "address": {"road": "Main St"}}
+    ) is None
+    # Address POI key + distinct display_name first segment.
+    assert geo._poi_label_from_nominatim({
+        "address": {"shop": "supermarket"},
+        "display_name": "Safeway, 123 Main, Phoenix",
+    }) == "Safeway"
+    assert geo._street_label_from_nominatim({
+        "address": {"road": "North Green Trail", "house_number": "30912"},
+    }) == "30912, North Green Trail"
+
+
+async def test_resolve_place_if_better_prefers_zone_over_street(monkeypatch):
+    import services.geo.main as geo
+
+    async def fake_resolve(lat, lon):
+        return "Home"
+
+    monkeypatch.setattr(geo, "_resolve_place_name", fake_resolve)
+    # Force cache miss path to call the patched resolver
+    geo._PLACE_NAME_CACHE.clear()
+
+    # Street-only stored name is upgraded to the zone name.
+    name, source = await geo._resolve_place_if_better("North Green Trail", 33.1667, -111.5646)
+    assert name == "Home"
+    assert source == "ha_zone"
+
+    # Non-street stored name is kept as-is (no re-resolve).
+    name, source = await geo._resolve_place_if_better("Dawson's", 33.14, -111.43)
+    assert (name, source) == ("Dawson's", "stored")
+
+
+async def test_resolve_place_name_zone_then_poi_then_street(monkeypatch):
+    import services.geo.main as geo
+
+    async def fake_zone(lat, lon):
+        return "QCBC Church"
+
+    monkeypatch.setattr(geo, "_closest_ha_zone", fake_zone)
+    assert await geo._resolve_place_name(33.24, -111.63) == "QCBC Church"
+
+    async def no_zone(lat, lon):
+        return None
+
+    async def fake_details(lat, lon):
+        return {
+            "name": "Fry's Food and Drug",
+            "lat": str(lat),
+            "lon": str(lon),
+            "address": {"road": "North Green Trail"},
+            "display_name": "Fry's Food and Drug, Phoenix",
+        }
+
+    monkeypatch.setattr(geo, "_closest_ha_zone", no_zone)
+    monkeypatch.setattr(geo, "_nominatim_reverse_details", fake_details)
+    assert await geo._resolve_place_name(33.16, -111.56) == "Fry's Food and Drug"
+
+    async def street_only_details(lat, lon):
+        return {
+            "lat": str(lat),
+            "lon": str(lon),
+            "address": {"road": "North Green Trail"},
+            "display_name": "30912 North Green Trail, Phoenix",
+        }
+
+    monkeypatch.setattr(geo, "_nominatim_reverse_details", street_only_details)
+    assert await geo._resolve_place_name(33.16, -111.56) == "North Green Trail"
+
+
 def test_telemetry_moving(client, monkeypatch):
     import time
     import services.geo.main as geo

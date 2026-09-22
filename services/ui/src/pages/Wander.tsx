@@ -352,8 +352,25 @@ const Wander = () => {
   // Open the trip-locations map modal for a given trip
   const openTripLocations = useCallback(async (trip: Trip) => {
     setTripLocationsTitle(`${trip.user_name || 'Trip'} — Route Map`);
-    setTripLocations(null);
-    setTripLocationsPath([]);
+    // Seed from the trip card so the modal opens immediately even if the API is slow/fails.
+    const seedStart = trip.start_location;
+    const seedEnd = trip.end_location;
+    setTripLocations({
+      trip_id: trip.id,
+      start: {
+        name: seedStart?.name || 'Starting Point',
+        lat: seedStart?.latitude ?? seedStart?.lat ?? null,
+        lon: seedStart?.longitude ?? seedStart?.lon ?? null,
+        source: 'stored',
+      },
+      end: {
+        name: seedEnd?.name || 'Destination',
+        lat: seedEnd?.latitude ?? seedEnd?.lat ?? null,
+        lon: seedEnd?.longitude ?? seedEnd?.lon ?? null,
+        source: 'stored',
+      },
+    });
+    setTripLocationsPath(routeCache.current[`${trip.id}:route`] || []);
     try {
       const [locs, route] = await Promise.allSettled([
         api.getTripLocations(trip.id),
@@ -361,22 +378,22 @@ const Wander = () => {
       ]);
       if (locs.status === 'fulfilled') {
         setTripLocations(locs.value);
-        // Populate endpoint coords onto path endpoints if route is empty
+      }
+      if (route.status === 'fulfilled' && route.value.points.length > 0) {
+        setTripLocationsPath(route.value.points);
+        routeCache.current[`${trip.id}:route`] = route.value.points;
+      } else if (locs.status === 'fulfilled') {
         const s = locs.value.start;
         const e = locs.value.end;
         if (s.lat != null && e.lat != null && s.lon != null && e.lon != null) {
-          if (route.status === 'fulfilled' && route.value.points.length > 0) {
-            setTripLocationsPath(route.value.points);
-          } else {
-            setTripLocationsPath([
-              { t: 0, lat: s.lat, lon: s.lon, spd: 0 },
-              { t: 1, lat: e.lat, lon: e.lon, spd: 0 },
-            ]);
-          }
+          setTripLocationsPath([
+            { t: 0, lat: s.lat, lon: s.lon, spd: 0 },
+            { t: 1, lat: e.lat, lon: e.lon, spd: 0 },
+          ]);
         }
       }
     } catch {
-      // Modal shows fallback coords display
+      // Modal already open with card-seeded coords
     }
   }, []);
 
@@ -1285,6 +1302,7 @@ const Wander = () => {
                   points={routePoints[trip.id]}
                   loadRoute={loadRoute}
                   fetcher={() => api.getTripRoute(trip.id).then((r) => r.points)}
+                  onOpenMap={() => openTripLocations(trip)}
                 />
               </div>
             );
@@ -1626,10 +1644,12 @@ interface RoutePreviewProps {
   points: RoutePoint[] | undefined;
   loadRoute: (key: string, loader: () => Promise<RoutePoint[]>) => void;
   fetcher: () => Promise<RoutePoint[]>;
+  /** Opens the full Route Map modal when the thumbnail is clicked. */
+  onOpenMap?: () => void;
 }
 
 /** Lazily loads and renders an OSM mini-map for a trip or workout. */
-const RoutePreview = ({ id, completed, points, loadRoute, fetcher }: RoutePreviewProps) => {
+const RoutePreview = ({ id, completed, points, loadRoute, fetcher, onOpenMap }: RoutePreviewProps) => {
   useEffect(() => {
     if (!points && completed) {
       loadRoute(id, fetcher);
@@ -1637,7 +1657,15 @@ const RoutePreview = ({ id, completed, points, loadRoute, fetcher }: RoutePrevie
   }, [points, completed, id, loadRoute, fetcher]);
 
   if (!points || points.length === 0) return null;
-  return <MiniRouteMap points={points} height={120} className="rounded-xl border border-white/10 overflow-hidden mt-3" />;
+  return (
+    <MiniRouteMap
+      points={points}
+      height={120}
+      className="rounded-xl border border-white/10 overflow-hidden mt-3"
+      onClick={onOpenMap}
+      title={onOpenMap ? 'Open route map' : undefined}
+    />
+  );
 };
 
 export default Wander;

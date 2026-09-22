@@ -1043,8 +1043,18 @@ def group_shared_trips(trips: list[dict]) -> list[dict]:
     return trips
 
 
-async def _nominatim_reverse(lat: float, lon: float) -> str | None:
-    """Reverse-geocode coordinates to a human-readable place name via OSM Nominatim."""
+# Address keys Nominatim uses for named places / businesses (not streets).
+_POI_ADDRESS_KEYS = (
+    "shop", "amenity", "tourism", "office", "craft", "leisure",
+    "historic", "club", "healthcare", "place_of_worship", "railway",
+    "public_transport", "aeroway", "boundary", "industrial", "building",
+)
+# How far (m) a POI / HA zone may be from the point and still label it.
+_PLACE_RADIUS_M = 200.0
+
+
+async def _nominatim_reverse_details(lat: float, lon: float) -> dict | None:
+    """Reverse-geocode via OSM Nominatim. Returns raw dict (addressdetails on)."""
     try:
         url = (f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}"
                f"&format=json&zoom=18&addressdetails=1")
@@ -1054,47 +1064,156 @@ async def _nominatim_reverse(lat: float, lon: float) -> str | None:
             data = await resp.json(content_type=None)
         if not isinstance(data, dict) or not data.get("display_name"):
             return None
-        addr = data.get("address", {})
-        # Prefer the most specific recognizable pieces, falling back gracefully
-        label_parts = []
-        for key in ("house_number", "road", "neighbourhood", "suburb", "city_town",
-                    "town", "village", "city", "county"):
-            val = addr.get(key)
-            if val and val not in label_parts:
-                label_parts.append(val)
-        if label_parts:
-            return ", ".join(label_parts[:3])
-        return data["display_name"].split(",")[0].strip()
+        return data
     except Exception as e:
         log.warning(f"[Geo] Nominatim reverse geocode failed for ({lat}, {lon}): {e}")
         return None
 
 
-async def _resolve_place_name(lat: float, lon: float) -> str:
-    """Resolve coordinates to a place name: HA zone first, then OSM Nominatim, then coords."""
-    # 1. Home Assistant zones (authoritative for known places)
+def _poi_label_from_nominatim(data: dict) -> str | None:
+    """Extract a business / place-of-interest name from a Nominatim reverse result."""
+    if not isinstance(data, dict):
+        return None
+    # Top-level name is usually the POI (store, church, park…) when present.
+    name = data.get("name")
+    if name and isinstance(name, str) and name.strip():
+        # Skip when name is just the street echoed back.
+        addr = data.get("address") or {}
+        road = addr.get("road") or ""
+        if road and name.strip().lower() == road.strip().lower():
+            return None
+        return name.strip()
+    addr = data.get("address") or {}
+    for key in _POI_ADDRESS_KEYS:
+        val = addr.get(key)
+        if val and isinstance(val, str) and val.strip() and not val.strip().isdigit():
+            # Nominatim sometimes puts the type slug here ("supermarket") and the
+            # proper name in display_name's first segment — prefer a titled form.
+            display = (data.get("display_name") or "").split(",")[0].strip()
+            if display and display.lower() != val.strip().lower():
+                return display
+            return val.strip().title() if val.strip().islower() else val.strip()
+    return None
+
+
+def _street_label_from_nominatim(data: dict) -> str | None:
+    """Street / neighbourhood-only label — last resort before coordinates."""
+    if not isinstance(data, dict):
+        return None
+    addr = data.get("address") or {}
+    label_parts = []
+    for key in ("house_number", "road", "neighbourhood", "suburb", "city_town",
+                "town", "village", "city", "county"):
+        val = addr.get(key)
+        if val and val not in label_parts:
+            label_parts.append(str(val))
+    if label_parts:
+        return ", ".join(label_parts[:3])
+    display = data.get("display_name")
+    if display:
+        return str(display).split(",")[0].strip()
+    return None
+
+
+async def _nominatim_reverse(lat: float, lon: float) -> str | None:
+    """Reverse-geocode coordinates to a human-readable place name via OSM Nominatim."""
+    data = await _nominatim_reverse_details(lat, lon)
+    if not data:
+        return None
+    poi = _poi_label_from_nominatim(data)
+    if poi:
+        return poi
+    return _street_label_from_nominatim(data)
+
+
+async def _closest_ha_zone(lat: float, lon: float) -> str | None:
+    """Nearest HA zone that contains the point (within its configured radius)."""
     try:
         states = await _ha_get_states()
-        for z in _filter_entities(states, "zone"):
-            attrs = z.get("attributes", {})
-            zlat = attrs.get("latitude")
-            zlon = attrs.get("longitude")
-            zrad = attrs.get("radius", 100)
-            if zlat is not None and zlon is not None:
-                if _haversine_distance(lat, lon, float(zlat), float(zlon)) <= float(zrad):
-                    return attrs.get("friendly_name") or z.get("entity_id", "").replace("zone.", "").title()
     except Exception:
-        pass
-    # 2. Open-source reverse geocoding (OpenStreetMap Nominatim)
-    nominatim = await _nominatim_reverse(lat, lon)
-    if nominatim:
-        return nominatim
-    # 3. Coordinates fallback
+        return None
+    best_name = None
+    best_dist = None
+    for z in _filter_entities(states, "zone"):
+        attrs = z.get("attributes", {})
+        zlat = attrs.get("latitude")
+        zlon = attrs.get("longitude")
+        zrad = attrs.get("radius", 100)
+        if zlat is None or zlon is None:
+            continue
+        dist = _haversine_distance(lat, lon, float(zlat), float(zlon))
+        if dist <= float(zrad):
+            name = attrs.get("friendly_name") or z.get("entity_id", "").replace("zone.", "").title()
+            if best_dist is None or dist < best_dist:
+                best_dist = dist
+                best_name = name
+    return best_name
+
+
+async def _resolve_place_name(lat: float, lon: float) -> str:
+    """Resolve coordinates to a place name.
+
+    Priority (user requirement):
+      1. Closest defined HA zone that contains the point
+      2. Closest place of business / POI within _PLACE_RADIUS_M (OSM)
+      3. Street / neighbourhood name only when no place or zone is nearby
+      4. Coordinates as a last resort
+    """
+    # 1. Home Assistant zones (authoritative for known family places)
+    zone_name = await _closest_ha_zone(lat, lon)
+    if zone_name:
+        return zone_name
+
+    # 2–3. Nominatim: prefer a named POI within the radius, else street.
+    data = await _nominatim_reverse_details(lat, lon)
+    if data:
+        poi = _poi_label_from_nominatim(data)
+        if poi:
+            # Nominatim reverse returns the nearest feature; when it names a POI
+            # it is almost always within a couple hundred metres of the point.
+            # Confirm with the feature centroid when coordinates are present.
+            try:
+                plat = float(data.get("lat")) if data.get("lat") is not None else None
+                plon = float(data.get("lon")) if data.get("lon") is not None else None
+                if plat is not None and plon is not None:
+                    if _haversine_distance(lat, lon, plat, plon) > _PLACE_RADIUS_M:
+                        poi = None
+            except (TypeError, ValueError):
+                pass
+        if poi:
+            return poi
+        street = _street_label_from_nominatim(data)
+        if street:
+            return street
+
+    # 4. Coordinates fallback
     return f"Location ({round(lat, 3)}, {round(lon, 3)})"
 
 
-# Back-compat alias
-_resolve_zone_name = _resolve_place_name
+# Back-compat alias — trips use the cached resolver to avoid Nominatim on every fix.
+def _resolve_zone_name(lat: float, lon: float):
+    return _resolve_place_name_cached(lat, lon)
+
+# Short-lived cache so get_trips / trip locations don't hammer Nominatim + HA.
+_PLACE_NAME_CACHE: dict[str, tuple[float, str]] = {}
+_PLACE_NAME_CACHE_TTL = 600.0
+
+
+def _place_cache_key(lat: float, lon: float) -> str:
+    return f"{round(float(lat), 4)}:{round(float(lon), 4)}"
+
+
+async def _resolve_place_name_cached(lat: float, lon: float) -> str:
+    key = _place_cache_key(lat, lon)
+    hit = _PLACE_NAME_CACHE.get(key)
+    now = time.time()
+    if hit and (now - hit[0]) < _PLACE_NAME_CACHE_TTL:
+        return hit[1]
+    name = await _resolve_place_name(lat, lon)
+    if len(_PLACE_NAME_CACHE) > 512:
+        _PLACE_NAME_CACHE.clear()
+    _PLACE_NAME_CACHE[key] = (now, name)
+    return name
 
 
 async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -> dict | None:
@@ -1230,8 +1349,24 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
                     trip["last_lon"] = lon
                 trip["top_speed_mph"] = max(trip.get("top_speed_mph", 0.0), round(spd_mph, 1))
                 trip["last_moving_time"] = ts
-                end_name = await _resolve_zone_name(lat, lon)
-                trip["end_location"] = {"name": end_name, "latitude": lat, "longitude": lon}
+                # Only re-resolve destination when the point moves ~50 m+ so we
+                # don't call Nominatim on every breadcrumb.
+                prev_end = trip.get("end_location") or {}
+                need_name = True
+                if prev_end.get("latitude") is not None and prev_end.get("longitude") is not None:
+                    moved = _haversine_distance(
+                        float(prev_end["latitude"]), float(prev_end["longitude"]), lat, lon
+                    )
+                    need_name = moved >= 50.0 or _is_street_only_name(prev_end.get("name"))
+                if need_name:
+                    end_name = await _resolve_zone_name(lat, lon)
+                    trip["end_location"] = {"name": end_name, "latitude": lat, "longitude": lon}
+                else:
+                    trip["end_location"] = {
+                        "name": prev_end.get("name"),
+                        "latitude": lat,
+                        "longitude": lon,
+                    }
                 await r.set(active_key, json.dumps(trip), ex=86400)
             except Exception as e:
                 log.warning(f"[Geo] Error updating active trip: {e}")
@@ -1269,6 +1404,27 @@ async def get_trips(user_id: str | None = None, limit: int = 50):
         if raw:
             try:
                 trips.append(json.loads(raw))
+            except Exception:
+                pass
+
+    # Upgrade street-only stored labels (e.g. "North Green Trail") to the
+    # closest HA zone or business so the card Destination is useful.
+    for trip in trips:
+        for loc_key in ("start_location", "end_location"):
+            entry = trip.get(loc_key)
+            if not isinstance(entry, dict):
+                continue
+            lat = entry.get("latitude", entry.get("lat"))
+            lon = entry.get("longitude", entry.get("lon"))
+            if lat is None or lon is None:
+                continue
+            stored_name = entry.get("name") or entry.get("zone")
+            if stored_name and not _is_street_only_name(stored_name):
+                continue
+            try:
+                name, _src = await _resolve_place_if_better(stored_name, float(lat), float(lon))
+                if name and name != stored_name:
+                    entry["name"] = name
             except Exception:
                 pass
 
@@ -1517,10 +1673,63 @@ async def get_trip_route(trip_id: str):
     }
 
 
+def _is_street_only_name(name: str | None) -> bool:
+    """True when a stored label is just a road/neighbourhood (re-resolve-worthy)."""
+    if not name or not name.strip():
+        return False
+    if name.startswith("Location ("):
+        return True
+    n = name.strip()
+    # Multi-token street patterns without a proper business/place title.
+    streetish = re.search(
+        r"\b(road|street|st|avenue|ave|drive|dr|lane|ln|trail|way|boulevard|blvd|"
+        r"circle|court|ct|place|pl|highway|hwy|parkway|pkwy)\b",
+        n,
+        re.I,
+    )
+    if not streetish:
+        return False
+    # "Home", "Dawson's", "Kaleb Work - Discount Tire" are not street-only.
+    if n.lower() in {"home", "work", "school", "church"}:
+        return False
+    # Has a place-ish qualifier (business words, apostrophe possessives with & etc.)
+    if re.search(r"\b(store|market|walmart|target|costco|starbucks|subway|"
+                 r"pharmacy|clinic|bank|church|school|park|restaurant|cafe|"
+                 r"dollar|gas|fuel|auto|tire|dental|vet|gym|salon)\b", n, re.I):
+        return False
+    # Single capitalized words that aren't street suffixes alone — keep.
+    # Otherwise: pure "North Green Trail" / "30912, North Green Trail" → street.
+    return True
+
+
+async def _resolve_place_if_better(stored: str | None, lat: float, lon: float) -> tuple[str, str]:
+    """Return (name, source). Prefer a re-resolved place over a street-only stored label."""
+    if stored and not _is_street_only_name(stored):
+        return stored, "stored"
+    resolved = await _resolve_place_name_cached(lat, lon)
+    resolved_is_street = _is_street_only_name(resolved) or resolved.startswith("Location (")
+    if not resolved_is_street:
+        # Re-resolve found an HA zone or business — always prefer it.
+        source = "coords" if resolved.startswith("Location (") else (
+            "osm" if ", " in resolved else "ha_zone"
+        )
+        # Single-token non-street (zone / POI) → ha_zone-ish; multi-part OSM POI → osm.
+        if not resolved.startswith("Location ("):
+            source = "osm" if ", " in resolved else "ha_zone"
+        return resolved, source
+    # Resolved is street or coords: keep a non-street stored name if we had one
+    # (already returned above). Street stored + street resolved → use fresh resolve.
+    if resolved.startswith("Location ("):
+        if stored:
+            return stored, "stored"
+        return resolved, "coords"
+    return resolved, "osm"
+
+
 @app.get("/trips/{trip_id}/locations")
 async def get_trip_locations(trip_id: str):
     """Resolved start/end locations for a trip: coordinates plus a human-readable
-    place name (HA zone first, then OSM Nominatim reverse geocoding)."""
+    place name (HA zone → nearby business → street → coords)."""
     r = await get_redis()
     if not r:
         raise HTTPException(status_code=503, detail="Redis unavailable")
@@ -1544,14 +1753,10 @@ async def get_trip_locations(trip_id: str):
         if lat is None or lon is None:
             return {"name": default_label, "lat": None, "lon": None, "source": None}
         stored_name = entry.get("name") or entry.get("zone")
-        # If the stored name is just a coordinate placeholder, re-resolve it
-        if stored_name and not stored_name.startswith("Location ("):
-            source = "stored"
-            name = stored_name
-        else:
-            name = await _resolve_place_name(float(lat), float(lon))
-            source = "ha_zone" if name and not (name.startswith("Location (") or ", " in name) else \
-                     ("osm" if name and not name.startswith("Location (") else "coords")
+        name, source = await _resolve_place_if_better(stored_name, float(lat), float(lon))
+        if not name:
+            name = default_label
+            source = None
         return {"name": name, "lat": float(lat), "lon": float(lon), "source": source}
 
     start = await _loc(trip.get("start_location"), "Starting Point")

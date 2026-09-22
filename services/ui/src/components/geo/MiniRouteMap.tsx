@@ -6,14 +6,17 @@ interface MiniRouteMapProps {
   points: Array<{ lat: number; lon: number }>;
   height?: number;
   className?: string;
+  /** When set, the thumbnail is clickable and opens the full route map. */
+  onClick?: () => void;
+  title?: string;
 }
 
 /**
  * Lightweight static route preview using OpenStreetMap tiles.
- * Renders a polyline fitted to the breadcrumb bounds. No interaction
- * (dragging/zoom disabled) — it's a thumbnail, not an explorer.
+ * Renders a polyline fitted to the breadcrumb bounds. Interaction is off —
+ * it's a thumbnail — but an optional onClick opens the full Route Map modal.
  */
-export default function MiniRouteMap({ points, height = 140, className = "" }: MiniRouteMapProps) {
+export default function MiniRouteMap({ points, height = 140, className = "", onClick, title }: MiniRouteMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
 
@@ -58,5 +61,18 @@ export default function MiniRouteMap({ points, height = 140, className = "" }: M
     return null;
   }
 
-  return <div ref={containerRef} className={className} style={{ height, width: "100%" }} />;
+  const clickable = Boolean(onClick);
+  return (
+    <div
+      ref={containerRef}
+      className={`${className}${clickable ? " cursor-pointer hover:opacity-90 transition-opacity" : ""}`}
+      style={{ height, width: "100%" }}
+      onClick={clickable ? onClick : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); } } : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      title={title || (clickable ? "Open route map" : undefined)}
+      aria-label={clickable ? "Open full route map" : undefined}
+    />
+  );
 }
