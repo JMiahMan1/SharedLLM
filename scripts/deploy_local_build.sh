@@ -185,11 +185,11 @@ ssh $SSH_OPTS "$HOST" << EOF
             echo "       Publishing \$BUNDLE_SHA (what clients actually receive)."
         fi
 
-        BUILD_TIME=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-        # The native versionCode of the current build (keep in sync with
-        # services/ui/android/app/build.gradle) — the app compares this against
-        # its own to know when a newer APK must be installed manually.
-        APK_CODE=5
+        BUILD_TIME=\$(date -u +\"%Y-%m-%dT%H:%M:%SZ\")
+        # The native versionCode of the current build — the app compares this
+        # against its own to know when a newer APK must be installed manually.
+        APK_CODE=\$(grep -oE 'versionCode [0-9]+' services/ui/android/app/build.gradle | awk '{print \$2}' | head -1)
+        if [ -z "\$APK_CODE" ]; then APK_CODE=5; fi
         cat << JSON_EOF > data/app_updates/version.json
 {
   "version": "\$BUNDLE_VERSION",

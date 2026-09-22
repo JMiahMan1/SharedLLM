@@ -232,17 +232,22 @@ if ssh $SSH_OPTS "$HOST" << EOF
             echo "       Publishing \$BUNDLE_SHA (what clients actually receive)."
         fi
 
-        BUILD_TIME=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        BUILD_TIME=\$(date -u +\"%Y-%m-%dT%H:%M:%SZ\")
+        # Keep in sync with services/ui/android/app/build.gradle versionCode —
+        # the app only offers an APK install when this exceeds its own build.
+        APK_CODE=\$(grep -oE 'versionCode [0-9]+' services/ui/android/app/build.gradle | awk '{print \$2}' | head -1)
+        if [ -z "\$APK_CODE" ]; then APK_CODE=5; fi
         cat << JSON_EOF > data/app_updates/version.json
 {
   "version": "\$BUNDLE_VERSION",
   "git_sha": "\$BUNDLE_SHA",
   "build_timestamp": "\$BUILD_TIME",
-  "release_notes": "Jarvis OS Over-The-Air Update"
+  "release_notes": "Jarvis OS Over-The-Air Update",
+  "apk_version_code": \$APK_CODE
 }
 JSON_EOF
         rm -f data/app_updates/.bundle_version.json
-        echo "[OK] Published OTA bundle \$BUNDLE_SHA (version \$BUNDLE_VERSION)."
+        echo "[OK] Published OTA bundle \$BUNDLE_SHA (version \$BUNDLE_VERSION, apk_version_code \$APK_CODE)."
     fi
 EOF
 then
