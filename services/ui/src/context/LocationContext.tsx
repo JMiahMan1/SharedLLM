@@ -4,6 +4,7 @@ import { Geolocation } from '@capacitor/geolocation';
 import { storageGet, storageSet } from '../lib/storage';
 import { getServerOrigin } from '../lib/serverUrl';
 import StepCounter from '../plugins/stepCounter';
+import TokenBridge from '../plugins/tokenBridge';
 
 interface LocationState {
   latitude: number | null;
@@ -194,6 +195,9 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       }
     }
     lastFixRef.current = { lat: latitude, lng: longitude, t: fixTs };
+    if (Capacitor.isNativePlatform()) {
+      TokenBridge.setLastLocation({ latitude, longitude }).catch(() => undefined);
+    }
 
     const speedMph = speedMps * 2.237;
     const newInterval = speedMph > SPEED_THRESHOLD_MPH ? 'transit' : 'stationary';
@@ -337,14 +341,50 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   // Auto-resume tracking if previously enabled or if running on mobile
   useEffect(() => {
     async function initTracking() {
+      // Step counting must always log — independent of location tracking state.
+      void refreshDailySteps().then(() => syncDailySteps());
       const saved = await storageGet('jarvis_location_tracking_enabled');
       const shouldTrack = saved === 'true' || (saved === null && Capacitor.isNativePlatform());
       if (shouldTrack) {
         void startTracking();
+      } else {
+        // Even with GPS off, keep the hardware pedometer running and synced.
+        try {
+          await StepCounter.startPolling();
+          if (!stepUpdateListenerRef.current) {
+            stepUpdateListenerRef.current = await StepCounter.addListener('stepUpdate', (reading) => {
+              if (reading.available && typeof reading.steps === 'number') {
+                const changed = dailyStepsRef.current !== reading.steps;
+                dailyStepsRef.current = reading.steps;
+                if (changed) void syncDailySteps();
+              }
+            });
+          }
+        } catch {
+          // Web platform or sensor absent
+        }
+        if (stationarySyncTimerRef.current === null) {
+          stationarySyncTimerRef.current = window.setInterval(() => {
+            void refreshDailySteps().then(() => syncDailySteps());
+          }, DAILY_STEPS_SYNC_INTERVAL_MS);
+        }
       }
     }
     void initTracking();
-  }, [startTracking]);
+  }, [startTracking, refreshDailySteps, syncDailySteps]);
+
+  // Midnight rollover: re-read the sensor so the new day's bucket starts even
+  // if no step event has fired yet after 00:00 local time.
+  useEffect(() => {
+    const checkMidnight = () => {
+      const d = new Date();
+      if (d.getHours() === 0 && d.getMinutes() === 0) {
+        void refreshDailySteps().then(() => syncDailySteps());
+      }
+    };
+    const midnightTimer = window.setInterval(checkMidnight, 30000);
+    return () => window.clearInterval(midnightTimer);
+  }, [refreshDailySteps, syncDailySteps]);
 
   useEffect(() => {
     return () => {

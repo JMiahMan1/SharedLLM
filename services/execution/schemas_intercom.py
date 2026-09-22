@@ -20,6 +20,7 @@ class IntercomBroadcastRequest(BaseModel):
     message: str
     target_entity_ids: list[str] | None = None
     target_rooms: list[str] | None = None
+    group_id: str | None = None
     volume: float | None = None
     tts_engine: str | None = None
     voice: str | None = None
@@ -29,7 +30,11 @@ class IntercomAnnouncementRequest(BaseModel):
     """TV/Smart speaker announcement (one-way)."""
     message: str
     target_devices: list[str] | None = None
+    target_entity_ids: list[str] | None = None
+    target_rooms: list[str] | None = None
+    group_id: str | None = None
     overlay_text: str | None = None
+    volume: float | None = None
 
 
 class IntercomSession(BaseModel):

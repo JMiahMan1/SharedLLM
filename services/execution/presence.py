@@ -67,6 +67,7 @@ class PresenceTracker:
         self._user_mac_map: dict[str, str] = {}  # user_id -> mac_address
         self._callbacks: list[Callable] = []
         self._home_coordinates = None  # Tuple[float, float]
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def start(self):
         """Start MQTT subscriber and Redis connection."""
@@ -75,6 +76,7 @@ class PresenceTracker:
             return
 
         self._running = True
+        self._loop = asyncio.get_running_loop()
         try:
             self._redis = aioredis.from_url(self.redis_url, decode_responses=True)
             assert self._redis is not None
@@ -136,6 +138,18 @@ class PresenceTracker:
             mac = topic.split("/")[-1].lower()
             self._process_device_update(mac, payload)
 
+    def _schedule_update(self, user_id: str, room: str, confidence: float):
+        """Schedule a presence update from the paho MQTT thread onto the main loop."""
+        if not self._running or self._loop is None:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._update_presence(user_id, room, confidence),
+                self._loop,
+            )
+        except RuntimeError as e:
+            log.warning(f"[presence] Failed to schedule update from MQTT thread: {e}")
+
     def _process_room_update(self, room_name: str, payload: dict):
         """Process room-level presence update."""
         occupants = payload.get("occupants", [])
@@ -143,13 +157,7 @@ class PresenceTracker:
             user_id = occupant.get("id") or occupant.get("name")
             confidence = occupant.get("confidence", 0.5)
             if user_id:
-                try:
-                    asyncio.create_task(
-                        self._update_presence(user_id, room_name, confidence)
-                    )
-                except RuntimeError:
-                    # No running event loop (e.g., in tests)
-                    pass
+                self._schedule_update(user_id, room_name, confidence)
 
     def _process_device_update(self, mac: str, payload: dict):
         """Process device-level presence update."""
@@ -162,13 +170,7 @@ class PresenceTracker:
         if user_id:
             room = payload.get("room", "unknown")
             confidence = payload.get("confidence", 0.5)
-            try:
-                asyncio.create_task(
-                    self._update_presence(user_id, room, confidence)
-                )
-            except RuntimeError:
-                # No running event loop (e.g., in tests)
-                pass
+            self._schedule_update(user_id, room, confidence)
 
     async def _update_presence(self, user_id: str, room: str, confidence: float):
         """Update presence in Redis."""

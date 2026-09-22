@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/dash_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_card_bg"
+    android:orientation="vertical"
+    android:padding="10dp">
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Dashboard"
+            android:textColor="#E2E8F0"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+        <ImageView
+            android:id="@+id/dash_refresh"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:contentDescription="Refresh"
+            android:src="@android:drawable/ic_popup_sync" />
+    </LinearLayout>
+    <GridLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:columnCount="2"
+        android:rowCount="2">
+        <LinearLayout android:id="@+id/cell_hit_1"
+            android:layout_width="0dp" android:layout_height="0dp"
+            android:layout_columnWeight="1" android:layout_rowWeight="1"
+            android:layout_margin="4dp" android:background="@drawable/widget_tile_bg"
+            android:gravity="center" android:orientation="vertical" android:padding="6dp">
+            <TextView android:id="@+id/cell_label_1"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center" android:maxLines="1" android:text="—"
+                android:textColor="#94A3B8" android:textSize="11sp" />
+            <TextView android:id="@+id/cell_value_1"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center" android:maxLines="1" android:text=""
+                android:textColor="#F8FAFC" android:textSize="16sp" android:textStyle="bold" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/cell_hit_2"
+            android:layout_width="0dp" android:layout_height="0dp"
+            android:layout_columnWeight="1" android:layout_rowWeight="1"
+            android:layout_margin="4dp" android:background="@drawable/widget_tile_bg"
+            android:gravity="center" android:orientation="vertical" android:padding="6dp">
+            <TextView android:id="@+id/cell_label_2"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center" android:maxLines="1" android:text="—"
+                android:textColor="#94A3B8" android:textSize="11sp" />
+            <TextView android:id="@+id/cell_value_2"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center" android:maxLines="1" android:text=""
+                android:textColor="#F8FAFC" android:textSize="16sp" android:textStyle="bold" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/cell_hit_3"
+            android:layout_width="0dp" android:layout_height="0dp"
+            android:layout_columnWeight="1" android:layout_rowWeight="1"
+            android:layout_margin="4dp" android:background="@drawable/widget_tile_bg"
+            android:gravity="center" android:orientation="vertical" android:padding="6dp">
+            <TextView android:id="@+id/cell_label_3"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center" android:maxLines="1" android:text="—"
+                android:textColor="#94A3B8" android:textSize="11sp" />
+            <TextView android:id="@+id/cell_value_3"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center" android:maxLines="1" android:text=""
+                android:textColor="#F8FAFC" android:textSize="16sp" android:textStyle="bold" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/cell_hit_4"
+            android:layout_width="0dp" android:layout_height="0dp"
+            android:layout_columnWeight="1" android:layout_rowWeight="1"
+            android:layout_margin="4dp" android:background="@drawable/widget_tile_bg"
+            android:gravity="center" android:orientation="vertical" android:padding="6dp">
+            <TextView android:id="@+id/cell_label_4"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center" android:maxLines="1" android:text="—"
+                android:textColor="#94A3B8" android:textSize="11sp" />
+            <TextView android:id="@+id/cell_value_4"
+                android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:gravity="center" android:maxLines="1" android:text=""
+                android:textColor="#F8FAFC" android:textSize="16sp" android:textStyle="bold" />
+        </LinearLayout>
+    </GridLayout>
+</LinearLayout>

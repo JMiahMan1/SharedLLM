@@ -1,5 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
+import TokenBridge from '../plugins/tokenBridge';
 
 const isNative = Capacitor.isNativePlatform();
 const _cache: Record<string, string | null> = {};
@@ -16,6 +17,11 @@ export async function storageInit(): Promise<void> {
     _cache['jarvis_api_key'] = apiKey;
     _cache['internal_secret'] = internalSecret;
     _cache['jarvis_server_url'] = serverUrl;
+    TokenBridge.setCredentials({
+      apiKey: apiKey ?? undefined,
+      serverUrl: serverUrl ?? undefined,
+    }).catch(() => undefined);
+    TokenBridge.refreshWidgets().catch(() => undefined);
   }
 }
 
@@ -39,6 +45,17 @@ export async function storageSet(key: string, value: string): Promise<void> {
   _cache[key] = value;
   if (isNative) {
     await Preferences.set({ key, value });
+    if (key === 'jarvis_api_key' || key === 'jarvis_server_url') {
+      try {
+        await TokenBridge.setCredentials({
+          apiKey: key === 'jarvis_api_key' ? value : undefined,
+          serverUrl: key === 'jarvis_server_url' ? value : undefined,
+        });
+        await TokenBridge.refreshWidgets();
+      } catch {
+        // native bridge unavailable
+      }
+    }
   } else {
     localStorage.setItem(key, value);
   }
@@ -48,6 +65,17 @@ export async function storageRemove(key: string): Promise<void> {
   delete _cache[key];
   if (isNative) {
     await Preferences.remove({ key });
+    if (key === 'jarvis_api_key' || key === 'jarvis_server_url') {
+      try {
+        await TokenBridge.setCredentials({
+          apiKey: key === 'jarvis_api_key' ? '' : undefined,
+          serverUrl: key === 'jarvis_server_url' ? '' : undefined,
+        });
+        await TokenBridge.refreshWidgets();
+      } catch {
+        // native bridge unavailable
+      }
+    }
   } else {
     localStorage.removeItem(key);
   }

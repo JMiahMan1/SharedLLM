@@ -91,8 +91,14 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
 
     @PermissionCallback
     private void onPermissionResult(PluginCall call) {
+        boolean granted = getPermissionState("activityRecognition") == PermissionState.GRANTED;
+        // If this permission was requested so polling could start, attach the
+        // sensor listener now — otherwise steps stay at 0 until the next open.
+        if (granted && stepSensor != null && !listening) {
+            listening = sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_UI);
+        }
         JSObject ret = new JSObject();
-        ret.put("granted", getPermissionState("activityRecognition") == PermissionState.GRANTED);
+        ret.put("granted", granted);
         call.resolve(ret);
     }
 
@@ -142,9 +148,16 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
 
     @PluginMethod
     public void startPolling(PluginCall call) {
-        if (stepSensor == null || listening) {
+        if (stepSensor == null) {
             call.resolve();
             return;
+        }
+        // Always re-register: a prior register without ACTIVITY_RECOGNITION can
+        // leave `listening=true` while delivering zero events. Unregister first
+        // so a retry after permission grant actually attaches the listener.
+        if (listening) {
+            sensorManager.unregisterListener(this);
+            listening = false;
         }
         listening = sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_UI);
         call.resolve();
@@ -177,8 +190,11 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
 
     /**
      * Convert the since-reboot cumulative counter into steps-today.
-     * Baseline is captured at first read of each calendar day; if the counter
-     * dropped below baseline (reboot), re-baseline and count from zero.
+     *
+     * Deltas from the cumulative sensor are accumulated into a per-day total so
+     * steps keep logging even when readings arrive before the app is opened.
+     * The day bucket rolls over at local midnight (date change on any read or
+     * sensor event); a reboot (counter drops) re-baselines without double-counting.
      */
     private int computeTodaySteps(float cumulative) {
         SharedPreferences prefs = bridge.getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -186,14 +202,22 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         String baselineDate = prefs.getString(KEY_BASELINE_DATE, "");
         boolean hasBaseline = prefs.getBoolean(KEY_HAS_BASELINE, false);
         long baseline = prefs.getLong(KEY_BASELINE, 0L);
+        long daySteps = prefs.getLong("day_steps", 0L);
 
-        // Counter reset (reboot) invalidates the baseline
+        // Counter reset (reboot) invalidates the baseline; keep the day's total.
         if (hasBaseline && (long) cumulative < baseline) {
             hasBaseline = false;
         }
 
         if (!hasBaseline || !today.equals(baselineDate)) {
-            // New day or first ever read: today's steps start from the current counter
+            if (hasBaseline && !today.equals(baselineDate) && (long) cumulative >= baseline) {
+                // Midnight rollover: credit steps taken since the last reading
+                // (sensor batches across the boundary) to the NEW day, then start fresh.
+                daySteps += (long) cumulative - baseline;
+            } else {
+                // First read of the day (or reboot): start today's bucket at 0.
+                daySteps = 0;
+            }
             baseline = (long) cumulative;
             baselineDate = today;
             hasBaseline = true;
@@ -201,15 +225,23 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             editor.putLong(KEY_BASELINE, baseline);
             editor.putString(KEY_BASELINE_DATE, baselineDate);
             editor.putBoolean(KEY_HAS_BASELINE, hasBaseline);
+            editor.putLong("day_steps", daySteps);
             editor.putLong(KEY_LAST_CUMULATIVE, (long) cumulative);
             editor.apply();
-            return 0;
+            return (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps));
         }
 
-        int todaySteps = (int) Math.max(0, (long) cumulative - baseline);
+        long delta = (long) cumulative - baseline;
+        if (delta < 0) {
+            delta = 0;
+        }
+        daySteps += delta;
+        baseline = (long) cumulative;
         SharedPreferences.Editor editor = prefs.edit();
+        editor.putLong(KEY_BASELINE, baseline);
+        editor.putLong("day_steps", daySteps);
         editor.putLong(KEY_LAST_CUMULATIVE, (long) cumulative);
         editor.apply();
-        return todaySteps;
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps));
     }
 }

@@ -110,9 +110,12 @@ def test_gateway_extracts_bearer_token(monkeypatch):
     # Identity resolutions are cached for IDENTITY_CACHE_TTL. If any earlier
     # test already resolved a token, this request is served from that cache and
     # never calls /api/resolve, so _capture["body"] stays None.
-    from services.gateway.cache import invalidate_identity
+    from services.gateway.cache import invalidate_identity, invalidate_settings
 
     invalidate_identity()
+    # Earlier tests may leave a settings cache without assistant_model; drop it
+    # so get_all_settings refetches via our mock /api/settings below.
+    invalidate_settings()
 
     # Inference now runs through the Redis-backed job queue, which is created in
     # the app lifespan. A bare TestClient does not run that, so stub the queue

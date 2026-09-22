@@ -1886,11 +1886,17 @@ async def _llm_trends_analysis(prompt: str, user: str) -> str | None:
     so trends degrade gracefully to raw stats."""
     try:
         from services.config import GATEWAY_INTERNAL_URL
+        from services.gateway.llm_providers import strip_thinking_blocks
         gateway_url = GATEWAY_INTERNAL_URL or "http://gateway:11435"
         body = {
             "model": "assistant",
             "messages": [{"role": "user", "content": prompt}],
             "rag_user": user,
+            # Reasoning models blend their  trace into `content` unless the
+            # caller opts out — that put the model's thinking straight into the
+            # Wander AI Insight card. We want the conclusion only.
+            "think": False,
+            "enable_thinking": False,
         }
         async with get_client_insecure() as client:
             async with client.post(
@@ -1909,9 +1915,20 @@ async def _llm_trends_analysis(prompt: str, user: str) -> str | None:
                     content = data.get("response") or data.get("answer") or data.get("message")
                     if isinstance(content, dict):
                         content = content.get("content")
-                    return content if isinstance(content, str) and content.strip() else None
+                    if not isinstance(content, str) or not content.strip():
+                        return None
+                    return strip_thinking_blocks(content) or None
                 msg = choices[0].get("message", {})
-                return msg.get("content") or None
+                # Never surface chain-of-thought as the insight itself.
+                raw = (
+                    msg.get("content")
+                    or msg.get("reasoning_content")
+                    or msg.get("reasoning")
+                    or ""
+                )
+                if not isinstance(raw, str) or not raw.strip():
+                    return None
+                return strip_thinking_blocks(raw) or None
     except Exception as e:
         log.warning(f"[Geo] LLM trends analysis failed: {e}")
         return None

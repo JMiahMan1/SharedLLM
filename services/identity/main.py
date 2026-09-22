@@ -2667,6 +2667,59 @@ def get_intercom_config(x_internal_secret: str = Header(...)):
         }
 
 
+@app.get("/api/intercom/room-speakers")
+def get_room_speakers(x_internal_secret: str = Header(...)):
+    """Room name → media_player entity_ids map. No hardcoded defaults."""
+    _require_internal_secret(x_internal_secret)
+    with Session(engine) as session:
+        setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "room_speakers")).first()
+        if setting and setting.value:
+            try:
+                return {"room_speakers": json.loads(setting.value)}
+            except json.JSONDecodeError:
+                return {"room_speakers": {}}
+        return {"room_speakers": {}}
+
+
+@app.put("/api/intercom/room-speakers")
+def put_room_speakers(body: dict, x_internal_secret: str = Header(...)):
+    """
+    Replace room→speakers mapping.
+    Body: {"room_speakers": {"kitchen": ["media_player.x"], ...}}
+    Values may be a string or list of entity IDs; empty map clears.
+    """
+    _require_internal_secret(x_internal_secret)
+    raw = body.get("room_speakers", body)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="room_speakers must be an object")
+    normalized: dict[str, list[str]] = {}
+    for room, val in raw.items():
+        if not isinstance(room, str) or not room.strip():
+            raise HTTPException(status_code=400, detail="room keys must be non-empty strings")
+        if val is None:
+            continue
+        if isinstance(val, str):
+            ids = [val] if val else []
+        elif isinstance(val, list):
+            ids = [str(x) for x in val if x]
+        else:
+            raise HTTPException(status_code=400, detail=f"room '{room}' must be string or list of entity IDs")
+        normalized[room.strip()] = ids
+    with Session(engine) as session:
+        setting = session.exec(select(GlobalSetting).where(GlobalSetting.key == "room_speakers")).first()
+        value = json.dumps(normalized)
+        if setting:
+            setting.value = value
+        else:
+            session.add(GlobalSetting(
+                key="room_speakers",
+                value=value,
+                description="Room name to media_player entity IDs for intercom/TTS routing",
+            ))
+        session.commit()
+    return {"status": "SUCCESS", "room_speakers": normalized}
+
+
 @app.patch("/api/intercom/config")
 def update_intercom_config(config_data: dict, x_internal_secret: str = Header(...)):
     _require_internal_secret(x_internal_secret)

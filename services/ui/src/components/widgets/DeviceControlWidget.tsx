@@ -27,6 +27,8 @@ import {
   Sliders
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import TokenBridge from '../../plugins/tokenBridge';
+import { Capacitor } from '@capacitor/core';
 
 const DEVICE_ICONS: Record<string, string> = {
   light: '💡',
@@ -188,10 +190,55 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     );
   }, [role, assignments, user]);
 
+  const isAwayFromHome = useCallback(async (): Promise<boolean> => {
+    if (!Capacitor.isNativePlatform()) return false;
+    try {
+      // TokenBridge mirrors last GPS; if stale/missing we treat as home (no confirm)
+      const homeLat = 33.16670697948413;
+      const homeLng = -111.56466007232666;
+      // Distance is also enforced natively; here we reuse window.location last fix via preferences bridge side-channel.
+      // Best-effort: only confirm when native reports away via a lightweight heuristic on stored coords is handled in TokenBridge.
+      // For in-app actions we check after fetch of last location stored by LocationContext through TokenBridge — not readable from JS.
+      // Fallback: use navigator.geolocation when available and permission granted.
+      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        const pos = await new Promise<GeolocationPosition | null>((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            (p) => resolve(p),
+            () => resolve(null),
+            { enableHighAccuracy: false, timeout: 4000, maximumAge: 60000 }
+          );
+        });
+        if (!pos) return false;
+        const R = 6371e3;
+        const φ1 = (homeLat * Math.PI) / 180;
+        const φ2 = (pos.coords.latitude * Math.PI) / 180;
+        const Δφ = ((pos.coords.latitude - homeLat) * Math.PI) / 180;
+        const Δλ = ((pos.coords.longitude - homeLng) * Math.PI) / 180;
+        const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+        const d = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return d > 200;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
+  }, []);
+
   const callHAService = useCallback(async (domain: string, service: string, entityId: string, serviceData: unknown = null) => {
     if (!hasControlPermission(entityId)) {
       toast.error('Access Denied: You are not assigned to control this device.');
       return;
+    }
+
+    const wantsGarageOpen =
+      entityId.toLowerCase().includes('garage') &&
+      (service === 'turn_on' || service === 'open_cover' || service === 'unlock');
+    if (wantsGarageOpen) {
+      const away = await isAwayFromHome();
+      if (away) {
+        const ok = window.confirm('You appear to be away from home. Open the garage door anyway?');
+        if (!ok) return;
+      }
     }
 
     try {
@@ -208,7 +255,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       console.error('HA Service Error:', err);
       toast.error('Failed to send command. Check Home Assistant connection.');
     }
-  }, [hasControlPermission, loadDevices]);
+  }, [hasControlPermission, loadDevices, isAwayFromHome]);
 
   const toggleDevice = useCallback(
     async (entityId: string, currentState: string) => {
@@ -235,7 +282,17 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       try {
         const currentPinned = useWidgetStore.getState().userWidgets['device_control']?.pinned_devices || [];
         await togglePinnedDevice('device_control', entityId);
-        toast.success(currentPinned.includes(entityId) ? 'Removed from favorites' : 'Added to favorites');
+        const nowPinned = !currentPinned.includes(entityId);
+        toast.success(
+          nowPinned
+            ? 'Pinned — shows on home-screen Device Buttons widget'
+            : 'Removed from favorites / home widget'
+        );
+        try {
+          await TokenBridge.refreshWidgets();
+        } catch {
+          // web
+        }
       } catch {
         toast.error('Failed to update favorite status');
       }
@@ -243,17 +300,35 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     [togglePinnedDevice]
   );
 
-  // Scan BLE room beacon simulator
-  const handleBLEScan = () => {
+  // Real room presence from gateway (ESPresense / people pipeline); no fake cycles
+  const handleBLEScan = async () => {
     setBleScanning(true);
-    setTimeout(() => {
-      const rooms = ['Living Room', 'Bedroom', 'Kitchen', 'Office'];
-      const currentIdx = rooms.indexOf(currentRoom);
-      const nextRoom = rooms[(currentIdx + 1) % rooms.length];
-      setCurrentRoom(nextRoom);
+    try {
+      const token = (await import('../../lib/storage')).storageGetSync('jarvis_api_key');
+      const origin = (await import('../../lib/serverUrl')).getServerOrigin();
+      const userId = user?.username || 'jeremiah';
+      const resp = await fetch(`${origin}/api/presence/${encodeURIComponent(userId)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const presence = data?.presence ?? data;
+        const room =
+          presence?.room || presence?.current_room || presence?.location || presence?.closest_room || null;
+        if (room) {
+          setCurrentRoom(String(room));
+          toast.success(`Presence: ${room}`);
+        } else {
+          toast('Presence offline — ESPresense not reporting yet', { icon: 'ℹ️' });
+        }
+      } else {
+        toast('Presence API unavailable', { icon: '⚠️' });
+      }
+    } catch {
+      toast('Presence check failed', { icon: '⚠️' });
+    } finally {
       setBleScanning(false);
-      toast.success(`BLE Beacon detected: Entered ${nextRoom}`);
-    }, 1800);
+    }
   };
 
   // Open modal & load detailed settings

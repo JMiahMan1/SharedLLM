@@ -109,29 +109,20 @@ async def handle_intercom_list_sessions() -> ExecutionResult:
 # ─── Broadcast / PA System ────────────────────────────────────────────────────
 
 async def handle_intercom_broadcast(req, user_context: UserContext) -> ExecutionResult:
-    """Broadcast a message to target devices/rooms."""
+    """Broadcast a message to resolved target devices/rooms (real dispatch)."""
     try:
-        payload = {
-            "message": req.message,
-            "target_entity_ids": getattr(req, "target_entity_ids", []),
-            "target_rooms": getattr(req, "target_rooms", []),
-            "volume": getattr(req, "volume", None),
-            "tts_engine": getattr(req, "tts_engine", None),
-            "voice": getattr(req, "voice", None),
-            "caller_user_id": user_context.user,
-        }
-        result = await _call_identity("POST", "/api/intercom/broadcast", payload)
-        # Best-effort: persist the spoken message into RAG conversational memory.
+        from services.execution.announce_routes import run_broadcast
+        result = await run_broadcast(req, user_context)
         msg = getattr(req, "message", "") or ""
-        if msg:
+        if msg and result.get("status") == "SUCCESS":
             asyncio.ensure_future(
                 push_conversation(user_context.user, msg, room_id="broadcast", user_id=user_context.user)
             )
         return ExecutionResult(
-            status="SUCCESS",
-            message=f"Broadcast sent to {result.get('targets_count', 0)} devices",
+            status=result.get("status", "FAILURE"),
+            message=result.get("message", "Broadcast finished"),
             service="intercom",
-            detail=result,
+            detail=result.get("detail"),
         )
     except Exception as e:
         log.error(f"Intercom broadcast failed: {e}")
@@ -141,26 +132,20 @@ async def handle_intercom_broadcast(req, user_context: UserContext) -> Execution
 # ─── TV/Smart Speaker Announcements ───────────────────────────────────────────
 
 async def handle_intercom_announcement(req, user_context: UserContext) -> ExecutionResult:
-    """Send a one-way announcement to TVs or smart speakers."""
+    """Send a one-way announcement to TVs or smart speakers (real dispatch)."""
     try:
-        payload = {
-            "message": req.message,
-            "target_devices": getattr(req, "target_devices", []),
-            "overlay_text": getattr(req, "overlay_text", None),
-            "caller_user_id": user_context.user,
-        }
-        result = await _call_identity("POST", "/api/intercom/announce", payload)
-        # Best-effort: persist the announcement into RAG conversational memory.
+        from services.execution.announce_routes import run_announcement
+        result = await run_announcement(req, user_context)
         msg = getattr(req, "message", "") or ""
-        if msg:
+        if msg and result.get("status") == "SUCCESS":
             asyncio.ensure_future(
                 push_conversation(user_context.user, msg, room_id="announcement", user_id=user_context.user)
             )
         return ExecutionResult(
-            status="SUCCESS",
-            message=f"Announcement sent to {result.get('targets_count', 0)} devices",
+            status=result.get("status", "FAILURE"),
+            message=result.get("message", "Announcement finished"),
             service="intercom",
-            detail=result,
+            detail=result.get("detail"),
         )
     except Exception as e:
         log.error(f"Intercom announcement failed: {e}")

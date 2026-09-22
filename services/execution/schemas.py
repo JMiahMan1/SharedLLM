@@ -290,6 +290,9 @@ class AnnouncementRequest(BaseRequest):
     user_context: UserContext
     entity_id: str | None = Field(None, description="Exact HA entity ID (e.g., media_player.office_tv_chrome). If omitted, resolved from device_name.")
     device_name: str | None = Field(None, description="Human-readable device name for entity resolution (e.g., 'Office TV')")
+    entity_ids: list[str] | None = Field(None, description="Optional multi-target entity IDs (room/speaker fan-out)")
+    rooms: list[str] | None = Field(None, description="Optional room names resolved via room_speakers config / HA areas")
+    group_id: str | None = Field(None, description="Optional media group ID whose members receive the announcement")
     message: str
     volume: float | None = Field(0.6, ge=0.0, le=1.0)
     tts_engine: Literal["kokoro", "piper"] | None = "kokoro"

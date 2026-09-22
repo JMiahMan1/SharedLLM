@@ -395,6 +395,24 @@ async def lifespan(app: FastAPI):
     # Background telemetry ingestion (live Energy Insights usage)
     telemetry_task = asyncio.create_task(telemetry_ingestion_loop())
 
+    # Start ESPresense BLE presence pipeline (E7: was never invoked)
+    from services.config import REDIS_URL as _PRESENCE_REDIS_URL
+    from services.execution.presence import init_presence_tracker
+    _mqtt_host = os.getenv("MQTT_HOST")
+    _mqtt_port = os.getenv("MQTT_PORT")
+    if not _mqtt_host or not _mqtt_port:
+        log.warning("MQTT_HOST/MQTT_PORT not set; presence tracker not started.")
+    else:
+        try:
+            await init_presence_tracker(
+                mqtt_host=_mqtt_host,
+                mqtt_port=int(_mqtt_port),
+                redis_url=_PRESENCE_REDIS_URL,
+            )
+            log.info("Presence tracker started (ESPresense MQTT -> Redis).")
+        except Exception as _pe:
+            log.warning(f"Presence tracker failed to start (non-fatal): {_pe}")
+
     # Configure GitHub CLI (gh) auth + git credential helper at startup so the
     # agent's workspace shells can push / manage repos without per-request token
     # plumbing. `gh` reads GH_TOKEN/GITHUB_TOKEN from the environment for API auth,
@@ -440,6 +458,9 @@ async def lifespan(app: FastAPI):
     telemetry_task.cancel()
     with suppress(Exception):
         await telemetry_task
+    with suppress(Exception):
+        from services.execution.presence import get_presence_tracker
+        await get_presence_tracker().stop()
     media_server.join(timeout=5)
     with suppress(Exception):
         from services.execution.http_client import close_all_sessions
@@ -2592,6 +2613,36 @@ async def get_presence_rooms(x_internal_secret: str = Header(None)):
     tracker = get_presence_tracker()
     rooms = await tracker.get_rooms()
     return {"status": "SUCCESS", "rooms": rooms}
+
+
+@app.post("/execute/intercom/announce")
+async def execute_intercom_announce(req: dict, x_internal_secret: str = Header(None)):
+    """Real one-way announcement: resolve room/device targets and fan out to HA."""
+    await _check_internal_secret(x_internal_secret)
+    from services.execution.announce_routes import run_announcement
+    from services.execution.schemas import UserContext
+    from services.execution.schemas_intercom import IntercomAnnouncementRequest
+
+    parsed = IntercomAnnouncementRequest(**req)
+    ctx_raw = req.get("user_context") or {}
+    user_context = UserContext(**ctx_raw) if ctx_raw else UserContext(user="", is_admin=True)
+    result = await run_announcement(parsed, user_context, announce_fn=execute_announce)
+    return result
+
+
+@app.post("/execute/intercom/broadcast")
+async def execute_intercom_broadcast(req: dict, x_internal_secret: str = Header(None)):
+    """Real broadcast: resolve targets and fan out (same path as announce)."""
+    await _check_internal_secret(x_internal_secret)
+    from services.execution.announce_routes import run_broadcast
+    from services.execution.schemas import UserContext
+    from services.execution.schemas_intercom import IntercomBroadcastRequest
+
+    parsed = IntercomBroadcastRequest(**req)
+    ctx_raw = req.get("user_context") or {}
+    user_context = UserContext(**ctx_raw) if ctx_raw else UserContext(user="", is_admin=True)
+    result = await run_broadcast(parsed, user_context, announce_fn=execute_announce)
+    return result
 
 
 @app.post("/execute/location")
