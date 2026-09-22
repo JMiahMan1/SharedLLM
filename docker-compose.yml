@@ -141,7 +141,7 @@ services:
       - WORKSPACE_RUNTIME_SVC_URL=${HOST_WORKSPACE_RUNTIME_SVC_URL}
       - REDIS_URL=${HOST_REDIS_URL}
       - SEARXNG_URL=${HOST_SEARXNG_URL}
-      - EXECUTION_EXTERNAL_HOST=host.docker.internal
+       - EXECUTION_EXTERNAL_HOST=192.168.2.205
       - TEMP_MEDIA_DIR=/workspaces
       - MODELS_DIR=/workspaces/models
       - TZ=America/Phoenix
