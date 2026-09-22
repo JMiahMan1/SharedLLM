@@ -7285,6 +7285,21 @@ async def get_geo_people():
     raise HTTPException(status_code=502, detail="Geo people unavailable")
 
 
+@app.get("/api/geo/android_auto")
+async def get_geo_android_auto(user_id: str | None = None):
+    params = {"user_id": user_id} if user_id else {}
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/android_auto",
+            params=params,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Geo android_auto unavailable")
+
+
 @app.get("/api/geo/zones")
 async def get_geo_zones():
     async with shared_http_client() as client:

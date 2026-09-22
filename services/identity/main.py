@@ -2892,13 +2892,29 @@ async def _forward_location_to_geo(user_id: str, location: LocationUpdate):
         log.warning(f"[location] Failed to record breadcrumb in Geo service: {e}")
 
 
+def _resolve_location_user_key(session: Session, user_id: str) -> str:
+    """Normalize location storage key: accept numeric DB ids or usernames."""
+    raw = (user_id or "").strip()
+    if not raw:
+        return raw
+    if raw.isdigit():
+        user = session.exec(select(User).where(User.id == int(raw))).first()
+        if user and user.username:
+            return user.username.lower()
+    return raw.lower()
+
+
 @app.post("/api/users/{user_id}/location")
 def update_user_location(
     user_id: str,
     location: LocationUpdate,
-    x_internal_secret: str = Header(...),
+    x_internal_secret: str | None = Header(None),
 ):
-    """Store user GPS location from mobile app, forward to Home Assistant, and record in Geo service."""
+    """Store user GPS location from mobile app, forward to Home Assistant, and record in Geo service.
+
+    Header is optional in the signature so a missing secret returns 403 (not FastAPI's 422),
+    matching the rest of the identity internal endpoints.
+    """
     _require_internal_secret(x_internal_secret)
     import asyncio
     import time
@@ -2913,7 +2929,7 @@ def update_user_location(
         "updated_at": time.time(),
     }
     with Session(engine) as session:
-        key = f"user_location:{user_id}"
+        key = f"user_location:{_resolve_location_user_key(session, user_id)}"
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if existing:
             existing.value = json.dumps(location_data)
@@ -2944,13 +2960,17 @@ def update_user_location(
 @app.get("/api/users/{user_id}/location")
 def get_user_location(
     user_id: str,
-    x_internal_secret: str = Header(...),
+    x_internal_secret: str | None = Header(None),
 ):
-    """Get stored GPS location for a user."""
+    """Get stored GPS location for a user (username or numeric id)."""
     _require_internal_secret(x_internal_secret)
     with Session(engine) as session:
-        key = f"user_location:{user_id}"
+        key = f"user_location:{_resolve_location_user_key(session, user_id)}"
         location = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not location and user_id != user_id.lower():
+            location = session.exec(
+                select(GlobalSetting).where(GlobalSetting.key == f"user_location:{user_id.lower()}")
+            ).first()
         if location:
             return json.loads(location.value)
     raise HTTPException(status_code=404, detail="Location not found")
