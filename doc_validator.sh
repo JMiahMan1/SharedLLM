@@ -109,7 +109,9 @@ check_consistency() {
     fi
 
     # Check for empty lines between headings (heuristic)
-    local heading_section_breaks=$(awk '/^#+ / {if(p && (NR-p)>10) break_count++} {p=NR}' "$file" && echo $break_count)
+    # break_count lives inside awk, so it has to be printed from awk's END block;
+    # `echo $break_count` referenced an unset *shell* variable and tripped `set -u`.
+    local heading_section_breaks=$(awk '/^#+ / {if(p && (NR-p)>10) c++} {p=NR} END {print c+0}' "$file")
     if [[ -n "$heading_section_breaks" && $heading_section_breaks -gt 0 ]]; then
         echo "  Contains $heading_section_breaks long heading sections - may need breaks" >> "$REPORT_FILE"
     fi
