@@ -19,6 +19,18 @@ const logsEnabled = { sendspin: true, jsonrpc: true }
 let audioElement: HTMLAudioElement | null = null
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null
 
+// MA's websocket API expects command messages only; do not inject ad-hoc pings.
+// These live at module scope because disconnect() calls stopHeartbeat() too.
+function startHeartbeat() {
+    if (heartbeatInterval !== null) clearInterval(heartbeatInterval)
+    heartbeatInterval = null
+}
+
+function stopHeartbeat() {
+    if (heartbeatInterval !== null) clearInterval(heartbeatInterval)
+    heartbeatInterval = null
+}
+
 // ═══════════════════════════════════════════════════════════
 // DOM refs
 // ═══════════════════════════════════════════════════════════
@@ -291,16 +303,6 @@ async function connect() {
 
         jsonrpcWs.onerror = () => {
             log(`[MAWebPlayer] JSON-RPC proxy error`, 'error')
-        }
-
-        // MA's websocket API expects command messages only; do not inject ad-hoc pings.
-        const startHeartbeat = () => {
-            clearInterval(heartbeatInterval!)
-            heartbeatInterval = null
-        }
-        const stopHeartbeat = () => {
-            clearInterval(heartbeatInterval!)
-            heartbeatInterval = null
         }
 
         // Wait for connections

@@ -1106,6 +1106,10 @@ const Media = () => {
   // Fetch Music Assistant players for the device picker. Uses the browser's
   // ma-jsonrpc WebSocket, which reaches MA directly and avoids the gateway's
   // server-side hostname loop (ha.sumemail.com resolves to the host internally).
+  //
+  // MA speakers that are integrated into Home Assistant also arrive through
+  // media/status as ordinary media_player entities, so the picker still lists
+  // them when this socket is not connected.
   useEffect(() => {
     let cancelled = false;
     if (maPlayer.isConnected) {
@@ -1994,7 +1998,7 @@ const Media = () => {
       } catch { /* ignore */ }
       return;
     }
-    try { await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_mute', volume_level: newMuted ? 0 : volume / 100 }); }
+    try { await api.mediaTransport({ entity_id: selectedTarget, command: 'volume_mute', muted: newMuted }); }
     catch { /* ignore */ }
   }, [selectedTarget, muted, volume, maPlayer.isConnected, maPlayer.connect, maPlayer.maCommand]);
 

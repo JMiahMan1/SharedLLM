@@ -11,19 +11,25 @@
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { getPlayerId, savePlayerId, setState } from './webPlayer';
-import { SendspinPlayer, type PlayerState } from '@sendspin/sendspin-js';
+import { SendspinPlayer } from '@sendspin/sendspin-js';
 import type { ConnectionState } from './wsManager';
 import { getServerOrigin, getWsProtocolFor } from './serverUrl';
 import { storageGetSync } from './storage';
 
 const STORAGE_KEY = 'sendspin_webplayer_id';
 
+/**
+ * UI-level playback state. Deliberately distinct from Sendspin's own
+ * `PlayerState` ("synchronized" | "error"), which describes the transport.
+ */
+type MAPlaybackState = 'playing' | 'idle';
+
 interface MAWebPlayerState {
   isConnected: boolean;
   isPlaying: boolean;
   volume: number;
   muted: boolean;
-  playerState: PlayerState | null;
+  playerState: MAPlaybackState | null;
   error: string | null;
   mediaUri: string | null;
   mediaTitle: string | null;
@@ -323,8 +329,8 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
           const vl = data.volume_level as number;
           next.volume = vl <= 1 ? Math.round(vl * 100) : Math.round(vl);
         }
-        if (data?.is_volume_muted !== undefined) {
-          next.muted = data.is_volume_muted;
+        if (data?.is_volume_muted !== undefined && data?.is_volume_muted !== null) {
+          next.muted = Boolean(data.is_volume_muted);
         }
         if (typeof data?.position === 'number' && data.position > 0 && !next.isPlaying) {
           next.position = data.position;
@@ -407,8 +413,8 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       return;
     }
 
-    let sendspinWs: WebSocket;
-    let jsonrpcWs: WebSocket;
+    let sendspinWs: WebSocket | undefined;
+    let jsonrpcWs: WebSocket | undefined;
     let player: SendspinPlayer;
 
     try {
@@ -468,7 +474,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
               isPlaying: newState.isPlaying,
               volume: Math.round(newState.volume),
               muted: newState.muted,
-              playerState: newState.isPlaying ? 'playing' : (newState.isConnected ? 'idle' : null),
+              playerState: newState.isPlaying ? 'playing' : (newState.playerState === 'synchronized' ? 'idle' : null),
               mediaTitle: (newState as unknown as { serverState?: { metadata?: { title?: string } } }).serverState?.metadata?.title ?? s.mediaTitle,
               mediaArtist: (newState as unknown as { serverState?: { metadata?: { artist?: string } } }).serverState?.metadata?.artist ?? s.mediaArtist,
               mediaImage: extractMaImage((newState as unknown as { serverState?: { metadata?: { image?: unknown } } }).serverState?.metadata?.image) ?? s.mediaImage,
@@ -493,7 +499,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         const msg = connectErr instanceof Error ? connectErr.message : String(connectErr);
         console.error('[MAWebPlayer] player.connect() failed:', msg);
         setError(`Player connection failed: ${msg}`);
-        player.disconnect('connect_failed');
+        player.disconnect();
         playerRef.current = null;
         return;
       }
@@ -597,7 +603,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
       const msg = err instanceof Error ? err.message : String(err);
       setError('Init failed: ' + msg, err);
       // Cleanup failed connections
-      try { playerRef.current?.disconnect('init-error'); } catch { /* ignore cleanup errors */ }
+      try { playerRef.current?.disconnect(); } catch { /* ignore cleanup errors */ }
       try { sendspinWs?.close(1000, 'init-error'); } catch { /* ignore cleanup errors */ }
       try { jsonrpcWs?.close(1000, 'init-error'); } catch { /* ignore cleanup errors */ }
       playerRef.current = null;
@@ -716,7 +722,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
         void sched.audioContext.resume();
       }
       console.log('[MAWebPlayer] cmd/play:', pid);
-      playerRef.current?.sendCommand('play');
+      playerRef.current?.sendCommand('play', undefined);
       await sendJsonRpc('players/cmd/play', { player_id: pid }, false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -734,7 +740,7 @@ export function useMAWebPlayer(onStateChange?: (state: MAWebPlayerState) => void
     }
     try {
       console.log('[MAWebPlayer] cmd/pause:', pid);
-      playerRef.current?.sendCommand('pause');
+      playerRef.current?.sendCommand('pause', undefined);
       await sendJsonRpc('players/cmd/pause', { player_id: pid }, false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
