@@ -91,6 +91,70 @@ def test_see_requires_secret(client):
     assert r.status_code == 403
 
 
+def test_android_auto_endpoint(client, monkeypatch):
+    import services.geo.main as geo
+
+    sample = [
+        {
+            "entity_id": "binary_sensor.jeremiahs_phone_android_auto_2",
+            "state": "off",
+            "attributes": {"connection_type": "Disconnected", "friendly_name": "Android Auto"},
+            "last_updated": "2026-09-22T00:00:00+00:00",
+        },
+        {
+            "entity_id": "sensor.jeremiahs_phone_detected_activity_2",
+            "state": "in_vehicle",
+            "attributes": {"friendly_name": "Detected activity"},
+            "last_updated": "2026-09-22T00:00:00+00:00",
+        },
+    ]
+
+    async def fake_states():
+        return sample
+
+    monkeypatch.setattr(geo, "_ha_get_states", fake_states)
+    r = client.get("/android_auto")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["in_android_auto"] is False
+    assert len(body["android_auto"]) == 1
+    assert body["android_auto"][0]["connection_type"] == "Disconnected"
+    assert body["detected_activity"][0]["state"] == "in_vehicle"
+
+
+async def test_steps_falls_back_to_ha_when_redis_empty(client, monkeypatch):
+    import services.geo.main as geo
+
+    async def fake_ha_states():
+        return [
+            {
+                "entity_id": "sensor.jeremiahs_phone_daily_steps",
+                "state": "4321",
+                "attributes": {},
+                "last_updated": "2026-09-22T12:00:00+00:00",
+            }
+        ]
+
+    class FakeRedis:
+        async def hgetall(self, key):
+            return {}
+
+        async def hget(self, key, field):
+            return None
+
+        async def hset(self, key, field, value):
+            return True
+
+    async def fake_get_redis():
+        return FakeRedis()
+
+    monkeypatch.setattr(geo, "_ha_get_states", fake_ha_states)
+    monkeypatch.setattr(geo, "get_redis", fake_get_redis)
+    r = await geo._steps_from_ha("jeremiahs_phone", days=7)
+    assert r
+    assert max(r.values()) == 4321
+
+
 def test_telemetry_at_zone(client):
     r = client.get("/people/summers/telemetry")
     assert r.status_code == 200

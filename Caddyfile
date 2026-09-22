@@ -151,6 +151,14 @@
     handle /api/auth* {
         reverse_proxy identity:8001
     }
+    # Location endpoints go through gateway so X-Internal-Secret is injected
+    # (identity requires it; phone/UI never send it → 422 if hit directly).
+    handle /api/users/*/location {
+        reverse_proxy gateway:11435
+    }
+    handle /api/users/location {
+        reverse_proxy gateway:11435
+    }
     handle /api/users* {
         reverse_proxy identity:8001
     }

@@ -158,6 +158,57 @@ async def get_people():
     return {"type": "FeatureCollection", "features": features}
 
 
+@app.get("/android_auto")
+async def get_android_auto(user_id: str | None = None):
+    """Android Auto / detected-activity status from the HA companion sensors.
+
+    Finds `binary_sensor.*_android_auto` (and optional `*detected_activity*`)
+    for the given user (or every phone if user_id is omitted).
+    """
+    try:
+        states = await _ha_get_states()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"HA error: {e}")
+
+    needle = (user_id or "").split(".")[-1].lower().replace("-", "_")
+    autos = []
+    activities = []
+    for s in states:
+        eid = (s.get("entity_id") or "").lower()
+        if eid.startswith("binary_sensor.") and "android_auto" in eid:
+            if needle and needle not in eid and needle.replace("_", "") not in eid.replace("_", ""):
+                # still include unnamed/ambiguous sensors when user omitted
+                if user_id:
+                    continue
+            attrs = s.get("attributes") or {}
+            autos.append({
+                "entity_id": s.get("entity_id"),
+                "state": s.get("state"),
+                "connection_type": attrs.get("connection_type"),
+                "friendly_name": attrs.get("friendly_name"),
+                "last_updated": s.get("last_updated") or s.get("last_changed"),
+            })
+        elif eid.startswith("sensor.") and "detected_activity" in eid:
+            if needle and needle not in eid:
+                if user_id:
+                    continue
+            attrs = s.get("attributes") or {}
+            activities.append({
+                "entity_id": s.get("entity_id"),
+                "state": s.get("state"),
+                "friendly_name": attrs.get("friendly_name"),
+                "last_updated": s.get("last_updated") or s.get("last_changed"),
+            })
+    return {
+        "user_id": user_id,
+        "android_auto": autos,
+        "detected_activity": activities,
+        "in_android_auto": any((a.get("state") or "").lower() == "on" for a in autos),
+    }
+
+
 @app.get("/zones")
 async def get_zones():
     """HA zones (geofences) as a GeoJSON FeatureCollection."""
@@ -294,7 +345,12 @@ async def _record_daily_steps(r, clean_id: str, steps: int, timestamp: float | N
 
 
 async def _get_daily_steps(r, clean_id: str, days: int = 30) -> dict:
-    """Daily step history: {date: steps} for the last N days (oldest first)."""
+    """Daily step history: {date: steps} for the last N days (oldest first).
+
+    Prefers the hardware pedometer buckets in Redis. When empty, falls back to
+    the HA companion daily_steps sensor so the UI is not blank while the phone
+    app is being updated (real sensor data only — never fabricated).
+    """
     tz = ZoneInfo("America/Phoenix")
     result: dict[str, int] = {}
     raw = await r.hgetall(f"geo:steps:{clean_id}")
@@ -307,7 +363,52 @@ async def _get_daily_steps(r, clean_id: str, days: int = 30) -> dict:
     if len(result) > days:
         cutoff = (datetime.now(tz) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
         result = {d: v for d, v in result.items() if d >= cutoff}
-    return dict(sorted(result.items()))
+    if result:
+        return dict(sorted(result.items()))
+    return await _steps_from_ha(clean_id, days)
+
+
+async def _steps_from_ha(clean_id: str, days: int) -> dict[str, int]:
+    """Read HA companion daily_steps (total_increasing) into per-day buckets."""
+    try:
+        states = await _ha_get_states()
+    except Exception:
+        return {}
+    tz = ZoneInfo("America/Phoenix")
+    cutoff = (datetime.now(tz) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    needle = clean_id.replace("-", "_")
+    best: dict[str, int] = {}
+    for s in states:
+        eid = (s.get("entity_id") or "").lower()
+        if not eid.startswith("sensor."):
+            continue
+        if "daily_steps" not in eid:
+            continue
+        if needle not in eid and clean_id not in eid:
+            continue
+        try:
+            val = float(s.get("state"))
+        except (TypeError, ValueError):
+            continue
+        if val < 0 or val != val:  # negative or NaN
+            continue
+        # Companion reports midnight-to-now total; bucket under today only when
+        # the reading is fresh (state updates continuously through the day).
+        last = s.get("last_updated") or s.get("last_changed") or ""
+        day = cutoff
+        if last:
+            try:
+                day = datetime.fromisoformat(last.replace("Z", "+00:00")).astimezone(tz).strftime("%Y-%m-%d")
+            except ValueError:
+                pass
+        steps = int(val)
+        if steps > 0 and day >= cutoff:
+            best[day] = max(best.get(day, 0), steps)
+            # Persist so subsequent reads hit Redis without re-querying HA
+            r = await get_redis()
+            if r:
+                await _record_daily_steps(r, clean_id, steps, None)
+    return dict(sorted(best.items()))
 
 
 async def get_points_in_window(entity_id: str, hours: float = 24.0) -> list[dict]:

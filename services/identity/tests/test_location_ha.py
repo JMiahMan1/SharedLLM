@@ -55,6 +55,36 @@ def test_update_user_location_stores_and_responds(test_client):
     assert loc_data["longitude"] == -122.4194
     assert loc_data["battery"] == 85
 
+
+def test_update_location_missing_secret_is_403_not_422(test_client):
+    # FastAPI required Header(...) returns 422 for a missing header; we need 403
+    # so clients treat it as auth failure, not a malformed request.
+    response = test_client.post(
+        "/api/users/default/location",
+        json={"latitude": 33.1, "longitude": -111.5, "accuracy": 10},
+    )
+    assert response.status_code == 403
+
+
+def test_location_accepts_numeric_user_id(test_client):
+    with Session(identity_main.engine) as session:
+        user = session.exec(select(User).where(User.username == "default")).first()
+        numeric_id = str(user.id)
+    response = test_client.post(
+        f"/api/users/{numeric_id}/location",
+        headers={"X-Internal-Secret": "test-secret"},
+        json={"latitude": 33.2, "longitude": -111.6, "accuracy": 5},
+    )
+    assert response.status_code == 200
+    # Stored under username key, retrievable by username
+    get_resp = test_client.get(
+        "/api/users/default/location",
+        headers={"X-Internal-Secret": "test-secret"},
+    )
+    assert get_resp.status_code == 200
+    assert get_resp.json()["latitude"] == 33.2
+
+
 @pytest.mark.asyncio
 async def test_forward_location_to_ha_calls_device_tracker_see():
     mock_resp = MagicMock()
