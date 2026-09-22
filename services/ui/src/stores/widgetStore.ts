@@ -76,6 +76,7 @@ interface WidgetState {
   setSortingMode: (widgetKey: WidgetKey, mode: DeviceSortMode) => Promise<void>;
   setQuickAssistantEnabled: (enabled: boolean) => Promise<void>;
   syncWithServer: () => Promise<void>;
+  replaceAllWidgets: (widgets: Record<string, UserWidgetSettings>) => void;
   getActiveWidgets: (capabilities: CapabilityPayload) => WidgetInstance[];
   getVisibleWidgets: () => WidgetInstance[];
   updateWidgetConfig: (id: string, config: Record<string, unknown>) => Promise<void>;
@@ -141,7 +142,7 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
     userWidgets: {},
     activeWidgets: [],
     quickAssistantEnabled: false,
-    mounting: false,
+    mounting: true,
     error: null,
     mountCapabilities: defaultCapabilities,
     visibleWidgets: [],
@@ -161,8 +162,17 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
       try {
         const response = await api.getWidgetSettings() as { widgets: UserWidgetSettings[]; quick_assistant_enabled: boolean };
         const widgetsMap: Record<string, UserWidgetSettings> = {};
-        for (const w of response.widgets) {
-          widgetsMap[w.widget_key] = w;
+        const serverWidgets = Array.isArray(response.widgets) ? response.widgets : [];
+        for (const w of serverWidgets) {
+          if (w && typeof w.widget_key === 'string') {
+            widgetsMap[w.widget_key] = w;
+          }
+        }
+        // Fill any registry keys the server omitted (e.g. pre-migration data).
+        for (const [index, def] of defaultWidgetDefs.entries()) {
+          if (!widgetsMap[def.key]) {
+            widgetsMap[def.key] = createDefaultSettings(def.key, index);
+          }
         }
         
         const activeWidgets: WidgetStateItem[] = defaultWidgetDefs.map((def, index) => {
@@ -217,9 +227,13 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
     set({ mountCapabilities: capabilities });
   },
 
+  replaceAllWidgets: (widgets: Record<string, UserWidgetSettings>) => {
+    set({ userWidgets: widgets });
+  },
+
   togglePin: async (widgetKey: WidgetKey) => {
-    const current = get().userWidgets[widgetKey];
-    if (!current) return;
+    const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
+    const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
     const updated = { ...current, is_pinned: !current.is_pinned, updated_at: Date.now() };
     set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
     try {
@@ -230,8 +244,8 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   updateOrder: async (widgetKey: WidgetKey, newIndex: number) => {
-    const current = get().userWidgets[widgetKey];
-    if (!current) return;
+    const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
+    const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
     const updated = { ...current, order_index: newIndex, updated_at: Date.now() };
     set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
     try {
@@ -242,8 +256,8 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   updateSize: async (widgetKey: WidgetKey, newSize: WidgetSize) => {
-    const current = get().userWidgets[widgetKey];
-    if (!current) return;
+    const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
+    const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
     const updated = { ...current, size: newSize, updated_at: Date.now() };
     const updatedActiveWidgets = get().activeWidgets.map((item) =>
       item.id === widgetKey ? { ...item, size: newSize } : item
@@ -265,8 +279,8 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   hideWidget: async (widgetKey: WidgetKey) => {
-    const current = get().userWidgets[widgetKey];
-    if (!current) return;
+    const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
+    const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
     const updated = { ...current, visibility: 'hidden' as const, is_pinned: false, updated_at: Date.now() };
     const updatedActiveWidgets = get().activeWidgets.map((item) =>
       item.id === widgetKey ? { ...item, isVisible: false } : item
@@ -288,8 +302,8 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   showWidget: async (widgetKey: WidgetKey) => {
-    const current = get().userWidgets[widgetKey];
-    if (!current) return;
+    const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
+    const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
     const updated = { ...current, visibility: 'visible' as const, updated_at: Date.now() };
     const updatedActiveWidgets = get().activeWidgets.map((item) =>
       item.id === widgetKey ? { ...item, isVisible: true } : item
@@ -311,8 +325,8 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   removeWidget: async (widgetKey: WidgetKey) => {
-    const current = get().userWidgets[widgetKey];
-    if (!current) return;
+    const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
+    const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
     const updated = { ...current, visibility: 'removed' as const, updated_at: Date.now() };
     const updatedActiveWidgets = get().activeWidgets.map((item) =>
       item.id === widgetKey ? { ...item, isVisible: false } : item
@@ -334,8 +348,8 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   setSortingMode: async (widgetKey: WidgetKey, mode: DeviceSortMode) => {
-    const current = get().userWidgets[widgetKey];
-    if (!current) return;
+    const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
+    const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
     const updated = { ...current, sort_mode: mode, updated_at: Date.now() };
     set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
     try {
@@ -346,11 +360,37 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   setQuickAssistantEnabled: async (enabled: boolean) => {
-    set({ quickAssistantEnabled: enabled });
+    const currentQA = get().userWidgets['quick_assistant'];
+    set({
+      quickAssistantEnabled: enabled,
+      userWidgets: currentQA
+        ? {
+            ...get().userWidgets,
+            quick_assistant: {
+              ...currentQA,
+              visibility: enabled ? 'visible' : 'hidden',
+              updated_at: Date.now(),
+            },
+          }
+        : get().userWidgets,
+    });
     try {
       await api.updateWidgetSettings('quick_assistant', { quick_assistant_enabled: enabled });
     } catch {
-      set({ quickAssistantEnabled: !enabled });
+      const prevQA = get().userWidgets['quick_assistant'];
+      set({
+        quickAssistantEnabled: !enabled,
+        userWidgets: prevQA
+          ? {
+              ...get().userWidgets,
+              quick_assistant: {
+                ...prevQA,
+                visibility: !enabled ? 'visible' : 'hidden',
+                updated_at: Date.now(),
+              },
+            }
+          : get().userWidgets,
+      });
     }
   },
 
@@ -410,8 +450,8 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   togglePinnedDevice: async (widgetKey: WidgetKey, deviceId: string) => {
-    const current = get().userWidgets[widgetKey];
-    if (!current) return;
+    const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
+    const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
     const pinned = current.pinned_devices || [];
     const updatedPinned = pinned.includes(deviceId)
       ? pinned.filter((id) => id !== deviceId)

@@ -3984,7 +3984,7 @@ async def proxy_list_timers(request: Request):
 async def proxy_add_timer(request: Request):
     body = await request.json()
     payload = {
-        "action": "add",
+        "action": body.get("action", "add"),
         "type": body.get("type", "timer"),
         "title": body.get("title"),
         "duration_str": body.get("duration_str"),
@@ -3992,6 +3992,8 @@ async def proxy_add_timer(request: Request):
         "recurrence": body.get("recurrence"),
         "target_device": body.get("target_device"),
     }
+    if body.get("id") is not None:
+        payload["id"] = body.get("id")
     return await _proxy_execution_with_identity(request, "/execute/timer", payload)
 
 
@@ -4004,6 +4006,8 @@ async def proxy_delete_timer(request: Request):
         "title": body.get("title"),
         "query": body.get("query"),
     }
+    if body.get("id") is not None:
+        payload["id"] = body.get("id")
     return await _proxy_execution_with_identity(request, "/execute/timer", payload)
 
 

@@ -259,14 +259,22 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   // Open modal & load detailed settings
   const handleOpenDetail = async (device: DeviceEntry) => {
     setSelectedDevice(device);
-    
-    // Set initial values from state/attributes
+
+    // Initialize sliders from actual device attributes when available
+    const attrs = device.attributes;
     if (device.domain === 'light') {
-      setBrightness(100);
+      const brightnessAttr = typeof attrs?.brightness === 'number' ? attrs.brightness : null;
+      setBrightness(
+        brightnessAttr != null
+          ? Math.max(1, Math.round(brightnessAttr / 2.55))
+          : isActive(device.state) ? 100 : 1
+      );
     } else if (device.domain === 'climate') {
-      setTemperature(72);
+      const tempAttr = typeof attrs?.temperature === 'number' ? attrs.temperature : null;
+      setTemperature(tempAttr != null ? Math.round(tempAttr) : 72);
     } else if (device.domain === 'media_player') {
-      setVolume(50);
+      const volAttr = typeof attrs?.volume_level === 'number' ? attrs.volume_level : null;
+      setVolume(volAttr != null ? Math.round(volAttr * 100) : 50);
     }
 
     // Filter assignments for this specific device

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   Database,
@@ -289,6 +290,19 @@ const Workspaces = () => {
     queryKey: ['workspaces'],
     queryFn: () => api.getWorkspaces(),
   });
+
+  // Deep-link from the dashboard Workspaces widget (?select=<id>)
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const select = searchParams.get('select');
+    if (!select || ideWs) return;
+    const ws = workspaces.find((w) => w.id === select);
+    if (ws) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- deep-link selection on load
+      setIdeWs(ws);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, workspaces, ideWs, setSearchParams]);
 
   const saveMutation = useMutation({
     mutationFn: (data: Partial<Workspace>) => {

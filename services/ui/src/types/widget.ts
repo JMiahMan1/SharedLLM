@@ -62,6 +62,7 @@ export interface DeviceEntry {
   state: string;
   room?: string;
   last_activated?: number;
+  attributes?: Record<string, number | string | boolean | string[] | null>;
 }
 
 export interface MediaState {

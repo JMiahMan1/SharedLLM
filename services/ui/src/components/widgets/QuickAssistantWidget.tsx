@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
+import type { IWidgetProps } from '../../types/widget';
 import toast from 'react-hot-toast';
 
 
@@ -11,7 +12,7 @@ interface ChatMessage {
   timestamp: number;
 }
 
-const QuickAssistantWidget = () => {
+const QuickAssistantWidget = ({ settingsButton }: IWidgetProps) => {
   const { user } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -50,12 +51,18 @@ const QuickAssistantWidget = () => {
         status: string;
         message?: string;
         response?: string;
+        choices?: Array<{ message?: { content?: string } }>;
       };
+
+      let content = resp.response || resp.message || resp.choices?.[0]?.message?.content || 'No response received';
+      if (resp.status === 'ERROR') {
+        content = resp.message || 'The assistant could not process that request.';
+      }
 
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
-        content: resp.response || resp.message || 'No response received',
+        content,
         timestamp: Date.now(),
       };
 
@@ -78,7 +85,8 @@ const QuickAssistantWidget = () => {
   if (messages.length === 0) {
     return (
       <div className="glass-card h-full p-5 relative flex flex-col">
-        <h3 className="font-bold text-white text-lg mb-4">Quick Assistant</h3>
+        <div className="absolute top-3 right-3 z-10">{settingsButton}</div>
+        <h3 className="font-bold text-white text-lg mb-4 pr-8">Quick Assistant</h3>
 
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
@@ -118,7 +126,8 @@ const QuickAssistantWidget = () => {
 
   return (
     <div className="glass-card h-full p-5 relative flex flex-col">
-      <h3 className="font-bold text-white text-lg mb-4">Quick Assistant</h3>
+      <div className="absolute top-3 right-3 z-10">{settingsButton}</div>
+      <h3 className="font-bold text-white text-lg mb-4 pr-8">Quick Assistant</h3>
 
       <div className="flex-1 overflow-y-auto space-y-3 mb-4 pr-1">
         {messages.map((msg) => (

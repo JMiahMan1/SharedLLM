@@ -114,8 +114,8 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
   }
 
   const clampPosition = (pos: ContextMenuPosition): ContextMenuPosition => ({
-    x: Math.min(pos.x, window.innerWidth - 200),
-    y: Math.min(pos.y, window.innerHeight - 300),
+    x: Math.max(0, Math.min(pos.x, window.innerWidth - 200)),
+    y: Math.max(0, Math.min(pos.y, window.innerHeight - 300)),
   });
 
   const displayPos = clampPosition(menuPos);
@@ -171,7 +171,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
           {props.widgetKey !== 'active_media' && (
             <button
               onClick={() => {
-                props.onToggleVisibility(props.widgetKey, !props.userSettings.is_pinned);
+                props.onToggleVisibility(props.widgetKey, props.userSettings.visibility !== 'visible');
                 setMenuOpen(false);
               }}
               className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors"

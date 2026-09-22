@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import toast from 'react-hot-toast';
 import {
   RotateCcw,
   Download,
@@ -11,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useWidgetStore, defaultWidgetDefs } from '../../stores/widgetStore';
 import type { UserWidgetSettings, WidgetVisibility } from '../../types/widget';
+import { api } from '../../services/api';
 
 interface DashboardSettingsPanelProps {
   isOpen: boolean;
@@ -121,7 +123,7 @@ const ExportSection = () => {
 };
 
 const ImportSection = () => {
-  const { userWidgets: currentWidgets, setQuickAssistantEnabled, syncWithServer } = useWidgetStore();
+  const { userWidgets: currentWidgets, setQuickAssistantEnabled, replaceAllWidgets } = useWidgetStore();
 
   const handleImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -135,17 +137,7 @@ const ImportSection = () => {
         throw new Error('Invalid format: missing widgets array');
       }
 
-      for (const w of data.widgets) {
-        if (!w.widget_key) continue;
-        if (typeof w.widget_key !== 'string') continue;
-
-        const current = currentWidgets[w.widget_key];
-        if (!current) continue;
-
-        await syncWithServer();
-      }
-
-      const widgetsMap: Record<string, UserWidgetSettings> = {};
+      const widgetsMap: Record<string, UserWidgetSettings> = { ...currentWidgets };
       for (const w of data.widgets) {
         if (!w.widget_key || typeof w.widget_key !== 'string') continue;
         const current = currentWidgets[w.widget_key];
@@ -163,17 +155,31 @@ const ImportSection = () => {
         };
       }
 
-      useWidgetStore.setState({ userWidgets: widgetsMap });
+      replaceAllWidgets(widgetsMap);
+
+      await Promise.all(
+        Object.values(widgetsMap).map((w) =>
+          api.updateWidgetSettings(w.widget_key as never, {
+            visibility: w.visibility,
+            order_index: w.order_index,
+            size: w.size,
+            is_pinned: w.is_pinned,
+            sort_mode: w.sort_mode,
+          }).catch(() => undefined)
+        )
+      );
 
       if (typeof data.quick_assistant_enabled === 'boolean') {
         setQuickAssistantEnabled(data.quick_assistant_enabled);
       }
 
-      await syncWithServer();
+      toast.success('Widget settings imported');
     } catch (err) {
       console.error('[DashboardSettings] Import failed:', err);
+      toast.error(err instanceof Error ? err.message : 'Import failed');
     }
-  }, [currentWidgets, setQuickAssistantEnabled, syncWithServer]);
+    e.target.value = '';
+  }, [currentWidgets, setQuickAssistantEnabled, replaceAllWidgets]);
 
   return (
     <label className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white glass-button cursor-pointer">
@@ -190,12 +196,16 @@ const ImportSection = () => {
 };
 
 const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps) => {
-  const { userWidgets, syncWithServer } = useWidgetStore();
+  const { userWidgets, replaceAllWidgets } = useWidgetStore();
 
   const handleReset = useCallback(async () => {
-    const hasChanges = Object.values(userWidgets).some(
-      (w) => w.visibility !== 'visible' || w.is_pinned || w.size !== 'medium'
-    );
+    const defaultByKey = new Map(defaultWidgetDefs.map((def) => [def.key, def]));
+    const hasChanges = Object.values(userWidgets).some((w) => {
+      const def = defaultByKey.get(w.widget_key as never);
+      const defaultSize = def?.defaultSize ?? 'medium';
+      const defaultVisibility = w.widget_key === 'quick_assistant' ? 'hidden' : 'visible';
+      return w.visibility !== defaultVisibility || w.is_pinned || w.size !== defaultSize;
+    });
     if (!hasChanges) return;
 
     const confirm = window.confirm('Reset all widget settings to defaults? This cannot be undone.');
@@ -216,9 +226,20 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
         updated_at: Date.now(),
       };
     }
-    useWidgetStore.setState({ userWidgets: resetWidgets });
-    await syncWithServer();
-  }, [userWidgets, syncWithServer]);
+    replaceAllWidgets(resetWidgets);
+    await Promise.all(
+      Object.values(resetWidgets).map((w) =>
+        api.updateWidgetSettings(w.widget_key as never, {
+          visibility: w.visibility,
+          order_index: w.order_index,
+          size: w.size,
+          is_pinned: w.is_pinned,
+          sort_mode: w.sort_mode,
+        }).catch(() => undefined)
+      )
+    );
+    toast.success('Widget settings reset to defaults');
+  }, [userWidgets, replaceAllWidgets]);
 
   if (!isOpen) return null;
 
