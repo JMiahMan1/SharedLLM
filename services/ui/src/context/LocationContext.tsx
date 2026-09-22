@@ -41,7 +41,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   });
 
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastFixRef = useRef<{ lat: number; lng: number; t: number } | null>(null);
   const watchIdRef = useRef<string | number | null>(null);
+  const startingRef = useRef(false);
+  const intervalRef = useRef<'stationary' | 'transit'>('stationary');
   const dailyStepsRef = useRef<number | null>(null);
   const lastSyncedStepsRef = useRef<number | null>(null);
   const stepsPluginReadyRef = useRef(false);
@@ -179,15 +182,29 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleLocationUpdate = useCallback(async (position: any) => {
     const { latitude, longitude, accuracy, speed } = position.coords;
-    const speedMph = speed ? speed * 2.237 : 0;
+    const fixTs = typeof position.timestamp === 'number' ? position.timestamp : Date.now();
+
+    // Many Android/iOS fixes omit `speed`. Derive it from consecutive fixes so
+    // the server's trip detector (>= 10 mph) actually fires during a drive.
+    let speedMps = typeof speed === 'number' && speed > 0 ? speed : 0;
+    if (speedMps === 0 && lastFixRef.current) {
+      const dtSec = (fixTs - lastFixRef.current.t) / 1000;
+      if (dtSec > 0.5 && dtSec < 60) {
+        speedMps = calculateDistance(lastFixRef.current.lat, lastFixRef.current.lng, latitude, longitude) / dtSec;
+      }
+    }
+    lastFixRef.current = { lat: latitude, lng: longitude, t: fixTs };
+
+    const speedMph = speedMps * 2.237;
     const newInterval = speedMph > SPEED_THRESHOLD_MPH ? 'transit' : 'stationary';
+    intervalRef.current = newInterval;
 
     setState((prev) => ({
       ...prev,
       latitude,
       longitude,
       accuracy: accuracy ?? null,
-      speed: speed ?? null,
+      speed: speedMps,
       timestamp: position.timestamp,
       isTracking: true,
       error: null,
@@ -204,87 +221,100 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }
 
     lastLocationRef.current = { lat: latitude, lng: longitude };
-    await syncToGateway(latitude, longitude, accuracy ?? null, speed ?? null);
+    await syncToGateway(latitude, longitude, accuracy ?? null, speedMps);
   }, [calculateDistance, syncToGateway, syncDailySteps]);
 
   const startTracking = useCallback(async () => {
+    // Guard against re-entry: startTracking identity changes must never stack watches
+    if (watchIdRef.current !== null || startingRef.current) return;
+    startingRef.current = true;
     setState((s) => ({ ...s, isTracking: true, error: null }));
     void storageSet('jarvis_location_tracking_enabled', 'true');
 
-    // Kick off hardware step counting in parallel with location tracking
-    void refreshDailySteps();
     try {
-      await StepCounter.startPolling();
-      if (!stepUpdateListenerRef.current) {
-        stepUpdateListenerRef.current = await StepCounter.addListener('stepUpdate', (reading) => {
-          if (reading.available && typeof reading.steps === 'number') {
-            dailyStepsRef.current = reading.steps;
-          }
-        });
+      // Kick off hardware step counting in parallel with location tracking
+      void refreshDailySteps();
+      try {
+        await StepCounter.startPolling();
+        if (!stepUpdateListenerRef.current) {
+          stepUpdateListenerRef.current = await StepCounter.addListener('stepUpdate', (reading) => {
+            if (reading.available && typeof reading.steps === 'number') {
+              const changed = dailyStepsRef.current !== reading.steps;
+              dailyStepsRef.current = reading.steps;
+              // Push new step counts immediately — don't wait for a GPS fix
+              if (changed) void syncDailySteps();
+            }
+          });
+        }
+      } catch {
+        // Web platform or sensor absent — GPS stride model remains the fallback
       }
-    } catch {
-      // Web platform or sensor absent — GPS stride model remains the fallback
-    }
 
-    if (!Capacitor.isNativePlatform()) {
-      if (!navigator.geolocation) {
-        setState((s) => ({ ...s, error: 'Geolocation is not supported by this browser', isTracking: false }));
+      if (!Capacitor.isNativePlatform()) {
+        if (!navigator.geolocation) {
+          setState((s) => ({ ...s, error: 'Geolocation is not supported by this browser', isTracking: false }));
+          return;
+        }
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const success = (pos: any) => {
+          handleLocationUpdate(pos);
+        };
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const error = (err: any) => {
+          setState((s) => ({ ...s, error: err.message, isTracking: false }));
+        };
+
+        const options = { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 };
+
+        navigator.geolocation.getCurrentPosition(success, error, options);
+        const watchId = navigator.geolocation.watchPosition(success, error, options);
+        watchIdRef.current = watchId;
         return;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const success = (pos: any) => {
-        handleLocationUpdate(pos);
-      };
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const error = (err: any) => {
-        setState((s) => ({ ...s, error: err.message, isTracking: false }));
-      };
-
-      const options = { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 };
-
-      navigator.geolocation.getCurrentPosition(success, error, options);
-      const watchId = navigator.geolocation.watchPosition(success, error, options);
-      watchIdRef.current = watchId;
-      return;
-    }
-
-    try {
-      const permission = await Geolocation.checkPermissions();
-      if (permission.location === 'denied') {
-        const request = await Geolocation.requestPermissions();
-        if (request.location === 'denied') {
-          setState((s) => ({ ...s, error: 'Location permission denied', isTracking: false }));
-          return;
+      try {
+        const permission = await Geolocation.checkPermissions();
+        if (permission.location === 'denied') {
+          const request = await Geolocation.requestPermissions();
+          if (request.location === 'denied') {
+            setState((s) => ({ ...s, error: 'Location permission denied', isTracking: false }));
+            return;
+          }
         }
+
+        const position = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await handleLocationUpdate(position as any);
+
+        // Sync steps immediately on tracking start
+        void syncDailySteps();
+
+        // Periodic step sync when stationary (treadmill etc.) — reads intervalRef,
+        // not state.interval, so the callback never goes stale
+        if (stationarySyncTimerRef.current === null) {
+          stationarySyncTimerRef.current = window.setInterval(() => {
+            if (intervalRef.current === 'stationary') {
+              void syncDailySteps();
+            }
+          }, DAILY_STEPS_SYNC_INTERVAL_MS);
+        }
+
+        watchIdRef.current = await Geolocation.watchPosition(
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+          (pos, err) => {
+            if (pos) handleLocationUpdate(pos);
+            if (err) setState((s) => ({ ...s, error: err.message }));
+          }
+        );
+      } catch (err) {
+        setState((s) => ({ ...s, error: err instanceof Error ? err.message : 'Failed to start location tracking', isTracking: false }));
       }
-
-      const position = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await handleLocationUpdate(position as any);
-
-      // Sync steps immediately on tracking start
-      void syncDailySteps();
-
-      // Periodic step sync when stationary (treadmill etc.)
-      stationarySyncTimerRef.current = window.setInterval(() => {
-        if (state.interval === 'stationary') {
-          void syncDailySteps();
-        }
-      }, DAILY_STEPS_SYNC_INTERVAL_MS);
-
-      watchIdRef.current = await Geolocation.watchPosition(
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-        (pos, err) => {
-          if (pos) handleLocationUpdate(pos);
-          if (err) setState((s) => ({ ...s, error: err.message }));
-        }
-      );
-    } catch (err) {
-      setState((s) => ({ ...s, error: err instanceof Error ? err.message : 'Failed to start location tracking', isTracking: false }));
+    } finally {
+      startingRef.current = false;
     }
-  }, [handleLocationUpdate, refreshDailySteps, syncDailySteps, state.interval]);
+  }, [handleLocationUpdate, refreshDailySteps, syncDailySteps]);
 
   const stopTracking = useCallback(() => {
     void storageSet('jarvis_location_tracking_enabled', 'false');
@@ -333,16 +363,17 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Refresh hardware step count when app returns to foreground
+  // Refresh hardware step count when app returns to foreground — and push it,
+  // otherwise the server only sees steps after the next GPS fix
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
-        void refreshDailySteps();
+        void refreshDailySteps().then(() => syncDailySteps());
       }
     };
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [refreshDailySteps]);
+  }, [refreshDailySteps, syncDailySteps]);
 
   const contextValue = useMemo(() => ({
     ...state,

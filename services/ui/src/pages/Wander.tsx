@@ -261,6 +261,29 @@ const Wander = () => {
     };
   }, [fetchTripsAndTelemetry, fetchStepsAndWorkouts, fetchTrends]);
 
+  // Live polling: trips and step counts should appear as events happen,
+  // not only when the user remembers to hit Refresh.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      void fetchTripsAndTelemetry();
+      void fetchStepsAndWorkouts();
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, [fetchTripsAndTelemetry, fetchStepsAndWorkouts]);
+
+  // Also refresh the moment the user comes back to the tab
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void fetchTripsAndTelemetry();
+        void fetchStepsAndWorkouts();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [fetchTripsAndTelemetry, fetchStepsAndWorkouts]);
+
   // Workout control handlers
   const [nowSeconds, setNowSeconds] = useState(() => Date.now() / 1000);
   useEffect(() => {

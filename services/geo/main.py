@@ -996,6 +996,69 @@ async def _resolve_place_name(lat: float, lon: float) -> str:
 _resolve_zone_name = _resolve_place_name
 
 
+async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -> dict | None:
+    """Persist an active trip as completed. Returns the completed trip, or None
+    if it was too short to keep (< 0.2 mi). Always clears the active-trip key
+    when the caller asks via the returned dict semantics — caller deletes."""
+    dist = float(trip.get("distance_miles", 0.0))
+    end_t = float(trip.get("last_moving_time", now_ts))
+    dur = max(60, int(end_t - float(trip.get("start_time", now_ts))))
+    if dist < 0.2:
+        return None
+    mpg = max(1.0, float(trip.get("mpg", 25.0)))
+    cpg = float(trip.get("cost_per_gallon", 3.65))
+    gallons = round(dist / mpg, 2)
+    cost = round(gallons * cpg, 2)
+    completed = {
+        "id": trip["id"],
+        "user_id": clean_user,
+        "user_name": trip.get("user_name", clean_user.title()),
+        "start_time": trip["start_time"],
+        "end_time": end_t,
+        "duration_seconds": dur,
+        "distance_miles": dist,
+        "top_speed_mph": trip.get("top_speed_mph", 0.0),
+        "activity_type": trip.get("activity_type", "driving"),
+        "start_location": trip.get("start_location"),
+        "end_location": trip.get("end_location"),
+        "vehicle_id": trip.get("vehicle_id"),
+        "vehicle_name": trip.get("vehicle_name"),
+        "fuel_type": trip.get("fuel_type", "gasoline"),
+        "mpg": mpg,
+        "cost_per_gallon": cpg,
+        "fuel_used_gal": gallons,
+        "trip_cost_usd": cost,
+        "status": "completed",
+        "created_at": trip["start_time"],
+        "updated_at": now_ts,
+        "updated_by": None,
+    }
+    await r.set(f"geo:trip:{completed['id']}", json.dumps(completed))
+    await r.zadd(f"geo:trips:user:{clean_user}", {completed["id"]: completed["start_time"]})
+    await r.zadd("geo:trips:all", {completed["id"]: completed["start_time"]})
+    return completed
+
+
+async def _estimate_speed_from_history(r, clean_user: str, lat: float, lon: float, ts: float) -> float | None:
+    """Derive m/s from the previous breadcrumb when the GPS fix omits speed.
+
+    record_point() writes the current fix to history *before* calling
+    process_trip_point(), so index 0 of a descending zrange is this fix and
+    index 1 is the previous one."""
+    try:
+        pts = await r.zrevrange(f"geo:history:{clean_user}", 0, 1)
+        if len(pts) < 2:
+            return None
+        prev = json.loads(pts[1])
+        dt = ts - float(prev.get("t", 0))
+        if dt <= 0 or dt > 120:
+            return None
+        dist_m = _haversine_distance(prev.get("lat", lat), prev.get("lon", lon), lat, lon)
+        return dist_m / dt
+    except Exception:
+        return None
+
+
 async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: float | None, timestamp: float):
     """Detect and record trips when speeds over 10 MPH are reached."""
     r = await get_redis()
@@ -1005,10 +1068,28 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
     clean_user = user_id.split(".")[-1].lower()
     ts = timestamp or time.time()
     spd_mps = speed_mps if (speed_mps is not None and speed_mps >= 0) else 0.0
+    if spd_mps == 0.0:
+        derived = await _estimate_speed_from_history(r, clean_user, lat, lon, ts)
+        if derived is not None:
+            spd_mps = derived
     spd_mph = spd_mps * 2.23694
 
     active_key = f"geo:active_trip:{clean_user}"
     active_raw = await r.get(active_key)
+
+    # 0. An active trip that went idle (>= 5 min) belongs to the previous
+    #    drive — finalize it before considering new movement, otherwise a
+    #    later drive keeps advancing the stale trip.
+    if active_raw:
+        try:
+            stale = json.loads(active_raw)
+            if ts - float(stale.get("last_moving_time", ts)) >= 300:
+                await _finalize_active_trip(r, clean_user, stale, ts)
+                await r.delete(active_key)
+                active_raw = None
+                log.info(f"[Geo] Finalized idle trip {stale.get('id')} for {clean_user}")
+        except Exception as e:
+            log.warning(f"[Geo] Error finalizing stale active trip: {e}")
 
     # 1. Start or advance a trip when speed >= 10 MPH
     if spd_mph >= 10.0:
@@ -1054,48 +1135,17 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
             except Exception as e:
                 log.warning(f"[Geo] Error updating active trip: {e}")
 
-    # 2. Finalize trip if stationary / slow for > 5 minutes (300 seconds)
+    # 2. Finalize trip if stationary / slow for > 5 minutes (300 seconds).
+    #    Step 0 above already handles the common case; this is the safety net
+    #    when the stale check couldn't parse the active record.
     elif active_raw:
         try:
             trip = json.loads(active_raw)
             idle_seconds = ts - float(trip.get("last_moving_time", ts))
             if idle_seconds >= 300:
-                dist = float(trip.get("distance_miles", 0.0))
-                end_t = float(trip.get("last_moving_time", ts))
-                dur = max(60, int(end_t - float(trip.get("start_time", ts))))
-                if dist >= 0.2:
-                    mpg = max(1.0, float(trip.get("mpg", 25.0)))
-                    cpg = float(trip.get("cost_per_gallon", 3.65))
-                    gallons = round(dist / mpg, 2)
-                    cost = round(gallons * cpg, 2)
-                    completed = {
-                        "id": trip["id"],
-                        "user_id": clean_user,
-                        "user_name": clean_user.title(),
-                        "start_time": trip["start_time"],
-                        "end_time": end_t,
-                        "duration_seconds": dur,
-                        "distance_miles": dist,
-                        "top_speed_mph": trip.get("top_speed_mph", 0.0),
-                        "activity_type": trip.get("activity_type", "driving"),
-                        "start_location": trip.get("start_location"),
-                        "end_location": trip.get("end_location"),
-                        "vehicle_id": trip.get("vehicle_id"),
-                        "vehicle_name": trip.get("vehicle_name"),
-                        "fuel_type": trip.get("fuel_type", "gasoline"),
-                        "mpg": mpg,
-                        "cost_per_gallon": cpg,
-                        "fuel_used_gal": gallons,
-                        "trip_cost_usd": cost,
-                        "status": "completed",
-                        "created_at": trip["start_time"],
-                        "updated_at": ts,
-                        "updated_by": None,
-                    }
-                    await r.set(f"geo:trip:{completed['id']}", json.dumps(completed))
-                    await r.zadd(f"geo:trips:user:{clean_user}", {completed["id"]: completed["start_time"]})
-                    await r.zadd("geo:trips:all", {completed["id"]: completed["start_time"]})
-                    log.info(f"[Geo] Completed trip {completed['id']} for {clean_user}: {dist} miles, {dur}s")
+                completed = await _finalize_active_trip(r, clean_user, trip, ts)
+                if completed:
+                    log.info(f"[Geo] Completed trip {completed['id']} for {clean_user}: {completed['distance_miles']} miles, {completed['duration_seconds']}s")
                 await r.delete(active_key)
         except Exception as e:
             log.warning(f"[Geo] Error finalizing active trip: {e}")
@@ -1128,8 +1178,19 @@ async def get_trips(user_id: str | None = None, limit: int = 50):
         if act_raw:
             try:
                 act = json.loads(act_raw)
-                dist = float(act.get("distance_miles", 0.0))
                 now_t = time.time()
+                # Idle >= 5 min: the drive is over, but no slow GPS fix ever
+                # arrived (client geofence filters stationary points). Finalize
+                # on read so Wander shows a completed trip instead of a
+                # permanently "in_progress" one.
+                if now_t - float(act.get("last_moving_time", now_t)) >= 300:
+                    act_user = act.get("user_id") or akey.split("geo:active_trip:")[-1]
+                    done = await _finalize_active_trip(r, act_user, act, now_t)
+                    await r.delete(akey)
+                    if done:
+                        trips.append(done)
+                    continue
+                dist = float(act.get("distance_miles", 0.0))
                 enriched = {
                     **act,
                     "end_time": now_t,
