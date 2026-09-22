@@ -15,8 +15,22 @@ async function packageOtaBundle(distDir) {
       }
     }
 
+    // The OTA updater identifies bundles solely by this SHA. An 'unknown' one
+    // can never be matched against what the device is running, so the app would
+    // re-download and restart forever. Fail the build instead.
+    if (!gitSha || gitSha === 'unknown') {
+      throw new Error(
+        'Cannot package OTA bundle: no git SHA available. ' +
+        'Pass GIT_SHA (docker build --build-arg GIT_SHA=$(git rev-parse --short HEAD)) ' +
+        'or build inside a git checkout.'
+      );
+    }
+
+    // package.json is the single source of truth for the app version.
+    const pkg = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8'));
+
     const versionMeta = {
-      version: '1.2.0',
+      version: pkg.version,
       git_sha: gitSha,
       build_timestamp: new Date().toISOString(),
       release_notes: 'Jarvis OS Over-The-Air Update',
@@ -51,7 +65,8 @@ async function packageOtaBundle(distDir) {
     fs.writeFileSync(zipPath, content);
     console.log(`[OTA] Packaged bundle.zip (${(content.length / 1024 / 1024).toFixed(2)} MB) for version ${gitSha}`);
   } catch (e) {
-    console.warn('[OTA] Warning: Failed to package OTA bundle.zip:', e);
+    console.error('[OTA] Failed to package OTA bundle.zip:', e.message);
+    throw e;
   }
 }
 

@@ -1,0 +1,15 @@
+# Host-built artifacts must never leak into the image — the build regenerates
+# them, and a stale dist/ or version.json makes the OTA bundle unidentifiable.
+node_modules/
+dist/
+android/
+test-results/
+playwright-report/
+.tmp/
+
+# Editor / OS noise
+.DS_Store
+*.log
+*.swp
+.vscode/
+.idea/

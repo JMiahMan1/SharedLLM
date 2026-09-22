@@ -199,22 +199,50 @@ if ssh $SSH_OPTS "$HOST" << EOF
     fi
     echo "[OK] Execution container (\$EXEC_CONTAINER) is running."
 
-    # Stage OTA web update bundle and version info for in-app mobile updates
+    # Stage OTA web update bundle and version info for in-app mobile updates.
+    #
+    # The advertised git_sha MUST be the SHA baked into the bundle we publish.
+    # Deriving it from the server's git HEAD instead lets metadata and bundle
+    # drift apart, and the mobile app then downloads, applies, restarts, and
+    # still sees itself as out of date — an endless reload loop.
     UI_CONTAINER=\$(docker ps --filter 'name=sharedllm_ui' --format '{{.Names}}' | head -1)
     if [ -n "\$UI_CONTAINER" ]; then
         echo "Staging OTA update bundle from \$UI_CONTAINER to data/app_updates..."
         mkdir -p data/app_updates
-        docker cp "\$UI_CONTAINER:/usr/share/nginx/html/bundle.zip" data/app_updates/bundle.zip 2>/dev/null || true
+        if ! docker cp "\$UI_CONTAINER:/usr/share/nginx/html/bundle.zip" data/app_updates/bundle.zip; then
+            echo "[FAIL] Could not copy bundle.zip out of \$UI_CONTAINER."
+            echo "       Refusing to publish stale OTA metadata (would reload-loop the mobile app)."
+            exit 1
+        fi
+        if ! docker cp "\$UI_CONTAINER:/usr/share/nginx/html/version.json" data/app_updates/.bundle_version.json; then
+            echo "[FAIL] Could not copy version.json out of \$UI_CONTAINER."
+            exit 1
+        fi
+
+        BUNDLE_SHA=\$(python3 -c "import json;print(json.load(open('data/app_updates/.bundle_version.json')).get('git_sha') or json.load(open('data/app_updates/.bundle_version.json')).get('gitSha') or 'unknown')")
+        BUNDLE_VERSION=\$(python3 -c "import json;print(json.load(open('data/app_updates/.bundle_version.json')).get('version') or '1.2.0')")
+        if [ "\$BUNDLE_SHA" = "unknown" ] || [ -z "\$BUNDLE_SHA" ]; then
+            echo "[FAIL] Built UI bundle has no git_sha (was GIT_SHA passed as a build arg?)."
+            echo "       Refusing to publish an unidentifiable bundle."
+            exit 1
+        fi
         CURRENT_SHA=\$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+        if [ "\$BUNDLE_SHA" != "\$CURRENT_SHA" ]; then
+            echo "[WARN] Deployed UI bundle is \$BUNDLE_SHA but the checkout is at \$CURRENT_SHA."
+            echo "       Publishing \$BUNDLE_SHA (what clients actually receive)."
+        fi
+
         BUILD_TIME=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
         cat << JSON_EOF > data/app_updates/version.json
 {
-  "version": "1.1.2",
-  "git_sha": "\$CURRENT_SHA",
+  "version": "\$BUNDLE_VERSION",
+  "git_sha": "\$BUNDLE_SHA",
   "build_timestamp": "\$BUILD_TIME",
   "release_notes": "Jarvis OS Over-The-Air Update"
 }
 JSON_EOF
+        rm -f data/app_updates/.bundle_version.json
+        echo "[OK] Published OTA bundle \$BUNDLE_SHA (version \$BUNDLE_VERSION)."
     fi
 EOF
 then

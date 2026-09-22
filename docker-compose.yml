@@ -457,7 +457,12 @@ services:
 
   ui:
     image: ghcr.io/jmiahman1/sharedllm-ui:latest
-    build: ./services/ui
+    build:
+      context: ./services/ui
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-ui}
     container_name: sharedllm_ui
     restart: unless-stopped
     mem_limit: 256m

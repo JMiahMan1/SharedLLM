@@ -15,8 +15,18 @@ RUN npm install --legacy-peer-deps
 
 COPY . .
 
-# Inject version info into a JSON file for the UI to consume
-RUN echo "{\"version\":\"${BUILD_DATE}\",\"gitSha\":\"${GIT_SHA}\"}" > public/version.json
+# Inject version info into a JSON file for the UI to consume.
+# Key name must be `git_sha` — the gateway's OTA endpoint and the mobile
+# updater both key off that. build.js overwrites this file after the Vite build
+# with the same schema; this copy is the fallback if packaging is skipped.
+RUN echo "{\"version\":\"1.2.0\",\"git_sha\":\"${GIT_SHA}\",\"build_timestamp\":\"${BUILD_DATE}\"}" > public/version.json
+
+# A bundle with no identifiable SHA cannot be offered as an OTA update (the app
+# could never tell whether it already has it), so refuse to build one.
+RUN if [ "${GIT_SHA}" = "unknown" ] || [ -z "${GIT_SHA}" ]; then \
+        echo "ERROR: GIT_SHA build arg is required (docker build --build-arg GIT_SHA=\$(git rev-parse --short HEAD))"; \
+        exit 1; \
+    fi
 
 # Set memory limit for Node to prevent bundler crashes
 ENV NODE_OPTIONS="--max-old-space-size=4096"

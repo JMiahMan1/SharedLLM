@@ -27,10 +27,100 @@ export interface CheckUpdateResult {
   releaseNotes?: string;
   apkUpdateAvailable: boolean;
   apkUrl?: string | null;
+  /** Set when an update was found but deliberately not applied (see reason). */
+  blockedReason?: string;
 }
 
 let isInitialized = false;
 let currentRuntimeSha: string = typeof __BUILD_SHA__ === 'string' ? __BUILD_SHA__ : 'unknown';
+
+// --- OTA loop guard --------------------------------------------------------
+// `CapacitorUpdater.set()` destroys the JS context and reloads the app
+// immediately — it does not merely stage a bundle for later. So an update check
+// that always reports "newer" becomes an endless download -> reload cycle. That
+// is exactly what happens when the SHA the server advertises is not the SHA
+// baked into the bundle it actually serves.
+//
+// We record the version we are about to install; on the next boot we check
+// whether we are really running it. If not, the server's metadata does not
+// describe its own bundle, so we blacklist that version instead of chasing it
+// forever.
+const PENDING_SHA_KEY = 'jarvis_ota_pending_sha';
+const REJECTED_SHAS_KEY = 'jarvis_ota_rejected_shas';
+const MAX_REJECTED_TRACKED = 10;
+
+function shaMatches(a: string, b: string): boolean {
+  if (!a || !b || a === 'unknown' || b === 'unknown') return false;
+  return a.startsWith(b) || b.startsWith(a);
+}
+
+function readLocal(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocal(key: string, value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // storage unavailable — the guard degrades to a no-op rather than throwing
+  }
+}
+
+function getRejectedShas(): string[] {
+  const raw = readLocal(REJECTED_SHAS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function rejectSha(sha: string): void {
+  if (!sha || sha === 'unknown') return;
+  const list = getRejectedShas().filter((s) => s !== sha);
+  list.push(sha);
+  writeLocal(REJECTED_SHAS_KEY, JSON.stringify(list.slice(-MAX_REJECTED_TRACKED)));
+}
+
+function isRejected(sha: string): boolean {
+  return getRejectedShas().some((s) => shaMatches(s, sha));
+}
+
+/**
+ * Compare the bundle we last tried to install against what is actually running.
+ * A mismatch means the server advertised a version its bundle does not contain,
+ * so we blacklist it and stop reload-looping on it.
+ */
+function reconcilePendingUpdate(): void {
+  const pending = readLocal(PENDING_SHA_KEY);
+  if (!pending) return;
+  writeLocal(PENDING_SHA_KEY, null);
+
+  if (shaMatches(currentRuntimeSha, pending)) {
+    console.log(`[AppUpdater] OTA bundle ${pending} applied successfully.`);
+    return;
+  }
+
+  rejectSha(pending);
+  console.warn(
+    `[AppUpdater] Server advertised OTA version "${pending}" but the bundle it served ` +
+    `reports "${currentRuntimeSha}". Ignoring that version to avoid a reload loop. ` +
+    `Fix on the server: republish so /api/app-updates/version matches bundle.zip's version.json.`,
+  );
+}
+
+/** Forget blacklisted versions so a manual check can retry from scratch. */
+export function resetUpdateGuard(): void {
+  writeLocal(REJECTED_SHAS_KEY, null);
+  writeLocal(PENDING_SHA_KEY, null);
+}
 
 /**
  * Get current runtime web SHA from version.json bundled with the web app.
@@ -60,6 +150,7 @@ export async function initAppUpdater(): Promise<void> {
   isInitialized = true;
 
   await getRunningVersion();
+  reconcilePendingUpdate();
 
   if (Capacitor.isNativePlatform()) {
     try {
@@ -82,7 +173,11 @@ export async function initAppUpdater(): Promise<void> {
 }
 
 /**
- * Check for updates against current server endpoint (local LAN or external domain)
+ * Check for updates against current server endpoint (local LAN or external domain).
+ *
+ * Silent (background) checks stage the bundle with `next()`, which activates on
+ * the next cold start. Only an explicit user-initiated check applies it with
+ * `set()`, which reloads the app there and then.
  */
 export async function checkForAppUpdates(options: { silent?: boolean } = {}): Promise<CheckUpdateResult> {
   const origin = getServerOrigin();
@@ -116,8 +211,7 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
       remote.git_sha &&
       remote.git_sha !== 'unknown' &&
       currentRuntimeSha !== 'unknown' &&
-      !currentRuntimeSha.startsWith(remote.git_sha) &&
-      !remote.git_sha.startsWith(currentRuntimeSha)
+      !shaMatches(currentRuntimeSha, remote.git_sha)
     );
 
     const effectiveBundleUrl = remote.bundle_url
@@ -132,7 +226,34 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
           : `${origin}${remote.apk_url.startsWith('/') ? '' : '/'}${remote.apk_url}`)
       : null;
 
+    const baseResult: CheckUpdateResult = {
+      hasUpdate: hasWebUpdate,
+      isDownloading: false,
+      currentGitSha: currentRuntimeSha,
+      remoteGitSha: remote.git_sha,
+      remoteVersion: remote.version,
+      releaseNotes: remote.release_notes,
+      apkUpdateAvailable,
+      apkUrl: effectiveApkUrl,
+    };
+
     if (hasWebUpdate && effectiveBundleUrl && Capacitor.isNativePlatform()) {
+      // A version we already installed once without the runtime SHA changing is
+      // mislabelled on the server. Applying it again would just reload forever.
+      if (isRejected(remote.git_sha)) {
+        const reason =
+          `Server version "${remote.git_sha}" does not match the bundle it serves ` +
+          `(still running "${currentRuntimeSha}" after installing it). Update skipped.`;
+        console.warn(`[AppUpdater] ${reason}`);
+        if (!options.silent) {
+          toast.error('Update on the server is mislabelled — skipping to avoid a restart loop.', {
+            id: 'app-update',
+            duration: 8000,
+          });
+        }
+        return { ...baseResult, blockedReason: reason };
+      }
+
       if (!options.silent) {
         toast.loading('Downloading update...', { id: 'app-update' });
       }
@@ -143,36 +264,28 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
         version: remote.git_sha,
       });
 
-      await CapacitorUpdater.set(bundle);
-      console.log('[AppUpdater] Update staged successfully!');
+      // Record the attempt BEFORE activating: set()/next() may tear down this
+      // JS context, and the next boot needs to know what we expected to get.
+      writeLocal(PENDING_SHA_KEY, remote.git_sha);
 
       if (options.silent) {
-        toast(
-          'Jarvis OS update ready! Restarting on next launch or tap to reload.',
-          {
-            icon: '🚀',
-            duration: 8000,
-            id: 'app-update-ready',
-            onClick: () => void CapacitorUpdater.reload(),
-          }
-        );
-      } else {
-        toast.success('Update ready! Restarting...', { id: 'app-update' });
-        setTimeout(() => {
-          void CapacitorUpdater.reload();
-        }, 1200);
+        // Background check: stage only. `next()` activates on the next cold
+        // start instead of yanking the app out from under the user.
+        await CapacitorUpdater.next({ id: bundle.id });
+        console.log('[AppUpdater] Update staged — will activate on next app launch.');
+        toast('Jarvis OS update ready — it will apply next time you open the app.', {
+          icon: '🚀',
+          duration: 6000,
+          id: 'app-update-ready',
+        });
+        return { ...baseResult, hasUpdate: true };
       }
 
-      return {
-        hasUpdate: true,
-        isDownloading: false,
-        currentGitSha: currentRuntimeSha,
-        remoteGitSha: remote.git_sha,
-        remoteVersion: remote.version,
-        releaseNotes: remote.release_notes,
-        apkUpdateAvailable,
-        apkUrl: effectiveApkUrl,
-      };
+      toast.success('Update ready! Restarting...', { id: 'app-update' });
+      // NOTE: set() destroys the JS context and reloads immediately; nothing
+      // after this line is guaranteed to run.
+      await CapacitorUpdater.set({ id: bundle.id });
+      return { ...baseResult, hasUpdate: true };
     }
 
     if (!options.silent) {
@@ -183,21 +296,15 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
       }
     }
 
-    return {
-      hasUpdate: hasWebUpdate,
-      isDownloading: false,
-      currentGitSha: currentRuntimeSha,
-      remoteGitSha: remote.git_sha,
-      remoteVersion: remote.version,
-      releaseNotes: remote.release_notes,
-      apkUpdateAvailable,
-      apkUrl: effectiveApkUrl,
-    };
+    return baseResult;
   } catch (err) {
     if (!options.silent) {
       console.error('[AppUpdater] Failed to check for updates:', err);
       toast.error('Unable to reach update server.', { id: 'app-update' });
     }
+    // A failed download must not leave a pending marker behind, or the next
+    // boot would wrongly blacklist a version we never actually installed.
+    writeLocal(PENDING_SHA_KEY, null);
     return {
       hasUpdate: false,
       isDownloading: false,
