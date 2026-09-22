@@ -28,11 +28,22 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
       const data = await api.listNotes();
       let loaded: NoteItem[] = [];
       if (typeof data === 'object' && data !== null) {
-        // /execute/note always wraps the listing in `detail.notes`
-        // (services/execution/handlers/note.py).
-        const resp = data as { status?: string; message?: string; detail?: { notes?: Array<{ title?: string; path?: string; modified?: string }> } };
-        if (Array.isArray(resp.detail?.notes)) {
-          loaded = resp.detail.notes.map((n, idx) => ({
+        // /execute/note wraps the listing in `detail.notes` on SUCCESS.
+        // On FAILURE, `detail` may be a traceback array — surface the message.
+        const resp = data as {
+          status?: string;
+          message?: string;
+          detail?: { notes?: Array<{ title?: string; path?: string; modified?: string }> } | unknown;
+        };
+        const notesList =
+          resp.detail && typeof resp.detail === 'object' && !Array.isArray(resp.detail)
+            ? (resp.detail as { notes?: unknown }).notes
+            : undefined;
+        if (resp.status && resp.status !== 'SUCCESS') {
+          throw new Error(resp.message || 'Failed to load notes');
+        }
+        if (Array.isArray(notesList)) {
+          loaded = (notesList as Array<{ title?: string; path?: string }>).map((n, idx) => ({
             id: n.path ?? n.title ?? `note-${idx}`,
             path: n.path,
             title: n.title ?? 'Untitled',
