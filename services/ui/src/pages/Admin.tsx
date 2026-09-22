@@ -147,6 +147,9 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
   audiobookshelf_api_key: String(user?.audiobookshelf_api_key ?? ''),
 });
 
+const normalizeServiceKey = (name: string): string =>
+  name.replace(/^sharedllm_/, '').replace(/_1$/, '');
+
 const Admin = () => {
   const queryClient = useQueryClient();
   const location = useLocation();
@@ -1617,10 +1620,17 @@ const Admin = () => {
 
                 <div className="space-y-3">
                    {systemHealth.services.map((service) => {
-                   const updateInfo = updatesData?.services.find(s => s.service === service.name);
-                   const hasUpdate = updateInfo?.has_update;
+                   const serviceKey = normalizeServiceKey(service.name);
+                   const updateInfo = updatesData?.services.find(
+                     s => normalizeServiceKey(s.service) === serviceKey
+                   );
+                   const hasUpdate = !!updateInfo?.has_update;
                    const checkError = updateInfo?.check_error;
-                   const isPulling = activePullService === service.name;
+                   // When the registry check fails we cannot prove "up to date" —
+                   // still offer one-click pull & restart after a CI push.
+                   const canForceUpdate = !hasUpdate && !!checkError && checkError !== 'no_image_tag';
+                   const isPulling = activePullService === service.name || activePullService === serviceKey;
+                   const showPullAndRestart = (hasUpdate || canForceUpdate) && !isPulling;
                    const pullStatus = isPulling ? pullStatusData : null;
 
                    return (
@@ -1725,15 +1735,15 @@ const Admin = () => {
                                    <Cloud size={12} /> {hasUpdate ? 'Update' : 'Pull'}
                                  </button>
                                )}
-                               {hasUpdate && !isPulling && (
-                                 <button
-                                   onClick={() => pullAndRestartMutation.mutate(service.name)}
-                                   disabled={pullAndRestartMutation.isPending}
-                                   className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest border-indigo-500/50 text-indigo-400"
-                                 >
-                                   <ArrowUpCircle size={12} /> Pull & Restart
-                                 </button>
-                               )}
+                                {showPullAndRestart && (
+                                  <button
+                                    onClick={() => pullAndRestartMutation.mutate(service.name)}
+                                    disabled={pullAndRestartMutation.isPending}
+                                    className="glass-button px-3 py-2 text-[9px] font-black uppercase tracking-widest border-indigo-500/50 text-indigo-400"
+                                  >
+                                    <ArrowUpCircle size={12} /> {pullAndRestartMutation.isPending ? 'Updating…' : 'Pull & Restart'}
+                                  </button>
+                                )}
                              </>
                            )}
                          </div>

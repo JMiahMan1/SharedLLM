@@ -73,13 +73,15 @@ const Header = () => {
     refetchInterval: 15000,
   });
 
-  // Periodic background check for service updates (admin accounts only)
+  // Periodic background check for service updates (admin accounts only).
+  // Same query key as Admin so pull/restart invalidations refresh the badge.
   useQuery({
-    queryKey: ['service-updates-background'],
+    queryKey: ['service-updates'],
     queryFn: () => api.checkAllUpdates(),
     enabled: !!user?.is_admin,
     refetchInterval: 300000, // 5 minutes
     refetchOnWindowFocus: false,
+    staleTime: 60000,
   });
 
   const queryClient = useQueryClient();

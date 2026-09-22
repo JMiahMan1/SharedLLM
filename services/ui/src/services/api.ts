@@ -1928,12 +1928,16 @@ export const api = {
   },
 
   async pullAndRestart(serviceName: string): Promise<PullAndRestartResult> {
-    const resp = await apiClient.post(`/api/admin/services/${serviceName}/pull-and-restart`);
+    // Pull + recreate can exceed the default 15s axios timeout (gateway allows 120s).
+    const resp = await apiClient.post(`/api/admin/services/${serviceName}/pull-and-restart`, undefined, {
+      timeout: 130000,
+    });
     return resp.data;
   },
 
   async checkAllUpdates(): Promise<CheckUpdatesResponse> {
-    const resp = await apiClient.get('/api/admin/services/updates');
+    // Registry digest checks can be slow (gateway allows 60s).
+    const resp = await apiClient.get('/api/admin/services/updates', { timeout: 90000 });
     return resp.data;
   },
 
