@@ -10,7 +10,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import { useWidgetStore, defaultWidgetDefs } from '../../stores/widgetStore';
-import type { UserWidgetSettings, WidgetVisibility } from '../types/widget';
+import type { UserWidgetSettings, WidgetVisibility } from '../../types/widget';
 
 interface DashboardSettingsPanelProps {
   isOpen: boolean;
@@ -83,9 +83,7 @@ const ExportSection = () => {
       exported_at: new Date().toISOString(),
       quick_assistant_enabled: quickAssistantEnabled,
       widgets: widgetRegistry.map((def) => ({
-        widget_key: def.key,
         ...((userWidgets[def.key]) ?? {
-          widget_key: def.key,
           visibility: 'visible',
           order_index: 0,
           size: def.defaultSize,
@@ -95,6 +93,8 @@ const ExportSection = () => {
           config: {},
           updated_at: 0,
         }),
+        // Last so the registry key always wins over whatever was persisted.
+        widget_key: def.key,
       })),
     };
 

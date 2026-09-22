@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { api } from '../services/api';
-import type { Trip, TripUpdatePayload, TripLocationsResponse, Workout, RoutePoint, StepsResponse, ActivityTrendsResponse } from '../types/api';
+import type { Trip, TripLocation, TripUpdatePayload, TripLocationsResponse, Workout, RoutePoint, StepsResponse, ActivityTrendsResponse } from '../types/api';
 import Modal from '../components/ui/Modal';
 import MiniRouteMap from '../components/geo/MiniRouteMap';
 import TripLocationsMap from '../components/geo/TripLocationsMap';
@@ -92,6 +92,21 @@ const ACTIVITY_ICONS: Record<string, typeof Footprints> = {
   mountain_biking: Mountain,
   dirtbiking: Zap,
   horseback_riding: PawPrint,
+};
+
+/**
+ * Render a trip endpoint: prefer the resolved place name, fall back to
+ * coordinates, then to a generic label. The geo service stores these as
+ * `latitude`/`longitude`, older records as `lat`/`lon`.
+ */
+const formatTripLocation = (loc: TripLocation | undefined, fallback: string): string => {
+  if (loc?.name) return loc.name;
+  const lat = loc?.latitude ?? loc?.lat;
+  const lon = loc?.longitude ?? loc?.lon;
+  if (typeof lat === 'number' && typeof lon === 'number') {
+    return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+  }
+  return loc?.zone || fallback;
 };
 
 const Wander = () => {
@@ -1087,19 +1102,13 @@ const Wander = () => {
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase font-semibold">Start</span>
                         <p className="text-xs font-medium text-slate-200 truncate">
-                          {trip.start_location?.name ||
-                            (trip.start_location?.latitude
-                              ? `${trip.start_location.latitude.toFixed(4)}, ${trip.start_location.longitude.toFixed(4)}`
-                              : 'Starting Point')}
+                          {formatTripLocation(trip.start_location, 'Starting Point')}
                         </p>
                       </div>
                       <div>
                         <span className="text-[10px] text-slate-500 uppercase font-semibold">Destination</span>
                         <p className="text-xs font-medium text-slate-200 truncate">
-                          {trip.end_location?.name ||
-                            (trip.end_location?.latitude
-                              ? `${trip.end_location.latitude.toFixed(4)}, ${trip.end_location.longitude.toFixed(4)}`
-                              : 'Destination')}
+                          {formatTripLocation(trip.end_location, 'Destination')}
                         </p>
                       </div>
                     </div>
@@ -1109,7 +1118,9 @@ const Wander = () => {
                   <div className="md:col-span-6 grid grid-cols-3 gap-2 text-center pt-2 md:pt-0 border-t md:border-t-0 md:border-l border-white/5 md:pl-4">
                     <div className="flex flex-col items-center justify-center p-2 rounded-lg bg-white/[0.02]">
                       <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                        <Lock size={10} className="text-slate-500" title="GPS Distance is locked and immutable" />
+                        <span title="GPS Distance is locked and immutable" className="inline-flex">
+                          <Lock size={10} className="text-slate-500" aria-label="GPS Distance is locked and immutable" />
+                        </span>
                         Distance
                       </span>
                       <span className="text-sm font-bold text-white mt-0.5">{trip.distance_miles} mi</span>

@@ -32,21 +32,24 @@ const TelemetryAdminPanel = () => {
     queryFn: () => api.getTelemetryEnrollments(),
   });
 
+  // `enabled` already gates these on activeEntity, so the query functions can
+  // assert it. The data endpoint wraps its rows in `{ entity_id, data }` —
+  // unwrap here so consumers get the array they expect.
   const { data: enrolledEntityData } = useQuery<TelemetryDataPoint[]>({
     queryKey: ['telemetry-data', activeEntity],
-    queryFn: () => activeEntity ? api.getTelemetryData(activeEntity, 24) : null,
+    queryFn: async () => (await api.getTelemetryData(activeEntity!, 24)).data ?? [],
     enabled: !!activeEntity,
   });
 
   const { data: enrolledEntitySummary } = useQuery<TelemetrySummary>({
     queryKey: ['telemetry-summary', activeEntity],
-    queryFn: () => activeEntity ? api.getTelemetrySummary(activeEntity) : null,
+    queryFn: () => api.getTelemetrySummary(activeEntity!),
     enabled: !!activeEntity,
   });
 
   const { data: enrolledEntityInsights } = useQuery<TelemetryInsights>({
     queryKey: ['telemetry-insights', activeEntity],
-    queryFn: () => activeEntity ? api.getTelemetryInsights(activeEntity) : null,
+    queryFn: () => api.getTelemetryInsights(activeEntity!),
     enabled: !!activeEntity,
   });
 

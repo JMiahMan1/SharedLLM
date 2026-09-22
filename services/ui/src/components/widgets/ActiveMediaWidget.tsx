@@ -116,20 +116,28 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
     if (!duration || !media?.entity_id) return;
-    const calculatePosition = (ev: PointerEvent) => {
-      const target = e.currentTarget as HTMLElement;
-      const rect = target.getBoundingClientRect();
-      const ratio = Math.max(0, Math.min(1, (ev.clientX - rect.left) / rect.width));
+    // Capture the track element now: React clears `currentTarget` once this
+    // handler returns, so the document-level drag listeners below cannot read
+    // it off the original event.
+    const track = e.currentTarget as HTMLElement;
+
+    const calculatePosition = (clientX: number) => {
+      const rect = track.getBoundingClientRect();
+      if (rect.width === 0) return;
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
       handleSeek(ratio * duration);
     };
-    calculatePosition(e);
-    const moveHandler = (ev: PointerEvent) => calculatePosition(ev);
+
+    calculatePosition(e.clientX);
+    const moveHandler = (ev: PointerEvent) => calculatePosition(ev.clientX);
     const upHandler = () => {
       document.removeEventListener('pointermove', moveHandler);
       document.removeEventListener('pointerup', upHandler);
+      document.removeEventListener('pointercancel', upHandler);
     };
     document.addEventListener('pointermove', moveHandler);
     document.addEventListener('pointerup', upHandler);
+    document.addEventListener('pointercancel', upHandler);
   }, [duration, media, handleSeek]);
 
   const progressPercent = duration > 0 ? (position / duration) * 100 : 0;

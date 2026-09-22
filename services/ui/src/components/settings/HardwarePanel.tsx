@@ -31,7 +31,7 @@ const HardwarePanel: React.FC = () => {
       setTesting(device);
       return api.esphomeList(device);
     },
-    onSuccess: (result) => {
+    onSuccess: (result, device) => {
       if (result.status === 'SUCCESS') {
         const detail = result.detail as { entities?: unknown[] } | undefined;
         toast.success(`${device}: ${detail?.entities?.length ?? 0} entities reachable`);

@@ -27,19 +27,14 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
       const data = await api.listNotes();
       let loaded: NoteItem[] = [];
       if (typeof data === 'object' && data !== null) {
+        // /execute/note always wraps the listing in `detail.notes`
+        // (services/execution/handlers/note.py).
         const resp = data as { status?: string; message?: string; detail?: { notes?: Array<{ title?: string; path?: string; modified?: string }> } };
         if (Array.isArray(resp.detail?.notes)) {
           loaded = resp.detail.notes.map((n, idx) => ({
             id: n.path ?? n.title ?? `note-${idx}`,
             title: n.title ?? 'Untitled',
             content: '',
-            category: 'Quick',
-          }));
-        } else if (Array.isArray(resp.notes)) {
-          loaded = resp.notes.map((n, idx) => ({
-            id: n.id ?? `note-${idx}`,
-            title: n.title ?? 'Untitled',
-            content: n.content ?? '',
             category: 'Quick',
           }));
         }

@@ -1262,6 +1262,10 @@ export const api = {
     entity_id?: string;
     command: string;
     volume_level?: number;
+    /** Seek target in seconds; only meaningful for command: 'seek'. */
+    position?: number;
+    /** Target mute state; only meaningful for command: 'volume_mute'. */
+    muted?: boolean;
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/execute/media/transport', payload);
     return resp.data;

@@ -272,12 +272,16 @@ export interface LightPattern {
   steps?: unknown[];
 }
 
+/** Mirrors TelemetryEnrollment in services/execution/schemas_telemetry.py. */
 export interface TelemetryEnrollment {
   entity_id: string;
   power_tracking: boolean;
   availability_tracking: boolean;
+  usage_tracking: boolean;
   offline_alert_threshold_minutes: number;
+  group_id?: string | null;
   power_attribute?: string | null;
+  enrolled_at?: string;
 }
 
 export interface IntercomSessionData {
@@ -749,10 +753,18 @@ export interface NetworkScanResponse {
   }>;
 }
 
+/**
+ * A trip endpoint as stored by the geo service
+ * (`{"name", "latitude", "longitude"}` — services/geo/main.py).
+ * `lat`/`lon`/`zone` are the legacy spelling, still tolerated on read.
+ */
 export interface TripLocation {
-  lat: number;
-  lon: number;
-  zone: string;
+  name?: string;
+  latitude?: number;
+  longitude?: number;
+  lat?: number;
+  lon?: number;
+  zone?: string;
 }
 
 export interface ResolvedTripLocation {
