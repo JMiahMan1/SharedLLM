@@ -22,10 +22,23 @@ def _default_db_url() -> str:
 
 
 DATABASE_URL = WORKSPACE_DATABASE_URL or _default_db_url()
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False, "timeout": 30} if "sqlite" in DATABASE_URL else {}
-)
+
+_is_sqlite = "sqlite" in DATABASE_URL
+_is_memory = _is_sqlite and ":memory:" in DATABASE_URL
+
+_engine_kwargs: dict = {}
+if _is_sqlite:
+    _engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+if _is_memory:
+    # An in-memory SQLite database lives inside a single connection, so the
+    # default pool hands every caller its own empty database — tables created
+    # by init_db() are then invisible to the next request ("no such table").
+    # StaticPool keeps one shared connection so the schema persists.
+    from sqlalchemy.pool import StaticPool
+
+    _engine_kwargs["poolclass"] = StaticPool
+
+engine = create_engine(DATABASE_URL, **_engine_kwargs)
 
 
 def init_db():

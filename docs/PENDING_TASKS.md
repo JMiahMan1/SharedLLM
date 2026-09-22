@@ -102,10 +102,14 @@ Source: `docs/RAVEN_CAPABILITY_GAP_ANALYSIS.md`, `docs/RAVEN_AUDIT_BLUEPRINT.md`
   the `catch` swallows the failure and renders an empty list.
 
 ### Test suite
-- 13 pre-existing failures unrelated to this sweep, several of which only fail
-  when the whole suite runs (they pass in isolation, so suspect shared state):
-  `tests/unit/test_workspace_env_enc.py` (6), `test/unit/test_workspace_sandbox.py` (2),
-  `test/test_workspace_security.py`, `test/test_storage_advanced.py`,
-  `test/test_gateway_timeouts.py`, `test/unit/test_gateway_auth.py`,
-  `services/tests/test_config_resolution.py`.
-- `tests/integration/test_workspace_lifecycle.py` errors on collection.
+Of the 13 pre-existing failures found in this sweep, 12 are fixed (see the
+`fix(tests)` commit). One remains:
+
+- `test/unit/test_gateway_auth.py::test_gateway_extracts_bearer_token` passes on
+  its own and when `test/` runs alone, but fails in a whole-suite run: the
+  gateway never calls `/api/resolve`, so the captured body is None. Some earlier
+  module changes the chat handler's branch (several gateway tests inject a
+  mocked `intent_engine` into `sys.modules` at module scope and never restore
+  it, which is the most likely candidate). Not run by any workflow that
+  triggers on this branch — `python-tests.yml` is limited to `main` /
+  `annoucements` and to `app/**` + `test/**` paths.

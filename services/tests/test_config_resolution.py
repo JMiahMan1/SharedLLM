@@ -22,7 +22,15 @@ class TestConfigBootstrap:
 
     def test_identity_svc_default(self, monkeypatch):
         """IDENTITY_SVC_URL defaults to container name."""
+        # services.config resolves this via _net_url(), which reads the
+        # network-aware "{NETWORK_MODE}_IDENTITY_SVC_URL" key — not the bare
+        # name. Clearing only the bare name left the prefixed value other test
+        # modules export in os.environ in play, so this asserted against their
+        # leak instead of the real default.
         monkeypatch.delenv("IDENTITY_SVC_URL", raising=False)
+        monkeypatch.delenv("NETWORK_MODE", raising=False)
+        for prefix in ("BRIDGE", "bridge", "HOST", "host"):
+            monkeypatch.delenv(f"{prefix}_IDENTITY_SVC_URL", raising=False)
         monkeypatch.setenv("INTERNAL_SECRET", "test-secret")
         monkeypatch.setenv("PYTEST_CURRENT_TEST", "1")
         if "services.config" in sys.modules:

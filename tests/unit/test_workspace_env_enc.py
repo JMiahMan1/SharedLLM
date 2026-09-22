@@ -9,13 +9,22 @@ import os
 
 # Must be set BEFORE importing the workspace_runtime app (it builds its engine
 # and reads FERNET_KEY / INTERNAL_SECRET at import time).
+from pathlib import Path
+
+# Scratch state goes in the workspace .tmp/ (see AGENTS.md), never /tmp.
+_TMP = Path(__file__).resolve().parents[2] / ".tmp"
+_TMP.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault(
-    "WORKSPACE_DATABASE_URL", "sqlite:////tmp/test_ws_env_enc_unit.db"
+    "WORKSPACE_DATABASE_URL", f"sqlite:///{_TMP / 'test_ws_env_enc_unit.db'}"
 )
 os.environ.setdefault(
     "FERNET_KEY", "g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14="
 )
-os.environ.setdefault("INTERNAL_SECRET", "test-secret-ci")
+# Not setdefault: other test modules set INTERNAL_SECRET at import time, and
+# whichever imported first would win, leaving these tests asserting against a
+# secret the app does not hold (403). The autouse fixture below pins it for
+# the duration of each test regardless of import order.
+os.environ["INTERNAL_SECRET"] = "test-secret-ci"
 
 import json
 
@@ -29,6 +38,12 @@ from services.workspace_runtime.models import Workspace
 
 pytestmark = pytest.mark.unit
 SECRET = "test-secret-ci"
+
+
+@pytest.fixture(autouse=True)
+def _pin_internal_secret(monkeypatch):
+    """Keep INTERNAL_SECRET stable no matter what else ran first."""
+    monkeypatch.setenv("INTERNAL_SECRET", SECRET)
 
 
 @pytest.fixture()

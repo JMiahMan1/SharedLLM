@@ -5986,7 +5986,7 @@ async def kill_mission(request: Request, id_or_slug: str):
     caller_ip = getattr(request.client, "host", "unknown")
     log.warning(
         f"[AUDIT] KILL requested for mission '{id_or_slug}' by user="
-        f"{creds.get('user')} from {caller_ip} at {datetime.utcnow().isoformat()}Z"
+        f"{creds.get('user')} from {caller_ip} at {datetime.now(timezone.utc).isoformat()}"
     )
 
     async with borrow_http_client() as client:
@@ -6055,7 +6055,7 @@ async def cancel_mission(request: Request, id_or_slug: str):
     caller_ip = getattr(request.client, "host", "unknown")
     log.warning(
         f"[AUDIT] CANCEL requested for mission '{id_or_slug}' by user="
-        f"{creds.get('user')} from {caller_ip} at {datetime.utcnow().isoformat()}Z"
+        f"{creds.get('user')} from {caller_ip} at {datetime.now(timezone.utc).isoformat()}"
     )
 
     async with borrow_http_client() as client:

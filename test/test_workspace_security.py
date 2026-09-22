@@ -1,7 +1,13 @@
 import os
+from pathlib import Path
+
+# Scratch state goes in the workspace .tmp/ (see AGENTS.md), never /tmp — which
+# is read-only in some sandboxes, leaving SQLite with no table to query.
+_TMP = Path(__file__).resolve().parents[1] / ".tmp"
+_TMP.mkdir(parents=True, exist_ok=True)
 
 os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["WORKSPACE_DATABASE_URL"] = "sqlite:////tmp/test_ws_security.db"
+os.environ["WORKSPACE_DATABASE_URL"] = f"sqlite:///{_TMP / 'test_ws_security.db'}"
 os.environ["FERNET_KEY"] = "g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14="
 
 import httpx
@@ -43,7 +49,7 @@ async def test_workspace_path_traversal_blocked(monkeypatch):
     })
 
     from pathlib import Path
-    tmp_root = Path("/tmp/test_ws_security_root")
+    tmp_root = _TMP / "test_ws_security_root"
     tmp_root.mkdir(exist_ok=True)
     monkeypatch.setattr(wsrt, "get_workspace_root", lambda: tmp_root)
 
