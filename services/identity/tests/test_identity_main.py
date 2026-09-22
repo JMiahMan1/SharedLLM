@@ -55,6 +55,17 @@ def test_health_check(test_client: TestClient):
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
 
+
+def test_coerce_profile_value_keeps_false_and_display_name():
+    from services.identity.main import _coerce_profile_value
+
+    assert _coerce_profile_value("skylight_enabled", False) is False
+    assert _coerce_profile_value("is_admin", False) is False
+    assert _coerce_profile_value("display_name", "   ") == ""
+    assert _coerce_profile_value("display_name", " Michele ") == "Michele"
+    assert _coerce_profile_value("ha_url", "  ") is None
+    assert _coerce_profile_value("ha_token", " tok ") == "tok"
+
 def test_identity_resolve(test_client: TestClient):
     payload = {"rag_user": "default"}
     resp = test_client.post("/api/resolve", json=payload, headers={"X-Internal-Secret": "test-secret"})
