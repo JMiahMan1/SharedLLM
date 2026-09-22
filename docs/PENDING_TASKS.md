@@ -52,7 +52,7 @@ Source: `services/storage/ARTIFACT_IMPLEMENTATION_PLAN.md` (design spec: `ARTIFA
 - Live verification: upload TTS artifact → stream → fill to >90% → confirm warn → exceed.
 
 ## UI Stabilization (`services/ui`) — open items
-Source: `docs/ui_stabilization_plan.md`
+Source: superseded plan doc removed 2026-09-21; items still open
 
 - Enhance E2E Playwright test coverage.
 - Monitor GHA pipelines after push.
@@ -67,3 +67,45 @@ Source: `docs/RAVEN_CAPABILITY_GAP_ANALYSIS.md`, `docs/RAVEN_AUDIT_BLUEPRINT.md`
 - No explicit dependency-install awareness — must discover and install deps manually
 - Loop detection escalates but doesn't auto-diagnose — Raven still needs to figure out fixes
 - No cross-workspace shared library/template reuse — each mission starts from scratch
+
+## Open items found during the 2026-09-21 bug sweep
+
+### Mobile OTA / app updates
+- Live server metadata and bundle are still out of sync until the next deploy
+  (`/api/app-updates/version` advertised `c2946120` while `bundle.zip` contained
+  `2c8dc477`). Redeploy so the two converge; the gateway now derives the
+  advertised SHA from the bundle, so this should not recur.
+- `services/ui/android/app/src/main/assets/public/bundle.zip` ships a full copy
+  of the web bundle *inside* the APK's own assets. Harmless but roughly doubles
+  APK size — exclude it from `npx cap sync`.
+
+### Media player
+- Selecting a remote Music Assistant speaker (`ma:` target) still calls
+  `maPlayer.connect()`, which starts the in-browser Sendspin audio player purely
+  to send a JSON-RPC command. Remote speakers should be driven without the
+  browser becoming a player; the MA logic belongs behind
+  `services/execution/handlers/mass_client.py`, not a new gateway endpoint.
+- The device picker highlights "Web Player" based on `!selectedTarget` rather
+  than `localMode`, so it looks active when no device has been chosen yet.
+
+### Voice
+- `POST /execute/voice/command` (`services/execution/main.py`) falls off the end
+  of the function when a transcript matches neither the light nor the media
+  keyword lists, returning `null` to the caller instead of a FAILURE result.
+
+### Frontend typing
+- `services/ui/src/ma-stream-test.ts` still has ~24 TypeScript strictness errors
+  (implicit `any`, possibly-null `e.target`, private `core` access). It is a
+  dev-only debug harness served at `/ma-stream-test.html`; the crash-level bug
+  (`stopHeartbeat` out of scope) is fixed, the rest is cleanup.
+- `QuickNotesWidget` computes an `error` state that is never set to a message —
+  the `catch` swallows the failure and renders an empty list.
+
+### Test suite
+- 13 pre-existing failures unrelated to this sweep, several of which only fail
+  when the whole suite runs (they pass in isolation, so suspect shared state):
+  `tests/unit/test_workspace_env_enc.py` (6), `test/unit/test_workspace_sandbox.py` (2),
+  `test/test_workspace_security.py`, `test/test_storage_advanced.py`,
+  `test/test_gateway_timeouts.py`, `test/unit/test_gateway_auth.py`,
+  `services/tests/test_config_resolution.py`.
+- `tests/integration/test_workspace_lifecycle.py` errors on collection.

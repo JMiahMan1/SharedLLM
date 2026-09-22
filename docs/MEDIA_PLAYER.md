@@ -335,7 +335,46 @@ All remote casting requests are sent through `POST /execute/media/play`:
 
 ---
 
-### 3.5 State Syncing & Polling
+### 3.5 Transport Commands
+
+Playback control (as opposed to starting playback) goes through
+`POST /execute/media/transport`, validated by `MediaTransportRequest` in
+`services/execution/schemas.py`:
+
+```json
+{
+  "user_context": { "user": "default" },
+  "entity_id": "media_player.mass_kitchen_speaker",
+  "command": "seek",
+  "position": 42.5
+}
+```
+
+| Command | Extra field | Home Assistant service |
+| --- | --- | --- |
+| `play`, `resume` | — | `media_play` |
+| `pause` | — | `media_pause` |
+| `stop` | — | `media_stop` |
+| `next`, `previous` | — | `media_next_track`, `media_previous_track` |
+| `seek` | `position` (seconds) | `media_seek` (`seek_position`) |
+| `volume_set`, `volume_up`, `volume_down` | `volume_level` (0.0–1.0) | `volume_set` |
+| `volume_mute`, `mute` | `muted` (bool) | `volume_mute` (`is_volume_muted`) |
+| `home`, `back`, `power_off` | — | `remote.send_command` |
+
+Notes:
+
+* `command` is a `Literal`, so an unlisted value is rejected with HTTP 422
+  before it reaches Home Assistant. When adding a UI control, extend the schema
+  and the `button_map` in `services/execution/handlers/media.py` together —
+  otherwise the call fails silently at the call site.
+* TV platforms (Android TV, webOS, Samsung, Roku) are detected first and routed
+  to their brand-specific handlers rather than the generic map.
+* For `local` / `web_player` targets the command never reaches Home Assistant;
+  `MediaPlaybackService.transport` updates the stored playback state instead.
+
+---
+
+### 3.6 State Syncing & Polling
 
 The frontend tracks the active playback state using two mechanisms:
 
