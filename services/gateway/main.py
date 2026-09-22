@@ -3701,6 +3701,58 @@ async def proxy_update_setting(key: str, request: Request):
         return await _proxy_json_response(resp)
 
 
+@app.get("/api/widgets/settings")
+async def proxy_get_widget_settings(request: Request):
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/widgets/settings",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.put("/api/widgets/settings/{widget_key}")
+async def proxy_update_widget_setting(widget_key: str, request: Request):
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.put(
+            f"{IDENTITY_SVC}/api/widgets/settings/{widget_key}",
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.get("/api/users/devices")
+async def proxy_list_user_devices(request: Request):
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/users/devices",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.post("/api/users/devices")
+async def proxy_add_user_device(request: Request):
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/users/devices",
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.post("/api/settings")
 async def proxy_update_settings_bulk(request: Request):
     body = await request.json()
