@@ -102,3 +102,39 @@ def test_openai_and_ollama_non_streaming_response():
     msg_ol = data_ol["message"]
     assert msg_ol["content"] == "Final answer"
     assert msg_ol["thinking"] == "Internal reason"
+
+
+def test_non_streaming_response_splits_embedded_reasoning():
+    """A caller forwarding raw model output must not get <think> in the answer.
+
+    The telemetry analyzer and the voice assistant render `content` verbatim, so
+    reasoning left inline would be shown (and spoken) as the reply itself.
+    """
+    raw = "<think>The lamp draws 9W idle</think>Your lamp idles at 9 watts."
+
+    resp_ai = _make_openai_response(raw, "jarvis")
+    msg_ai = json.loads(resp_ai.body.decode("utf-8"))["choices"][0]["message"]
+    assert msg_ai["content"] == "Your lamp idles at 9 watts."
+    assert msg_ai["reasoning_content"] == "The lamp draws 9W idle"
+
+    resp_ol = _make_ollama_response(raw, "jarvis")
+    msg_ol = json.loads(resp_ol.body.decode("utf-8"))["message"]
+    assert msg_ol["content"] == "Your lamp idles at 9 watts."
+    assert msg_ol["thinking"] == "The lamp draws 9W idle"
+
+
+def test_non_streaming_response_keeps_thinking_only_answer():
+    """A model that emits only reasoning must still produce a non-empty reply."""
+    raw = "<think>Only reasoning, no answer</think>"
+
+    resp_ol = _make_ollama_response(raw, "jarvis")
+    msg_ol = json.loads(resp_ol.body.decode("utf-8"))["message"]
+    assert msg_ol["content"].strip()
+
+
+def test_non_streaming_response_preserves_explicit_thinking():
+    """An already-split answer is passed through untouched."""
+    resp_ol = _make_ollama_response("Answer", "jarvis", thinking="Given reason")
+    msg_ol = json.loads(resp_ol.body.decode("utf-8"))["message"]
+    assert msg_ol["content"] == "Answer"
+    assert msg_ol["thinking"] == "Given reason"

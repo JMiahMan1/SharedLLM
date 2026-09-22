@@ -9,6 +9,7 @@ import threading
 import time
 import traceback
 import uuid
+import zipfile
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
 from pathlib import Path
@@ -54,6 +55,7 @@ from services.gateway.llm_providers import (
     BaseLLMProvider,
     OllamaProvider,
     OpenRouterProvider,
+    extract_thinking_and_content,
     get_provider,
     strip_thinking_blocks,
 )
@@ -97,9 +99,29 @@ QWEN_GROUNDING_INSTRUCTION = """
 6. **TERMINAL EXECUTION**: Continue until the task is verified fixed. If you stall, you are in violation of protocol.
 """
 
+def _split_reasoning(message: str, thinking: str | None) -> tuple[str, str | None]:
+    """Keep model reasoning out of the user-visible answer.
+
+    Most paths hand us an answer the orchestrator already cleaned, but any
+    caller that forwards raw model output (e.g. the telemetry analyzer calling
+    /v1/chat/completions) would otherwise surface `<think>` blocks as the reply
+    itself. Split here so every non-streaming response is clean, and the
+    reasoning is still available in its own field.
+    """
+    if thinking or not message:
+        return message, thinking
+    extracted, content = extract_thinking_and_content(message)
+    if not extracted:
+        return message, thinking
+    # Never return an empty answer just because the model only produced
+    # reasoning — the original text is more useful than nothing.
+    return (content or message), (extracted or None)
+
+
 def _make_ollama_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an Ollama-compatible response (streaming or non-streaming)."""
     if not stream:
+        message, thinking = _split_reasoning(message, thinking)
         msg: dict[str, Any] = {"role": "assistant", "content": message}
         if thinking:
             msg["thinking"] = thinking
@@ -146,6 +168,7 @@ def _make_ollama_chunk(content: str, model: str, done: bool = False, thinking: s
 def _make_openai_response(message: str, model: str, intent: str | None = None, debug_context: str | None = None, stream: bool = False, thinking: str | None = None):
     """Helper to create an OpenAI-compatible response (streaming or non-streaming)."""
     if not stream:
+        message, thinking = _split_reasoning(message, thinking)
         msg: dict[str, Any] = {"role": "assistant", "content": message}
         if thinking:
             msg["reasoning_content"] = thinking
@@ -1920,6 +1943,73 @@ async def _resolve_identity_from_request(request: Request, body: dict | None = N
     return await resolve_identity(_auth_body_from_request(request, body))
 
 
+async def _resolve_ma_credentials(request: Request, body: dict | None = None) -> tuple[str, str]:
+    """Resolve the caller's Music Assistant base URL and token."""
+    try:
+        creds = await _resolve_identity_from_request(request, body)
+        if not isinstance(creds, dict):
+            creds = creds.model_dump() if hasattr(creds, "model_dump") else (
+                creds.dict() if hasattr(creds, "dict") else dict(creds)
+            )
+    except HTTPException as e:
+        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}") from e
+    return creds.get("mass_url") or "", creds.get("mass_token") or ""
+
+
+async def _ma_rpc(
+    mass_url: str,
+    mass_token: str,
+    command: str,
+    args: dict[str, Any] | None = None,
+    *,
+    message_id: str | None = None,
+    timeout: float = 10.0,
+) -> Any:
+    """Send one JSON-RPC command to Music Assistant's HTTP `/api` endpoint.
+
+    Single place that knows how MA's REST JSON-RPC is shaped, so the player
+    picker, the command relay, the stream path and the debug endpoints all
+    agree on URL normalization, auth and response unwrapping.
+
+    Returns the unwrapped `result` (MA v2 answers with the payload directly;
+    older builds wrap it in `{"result": ...}`).
+    """
+    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
+    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
+    headers = {"Content-Type": "application/json"}
+    if mass_token:
+        headers["Authorization"] = f"Bearer {mass_token}"
+
+    payload: dict[str, Any] = {
+        "message_id": message_id or uuid.uuid4().hex,
+        "command": command,
+    }
+    if args:
+        payload["args"] = args
+
+    async with shared_http_client() as client:
+        resp = await client.post(
+            ma_api,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=timeout),
+        )
+        if resp.status != 200:
+            detail = await resp.text()
+            raise HTTPException(
+                status_code=502,
+                detail=f"Music Assistant returned HTTP {resp.status}: {detail[:200]}",
+            )
+        data = await resp.json(content_type=None)
+
+    if isinstance(data, dict) and "result" in data:
+        return data["result"]
+    return data
+
+
+
 async def _proxy_execution_with_identity(
     request: Request,
     endpoint: str,
@@ -3336,7 +3426,6 @@ async def chat_handler(request: Request, background_tasks=None):
                     break
                 if job["status"] == JobStatus.COMPLETED:
                     ans = job["result"]
-                    from services.gateway.llm_providers import extract_thinking_and_content
                     thinking = ""
                     clean_ans = str(ans) if ans is not None else ""
                     if isinstance(ans, str):
@@ -3393,7 +3482,16 @@ async def stream_chat_job(job_id: str):
 
                 if status == JobStatus.COMPLETED:
                     result = job["result"]
-                    yield f"data: {json.dumps({'status': 'COMPLETED', 'result': result})}\n\n"
+                    # Voice and UI clients render this verbatim (voice speaks it
+                    # aloud), so the model's reasoning must not ride along in
+                    # the answer. Every other completion path already splits it.
+                    thinking = ""
+                    if isinstance(result, str):
+                        thinking, result = extract_thinking_and_content(result)
+                    payload = {'status': 'COMPLETED', 'result': result}
+                    if thinking:
+                        payload['thinking'] = thinking
+                    yield f"data: {json.dumps(payload)}\n\n"
                     break
 
                 if status == JobStatus.FAILED:
@@ -7408,19 +7506,60 @@ async def get_geo_activity_trends(request: Request, user_id: str | None = None, 
 # Mobile App Over-The-Air (OTA) & APK In-App Updates
 # ---------------------------------------------------------------------------
 APP_UPDATES_DIR = Path(os.getenv("APP_UPDATES_DIR", "/app/data/app_updates"))
-APP_UPDATES_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    APP_UPDATES_DIR.mkdir(parents=True, exist_ok=True)
+except OSError as _e:
+    # Importing this module must not fail just because the container data path
+    # is absent (tests and tooling import it outside Docker). The OTA endpoints
+    # already treat a missing directory as "nothing published".
+    log.warning(f"[AppUpdates] Could not create {APP_UPDATES_DIR}: {_e}")
 UI_SVC = os.getenv("UI_SVC", "http://ui:8008")
+
+
+def _normalize_version_meta(raw: dict) -> dict:
+    """Accept both `git_sha` (build.js / publish API) and `gitSha` (Docker build arg)."""
+    if not isinstance(raw, dict):
+        return {}
+    meta = dict(raw)
+    if not meta.get("git_sha") and meta.get("gitSha"):
+        meta["git_sha"] = meta["gitSha"]
+    return meta
+
+
+def _read_bundle_version(bundle_path: Path) -> dict:
+    """Read version.json out of an OTA bundle.zip.
+
+    The SHA a client ends up running is whatever is inside the bundle, so the
+    bundle is the only trustworthy source for the version we advertise. Serving
+    metadata that disagrees with the bundle makes the mobile app download,
+    apply, restart, and find itself still "out of date" — an endless reload
+    loop. See services/ui/src/lib/appUpdater.ts.
+    """
+    try:
+        with zipfile.ZipFile(bundle_path) as zf:
+            for name in ("version.json", "./version.json"):
+                try:
+                    return _normalize_version_meta(json.loads(zf.read(name)))
+                except KeyError:
+                    continue
+            # Some packagers nest the app under a single top-level folder.
+            for info in zf.infolist():
+                if info.filename.count("/") == 1 and info.filename.endswith("/version.json"):
+                    return _normalize_version_meta(json.loads(zf.read(info.filename)))
+    except Exception as e:
+        log.warning(f"[AppUpdates] Could not read version.json from {bundle_path}: {e}")
+    return {}
 
 
 @app.get("/api/app-updates/version")
 async def get_app_update_version(request: Request):
     """Return version and bundle info for OTA live updates and native APK updates."""
-    # 1. Try to read version metadata from local disk first
+    # 1. Published metadata on local disk (release notes, apk_version_code, ...)
     local_version_file = APP_UPDATES_DIR / "version.json"
     version_data = {}
     if local_version_file.exists():
         try:
-            version_data = json.loads(local_version_file.read_text())
+            version_data = _normalize_version_meta(json.loads(local_version_file.read_text()))
         except Exception as e:
             log.warning(f"[AppUpdates] Failed reading local version.json: {e}")
 
@@ -7430,7 +7569,7 @@ async def get_app_update_version(request: Request):
             async with shared_http_client() as client:
                 resp = await client.get(f"{UI_SVC}/version.json", timeout=aiohttp.ClientTimeout(total=3.0))
                 if resp.status == 200:
-                    version_data = await resp.json()
+                    version_data = _normalize_version_meta(await resp.json(content_type=None))
         except Exception:
             pass
 
@@ -7442,6 +7581,44 @@ async def get_app_update_version(request: Request):
             "build_timestamp": datetime.now(timezone.utc).isoformat(),
             "release_notes": "Jarvis OS Over-The-Air Update",
         }
+
+    # 4. The bundle we will actually serve is authoritative for git_sha. The
+    #    published metadata is written by the deploy script from the server's
+    #    git HEAD, which drifts from the SHA baked into the image being served.
+    local_bundle = APP_UPDATES_DIR / "bundle.zip"
+    bundle_available = local_bundle.exists()
+    bundle_meta = _read_bundle_version(local_bundle) if bundle_available else {}
+
+    if not bundle_available:
+        # No staged bundle — the gateway proxies the UI container's copy, so the
+        # UI container's own version.json describes what clients would receive.
+        try:
+            async with shared_http_client() as client:
+                head = await client.head(f"{UI_SVC}/bundle.zip", timeout=aiohttp.ClientTimeout(total=3.0))
+                bundle_available = head.status == 200
+                if bundle_available:
+                    vresp = await client.get(
+                        f"{UI_SVC}/version.json", timeout=aiohttp.ClientTimeout(total=3.0)
+                    )
+                    if vresp.status == 200:
+                        bundle_meta = _normalize_version_meta(await vresp.json(content_type=None))
+        except Exception as e:
+            log.warning(f"[AppUpdates] UI service bundle unavailable: {e}")
+            bundle_available = False
+
+    effective_sha = bundle_meta.get("git_sha") or "unknown"
+    if bundle_available and effective_sha == "unknown":
+        # We cannot prove what the bundle contains; advertising a guessed SHA is
+        # what causes reload loops, so withhold the bundle instead.
+        log.warning("[AppUpdates] Bundle present but its version.json is unreadable; not offering OTA.")
+        bundle_available = False
+
+    metadata_sha = version_data.get("git_sha", "unknown")
+    if bundle_available and metadata_sha not in ("unknown", effective_sha):
+        log.warning(
+            f"[AppUpdates] Published metadata git_sha={metadata_sha} disagrees with "
+            f"bundle git_sha={effective_sha}; advertising the bundle's SHA."
+        )
 
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
@@ -7455,12 +7632,12 @@ async def get_app_update_version(request: Request):
     apk_size = apk_file.stat().st_size if apk_available else 0
 
     return {
-        "version": version_data.get("version", "1.2.0"),
-        "git_sha": version_data.get("git_sha", "unknown"),
-        "build_timestamp": version_data.get("build_timestamp"),
+        "version": bundle_meta.get("version") or version_data.get("version", "1.2.0"),
+        "git_sha": effective_sha,
+        "build_timestamp": bundle_meta.get("build_timestamp") or version_data.get("build_timestamp"),
         "release_notes": version_data.get("release_notes", "Jarvis OS live update"),
         "bundle_url": bundle_url,
-        "bundle_available": True,
+        "bundle_available": bundle_available,
         "apk_available": apk_available,
         "apk_url": f"{base_url}/api/app-updates/app-debug.apk" if apk_available else None,
         "apk_size_bytes": apk_size,
@@ -8388,95 +8565,32 @@ async def sendspin_proxy(websocket: WebSocket):
 
 @app.get("/api/ma-jsonrpc/debug/players")
 async def debug_list_players(request: Request):
-    """Debug endpoint: list all MA players."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-        if not isinstance(creds, dict):
-            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
-        mass_url = creds.get("mass_url") or ""
-        mass_token = creds.get("mass_token") or ""
-    except HTTPException as e:
-        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}") from e
-
+    """Debug endpoint: list all MA players (raw MA payload)."""
+    mass_url, mass_token = await _resolve_ma_credentials(request)
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
-
-    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
-    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
-    auth_headers = {"Authorization": f"Bearer {mass_token}"}
-
-    async with shared_http_client() as client:
-        resp = await client.post(
-            ma_api,
-            json={"message_id": "debug_players", "command": "players/all"},
-            headers={"Content-Type": "application/json", **auth_headers},
-             timeout=aiohttp.ClientTimeout(total=10.0),
-        )
-    return {"status": resp.status, "result": await resp.json()} if resp.status == 200 else {"status": resp.status, "error": await resp.text()}
+    return {"result": await _ma_rpc(mass_url, mass_token, "players/all", message_id="debug_players")}
 
 
 @app.get("/api/ma-jsonrpc/debug/queues")
 async def debug_list_queues(request: Request):
-    """Debug endpoint: list all MA queues."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-        if not isinstance(creds, dict):
-            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
-        mass_url = creds.get("mass_url") or ""
-        mass_token = creds.get("mass_token") or ""
-    except HTTPException as e:
-        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}") from e
-
+    """Debug endpoint: list all MA queues (raw MA payload)."""
+    mass_url, mass_token = await _resolve_ma_credentials(request)
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
-
-    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
-    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
-    auth_headers = {"Authorization": f"Bearer {mass_token}"}
-
-    async with shared_http_client() as client:
-        resp = await client.post(
-            ma_api,
-            json={"message_id": "debug_queues", "command": "player_queues/all"},
-            headers={"Content-Type": "application/json", **auth_headers},
-             timeout=aiohttp.ClientTimeout(total=10.0),
-        )
-    return {"status": resp.status, "result": await resp.json()} if resp.status == 200 else {"status": resp.status, "error": await resp.text()}
+    return {"result": await _ma_rpc(mass_url, mass_token, "player_queues/all", message_id="debug_queues")}
 
 
 @app.get("/api/ma-jsonrpc/debug/player/{player_id}")
 async def debug_get_player(request: Request, player_id: str):
-    """Debug endpoint: get specific player info."""
-    try:
-        creds = await _resolve_identity_from_request(request)
-        if not isinstance(creds, dict):
-            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
-        mass_url = creds.get("mass_url") or ""
-        mass_token = creds.get("mass_token") or ""
-    except HTTPException as e:
-        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Identity resolution failed: {e}") from e
-
+    """Debug endpoint: get specific player info (raw MA payload)."""
+    mass_url, mass_token = await _resolve_ma_credentials(request)
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
-
-    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
-    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
-    auth_headers = {"Authorization": f"Bearer {mass_token}"}
-
-    async with shared_http_client() as client:
-        resp = await client.post(
-            ma_api,
-            json={"message_id": "debug_player", "command": "players/get", "args": {"player_id": player_id}},
-            headers={"Content-Type": "application/json", **auth_headers},
-             timeout=aiohttp.ClientTimeout(total=10.0),
-        )
-    return {"status": resp.status, "result": await resp.json()} if resp.status == 200 else {"status": resp.status, "error": await resp.text()}
+    result = await _ma_rpc(
+        mass_url, mass_token, "players/get", {"player_id": player_id}, message_id="debug_player"
+    )
+    return {"result": result}
 
 
 @app.websocket("/api/ma-jsonrpc")
@@ -9087,40 +9201,10 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
 async def get_media_detail(uri: str, request: Request):
     """Resolve full media details from Music Assistant for a given URI."""
     log.info(f"[media/detail] Resolving details for uri='{uri}'")
-    try:
-        creds = await _resolve_identity_from_request(request)
-        if not isinstance(creds, dict):
-            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
-    except Exception as e:
-        log.error(f"[media/detail] Identity resolution failed: {e}")
-        raise HTTPException(status_code=401, detail="Authentication required") from e
-
-    mass_url = creds.get("mass_url") or ""
-    mass_token = creds.get("mass_token") or ""
-
+    mass_url, mass_token = await _resolve_ma_credentials(request)
     if not mass_url:
         raise HTTPException(status_code=400, detail="Music Assistant URL not configured")
-
-    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
-    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
-    auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
-
-    async with shared_http_client() as client:
-        try:
-            resp = await client.post(
-                ma_api,
-                json={"command": "music/item_by_uri", "args": {"uri": uri}},
-                headers={"Content-Type": "application/json", **auth_headers},
-                 timeout=aiohttp.ClientTimeout(total=10.0),
-            )
-            if resp.status == 200:
-                return await resp.json()
-            else:
-                log.error(f"[media/detail] Music Assistant returned status {resp.status}: {await resp.text()}")
-                raise HTTPException(status_code=resp.status, detail="Failed to fetch media details from Music Assistant")
-        except Exception as e:
-            log.error(f"[media/detail] Exception: {e}", exc_info=True)
-            raise HTTPException(status_code=502, detail="Error communicating with Music Assistant") from e
+    return await _ma_rpc(mass_url, mass_token, "music/item_by_uri", {"uri": uri})
 
 
 class FavoriteRequest(BaseModel):
@@ -9135,83 +9219,32 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
     if not req.uri or "://" not in req.uri:
         log.info(f"[media/favorite] Skipping non-Music-Assistant URI: '{req.uri}'")
         return {"status": "SKIPPED", "favorite": req.favorite, "reason": "Not a Music Assistant URI"}
-    try:
-        creds = await _resolve_identity_from_request(request)
-        if not isinstance(creds, dict):
-            creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
-    except Exception as e:
-        log.error(f"[media/favorite] Identity resolution failed: {e}")
-        raise HTTPException(status_code=401, detail="Authentication required") from e
 
-    mass_url = creds.get("mass_url") or ""
-    mass_token = creds.get("mass_token") or ""
-
+    mass_url, mass_token = await _resolve_ma_credentials(request)
     if not mass_url:
         raise HTTPException(status_code=400, detail="Music Assistant not configured")
 
-    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
-    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
-    auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
+    if req.favorite:
+        await _ma_rpc(mass_url, mass_token, "music/favorites/add_item", {"item": req.uri})
+        return {"status": "SUCCESS", "favorite": True}
 
-    async with shared_http_client() as client:
-        try:
-            if req.favorite:
-                # Add to favorites
-                resp = await client.post(
-                    ma_api,
-                    json={"command": "music/favorites/add_item", "args": {"item": req.uri}},
-                    headers={"Content-Type": "application/json", **auth_headers},
-                     timeout=aiohttp.ClientTimeout(total=10.0),
-                )
-                if resp.status == 200:
-                    return {"status": "SUCCESS", "favorite": True}
-                else:
-                    log.error(f"[media/favorite] Add failed: {resp.status} - {await resp.text()}")
-                    raise HTTPException(status_code=resp.status, detail="Failed to add to favorites")
-            else:
-                # To remove, first resolve item details to get item_id and media_type
-                resolve_resp = await client.post(
-                    ma_api,
-                    json={"command": "music/item_by_uri", "args": {"uri": req.uri}},
-                    headers={"Content-Type": "application/json", **auth_headers},
-                     timeout=aiohttp.ClientTimeout(total=10.0),
-                )
-                if resolve_resp.status != 200:
-                    log.error(f"[media/favorite] Resolve failed: {resolve_resp.status} - {await resolve_resp.text()}")
-                    raise HTTPException(status_code=resolve_resp.status, detail="Failed to resolve item details")
+    # Removing needs the library item id and media type, which only the item
+    # lookup can provide.
+    item = await _ma_rpc(mass_url, mass_token, "music/item_by_uri", {"uri": req.uri})
+    if not isinstance(item, dict):
+        raise HTTPException(status_code=404, detail="Could not resolve library item")
+    item_id = item.get("item_id")
+    media_type = item.get("media_type")
+    if not item_id or not media_type:
+        raise HTTPException(status_code=404, detail="Could not resolve library item ID or media type")
 
-                item = await resolve_resp.json()
-                item_id = item.get("item_id")
-                media_type = item.get("media_type")
-
-                if not item_id or not media_type:
-                    # Try looking under result if the response is wrapped
-                    res = item.get("result", {}) if isinstance(item, dict) else {}
-                    item_id = res.get("item_id")
-                    media_type = res.get("media_type")
-
-                if not item_id or not media_type:
-                    raise HTTPException(status_code=404, detail="Could not resolve library item ID or media type")
-
-                resp = await client.post(
-                    ma_api,
-                    json={
-                        "command": "music/favorites/remove_item",
-                        "args": {"library_item_id": item_id, "media_type": media_type}
-                    },
-                    headers={"Content-Type": "application/json", **auth_headers},
-                     timeout=aiohttp.ClientTimeout(total=10.0),
-                )
-                if resp.status == 200:
-                    return {"status": "SUCCESS", "favorite": False}
-                else:
-                    log.error(f"[media/favorite] Remove failed: {resp.status} - {await resp.text()}")
-                    raise HTTPException(status_code=resp.status, detail="Failed to remove from favorites")
-        except HTTPException as he:
-            raise he
-        except Exception as e:
-            log.error(f"[media/favorite] Exception: {e}", exc_info=True)
-            raise HTTPException(status_code=502, detail="Error communicating with Music Assistant") from e
+    await _ma_rpc(
+        mass_url,
+        mass_token,
+        "music/favorites/remove_item",
+        {"library_item_id": item_id, "media_type": media_type},
+    )
+    return {"status": "SUCCESS", "favorite": False}
 
 
 @app.websocket("/api/workspaces/{workspace_id}/terminal")

@@ -84,7 +84,10 @@ async def test_get_media_detail_success(client):
             ]
             assert len(ma_calls) == 1
             assert ma_calls[0][0][0] == "http://ma.local:8095/api"
-            assert ma_calls[0][1]["json"] == {"command": "music/item_by_uri", "args": {"uri": "library://track/123"}}
+            sent = ma_calls[0][1]["json"]
+            assert sent["command"] == "music/item_by_uri"
+            assert sent["args"] == {"uri": "library://track/123"}
+            assert sent["message_id"]
             assert ma_calls[0][1]["headers"] == {"Content-Type": "application/json", "Authorization": "Bearer test-mass-token"}
 
 
@@ -124,7 +127,10 @@ async def test_toggle_favorite_add(client):
             ]
             assert len(ma_calls) == 1
             assert ma_calls[0][0][0] == "http://ma.local:8095/api"
-            assert ma_calls[0][1]["json"] == {"command": "music/favorites/add_item", "args": {"item": "library://track/123"}}
+            sent = ma_calls[0][1]["json"]
+            assert sent["command"] == "music/favorites/add_item"
+            assert sent["args"] == {"item": "library://track/123"}
+            assert sent["message_id"]
             assert ma_calls[0][1]["headers"] == {"Content-Type": "application/json", "Authorization": "Bearer test-mass-token"}
 
 
@@ -170,14 +176,17 @@ async def test_toggle_favorite_remove(client):
             ]
             assert len(ma_calls) == 2
             assert ma_calls[0][0][0] == "http://ma.local:8095/api"
-            assert ma_calls[0][1]["json"] == {"command": "music/item_by_uri", "args": {"uri": "library://track/123"}}
+            sent = ma_calls[0][1]["json"]
+            assert sent["command"] == "music/item_by_uri"
+            assert sent["args"] == {"uri": "library://track/123"}
+            assert sent["message_id"]
             assert ma_calls[0][1]["headers"] == {"Content-Type": "application/json", "Authorization": "Bearer test-mass-token"}
 
             assert ma_calls[1][0][0] == "http://ma.local:8095/api"
-            assert ma_calls[1][1]["json"] == {
-                "command": "music/favorites/remove_item",
-                "args": {"library_item_id": "123", "media_type": "track"}
-            }
+            removed = ma_calls[1][1]["json"]
+            assert removed["command"] == "music/favorites/remove_item"
+            assert removed["args"] == {"library_item_id": "123", "media_type": "track"}
+            assert removed["message_id"]
             assert ma_calls[1][1]["headers"] == {"Content-Type": "application/json", "Authorization": "Bearer test-mass-token"}
 
 
