@@ -533,6 +533,20 @@ def _load_calendar_settings(session: Session, username: str) -> dict:
             return {}
     return {}
 
+
+def _coerce_profile_value(key: str, value):
+    """Normalize a profile update field without nulling valid falsy values.
+
+    Booleans like False must stay False (NOT NULL columns). Only blank optional
+    strings become None; display_name keeps "" so UserRead validation passes.
+    """
+    if isinstance(value, str):
+        value = value.strip()
+        if value == "" and key != "display_name":
+            return None
+        return value
+    return value
+
 START_TIME = time.time()
 
 @app.get("/health")
@@ -618,10 +632,7 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
             setattr(user, enc, encrypt(val) if val else None)
 
     for key, value in update_data.items():
-        if isinstance(value, str):
-            value = value.strip()
-        value = value if value else None
-        setattr(user, key, value)
+        setattr(user, key, _coerce_profile_value(key, value))
 
     session.add(user)
     session.commit()
@@ -666,10 +677,7 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
             setattr(user, enc, encrypt(val) if val else None)
 
     for key, value in update_data.items():
-        if isinstance(value, str):
-            value = value.strip()
-        value = value if value else None
-        setattr(user, key, value)
+        setattr(user, key, _coerce_profile_value(key, value))
 
     session.add(user)
     session.commit()
