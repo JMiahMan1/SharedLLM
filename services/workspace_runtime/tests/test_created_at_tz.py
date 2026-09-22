@@ -5,7 +5,24 @@ from unittest.mock import MagicMock, patch
 # Ensure the package root is importable
 sys.path.insert(0, ".")
 
+import pytest
+
 from services.workspace_runtime import main as rt
+
+
+@pytest.fixture(autouse=True)
+def _reset_config_tz_cache():
+    """Drop the hourly timezone cache around each test.
+
+    `_created_at_in_config_tz` goes through `_cached_config_tz()`, which only
+    consults `get_config_timezone()` when its cache is more than an hour old.
+    If any earlier test populated that cache, patching `get_config_timezone`
+    here had no effect and these tests silently asserted against stale UTC.
+    """
+    original = dict(rt._CONFIG_TZ_CACHE)
+    rt._CONFIG_TZ_CACHE.update({"tz": "UTC", "ts": 0.0})
+    yield
+    rt._CONFIG_TZ_CACHE.update(original)
 
 
 def test_created_at_in_config_tz_converts_utc_to_config_tz():

@@ -1,5 +1,5 @@
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlmodel import JSON, Column, Field, SQLModel
 
@@ -30,4 +30,7 @@ class Workspace(SQLModel, table=True):
     quarantined: bool = Field(default=False)
     last_raven_mission_id: int | None = Field(default=None)
     excludes: list[str] = Field(default_factory=list, sa_column=Column(JSON))
-    created_at: datetime | None = Field(default_factory=datetime.utcnow)
+    # Must be timezone-aware: SQLModel rejects naive datetimes on write
+    # ("Datetime values must have timezone information"), and datetime.utcnow()
+    # is deprecated from Python 3.12.
+    created_at: datetime | None = Field(default_factory=lambda: datetime.now(UTC))

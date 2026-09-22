@@ -12,9 +12,19 @@ import pytest
 import services.workspace_sandbox as sb
 
 
+# Any stable value works; it just has to be consistent between the container's
+# reported image and the one the client resolves for the image name, so
+# _get_or_recreate() sees a matching image and reuses the container instead of
+# tearing it down. With bare MagicMocks those two are different objects, so the
+# sandbox recreated the container via containers.run() and the test lost its
+# stubbed exec_run.
+_IMAGE_ID = "sha256:test-image"
+
+
 def _fake_container(exit_code: int = 0, stdout: bytes = b"", stderr: bytes = b""):
     c = MagicMock()
     c.status = "running"
+    c.image.id = _IMAGE_ID
     c.exec_run.return_value = MagicMock(exit_code=exit_code, output=(stdout, stderr))
     return c
 
@@ -22,6 +32,10 @@ def _fake_container(exit_code: int = 0, stdout: bytes = b"", stderr: bytes = b""
 def _fake_client(container):
     client = MagicMock()
     client.containers.get.return_value = container
+    # Safety net: if the sandbox does decide to create a container, it must
+    # still be the one this test stubbed.
+    client.containers.run.return_value = container
+    client.images.get.return_value = MagicMock(id=_IMAGE_ID)
     client.networks.get.side_effect = sb.NotFound("nope")
     client.networks.create.return_value = MagicMock()
     return client
