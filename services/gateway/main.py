@@ -11,7 +11,7 @@ import traceback
 import uuid
 import zipfile
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse

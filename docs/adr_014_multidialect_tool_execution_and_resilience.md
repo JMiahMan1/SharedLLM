@@ -18,7 +18,7 @@ Home Assistant voice commands routed through the Jarvis LLM gateway failed to re
    Different open-source and GGUF-quantized LLMs served via llama.cpp / Alpaca emit tool calls in differing syntaxes:
    - GGUF text protocol: `call:default_api:ToolName{...}` or `call:ToolName{...}`
    - Qwen dialect: `<tool_code>...</tool_code>` or `<tool_call>...</tool_call>`
-   - Fenced Markdown JSON: ````json {"tool": "...", ...} ````
+   - Fenced Markdown JSON: a fenced `json` block containing `{"tool": "...", ...}`
    While some parts of `external_agent.py` handled raw text calls, `agent_loop.py` and `orchestrator.py` only inspected fenced code blocks or JSON dictionaries. Unhandled dialects caused tool calls to be treated as conversational text or dropped entirely.
 
 3. **Tool Name Routing vs. Device Verb Collisions:**
