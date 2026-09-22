@@ -5384,6 +5384,44 @@ async def proxy_delete_intercom_session(session_id: str, request: Request):
         )
         return await _proxy_json_response(resp)
 
+
+@app.post("/api/intercom/announce")
+async def proxy_intercom_announce(request: Request):
+    """Proxy one-way announcement to Execution (real HA dispatch)."""
+    body = await request.json()
+    return await _proxy_execution_with_identity(request, "/execute/intercom/announce", body)
+
+
+@app.post("/api/intercom/broadcast")
+async def proxy_intercom_broadcast(request: Request):
+    """Proxy broadcast to Execution (real HA dispatch, room→speaker resolution)."""
+    body = await request.json()
+    return await _proxy_execution_with_identity(request, "/execute/intercom/broadcast", body)
+
+
+@app.api_route("/api/intercom/room-speakers", methods=["GET", "PUT"])
+async def proxy_room_speakers(request: Request):
+    """Proxy room→speaker map CRUD to Identity."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    body = None
+    if request.method == "PUT":
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+    async with borrow_http_client() as client:
+        resp = await client.request(
+            request.method,
+            f"{IDENTITY_SVC}/api/intercom/room-speakers",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/admin/services/{service_name}/logs")
 async def get_service_logs(service_name: str, request: Request, tail: int = 100):
     creds = await _resolve_identity_from_request(request)
