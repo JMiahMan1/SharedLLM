@@ -39,14 +39,18 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         media_duration = attrs.get("media_duration")
         entity_picture = attrs.get("entity_picture")
 
-        # Only include MA-compatible devices (those with MA queue integration)
-        # Check integration source and queue presence for MA compatibility
+        # Only include Music Assistant players. The detection must match
+        # mass_ha_client.get_ma_players() — `app_id` and `mass_player_type` are
+        # how HA actually marks MA entities, and omitting them here dropped
+        # real MA speakers from the device picker.
         integration = attrs.get("integration", "")
         active_queue = attrs.get("active_queue")
-        is_ma_compatible = (
+        is_ma_compatible = bool(
             integration == "music_assistant"
             or "music assistant" in source.lower()
             or active_queue is not None
+            or attrs.get("app_id") == "music_assistant"
+            or attrs.get("mass_player_type")
         )
 
         if not is_ma_compatible:
@@ -65,13 +69,17 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
             "position": media_position,
             "duration": media_duration,
             "entity_picture": entity_picture,
+            "available": st not in ("unavailable", "unknown"),
+            "supported_features": attrs.get("supported_features", 0),
         }
 
+        # Anything actively rendering media is "active"; everything else is a
+        # selectable target. The two lists together must cover every player —
+        # states outside a fixed whitelist (e.g. "on", "unavailable") used to
+        # fall through both and vanish from the picker.
         if st in ("playing", "paused", "buffering"):
             active_players.append(player)
-
-        # Also collect idle/standby/off players for device selection
-        if st in ("idle", "standby", "off"):
+        else:
             available_players.append(player)
 
     # Filter by area if requested

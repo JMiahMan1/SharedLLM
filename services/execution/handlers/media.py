@@ -712,7 +712,8 @@ async def handle_media_transport(req) -> ExecutionResult:
     button_map = {
         "pause": "media_pause", "resume": "media_play", "play": "media_play", "stop": "media_stop",
         "next": "media_next_track", "previous": "media_previous_track",
-        "volume_up": "volume_up", "volume_down": "volume_down", "volume_set": "volume_set", "mute": "volume_mute"
+        "volume_up": "volume_up", "volume_down": "volume_down", "volume_set": "volume_set", "mute": "volume_mute",
+        "seek": "media_seek",
     }
 
     service = button_map.get(command, command)
@@ -734,6 +735,27 @@ async def handle_media_transport(req) -> ExecutionResult:
     if command in ("volume_up", "volume_down", "volume_set") and req.volume_level is not None:
         service_cmd = "volume_set"
         data = {"volume_level": req.volume_level}
+
+    if command in ("volume_mute", "mute"):
+        # HA's volume_mute service requires an explicit target state. Fall back
+        # to "mute" when the caller did not say, which matches the old button
+        # behaviour of muting on press.
+        muted = getattr(req, "muted", None)
+        if muted is None:
+            muted = True if req.volume_level in (None, 0) else False
+        service_cmd = "volume_mute"
+        data = {"is_volume_muted": bool(muted)}
+
+    if command == "seek":
+        position = getattr(req, "position", None)
+        if position is None:
+            return ExecutionResult(
+                status="FAILURE",
+                message="Seek requires a position (seconds).",
+                service="media_transport",
+            )
+        service_cmd = "media_seek"
+        data = {"seek_position": float(position)}
 
     result = await ha_client.call_service(
         ha_url, ha_token, domain, service_cmd, target_entity, data or None,
