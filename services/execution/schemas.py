@@ -205,8 +205,14 @@ class MediaPlayRequest(BaseRequest):
 class MediaTransportRequest(BaseRequest):
     user_context: UserContext
     entity_id: str
-    command: Literal["pause", "resume", "stop", "next", "previous", "volume_up", "volume_down", "home", "power_off", "back", "play", "volume_set"]
+    command: Literal[
+        "pause", "resume", "stop", "next", "previous",
+        "volume_up", "volume_down", "volume_set", "volume_mute", "mute",
+        "home", "power_off", "back", "play", "seek",
+    ]
     volume_level: float | None = Field(None, ge=0.0, le=1.0)
+    position: float | None = Field(None, ge=0.0, description="Seek target in seconds (command='seek')")
+    muted: bool | None = Field(None, description="Mute target state (command='volume_mute')")
 
 
 class MediaStateSyncRequest(BaseRequest):

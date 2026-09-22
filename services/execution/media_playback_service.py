@@ -126,6 +126,9 @@ class MediaPlaybackService:
             elif req.command in ("play", "resume"):
                 updated_fields["state"] = "playing"
 
+            if req.command == "seek" and req.position is not None:
+                updated_fields["position"] = req.position
+
             if req.command == "volume_set" and req.volume_level is not None:
                 updated_fields["volume_level"] = req.volume_level
             elif req.command == "volume_up":
