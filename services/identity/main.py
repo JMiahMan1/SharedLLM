@@ -2467,6 +2467,10 @@ async def trigger_telemetry_analysis(analysis_data: dict, x_internal_secret: str
             "model": "assistant",
             "messages": [{"role": "user", "content": prompt}],
             "rag_user": rag_user,
+            # Reasoning models blend their <think> trace into `content` unless
+            # the caller opts out, which put the model's thinking straight into
+            # the stored insight text. We want the conclusion only.
+            "think": False,
         }
         timeout = aiohttp.ClientTimeout(total=90.0)
         async with aiohttp.ClientSession() as client:
