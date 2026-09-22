@@ -376,6 +376,7 @@ class TimerRequest(BaseRequest):
     user_context: UserContext
     action: Literal["add", "list", "delete", "pause", "resume"]
     type: Literal["timer", "alarm"] = "timer"
+    id: str | None = None
     query: str | None = None
     title: str | None = None
     duration_str: str | None = None

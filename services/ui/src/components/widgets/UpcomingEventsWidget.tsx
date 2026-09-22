@@ -23,7 +23,7 @@ const parseEvent = (event: CalendarEvent): ParsedEvent => {
   const start = new Date(event.start_time);
   const now = new Date();
   const isToday = start.toDateString() === now.toDateString();
-  const isVerySoon = isToday && start.getTime() - now.getTime() < 3600000;
+  const isVerySoon = isToday && start.getTime() > now.getTime() && start.getTime() - now.getTime() < 3600000;
   return {
     summary: event.summary,
     start_time: event.start_time,
@@ -136,11 +136,13 @@ const formatRelativeTime = (date: Date): string => {
     <div className={isExpanded ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" : "space-y-3 max-h-64 overflow-y-auto pr-1"}>
       {events.map((event, index) => {
         const relativeTime = formatRelativeTime(new Date(event.start_time));
-        const isVerySoon = event.isVerySoon;
+        const startMs = new Date(event.start_time).getTime();
+        const isVerySoon =
+          event.isToday && startMs > Date.now() && startMs - Date.now() < 3600000;
 
         return (
           <div
-            key={`${event.summary}-${index}`}
+            key={`${event.summary}-${event.start_time}-${index}`}
             role="button"
             tabIndex={0}
             onClick={openCalendar}

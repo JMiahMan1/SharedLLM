@@ -12,6 +12,7 @@ interface ActiveTimer {
   createdAt: number;
   isRemote?: boolean;
   paused?: boolean;
+  expiredTicks?: number;
 }
 
 interface BackendTimer {
@@ -62,8 +63,8 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
           const expiresAt = new Date(bt.expires_at).getTime();
           const remaining = expiresAt - Date.now();
           if (remaining > 0) {
-            const createdAt = expiresAt - remaining;
             const durationMs = bt.duration_sec ? bt.duration_sec * 1000 : remaining;
+            const createdAt = expiresAt - durationMs;
             mapped.push({
               id: bt.id,
               title: bt.title || 'Untitled',
@@ -75,7 +76,11 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
           }
         }
       }
-      setTimers(mapped);
+      // Preserve local-only timers; replace the remote set wholesale.
+      setTimers((prev) => {
+        const localOnes = prev.filter((t) => t.id.startsWith('local-') && t.remainingMs > 0);
+        return [...localOnes, ...mapped];
+      });
     } catch {
       // Silently fail - keep local state if backend unavailable
     } finally {
@@ -84,9 +89,20 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional fetch-on-mount
+    fetchTimers();
     const interval = setInterval(fetchTimers, 10000);
     return () => clearInterval(interval);
   }, [fetchTimers]);
+
+  // Ask for notification permission once on mount
+  useEffect(() => {
+    try {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+        void Notification.requestPermission();
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   // Local countdown + expiry detection
   useEffect(() => {
@@ -95,27 +111,39 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
         const next: ActiveTimer[] = [];
         for (const t of prev) {
           if (t.paused) { next.push(t); continue; }
-          const newRemaining = Math.max(0, t.remainingMs - 1000);
-          // Detect transition to expired
-          if (newRemaining <= 0 && t.remainingMs > 0 && !notifiedRef.current.has(t.id)) {
-            notifiedRef.current.add(t.id);
-            setExpiredIds((prevExpired) => new Set(prevExpired).add(t.id));
-            setTimeout(() => {
-              setExpiredIds((prevExpired) => {
-                const s = new Set(prevExpired);
-                s.delete(t.id);
-                return s;
-              });
-            }, 3000);
-
-            // Browser notification
-            if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-              new Notification('Timer Expired', { body: `"${t.title}" is done!` });
+          // Already expired: hold a few ticks so the ring-flash is visible (first expiry only)
+          if (t.remainingMs <= 0) {
+            if (t.expiredTicks === undefined) {
+              // Re-fetched timer that hit zero again while already notified — drop now
+              continue;
             }
+            const ticks = t.expiredTicks + 1;
+            if (ticks >= 5) continue;
+            next.push({ ...t, remainingMs: 0, expiredTicks: ticks });
+            continue;
           }
-          if (newRemaining > 0) {
-            next.push({ ...t, remainingMs: newRemaining });
+          const newRemaining = Math.max(0, t.remainingMs - 1000);
+          if (newRemaining <= 0) {
+            if (!notifiedRef.current.has(t.id)) {
+              notifiedRef.current.add(t.id);
+              setExpiredIds((prevExpired) => new Set(prevExpired).add(t.id));
+              setTimeout(() => {
+                setExpiredIds((prevExpired) => {
+                  const s = new Set(prevExpired);
+                  s.delete(t.id);
+                  return s;
+                });
+              }, 3000);
+              if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+                new Notification('Timer Expired', { body: `"${t.title}" is done!` });
+              }
+              // First expiry: keep on screen for the ring-flash
+              next.push({ ...t, remainingMs: 0, expiredTicks: 0 });
+            }
+            // Already notified (e.g. re-fetched duplicate): drop immediately
+            continue;
           }
+          next.push({ ...t, remainingMs: newRemaining });
         }
         return next;
       });
@@ -124,8 +152,28 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
   }, []);
 
   const togglePause = useCallback((id: string) => {
-    setTimers((prev) => prev.map((t) => t.id === id ? { ...t, paused: !t.paused } : t));
-  }, []);
+    const timer = timers.find((t) => t.id === id);
+    if (!timer) return;
+    const nextPaused = !timer.paused;
+    setTimers((prev) => prev.map((t) => t.id === id ? { ...t, paused: nextPaused } : t));
+    if (timer.isRemote) {
+      void (async () => {
+        try {
+          const resp = await api.timerAction(nextPaused ? 'pause' : 'resume', {
+            title: timer.title,
+            type: 'timer',
+            id: timer.id,
+          });
+          if (resp.status !== 'SUCCESS') {
+            // Roll back optimistic pause
+            setTimers((prev) => prev.map((t) => t.id === id ? { ...t, paused: !nextPaused } : t));
+          }
+        } catch {
+          setTimers((prev) => prev.map((t) => t.id === id ? { ...t, paused: !nextPaused } : t));
+        }
+      })();
+    }
+  }, [timers]);
 
   const resetTimer = useCallback((id: string) => {
     setTimers((prev) => prev.map((t) => t.id === id ? { ...t, remainingMs: t.durationMs, paused: false } : t));
@@ -142,7 +190,10 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
 
   const totalProgress = useMemo(() => {
     if (timers.length === 0) return 0;
-    return timers.reduce((sum, t) => sum + (1 - t.remainingMs / t.durationMs), 0) / timers.length * 100;
+    return timers.reduce(
+      (sum, t) => sum + (t.durationMs > 0 ? 1 - t.remainingMs / t.durationMs : 0),
+      0
+    ) / timers.length * 100;
   }, [timers]);
 
   const addTimer = async () => {
@@ -156,13 +207,14 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
         target_device: selectedDevice || undefined,
       });
       if (remote.status === 'SUCCESS') {
+        const remoteId = (remote as { detail?: { timer_id?: string } }).detail?.timer_id;
         const timer: ActiveTimer = {
-          id: `local-${Date.now()}`,
+          id: remoteId || `local-${Date.now()}`,
           title: newTitle || `Timer ${timers.length + 1}`,
           durationMs: durationSec * 1000,
           remainingMs: durationSec * 1000,
           createdAt: Date.now(),
-          isRemote: false,
+          isRemote: Boolean(remoteId),
         };
         setTimers((prev) => [...prev, timer]);
         setNewTitle('');
@@ -193,10 +245,15 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
 
     if (timer.isRemote) {
       try {
-        await api.deleteTimer(timer.title, 'timer');
+        const resp = await api.deleteTimer(timer.title, 'timer', timer.id);
+        if (resp.status !== 'SUCCESS') {
+          toast.error(resp.message || 'Failed to delete timer');
+          return;
+        }
         toast.success('Timer deleted');
       } catch {
         toast.error('Failed to delete timer');
+        return;
       }
     }
 
@@ -265,7 +322,7 @@ const AmbientTimerWidget = ({ userSettings, onTogglePin, settingsButton }: IWidg
               <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-1">
                 <div
                   className="h-full bg-gradient-to-r from-purple-500 to-purple-400 rounded-full transition-all duration-1000"
-                  style={{ width: `${(timer.remainingMs / timer.durationMs) * 100}%` }}
+                  style={{ width: `${timer.durationMs > 0 ? (timer.remainingMs / timer.durationMs) * 100 : 0}%` }}
                 />
               </div>
               <p className="text-xs font-mono text-purple-400 shrink-0">{formatTime(timer.remainingMs)}</p>

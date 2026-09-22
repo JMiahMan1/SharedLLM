@@ -298,8 +298,8 @@ const Dashboard = () => {
 
   const filteredLogs = useMemo(() => {
     return logs.filter(n => {
-      const msg = n.message.toLowerCase();
-      const service = n.service.toLowerCase();
+      const msg = (n.message || '').toLowerCase();
+      const service = (n.service || '').toLowerCase();
 
       // 1. Check if it's an update notification (admin only)
       const isUpdate = msg.includes('update available') || msg.includes('updates available') || msg.includes('image update');

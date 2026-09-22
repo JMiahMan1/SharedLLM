@@ -15,6 +15,7 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
   const [media, setMedia] = useState<MediaState | null>(null);
   const [position, setPosition] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [volumeLevel, setVolumeLevel] = useState(50);
   const [isLoading, setIsLoading] = useState(true);
   const localTimeRef = useRef(0);
 
@@ -55,10 +56,12 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
             setPosition(active.position);
             localTimeRef.current = active.position;
           }
+          setVolumeLevel(Math.round((active.volume_level ?? 0.5) * 100));
         } else {
           setMedia(null);
           setPosition(0);
           setDuration(0);
+          setVolumeLevel(50);
           if (!userSettings.is_pinned) onMediaStop?.();
         }
       } catch {
@@ -236,11 +239,13 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
               type="range"
               min={0}
               max={100}
-              defaultValue={50}
+              value={volumeLevel}
               className="flex-1 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer accent-purple-500"
               onChange={async (e) => {
+                const next = Number(e.target.value);
+                setVolumeLevel(next);
                 if (media?.entity_id) {
-                  try { await api.mediaTransport({ entity_id: media.entity_id, command: 'volume_set', volume_level: Number(e.target.value) / 100 }); } catch { /* ignore */ }
+                  try { await api.mediaTransport({ entity_id: media.entity_id, command: 'volume_set', volume_level: next / 100 }); } catch { /* ignore */ }
                 }
               }}
             />

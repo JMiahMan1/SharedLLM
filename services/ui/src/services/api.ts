@@ -872,8 +872,18 @@ export const api = {
     return resp.data;
   },
 
-  async deleteTimer(title: string, type: 'timer' | 'alarm' = 'timer'): Promise<ExecutionResponse> {
-    const resp = await apiClient.delete('/api/communication/timers', { data: { title, type } });
+  async deleteTimer(title: string, type: 'timer' | 'alarm' = 'timer', id?: string): Promise<ExecutionResponse> {
+    const data: { title: string; type: 'timer' | 'alarm'; id?: string } = { title, type };
+    if (id) data.id = id;
+    const resp = await apiClient.delete('/api/communication/timers', { data });
+    return resp.data;
+  },
+
+  async timerAction(
+    action: 'pause' | 'resume',
+    payload: { title: string; type?: 'timer' | 'alarm'; id?: string }
+  ): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/timers', { action, ...payload });
     return resp.data;
   },
 
@@ -1499,13 +1509,14 @@ export const api = {
       area: null,
       state: null,
     });
-    return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string }) => ({
+    return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string; attributes?: Record<string, number | string | boolean | string[] | null> }) => ({
       entity_id: e.entity_id,
       friendly_name: e.friendly_name,
       state: e.state,
       domain: e.domain,
       room: e.area_id || undefined,
       last_activated: undefined,
+      attributes: e.attributes || undefined,
     }));
   },
 

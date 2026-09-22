@@ -8,6 +8,7 @@ import toast from 'react-hot-toast';
 interface NoteItem {
   id: string;
   title: string;
+  path?: string;
   content: string;
   category: string;
 }
@@ -33,6 +34,7 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
         if (Array.isArray(resp.detail?.notes)) {
           loaded = resp.detail.notes.map((n, idx) => ({
             id: n.path ?? n.title ?? `note-${idx}`,
+            path: n.path,
             title: n.title ?? 'Untitled',
             content: '',
             category: 'Quick',
@@ -40,8 +42,9 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
         }
       }
       setNotes(loaded);
-    } catch {
+    } catch (err) {
       setNotes([]);
+      setError(err instanceof Error ? err.message : 'Failed to load notes');
     } finally {
       setIsLoading(false);
     }
@@ -59,7 +62,10 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
     }
     setSaving(true);
     try {
-      await api.createNote({ title: newTitle, content: newNote });
+      const resp = await api.createNote({ title: newTitle, content: newNote });
+      if (resp.status !== 'SUCCESS') {
+        throw new Error(resp.message || 'Failed to save note');
+      }
       setNotes((prev) => [
         { id: Date.now().toString(), title: newTitle, content: newNote, category: 'Quick' },
         ...prev,
@@ -67,8 +73,8 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
       setNewTitle('');
       setNewNote('');
       toast.success('Note saved');
-    } catch {
-      toast.error('Failed to save note');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save note');
     } finally {
       setSaving(false);
     }
@@ -80,12 +86,15 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
     // Optimistic removal
     setNotes((prev) => prev.filter((n) => n.id !== id));
     try {
-      await api.deleteNote(note.title);
+      const resp = await api.deleteNote(note.title, undefined, note.path);
+      if (resp.status !== 'SUCCESS') {
+        throw new Error(resp.message || 'Failed to delete note');
+      }
       toast.success('Note deleted');
-    } catch {
+    } catch (err) {
       // Re-add on failure
       setNotes((prev) => [note, ...prev]);
-      toast.error('Failed to delete note');
+      toast.error(err instanceof Error ? err.message : 'Failed to delete note');
     }
   };
 
@@ -126,7 +135,7 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
                   </div>
                   <button
                     onClick={() => deleteNote(note.id)}
-                    className="shrink-0 p-1 text-slate-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
+                    className="shrink-0 p-1 text-slate-600 hover:text-red-400 transition-colors opacity-100 md:opacity-0 md:group-hover:opacity-100 focus:opacity-100"
                     aria-label="Delete note"
                   >
                     <Trash2 size={13} />

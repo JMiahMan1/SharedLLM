@@ -90,7 +90,7 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
             return ExecutionResult(status="SUCCESS", message="Active Timers:\n" + "\n".join(lines), service="timer_list")
 
         elif action == "delete":
-            # For simplicity, delete by title match
+            # Prefer exact id match; fall back to title substring match.
             user_id = req.user_context.user
             keys = await r.keys(f"timer:{user_id}:*")
             deleted_count = 0
@@ -98,7 +98,11 @@ async def handle_timer(req: TimerRequest) -> ExecutionResult:
                 data = await r.get(k)
                 if data:
                     t = json.loads(data)
-                    if req.title and req.title.lower() in t['title'].lower():
+                    if req.id:
+                        if t.get("id") == req.id:
+                            await r.delete(k)
+                            deleted_count += 1
+                    elif req.title and req.title.lower() in t['title'].lower():
                         await r.delete(k)
                         deleted_count += 1
 

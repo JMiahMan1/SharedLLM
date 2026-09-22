@@ -54,7 +54,7 @@ const WorkspacesWidget = ({ settingsButton }: IActiveMediaWidgetProps) => {
           relevant.map((ws) => (
             <button
               key={ws.id}
-              onClick={() => navigate('/workspaces')}
+              onClick={() => navigate(`/workspaces?select=${encodeURIComponent(ws.id)}`)}
               className="w-full flex items-start gap-3 p-3 rounded-xl bg-black/20 border border-white/5 hover:border-emerald-500/15 transition-all text-left"
             >
               <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${ws.available ? 'bg-emerald-400' : 'bg-red-400'}`} />

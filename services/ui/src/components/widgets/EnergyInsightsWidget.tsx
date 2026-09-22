@@ -62,13 +62,15 @@ const EnergyInsightsWidget = ({ settingsButton }: IWidgetProps) => {
         } else if (msg.includes('connect') || msg.includes('refused') || msg.includes('econnrefused')) {
           setError('Cannot reach telemetry service. Ensure the logging service is running and network discovery is active.');
         } else {
-          setError('Telemetry service is unconfigured. Enroll devices in Admin → Telemetry to enable energy tracking.');
+          setError((err as Error).message || 'Failed to load energy data');
         }
       } finally {
         setLoading(false);
       }
     };
     fetchEnergyData();
+    const interval = setInterval(fetchEnergyData, 60000);
+    return () => clearInterval(interval);
   }, []);
 
   const data = useMemo(() => {

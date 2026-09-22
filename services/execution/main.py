@@ -1705,6 +1705,14 @@ async def execute_entity_search(req: EntitySearchRequest):
             if not any(term in searchable for term in search_terms):
                 continue
 
+        attr_keys = (
+            "brightness", "color_temp", "color_mode", "min_mireds", "max_mireds",
+            "hvac_modes", "hvac_action", "temperature", "current_temperature",
+            "min_temp", "max_temp", "volume_level", "is_volume_muted",
+            "media_title", "media_artist", "current_position", "percent_open",
+        )
+        attributes = {k: attrs[k] for k in attr_keys if attrs.get(k) is not None}
+
         results.append({
             "entity_id": eid,
             "friendly_name": attrs.get("friendly_name", ""),
@@ -1717,6 +1725,7 @@ async def execute_entity_search(req: EntitySearchRequest):
             "source_list": attrs.get("source_list", [])[:5],
             "supported_features": attrs.get("supported_features", 0),
             "platform": _detect_media_platform(eid, attrs),
+            "attributes": attributes,
         })
 
     # Sort by relevance: exact matches first, then partial

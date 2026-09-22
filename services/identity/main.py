@@ -798,8 +798,11 @@ def revoke_device(device_id: str, session: Session = Depends(get_session), _: Us
 
 # --- Device Matrix (UI Contract) ---
 @app.get("/api/users/devices", response_model=list[DeviceAssignmentRead])
-def list_devices_ui(session: Session = Depends(get_session), _: User = Depends(require_api_key)):
-    results = session.exec(select(DeviceAssignment)).all()
+def list_devices_ui(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
+    query = select(DeviceAssignment)
+    if not user.is_admin:
+        query = query.where(DeviceAssignment.user_id == (user.id or 0))
+    results = session.exec(query).all()
     return [
         DeviceAssignmentRead(
             id=d.id or 0,
@@ -1561,8 +1564,20 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
     # Return as list, ensure every known widget key has an entry
     known_keys = [
         'energy_insights', 'ambient_timer', 'quick_notes', 'active_media',
-        'chores_progress', 'upcoming_events', 'quick_assistant', 'device_control'
+        'chores_progress', 'upcoming_events', 'quick_assistant', 'device_control',
+        'workspaces'
     ]
+    default_sizes = {
+        'energy_insights': 'medium',
+        'ambient_timer': 'small',
+        'quick_notes': 'medium',
+        'active_media': 'wide',
+        'chores_progress': 'tall',
+        'upcoming_events': 'wide',
+        'quick_assistant': 'medium',
+        'device_control': 'tall',
+        'workspaces': 'medium',
+    }
     result = []
     for key in known_keys:
         if key in settings_map:
@@ -1572,7 +1587,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
                 widget_key=key,
                 visibility='visible' if key != 'quick_assistant' else 'hidden',
                 order_index=known_keys.index(key),
-                size='medium',
+                size=default_sizes[key],
                 is_pinned=False,
                 sort_mode=None,
                 pinned_devices=[],
@@ -1639,6 +1654,11 @@ def update_widget_settings(
         update_data['pinned_devices'] = json.dumps(update_data['pinned_devices'])
     if 'config' in update_data:
         update_data['config'] = json.dumps(update_data['config'])
+
+    # Creating a quick_assistant row without an explicit visibility must not
+    # reveal the widget (model default is 'visible').
+    if widget_key == 'quick_assistant' and 'visibility' not in update_data:
+        update_data['visibility'] = 'hidden'
 
     if existing:
         for key, value in update_data.items():
