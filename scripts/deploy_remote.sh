@@ -80,15 +80,23 @@ if command -v gh >/dev/null 2>&1; then
     echo "Checking for latest Android APK artifact from CI..."
     APK_RUN_ID=$(gh run list --workflow=android-build.yml --branch="$BRANCH" --limit 1 --json databaseId,status,conclusion --jq '.[] | select(.conclusion=="success") | .databaseId' 2>/dev/null || true)
     if [ -n "$APK_RUN_ID" ]; then
-        echo "Downloading APK artifact from CI run $APK_RUN_ID..."
-        mkdir -p .tmp/apk
-        rm -rf .tmp/apk/*
-        if gh run download "$APK_RUN_ID" -n jarvis-os-debug-apk -D .tmp/apk 2>/dev/null; then
-            echo "Syncing APK to remote $HOST:$DIR/data/app_updates/..."
-            ssh $SSH_OPTS "$HOST" "mkdir -p '$DIR/data/app_updates'"
-            rsync -a -e "ssh $SSH_OPTS" .tmp/apk/app-debug.apk "$HOST:$DIR/data/app_updates/app-debug.apk"
-            echo "[OK] Latest APK synced to remote update server."
-        fi
+    echo "Downloading APK artifact from CI run $APK_RUN_ID..."
+    mkdir -p .tmp/apk
+    rm -rf .tmp/apk/*
+    # Prefer signed release APK; fall back to debug (also signed with release.keystore)
+    if gh run download "$APK_RUN_ID" -n jarvis-os-release-apk -D .tmp/apk 2>/dev/null; then
+        APK_SRC=$(ls .tmp/apk/*.apk 2>/dev/null | head -1)
+    elif gh run download "$APK_RUN_ID" -n jarvis-os-debug-apk -D .tmp/apk 2>/dev/null; then
+        APK_SRC=$(ls .tmp/apk/*.apk 2>/dev/null | head -1)
+    else
+        APK_SRC=""
+    fi
+    if [ -n "${APK_SRC:-}" ] && [ -f "$APK_SRC" ]; then
+        echo "Syncing APK ($APK_SRC) to remote $HOST:$DIR/data/app_updates/..."
+        ssh $SSH_OPTS "$HOST" "mkdir -p '$DIR/data/app_updates'"
+        rsync -a -e "ssh $SSH_OPTS" "$APK_SRC" "$HOST:$DIR/data/app_updates/app-debug.apk"
+        echo "[OK] Latest APK synced to remote update server."
+    fi
     fi
 fi
 
