@@ -94,6 +94,7 @@ public final class WidgetApi {
         body.put("area", JSONObject.NULL);
         body.put("state", JSONObject.NULL);
         body.put("limit", limit);
+        body.put("controllable_only", true);
         JSONObject resp = post(context, "/execute/entity/search", body);
         JSONArray result = resp.optJSONArray("result");
         if (result == null) {

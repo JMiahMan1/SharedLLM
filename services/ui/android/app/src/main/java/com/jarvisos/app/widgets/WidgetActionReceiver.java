@@ -74,8 +74,9 @@ public class WidgetActionReceiver extends BroadcastReceiver {
                 try {
                     WidgetApi.mediaTransport(app, command);
                     WidgetUpdater.pushMedia(app);
+                    postToast(app, "✓ media: " + command);
                 } catch (Exception e) {
-                    postToast(app, "Media: " + e.getMessage());
+                    postToast(app, "✕ media: " + e.getMessage());
                 }
             });
         }
@@ -94,9 +95,10 @@ public class WidgetActionReceiver extends BroadcastReceiver {
                     resolved = WidgetApi.toggleService(domain, state);
                 }
                 WidgetApi.haService(app, domain, resolved, entity);
+                postToast(app, "✓ " + resolved + " → " + entity);
                 WidgetUpdater.requestAll(app);
             } catch (Exception e) {
-                postToast(app, e.getMessage() != null ? e.getMessage() : "Command failed");
+                postToast(app, "✕ " + (e.getMessage() != null ? e.getMessage() : "Command failed"));
             }
         });
     }

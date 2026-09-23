@@ -609,18 +609,62 @@ def _ok(message: str, service: str, detail: dict | None = None) -> ExecutionResu
 def _fail(message: str, service: str, detail: dict | None = None) -> ExecutionResult:
     return ExecutionResult(status="FAILURE", message=message, service=service, detail=detail)
 
+CONTROLLABLE_DOMAINS = frozenset({
+    "light", "switch", "cover", "lock", "fan", "media_player", "climate",
+    "button", "input_button", "scene", "vacuum", "humidifier", "water_heater",
+    "remote", "siren",
+})
+
+async def _allowed_entity_ids(username: str, is_admin: bool) -> set[str] | None:
+    """Entity ids the non-admin user may control via DeviceAssignment.
+
+    Returns None on Identity network/HTTP failure (caller fail-opens).
+    Empty set means Identity answered with no assignments (caller fail-closes).
+    Admins are short-circuited before this is called.
+    """
+    if is_admin or not username:
+        return set()
+    try:
+        async with get_client() as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC_URL}/api/internal/user-device-assignments",
+                params={"username": username},
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            )
+            if resp.status != 200:
+                log.warning(f"Identity device-assignments HTTP {resp.status} for {username}")
+                return None
+            data = await resp.json()
+            if isinstance(data, dict):
+                data = data.get("device_ids") or data.get("entities") or []
+            return {str(x) for x in data if x}
+    except Exception as e:
+        log.warning(f"Identity device-assignments failed for {username}: {e}")
+        return None
+
+
 async def verify_entity_access(ctx: UserContext, entity_id: str) -> bool:
     """
     Checks if the user has permission to control this entity.
     Admins bypass all checks.
+    Non-admin: allow only DeviceAssignment-mapped entities.
+    Identity unreachable → fail-open (availability); empty assignments → fail-closed.
     """
     if ctx.is_admin:
         return True
-
-    # In a stricter system, we would call Identity service here to check DeviceAssignment.
-    # For now, we allow the request but log it.
-    log.info(f"Access check for {ctx.user} on {entity_id}: ALLOWED (Implicit)")
-    return True
+    if not entity_id:
+        return False
+    allowed = await _allowed_entity_ids(ctx.user, ctx.is_admin)
+    if allowed is None:
+        log.info(f"Access check for {ctx.user} on {entity_id}: ALLOW (identity unavailable)")
+        return True
+    ok = entity_id in allowed
+    log.info(
+        f"Access check for {ctx.user} on {entity_id}: "
+        f"{'ALLOWED' if ok else 'DENIED'} ({len(allowed)} assigned entities)"
+    )
+    return ok
 
 
 # ─── Domain Endpoints ──────────────────────────────────────────────────────────
@@ -1696,6 +1740,12 @@ async def execute_entity_search(req: EntitySearchRequest):
     if not ha_url or not ha_token:
         return _fail("Home Assistant URL or token not configured.", "entity_search")
 
+    allowed_entities: set[str] | None = None
+    if not ctx.is_admin:
+        allowed_entities = await _allowed_entity_ids(ctx.user, ctx.is_admin)
+        if allowed_entities is None:
+            allowed_entities = None  # fail-open: identity unreachable
+
     all_states = await ha_client.get_states(ha_url, ha_token) or []
     results = []
 
@@ -1706,8 +1756,17 @@ async def execute_entity_search(req: EntitySearchRequest):
         attrs = state.get("attributes", {})
         friendly = attrs.get("friendly_name", "").lower()
         device_class = attrs.get("device_class", "")
-        area = attrs.get("area_id", "")
+        area = attrs.get("area_id", "") or state.get("area_id", "")
         current_state = state.get("state", "")
+
+        # Permission: non-admin sees only DeviceAssignment-mapped entities
+        # (identity unreachable → allow; empty set → show nothing).
+        if allowed_entities is not None and eid not in allowed_entities:
+            continue
+        if req.controllable_only:
+            entity_domain = eid.split('.')[0] if '.' in eid else ''
+            if entity_domain not in CONTROLLABLE_DOMAINS:
+                continue
 
         # Apply filters
         if req.domain:
@@ -1783,6 +1842,12 @@ async def execute_entity_search(req: EntitySearchRequest):
 @app.post("/execute/ha_service", response_model=ExecutionResult)
 async def execute_ha_service(req: HAServiceRequest):
     ctx = req.user_context
+
+    if req.entity_id and not await verify_entity_access(ctx, req.entity_id):
+        return _fail(
+            f"Access denied to '{req.entity_id}' for user '{ctx.user}'.",
+            "ha_service",
+        )
 
     # Pre-flight check: detect unavailable/unknown entities before calling HA
     if req.entity_id and ctx.ha_url and ctx.ha_token:
