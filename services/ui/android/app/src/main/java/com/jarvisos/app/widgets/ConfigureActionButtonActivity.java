@@ -40,7 +40,6 @@ public class ConfigureActionButtonActivity extends Activity {
     private String selectedIcon = MaterialIcons.defaultIcon();
     private int selectedIconBg = 0;
     private final List<ImageView> iconViews = new ArrayList<>();
-    private final List<ImageView> bgSwatchViews = new ArrayList<>();
     private static final int[] ICON_BG_CHOICES = {
         0,                 // transparent
         0x331E293B,        // slate 20%
@@ -52,6 +51,8 @@ public class ConfigureActionButtonActivity extends Activity {
     private static final String[] ICON_BG_LABELS = {
         "None", "Slate", "Navy", "Green", "Purple", "Sky"
     };
+    /** True only while pickEntity() is writing the field — blocks the results list from reopening. */
+    private boolean suppressEntityResults;
     private final List<String> entityIds = new ArrayList<>();
     private final List<String> entityLabels = new ArrayList<>();
     private ArrayAdapter<String> resultsAdapter;
@@ -112,13 +113,17 @@ public class ConfigureActionButtonActivity extends Activity {
                 rebuildServices(null);
                 String q = s != null ? s.toString().trim() : "";
                 scheduleLivePreview(q);
+                if (suppressEntityResults) {
+                    if (entityResults != null) entityResults.setVisibility(View.GONE);
+                    return;
+                }
                 updateResultsList(q);
                 scheduleServerSearch(q);
             }
         });
         // Focus shows the match list once entities are loaded
         fieldEntity.setOnFocusChangeListener((v, hasFocus) -> {
-            if (hasFocus) {
+            if (hasFocus && !suppressEntityResults) {
                 String q = fieldEntity.getText() != null ? fieldEntity.getText().toString().trim() : "";
                 updateResultsList(q);
             }
@@ -183,14 +188,23 @@ public class ConfigureActionButtonActivity extends Activity {
     private void pickEntity(String full) {
         int open = full.lastIndexOf('(');
         int close = full.lastIndexOf(')');
-        if (open >= 0 && close > open) {
-            fieldEntity.setText(full.substring(open + 1, close));
-            fieldEntity.setSelection(fieldEntity.getText().length());
+        if (searchHandler != null) searchHandler.removeCallbacksAndMessages(null);
+        searchGeneration++; // drop any in-flight server search
+        loadGeneration++;   // drop in-flight initial load so it can't reopen the list
+        suppressEntityResults = true;
+        try {
+            if (open >= 0 && close > open) {
+                fieldEntity.setText(full.substring(open + 1, close));
+                fieldEntity.setSelection(fieldEntity.getText().length());
+            }
+        } finally {
+            suppressEntityResults = false;
         }
         rebuildServices(null);
         scheduleLivePreview(fieldEntity.getText() != null
             ? fieldEntity.getText().toString().trim() : "");
         if (entityResults != null) entityResults.setVisibility(View.GONE);
+        if (entityStatus != null) entityStatus.setVisibility(View.GONE);
     }
 
     @Override
@@ -356,54 +370,90 @@ public class ConfigureActionButtonActivity extends Activity {
         }
     }
 
-    /** Optional chip color behind the widget icon (0 = transparent). */
+    /** Optional chip color behind the widget icon (0 = transparent / "None"). */
     private void buildIconBgRow() {
         LinearLayout row = findViewById(R.id.icon_bg_row);
         if (row == null) return;
         row.removeAllViews();
-        bgSwatchViews.clear();
         int cell = MaterialIcons.dp(getResources(), 40);
         int pad = MaterialIcons.dp(getResources(), 6);
-        TextView label = new TextView(this);
-        label.setText("Icon background:");
-        label.setTextColor(0xFFCBD5E1);
-        label.setTextSize(12);
-        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        llp.gravity = android.view.Gravity.CENTER_VERTICAL;
-        label.setLayoutParams(llp);
-        row.addView(label);
         for (int i = 0; i < ICON_BG_CHOICES.length; i++) {
             final int color = ICON_BG_CHOICES[i];
+            final boolean selected = color == selectedIconBg;
+            if (color == 0) {
+                TextView none = new TextView(this);
+                none.setText("None");
+                none.setTextSize(12);
+                none.setTextColor(selected ? 0xFF4ADE80 : 0xFFCBD5E1);
+                none.setGravity(android.view.Gravity.CENTER);
+                LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, cell);
+                nlp.setMargins(pad, pad, pad, pad);
+                none.setLayoutParams(nlp);
+                none.setPadding(MaterialIcons.dp(getResources(), 12), 0,
+                    MaterialIcons.dp(getResources(), 12), 0);
+                GradientDrawable nbg = new GradientDrawable();
+                nbg.setCornerRadius(MaterialIcons.dp(getResources(), 20));
+                nbg.setColor(0x00000000);
+                nbg.setStroke(MaterialIcons.dp(getResources(), 2),
+                    selected ? 0xFF4ADE80 : 0xFF64748B);
+                none.setBackground(nbg);
+                none.setContentDescription("None — transparent, no background");
+                none.setTooltipText("None — transparent, no background");
+                none.setOnClickListener(v -> {
+                    selectedIconBg = 0;
+                    buildIconBgRow();
+                    updateIconNameLabel();
+                });
+                row.addView(none);
+                continue;
+            }
             ImageView sw = new ImageView(this);
             LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(cell, cell);
             lp.setMargins(pad, pad, pad, pad);
             sw.setLayoutParams(lp);
             sw.setContentDescription(ICON_BG_LABELS[i]);
             sw.setTooltipText(ICON_BG_LABELS[i]);
-            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-            bg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
-            bg.setColor(color == 0 ? 0x00000000 : color);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setShape(GradientDrawable.OVAL);
+            bg.setColor(color);
             bg.setStroke(MaterialIcons.dp(getResources(), 2),
-                color == selectedIconBg ? 0xFF4ADE80 : 0x475569);
+                selected ? 0xFF4ADE80 : 0xFF64748B);
             sw.setBackground(bg);
-            final boolean selected = color == selectedIconBg;
-            if (selected) sw.setAlpha(1f); else sw.setAlpha(0.75f);
+            sw.setAlpha(selected ? 1f : 0.85f);
             sw.setOnClickListener(v -> {
                 selectedIconBg = color;
                 buildIconBgRow();
                 updateIconNameLabel();
             });
-            bgSwatchViews.add(sw);
             row.addView(sw);
+        }
+        updateIconBgStatusLabel();
+    }
+
+    private void updateIconBgStatusLabel() {
+        TextView status = findViewById(R.id.icon_bg_selected);
+        if (status == null) return;
+        if (selectedIconBg == 0) {
+            status.setText("None — transparent (no chip behind the icon)");
+        } else {
+            String name = "Color";
+            for (int i = 0; i < ICON_BG_CHOICES.length; i++) {
+                if (ICON_BG_CHOICES[i] == selectedIconBg) {
+                    name = ICON_BG_LABELS[i];
+                    break;
+                }
+            }
+            status.setText(name + " chip — tap None to clear");
         }
     }
 
     private void updateIconNameLabel() {
         if (iconName != null) {
-            String bg = selectedIconBg == 0 ? "bg none" : "bg set";
+            String bg = selectedIconBg == 0 ? "bg transparent" : "bg color";
             iconName.setText("Selected: " + selectedIcon + " · " + bg);
         }
+        updateIconBgStatusLabel();
     }
 
     private void highlightIcon(ImageView iv, boolean selected) {

@@ -38,6 +38,8 @@ public class ConfigureDashboardActivity extends Activity {
     private int searchGeneration;
     private int activeCell = -1;
     private android.os.Handler searchHandler;
+    /** True only while pickEntity() writes a cell — blocks that cell's results from reopening. */
+    private final boolean[] suppressCellResults = new boolean[DashboardConfig.MAX_CELLS];
 
     @SuppressWarnings("unchecked")
     @Override
@@ -87,6 +89,10 @@ public class ConfigureDashboardActivity extends Activity {
             fields[i].addTextChangedListener(new SimpleWatcher() {
                 @Override public void afterTextChanged(Editable s) {
                     refreshPreview(idx);
+                    if (suppressCellResults[idx]) {
+                        if (resultLists[idx] != null) resultLists[idx].setVisibility(View.GONE);
+                        return;
+                    }
                     String q = s != null ? s.toString().trim() : "";
                     updateResultsList(idx, q);
                     scheduleServerSearch(idx, q);
@@ -95,7 +101,7 @@ public class ConfigureDashboardActivity extends Activity {
             fields[i].setOnFocusChangeListener((v, hasFocus) -> {
                 if (hasFocus) {
                     activeCell = idx;
-                    updateResultsList(idx, textAt(idx));
+                    if (!suppressCellResults[idx]) updateResultsList(idx, textAt(idx));
                 }
             });
         }
@@ -158,12 +164,21 @@ public class ConfigureDashboardActivity extends Activity {
     private void pickEntity(int cell, String full) {
         int open = full.lastIndexOf('(');
         int close = full.lastIndexOf(')');
-        if (open >= 0 && close > open) {
-            fields[cell].setText(full.substring(open + 1, close));
-            fields[cell].setSelection(fields[cell].getText().length());
+        if (searchHandler != null) searchHandler.removeCallbacksAndMessages(null);
+        searchGeneration++; // drop any in-flight server search
+        loadGeneration++;   // drop in-flight initial load so it can't reopen the list
+        suppressCellResults[cell] = true;
+        try {
+            if (open >= 0 && close > open) {
+                fields[cell].setText(full.substring(open + 1, close));
+                fields[cell].setSelection(fields[cell].getText().length());
+            }
+        } finally {
+            suppressCellResults[cell] = false;
         }
         refreshPreview(cell);
         if (resultLists[cell] != null) resultLists[cell].setVisibility(View.GONE);
+        if (entityStatus != null) entityStatus.setVisibility(View.GONE);
         applyLive(cell);
     }
 

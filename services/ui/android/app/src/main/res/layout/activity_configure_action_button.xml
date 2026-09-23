@@ -139,13 +139,35 @@
             android:textColor="#94A3B8"
             android:textSize="12sp"
             tools:ignore="MissingConstraints" />
-        <LinearLayout
-            android:id="@+id/icon_bg_row"
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:gravity="center_vertical"
-            android:orientation="horizontal" />
+            android:text="Icon background"
+            android:textColor="#CBD5E1"
+            android:textSize="12sp" />
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:scrollbars="none">
+            <LinearLayout
+                android:id="@+id/icon_bg_row"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="2dp"
+                android:paddingEnd="2dp" />
+        </HorizontalScrollView>
+        <TextView
+            android:id="@+id/icon_bg_selected"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="None — transparent (no chip behind the icon)"
+            android:textColor="#94A3B8"
+            android:textSize="12sp" />
 
         <LinearLayout
             android:layout_width="match_parent"
