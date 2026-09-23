@@ -361,6 +361,19 @@ export const api = {
     return normalizeUser(resp.data);
   },
 
+  async getUserTheme(): Promise<{ theme_id: string; packs: unknown[] }> {
+    const resp = await apiClient.get('/api/users/me/theme');
+    return resp.data;
+  },
+
+  async updateUserTheme(body: {
+    theme_id?: string;
+    packs?: unknown[];
+  }): Promise<{ status: string; theme_id: string; packs: unknown[] }> {
+    const resp = await apiClient.put('/api/users/me/theme', body);
+    return resp.data;
+  },
+
   async enrollVoice(audioBlob: Blob): Promise<{ status: string; message: string }> {
     const formData = new FormData();
     formData.append('file', audioBlob, 'enrollment.webm');

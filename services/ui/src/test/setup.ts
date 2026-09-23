@@ -183,14 +183,43 @@ const resetMockState = () => {
       pinned_devices: [],
       config: {},
       updated_at: Date.now(),
+    },
+    {
+      widget_key: 'health_activity',
+      visibility: 'visible',
+      order_index: 7,
+      size: 'medium',
+      is_pinned: false,
+      sort_mode: null,
+      pinned_devices: [],
+      config: {},
+      updated_at: Date.now(),
     }
   ];
   quickAssistantEnabled = false;
 };
 
+const userThemePref = {
+  theme_id: 'aurora',
+  packs: [] as unknown[],
+};
+
 export const server = setupServer(
   http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
   http.get('/api/users/me', () => HttpResponse.json(users[0])),
+  http.get('/api/users/me/theme', () => HttpResponse.json({
+    status: 'SUCCESS',
+    ...userThemePref,
+  })),
+  http.put('/api/users/me/theme', async ({ request }) => {
+    const body = await request.json() as { theme_id?: string; packs?: unknown[] };
+    if (body.theme_id !== undefined) userThemePref.theme_id = body.theme_id;
+    if (body.packs !== undefined) userThemePref.packs = body.packs;
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      ...userThemePref,
+    });
+  }),
   http.get('/api/users', () => HttpResponse.json(users)),
   http.post('/api/users', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;

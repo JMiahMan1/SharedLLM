@@ -170,6 +170,20 @@ export const WorkspacesSkeleton: React.FC = () => (
   </div>
 );
 
+export const HealthActivitySkeleton: React.FC = () => (
+  <div className="glass-panel overflow-hidden p-5 flex flex-col h-full w-full relative">
+    <SkeletonHeader title="Health" icon="🏃" />
+    <div className="flex-1 flex items-center justify-center gap-4">
+      <div className="h-24 w-24 rounded-full bg-white/5 animate-pulse" />
+      <div className="flex-1 space-y-2">
+        <div className="h-8 bg-white/5 rounded-lg w-full animate-pulse" />
+        <div className="h-8 bg-white/5 rounded-lg w-5/6 animate-pulse" />
+        <div className="h-8 bg-white/5 rounded-lg w-4/5 animate-pulse" />
+      </div>
+    </div>
+  </div>
+);
+
 const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   energy_insights: EnergyInsightsSkeleton,
   ambient_timer: AmbientTimerSkeleton,
@@ -180,6 +194,7 @@ const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   quick_assistant: QuickAssistantSkeleton,
   device_control: DeviceControlSkeleton,
   workspaces: WorkspacesSkeleton,
+  health_activity: HealthActivitySkeleton,
 };
 
 interface WidgetSkeletonSelectorProps {

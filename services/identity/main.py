@@ -32,6 +32,7 @@ from services.identity.models import (
     RavenMission,
     User,
     UserCalendarSetting,
+    UserThemeSetting,
     UserWidget,
 )
 from services.identity.schemas import (
@@ -179,6 +180,16 @@ def _ensure_schema_upgrades() -> None:
                     pinned_devices VARCHAR NOT NULL DEFAULT '[]',
                     config VARCHAR NOT NULL DEFAULT '{}',
                     updated_at INTEGER NOT NULL
+                )
+            """))
+            conn.commit()
+
+    if not _table_exists("userthemesetting"):
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE userthemesetting (
+                    username VARCHAR PRIMARY KEY,
+                    data VARCHAR NOT NULL DEFAULT '{}'
                 )
             """))
             conn.commit()
@@ -1592,7 +1603,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
     known_keys = [
         'energy_insights', 'ambient_timer', 'quick_notes', 'active_media',
         'chores_progress', 'upcoming_events', 'quick_assistant', 'device_control',
-        'workspaces'
+        'workspaces', 'health_activity'
     ]
     default_sizes = {
         'energy_insights': 'medium',
@@ -1604,6 +1615,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
         'quick_assistant': 'medium',
         'device_control': 'tall',
         'workspaces': 'medium',
+        'health_activity': 'medium',
     }
     result = []
     for key in known_keys:
@@ -1749,6 +1761,74 @@ def update_calendar_settings(
     session.add(row)
     session.commit()
     return {"status": "SUCCESS", "settings": data}
+
+
+# ─── Per-user website/widget theme (same pack schema as the web client) ──────
+
+@app.get("/api/users/me/theme")
+def get_user_theme(
+    session: Session = Depends(get_session),
+    user: User = Depends(require_api_key),
+):
+    """Get the current user's website/widget theme preference."""
+    row = session.exec(
+        select(UserThemeSetting).where(UserThemeSetting.username == user.username)
+    ).first()
+    data = json.loads(row.data) if row and row.data else {}
+    return {
+        "status": "SUCCESS",
+        "theme_id": data.get("theme_id") or "aurora",
+        "packs": data.get("packs") or [],
+    }
+
+
+@app.put("/api/users/me/theme")
+def update_user_theme(
+    body: dict,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_api_key),
+):
+    """Update theme_id and/or imported user theme packs for this user.
+
+    Packs must satisfy the web schematic (kind=jarvis.health-theme-pack).
+    Unknown keys are ignored; missing keys are preserved.
+    """
+    row = session.exec(
+        select(UserThemeSetting).where(UserThemeSetting.username == user.username)
+    ).first()
+    if row is None:
+        row = UserThemeSetting(username=user.username, data="{}")
+        session.add(row)
+
+    data = json.loads(row.data) if row and row.data else {}
+    allowed = {"theme_id", "packs"}
+    for key, value in (body or {}).items():
+        if key not in allowed:
+            continue
+        if key == "theme_id":
+            if not isinstance(value, str) or not value.strip():
+                raise HTTPException(status_code=422, detail="theme_id must be a non-empty string")
+            data["theme_id"] = value.strip()
+        elif key == "packs":
+            if not isinstance(value, list):
+                raise HTTPException(status_code=422, detail="packs must be a list of theme packs")
+            for pack in value:
+                if not isinstance(pack, dict) or pack.get("kind") != "jarvis.health-theme-pack":
+                    raise HTTPException(
+                        status_code=422,
+                        detail='each pack must be an object with kind "jarvis.health-theme-pack"',
+                    )
+                if pack.get("schemaVersion") != 1:
+                    raise HTTPException(status_code=422, detail="pack.schemaVersion must be 1")
+            data["packs"] = value
+    row.data = json.dumps(data)
+    session.add(row)
+    session.commit()
+    return {
+        "status": "SUCCESS",
+        "theme_id": data.get("theme_id") or "aurora",
+        "packs": data.get("packs") or [],
+    }
 
 
 def _resolve_mission(mission_id_or_slug: str, session: Session) -> RavenMission:

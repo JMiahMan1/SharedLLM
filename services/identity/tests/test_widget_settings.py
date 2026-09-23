@@ -52,7 +52,7 @@ def test_get_widget_settings_returns_all_known_widgets(client: TestClient, sessi
     resp = client.get("/api/widgets/settings")
     assert resp.status_code == 200
     settings = resp.json()
-    assert len(settings["widgets"]) == 9  # 9 known widget keys
+    assert len(settings["widgets"]) == 10  # 10 known widget keys
 
     widget_keys = [w["widget_key"] for w in settings["widgets"]]
     assert "energy_insights" in widget_keys
@@ -64,6 +64,7 @@ def test_get_widget_settings_returns_all_known_widgets(client: TestClient, sessi
     assert "quick_assistant" in widget_keys
     assert "device_control" in widget_keys
     assert "workspaces" in widget_keys
+    assert "health_activity" in widget_keys
 
 
 def test_quick_assistant_hidden_by_default(client: TestClient):

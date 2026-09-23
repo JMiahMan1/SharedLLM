@@ -154,6 +154,18 @@ class UserCalendarSetting(SQLModel, table=True):  # type: ignore
     username: str = Field(primary_key=True, foreign_key="user.username")
     data: str = Field(default="{}")
 
+
+class UserThemeSetting(SQLModel, table=True):  # type: ignore
+    """Per-user website + widget theme preference.
+
+    data JSON keys:
+      - theme_id: selected health/site theme slug
+      - packs: optional list of user ThemePack objects (same schema as web)
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: str = Field(default="{}")
+
 DEFAULT_GLOBAL_SETTINGS = [
     {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
     {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},

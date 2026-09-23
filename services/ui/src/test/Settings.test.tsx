@@ -22,7 +22,7 @@ describe('Settings System Configuration migration', () => {
   it('exposes an edit entry point for admins', async () => {
     renderWithProviders(<Settings />);
 
-    const editButton = await screen.findByRole('button', { name: /edit/i });
+    const editButton = await screen.findByRole('button', { name: /^edit$/i });
     expect(editButton).toBeInTheDocument();
   });
 });
