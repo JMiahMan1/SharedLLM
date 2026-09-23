@@ -351,10 +351,37 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
 }
 
 /**
- * Download and launch Android system package installer for APK updates
+ * Download and launch Android system package installer for APK updates.
+ * Uses the native ApkInstall plugin (self-signed, no Play Store) when available;
+ * falls back to opening the URL in the system browser.
  */
-export function downloadAndInstallApk(apkUrl: string): void {
+export async function downloadAndInstallApk(apkUrl: string): Promise<void> {
   if (!apkUrl) return;
-  toast.loading('Opening APK download...', { duration: 3000 });
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const { registerPlugin } = await import('@capacitor/core');
+      const ApkInstall = registerPlugin<{
+        canInstall(): Promise<{ allowed: boolean }>;
+        openInstallSettings(): Promise<void>;
+        installApk(opts: { url: string }): Promise<{ message: string }>;
+      }>('ApkInstall');
+      const can = await ApkInstall.canInstall();
+      if (!can.allowed) {
+        toast('Allow “Install unknown apps” for Jarvis OS to continue.', {
+          id: 'apk-install',
+          duration: 8000,
+        });
+        await ApkInstall.openInstallSettings();
+        return;
+      }
+      toast.loading('Downloading APK…', { id: 'apk-install' });
+      await ApkInstall.installApk({ url: apkUrl });
+      toast.success('Installer opened — tap Install.', { id: 'apk-install', duration: 5000 });
+      return;
+    } catch (err) {
+      console.warn('[AppUpdater] ApkInstall plugin failed, falling back:', err);
+    }
+  }
+  toast.loading('Opening APK download...', { duration: 3000, id: 'apk-install' });
   window.open(apkUrl, '_system');
 }

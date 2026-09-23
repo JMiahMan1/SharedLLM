@@ -17,7 +17,7 @@ android {
         applicationId "com.jarvisos.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 8
+        versionCode 9
         versionName uiVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -33,12 +33,21 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Self-signed release keystore — no Play Store. Same key signs debug
+        // and release so device upgrades never hit a signature mismatch.
+        release {
+            storeFile file('release.keystore')
+            storePassword System.getenv('KEYSTORE_PASSWORD') ?: 'jarvis-home-2026'
+            keyAlias 'jarvisos'
+            keyPassword System.getenv('KEY_PASSWORD') ?: 'jarvis-home-2026'
+        }
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
         }
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

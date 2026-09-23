@@ -546,7 +546,7 @@ const AppUpdatesSection = () => {
             <button
               onClick={() => {
                 trigger('medium');
-                downloadAndInstallApk(updateInfo.apkUrl!);
+                void downloadAndInstallApk(updateInfo.apkUrl!);
               }}
               className="shrink-0 px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5"
             >

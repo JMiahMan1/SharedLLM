@@ -99,6 +99,29 @@ running build, the app offers the APK for manual install.
 `services/ui/package.json` so a release cannot ship web `1.4.0` against Android
 `1.3.1`.
 
+## Self-signed APK (no Play Store)
+
+Jarvis OS is a personal home app and will **never** ship on Google Play.
+
+| Piece | Location |
+| --- | --- |
+| Keystore | `services/ui/android/app/release.keystore` (alias `jarvisos`) |
+| Passwords | env `KEYSTORE_PASSWORD` / `KEY_PASSWORD`, defaults `jarvis-home-2026` |
+| Signing | `build.gradle` — **both** `debug` and `release` use this keystore |
+| CI artifact | `jarvis-os-release-apk` → `app-release.apk` (signed) |
+| In-app install | `ApkInstall` Capacitor plugin → FileProvider → system installer |
+
+Because debug and release share one certificate, OTA-era installs upgrade in
+place without uninstall. First transition from an old debug-keystore build may
+require one uninstall/install if signatures differ.
+
+Android still shows the system “Install?” sheet (or requires a one-time
+“Install unknown apps” grant for Jarvis OS). Fully silent installs are not
+possible on a non-rooted personal device without Play/MDM.
+
+Publish path: CI signs → `deploy_remote.sh` copies APK to
+`data/app_updates/app-debug.apk` → Settings → Check for updates → Download APK.
+
 ## Verifying a deploy
 
 ```bash

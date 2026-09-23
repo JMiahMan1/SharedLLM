@@ -74,7 +74,7 @@ jobs:
           services/ui/dist/version.json
         retention-days: 30
 
-    - name: Build Release APK
+    - name: Build Release APK (self-signed)
       run: |
         cd android
         ./gradlew assembleRelease -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m" --no-daemon --stacktrace
@@ -82,6 +82,14 @@ jobs:
     - name: Upload Release APK artifact
       uses: actions/upload-artifact@v4
       with:
+        name: jarvis-os-release-apk
+        path: services/ui/android/app/build/outputs/apk/release/app-release.apk
+        retention-days: 30
+
+    # Keep legacy artifact name so deploy_remote.sh keeps working
+    - name: Upload Release APK (legacy name)
+      uses: actions/upload-artifact@v4
+      with:
         name: jarvis-os-release-unsigned-apk
-        path: services/ui/android/app/build/outputs/apk/release/app-release-unsigned.apk
+        path: services/ui/android/app/build/outputs/apk/release/app-release.apk
         retention-days: 30

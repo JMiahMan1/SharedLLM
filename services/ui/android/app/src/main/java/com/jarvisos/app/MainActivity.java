@@ -20,6 +20,7 @@ public class MainActivity extends BridgeActivity {
         // "plugin is not implemented on android".
         registerPlugin(StepCounterPlugin.class);
         registerPlugin(TokenBridgePlugin.class);
+        registerPlugin(ApkInstallPlugin.class);
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
