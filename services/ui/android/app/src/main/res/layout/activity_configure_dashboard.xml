@@ -158,15 +158,19 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:background="#1E293B"
                 android:text="Cancel"
-                android:textColor="#CBD5E1" />
+                android:textAllCaps="false"
+                android:textColor="#F8FAFC" />
             <Button
                 android:id="@+id/btn_save"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="12dp"
                 android:layout_weight="1"
+                android:background="#4ADE80"
                 android:text="Save"
+                android:textAllCaps="false"
                 android:textColor="#0F172A" />
         </LinearLayout>
     </LinearLayout>
