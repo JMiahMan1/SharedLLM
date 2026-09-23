@@ -23,6 +23,7 @@ import Remote from './pages/Remote';
 import Settings from './pages/Settings';
 import Wander from './pages/Wander';
 import { initAppUpdater } from './lib/appUpdater';
+import { useSiteTheme } from './themes/siteTheme';
 
 import { Toaster } from 'react-hot-toast';
 
@@ -87,6 +88,8 @@ function App() {
     void initAppUpdater();
     return () => window.removeEventListener('resize', handleResize);
   }, []);
+
+  useSiteTheme();
 
   return (
     <QueryClientProvider client={queryClient}>

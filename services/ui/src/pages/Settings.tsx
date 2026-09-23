@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import type { GlobalSetting } from '../services/api';
 import LocationPanel from '../components/location/LocationPanel';
+import SiteThemePanel from '../components/settings/SiteThemePanel';
 import Toggle from '../components/ui/Toggle';
 import { isAdminPinSet, setAdminPin, clearAdminPin } from '../lib/adminPin';
 import { checkForAppUpdates, downloadAndInstallApk, getRunningVersion } from '../lib/appUpdater';
@@ -79,6 +80,8 @@ const Settings = () => {
           onChange={() => handleToggle(setNotifications, notifications)}
         />
       </div>
+
+      <SiteThemePanel />
 
       <SensorsSection />
 

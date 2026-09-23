@@ -7,7 +7,8 @@ export type WidgetKey =
   | 'upcoming_events'
   | 'quick_assistant'
   | 'device_control'
-  | 'workspaces';
+  | 'workspaces'
+  | 'health_activity';
 
 export type WidgetVisibility = 'visible' | 'hidden' | 'removed';
 export type WidgetSize = 'small' | 'medium' | 'wide' | 'tall';
