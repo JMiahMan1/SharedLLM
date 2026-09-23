@@ -97,6 +97,32 @@ class TestPermissionsHandling:
         assert call_pos > recreate_pos, "_fix_volume_permissions should be called within _recreate_container"
 
 
+class TestRecreateNetworkSafety:
+    """Recreate must snapshot config while healthy and survive self-update."""
+
+    def test_snapshot_taken_before_stop(self, control_plane_code):
+        snap_at = control_plane_code.find("snap = _snapshot_container_config(container)")
+        stop_at = control_plane_code.find("container.stop(timeout=10)")
+        assert snap_at != -1, "must snapshot before mutating the container"
+        assert stop_at != -1
+        assert snap_at < stop_at, "snapshot must happen before stop (attrs clear NetworkSettings after stop)"
+
+    def test_self_recreate_is_detached(self, control_plane_code):
+        """Self-recreate must not stop this process in-place (exit 137 left CP down)."""
+        assert "_is_self_container" in control_plane_code
+        assert "_recreate_self_detached" in control_plane_code
+        assert "start_new_session=True" in control_plane_code
+
+    def test_network_connect_releases_backup_first(self, control_plane_code):
+        """Backup must release its IPv4 before the new container pins/connects."""
+        assert "release_from" in control_plane_code
+        assert "disconnect" in control_plane_code
+
+    def test_aliases_include_compose_service(self, control_plane_code):
+        assert "com.docker.compose.service" in control_plane_code
+        assert "_network_aliases" in control_plane_code
+
+
 class TestUpdateDetectionImprovements:
     """Test improvements to the update detection logic."""
 
