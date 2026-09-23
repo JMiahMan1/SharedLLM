@@ -130,12 +130,19 @@
 
 
 
-    handle /api/logs* {
+    # WebSocket stream authenticates via ?token= (user API key) on logging.
+    handle /api/logs/stream* {
         reverse_proxy logging:8006
     }
 
+    # HTTP log reads/clears go through gateway so X-Internal-Secret is injected;
+    # logging rejects Bearer-only with 403.
+    handle /api/logs* {
+        reverse_proxy gateway:11435
+    }
+
     handle /api/admin/logs* {
-        reverse_proxy logging:8006
+        reverse_proxy gateway:11435
     }
 
     handle /execute* {
