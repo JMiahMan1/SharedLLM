@@ -5,6 +5,7 @@ __pycache__/
 .env.test
 test.env
 .venv
+uv.lock
 .idea/
 .vscode/
 *.swp
