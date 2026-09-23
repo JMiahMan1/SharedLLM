@@ -9,6 +9,7 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.os.Build;
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -87,7 +88,7 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             call.resolve(ret);
             return;
         }
-        if (state == PermissionState.DENIED_WITH_ALWAYS) {
+        if (state == PermissionState.DENIED && isPermanentlyDenied()) {
             // System will not show the dialog again — UI must deep-link to Settings.
             JSObject ret = new JSObject();
             ret.put("granted", false);
@@ -96,6 +97,23 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             return;
         }
         requestPermissionForAlias("activityRecognition", call, "onPermissionResult");
+    }
+
+    /**
+     * Capacitor's PermissionState has no DENIED_WITH_ALWAYS; Android signals a
+     * permanent deny as DENIED + shouldShowRequestPermissionRationale == false.
+     */
+    private boolean isPermanentlyDenied() {
+        try {
+            android.app.Activity activity = getActivity();
+            if (activity == null) {
+                return false;
+            }
+            return !ActivityCompat.shouldShowRequestPermissionRationale(
+                activity, Manifest.permission.ACTIVITY_RECOGNITION);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     @PermissionCallback
@@ -109,7 +127,7 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         }
         JSObject ret = new JSObject();
         ret.put("granted", granted);
-        ret.put("permanentlyDenied", state == PermissionState.DENIED_WITH_ALWAYS);
+        ret.put("permanentlyDenied", !granted && isPermanentlyDenied());
         call.resolve(ret);
     }
 
