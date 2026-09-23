@@ -14,9 +14,13 @@ import com.getcapacitor.Plugin;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+        // Capacitor 8: bridge is created inside super.onCreate() via load().
+        // registerPlugin() only queues on the builder — after super.onCreate()
+        // the bridge already exists, so late plugins are dropped and JS gets
+        // "plugin is not implemented on android".
         registerPlugin(StepCounterPlugin.class);
         registerPlugin(TokenBridgePlugin.class);
+        super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             getWindow().setDecorFitsSystemWindows(false);

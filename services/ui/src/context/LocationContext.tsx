@@ -355,6 +355,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       error: null,
       interval: newInterval,
     }));
+    // Successful fix — clear any sticky sensor banner (timeout, old TokenBridge miss, etc.)
+    patchSensor('location', { permission: 'granted', message: null });
 
     if (lastLocationRef.current) {
       const distance = calculateDistance(lastLocationRef.current.lat, lastLocationRef.current.lng, latitude, longitude);
