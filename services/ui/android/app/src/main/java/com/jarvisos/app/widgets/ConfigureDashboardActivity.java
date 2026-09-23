@@ -10,6 +10,7 @@ import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
 import android.widget.Button;
+import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -24,6 +25,7 @@ import org.json.JSONObject;
 public class ConfigureDashboardActivity extends Activity {
     private int appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID;
     private final AutoCompleteTextView[] fields = new AutoCompleteTextView[DashboardConfig.MAX_CELLS];
+    private final ListView[] resultLists = new ListView[DashboardConfig.MAX_CELLS];
     private final TextView[] previews = new TextView[DashboardConfig.MAX_CELLS];
     private ProgressBar entityProgress;
     private TextView entityStatus;
@@ -32,8 +34,11 @@ public class ConfigureDashboardActivity extends Activity {
     private final Map<String, String> liveStates = new ConcurrentHashMap<>();
     private final Map<String, String> liveNames = new ConcurrentHashMap<>();
     private ArrayAdapter<String> adapter;
+    private ArrayAdapter<String>[] resultsAdapters;
     private int loadGeneration;
+    private int activeCell = -1;
 
+    @SuppressWarnings("unchecked")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -50,7 +55,21 @@ public class ConfigureDashboardActivity extends Activity {
         fields[1] = findViewById(R.id.field_entity_2);
         fields[2] = findViewById(R.id.field_entity_3);
         fields[3] = findViewById(R.id.field_entity_4);
-        for (AutoCompleteTextView f : fields) f.setThreshold(1);
+        resultLists[0] = findViewById(R.id.entity_results_1);
+        resultLists[1] = findViewById(R.id.entity_results_2);
+        resultLists[2] = findViewById(R.id.entity_results_3);
+        resultLists[3] = findViewById(R.id.entity_results_4);
+        resultsAdapters = new ArrayAdapter[DashboardConfig.MAX_CELLS];
+        for (int i = 0; i < fields.length; i++) {
+            fields[i].setThreshold(1);
+            resultsAdapters[i] = makeDarkAdapter();
+            resultLists[i].setAdapter(resultsAdapters[i]);
+            final int idx = i;
+            resultLists[i].setOnItemClickListener((parent, view, position, id) -> {
+                String full = resultsAdapters[idx].getItem(position);
+                if (full != null) pickEntity(idx, full);
+            });
+        }
         previews[0] = findViewById(R.id.preview_1);
         previews[1] = findViewById(R.id.preview_2);
         previews[2] = findViewById(R.id.preview_3);
@@ -67,21 +86,24 @@ public class ConfigureDashboardActivity extends Activity {
             fields[i].addTextChangedListener(new SimpleWatcher() {
                 @Override public void afterTextChanged(Editable s) {
                     refreshPreview(idx);
-                    // Live re-filter suggestions as the user types
-                    if (adapter != null) adapter.getFilter().filter(s != null ? s.toString() : "");
+                    updateResultsList(idx, s != null ? s.toString().trim() : "");
+                }
+            });
+            fields[i].setOnFocusChangeListener((v, hasFocus) -> {
+                if (hasFocus) {
+                    activeCell = idx;
+                    String q = textAt(idx);
+                    updateResultsList(idx, q);
+                } else {
+                    // Hide only this cell's list when focus leaves
+                    if (resultLists[idx] != null && !resultLists[idx].isPressed()) {
+                        // keep visible if user is about to tap a row; hide on Save path
+                    }
                 }
             });
             fields[i].setOnItemClickListener((parent, view, position, id) -> {
                 String full = entityLabels.get(position);
-                int open = full.lastIndexOf('(');
-                int close = full.lastIndexOf(')');
-                if (open >= 0 && close > open) {
-                    fields[idx].setText(full.substring(open + 1, close));
-                    fields[idx].setSelection(fields[idx].getText().length());
-                }
-                refreshPreview(idx);
-                // Live-push so the home screen updates without waiting for Save
-                applyLive(idx);
+                pickEntity(idx, full);
             });
         }
 
@@ -92,6 +114,64 @@ public class ConfigureDashboardActivity extends Activity {
         });
 
         loadEntities();
+    }
+
+    private ArrayAdapter<String> makeDarkAdapter() {
+        ArrayAdapter<String> a = new ArrayAdapter<String>(
+            this, android.R.layout.simple_list_item_1, new ArrayList<String>()) {
+            @Override public android.view.View getView(int position, android.view.View convertView, android.view.ViewGroup parent) {
+                android.view.View v = super.getView(position, convertView, parent);
+                if (v instanceof TextView) {
+                    TextView tv = (TextView) v;
+                    tv.setTextColor(0xFFF1F5F9);
+                    tv.setBackgroundColor(0xFF1E293B);
+                    tv.setPadding(MaterialIcons.dp(getResources(), 12),
+                        MaterialIcons.dp(getResources(), 10),
+                        MaterialIcons.dp(getResources(), 12),
+                        MaterialIcons.dp(getResources(), 10));
+                }
+                return v;
+            }
+        };
+        a.setNotifyOnChange(true);
+        return a;
+    }
+
+    private void updateResultsList(int cell, String query) {
+        if (resultLists[cell] == null || resultsAdapters[cell] == null) return;
+        if (entityLabels.isEmpty()) {
+            resultLists[cell].setVisibility(View.GONE);
+            return;
+        }
+        String q = query == null ? "" : query.toLowerCase();
+        List<String> matches = new ArrayList<>();
+        for (int i = 0; i < entityLabels.size(); i++) {
+            String label = entityLabels.get(i);
+            String id = i < entityIds.size() ? entityIds.get(i) : "";
+            if (q.isEmpty()
+                || label.toLowerCase().contains(q)
+                || id.toLowerCase().contains(q)) {
+                matches.add(label);
+                if (!q.isEmpty() && matches.size() >= 40) break;
+                if (q.isEmpty() && matches.size() >= 8) break;
+            }
+        }
+        resultsAdapters[cell].clear();
+        resultsAdapters[cell].addAll(matches);
+        resultsAdapters[cell].notifyDataSetChanged();
+        resultLists[cell].setVisibility(matches.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private void pickEntity(int cell, String full) {
+        int open = full.lastIndexOf('(');
+        int close = full.lastIndexOf(')');
+        if (open >= 0 && close > open) {
+            fields[cell].setText(full.substring(open + 1, close));
+            fields[cell].setSelection(fields[cell].getText().length());
+        }
+        refreshPreview(cell);
+        if (resultLists[cell] != null) resultLists[cell].setVisibility(View.GONE);
+        applyLive(cell);
     }
 
     private String textAt(int i) {
@@ -114,15 +194,12 @@ public class ConfigureDashboardActivity extends Activity {
         previews[i].setText(state != null ? name + " · " + state : name);
     }
 
-    /** Propagate a single cell to the live widget as soon as an entity is chosen. */
     private void applyLive(int cellIndex) {
         List<String> cells = collectCells();
-        // Persist only the cells so far so a partial config still renders
         DashboardConfig.saveCells(this, appWidgetId, cells);
         AppWidgetManager mgr = AppWidgetManager.getInstance(this);
         mgr.updateAppWidget(appWidgetId, DashboardWidget.build(this, appWidgetId));
         WidgetUpdater.request(this, DashboardWidget.class);
-        // Keep collecting remaining cells in memory via prefs — save() rewrites full list
         if (cellIndex >= 0) {
             previews[cellIndex].setAlpha(1f);
         }
@@ -138,6 +215,7 @@ public class ConfigureDashboardActivity extends Activity {
     }
 
     private void loadEntities() {
+        WidgetApi.ensureCredentials(this);
         if (WidgetApi.apiKey(this) == null) {
             entityStatus.setVisibility(View.VISIBLE);
             entityStatus.setText("Sign in to Jarvis OS to browse entities, or type an entity_id.");
@@ -196,7 +274,10 @@ public class ConfigureDashboardActivity extends Activity {
                 for (AutoCompleteTextView f : fields) {
                     f.setAdapter(adapter);
                 }
-                for (int i = 0; i < previews.length; i++) refreshPreview(i);
+                for (int i = 0; i < previews.length; i++) {
+                    refreshPreview(i);
+                    updateResultsList(i, textAt(i));
+                }
             });
         });
     }
