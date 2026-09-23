@@ -16,6 +16,7 @@ import aiohttp
 log = logging.getLogger("execution.mass_ha")
 
 from services.execution.http_client import get_session, host_of
+from services.shared.ma_player import is_music_assistant_player
 
 
 @asynccontextmanager
@@ -350,7 +351,7 @@ async def get_ma_players(ha_url: str, ha_token: str) -> list[dict[str, Any]]:
                 for state in await resp.json():
                     eid = state.get("entity_id", "")
                     attrs = state.get("attributes", {})
-                    if attrs.get("app_id") == "music_assistant" or attrs.get("mass_player_type"):
+                    if is_music_assistant_player(attrs, eid):
                         players.append({
                             "entity_id": eid,
                             "friendly_name": attrs.get("friendly_name", ""),

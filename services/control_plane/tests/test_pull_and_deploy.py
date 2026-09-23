@@ -116,11 +116,27 @@ class TestRecreateNetworkSafety:
     def test_network_connect_releases_backup_first(self, control_plane_code):
         """Backup must release its IPv4 before the new container pins/connects."""
         assert "release_from" in control_plane_code
-        assert "disconnect" in control_plane_code
+        recreate_path = os.path.join(os.path.dirname(__file__), "..", "recreate.py")
+        with open(recreate_path) as f:
+            recreate_code = f.read()
+        assert "disconnect" in recreate_code
+        assert "release_from" in recreate_code
 
     def test_aliases_include_compose_service(self, control_plane_code):
+        # Alias/create/connect logic lives in services.control_plane.recreate
+        # and is shared with the detached self-recreate child.
+        recreate_path = os.path.join(
+            os.path.dirname(__file__), "..", "recreate.py",
+        )
         assert "com.docker.compose.service" in control_plane_code
+        with open(recreate_path) as f:
+            recreate_code = f.read()
         assert "_network_aliases" in control_plane_code
+        assert "network_aliases" in recreate_code
+        assert "run_detached_self_recreate" in control_plane_code
+        assert "run_detached_self_recreate" in recreate_code
+        assert "create_from_snapshot" in recreate_code
+        assert "connect_container_networks" in recreate_code
 
 
 class TestUpdateDetectionImprovements:

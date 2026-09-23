@@ -8,6 +8,8 @@ except ImportError:
     from .. import ha_client
     from ..schemas import ExecutionResult, MediaStatusRequest
 
+from services.shared.ma_player import is_music_assistant_player
+
 log = logging.getLogger("execution.media_status")
 
 async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
@@ -43,15 +45,7 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         # must not drop cast/Chrome/HA players that carry real now-playing
         # metadata — otherwise Office TV shows "No Active Playback" while
         # transport still works via entity_id.
-        integration = attrs.get("integration", "")
-        active_queue = attrs.get("active_queue")
-        is_ma = bool(
-            integration == "music_assistant"
-            or "music assistant" in source.lower()
-            or active_queue is not None
-            or attrs.get("app_id") == "music_assistant"
-            or attrs.get("mass_player_type")
-        )
+        is_ma = is_music_assistant_player(attrs, entity_id)
         has_metadata = bool(media_title or media_artist or media_album or entity_picture)
         is_active_state = st in ("playing", "paused", "buffering")
         is_selectable = st not in ("unavailable", "unknown")
