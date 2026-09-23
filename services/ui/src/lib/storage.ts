@@ -17,11 +17,17 @@ export async function storageInit(): Promise<void> {
     _cache['jarvis_api_key'] = apiKey;
     _cache['internal_secret'] = internalSecret;
     _cache['jarvis_server_url'] = serverUrl;
-    TokenBridge.setCredentials({
-      apiKey: apiKey ?? undefined,
-      serverUrl: serverUrl ?? undefined,
-    }).catch(() => undefined);
-    TokenBridge.refreshWidgets().catch(() => undefined);
+    try {
+      await TokenBridge.setCredentials({
+        apiKey: apiKey ?? undefined,
+        serverUrl: serverUrl ?? undefined,
+        internalSecret: internalSecret ?? undefined,
+      });
+      await TokenBridge.refreshWidgets();
+    } catch (err) {
+      // Never fail silent credential handoff to native widgets
+      console.error('[storage] TokenBridge credential sync failed:', err);
+    }
   }
 }
 
@@ -45,15 +51,16 @@ export async function storageSet(key: string, value: string): Promise<void> {
   _cache[key] = value;
   if (isNative) {
     await Preferences.set({ key, value });
-    if (key === 'jarvis_api_key' || key === 'jarvis_server_url') {
+    if (key === 'jarvis_api_key' || key === 'jarvis_server_url' || key === 'internal_secret') {
       try {
         await TokenBridge.setCredentials({
           apiKey: key === 'jarvis_api_key' ? value : undefined,
           serverUrl: key === 'jarvis_server_url' ? value : undefined,
+          internalSecret: key === 'internal_secret' ? value : undefined,
         });
         await TokenBridge.refreshWidgets();
-      } catch {
-        // native bridge unavailable
+      } catch (err) {
+        console.error('[storage] TokenBridge setCredentials failed:', err);
       }
     }
   } else {
@@ -65,15 +72,16 @@ export async function storageRemove(key: string): Promise<void> {
   delete _cache[key];
   if (isNative) {
     await Preferences.remove({ key });
-    if (key === 'jarvis_api_key' || key === 'jarvis_server_url') {
+    if (key === 'jarvis_api_key' || key === 'jarvis_server_url' || key === 'internal_secret') {
       try {
         await TokenBridge.setCredentials({
           apiKey: key === 'jarvis_api_key' ? '' : undefined,
           serverUrl: key === 'jarvis_server_url' ? '' : undefined,
+          internalSecret: key === 'internal_secret' ? '' : undefined,
         });
         await TokenBridge.refreshWidgets();
-      } catch {
-        // native bridge unavailable
+      } catch (err) {
+        console.error('[storage] TokenBridge clear failed:', err);
       }
     }
   } else {

@@ -67,7 +67,7 @@
 
         <receiver
             android:name=".widgets.DeviceButtonWidget"
-            android:exported="false"
+            android:exported="true"
             android:label="Device Buttons">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -79,7 +79,7 @@
 
         <receiver
             android:name=".widgets.MetricWidget"
-            android:exported="false"
+            android:exported="true"
             android:label="Metric">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -91,7 +91,7 @@
 
         <receiver
             android:name=".widgets.MediaWidget"
-            android:exported="false"
+            android:exported="true"
             android:label="Media">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -103,7 +103,7 @@
 
         <receiver
             android:name=".widgets.DashboardWidget"
-            android:exported="false"
+            android:exported="true"
             android:label="Dashboard">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
@@ -127,9 +127,12 @@
 
         <receiver
             android:name=".widgets.WidgetBootReceiver"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 
