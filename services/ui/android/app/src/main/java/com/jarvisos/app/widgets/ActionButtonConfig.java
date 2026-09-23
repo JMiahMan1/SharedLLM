@@ -125,10 +125,8 @@ public final class ActionButtonConfig {
         } else {
             m.put("turn_on", "Turn on / Open");
             m.put("turn_off", "Turn off / Close");
-            if ("light".equals(domain) || "switch".equals(domain)
-                || "fan".equals(domain) || "media_player".equals(domain)) {
-                m.put("toggle", "Toggle");
-            }
+            // Third option: single switch that flips on↔off based on current state
+            m.put("toggle", "Switch (on/off)");
         }
         return m;
     }

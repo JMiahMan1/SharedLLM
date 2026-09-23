@@ -5,6 +5,7 @@
     android:targetCellWidth="2"
     android:targetCellHeight="2"
     android:updatePeriodMillis="0"
+    android:configure="com.jarvisos.app.widgets.ConfigureDashboardActivity"
     android:initialLayout="@layout/widget_dashboard"
     android:resizeMode="horizontal|vertical"
     android:widgetCategory="home_screen"

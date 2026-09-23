@@ -60,7 +60,16 @@
             android:maxLines="1"
             android:textColor="#F1F5F9"
             android:textColorHint="#64748B"
-            android:textSize="14sp" />
+            android:textSize="14sp"
+            android:threshold="1" />
+        <TextView
+            android:id="@+id/entity_preview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="#4ADE80"
+            android:textSize="12sp"
+            android:visibility="gone" />
         <ProgressBar
             android:id="@+id/entity_progress"
             android:layout_width="wrap_content"

@@ -130,10 +130,16 @@ public final class WidgetUpdater {
         AppWidgetManager mgr = AppWidgetManager.getInstance(context);
         int[] ids = mgr.getAppWidgetIds(new ComponentName(context, DashboardWidget.class));
         if (ids == null || ids.length == 0) return;
+        final int[] widgetIds = ids;
         onBackground(() -> {
-            RemoteViews views = DashboardWidget.build(context);
+            final android.util.SparseArray<RemoteViews> out = new android.util.SparseArray<>();
+            for (int id : widgetIds) {
+                out.put(id, DashboardWidget.build(context, id));
+            }
             onMain(() -> {
-                for (int id : ids) mgr.updateAppWidget(id, views);
+                for (int i = 0; i < out.size(); i++) {
+                    mgr.updateAppWidget(out.keyAt(i), out.valueAt(i));
+                }
             });
         });
     }
