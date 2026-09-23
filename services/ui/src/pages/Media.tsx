@@ -298,6 +298,7 @@ const NowPlayingCard = ({
 
   const displayTitle = isWebPlayer ? (maPlayer?.mediaTitle ?? undefined) : mediaStatus?.media_title;
   const displayArtist = isWebPlayer ? (maPlayer?.mediaArtist ?? undefined) : mediaStatus?.media_artist;
+  const displayAlbum = isWebPlayer ? undefined : mediaStatus?.media_album;
 
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragState, setDragState] = useState<{ title: string; time: number | null }>({ title: '', time: null });
@@ -375,7 +376,10 @@ const NowPlayingCard = ({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-white font-medium text-lg truncate">{displayTitle || 'Unknown Title'}</p>
-                <p className="text-sm text-slate-400 truncate">{displayArtist || 'Unknown Artist'}</p>
+                <p className="text-sm text-slate-400 truncate">
+                  {displayArtist || 'Unknown Artist'}
+                  {displayAlbum ? <span className="text-slate-500"> · {displayAlbum}</span> : null}
+                </p>
               </div>
               {onFavoriteToggle && (
                 <button

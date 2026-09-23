@@ -39,21 +39,26 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
         media_duration = attrs.get("media_duration")
         entity_picture = attrs.get("entity_picture")
 
-        # Only include Music Assistant players. The detection must match
-        # mass_ha_client.get_ma_players() — `app_id` and `mass_player_type` are
-        # how HA actually marks MA entities, and omitting them here dropped
-        # real MA speakers from the device picker.
+        # Music Assistant players are preferred for the "active" slot, but we
+        # must not drop cast/Chrome/HA players that carry real now-playing
+        # metadata — otherwise Office TV shows "No Active Playback" while
+        # transport still works via entity_id.
         integration = attrs.get("integration", "")
         active_queue = attrs.get("active_queue")
-        is_ma_compatible = bool(
+        is_ma = bool(
             integration == "music_assistant"
             or "music assistant" in source.lower()
             or active_queue is not None
             or attrs.get("app_id") == "music_assistant"
             or attrs.get("mass_player_type")
         )
+        has_metadata = bool(media_title or media_artist or media_album or entity_picture)
+        is_active_state = st in ("playing", "paused", "buffering")
+        is_selectable = st not in ("unavailable", "unknown")
 
-        if not is_ma_compatible:
+        # Keep: MA players, anything actively rendering, anything with now-playing
+        # metadata, and live selectable targets. Drop dead non-MA entities only.
+        if not (is_ma or is_active_state or has_metadata or is_selectable):
             continue
 
         player = {
@@ -69,18 +74,23 @@ async def handle_media_status(req: MediaStatusRequest) -> ExecutionResult:
             "position": media_position,
             "duration": media_duration,
             "entity_picture": entity_picture,
-            "available": st not in ("unavailable", "unknown"),
+            "available": is_selectable,
             "supported_features": attrs.get("supported_features", 0),
+            "is_ma": is_ma,
         }
 
         # Anything actively rendering media is "active"; everything else is a
         # selectable target. The two lists together must cover every player —
         # states outside a fixed whitelist (e.g. "on", "unavailable") used to
         # fall through both and vanish from the picker.
-        if st in ("playing", "paused", "buffering"):
+        if is_active_state:
             active_players.append(player)
         else:
             available_players.append(player)
+
+    # Prefer Music Assistant when multiple players are active so the header
+    # matches the usual send-target; otherwise keep HA order.
+    active_players.sort(key=lambda p: (not p.get("is_ma"),))
 
     # Filter by area if requested
     if req.area:

@@ -370,3 +370,82 @@ async def test_media_status_empty_area_map_for_filter():
     all_players = result.detail.get("all_players") if result.detail else None
     assert all_players is not None
     assert len(all_players) == 0
+
+
+@pytest.mark.asyncio
+async def test_media_status_non_ma_cast_with_metadata_is_active():
+    """Chrome/Cast Office TV is not MA but must surface title/artist/album."""
+    states = [
+        _make_state(
+            "media_player.office_tv_chrome",
+            "paused",
+            {
+                "friendly_name": "Office TV Cast",
+                "media_title": "Incomplete",
+                "media_artist": "Switchfoot",
+                "media_album_name": "New Way to Be Human",
+                "entity_picture": "/local/cover.jpg",
+                "app_id": "C35B0678",
+            },
+        )
+    ]
+    with (
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+    ):
+        result = await handle_media_status(_make_req())
+
+    assert result.status == "SUCCESS"
+    active = (result.detail or {}).get("active")
+    assert active is not None
+    assert active["entity_id"] == "media_player.office_tv_chrome"
+    assert active["media_title"] == "Incomplete"
+    assert active["media_artist"] == "Switchfoot"
+    assert active["media_album"] == "New Way to Be Human"
+    assert active["is_ma"] is False
+
+
+@pytest.mark.asyncio
+async def test_media_status_prefers_ma_when_multiple_active():
+    """When both MA and cast players are active, MA wins the active slot."""
+    states = [
+        _make_state(
+            "media_player.cast_tv",
+            "playing",
+            {"media_title": "Cast Song", "media_artist": "Cast Artist"},
+        ),
+        _make_state(
+            "media_player.ma_speaker",
+            "playing",
+            {"media_title": "MA Song", **_make_ma_attributes()},
+        ),
+    ]
+    with (
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+    ):
+        result = await handle_media_status(_make_req())
+
+    active = (result.detail or {}).get("active")
+    assert active is not None
+    assert active["entity_id"] == "media_player.ma_speaker"
+    all_ids = [p["entity_id"] for p in (result.detail or {}).get("all_players") or []]
+    assert "media_player.cast_tv" in all_ids
+
+
+@pytest.mark.asyncio
+async def test_media_status_unavailable_non_ma_without_metadata_excluded():
+    """Dead non-MA entities without metadata stay out of the picker payload."""
+    states = [
+        _make_state("media_player.office_tv_3", "unavailable", {}),
+        _make_state("media_player.office_tv_chrome", "paused", {"media_title": "Song"}),
+    ]
+    with (
+        patch("services.execution.handlers.media_status.ha_client.get_states", new=AsyncMock(return_value=states)),
+        patch("services.execution.handlers.media_status.ha_client.get_areas", new=AsyncMock(return_value={})),
+    ):
+        result = await handle_media_status(_make_req())
+
+    all_ids = [p["entity_id"] for p in (result.detail or {}).get("all_players") or []]
+    assert "media_player.office_tv_3" not in all_ids
+    assert "media_player.office_tv_chrome" in all_ids
