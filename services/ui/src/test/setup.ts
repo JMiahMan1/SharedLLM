@@ -204,6 +204,63 @@ const userThemePref = {
   packs: [] as unknown[],
 };
 
+let telemetrySchedules: Array<{
+  id: string;
+  user: string;
+  type: 'health' | 'power';
+  period: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  run_at: string;
+  timezone: string;
+  enabled: boolean;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  attempts: number;
+}> = [];
+
+const telemetryReports: Array<{
+  id: string;
+  user: string;
+  type: 'health' | 'power';
+  period: 'daily' | 'weekly' | 'monthly' | 'yearly';
+  status: string;
+  analysis: string | null;
+  stats: Record<string, unknown>;
+  generated_at: string;
+}> = [
+  {
+    id: 'report-1',
+    user: 'default',
+    type: 'health',
+    period: 'daily',
+    status: 'ready',
+    analysis: 'You hit your step goal three days in a row.',
+    stats: {},
+    generated_at: '2026-05-10T20:00:00+00:00',
+  },
+];
+
+const telemetryNotifications: Array<{
+  id: string;
+  kind: string;
+  title: string;
+  report_type?: string;
+  period?: string;
+  created_at: string;
+  read: boolean;
+}> = [
+  {
+    id: 'note-1',
+    kind: 'report_ready',
+    title: 'Your daily health report is ready',
+    report_type: 'health',
+    period: 'daily',
+    created_at: '2026-05-10T20:00:00+00:00',
+    read: false,
+  },
+];
+
 export const server = setupServer(
   http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
   http.get('/api/users/me', () => HttpResponse.json(users[0])),
@@ -220,6 +277,60 @@ export const server = setupServer(
       ...userThemePref,
     });
   }),
+  http.get('/api/telemetry/schedules', () => HttpResponse.json({ status: 'SUCCESS', jobs: telemetrySchedules })),
+  http.put('/api/telemetry/schedules', async ({ request }) => {
+    const body = await request.json() as {
+      type: 'health' | 'power';
+      period: 'daily' | 'weekly' | 'monthly' | 'yearly';
+      run_at: string;
+      timezone: string;
+      enabled: boolean;
+    };
+    const existing = telemetrySchedules.find(
+      (j) => j.type === body.type && j.period === body.period
+    );
+    const job = {
+      id: existing?.id ?? `job-${body.type}-${body.period}`,
+      user: 'default',
+      type: body.type,
+      period: body.period,
+      run_at: body.run_at,
+      timezone: body.timezone,
+      enabled: body.enabled,
+      next_run_at: '2026-05-10T21:00:00+00:00',
+      last_run_at: null,
+      last_status: null,
+      last_error: null,
+      attempts: 0,
+    };
+    if (existing) Object.assign(existing, job);
+    else telemetrySchedules.push(job);
+    return HttpResponse.json({ status: 'SUCCESS', job });
+  }),
+  http.delete('/api/telemetry/schedules/:jobId', ({ params }) => {
+    const index = telemetrySchedules.findIndex((j) => j.id === params.jobId);
+    if (index >= 0) telemetrySchedules.splice(index, 1);
+    return HttpResponse.json({ status: 'SUCCESS', deleted: params.jobId });
+  }),
+  http.post('/api/telemetry/reports/request', () =>
+    HttpResponse.json({ status: 'QUEUED', job_id: 'job-manual' })
+  ),
+  http.get('/api/telemetry/reports', () =>
+    HttpResponse.json({ status: 'SUCCESS', reports: telemetryReports })
+  ),
+  http.get('/api/telemetry/reports/latest', () =>
+    HttpResponse.json({ status: 'SUCCESS', report: telemetryReports[0] ?? null })
+  ),
+  http.get('/api/telemetry/notifications', () =>
+    HttpResponse.json({ status: 'SUCCESS', notifications: telemetryNotifications })
+  ),
+  http.get('/api/telemetry/push/key', () =>
+    HttpResponse.json({ status: 'SUCCESS', public_key: 'test-vapid-public-key' })
+  ),
+  http.post('/api/telemetry/push/subscribe', () => HttpResponse.json({ status: 'SUCCESS' })),
+  http.post('/api/telemetry/push/unsubscribe', () =>
+    HttpResponse.json({ status: 'SUCCESS', removed: true })
+  ),
   http.get('/api/users', () => HttpResponse.json(users)),
   http.post('/api/users', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;
@@ -772,6 +883,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   server.resetHandlers();
+  telemetrySchedules = [];
 });
 
 afterAll(() => server.close());

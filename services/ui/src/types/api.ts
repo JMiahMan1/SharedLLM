@@ -891,3 +891,46 @@ export interface ActivityTrendsResponse {
   cached?: boolean;
 }
 
+export type TelemetryReportType = 'health' | 'power';
+export type TelemetryReportPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+export interface TelemetrySchedule {
+  id: string;
+  user: string;
+  type: TelemetryReportType;
+  period: TelemetryReportPeriod;
+  run_at: string;
+  timezone: string;
+  enabled: boolean;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_status: string | null;
+  last_error: string | null;
+  attempts: number;
+}
+
+export interface TelemetryReport {
+  id: string;
+  user: string;
+  type: TelemetryReportType;
+  period: TelemetryReportPeriod;
+  status: 'ready' | 'no_data' | string;
+  analysis: string | null;
+  stats: Record<string, unknown>;
+  window_start?: string;
+  window_end?: string;
+  generated_at: string;
+}
+
+export interface TelemetryNotification {
+  id: string;
+  kind: 'report_ready' | 'report_failed' | string;
+  report_type?: TelemetryReportType;
+  period?: TelemetryReportPeriod;
+  report_id?: string;
+  title: string;
+  error?: string;
+  created_at: string;
+  read: boolean;
+}
+

@@ -4,7 +4,7 @@ set -e
 echo "=== RUNNING CI-SAFE UNIT TESTS ==="
 
 # Define services with tests
-SERVICES=("identity" "storage" "workspace_runtime" "execution" "rag" "gateway")
+SERVICES=("identity" "storage" "workspace_runtime" "execution" "rag" "gateway" "automation" "telemetry")
 
 ROOT_DIR=$(pwd)
 

@@ -1,2 +1,4 @@
 aiohttp
 redis
+fastapi
+uvicorn

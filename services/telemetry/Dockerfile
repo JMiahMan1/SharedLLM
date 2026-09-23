@@ -1,0 +1,16 @@
+ARG BASE_IMAGE=ghcr.io/jmiahman1/sharedllm-base:latest
+FROM ${BASE_IMAGE} AS base
+ARG GIT_SHA=unknown
+ARG BUILD_DATE=unknown
+ARG SERVICE_NAME=telemetry
+ENV GIT_SHA=${GIT_SHA}
+ENV BUILD_DATE=${BUILD_DATE}
+ENV SERVICE_NAME=${SERVICE_NAME}
+WORKDIR /app
+ENV PYTHONPATH=/app
+COPY . .
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 11438
+
+CMD ["python", "services/telemetry/main.py"]

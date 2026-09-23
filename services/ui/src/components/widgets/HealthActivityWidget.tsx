@@ -12,6 +12,10 @@ export interface HealthActivityConfig {
   floorGoal?: number;
   activeMinuteGoal?: number;
   metrics?: string[];
+  steps?: number;
+  floors?: number;
+  activeMinutes?: number;
+  calories?: number;
 }
 
 const DEFAULT_CONFIG: Required<Pick<HealthActivityConfig, 'stepGoal' | 'floorGoal' | 'activeMinuteGoal'>> = {

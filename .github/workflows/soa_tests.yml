@@ -44,6 +44,8 @@ jobs:
         pip install -r services/execution/requirements.txt
         pip install -r services/gateway/requirements.txt
         pip install -r services/storage/requirements.txt
+        pip install -r services/automation/requirements.txt
+        pip install -r services/telemetry/requirements.txt
         # RAG has huge deps (Torch), so we mock it for CI unit tests
         # The tests are designed to bypass heavy ML loads via mocker.
 
@@ -93,7 +95,10 @@ jobs:
           services/tests/test_raven_routing.py \
           services/tests/test_raven_timeout_behavior.py \
           services/tests/test_identity_resolution.py \
-          services/tests/test_execution_handlers.py
+          services/tests/test_execution_handlers.py \
+          services/automation/tests/test_scheduler.py \
+          services/telemetry/tests/test_jobs.py \
+          services/telemetry/tests/test_api.py
 
     - name: Run Pytest
       env:
@@ -135,6 +140,9 @@ jobs:
           services/tests/test_raven_timeout_behavior.py \
           services/tests/test_identity_resolution.py \
           services/tests/test_execution_handlers.py \
+          services/automation/tests/test_scheduler.py \
+          services/telemetry/tests/test_jobs.py \
+          services/telemetry/tests/test_api.py \
           -m "not local_only and not server_only" \
           --junitxml=pytest-report.xml \
           --cov=services/ \

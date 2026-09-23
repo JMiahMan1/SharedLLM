@@ -72,6 +72,7 @@ async def get_all_settings() -> dict[str, str]:
             # Merge with defaults for non-model keys only
             model_keys = {
                 "active_llm_provider", "assistant_model", "coding_model", "librarian_model",
+            "telemetry_model",
             }
             for key, default in _DEFAULTS.items():
                 if key in model_keys:

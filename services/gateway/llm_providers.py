@@ -225,6 +225,13 @@ class OllamaProvider(BaseLLMProvider):
             "stream": chunk_callback is not None,  # Only stream when caller expects chunks
             "options": opts
         }
+        # Let Alpaca's shared slot queue absorb the wait instead of failing fast
+        # when every slot is busy (background report runs set this explicitly).
+        queue_timeout = opts.get("queue_timeout")
+        if queue_timeout:
+            payload["queue_timeout"] = float(queue_timeout)
+        opts.pop("queue_timeout", None)
+        opts.pop("slot_wait_timeout", None)
         if not show_thinking:
             payload["think"] = False
             payload["enable_thinking"] = False

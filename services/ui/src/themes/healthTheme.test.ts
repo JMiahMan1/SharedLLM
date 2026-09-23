@@ -82,8 +82,8 @@ describe('ThemeRegistry', () => {
 
   it('exposes CSS vars from tokens (not hardcoded in widget)', () => {
     const vars = registry.cssVarsFor('bloom');
-    expect(vars['--ht-bg']).toBe('#FFF7F9');
-    expect(vars['--ht-accent']).toBe('#E879A9');
+    expect(vars['--ht-bg']).toBe('#470A1D');
+    expect(vars['--ht-accent']).toBe('#C36786');
   });
 
   it('imports a user pack and persists it', () => {
