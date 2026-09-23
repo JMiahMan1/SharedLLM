@@ -474,17 +474,279 @@ def _infer_ghcr_image_ref(service_name: str) -> str | None:
     return f"ghcr.io/{namespace}/sharedllm-{clean_name}:latest"
 
 
+def _snapshot_container_config(container) -> dict:
+    """Capture Config/HostConfig/network membership while the container is still up.
+
+    attrs after stop/rename can have empty NetworkSettings (None Aliases/IP),
+    which previously left recreated containers with Networks={}.
+    """
+    container.reload()
+    attrs = container.attrs or {}
+    config = dict(attrs.get("Config") or {})
+    host_config = dict(attrs.get("HostConfig") or {})
+    networks_raw = (attrs.get("NetworkSettings") or {}).get("Networks") or {}
+    networks: dict[str, dict] = {}
+    for net_name, net_config in networks_raw.items():
+        if not isinstance(net_config, dict):
+            continue
+        networks[net_name] = {
+            "Aliases": list(net_config.get("Aliases") or []),
+            "IPv4Address": (
+                (net_config.get("IPAMConfig") or {}).get("IPv4Address")
+                or net_config.get("IPAddress")
+                or ""
+            ),
+        }
+    labels = config.get("Labels") or {}
+    compose_service = labels.get("com.docker.compose.service") or ""
+    return {
+        "name": container.name,
+        "id": container.id,
+        "config": config,
+        "host_config": host_config,
+        "networks": networks,
+        "exposed_ports": config.get("ExposedPorts"),
+        "compose_service": compose_service,
+        "env": config.get("Env") or [],
+        "cmd": config.get("Cmd"),
+        "entrypoint": config.get("Entrypoint"),
+        "user": config.get("User"),
+        "working_dir": config.get("WorkingDir"),
+    }
+
+
+def _network_aliases(snap: dict, net_name: str, net_config: dict, new_id: str) -> list[str]:
+    """Compose DNS aliases for a recreated container (filter auto container IDs)."""
+    aliases = [
+        a for a in (net_config.get("Aliases") or [])
+        if a and a != (snap.get("id") or "")[:12] and a != new_id[:12]
+        and not re.fullmatch(r"[0-9a-f]{12}", a)
+    ]
+    name = (snap.get("name") or "").lstrip("/")
+    short = name.removeprefix("sharedllm_")
+    service = snap.get("compose_service") or ""
+    for extra in (name, short, service):
+        if extra and extra not in aliases:
+            aliases.append(extra)
+    # Dedup preserve order
+    return list(dict.fromkeys(aliases))
+
+
+def _connect_container_networks(container, snap: dict, *, release_from=None) -> None:
+    """Attach container to snapshotted networks with aliases; optional IP pin.
+
+    release_from: optional prior container to disconnect first so its IPv4 is free.
+    """
+    if not client:
+        return
+    host_config = snap.get("host_config") or {}
+    network_mode = host_config.get("NetworkMode") or ""
+    for net_name, net_config in (snap.get("networks") or {}).items():
+        if net_name == "bridge" and network_mode in ("default", ""):
+            continue
+        if net_name == "host" and network_mode == "host":
+            continue
+        try:
+            network = client.networks.get(net_name)
+        except Exception as ne:
+            log.warning(f"[recreate] Network not found {net_name}: {ne}")
+            continue
+        if release_from is not None:
+            with suppress(Exception):
+                network.disconnect(release_from)
+        aliases = _network_aliases(snap, net_name, net_config, container.id)
+        ipv4 = (net_config.get("IPv4Address") or "").strip() or None
+        connected = False
+        if ipv4:
+            try:
+                network.connect(container, aliases=aliases, ipv4_address=ipv4)
+                connected = True
+                log.info(f"[recreate] Connected {container.name} to {net_name} aliases={aliases} ipv4={ipv4}")
+            except Exception as ne:
+                log.warning(f"[recreate] Pinned IP connect failed for {net_name}: {ne}")
+        if not connected:
+            try:
+                network.connect(container, aliases=aliases)
+                log.info(f"[recreate] Connected {container.name} to {net_name} aliases={aliases} ipv4=auto")
+            except Exception as ne2:
+                log.error(f"[recreate] Connect failed for {net_name}: {ne2}")
+
+
+def _create_from_snapshot(snap: dict, new_image_id: str, name: str):
+    """Low-level create using a pre-stop snapshot of Config/HostConfig."""
+    host_config = dict(snap.get("host_config") or {})
+    # Never inherit a pinned NetworkMode that would skip our explicit connect.
+    # Docker still needs the field for bridge/host modes.
+    resp = client.api.create_container(
+        image=new_image_id,
+        name=name,
+        command=snap.get("cmd"),
+        entrypoint=snap.get("entrypoint"),
+        environment=snap.get("env"),
+        user=snap.get("user"),
+        working_dir=snap.get("working_dir"),
+        labels=snap.get("config", {}).get("Labels"),
+        host_config=host_config,
+        ports=snap.get("exposed_ports") or None,
+    )
+    return client.containers.get(resp["Id"])
+
+
+def _is_self_container(container) -> bool:
+    """True when this process runs inside the container being recreated."""
+    hostname = os.environ.get("HOSTNAME", "")
+    return bool(
+        hostname
+        and (
+            hostname == container.name
+            or hostname == container.id
+            or hostname == container.id[:12]
+            or hostname.startswith(container.id[:12])
+        )
+    )
+
+
+def _recreate_self_detached(snap: dict, new_image_id: str) -> dict:
+    """Recreate this container from a detached child so we can finish the HTTP response.
+
+    Stopping ourselves in-process previously SIGKILL'd mid-recreate (exit 137)
+    and left control_plane down with no new container.
+    """
+    import json
+    import subprocess
+    import sys
+
+    script = r'''
+import json, sys, time, traceback
+import docker
+from contextlib import suppress
+
+payload = json.loads(sys.argv[1])
+snap = payload["snap"]
+new_image_id = payload["new_image_id"]
+name = snap["name"]
+backup = payload["backup_name"]
+log = print
+
+def aliases_for(net_config, new_id):
+    out = []
+    for a in (net_config.get("Aliases") or []):
+        if a and a != (snap.get("id") or "")[:12] and a != new_id[:12]:
+            out.append(a)
+    short = name.lstrip("/").removeprefix("sharedllm_")
+    for extra in (name.lstrip("/"), short, snap.get("compose_service") or ""):
+        if extra and extra not in out:
+            out.append(extra)
+    return list(dict.fromkeys(out))
+
+def main():
+    d = docker.from_env()
+    time.sleep(1.5)  # let the parent finish the HTTP response and exit
+    old = d.containers.get(name)
+    log("stopping", name)
+    old.stop(timeout=10)
+    old.rename(backup)
+    backup_ctr = d.containers.get(backup)
+    host_config = dict(snap.get("host_config") or {})
+    networks = snap.get("networks") or {}
+    # Free IPs held by backup before connecting the new container
+    for net_name in list(networks.keys()):
+        with suppress(Exception):
+            d.networks.get(net_name).disconnect(backup_ctr)
+    resp = d.api.create_container(
+        image=new_image_id,
+        name=name,
+        command=snap.get("cmd"),
+        entrypoint=snap.get("entrypoint"),
+        environment=snap.get("env"),
+        user=snap.get("user"),
+        working_dir=snap.get("working_dir"),
+        labels=(snap.get("config") or {}).get("Labels"),
+        host_config=host_config,
+        ports=snap.get("exposed_ports") or None,
+    )
+    new = d.containers.get(resp["Id"])
+    network_mode = host_config.get("NetworkMode") or ""
+    for net_name, net_config in networks.items():
+        if net_name == "bridge" and network_mode in ("default", ""):
+            continue
+        if net_name == "host" and network_mode == "host":
+            continue
+        try:
+            net = d.networks.get(net_name)
+        except Exception as e:
+            log("missing net", net_name, e)
+            continue
+        als = aliases_for(net_config, new.id)
+        ipv4 = (net_config.get("IPv4Address") or "").strip() or None
+        ok = False
+        if ipv4:
+            try:
+                net.connect(new, aliases=als, ipv4_address=ipv4)
+                ok = True
+                log("connected", net_name, als, ipv4)
+            except Exception as e:
+                log("pinned ip failed", net_name, e)
+        if not ok:
+            try:
+                net.connect(new, aliases=als)
+                log("connected auto", net_name, als)
+            except Exception as e:
+                log("connect failed", net_name, e)
+    new.start()
+    with suppress(Exception):
+        backup_ctr.remove(force=True)
+    log("recreate complete", name)
+
+try:
+    main()
+except Exception:
+    traceback.print_exc()
+    # Best-effort restore
+    try:
+        d = docker.from_env()
+        with suppress(Exception):
+            b = d.containers.get(payload["backup_name"])
+            b.rename(name)
+            b.start()
+            log("restored backup")
+    except Exception:
+        pass
+    sys.exit(1)
+'''
+    backup_name = f"{snap['name']}_backup_{int(time.time())}"
+    payload = json.dumps({"snap": snap, "new_image_id": new_image_id, "backup_name": backup_name})
+    # Detached: survives parent exit when we stop ourselves.
+    subprocess.Popen(
+        [sys.executable, "-c", script, payload],
+        start_new_session=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
+    )
+    log.info(f"[recreate] Scheduled detached self-recreate for {snap['name']} -> {new_image_id}")
+    return {"recreated": True, "pending": True, "container_name": snap["name"], "backup_name": backup_name}
+
+
 def _recreate_container(container, new_image_id: str):
     """
-    Recreates a container with the new image, preserving all config (port bindings,
-    volume binds, environment, network mode, and custom networks/aliases).
+    Recreates a container with the new image, preserving ports, volumes, env,
+    and custom networks/aliases.
+
+    Config is snapshotted BEFORE stop. Self-recreate (control_plane updating
+    itself) is handed off to a detached child so the API process is not killed
+    mid-flight (previously exit 137 with the stack left down).
     """
     import time
     if not client:
         raise ValueError("Docker client not initialized")
 
-    old_name = container.name
+    snap = _snapshot_container_config(container)
+    old_name = snap["name"]
     backup_name = f"{old_name}_backup_{int(time.time())}"
+
+    if _is_self_container(container):
+        return _recreate_self_detached(snap, new_image_id)
 
     # 1. Stop the old container
     log.info(f"[recreate] Stopping old container {old_name}...")
@@ -496,75 +758,13 @@ def _recreate_container(container, new_image_id: str):
 
     new_container = None
     try:
-        # 3. Extract old container configurations
-        old_config = container.attrs
-        config = old_config.get("Config", {})
-        host_config = old_config.get("HostConfig", {})
-        networks_dict = old_config.get("NetworkSettings", {}).get("Networks", {})
-
-        exposed_ports = config.get("ExposedPorts")
-
-        # 4. Create new container using the low-level API to preserve HostConfig exactly
+        # 3. Create new container from the pre-stop snapshot
         log.info(f"[recreate] Creating new container {old_name} with image {new_image_id}...")
-        container_resp = client.api.create_container(
-            image=new_image_id,
-            name=old_name,
-            command=config.get("Cmd"),
-            entrypoint=config.get("Entrypoint"),
-            environment=config.get("Env"),
-            user=config.get("User"),
-            working_dir=config.get("WorkingDir"),
-            labels=config.get("Labels"),
-            host_config=host_config,
-            ports=exposed_ports if exposed_ports else None
-        )
+        new_container = _create_from_snapshot(snap, new_image_id, old_name)
 
-        new_container_id = container_resp["Id"]
-        new_container = client.containers.get(new_container_id)
-
-        # 5. Connect new container to custom networks with original aliases & IPs
-        # Disconnect the backup first so the original IPv4 is free for the new
-        # container (reconnect with a still-held IP otherwise leaves Networks={}.
-        for net_name in list(networks_dict.keys()):
-            if net_name == "bridge" and host_config.get("NetworkMode") == "default":
-                continue
-            if net_name == "host" and host_config.get("NetworkMode") == "host":
-                continue
-            with suppress(Exception):
-                client.networks.get(net_name).disconnect(container)
-
-        for net_name, net_config in networks_dict.items():
-            if net_name == "bridge" and host_config.get("NetworkMode") == "default":
-                continue
-            if net_name == "host" and host_config.get("NetworkMode") == "host":
-                continue
-
-            try:
-                network = client.networks.get(net_name)
-                # Filter auto-generated aliases (like container IDs) to avoid conflicts
-                aliases = [
-                    a for a in net_config.get("Aliases", [])
-                    if a != container.id[:12] and a != backup_name and a != new_container.id[:12]
-                ]
-                if not aliases:
-                    aliases = [old_name.lstrip("/"), old_name.lstrip("/").removeprefix("sharedllm_")]
-                    aliases = list(dict.fromkeys(aliases))
-                ipv4 = net_config.get("IPAMConfig", {}).get("IPv4Address", "") or net_config.get("IPAddress", "")
-
-                network.connect(
-                    new_container,
-                    aliases=aliases,
-                    ipv4_address=ipv4 or None
-                )
-                log.info(f"[recreate] Connected {old_name} to {net_name} aliases={aliases} ipv4={ipv4 or 'auto'}")
-            except Exception as ne:
-                log.warning(f"[recreate] Network connect warning for {net_name}: {ne}")
-                # Fallback without pinned IP — aliases still matter for DNS
-                try:
-                    network.connect(new_container, aliases=aliases)
-                    log.info(f"[recreate] Connected {old_name} to {net_name} (auto IP) aliases={aliases}")
-                except Exception as ne2:
-                    log.error(f"[recreate] Fallback connect failed for {net_name}: {ne2}")
+        # 4. Free the backup's network endpoints, then attach the new container
+        #    with original aliases/IPs (snapshot already captured while healthy).
+        _connect_container_networks(new_container, snap, release_from=container)
 
         # 5b. Fix volume permissions before starting (mirrors deploy.sh guard)
         fixed_vols = _fix_volume_permissions(container)
@@ -574,6 +774,17 @@ def _recreate_container(container, new_image_id: str):
         # 6. Start the new container
         log.info(f"[recreate] Starting new container {new_container.name}...")
         new_container.start()
+
+        # Verify we actually landed on the intended networks
+        new_container.reload()
+        attached = (new_container.attrs.get("NetworkSettings") or {}).get("Networks") or {}
+        if snap.get("networks") and not any(
+            (attached.get(n) or {}).get("IPAddress")
+            for n in snap["networks"]
+            if n not in ("bridge", "host")
+        ):
+            log.warning(f"[recreate] {old_name} started with no network IP; reconnecting...")
+            _connect_container_networks(new_container, snap, release_from=None)
 
         # 7. Success: remove backup container
         log.info(f"[recreate] Recreate successful. Removing backup container {backup_name}...")
@@ -594,6 +805,7 @@ def _recreate_container(container, new_image_id: str):
         try:
             container.rename(old_name)
             container.start()
+            _connect_container_networks(container, snap, release_from=None)
             log.info(f"[recreate] Fallback successful. Old container {old_name} restored and started.")
         except Exception as fe:
             log.critical(f"[recreate] Critical failure: Could not restore backup container {backup_name}: {fe}")
