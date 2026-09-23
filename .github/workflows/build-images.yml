@@ -108,6 +108,10 @@ jobs:
               - 'services/automation/**'
               - 'services/common/**'
               - 'services/config.py'
+            telemetry:
+              - 'services/telemetry/**'
+              - 'services/common/**'
+              - 'services/config.py'
             workspace_runtime:
               - 'services/workspace_runtime/**'
               - 'services/common/**'
@@ -136,7 +140,7 @@ jobs:
           
           # If base changed, build all services
           if echo "$CHANGES" | grep -q '"base"'; then
-            SERVICES_JSON='["identity","gateway","rag","execution","storage","logging","automation","workspace_runtime","control_plane","dns","geo"]'
+            SERVICES_JSON='["identity","gateway","rag","execution","storage","logging","automation","workspace_runtime","control_plane","dns","geo","telemetry"]'
             BUILD_BASE='true'
           else
             # Filter out base, caddy, and ui from changes to build only changed services

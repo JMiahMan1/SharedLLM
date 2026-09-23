@@ -10,6 +10,7 @@ import { api } from '../services/api';
 import type { GlobalSetting } from '../services/api';
 import LocationPanel from '../components/location/LocationPanel';
 import SiteThemePanel from '../components/settings/SiteThemePanel';
+import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
 import Toggle from '../components/ui/Toggle';
 import { isAdminPinSet, setAdminPin, clearAdminPin } from '../lib/adminPin';
 import { checkForAppUpdates, downloadAndInstallApk, getRunningVersion } from '../lib/appUpdater';
@@ -82,6 +83,8 @@ const Settings = () => {
       </div>
 
       <SiteThemePanel />
+
+      <TelemetryReportsPanel />
 
       <SensorsSection />
 

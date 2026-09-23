@@ -184,6 +184,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "assistant_model", "value": "", "description": "Global assistant model"},
     {"key": "coding_model", "value": "", "description": "Global coding model"},
     {"key": "librarian_model", "value": "", "description": "Global librarian/RAG model"},
+    {"key": "telemetry_model", "value": "", "description": "Model used for telemetry/health/fitness report analysis. Kept separate from the assistant so report generation never competes with voice tasks."},
     {"key": "vision_ocr_model", "value": "", "description": "Vision model for OCR/text extraction from images, screenshots, and documents (PDF pages). Default: qwen2.5-vl:7b"},
     {"key": "vision_ocr_proxy_url", "value": "", "description": "Proxy URL for Vision OCR service (Qwen2.5-VL, or any /v1/chat/completions-compatible vision endpoint). Set in Settings > AI & Compute > Endpoints."},
     {"key": "image_edit_model", "value": "", "description": "Image editing model for editing existing images (qwen-image-edit via the LLM proxy /v1/images/edits). Default: qwen-image-edit-rapid-aio:q4_k"},

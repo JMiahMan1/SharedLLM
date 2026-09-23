@@ -142,7 +142,7 @@ export function useSiteTheme() {
       try {
         const pref = await api.getUserTheme();
         if (pref?.theme_id) nextId = pref.theme_id;
-        serverPacks = Array.isArray(pref?.packs) ? pref.packs : [];
+        serverPacks = Array.isArray(pref?.packs) ? (pref.packs as ThemePack[]) : [];
       } catch {
         // offline / not signed in — local only
       }

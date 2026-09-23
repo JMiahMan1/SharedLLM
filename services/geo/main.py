@@ -2183,6 +2183,7 @@ async def get_workout_route(workout_id: str):
 
 TRENDS_CACHE_TTL = 3600  # 1 hour
 TRENDS_FAILURE_CACHE_TTL = 120  # retry analysis quickly after a failure
+TRENDS_ANALYSIS_LOCK_TTL = 300  # only one generation per user/window at a time
 TRENDS_LLM_TIMEOUT = 300.0  # cold model load + RAG context can exceed 2 minutes
 
 
@@ -2293,35 +2294,8 @@ def _build_trends_context(user: str, days: int, daily_steps: dict, workouts: lis
     return "\n".join(lines)
 
 
-@app.get("/trends/activity")
-async def get_activity_trends(
-    user_id: str | None = None,
-    days: int = Query(7, ge=1, le=30),
-    refresh: bool = Query(False),
-    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
-    query_secret: str | None = Query(None, alias="x_internal_secret"),
-):
-    """Real data trends for one family member: daily steps + workouts + driving,
-    with an LLM narrative analysis (cached 1h in Redis, `?refresh=true` to force)."""
-    if not _verify_internal_secret(x_internal_secret, query_secret):
-        raise HTTPException(status_code=403, detail="Forbidden")
-    clean = (user_id or "").split(".")[-1].lower()
-    if not clean:
-        raise HTTPException(status_code=400, detail="user_id required")
-
-    r = await get_redis()
-    if not r:
-        raise HTTPException(status_code=503, detail="Redis unavailable")
-
-    cache_key = f"geo:trends:{clean}:{days}"
-    if not refresh:
-        cached = await r.get(cache_key)
-        if cached:
-            try:
-                return json.loads(cached)
-            except Exception:
-                pass
-
+async def _collect_activity_stats(r, clean: str, days: int) -> dict:
+    """Gather raw activity stats for a window. No LLM call happens here."""
     tz = ZoneInfo("America/Phoenix")
     today = datetime.now(tz).strftime("%Y-%m-%d")
     daily_steps = await _get_daily_steps(r, clean, days)
@@ -2359,7 +2333,7 @@ async def get_activity_trends(
     workout_distance = round(sum(w.get("distance_miles") or 0 for w in workouts), 2)
     drive_distance = round(sum(t.get("distance_miles") or 0 for t in trips), 1)
 
-    stats = {
+    return {
         "user_id": clean,
         "days": days,
         "window_start": (datetime.now(tz) - timedelta(days=days - 1)).strftime("%Y-%m-%d"),
@@ -2383,27 +2357,139 @@ async def get_activity_trends(
             }
             for w in workouts[:10]
         ],
+        "_workouts": workouts,
+        "_trips": trips,
     }
 
-    prompt = _build_trends_context(clean, days, daily_steps, workouts, trips)
-    analysis = await _llm_trends_analysis(prompt, clean)
+
+@app.get("/trends/activity")
+async def get_activity_trends(
+    user_id: str | None = None,
+    days: int = Query(7, ge=1, le=30),
+    refresh: bool = Query(False),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Real activity data for one family member: steps, workouts, driving.
+
+    Read-only: this endpoint never calls the LLM. A previously generated
+    analysis is attached when one is already cached, but generating a new
+    narrative is an explicit action (``POST /trends/activity/analyze``) so a
+    page load can never spend model time.
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    clean = (user_id or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    cache_key = f"geo:trends:{clean}:{days}"
+    if not refresh:
+        cached = await r.get(cache_key)
+        if cached:
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
+
+    stats = await _collect_activity_stats(r, clean, days)
     result = {
-        **stats,
-        "analysis": analysis,
-        "analysis_available": analysis is not None,
+        **{k: v for k, v in stats.items() if not k.startswith("_")},
+        "analysis": None,
+        "analysis_available": False,
         "generated_at": time.time(),
     }
 
+    # Keep any previously generated analysis visible without regenerating one.
     try:
-        await r.set(
-            cache_key,
-            json.dumps(result),
-            ex=TRENDS_CACHE_TTL if analysis is not None else TRENDS_FAILURE_CACHE_TTL,
-        )
+        analysis_cache = await r.get(f"geo:trends_analysis:{clean}:{days}")
+        if analysis_cache:
+            payload = json.loads(analysis_cache)
+            result["analysis"] = payload.get("analysis")
+            result["analysis_available"] = payload.get("analysis") is not None
+            result["analysis_generated_at"] = payload.get("generated_at")
     except Exception as e:
-        log.warning(f"[Geo] Trends cache write failed: {e}")
+        log.warning(f"[Geo] Trends analysis cache read failed: {e}")
 
     return result
+
+
+@app.post("/trends/activity/analyze")
+async def analyze_activity_trends(
+    user_id: str | None = None,
+    days: int = Query(7, ge=1, le=30),
+    refresh: bool = Query(False),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Explicitly generate (or re-generate) the LLM activity narrative.
+
+    Guarded by a per-user lock so concurrent callers share one generation
+    instead of stampeding the model.
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    clean = (user_id or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    analysis_cache_key = f"geo:trends_analysis:{clean}:{days}"
+    if not refresh:
+        cached = await r.get(analysis_cache_key)
+        if cached:
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
+
+    lock_key = f"geo:trends_analysis:lock:{clean}:{days}"
+    lock_acquired = False
+    try:
+        lock_acquired = bool(await r.set(lock_key, "1", nx=True, ex=TRENDS_ANALYSIS_LOCK_TTL))
+        if not lock_acquired:
+            # Another caller is already generating — return what we have.
+            cached = await r.get(analysis_cache_key)
+            if cached:
+                try:
+                    return json.loads(cached)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=409, detail="Analysis already in progress")
+
+        stats = await _collect_activity_stats(r, clean, days)
+        workouts = stats.pop("_workouts", [])
+        trips = stats.pop("_trips", [])
+        prompt = _build_trends_context(clean, days, stats.get("daily_steps", {}), workouts, trips)
+        analysis = await _llm_trends_analysis(prompt, clean)
+        result = {
+            **{k: v for k, v in stats.items() if not k.startswith("_")},
+            "analysis": analysis,
+            "analysis_available": analysis is not None,
+            "generated_at": time.time(),
+        }
+        try:
+            await r.set(
+                analysis_cache_key,
+                json.dumps(result),
+                ex=TRENDS_CACHE_TTL if analysis is not None else TRENDS_FAILURE_CACHE_TTL,
+            )
+        except Exception as e:
+            log.warning(f"[Geo] Trends analysis cache write failed: {e}")
+        return result
+    finally:
+        if lock_acquired:
+            try:
+                await r.delete(lock_key)
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------

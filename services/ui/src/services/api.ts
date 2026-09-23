@@ -85,6 +85,11 @@ import type {
   WorkoutsResponse,
   StepsResponse,
   ActivityTrendsResponse,
+  TelemetryNotification,
+  TelemetryReport,
+  TelemetryReportPeriod,
+  TelemetryReportType,
+  TelemetrySchedule,
 } from '../types/api';
 
 // Re-export domain types so consumers can import them from the api module.
@@ -361,8 +366,7 @@ export const api = {
     return normalizeUser(resp.data);
   },
 
-  async getUserTheme(): Promise<{ theme_id: string; packs: unknown[] }> {
-    const resp = await apiClient.get('/api/users/me/theme');
+  async getUserTheme(): Promise<{ theme_id: string; packs: unknown[] }> {    const resp = await apiClient.get('/api/users/me/theme');
     return resp.data;
   },
 
@@ -759,12 +763,21 @@ export const api = {
     return resp.data;
   },
 
-  // Activity trends (LLM-analyzed)
+  // Activity trends — reading data never generates an analysis.
   async getActivityTrends(userId?: string, days = 7, refresh = false): Promise<ActivityTrendsResponse> {
     const params = new URLSearchParams({ days: String(days) });
     if (userId && userId !== 'all') params.set('user_id', userId);
     if (refresh) params.set('refresh', 'true');
     const resp = await apiClient.get(`/api/geo/trends/activity?${params.toString()}`);
+    return resp.data;
+  },
+
+  // Explicit opt-in analysis. Only call this when the user asks for it.
+  async analyzeActivityTrends(userId?: string, days = 7, refresh = false): Promise<ActivityTrendsResponse> {
+    const params = new URLSearchParams({ days: String(days) });
+    if (userId && userId !== 'all') params.set('user_id', userId);
+    if (refresh) params.set('refresh', 'true');
+    const resp = await apiClient.post(`/api/geo/trends/activity/analyze?${params.toString()}`);
     return resp.data;
   },
 
@@ -1230,8 +1243,9 @@ export const api = {
     return resp.data.enrollments || [];
   },
 
-  async analyzeTelemetry(): Promise<{ status: string; message: string }> {
-    const resp = await apiClient.post('/api/telemetry/analyze', { hours: 168 });
+  async analyzeTelemetry(entityId: string, hours = 168): Promise<{ status: string; message: string }> {
+    // entity_id is required by the analysis endpoint — without it the call 400s.
+    const resp = await apiClient.post('/api/telemetry/analyze', { entity_id: entityId, hours });
     return resp.data;
   },
 
@@ -1444,6 +1458,81 @@ export const api = {
     return resp.data;
   },
 
+  // Scheduled telemetry reports (health/fitness + power)
+
+  async getTelemetrySchedules(): Promise<{ jobs: TelemetrySchedule[] }> {
+    const resp = await apiClient.get('/api/telemetry/schedules');
+    return resp.data;
+  },
+
+  async saveTelemetrySchedule(body: {
+    type: TelemetryReportType;
+    period: TelemetryReportPeriod;
+    run_at: string;
+    timezone: string;
+    enabled: boolean;
+  }): Promise<{ job: TelemetrySchedule }> {
+    const resp = await apiClient.put('/api/telemetry/schedules', body);
+    return resp.data;
+  },
+
+  async deleteTelemetrySchedule(jobId: string): Promise<{ deleted: string }> {
+    const resp = await apiClient.delete(`/api/telemetry/schedules/${encodeURIComponent(jobId)}`);
+    return resp.data;
+  },
+
+  async requestTelemetryReport(body: {
+    type: TelemetryReportType;
+    period: TelemetryReportPeriod;
+    timezone?: string;
+  }): Promise<{ status: string; job_id: string }> {
+    const resp = await apiClient.post('/api/telemetry/reports/request', body);
+    return resp.data;
+  },
+
+  async getTelemetryReports(params: {
+    type?: TelemetryReportType;
+    period?: TelemetryReportPeriod;
+    limit?: number;
+  } = {}): Promise<{ reports: TelemetryReport[] }> {
+    const query = new URLSearchParams();
+    if (params.type) query.set('type', params.type);
+    if (params.period) query.set('period', params.period);
+    if (params.limit) query.set('limit', String(params.limit));
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    const resp = await apiClient.get(`/api/telemetry/reports${suffix}`);
+    return resp.data;
+  },
+
+  async getLatestTelemetryReport(
+    type: TelemetryReportType = 'health',
+    period: TelemetryReportPeriod | 'any' = 'any'
+  ): Promise<{ report: TelemetryReport | null }> {
+    const query = new URLSearchParams({ type, period });
+    const resp = await apiClient.get(`/api/telemetry/reports/latest?${query.toString()}`);
+    return resp.data;
+  },
+
+  async getTelemetryNotifications(limit = 20): Promise<{ notifications: TelemetryNotification[] }> {
+    const resp = await apiClient.get(`/api/telemetry/notifications?limit=${limit}`);
+    return resp.data;
+  },
+
+  async getPushPublicKey(): Promise<{ public_key: string | null }> {
+    const resp = await apiClient.get('/api/telemetry/push/key');
+    return resp.data;
+  },
+
+  async subscribePush(subscription: unknown): Promise<{ status: string }> {
+    const resp = await apiClient.post('/api/telemetry/push/subscribe', { subscription });
+    return resp.data;
+  },
+
+  async unsubscribePush(endpoint: string): Promise<{ status: string; removed: boolean }> {
+    const resp = await apiClient.post('/api/telemetry/push/unsubscribe', { endpoint });
+    return resp.data;
+  },
+
   async updateWidgetSettings(widgetKey: string, updates: Partial<{
     visibility: WidgetVisibility;
     order_index: number;
@@ -1632,6 +1721,11 @@ export const api = {
 
   async enrollTelemetry(entityId: string, config: Partial<TelemetryEnrollment>): Promise<{ status: string; message: string }> {
     const resp = await apiClient.post(`/api/telemetry/enroll/${entityId}`, config);
+    return resp.data;
+  },
+
+  async updateTelemetryEnrollment(entityId: string, config: Partial<TelemetryEnrollment>): Promise<{ status: string; message: string }> {
+    const resp = await apiClient.put(`/api/telemetry/enroll/${entityId}`, config);
     return resp.data;
   },
 

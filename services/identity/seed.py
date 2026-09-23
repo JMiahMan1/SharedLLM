@@ -358,6 +358,7 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         "ASSISTANT_MODEL": "assistant_model",
         "CODING_MODEL": "coding_model",
         "LIBRARIAN_MODEL": "librarian_model",
+        "TELEMETRY_MODEL": "telemetry_model",
     }
     for env_key, global_key in env_models.items():
         env_val = os.getenv(env_key)

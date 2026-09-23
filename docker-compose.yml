@@ -367,6 +367,45 @@ services:
     networks:
       - sharedllm
 
+  telemetry:
+    image: ghcr.io/jmiahman1/sharedllm-telemetry:latest
+    build:
+      context: .
+      dockerfile: services/telemetry/Dockerfile
+      args:
+        - GIT_SHA=${GIT_SHA:-unknown}
+        - BUILD_DATE=${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
+        - SERVICE_NAME=${SERVICE_NAME:-unknown}
+    container_name: sharedllm_telemetry
+    restart: unless-stopped
+    mem_limit: 512m
+    env_file:
+      - .env
+    environment:
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - FERNET_KEY=${FERNET_KEY}
+      - NETWORK_MODE=bridge
+      - IDENTITY_SVC_URL=${BRIDGE_IDENTITY_SVC_URL}
+      - GEO_SVC_URL=${BRIDGE_GEO_SVC_URL}
+      - GATEWAY_INTERNAL_URL=${BRIDGE_GATEWAY_SVC_URL}
+      - AUTOMATION_SVC_URL=${BRIDGE_AUTOMATION_SVC_URL}
+      - OLLAMA_URL=${OLLAMA_URL}
+      - REDIS_URL=${BRIDGE_REDIS_URL}
+      - TZ=America/Phoenix
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+    depends_on:
+      - redis
+      - gateway
+      - geo
+      - identity
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 172.26.0.254
+    networks:
+      - sharedllm
+
   storage:
     image: ghcr.io/jmiahman1/sharedllm-storage:latest
     build:

@@ -1,5 +1,6 @@
 import {
   DEFAULT_HEALTH_THEME_ID,
+  THEME_PACK_SCHEMA_VERSION,
   createThemePack,
   parseThemePackJson,
   serializeThemePack,

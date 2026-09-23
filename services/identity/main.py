@@ -707,6 +707,29 @@ def delete_user(username: str, session: Session = Depends(get_session), admin: U
     if user.is_system_default:
         raise HTTPException(status_code=400, detail="Cannot delete system default user")
 
+    # Per-user telemetry state lives in Redis (report jobs, reports,
+    # notifications, push subscriptions). Remove it so a deleted user leaves
+    # nothing behind that could still surface their data.
+    try:
+        import redis as _redis_sync
+        from services.config import REDIS_URL as _REDIS_URL
+
+        r = _redis_sync.from_url(_REDIS_URL, decode_responses=True)
+        try:
+            job_ids = r.smembers(f"tel:jobs:user:{username.lower()}") or set()
+            for job_id in job_ids:
+                r.delete(f"tel:job:{job_id}")
+            r.delete(
+                f"tel:jobs:user:{username.lower()}",
+                f"tel:reports:user:{username.lower()}",
+                f"tel:notify:{username.lower()}",
+                f"tel:push:sub:{username.lower()}",
+            )
+        finally:
+            r.close()
+    except Exception as e:  # cleanup is best-effort; deletion must still succeed
+        log.warning(f"Telemetry cleanup for deleted user {username} failed: {e}")
+
     session.delete(user)
     session.commit()
     return {"status": "SUCCESS"}
@@ -1302,6 +1325,7 @@ def get_settings(
 # here means a UI bug or a bad direct API call — both must fail loudly.
 _MODEL_KEYS = {
     "assistant_model", "librarian_model", "coding_model", "vision_ocr_model",
+    "telemetry_model",
 }
 
 @app.post("/api/settings")
@@ -2368,7 +2392,23 @@ def enroll_telemetry(enroll_data: dict, x_internal_secret: str = Header(...)):
         from datetime import datetime
         existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if existing:
-            raise HTTPException(status_code=409, detail=f"'{entity_id}' already enrolled")
+            # Re-enrolling is how the UI edits an enrollment: merge the new
+            # config over the stored one instead of failing with a 409.
+            try:
+                record = json.loads(existing.value) or {}
+            except Exception:
+                record = {}
+            record.update(enroll_data)
+            record["entity_id"] = entity_id
+            record["updated_at"] = datetime.now(UTC).isoformat()
+            existing.value = json.dumps(record)
+            session.add(existing)
+            session.commit()
+            return {
+                "status": "SUCCESS",
+                "message": f"Updated '{entity_id}' telemetry enrollment",
+                "updated": True,
+            }
         # Persist the full config (entity_id, power_tracking, etc.) so the
         # Energy Insights widget can filter enrollments by capability.
         record = dict(enroll_data)
@@ -2383,6 +2423,43 @@ def enroll_telemetry(enroll_data: dict, x_internal_secret: str = Header(...)):
         session.add(enrollment)
         session.commit()
         return {"status": "SUCCESS", "message": f"Enrolled '{entity_id}' in telemetry monitoring"}
+
+
+@app.put("/api/telemetry/enroll/{entity_id}")
+def update_telemetry_enrollment(
+    entity_id: str,
+    enroll_data: dict,
+    x_internal_secret: str = Header(...),
+):
+    """Update an existing enrollment in place (keeps owner + created metadata)."""
+    _require_internal_secret(x_internal_secret)
+    key = f"telemetry_enroll:{entity_id}"
+    with Session(engine) as session:
+        from datetime import datetime
+        existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"'{entity_id}' not enrolled")
+        try:
+            record = json.loads(existing.value) or {}
+        except Exception:
+            record = {}
+        created_at = record.get("enrolled_at")
+        enrolled_by = record.get("enrolled_by")
+        record.update({k: v for k, v in enroll_data.items() if k != "entity_id"})
+        record["entity_id"] = entity_id
+        if created_at:
+            record["enrolled_at"] = created_at
+        if enrolled_by:
+            record["enrolled_by"] = enrolled_by
+        record["updated_at"] = datetime.now(UTC).isoformat()
+        existing.value = json.dumps(record)
+        session.add(existing)
+        session.commit()
+        return {
+            "status": "SUCCESS",
+            "message": f"Updated '{entity_id}' telemetry enrollment",
+            "enrollment": record,
+        }
 
 
 @app.delete("/api/telemetry/enroll/{entity_id}")
@@ -2434,15 +2511,24 @@ def ingest_telemetry_snapshot(snapshot_data: dict, x_internal_secret: str = Head
 
 
 @app.get("/api/telemetry/data/{entity_id}")
-def get_telemetry_data(entity_id: str, x_internal_secret: str = Header(...)):
+def get_telemetry_data(
+    entity_id: str,
+    hours: int | None = None,
+    x_internal_secret: str = Header(...),
+):
     _require_internal_secret(x_internal_secret)
     key = f"telemetry_data:{entity_id}"
     with Session(engine) as session:
         snapshot = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
         if not snapshot:
-            return {"entity_id": entity_id, "data_points": []}
+            return {"entity_id": entity_id, "data_points": [], "data": []}
         data_points = json.loads(snapshot.value)
-        return {"entity_id": entity_id, "data_points": data_points}
+        if hours:
+            cutoff = time.time() - hours * 3600
+            data_points = [
+                p for p in data_points if float(p.get("recorded_at") or 0) >= cutoff
+            ]
+        return {"entity_id": entity_id, "data_points": data_points, "data": data_points}
 
 
 @app.get("/api/telemetry/summary/{entity_id}")
@@ -2586,12 +2672,16 @@ async def trigger_telemetry_analysis(analysis_data: dict, x_internal_secret: str
             if enrollment:
                 rag_user = (json.loads(enrollment.value) or {}).get("rag_user")
         if not rag_user:
-            admin = session.exec(select(User).where(User.role == "admin")).first()
-            rag_user = admin.username if admin else "admin"
+            admin = session.exec(select(User).where(User.is_admin == True)).first()  # noqa: E712
+            if admin is None:
+                admin = session.exec(select(User).where(User.username == "default")).first()
+            rag_user = admin.username if admin else "default"
 
         import aiohttp
         body = {
-            "model": "assistant",
+            # Telemetry analysis runs on its own model so a scheduled/queued
+            # report never competes with the voice assistant's model.
+            "model": "telemetry",
             "messages": [{"role": "user", "content": prompt}],
             "rag_user": rag_user,
             # Reasoning models blend their <think> trace into `content` unless
@@ -2661,6 +2751,31 @@ def get_telemetry_insights(x_internal_secret: str = Header(...)):
             data["key"] = i.key
             result.append(data)
         return {"insights": result}
+
+
+@app.get("/api/telemetry/insights/{entity_id}")
+def get_telemetry_insight_for_entity(entity_id: str, x_internal_secret: str = Header(...)):
+    """Latest stored analysis for one entity (the UI asks for this per entity)."""
+    _require_internal_secret(x_internal_secret)
+    key = f"telemetry_insight:{entity_id}"
+    with Session(engine) as session:
+        insight = session.exec(select(GlobalSetting).where(GlobalSetting.key == key)).first()
+        if not insight:
+            return {"entity_id": entity_id, "insight": None, "insights": []}
+        data = json.loads(insight.value)
+        data["key"] = insight.key
+        return {
+            "entity_id": entity_id,
+            "insight": data,
+            "insights": [
+                {
+                    "type": data.get("analysis_available") and "analysis" or "none",
+                    "message": data.get("analysis") or "",
+                    "severity": "info",
+                    "timestamp": data.get("generated_at"),
+                }
+            ],
+        }
 
 
 # ─── Household Intercom System (Section 3.16) ─────────────────────────────────
@@ -2897,7 +3012,7 @@ async def _forward_location_to_ha(user_id: str, location: LocationUpdate):
 
             # 2. Fallback to admin/default or global settings
             if not ha_url or not ha_token:
-                admin = session.exec(select(User).where(User.role == "admin")).first()
+                admin = session.exec(select(User).where(User.is_admin == True)).first()  # noqa: E712
                 default_user = session.exec(select(User).where(User.username == "default")).first()
                 if admin and admin.ha_url and admin.ha_token_enc:
                     ha_url = ha_url or admin.ha_url

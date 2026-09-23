@@ -227,7 +227,7 @@ const Wander = () => {
     async (refresh = false) => {
       setTrendsLoading(true);
       try {
-        const res = await api.getActivityTrends(currentUsername || undefined, 7, refresh);
+        const res = await api.analyzeActivityTrends(currentUsername || undefined, 7, refresh);
         setTrends(res);
         setTrendsAnalysis(res.analysis_available ? res.analysis : null);
       } catch {
@@ -247,8 +247,6 @@ const Wander = () => {
         await fetchTripsAndTelemetry();
         if (!active) return;
         await fetchStepsAndWorkouts();
-        if (!active) return;
-        await fetchTrends();
       } catch (err) {
         if (active) {
           console.error('Initial telemetry load failed:', err);
@@ -259,7 +257,7 @@ const Wander = () => {
     return () => {
       active = false;
     };
-  }, [fetchTripsAndTelemetry, fetchStepsAndWorkouts, fetchTrends]);
+  }, [fetchTripsAndTelemetry, fetchStepsAndWorkouts]);
 
   // Live polling: trips and step counts should appear as events happen,
   // not only when the user remembers to hit Refresh.
@@ -324,7 +322,6 @@ const Wander = () => {
       // Prepend the finished workout
       setWorkouts((prev) => [res.workout, ...prev].slice(0, 10));
       await fetchStepsAndWorkouts();
-      await fetchTrends(true);
     } catch (err: unknown) {
       const errorMsg =
         err && typeof err === 'object' && 'response' in err
@@ -494,7 +491,6 @@ const Wander = () => {
       // Update in local state
       setTrips((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
       setEditingTrip(null);
-      await fetchTrends(true);
     } catch (err: unknown) {
       const errorMsg =
         err && typeof err === 'object' && 'response' in err
@@ -769,18 +765,19 @@ const Wander = () => {
               7-Day Activity Trends
             </div>
             <button
-              onClick={() => void fetchTrends(true)}
+              onClick={() => void fetchTrends(Boolean(trends))}
               disabled={trendsLoading}
+              data-testid="analyze-activity"
               className="glass-button flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold text-slate-300 hover:text-white rounded-lg"
-              title="Re-analyze with fresh data"
+              title="Fitness analysis runs only when you request it"
             >
               <RefreshCw size={11} className={trendsLoading ? 'animate-spin text-indigo-400' : ''} />
-              Re-analyze
+              {trends ? 'Re-analyze' : 'Analyze activity'}
             </button>
           </div>
 
           {trendsLoading && !trends ? (
-            <div className="py-6 text-center text-sm text-slate-500">Loading activity trends...</div>
+            <div className="py-6 text-center text-sm text-slate-500">Analyzing your activity on request...</div>
           ) : trends ? (
             <div className="space-y-3">
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -823,8 +820,21 @@ const Wander = () => {
               )}
             </div>
           ) : (
-            <div className="py-6 text-center text-sm text-slate-500">
-              No activity data yet. Start a workout or take a drive to build your trends.
+            <div className="py-6 text-center space-y-2" data-testid="analysis-opt-in">
+              <p className="text-sm text-slate-500">
+                Fitness and health analysis only runs when you ask for it.
+              </p>
+              <p className="text-xs text-slate-600">
+                Steps and workouts below are recorded data — no analysis is generated until you request it.
+              </p>
+              <button
+                type="button"
+                onClick={() => void fetchTrends(false)}
+                disabled={trendsLoading}
+                className="glass-button px-3 py-1.5 text-xs font-semibold text-slate-200 rounded-lg"
+              >
+                Analyze my activity
+              </button>
             </div>
           )}
         </div>

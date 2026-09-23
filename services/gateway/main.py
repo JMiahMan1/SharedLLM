@@ -46,6 +46,7 @@ from services.gateway.config import (
     OLLAMA_TIMEOUT,
     RAG_SVC,
     STORAGE_SVC,
+    TELEMETRY_SVC,
     WORKSPACE_RUNTIME_SVC,
 )
 from services.gateway.config_validator import validate_config
@@ -448,6 +449,30 @@ async def get_librarian_model():
         available_models = {k: v for k, v in settings.items() if "model" in k.lower() and v}
         log.error(f"[get_librarian_model] No librarian model found. active_provider={active}. Available models: {available_models}")
         raise RuntimeError(f"No librarian model configured. Set librarian_model in Identity settings. Available: {available_models}")
+    return model
+
+
+async def get_telemetry_model():
+    """Model for telemetry/health/fitness report analysis.
+
+    Deliberately separate from the assistant model: scheduled report runs must
+    never share the voice assistant's model, so a report can neither slow down
+    nor be slowed by an in-flight conversation. Falls back to librarian, then
+    coding, and only then to the assistant — never silently shares the assistant
+    while another role is configured.
+    """
+    settings = await get_llm_settings()
+    model = (
+        settings.get("telemetry_model")
+        or settings.get("librarian_model")
+        or settings.get("coding_model")
+    )
+    if not model:
+        log.warning(
+            "[get_telemetry_model] No telemetry_model/librarian_model/coding_model configured; "
+            "falling back to the assistant model for report analysis"
+        )
+        return await get_assistant_model()
     return model
 
 async def fetch_autonomous_protocols() -> str:
@@ -2917,6 +2942,10 @@ async def chat_handler(request: Request, background_tasks=None):
             selected_model = await get_coding_model()
         elif model_lower in ("librarian", "rag"):
             selected_model = await get_librarian_model()
+        elif model_lower in ("telemetry", "health", "fitness", "report"):
+            # Scheduled report analysis runs on its own model so it never
+            # contends with voice/assistant traffic.
+            selected_model = await get_telemetry_model()
         elif clean_req_model:
             selected_model = clean_req_model
         else:
@@ -3960,13 +3989,15 @@ async def proxy_get_telemetry_summary(entity_id: str, request: Request):
         return await _proxy_json_response(resp)
 
 @app.get("/api/telemetry/data/{entity_id:path}")
-async def proxy_get_telemetry_data(entity_id: str, request: Request):
+async def proxy_get_telemetry_data(entity_id: str, request: Request, hours: int | None = None):
     await _resolve_identity_from_request(request)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    params = {"hours": hours} if hours else None
     async with borrow_http_client() as client:
         resp = await client.get(
             f"{IDENTITY_SVC}/api/telemetry/data/{entity_id}",
-            headers=headers
+            headers=headers,
+            params=params,
         )
         return await _proxy_json_response(resp)
 
@@ -4063,6 +4094,37 @@ async def proxy_get_telemetry_insights(request: Request):
         resp = await client.get(
             f"{IDENTITY_SVC}/api/telemetry/insights",
             headers=headers
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.get("/api/telemetry/insights/{entity_id:path}")
+async def proxy_get_telemetry_insight(entity_id: str, request: Request):
+    """Latest analysis for a single enrolled entity (what the UI requests)."""
+    await _resolve_identity_from_request(request)
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/telemetry/insights/{entity_id}",
+            headers=headers
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.put("/api/telemetry/enroll/{entity_id:path}")
+async def proxy_update_telemetry_enrollment(entity_id: str, request: Request):
+    """Update an existing enrollment in place (the UI's edit action)."""
+    user = await _resolve_identity_from_request(request)
+    body = await request.json()
+    if isinstance(body, dict):
+        body.setdefault("entity_id", entity_id)
+        body["owner_user_id"] = getattr(user, "user", None) or body.get("owner_user_id")
+    headers = {"X-Internal-Secret": INTERNAL_SECRET}
+    async with borrow_http_client() as client:
+        resp = await client.put(
+            f"{IDENTITY_SVC}/api/telemetry/enroll/{entity_id}",
+            json=body,
+            headers=headers,
         )
         return await _proxy_json_response(resp)
 
@@ -5201,7 +5263,7 @@ async def update_raven_config(request: Request):
 
     async with borrow_http_client() as client:
         for k, v in body.items():
-            if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold", "raven_max_total_seconds", "system_default_tts_voice", "system_default_tts_engine", "coding_model", "ollama_coding_model", "assistant_model", "librarian_model"]:
+            if k in ["raven_suspended", "raven_scan_interval", "raven_error_threshold", "raven_max_total_seconds", "system_default_tts_voice", "system_default_tts_engine", "coding_model", "ollama_coding_model", "assistant_model", "librarian_model", "telemetry_model"]:
                 await client.patch(
                     f"{IDENTITY_SVC}/api/settings/{k}",
                     json={"value": str(v).lower() if isinstance(v, bool) else str(v)},
@@ -5507,7 +5569,12 @@ async def list_models(request: Request):
     # For OpenRouter or others, we might return the config models
     return {
         "status": "SUCCESS",
-        "models": [settings.get("assistant_model"), settings.get("coding_model"), settings.get("librarian_model")],
+        "models": [
+            settings.get("assistant_model"),
+            settings.get("coding_model"),
+            settings.get("librarian_model"),
+            settings.get("telemetry_model"),
+        ],
         "note": "Active config models returned for this provider."
     }
 
@@ -5618,7 +5685,7 @@ async def list_openai_models(request: Request):
 
     if not model_names:
         # Fallback to configured models
-        for model_key in ["assistant_model", "coding_model", "librarian_model"]:
+        for model_key in ["assistant_model", "coding_model", "librarian_model", "telemetry_model"]:
             model_name = settings.get(model_key)
             if model_name and model_name not in model_names:
                 model_names.append(model_name)
@@ -6005,7 +6072,9 @@ async def _enqueue_user_mission(
     if not target_model:
         raise RuntimeError("No coding model configured. Mission cannot be dispatched.")
 
-    owner_user = creds.get("user_id")
+    # Identity returns the caller's numeric id as "id"; older payloads used
+    # "user_id". Accept both so a mission is never persisted ownerless.
+    owner_user = creds.get("user_id") or creds.get("id") or creds.get("user")
 
     mission_payload = {
         "slug": slug,
@@ -6109,7 +6178,10 @@ async def get_mission_details(request: Request, id_or_slug: str):
         )
         if resp.status != 200:
             raise HTTPException(status_code=resp.status, detail="Mission not found")
-        return await resp.json()
+        mission = await resp.json()
+        # Reading a mission is an owner-scoped action, same as mutating one.
+        _ensure_mission_owner(creds, mission)
+        return mission
 
 def _ensure_mission_owner(creds: dict, mission_data: dict) -> None:
     """403 unless the caller owns the mission or is an admin.
@@ -6389,7 +6461,8 @@ async def get_user_missions(request: Request):
     if not creds:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    # Ideally filter by user_id if we want isolation, for now just proxy it all
+    # Per-user isolation: a non-admin only ever sees their own missions plus
+    # shared/system ones (user_id is null). Admins see everything.
     qs = request.url.query
     url = f"{IDENTITY_SVC}/api/raven/missions" + (f"?{qs}" if qs else "")
     async with borrow_http_client() as client:
@@ -6398,6 +6471,12 @@ async def get_user_missions(request: Request):
             headers={"X-Internal-Secret": INTERNAL_SECRET}
         )
         missions = [m for m in await resp.json() if m["mission_type"] != "admin_fix" or creds.get("is_admin")]
+        if not creds.get("is_admin"):
+            caller_id = creds.get("id")
+            missions = [
+                m for m in missions
+                if m.get("user_id") is None or m.get("user_id") == caller_id
+            ]
         return JSONResponse(status_code=resp.status, content=missions)
 
 @app.patch("/api/raven/missions/{id_or_slug}")
@@ -6667,12 +6746,14 @@ async def get_gateway_config():
     assistant = await get_assistant_model()
     coding = await get_coding_model()
     librarian = await get_librarian_model()
+    telemetry = await get_telemetry_model()
     return {
         "status": "SUCCESS",
         "config": {
             "assistant_model": assistant,
             "coding_model": coding,
-            "librarian_model": librarian
+            "librarian_model": librarian,
+            "telemetry_model": telemetry,
         }
     }
 
@@ -7600,6 +7681,155 @@ async def get_geo_activity_trends(request: Request, user_id: str | None = None, 
         if resp.status == 200:
             return await resp.json()
     raise HTTPException(status_code=502, detail="Failed to fetch activity trends")
+
+
+@app.post("/api/geo/trends/activity/analyze")
+async def post_geo_activity_trends_analyze(
+    request: Request, user_id: str | None = None, days: int = 7, refresh: bool = False
+):
+    """Explicitly generate the activity narrative (never triggered by a page load)."""
+    if not user_id:
+        user_id = await _user_id_from_request(request) or "all"
+    params = {"days": days}
+    if user_id and user_id != "all":
+        params["user_id"] = user_id
+    if refresh:
+        params["refresh"] = "true"
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/trends/activity/analyze",
+            params=params,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=300.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to analyze activity trends")
+
+
+# --- Scheduled telemetry reports (health/fitness + power) --------------------
+# The user is always taken from the authenticated request, never from the body,
+# so one user cannot schedule or read another user's reports.
+
+_TELEMETRY_TIMEOUT = aiohttp.ClientTimeout(total=30.0)
+
+
+async def _telemetry_call(method: str, path: str, **kwargs):
+    async with shared_http_client() as client:
+        resp = await client.request(
+            method,
+            f"{TELEMETRY_SVC}{path}",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=_TELEMETRY_TIMEOUT,
+            **kwargs,
+        )
+        if resp.status >= 400:
+            detail = await resp.text()
+            raise HTTPException(status_code=resp.status, detail=detail[:300])
+        return await resp.json(content_type=None)
+
+
+@app.get("/api/telemetry/schedules")
+async def get_telemetry_schedules(request: Request):
+    user = await _user_id_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return await _telemetry_call("GET", f"/api/telemetry/schedules/{user}")
+
+
+@app.put("/api/telemetry/schedules")
+async def put_telemetry_schedule(request: Request):
+    user = await _user_id_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    return await _telemetry_call("PUT", f"/api/telemetry/schedules/{user}", json=body)
+
+
+@app.delete("/api/telemetry/schedules/{job_id}")
+async def delete_telemetry_schedule(request: Request, job_id: str):
+    user = await _user_id_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return await _telemetry_call("DELETE", f"/api/telemetry/schedules/{user}/{job_id}")
+
+
+@app.post("/api/telemetry/reports/request")
+async def request_telemetry_report(request: Request):
+    """Queue an on-demand report. It runs when Alpaca is free, not immediately."""
+    user = await _user_id_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    body["user"] = user
+    return await _telemetry_call("POST", "/api/telemetry/reports/request", json=body)
+
+
+@app.get("/api/telemetry/reports")
+async def get_telemetry_reports(
+    request: Request,
+    type: str | None = None,
+    period: str | None = None,
+    limit: int = 20,
+):
+    user = await _user_id_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    params = {"limit": limit}
+    if type:
+        params["type"] = type
+    if period:
+        params["period"] = period
+    return await _telemetry_call("GET", f"/api/telemetry/reports/{user}", params=params)
+
+
+@app.get("/api/telemetry/reports/latest")
+async def get_latest_telemetry_report(request: Request, type: str = "health", period: str = "any"):
+    user = await _user_id_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return await _telemetry_call(
+        "GET",
+        f"/api/telemetry/reports/{user}/latest",
+        params={"type": type, "period": period},
+    )
+
+
+@app.get("/api/telemetry/notifications")
+async def get_telemetry_notifications(request: Request, limit: int = 20):
+    user = await _user_id_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return await _telemetry_call(
+        "GET", f"/api/telemetry/notifications/{user}", params={"limit": limit}
+    )
+
+
+@app.get("/api/telemetry/push/key")
+async def get_push_key(request: Request):
+    if not await _user_id_from_request(request):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return await _telemetry_call("GET", "/api/telemetry/push/key")
+
+
+@app.post("/api/telemetry/push/subscribe")
+async def subscribe_push(request: Request):
+    user = await _user_id_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    body["user"] = user
+    return await _telemetry_call("POST", "/api/telemetry/push/subscribe", json=body)
+
+
+@app.post("/api/telemetry/push/unsubscribe")
+async def unsubscribe_push(request: Request):
+    user = await _user_id_from_request(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    body["user"] = user
+    return await _telemetry_call("POST", "/api/telemetry/push/unsubscribe", json=body)
 
 
 # ---------------------------------------------------------------------------

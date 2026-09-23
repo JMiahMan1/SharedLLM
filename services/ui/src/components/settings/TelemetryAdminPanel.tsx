@@ -70,7 +70,7 @@ const TelemetryAdminPanel = () => {
 
   const updateTelemetryMutation = useMutation({
     mutationFn: ({ entityId, updates }: { entityId: string; updates: Partial<TelemetryEnrollment> }) =>
-      api.enrollTelemetry(entityId, updates),
+      api.updateTelemetryEnrollment(entityId, updates),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['telemetry-enrollments'] });
       toast.success('Telemetry settings updated');
@@ -89,8 +89,10 @@ const TelemetryAdminPanel = () => {
   });
 
   const analyzeTelemetryMutation = useMutation({
-    mutationFn: () => api.analyzeTelemetry(),
-    onSuccess: () => {
+    // Analysis is per-entity and must never fire without a selected entity.
+    mutationFn: (entityId: string) => api.analyzeTelemetry(entityId),
+    onSuccess: (_data, entityId) => {
+      queryClient.invalidateQueries({ queryKey: ['telemetry-insights', entityId] });
       toast.success('Telemetry analysis queued');
     },
     onError: () => toast.error('Failed to queue analysis'),
@@ -239,8 +241,14 @@ const TelemetryAdminPanel = () => {
             </p>
           </div>
           <button
-            onClick={() => analyzeTelemetryMutation.mutate()}
-            disabled={analyzeTelemetryMutation.isPending}
+            onClick={() => {
+              if (!activeEntity) {
+                toast.error('Select an enrolled device first');
+                return;
+              }
+              analyzeTelemetryMutation.mutate(activeEntity);
+            }}
+            disabled={analyzeTelemetryMutation.isPending || !activeEntity}
             className="glass-button px-4 py-3 text-[10px] font-black uppercase tracking-widest"
           >
             <TrendingUp size={14} />
