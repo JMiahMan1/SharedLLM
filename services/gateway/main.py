@@ -7546,9 +7546,9 @@ async def get_geo_steps(request: Request, user_id: str | None = None, days: int 
                 except Exception:
                     pass
         user_id = user or "all"
-    params = {"days": days}
-    if user_id and user_id != "all":
-        params["user_id"] = user_id
+    # Always pass user_id — geo GET /steps 400s when it's omitted.
+    # "all" is a valid sentinel (empty history for that key).
+    params = {"days": days, "user_id": user_id or "all"}
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/steps",
