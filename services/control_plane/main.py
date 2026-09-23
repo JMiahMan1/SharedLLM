@@ -523,6 +523,16 @@ def _recreate_container(container, new_image_id: str):
         new_container = client.containers.get(new_container_id)
 
         # 5. Connect new container to custom networks with original aliases & IPs
+        # Disconnect the backup first so the original IPv4 is free for the new
+        # container (reconnect with a still-held IP otherwise leaves Networks={}.
+        for net_name in list(networks_dict.keys()):
+            if net_name == "bridge" and host_config.get("NetworkMode") == "default":
+                continue
+            if net_name == "host" and host_config.get("NetworkMode") == "host":
+                continue
+            with suppress(Exception):
+                client.networks.get(net_name).disconnect(container)
+
         for net_name, net_config in networks_dict.items():
             if net_name == "bridge" and host_config.get("NetworkMode") == "default":
                 continue
@@ -531,15 +541,14 @@ def _recreate_container(container, new_image_id: str):
 
             try:
                 network = client.networks.get(net_name)
-                # Disconnect first to avoid auto-connect conflicts and set aliases/IPs
-                with suppress(Exception):
-                    network.disconnect(new_container)
-
                 # Filter auto-generated aliases (like container IDs) to avoid conflicts
                 aliases = [
                     a for a in net_config.get("Aliases", [])
                     if a != container.id[:12] and a != backup_name and a != new_container.id[:12]
                 ]
+                if not aliases:
+                    aliases = [old_name.lstrip("/"), old_name.lstrip("/").removeprefix("sharedllm_")]
+                    aliases = list(dict.fromkeys(aliases))
                 ipv4 = net_config.get("IPAMConfig", {}).get("IPv4Address", "") or net_config.get("IPAddress", "")
 
                 network.connect(
@@ -547,8 +556,15 @@ def _recreate_container(container, new_image_id: str):
                     aliases=aliases,
                     ipv4_address=ipv4 or None
                 )
+                log.info(f"[recreate] Connected {old_name} to {net_name} aliases={aliases} ipv4={ipv4 or 'auto'}")
             except Exception as ne:
                 log.warning(f"[recreate] Network connect warning for {net_name}: {ne}")
+                # Fallback without pinned IP — aliases still matter for DNS
+                try:
+                    network.connect(new_container, aliases=aliases)
+                    log.info(f"[recreate] Connected {old_name} to {net_name} (auto IP) aliases={aliases}")
+                except Exception as ne2:
+                    log.error(f"[recreate] Fallback connect failed for {net_name}: {ne2}")
 
         # 5b. Fix volume permissions before starting (mirrors deploy.sh guard)
         fixed_vols = _fix_volume_permissions(container)

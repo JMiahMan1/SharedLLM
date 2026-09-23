@@ -1943,6 +1943,24 @@ async def _resolve_identity_from_request(request: Request, body: dict | None = N
     return await resolve_identity(_auth_body_from_request(request, body))
 
 
+async def _user_id_from_request(request: Request) -> str | None:
+    """Resolve the acting username from X-User-Id or a Bearer API key."""
+    user = request.headers.get("X-User-Id")
+    if user:
+        return user
+    auth_header = request.headers.get("Authorization")
+    if not (auth_header and auth_header.startswith("Bearer ")):
+        return None
+    token = auth_header.split(" ", 1)[1]
+    try:
+        ident = await resolve_identity({"api_key": token})
+    except Exception:
+        return None
+    if not isinstance(ident, dict):
+        return None
+    return ident.get("user") or ident.get("username") or ident.get("user_id") or None
+
+
 async def _resolve_ma_credentials(request: Request, body: dict | None = None) -> tuple[str, str]:
     """Resolve the caller's Music Assistant base URL and token."""
     try:
@@ -7360,20 +7378,7 @@ async def get_geo_trip_locations(trip_id: str):
 
 @app.patch("/api/geo/trips/{trip_id}")
 async def update_geo_trip(trip_id: str, request: Request):
-    user = None
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ")[1]
-        try:
-            from services.gateway.cache import get_cached_identity
-            ident = await get_cached_identity({"api_key": token})
-            if ident:
-                user = ident.get("user_id") or ident.get("username")
-        except Exception:
-            pass
-
-    if not user:
-        user = request.headers.get("X-User-Id")
+    user = await _user_id_from_request(request)
 
     body = await request.json()
     headers = {
@@ -7450,19 +7455,7 @@ async def get_geo_workouts(request: Request, user_id: str | None = None, limit: 
 
 @app.post("/api/geo/workouts/start")
 async def start_geo_workout(request: Request):
-    user = None
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ")[1]
-        try:
-            from services.gateway.cache import get_cached_identity
-            ident = await get_cached_identity({"api_key": token})
-            if ident:
-                user = ident.get("user_id") or ident.get("username")
-        except Exception:
-            pass
-    if not user:
-        user = request.headers.get("X-User-Id")
+    user = await _user_id_from_request(request)
 
     body = await request.json()
     async with shared_http_client() as client:
@@ -7484,19 +7477,7 @@ async def start_geo_workout(request: Request):
 
 @app.post("/api/geo/workouts/stop")
 async def stop_geo_workout(request: Request):
-    user = None
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header.split(" ")[1]
-        try:
-            from services.gateway.cache import get_cached_identity
-            ident = await get_cached_identity({"api_key": token})
-            if ident:
-                user = ident.get("user_id") or ident.get("username")
-        except Exception:
-            pass
-    if not user:
-        user = request.headers.get("X-User-Id")
+    user = await _user_id_from_request(request)
 
     body = await request.json()
     async with shared_http_client() as client:
@@ -7533,19 +7514,7 @@ async def get_geo_workout_route(workout_id: str):
 @app.get("/api/geo/steps")
 async def get_geo_steps(request: Request, user_id: str | None = None, days: int = 7):
     if not user_id:
-        user = request.headers.get("X-User-Id")
-        if not user:
-            auth_header = request.headers.get("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                token = auth_header.split(" ")[1]
-                try:
-                    from services.gateway.cache import get_cached_identity
-                    ident = await get_cached_identity({"api_key": token})
-                    if ident:
-                        user = ident.get("user_id") or ident.get("username")
-                except Exception:
-                    pass
-        user_id = user or "all"
+        user_id = await _user_id_from_request(request) or "all"
     # Always pass user_id — geo GET /steps 400s when it's omitted.
     # "all" is a valid sentinel (empty history for that key).
     params = {"days": days, "user_id": user_id or "all"}
@@ -7581,19 +7550,7 @@ async def proxy_geo_steps(request: Request):
 @app.get("/api/geo/trends/activity")
 async def get_geo_activity_trends(request: Request, user_id: str | None = None, days: int = 7, refresh: bool = False):
     if not user_id:
-        user = request.headers.get("X-User-Id")
-        if not user:
-            auth_header = request.headers.get("Authorization")
-            if auth_header and auth_header.startswith("Bearer "):
-                token = auth_header.split(" ")[1]
-                try:
-                    from services.gateway.cache import get_cached_identity
-                    ident = await get_cached_identity({"api_key": token})
-                    if ident:
-                        user = ident.get("user_id") or ident.get("username")
-                except Exception:
-                    pass
-        user_id = user or "all"
+        user_id = await _user_id_from_request(request) or "all"
     params = {"days": days}
     if user_id and user_id != "all":
         params["user_id"] = user_id
