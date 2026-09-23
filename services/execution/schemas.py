@@ -346,6 +346,7 @@ class EntitySearchRequest(BaseRequest):
     domain: str | None = Field(None, description="Filter by domain (e.g., 'media_player', 'light', 'switch')")
     area: str | None = Field(None, description="Filter by area (e.g., 'Office', 'Kitchen', 'Master Bedroom')")
     state: str | None = Field(None, description="Filter by state (e.g., 'on', 'off', 'playing', 'idle')")
+    limit: int = Field(200, ge=1, le=1000, description="Max entities to return (browse lists need more than search)")
 
 
 # ─── Personal Data (Calendar / Notes) ──────────────────────────────────────────

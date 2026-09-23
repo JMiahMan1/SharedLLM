@@ -112,6 +112,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   );
 
   const [devices, setDevices] = useState<DeviceEntry[]>([]);
+  const [activityCutoff, setActivityCutoff] = useState<number>(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -143,6 +144,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       // Load device states — isolated: failure here is shown as error
       const state = await api.getDeviceStates(['light', 'switch', 'media_player', 'cover', 'climate', 'lock', 'fan']);
       setDevices(state);
+      setActivityCutoff(Date.now() - 30 * 24 * 60 * 60 * 1000);
     } catch (err) {
       console.error('Failed to load device states:', err);
       setError('Failed to load devices. Check that Home Assistant is reachable.');
@@ -400,9 +402,24 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     return devices.filter((d) => pinnedDevices.includes(d.entity_id));
   }, [devices, pinnedDevices]);
 
+  // Active in the last 30 days: recently updated/changed, currently active,
+  // or pinned as a favorite (so favorites never disappear when idle).
+  // cutoff is captured when devices load so this memo stays pure.
+  const activeDevices = useMemo(() => {
+    if (!activityCutoff) return devices;
+    return devices.filter((d) => {
+      if (pinnedDevices.includes(d.entity_id)) return true;
+      if (isActive(d.state)) return true;
+      if (d.last_activated && d.last_activated >= activityCutoff) return true;
+      // No timestamp from HA — keep the device rather than hide it
+      if (!d.last_activated) return true;
+      return false;
+    });
+  }, [devices, pinnedDevices, activityCutoff]);
+
   const allDevicesGrouped = useMemo(() => {
     const groups: Record<string, DeviceEntry[]> = {};
-    for (const d of devices) {
+    for (const d of activeDevices) {
       const dom = d.domain || 'other';
       if (!groups[dom]) groups[dom] = [];
       groups[dom].push(d);
@@ -412,11 +429,11 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
       label: getDomainLabel(domain),
       devices: devs.sort((a, b) => (a.friendly_name || '').localeCompare(b.friendly_name || '')),
     })).sort((a, b) => a.label.localeCompare(b.label));
-  }, [devices]);
+  }, [activeDevices]);
 
   const roomDevicesList = useMemo(() => {
-    return devices.filter((d) => resolveDeviceRoom(d) === currentRoom);
-  }, [devices, currentRoom]);
+    return activeDevices.filter((d) => resolveDeviceRoom(d) === currentRoom);
+  }, [activeDevices, currentRoom]);
 
   // Render a standard device row
   const renderDeviceRow = (device: DeviceEntry) => {
