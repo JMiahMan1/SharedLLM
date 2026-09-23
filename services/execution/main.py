@@ -1747,6 +1747,8 @@ async def execute_entity_search(req: EntitySearchRequest):
             "supported_features": attrs.get("supported_features", 0),
             "platform": _detect_media_platform(eid, attrs),
             "attributes": attributes,
+            "last_changed": state.get("last_changed"),
+            "last_updated": state.get("last_updated"),
         })
 
     # Sort by relevance: exact matches first, then partial
@@ -1761,12 +1763,21 @@ async def execute_entity_search(req: EntitySearchRequest):
                     score += 10
             return score
         results.sort(key=relevance_score, reverse=True)
+    else:
+        # Browse mode (empty query): stable alphabetical order so domain
+        # lists aren't cut arbitrarily by HA state order.
+        results.sort(key=lambda r: (r.get("friendly_name") or r["entity_id"]).lower())
 
+    limit = max(1, min(int(req.limit or 200), 1000))
     return ExecutionResult(
         status="SUCCESS",
         message=f"Found {len(results)} matching entities.",
         service="entity_search",
-        detail={"entities": results[:20]}
+        detail={
+            "entities": results[:limit],
+            "total": len(results),
+            "limit": limit,
+        },
     )
 
 @app.post("/execute/ha_service", response_model=ExecutionResult)

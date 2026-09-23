@@ -1508,16 +1508,25 @@ export const api = {
       domain: domains && domains.length > 0 ? domains.join(',') : null,
       area: null,
       state: null,
+      limit: 500,
     });
-    return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string; attributes?: Record<string, number | string | boolean | string[] | null> }) => ({
-      entity_id: e.entity_id,
-      friendly_name: e.friendly_name,
-      state: e.state,
-      domain: e.domain,
-      room: e.area_id || undefined,
-      last_activated: undefined,
-      attributes: e.attributes || undefined,
-    }));
+    return (resp.data.result || []).map((e: { entity_id: string; friendly_name: string; state: string; domain: string; area_id?: string; attributes?: Record<string, number | string | boolean | string[] | null>; last_changed?: string; last_updated?: string }) => {
+      const ts = e.last_updated || e.last_changed;
+      let lastActivated: number | undefined;
+      if (ts) {
+        const parsed = Date.parse(ts);
+        if (!Number.isNaN(parsed)) lastActivated = parsed;
+      }
+      return {
+        entity_id: e.entity_id,
+        friendly_name: e.friendly_name,
+        state: e.state,
+        domain: e.domain,
+        room: e.area_id || undefined,
+        last_activated: lastActivated,
+        attributes: e.attributes || undefined,
+      };
+    });
   },
 
   async toggleDevice(entityId: string, action: 'on' | 'off'): Promise<{ status: string; message?: string }> {
