@@ -9,7 +9,6 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
 import android.widget.ArrayAdapter;
-import android.widget.AutoCompleteTextView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
@@ -28,7 +27,7 @@ import org.json.JSONObject;
 /** Launcher configure activity for ActionButtonWidget (entity + service + Material icon). */
 public class ConfigureActionButtonActivity extends Activity {
     private int appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID;
-    private AutoCompleteTextView fieldEntity;
+    private EditText fieldEntity;
     private EditText fieldLabel;
     private Spinner fieldService;
     private ProgressBar entityProgress;
@@ -42,11 +41,12 @@ public class ConfigureActionButtonActivity extends Activity {
     private final List<ImageView> iconViews = new ArrayList<>();
     private final List<String> entityIds = new ArrayList<>();
     private final List<String> entityLabels = new ArrayList<>();
-    private ArrayAdapter<String> entityAdapter;
     private ArrayAdapter<String> resultsAdapter;
     private int loadGeneration;
     private int previewGeneration;
+    private int searchGeneration;
     private android.os.Handler previewHandler;
+    private android.os.Handler searchHandler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -62,7 +62,6 @@ public class ConfigureActionButtonActivity extends Activity {
 
         fieldLabel = findViewById(R.id.field_label);
         fieldEntity = findViewById(R.id.field_entity);
-        fieldEntity.setThreshold(1);
         fieldService = findViewById(R.id.field_service);
         entityProgress = findViewById(R.id.entity_progress);
         entityStatus = findViewById(R.id.entity_status);
@@ -70,6 +69,7 @@ public class ConfigureActionButtonActivity extends Activity {
         entityResults = findViewById(R.id.entity_results);
         iconName = findViewById(R.id.icon_name);
         previewHandler = new android.os.Handler(getMainLooper());
+        searchHandler = new android.os.Handler(getMainLooper());
         Button btnSave = findViewById(R.id.btn_save);
         Button btnCancel = findViewById(R.id.btn_cancel);
         LinearLayout iconRow = findViewById(R.id.icon_row);
@@ -98,9 +98,10 @@ public class ConfigureActionButtonActivity extends Activity {
                 String q = s != null ? s.toString().trim() : "";
                 scheduleLivePreview(q);
                 updateResultsList(q);
+                scheduleServerSearch(q);
             }
         });
-        // Focus opens the search list once entities are loaded
+        // Focus shows the match list once entities are loaded
         fieldEntity.setOnFocusChangeListener((v, hasFocus) -> {
             if (hasFocus) {
                 String q = fieldEntity.getText() != null ? fieldEntity.getText().toString().trim() : "";
@@ -180,13 +181,75 @@ public class ConfigureActionButtonActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (previewHandler != null) previewHandler.removeCallbacksAndMessages(null);
+        if (searchHandler != null) searchHandler.removeCallbacksAndMessages(null);
         super.onDestroy();
+    }
+
+    /**
+     * Debounced server-side search so typing uses the current app credentials
+     * and always reflects live HA state (not just a one-shot local cache).
+     */
+    private void scheduleServerSearch(String query) {
+        if (searchHandler == null) return;
+        final String q = query == null ? "" : query;
+        if (q.isEmpty()) {
+            updateResultsList("");
+            return;
+        }
+        final int gen = ++searchGeneration;
+        searchHandler.removeCallbacksAndMessages(null);
+        searchHandler.postDelayed(() -> WidgetUpdater.onBackground(() -> {
+            final List<String> ids = new ArrayList<>();
+            final List<String> labels = new ArrayList<>();
+            final String[] error = new String[1];
+            try {
+                WidgetApi.ensureCredentials(this);
+                if (WidgetApi.apiKey(this) == null) {
+                    error[0] = "Sign in to Jarvis OS to search entities.";
+                } else {
+                    JSONObject states = WidgetApi.searchEntities(this, q, 40);
+                    java.util.Iterator<String> it = states.keys();
+                    while (it.hasNext()) {
+                        String id = it.next();
+                        JSONObject e = states.optJSONObject(id);
+                        String friendly = e != null ? WidgetApi.friendlyName(e) : id;
+                        String state = e != null ? e.optString("state", "") : "";
+                        String domain = id.contains(".") ? id.substring(0, id.indexOf('.')) : "";
+                        if (isControllableDomain(domain)) {
+                            ids.add(id);
+                            labels.add(friendly + (state.isEmpty() ? "" : " · " + state) + "  (" + id + ")");
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                error[0] = e.getMessage() != null ? e.getMessage() : "Search failed";
+            }
+            WidgetUpdater.onMain(() -> {
+                if (gen != searchGeneration || isFinishing() || entityResults == null) return;
+                entityProgress.setVisibility(View.GONE);
+                if (error[0] != null) {
+                    entityStatus.setVisibility(View.VISIBLE);
+                    entityStatus.setText(error[0]);
+                    // Fall back to local cache filter
+                    updateResultsList(q);
+                    return;
+                }
+                resultsAdapter.clear();
+                resultsAdapter.addAll(labels);
+                resultsAdapter.notifyDataSetChanged();
+                entityResults.setVisibility(labels.isEmpty() ? View.GONE : View.VISIBLE);
+                entityStatus.setVisibility(View.VISIBLE);
+                entityStatus.setText(labels.isEmpty()
+                    ? "No matches for “" + q + "”"
+                    : labels.size() + " matches — tap to select");
+            });
+        }), 250);
     }
 
     /** Debounced live state lookup for the current entity_id text. */
     private void scheduleLivePreview(String entityId) {
         if (previewHandler == null) return;
-        previewHandler.removeCallbacksAndMessages(null);
+        WidgetApi.ensureCredentials(this);
         if (entityId == null || !entityId.contains(".") || WidgetApi.apiKey(this) == null) {
             if (entityPreview != null) entityPreview.setVisibility(View.GONE);
             return;
@@ -350,15 +413,6 @@ public class ConfigureActionButtonActivity extends Activity {
                 entityIds.addAll(ids);
                 entityLabels.clear();
                 entityLabels.addAll(labels);
-                entityAdapter = new ArrayAdapter<>(
-                    ConfigureActionButtonActivity.this,
-                    android.R.layout.simple_dropdown_item_1line,
-                    entityLabels);
-                fieldEntity.setAdapter(entityAdapter);
-                fieldEntity.setOnItemClickListener((parent, view, position, id) -> {
-                    String full = entityLabels.get(position);
-                    pickEntity(full);
-                });
                 CharSequence now = fieldEntity.getText();
                 updateResultsList(now != null ? now.toString().trim() : "");
                 CharSequence cur = fieldEntity.getText();

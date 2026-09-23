@@ -42,26 +42,77 @@ public final class WidgetApi {
         return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
     }
 
-    /** Best-effort credential re-sync from Capacitor Preferences if widget prefs are empty. */
+    /**
+     * Re-sync credentials from Capacitor Preferences (current app session).
+     * CapacitorStorage is the source of truth so configure screens always use
+     * the logged-in API key even if TokenBridge mirror is stale/empty.
+     */
     public static void ensureCredentials(Context context) {
         SharedPreferences p = prefs(context);
-        if (p.getString(TokenBridgePlugin.KEY_API_KEY, null) != null) return;
         try {
             SharedPreferences cap = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
             String key = cap.getString("jarvis_api_key", null);
             String url = cap.getString("jarvis_server_url", null);
             String secret = cap.getString("internal_secret", null);
             SharedPreferences.Editor ed = p.edit();
-            if (key != null && !key.isEmpty()) ed.putString(TokenBridgePlugin.KEY_API_KEY, key);
-            if (url != null && !url.isEmpty()) ed.putString(TokenBridgePlugin.KEY_SERVER_URL, url);
-            if (secret != null && !secret.isEmpty()) ed.putString(TokenBridgePlugin.KEY_INTERNAL_SECRET, secret);
-            ed.apply();
-            if (key != null) {
-                Log.i(TAG, "Migrated credentials from CapacitorStorage into widget prefs");
+            boolean changed = false;
+            if (key != null && !key.isEmpty() && !key.equals(p.getString(TokenBridgePlugin.KEY_API_KEY, null))) {
+                ed.putString(TokenBridgePlugin.KEY_API_KEY, key);
+                changed = true;
+                Log.i(TAG, "Synced jarvis_api_key from CapacitorStorage");
             }
+            if (url != null && !url.isEmpty() && !url.equals(p.getString(TokenBridgePlugin.KEY_SERVER_URL, null))) {
+                ed.putString(TokenBridgePlugin.KEY_SERVER_URL, url);
+                changed = true;
+            }
+            if (secret != null && !secret.isEmpty() && !secret.equals(p.getString(TokenBridgePlugin.KEY_INTERNAL_SECRET, null))) {
+                ed.putString(TokenBridgePlugin.KEY_INTERNAL_SECRET, secret);
+                changed = true;
+            }
+            // Fallback: TokenBridge mirror may already hold a key if CapacitorStorage is empty
+            if (key == null || key.isEmpty()) {
+                String mirrored = p.getString(TokenBridgePlugin.KEY_API_KEY, null);
+                if (mirrored == null || mirrored.isEmpty()) {
+                    String legacy = cap.getString("jarvis_api_key", null);
+                    if (legacy != null && !legacy.isEmpty()) {
+                        ed.putString(TokenBridgePlugin.KEY_API_KEY, legacy);
+                        changed = true;
+                    }
+                }
+            }
+            if (changed) ed.apply();
         } catch (Exception e) {
             Log.w(TAG, "ensureCredentials failed: " + e.getMessage());
         }
+    }
+
+    /** Server-side entity search with explicit query + limit (default browse cap is 200). */
+    public static JSONObject searchEntities(Context context, String query, int limit) throws Exception {
+        JSONObject body = new JSONObject();
+        body.put("query", query != null ? query : "");
+        body.put("domain", JSONObject.NULL);
+        body.put("area", JSONObject.NULL);
+        body.put("state", JSONObject.NULL);
+        body.put("limit", limit);
+        JSONObject resp = post(context, "/execute/entity/search", body);
+        JSONArray result = resp.optJSONArray("result");
+        if (result == null) {
+            JSONObject detail = resp.optJSONObject("detail");
+            if (detail != null) result = detail.optJSONArray("entities");
+        }
+        if (result == null) {
+            if (!resp.has("result") && !resp.has("detail")) {
+                throw new IllegalStateException("Unexpected entity search response");
+            }
+            return new JSONObject();
+        }
+        JSONObject byId = new JSONObject();
+        for (int i = 0; i < result.length(); i++) {
+            JSONObject e = result.getJSONObject(i);
+            String id = e.optString("entity_id");
+            if (!id.isEmpty()) byId.put(id, e);
+        }
+        return byId;
     }
 
     public static boolean isAwayFromHome(Context context, float thresholdMeters) {
@@ -188,6 +239,8 @@ public final class WidgetApi {
         body.put("domain", JSONObject.NULL);
         body.put("area", JSONObject.NULL);
         body.put("state", JSONObject.NULL);
+        // Default server limit is 200 — homes routinely exceed that (e.g. 693).
+        body.put("limit", 1000);
         JSONObject resp = post(context, "/execute/entity/search", body);
         JSONObject byId = new JSONObject();
         JSONArray result = resp.optJSONArray("result");

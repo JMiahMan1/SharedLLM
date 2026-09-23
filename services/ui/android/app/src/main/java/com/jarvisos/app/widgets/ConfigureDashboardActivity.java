@@ -8,8 +8,8 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
 import android.widget.ArrayAdapter;
-import android.widget.AutoCompleteTextView;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -24,7 +24,7 @@ import org.json.JSONObject;
 /** Launcher configure activity for DashboardWidget — 4 searchable entity cells. */
 public class ConfigureDashboardActivity extends Activity {
     private int appWidgetId = AppWidgetManager.INVALID_APPWIDGET_ID;
-    private final AutoCompleteTextView[] fields = new AutoCompleteTextView[DashboardConfig.MAX_CELLS];
+    private final EditText[] fields = new EditText[DashboardConfig.MAX_CELLS];
     private final ListView[] resultLists = new ListView[DashboardConfig.MAX_CELLS];
     private final TextView[] previews = new TextView[DashboardConfig.MAX_CELLS];
     private ProgressBar entityProgress;
@@ -33,10 +33,11 @@ public class ConfigureDashboardActivity extends Activity {
     private final List<String> entityLabels = new ArrayList<>();
     private final Map<String, String> liveStates = new ConcurrentHashMap<>();
     private final Map<String, String> liveNames = new ConcurrentHashMap<>();
-    private ArrayAdapter<String> adapter;
     private ArrayAdapter<String>[] resultsAdapters;
     private int loadGeneration;
+    private int searchGeneration;
     private int activeCell = -1;
+    private android.os.Handler searchHandler;
 
     @SuppressWarnings("unchecked")
     @Override
@@ -60,8 +61,8 @@ public class ConfigureDashboardActivity extends Activity {
         resultLists[2] = findViewById(R.id.entity_results_3);
         resultLists[3] = findViewById(R.id.entity_results_4);
         resultsAdapters = new ArrayAdapter[DashboardConfig.MAX_CELLS];
+        searchHandler = new android.os.Handler(getMainLooper());
         for (int i = 0; i < fields.length; i++) {
-            fields[i].setThreshold(1);
             resultsAdapters[i] = makeDarkAdapter();
             resultLists[i].setAdapter(resultsAdapters[i]);
             final int idx = i;
@@ -86,24 +87,16 @@ public class ConfigureDashboardActivity extends Activity {
             fields[i].addTextChangedListener(new SimpleWatcher() {
                 @Override public void afterTextChanged(Editable s) {
                     refreshPreview(idx);
-                    updateResultsList(idx, s != null ? s.toString().trim() : "");
+                    String q = s != null ? s.toString().trim() : "";
+                    updateResultsList(idx, q);
+                    scheduleServerSearch(idx, q);
                 }
             });
             fields[i].setOnFocusChangeListener((v, hasFocus) -> {
                 if (hasFocus) {
                     activeCell = idx;
-                    String q = textAt(idx);
-                    updateResultsList(idx, q);
-                } else {
-                    // Hide only this cell's list when focus leaves
-                    if (resultLists[idx] != null && !resultLists[idx].isPressed()) {
-                        // keep visible if user is about to tap a row; hide on Save path
-                    }
+                    updateResultsList(idx, textAt(idx));
                 }
-            });
-            fields[i].setOnItemClickListener((parent, view, position, id) -> {
-                String full = entityLabels.get(position);
-                pickEntity(idx, full);
             });
         }
 
@@ -177,6 +170,67 @@ public class ConfigureDashboardActivity extends Activity {
     private String textAt(int i) {
         CharSequence cs = fields[i].getText();
         return cs != null ? cs.toString().trim() : "";
+    }
+
+    /** Debounced server-side search with current app credentials for one cell. */
+    private void scheduleServerSearch(int cell, String query) {
+        if (searchHandler == null) return;
+        final String q = query == null ? "" : query;
+        final int idx = cell;
+        if (q.isEmpty()) {
+            updateResultsList(idx, "");
+            return;
+        }
+        final int gen = ++searchGeneration;
+        searchHandler.removeCallbacksAndMessages(null);
+        searchHandler.postDelayed(() -> WidgetUpdater.onBackground(() -> {
+            final List<String> ids = new ArrayList<>();
+            final List<String> labels = new ArrayList<>();
+            final Map<String, String> states = new ConcurrentHashMap<>();
+            final Map<String, String> names = new ConcurrentHashMap<>();
+            final String[] error = new String[1];
+            try {
+                WidgetApi.ensureCredentials(this);
+                if (WidgetApi.apiKey(this) == null) {
+                    error[0] = "Sign in to Jarvis OS to search entities.";
+                } else {
+                    JSONObject found = WidgetApi.searchEntities(this, q, 40);
+                    java.util.Iterator<String> it = found.keys();
+                    while (it.hasNext()) {
+                        String id = it.next();
+                        JSONObject e = found.optJSONObject(id);
+                        String friendly = e != null ? WidgetApi.friendlyName(e) : id;
+                        String state = e != null ? e.optString("state", "") : "";
+                        ids.add(id);
+                        names.put(id, friendly);
+                        states.put(id, state);
+                        labels.add(friendly + "  (" + id + ")");
+                    }
+                }
+            } catch (Exception e) {
+                error[0] = e.getMessage() != null ? e.getMessage() : "Search failed";
+            }
+            WidgetUpdater.onMain(() -> {
+                if (gen != searchGeneration || isFinishing()) return;
+                entityProgress.setVisibility(View.GONE);
+                if (error[0] != null) {
+                    entityStatus.setVisibility(View.VISIBLE);
+                    entityStatus.setText(error[0]);
+                    updateResultsList(idx, q);
+                    return;
+                }
+                liveStates.putAll(states);
+                liveNames.putAll(names);
+                resultsAdapters[idx].clear();
+                resultsAdapters[idx].addAll(labels);
+                resultsAdapters[idx].notifyDataSetChanged();
+                resultLists[idx].setVisibility(labels.isEmpty() ? View.GONE : View.VISIBLE);
+                entityStatus.setVisibility(View.VISIBLE);
+                entityStatus.setText(labels.isEmpty()
+                    ? "No matches for “" + q + "”"
+                    : labels.size() + " matches — tap to select");
+            });
+        }), 250);
     }
 
     private void refreshPreview(int i) {
@@ -267,19 +321,18 @@ public class ConfigureDashboardActivity extends Activity {
                 liveNames.clear();
                 liveNames.putAll(names);
                 entityStatus.setText(ids.size() + " entities — type to search");
-                adapter = new ArrayAdapter<>(
-                    ConfigureDashboardActivity.this,
-                    android.R.layout.simple_dropdown_item_1line,
-                    entityLabels);
-                for (AutoCompleteTextView f : fields) {
-                    f.setAdapter(adapter);
-                }
                 for (int i = 0; i < previews.length; i++) {
                     refreshPreview(i);
                     updateResultsList(i, textAt(i));
                 }
             });
         });
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (searchHandler != null) searchHandler.removeCallbacksAndMessages(null);
+        super.onDestroy();
     }
 
     private void save() {

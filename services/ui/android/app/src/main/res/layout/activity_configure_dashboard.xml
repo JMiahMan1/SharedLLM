@@ -47,7 +47,7 @@
             android:text="Cell 1"
             android:textColor="#CBD5E1"
             android:textSize="12sp" />
-        <AutoCompleteTextView
+        <EditText
             android:id="@+id/field_entity_1"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -56,10 +56,6 @@
             android:inputType="text"
             android:imeOptions="actionSearch"
             android:maxLines="1"
-            android:completionHint="Tap a match"
-            android:dropDownWidth="match_parent"
-            android:dropDownHeight="200dp"
-            android:popupBackground="#1E293B"
             android:textColor="#F1F5F9"
             android:textColorHint="#64748B"
             android:textSize="14sp" />
@@ -87,7 +83,7 @@
             android:text="Cell 2"
             android:textColor="#CBD5E1"
             android:textSize="12sp" />
-        <AutoCompleteTextView
+        <EditText
             android:id="@+id/field_entity_2"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -96,10 +92,6 @@
             android:inputType="text"
             android:imeOptions="actionSearch"
             android:maxLines="1"
-            android:completionHint="Tap a match"
-            android:dropDownWidth="match_parent"
-            android:dropDownHeight="200dp"
-            android:popupBackground="#1E293B"
             android:textColor="#F1F5F9"
             android:textColorHint="#64748B"
             android:textSize="14sp" />
@@ -127,7 +119,7 @@
             android:text="Cell 3"
             android:textColor="#CBD5E1"
             android:textSize="12sp" />
-        <AutoCompleteTextView
+        <EditText
             android:id="@+id/field_entity_3"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -136,10 +128,6 @@
             android:inputType="text"
             android:imeOptions="actionSearch"
             android:maxLines="1"
-            android:completionHint="Tap a match"
-            android:dropDownWidth="match_parent"
-            android:dropDownHeight="200dp"
-            android:popupBackground="#1E293B"
             android:textColor="#F1F5F9"
             android:textColorHint="#64748B"
             android:textSize="14sp" />
@@ -167,7 +155,7 @@
             android:text="Cell 4"
             android:textColor="#CBD5E1"
             android:textSize="12sp" />
-        <AutoCompleteTextView
+        <EditText
             android:id="@+id/field_entity_4"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -176,10 +164,6 @@
             android:inputType="text"
             android:imeOptions="actionSearch"
             android:maxLines="1"
-            android:completionHint="Tap a match"
-            android:dropDownWidth="match_parent"
-            android:dropDownHeight="200dp"
-            android:popupBackground="#1E293B"
             android:textColor="#F1F5F9"
             android:textColorHint="#64748B"
             android:textSize="14sp" />

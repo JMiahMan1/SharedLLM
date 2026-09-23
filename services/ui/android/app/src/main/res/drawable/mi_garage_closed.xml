@@ -5,7 +5,7 @@
     android:viewportWidth="24"
     android:viewportHeight="24"
     android:tint="#FFFFFF">
-    <!-- Material Symbols "garage" closed door (garage_door), 960 grid → 24dp -->
+    <!-- Alias of closed garage (Material Symbols garage_door) -->
     <group
         android:scaleX="0.025"
         android:scaleY="0.025"

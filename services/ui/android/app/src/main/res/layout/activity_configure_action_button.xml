@@ -51,7 +51,7 @@
             android:text="Entity"
             android:textColor="#CBD5E1"
             android:textSize="12sp" />
-        <AutoCompleteTextView
+        <EditText
             android:id="@+id/field_entity"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -60,10 +60,6 @@
             android:inputType="text"
             android:imeOptions="actionSearch"
             android:maxLines="1"
-            android:completionHint="Tap a match"
-            android:dropDownWidth="match_parent"
-            android:dropDownHeight="240dp"
-            android:popupBackground="#1E293B"
             android:textColor="#F1F5F9"
             android:textColorHint="#64748B"
             android:textSize="14sp" />
