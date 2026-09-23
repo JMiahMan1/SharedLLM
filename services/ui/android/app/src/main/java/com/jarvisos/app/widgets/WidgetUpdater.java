@@ -82,6 +82,16 @@ public final class WidgetUpdater {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
+    /** Re-open Action Button configure for an existing widget id. */
+    public static PendingIntent configureActionButtonPendingIntent(Context context, int appWidgetId) {
+        Intent i = new Intent(context, ConfigureActionButtonActivity.class);
+        i.setAction(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE);
+        i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
+        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        return PendingIntent.getActivity(context, 4000 + appWidgetId, i,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
     public static void onBackground(Runnable r) {
         IO.execute(r);
     }

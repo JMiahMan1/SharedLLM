@@ -189,25 +189,26 @@ public class ConfigureDashboardActivity extends Activity {
             final Map<String, String> states = new ConcurrentHashMap<>();
             final Map<String, String> names = new ConcurrentHashMap<>();
             final String[] error = new String[1];
-            try {
-                WidgetApi.ensureCredentials(this);
-                if (WidgetApi.apiKey(this) == null) {
-                    error[0] = "Sign in to Jarvis OS to search entities.";
-                } else {
-                    JSONObject found = WidgetApi.searchEntities(this, q, 40);
-                    java.util.Iterator<String> it = found.keys();
-                    while (it.hasNext()) {
-                        String id = it.next();
-                        JSONObject e = found.optJSONObject(id);
-                        String friendly = e != null ? WidgetApi.friendlyName(e) : id;
-                        String state = e != null ? e.optString("state", "") : "";
-                        ids.add(id);
-                        names.put(id, friendly);
-                        states.put(id, state);
-                        labels.add(friendly + "  (" + id + ")");
+                try {
+                    WidgetApi.ensureCredentials(this);
+                    if (WidgetApi.apiKey(this) == null) {
+                        error[0] = "Sign in to Jarvis OS to search entities.";
+                    } else {
+                        JSONObject found = WidgetApi.searchEntities(this, q, 40);
+                        java.util.Iterator<String> it = found.keys();
+                        while (it.hasNext()) {
+                            String id = it.next();
+                            JSONObject e = found.optJSONObject(id);
+                            String friendly = e != null ? WidgetApi.friendlyName(e) : id;
+                            String state = e != null ? e.optString("state", "") : "";
+                            if (!isControllableEntity(id)) continue;
+                            ids.add(id);
+                            names.put(id, friendly);
+                            states.put(id, state);
+                            labels.add(friendly + "  (" + id + ")");
+                        }
                     }
-                }
-            } catch (Exception e) {
+                } catch (Exception e) {
                 error[0] = e.getMessage() != null ? e.getMessage() : "Search failed";
             }
             WidgetUpdater.onMain(() -> {
@@ -293,6 +294,7 @@ public class ConfigureDashboardActivity extends Activity {
                     JSONObject e = all.optJSONObject(id);
                     String friendly = e != null ? WidgetApi.friendlyName(e) : id;
                     String state = e != null ? e.optString("state", "") : "";
+                    if (!isControllableEntity(id)) continue;
                     ids.add(id);
                     names.put(id, friendly);
                     states.put(id, state);
@@ -350,6 +352,32 @@ public class ConfigureDashboardActivity extends Activity {
         result.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
         setResult(Activity.RESULT_OK, result);
         finish();
+    }
+
+    /** Only offer controllable domains in widget pickers (no sensors/cameras/automations). */
+    private static boolean isControllableEntity(String entityId) {
+        int dot = entityId.indexOf('.');
+        String domain = dot > 0 ? entityId.substring(0, dot) : "";
+        switch (domain) {
+            case "light":
+            case "switch":
+            case "cover":
+            case "lock":
+            case "fan":
+            case "media_player":
+            case "climate":
+            case "button":
+            case "input_button":
+            case "scene":
+            case "vacuum":
+            case "humidifier":
+            case "water_heater":
+            case "remote":
+            case "siren":
+                return true;
+            default:
+                return false;
+        }
     }
 
     private abstract static class SimpleWatcher implements TextWatcher {

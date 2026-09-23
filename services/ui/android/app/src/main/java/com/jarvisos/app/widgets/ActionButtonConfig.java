@@ -18,12 +18,19 @@ public final class ActionButtonConfig {
     public final String service;
     public final String label;
     public final String icon;
+    /** ARGB icon chip background; 0 = transparent (default). */
+    public final int iconBg;
 
     public ActionButtonConfig(String entityId, String service, String label, String icon) {
+        this(entityId, service, label, icon, 0);
+    }
+
+    public ActionButtonConfig(String entityId, String service, String label, String icon, int iconBg) {
         this.entityId = entityId;
         this.service = service;
         this.label = label;
         this.icon = icon;
+        this.iconBg = iconBg;
     }
 
     private static SharedPreferences prefs(Context context) {
@@ -37,12 +44,13 @@ public final class ActionButtonConfig {
             JSONObject o = new JSONObject(raw);
             String entity = o.optString("entity_id", "");
             if (entity.isEmpty()) return null;
-            return new ActionButtonConfig(
-                entity,
-                o.optString("service", "turn_on"),
-                o.optString("label", ""),
-                o.optString("icon", "garage")
-            );
+              return new ActionButtonConfig(
+                  entity,
+                  o.optString("service", "turn_on"),
+                  o.optString("label", ""),
+                  o.optString("icon", "garage"),
+                  o.optInt("icon_bg", 0)
+              );
         } catch (Exception e) {
             Log.w(TAG, "load failed for " + appWidgetId + ": " + e.getMessage());
             return null;
@@ -55,8 +63,9 @@ public final class ActionButtonConfig {
             o.put("entity_id", config.entityId);
             o.put("service", config.service);
             o.put("label", config.label != null ? config.label : "");
-            o.put("icon", config.icon != null ? config.icon : "garage");
-            prefs(context).edit().putString(key(appWidgetId), o.toString()).apply();
+              o.put("icon", config.icon != null ? config.icon : "garage");
+              o.put("icon_bg", config.iconBg);
+              prefs(context).edit().putString(key(appWidgetId), o.toString()).apply();
         } catch (Exception e) {
             Log.w(TAG, "save failed: " + e.getMessage());
         }

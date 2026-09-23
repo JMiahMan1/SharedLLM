@@ -805,6 +805,25 @@ def revoke_device(device_id: str, session: Session = Depends(get_session), _: Us
     return {"status": "SUCCESS", "message": f"Device '{device_id}' revoked (was assigned to '{username}')."}
 
 # --- Device Matrix (UI Contract) ---
+@app.get("/api/internal/user-device-assignments")
+def internal_user_device_assignments(
+    username: str,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_internal),
+):
+    """Internal: entity_ids (device_ids) assigned to a user (non-revoked)."""
+    user = session.exec(select(User).where(User.username == username)).first()
+    if not user:
+        return {"device_ids": []}
+    rows = session.exec(
+        select(DeviceAssignment).where(
+            DeviceAssignment.user_id == (user.id or 0),
+            DeviceAssignment.revoked == False,  # noqa: E712
+        )
+    ).all()
+    return {"device_ids": [r.device_id for r in rows]}
+
+
 @app.get("/api/users/devices", response_model=list[DeviceAssignmentRead])
 def list_devices_ui(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     query = select(DeviceAssignment)

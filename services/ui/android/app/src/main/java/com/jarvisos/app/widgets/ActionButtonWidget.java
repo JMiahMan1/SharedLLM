@@ -39,12 +39,16 @@ public class ActionButtonWidget extends AppWidgetProvider {
             views.setTextViewText(R.id.action_label, "Configure");
             views.setTextViewText(R.id.action_state, "Tap to set up");
             views.setImageViewResource(R.id.action_icon, MaterialIcons.drawableRes("settings"));
-            views.setOnClickPendingIntent(R.id.action_root, WidgetUpdater.openAppPendingIntent(context));
+            views.setInt(R.id.action_icon, "setBackgroundColor", 0);
+            views.setOnClickPendingIntent(R.id.action_root,
+                WidgetUpdater.configureActionButtonPendingIntent(context, appWidgetId));
             return views;
         }
 
         int iconRes = MaterialIcons.drawableRes(cfg.icon);
         views.setImageViewResource(R.id.action_icon, iconRes);
+        // Transparent by default; optional per-widget chip color from configure
+        views.setInt(R.id.action_icon, "setBackgroundColor", cfg.iconBg);
         views.setTextViewText(R.id.action_label, DeviceButtonWidget.truncate(
             cfg.displayLabel(null), 18));
         views.setTextViewText(R.id.action_state, "");
@@ -81,11 +85,16 @@ public class ActionButtonWidget extends AppWidgetProvider {
                 pi = WidgetUpdater.actionPendingIntent(context, appWidgetId, cfg.entityId, service);
             }
             views.setOnClickPendingIntent(R.id.action_root, pi);
+            // Tap the icon to re-open settings without losing the widget
+            views.setOnClickPendingIntent(R.id.action_icon,
+                WidgetUpdater.configureActionButtonPendingIntent(context, appWidgetId));
         } catch (Exception ex) {
             views.setTextViewText(R.id.action_state,
                 ex.getMessage() != null ? DeviceButtonWidget.truncate(ex.getMessage(), 20) : "offline");
             views.setOnClickPendingIntent(R.id.action_root,
                 WidgetUpdater.actionPendingIntent(context, appWidgetId, cfg.entityId, cfg.service));
+            views.setOnClickPendingIntent(R.id.action_icon,
+                WidgetUpdater.configureActionButtonPendingIntent(context, appWidgetId));
         }
         return views;
     }

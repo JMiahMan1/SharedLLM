@@ -11,7 +11,9 @@
         android:id="@+id/action_icon"
         android:layout_width="44dp"
         android:layout_height="44dp"
-        android:contentDescription="Action"
+        android:background="@android:color/transparent"
+        android:contentDescription="Action — tap icon to edit settings"
+        android:padding="2dp"
         android:src="@drawable/mi_garage"
         android:tint="#F1F5F9" />
     <TextView

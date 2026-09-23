@@ -38,7 +38,20 @@ public class ConfigureActionButtonActivity extends Activity {
     private final List<String> serviceKeys = new ArrayList<>();
     private final List<String> serviceLabels = new ArrayList<>();
     private String selectedIcon = MaterialIcons.defaultIcon();
+    private int selectedIconBg = 0;
     private final List<ImageView> iconViews = new ArrayList<>();
+    private final List<ImageView> bgSwatchViews = new ArrayList<>();
+    private static final int[] ICON_BG_CHOICES = {
+        0,                 // transparent
+        0x331E293B,        // slate 20%
+        0x660F172A,        // navy 40%
+        0x4D4ADE80,        // green 30%
+        0x4D863BFF,        // purple 30%
+        0x4D38BDF8,        // sky 30%
+    };
+    private static final String[] ICON_BG_LABELS = {
+        "None", "Slate", "Navy", "Green", "Purple", "Sky"
+    };
     private final List<String> entityIds = new ArrayList<>();
     private final List<String> entityLabels = new ArrayList<>();
     private ArrayAdapter<String> resultsAdapter;
@@ -86,12 +99,14 @@ public class ConfigureActionButtonActivity extends Activity {
             if (existing.label != null && !existing.label.isEmpty()) fieldLabel.setText(existing.label);
             fieldEntity.setText(existing.entityId);
             selectedIcon = existing.icon;
+            selectedIconBg = existing.iconBg;
             rebuildServices(existing.service);
         } else {
             rebuildServices(null);
         }
 
         buildIconRow(iconRow);
+        buildIconBgRow();
         fieldEntity.addTextChangedListener(new SimpleWatcher() {
             @Override public void afterTextChanged(Editable s) {
                 rebuildServices(null);
@@ -341,9 +356,53 @@ public class ConfigureActionButtonActivity extends Activity {
         }
     }
 
+    /** Optional chip color behind the widget icon (0 = transparent). */
+    private void buildIconBgRow() {
+        LinearLayout row = findViewById(R.id.icon_bg_row);
+        if (row == null) return;
+        row.removeAllViews();
+        bgSwatchViews.clear();
+        int cell = MaterialIcons.dp(getResources(), 40);
+        int pad = MaterialIcons.dp(getResources(), 6);
+        TextView label = new TextView(this);
+        label.setText("Icon background:");
+        label.setTextColor(0xFFCBD5E1);
+        label.setTextSize(12);
+        LinearLayout.LayoutParams llp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        llp.gravity = android.view.Gravity.CENTER_VERTICAL;
+        label.setLayoutParams(llp);
+        row.addView(label);
+        for (int i = 0; i < ICON_BG_CHOICES.length; i++) {
+            final int color = ICON_BG_CHOICES[i];
+            ImageView sw = new ImageView(this);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(cell, cell);
+            lp.setMargins(pad, pad, pad, pad);
+            sw.setLayoutParams(lp);
+            sw.setContentDescription(ICON_BG_LABELS[i]);
+            sw.setTooltipText(ICON_BG_LABELS[i]);
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            bg.setColor(color == 0 ? 0x00000000 : color);
+            bg.setStroke(MaterialIcons.dp(getResources(), 2),
+                color == selectedIconBg ? 0xFF4ADE80 : 0x475569);
+            sw.setBackground(bg);
+            final boolean selected = color == selectedIconBg;
+            if (selected) sw.setAlpha(1f); else sw.setAlpha(0.75f);
+            sw.setOnClickListener(v -> {
+                selectedIconBg = color;
+                buildIconBgRow();
+                updateIconNameLabel();
+            });
+            bgSwatchViews.add(sw);
+            row.addView(sw);
+        }
+    }
+
     private void updateIconNameLabel() {
         if (iconName != null) {
-            iconName.setText("Selected: " + selectedIcon);
+            String bg = selectedIconBg == 0 ? "bg none" : "bg set";
+            iconName.setText("Selected: " + selectedIcon + " · " + bg);
         }
     }
 
@@ -455,7 +514,7 @@ public class ConfigureActionButtonActivity extends Activity {
         String service = serviceKeys.isEmpty() ? "turn_on" : serviceKeys.get(Math.max(0, fieldService.getSelectedItemPosition()));
         CharSequence labelCs = fieldLabel.getText();
         String label = labelCs != null ? labelCs.toString().trim() : "";
-        ActionButtonConfig cfg = new ActionButtonConfig(entity, service, label, selectedIcon);
+        ActionButtonConfig cfg = new ActionButtonConfig(entity, service, label, selectedIcon, selectedIconBg);
         ActionButtonConfig.save(this, appWidgetId, cfg);
 
         AppWidgetManager mgr = AppWidgetManager.getInstance(this);
