@@ -32,10 +32,17 @@ public class ConfigureActionButtonActivity extends Activity {
     private Spinner fieldService;
     private ProgressBar entityProgress;
     private TextView entityStatus;
+    private TextView entityPreview;
     private final List<String> serviceKeys = new ArrayList<>();
     private final List<String> serviceLabels = new ArrayList<>();
     private String selectedIcon = MaterialIcons.defaultIcon();
     private final List<ImageView> iconViews = new ArrayList<>();
+    private final List<String> entityIds = new ArrayList<>();
+    private final List<String> entityLabels = new ArrayList<>();
+    private ArrayAdapter<String> entityAdapter;
+    private int loadGeneration;
+    private int previewGeneration;
+    private android.os.Handler previewHandler;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -54,6 +61,8 @@ public class ConfigureActionButtonActivity extends Activity {
         fieldService = findViewById(R.id.field_service);
         entityProgress = findViewById(R.id.entity_progress);
         entityStatus = findViewById(R.id.entity_status);
+        entityPreview = findViewById(R.id.entity_preview);
+        previewHandler = new android.os.Handler(getMainLooper());
         Button btnSave = findViewById(R.id.btn_save);
         Button btnCancel = findViewById(R.id.btn_cancel);
         LinearLayout iconRow = findViewById(R.id.icon_row);
@@ -72,6 +81,12 @@ public class ConfigureActionButtonActivity extends Activity {
         fieldEntity.addTextChangedListener(new SimpleWatcher() {
             @Override public void afterTextChanged(Editable s) {
                 rebuildServices(null);
+                String q = s != null ? s.toString().trim() : "";
+                // Live filter as the user types
+                if (entityAdapter != null) {
+                    entityAdapter.getFilter().filter(q);
+                }
+                scheduleLivePreview(q);
             }
         });
         loadEntities();
@@ -81,6 +96,46 @@ public class ConfigureActionButtonActivity extends Activity {
             setResult(Activity.RESULT_CANCELED);
             finish();
         });
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (previewHandler != null) previewHandler.removeCallbacksAndMessages(null);
+        super.onDestroy();
+    }
+
+    /** Debounced live state lookup for the current entity_id text. */
+    private void scheduleLivePreview(String entityId) {
+        if (previewHandler == null) return;
+        previewHandler.removeCallbacksAndMessages(null);
+        if (entityId == null || !entityId.contains(".") || WidgetApi.apiKey(this) == null) {
+            if (entityPreview != null) entityPreview.setVisibility(View.GONE);
+            return;
+        }
+        final String id = entityId;
+        final int gen = ++previewGeneration;
+        previewHandler.postDelayed(() -> WidgetUpdater.onBackground(() -> {
+            String line = null;
+            try {
+                List<String> only = java.util.Collections.singletonList(id);
+                JSONObject states = WidgetApi.entityStates(this, only);
+                JSONObject e = states.optJSONObject(id);
+                if (e != null) {
+                    line = WidgetApi.friendlyName(e) + " · " + e.optString("state", "?");
+                }
+            } catch (Exception ignored) {
+            }
+            final String text = line;
+            WidgetUpdater.onMain(() -> {
+                if (gen != previewGeneration || isFinishing() || entityPreview == null) return;
+                if (text != null) {
+                    entityPreview.setVisibility(View.VISIBLE);
+                    entityPreview.setText(text);
+                } else {
+                    entityPreview.setVisibility(View.GONE);
+                }
+            });
+        }), 250);
     }
 
     private void rebuildServices(String preferred) {
@@ -157,6 +212,7 @@ public class ConfigureActionButtonActivity extends Activity {
         entityProgress.setVisibility(View.VISIBLE);
         entityStatus.setVisibility(View.VISIBLE);
         entityStatus.setText("Loading entities…");
+        final int gen = ++loadGeneration;
         WidgetUpdater.onBackground(() -> {
             final List<String> ids = new ArrayList<>();
             final List<String> labels = new ArrayList<>();
@@ -168,17 +224,18 @@ public class ConfigureActionButtonActivity extends Activity {
                     String id = it.next();
                     JSONObject e = states.optJSONObject(id);
                     String friendly = e != null ? WidgetApi.friendlyName(e) : id;
-                    // Prefer controllable domains for action buttons
+                    String state = e != null ? e.optString("state", "") : "";
                     String domain = id.contains(".") ? id.substring(0, id.indexOf('.')) : "";
                     if (isControllableDomain(domain)) {
                         ids.add(id);
-                        labels.add(friendly + "  (" + id + ")");
+                        labels.add(friendly + (state.isEmpty() ? "" : " · " + state) + "  (" + id + ")");
                     }
                 }
             } catch (Exception e) {
                 error[0] = e.getMessage() != null ? e.getMessage() : "Failed to load entities";
             }
             WidgetUpdater.onMain(() -> {
+                if (gen != loadGeneration || isFinishing()) return;
                 entityProgress.setVisibility(View.GONE);
                 if (error[0] != null) {
                     entityStatus.setText(error[0] + " — type entity_id manually");
@@ -188,22 +245,37 @@ public class ConfigureActionButtonActivity extends Activity {
                     entityStatus.setText("No controllable entities found — type entity_id");
                     return;
                 }
-                entityStatus.setText(ids.size() + " entities");
-                ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                entityStatus.setText(ids.size() + " entities — type to search");
+                entityIds.clear();
+                entityIds.addAll(ids);
+                entityLabels.clear();
+                entityLabels.addAll(labels);
+                entityAdapter = new ArrayAdapter<>(
                     ConfigureActionButtonActivity.this,
                     android.R.layout.simple_dropdown_item_1line,
-                    labels);
-                fieldEntity.setAdapter(adapter);
-                // Store id ↔ label mapping via tag on adapter positions
+                    entityLabels);
+                fieldEntity.setAdapter(entityAdapter);
+                // Re-filter current text if the field already has a value
+                CharSequence cur = fieldEntity.getText();
+                if (cur != null && cur.length() > 0) {
+                    entityAdapter.getFilter().filter(cur.toString());
+                }
                 fieldEntity.setOnItemClickListener((parent, view, position, id) -> {
-                    // label format: "Friendly  (entity.id)" — extract id
-                    String full = labels.get(position);
+                    String full = entityLabels.get(position);
                     int open = full.lastIndexOf('(');
                     int close = full.lastIndexOf(')');
                     if (open >= 0 && close > open) {
-                        fieldEntity.setText(full.substring(open + 1, close));
+                        String picked = full.substring(open + 1, close);
+                        fieldEntity.setText(picked);
+                        fieldEntity.setSelection(fieldEntity.getText().length());
                     }
+                    rebuildServices(null);
+                    scheduleLivePreview(fieldEntity.getText() != null
+                        ? fieldEntity.getText().toString().trim() : "");
                 });
+                // Live preview for whatever is already in the field
+                CharSequence now = fieldEntity.getText();
+                scheduleLivePreview(now != null ? now.toString().trim() : "");
             });
         });
     }

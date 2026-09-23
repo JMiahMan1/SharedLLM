@@ -41,27 +41,46 @@ public class DashboardWidget extends AppWidgetProvider {
         }
     }
 
+    @Override
+    public void onDeleted(Context context, int[] appWidgetIds) {
+        if (appWidgetIds == null) return;
+        for (int id : appWidgetIds) DashboardConfig.delete(context, id);
+        super.onDeleted(context, appWidgetIds);
+    }
+
     static RemoteViews build(Context context) {
+        return build(context, -1);
+    }
+
+    static RemoteViews build(Context context, int appWidgetId) {
         RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.widget_dashboard);
         views.setOnClickPendingIntent(R.id.dash_root, WidgetUpdater.openAppPendingIntent(context));
         views.setOnClickPendingIntent(R.id.dash_refresh, WidgetUpdater.refreshPendingIntent(context));
 
-        List<String> pins = WidgetApi.pinnedDevices(context);
-        List<String> cells = pins.isEmpty() || pins.size() < 2 ? DEFAULT_CELLS
-            : pins.subList(0, Math.min(4, pins.size()));
+        List<String> cells = appWidgetId >= 0
+            ? DashboardConfig.loadCells(context, appWidgetId)
+            : java.util.Collections.emptyList();
+        if (cells.isEmpty()) {
+            List<String> pins = WidgetApi.apiKey(context) != null
+                ? WidgetApi.pinnedDevices(context)
+                : java.util.Collections.emptyList();
+            cells = pins.isEmpty() || pins.size() < 2 ? DEFAULT_CELLS
+                : pins.subList(0, Math.min(4, pins.size()));
+        }
+        final List<String> cellIds = cells;
 
         try {
             JSONObject states = WidgetApi.apiKey(context) != null
-                ? WidgetApi.entityStates(context, cells)
+                ? WidgetApi.entityStates(context, cellIds)
                 : new JSONObject();
             for (int i = 0; i < 4; i++) {
-                if (i >= cells.size()) {
+                if (i >= cellIds.size()) {
                     views.setTextViewText(CELL_LABEL_IDS[i], "—");
                     views.setTextViewText(CELL_VALUE_IDS[i], "");
                     views.setOnClickPendingIntent(CELL_HIT_IDS[i], WidgetUpdater.refreshPendingIntent(context));
                     continue;
                 }
-                String id = cells.get(i);
+                String id = cellIds.get(i);
                 JSONObject e = states.optJSONObject(id);
                 String label = e != null ? WidgetApi.friendlyName(e)
                     : id.substring(id.indexOf('.') + 1).replace('_', ' ');

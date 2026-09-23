@@ -12,7 +12,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Action Button"
+            android:text="Dashboard"
             android:textColor="#F1F5F9"
             android:textSize="20sp"
             android:textStyle="bold" />
@@ -20,54 +20,16 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="Single home-screen button for one entity action."
+            android:text="Search entities for each cell. Changes apply as you save."
             android:textColor="#94A3B8"
             android:textSize="13sp" />
 
         <TextView
+            android:id="@+id/entity_status"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Label"
-            android:textColor="#CBD5E1"
-            android:textSize="12sp" />
-        <EditText
-            android:id="@+id/field_label"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:hint="Open Garage"
-            android:inputType="textCapWords"
-            android:maxLines="1"
-            android:textColor="#F1F5F9"
-            android:textColorHint="#64748B"
-            android:textSize="15sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="Entity"
-            android:textColor="#CBD5E1"
-            android:textSize="12sp" />
-        <AutoCompleteTextView
-            android:id="@+id/field_entity"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:hint="switch.garage_door_2"
-            android:inputType="textNoSuggestions"
-            android:maxLines="1"
-            android:textColor="#F1F5F9"
-            android:textColorHint="#64748B"
-            android:textSize="14sp"
-            android:threshold="1" />
-        <TextView
-            android:id="@+id/entity_preview"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:textColor="#4ADE80"
+            android:layout_marginTop="12dp"
+            android:textColor="#94A3B8"
             android:textSize="12sp"
             android:visibility="gone" />
         <ProgressBar
@@ -77,48 +39,114 @@
             android:layout_gravity="center_horizontal"
             android:layout_marginTop="8dp"
             android:visibility="gone" />
-        <TextView
-            android:id="@+id/entity_status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:textColor="#94A3B8"
-            android:textSize="12sp"
-            android:visibility="gone" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:text="Action"
+            android:text="Cell 1"
             android:textColor="#CBD5E1"
             android:textSize="12sp" />
-        <Spinner
-            android:id="@+id/field_service"
+        <AutoCompleteTextView
+            android:id="@+id/field_entity_1"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp" />
+            android:layout_marginTop="4dp"
+            android:hint="light.kitchen"
+            android:inputType="textNoSuggestions"
+            android:maxLines="1"
+            android:textColor="#F1F5F9"
+            android:textColorHint="#64748B"
+            android:textSize="14sp"
+            android:threshold="1" />
+        <TextView
+            android:id="@+id/preview_1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="#64748B"
+            android:textSize="11sp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="Icon (Material)"
+            android:layout_marginTop="12dp"
+            android:text="Cell 2"
             android:textColor="#CBD5E1"
             android:textSize="12sp" />
-        <HorizontalScrollView
+        <AutoCompleteTextView
+            android:id="@+id/field_entity_2"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:scrollbars="none">
-            <LinearLayout
-                android:id="@+id/icon_row"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:paddingStart="2dp"
-                android:paddingEnd="2dp" />
-        </HorizontalScrollView>
+            android:layout_marginTop="4dp"
+            android:hint="sensor.temperature"
+            android:inputType="textNoSuggestions"
+            android:maxLines="1"
+            android:textColor="#F1F5F9"
+            android:textColorHint="#64748B"
+            android:textSize="14sp"
+            android:threshold="1" />
+        <TextView
+            android:id="@+id/preview_2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="#64748B"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Cell 3"
+            android:textColor="#CBD5E1"
+            android:textSize="12sp" />
+        <AutoCompleteTextView
+            android:id="@+id/field_entity_3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:hint="switch.garage"
+            android:inputType="textNoSuggestions"
+            android:maxLines="1"
+            android:textColor="#F1F5F9"
+            android:textColorHint="#64748B"
+            android:textSize="14sp"
+            android:threshold="1" />
+        <TextView
+            android:id="@+id/preview_3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="#64748B"
+            android:textSize="11sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Cell 4"
+            android:textColor="#CBD5E1"
+            android:textSize="12sp" />
+        <AutoCompleteTextView
+            android:id="@+id/field_entity_4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:hint="media_player.living_room"
+            android:inputType="textNoSuggestions"
+            android:maxLines="1"
+            android:textColor="#F1F5F9"
+            android:textColorHint="#64748B"
+            android:textSize="14sp"
+            android:threshold="1" />
+        <TextView
+            android:id="@+id/preview_4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="#64748B"
+            android:textSize="11sp" />
 
         <LinearLayout
             android:layout_width="match_parent"
