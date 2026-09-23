@@ -257,4 +257,19 @@ public final class WidgetApi {
         }
         return active ? "turn_off" : "turn_on";
     }
+
+    /** Resolve toggle for a fixed action button service against current state. */
+    public static String resolveService(String configuredService, String domain, String state) {
+        if (configuredService == null || configuredService.isEmpty()
+            || "toggle".equals(configuredService)) {
+            return toggleService(domain, state);
+        }
+        if ("open_cover".equals(configuredService) || "close_cover".equals(configuredService)
+            || "lock".equals(configuredService) || "unlock".equals(configuredService)
+            || "press".equals(configuredService) || "turn_on".equals(configuredService)
+            || "turn_off".equals(configuredService)) {
+            return configuredService;
+        }
+        return toggleService(domain, state);
+    }
 }
