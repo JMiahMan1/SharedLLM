@@ -89,7 +89,7 @@ if [ -n "$CHANGED_FILES" ]; then
     fi
     # Extract service names from paths like services/gateway/...
     # Only match known service directories
-    KNOWN_SERVICES="automation|control_plane|dns_sync|execution|gateway|identity|logging|rag|storage|ui|workspace_runtime"
+    KNOWN_SERVICES="automation|control_plane|dns_sync|execution|gateway|geo|identity|logging|rag|storage|telemetry|ui|workspace_runtime"
     MODIFIED_SERVICES=$(printf '%s\n' "$CHANGED_FILES" | grep "^services/" | cut -d'/' -f2 | grep -E "^(${KNOWN_SERVICES})$" | sort | uniq || true)
 fi
 
