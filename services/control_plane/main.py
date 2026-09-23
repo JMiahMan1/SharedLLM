@@ -16,6 +16,12 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("control_plane")
 
 from services.shared.info_endpoint import info_router
+from services.control_plane.recreate import (
+    connect_container_networks as _connect_container_networks,
+    create_from_snapshot as _create_from_snapshot,
+    network_aliases as _network_aliases,
+    run_detached_self_recreate,
+)
 
 TRACEBACK_RE = re.compile(r"^Traceback \(most recent call last\)|^\s+File ", re.MULTILINE)
 
@@ -515,83 +521,6 @@ def _snapshot_container_config(container) -> dict:
     }
 
 
-def _network_aliases(snap: dict, net_name: str, net_config: dict, new_id: str) -> list[str]:
-    """Compose DNS aliases for a recreated container (filter auto container IDs)."""
-    aliases = [
-        a for a in (net_config.get("Aliases") or [])
-        if a and a != (snap.get("id") or "")[:12] and a != new_id[:12]
-        and not re.fullmatch(r"[0-9a-f]{12}", a)
-    ]
-    name = (snap.get("name") or "").lstrip("/")
-    short = name.removeprefix("sharedllm_")
-    service = snap.get("compose_service") or ""
-    for extra in (name, short, service):
-        if extra and extra not in aliases:
-            aliases.append(extra)
-    # Dedup preserve order
-    return list(dict.fromkeys(aliases))
-
-
-def _connect_container_networks(container, snap: dict, *, release_from=None) -> None:
-    """Attach container to snapshotted networks with aliases; optional IP pin.
-
-    release_from: optional prior container to disconnect first so its IPv4 is free.
-    """
-    if not client:
-        return
-    host_config = snap.get("host_config") or {}
-    network_mode = host_config.get("NetworkMode") or ""
-    for net_name, net_config in (snap.get("networks") or {}).items():
-        if net_name == "bridge" and network_mode in ("default", ""):
-            continue
-        if net_name == "host" and network_mode == "host":
-            continue
-        try:
-            network = client.networks.get(net_name)
-        except Exception as ne:
-            log.warning(f"[recreate] Network not found {net_name}: {ne}")
-            continue
-        if release_from is not None:
-            with suppress(Exception):
-                network.disconnect(release_from)
-        aliases = _network_aliases(snap, net_name, net_config, container.id)
-        ipv4 = (net_config.get("IPv4Address") or "").strip() or None
-        connected = False
-        if ipv4:
-            try:
-                network.connect(container, aliases=aliases, ipv4_address=ipv4)
-                connected = True
-                log.info(f"[recreate] Connected {container.name} to {net_name} aliases={aliases} ipv4={ipv4}")
-            except Exception as ne:
-                log.warning(f"[recreate] Pinned IP connect failed for {net_name}: {ne}")
-        if not connected:
-            try:
-                network.connect(container, aliases=aliases)
-                log.info(f"[recreate] Connected {container.name} to {net_name} aliases={aliases} ipv4=auto")
-            except Exception as ne2:
-                log.error(f"[recreate] Connect failed for {net_name}: {ne2}")
-
-
-def _create_from_snapshot(snap: dict, new_image_id: str, name: str):
-    """Low-level create using a pre-stop snapshot of Config/HostConfig."""
-    host_config = dict(snap.get("host_config") or {})
-    # Never inherit a pinned NetworkMode that would skip our explicit connect.
-    # Docker still needs the field for bridge/host modes.
-    resp = client.api.create_container(
-        image=new_image_id,
-        name=name,
-        command=snap.get("cmd"),
-        entrypoint=snap.get("entrypoint"),
-        environment=snap.get("env"),
-        user=snap.get("user"),
-        working_dir=snap.get("working_dir"),
-        labels=snap.get("config", {}).get("Labels"),
-        host_config=host_config,
-        ports=snap.get("exposed_ports") or None,
-    )
-    return client.containers.get(resp["Id"])
-
-
 def _is_self_container(container) -> bool:
     """True when this process runs inside the container being recreated."""
     hostname = os.environ.get("HOSTNAME", "")
@@ -610,115 +539,24 @@ def _recreate_self_detached(snap: dict, new_image_id: str) -> dict:
     """Recreate this container from a detached child so we can finish the HTTP response.
 
     Stopping ourselves in-process previously SIGKILL'd mid-recreate (exit 137)
-    and left control_plane down with no new container.
+    and left control_plane down with no new container. The child uses the same
+    services.control_plane.recreate helpers as the in-process path.
     """
     import json
     import subprocess
     import sys
 
-    script = r'''
-import json, sys, time, traceback
-import docker
-from contextlib import suppress
-
-payload = json.loads(sys.argv[1])
-snap = payload["snap"]
-new_image_id = payload["new_image_id"]
-name = snap["name"]
-backup = payload["backup_name"]
-log = print
-
-def aliases_for(net_config, new_id):
-    out = []
-    for a in (net_config.get("Aliases") or []):
-        if a and a != (snap.get("id") or "")[:12] and a != new_id[:12]:
-            out.append(a)
-    short = name.lstrip("/").removeprefix("sharedllm_")
-    for extra in (name.lstrip("/"), short, snap.get("compose_service") or ""):
-        if extra and extra not in out:
-            out.append(extra)
-    return list(dict.fromkeys(out))
-
-def main():
-    d = docker.from_env()
-    time.sleep(1.5)  # let the parent finish the HTTP response and exit
-    old = d.containers.get(name)
-    log("stopping", name)
-    old.stop(timeout=10)
-    old.rename(backup)
-    backup_ctr = d.containers.get(backup)
-    host_config = dict(snap.get("host_config") or {})
-    networks = snap.get("networks") or {}
-    # Free IPs held by backup before connecting the new container
-    for net_name in list(networks.keys()):
-        with suppress(Exception):
-            d.networks.get(net_name).disconnect(backup_ctr)
-    resp = d.api.create_container(
-        image=new_image_id,
-        name=name,
-        command=snap.get("cmd"),
-        entrypoint=snap.get("entrypoint"),
-        environment=snap.get("env"),
-        user=snap.get("user"),
-        working_dir=snap.get("working_dir"),
-        labels=(snap.get("config") or {}).get("Labels"),
-        host_config=host_config,
-        ports=snap.get("exposed_ports") or None,
-    )
-    new = d.containers.get(resp["Id"])
-    network_mode = host_config.get("NetworkMode") or ""
-    for net_name, net_config in networks.items():
-        if net_name == "bridge" and network_mode in ("default", ""):
-            continue
-        if net_name == "host" and network_mode == "host":
-            continue
-        try:
-            net = d.networks.get(net_name)
-        except Exception as e:
-            log("missing net", net_name, e)
-            continue
-        als = aliases_for(net_config, new.id)
-        ipv4 = (net_config.get("IPv4Address") or "").strip() or None
-        ok = False
-        if ipv4:
-            try:
-                net.connect(new, aliases=als, ipv4_address=ipv4)
-                ok = True
-                log("connected", net_name, als, ipv4)
-            except Exception as e:
-                log("pinned ip failed", net_name, e)
-        if not ok:
-            try:
-                net.connect(new, aliases=als)
-                log("connected auto", net_name, als)
-            except Exception as e:
-                log("connect failed", net_name, e)
-    new.start()
-    with suppress(Exception):
-        backup_ctr.remove(force=True)
-    log("recreate complete", name)
-
-try:
-    main()
-except Exception:
-    traceback.print_exc()
-    # Best-effort restore
-    try:
-        d = docker.from_env()
-        with suppress(Exception):
-            b = d.containers.get(payload["backup_name"])
-            b.rename(name)
-            b.start()
-            log("restored backup")
-    except Exception:
-        pass
-    sys.exit(1)
-'''
     backup_name = f"{snap['name']}_backup_{int(time.time())}"
     payload = json.dumps({"snap": snap, "new_image_id": new_image_id, "backup_name": backup_name})
     # Detached: survives parent exit when we stop ourselves.
     subprocess.Popen(
-        [sys.executable, "-c", script, payload],
+        [
+            sys.executable,
+            "-c",
+            "import json,sys; from services.control_plane.recreate import run_detached_self_recreate; "
+            "sys.exit(0 if run_detached_self_recreate(sys.argv[1]) else 1)",
+            payload,
+        ],
         start_new_session=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -760,11 +598,13 @@ def _recreate_container(container, new_image_id: str):
     try:
         # 3. Create new container from the pre-stop snapshot
         log.info(f"[recreate] Creating new container {old_name} with image {new_image_id}...")
-        new_container = _create_from_snapshot(snap, new_image_id, old_name)
+        if not client:
+            raise ValueError("Docker client not initialized")
+        new_container = _create_from_snapshot(client, snap, new_image_id, old_name)
 
         # 4. Free the backup's network endpoints, then attach the new container
         #    with original aliases/IPs (snapshot already captured while healthy).
-        _connect_container_networks(new_container, snap, release_from=container)
+        _connect_container_networks(client, new_container, snap, release_from=container)
 
         # 5b. Fix volume permissions before starting (mirrors deploy.sh guard)
         fixed_vols = _fix_volume_permissions(container)
@@ -784,7 +624,7 @@ def _recreate_container(container, new_image_id: str):
             if n not in ("bridge", "host")
         ):
             log.warning(f"[recreate] {old_name} started with no network IP; reconnecting...")
-            _connect_container_networks(new_container, snap, release_from=None)
+            _connect_container_networks(client, new_container, snap, release_from=None)
 
         # 7. Success: remove backup container
         log.info(f"[recreate] Recreate successful. Removing backup container {backup_name}...")
@@ -805,7 +645,8 @@ def _recreate_container(container, new_image_id: str):
         try:
             container.rename(old_name)
             container.start()
-            _connect_container_networks(container, snap, release_from=None)
+            if client:
+                _connect_container_networks(client, container, snap, release_from=None)
             log.info(f"[recreate] Fallback successful. Old container {old_name} restored and started.")
         except Exception as fe:
             log.critical(f"[recreate] Critical failure: Could not restore backup container {backup_name}: {fe}")

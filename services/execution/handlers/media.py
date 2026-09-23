@@ -7,6 +7,7 @@ from typing import cast
 from services.config import MASS_CONFIG_ENTRY_ID
 from services.execution import ha_client
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult, MediaPlayRequest
+from services.shared.ma_player import is_music_assistant_player
 
 log = logging.getLogger("execution.media")
 
@@ -99,11 +100,11 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
     for state in all_states:
         if state.get("entity_id") == original_entity:
             attrs = state.get("attributes", {})
-            integration = attrs.get("integration", "")
-            source = attrs.get("source", "").lower()
             active_queue = attrs.get("active_queue")
 
-            if active_queue and ("music assistant" in source or integration == "music_assistant"):
+            if is_music_assistant_player(
+                attrs, original_entity, require_active_queue=True
+            ):
                 log.info(f"[media/play] Original entity {original_entity} is already an MA player (queue: {active_queue})")
                 return original_entity
 
@@ -128,16 +129,12 @@ async def resolve_mass_entity(ctx, original_entity: str) -> str:
 
         attrs = state.get("attributes", {})
         friendly = attrs.get("friendly_name", "").lower()
-        source = attrs.get("source", "").lower()
-        integration = attrs.get("integration", "")
         active_queue = attrs.get("active_queue")
-
-        # Check if this is an MA player (via integration/source attributes)
-        is_ma_player = "music assistant" in source or integration == "music_assistant"
+        is_ma_player = is_music_assistant_player(attrs, eid)
 
         # For MA players, allow any state (idle/playing/paused) - active_queue not required
         if is_ma_player and search in friendly:
-            log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid} (integration={integration}, queue={active_queue})")
+            log.info(f"[media/play] Resolved MASS entity: {original_entity} -> {eid} (queue={active_queue})")
             return eid
 
     # No MA variant found, return original (may still work for non-MA players)

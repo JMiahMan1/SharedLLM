@@ -8,6 +8,7 @@ from datetime import datetime
 
 from services.execution import abs_client, ha_client
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult
+from services.shared.ma_player import is_music_assistant_player
 
 log = logging.getLogger("execution.audiobookshelf")
 
@@ -199,12 +200,8 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
     # Detect if this is a Music Assistant player
     is_ma = False
     if state:
-        attrs = state.get("attributes", {})
-        is_ma = (
-            attrs.get("integration") == "music_assistant"
-            or "music assistant" in attrs.get("source", "").lower()
-            or attrs.get("active_queue") is not None
-            or full_entity_id.startswith("media_player.mass_")
+        is_ma = is_music_assistant_player(
+            state.get("attributes", {}), full_entity_id
         )
 
     if is_ma:
@@ -262,12 +259,8 @@ async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
     # Detect if this is a Music Assistant player
     is_ma = False
     if state:
-        attrs = state.get("attributes", {})
-        is_ma = (
-            attrs.get("integration") == "music_assistant"
-            or "music assistant" in attrs.get("source", "").lower()
-            or attrs.get("active_queue") is not None
-            or full_entity_id.startswith("media_player.mass_")
+        is_ma = is_music_assistant_player(
+            state.get("attributes", {}), full_entity_id
         )
 
     if is_ma:

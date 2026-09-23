@@ -23,6 +23,8 @@ except ImportError:
     from .. import device_discovery, device_registry, ha_client
     from ..schemas import ExecutionResult
 
+from services.shared.ma_player import is_music_assistant_player
+
 log = logging.getLogger("execution.roku")
 
 ROKU_KEYS = {
@@ -102,18 +104,13 @@ async def find_ma_player_sibling(ha_url: str, ha_token: str, roku_entity: str) -
             continue
         attrs = state.get("attributes", {})
         friendly = attrs.get("friendly_name", "").lower()
-        source = attrs.get("source", "").lower()
-        integration = attrs.get("integration", "")
         active_queue = attrs.get("active_queue")
 
         # Must have an active MA queue to be a valid playback target
         if not active_queue:
             continue
 
-        is_ma = ("music_assistant" in str(integration).lower() or
-                 "active_queue" in attrs or
-                 "mass_player_type" in attrs or
-                 "music_assistant" in source)
+        is_ma = is_music_assistant_player(attrs, eid, require_active_queue=True)
 
         if is_ma and (roku_friendly in friendly or friendly in roku_friendly):
             log.info(f"[roku] Found MA player sibling: {eid} (queue: {active_queue})")
