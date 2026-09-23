@@ -25,9 +25,22 @@ require_device() {
 }
 
 pkg_installed() {
-  "$ADB" shell pm path "$PKG" >/dev/null 2>&1
+  "$ADB" shell pm path --user 0 "$PKG" >/dev/null 2>&1
 }
 
+ensure_personal_profile_only() {
+  # Force personal profile; remove from work profile if MDM/install put it there.
+  "$ADB" shell pm install-existing --user 0 "$PKG" >/dev/null 2>&1 || true
+  if "$ADB" shell pm path --user 10 "$PKG" >/dev/null 2>&1; then
+    log "  NOTE removing $PKG from work profile (user 10)"
+    "$ADB" shell pm uninstall --user 10 "$PKG" >/dev/null 2>&1 || true
+  fi
+}
+
+# Install path: always personal profile only.
+#   adb install -r app-debug.apk
+#   adb shell pm install-existing --user 0 com.jarvisos.app
+# NEVER install into work profile (user 10) — MDM removes unapproved apps.
 launch_app() {
   "$ADB" shell am force-stop "$PKG" || true
   "$ADB" shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || \
@@ -36,7 +49,18 @@ launch_app() {
 }
 
 test_package_installed() {
-  if pkg_installed; then ok "package $PKG installed"; else bad "package $PKG missing"; fi
+  # Personal profile only (user 0). Work profile (user 10) is MDM-managed and
+  # will auto-remove unapproved packages — never install or assert there.
+  if "$ADB" shell pm path --user 0 "$PKG" >/dev/null 2>&1; then
+    ok "package $PKG installed on user 0 (personal)"
+  else
+    bad "package $PKG missing on user 0"
+  fi
+  if "$ADB" shell pm path --user 10 "$PKG" >/dev/null 2>&1; then
+    bad "package $PKG also present on work profile (user 10) — uninstall it"
+  else
+    ok "package $PKG absent from work profile (user 10)"
+  fi
 }
 
 test_activity_launches() {
@@ -140,6 +164,7 @@ test_screenshot() {
 main() {
   require_device
   log "== Android functional smoke =="
+  ensure_personal_profile_only
   test_package_installed
   if pkg_installed; then
     test_activity_launches
