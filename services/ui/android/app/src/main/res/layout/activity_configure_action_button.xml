@@ -61,8 +61,7 @@
             android:maxLines="1"
             android:textColor="#F1F5F9"
             android:textColorHint="#64748B"
-            android:textSize="14sp"
-            android:threshold="1" />
+            android:textSize="14sp" />
         <TextView
             android:id="@+id/entity_preview"
             android:layout_width="match_parent"

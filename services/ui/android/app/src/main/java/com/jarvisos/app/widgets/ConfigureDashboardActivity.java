@@ -50,6 +50,7 @@ public class ConfigureDashboardActivity extends Activity {
         fields[1] = findViewById(R.id.field_entity_2);
         fields[2] = findViewById(R.id.field_entity_3);
         fields[3] = findViewById(R.id.field_entity_4);
+        for (AutoCompleteTextView f : fields) f.setThreshold(1);
         previews[0] = findViewById(R.id.preview_1);
         previews[1] = findViewById(R.id.preview_2);
         previews[2] = findViewById(R.id.preview_3);

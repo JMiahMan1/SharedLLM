@@ -59,6 +59,7 @@ public class ConfigureActionButtonActivity extends Activity {
 
         fieldLabel = findViewById(R.id.field_label);
         fieldEntity = findViewById(R.id.field_entity);
+        fieldEntity.setThreshold(1);
         fieldService = findViewById(R.id.field_service);
         entityProgress = findViewById(R.id.entity_progress);
         entityStatus = findViewById(R.id.entity_status);
