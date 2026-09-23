@@ -33,6 +33,7 @@ public class ConfigureActionButtonActivity extends Activity {
     private ProgressBar entityProgress;
     private TextView entityStatus;
     private TextView entityPreview;
+    private TextView iconName;
     private final List<String> serviceKeys = new ArrayList<>();
     private final List<String> serviceLabels = new ArrayList<>();
     private String selectedIcon = MaterialIcons.defaultIcon();
@@ -62,6 +63,7 @@ public class ConfigureActionButtonActivity extends Activity {
         entityProgress = findViewById(R.id.entity_progress);
         entityStatus = findViewById(R.id.entity_status);
         entityPreview = findViewById(R.id.entity_preview);
+        iconName = findViewById(R.id.icon_name);
         previewHandler = new android.os.Handler(getMainLooper());
         Button btnSave = findViewById(R.id.btn_save);
         Button btnCancel = findViewById(R.id.btn_cancel);
@@ -152,8 +154,19 @@ public class ConfigureActionButtonActivity extends Activity {
             if (preferred != null && preferred.equals(e.getKey())) selected = i;
             i++;
         }
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(
-            this, android.R.layout.simple_spinner_dropdown_item, serviceLabels);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(
+            this, android.R.layout.simple_spinner_dropdown_item, serviceLabels) {
+            @Override public android.view.View getView(int position, android.view.View convertView, android.view.ViewGroup parent) {
+                android.view.View v = super.getView(position, convertView, parent);
+                if (v instanceof TextView) ((TextView) v).setTextColor(0xFFF1F5F9);
+                return v;
+            }
+            @Override public android.view.View getDropDownView(int position, android.view.View convertView, android.view.ViewGroup parent) {
+                android.view.View v = super.getDropDownView(position, convertView, parent);
+                if (v instanceof TextView) ((TextView) v).setTextColor(0xFFF1F5F9);
+                return v;
+            }
+        };
         fieldService.setAdapter(adapter);
         fieldService.setSelection(selected);
     }
@@ -161,6 +174,7 @@ public class ConfigureActionButtonActivity extends Activity {
     private void buildIconRow(LinearLayout row) {
         row.removeAllViews();
         iconViews.clear();
+        updateIconNameLabel();
         int cell = MaterialIcons.dp(getResources(), 48);
         int pad = MaterialIcons.dp(getResources(), 6);
         for (String name : MaterialIcons.names()) {
@@ -171,6 +185,7 @@ public class ConfigureActionButtonActivity extends Activity {
             iv.setScaleType(ImageView.ScaleType.FIT_CENTER);
             iv.setImageResource(MaterialIcons.drawableRes(name));
             iv.setContentDescription(name);
+            iv.setTooltipText(name);
             final String iconId = name;
             final ImageView button = iv;
             highlightIcon(iv, name.equals(selectedIcon));
@@ -179,9 +194,16 @@ public class ConfigureActionButtonActivity extends Activity {
                 for (ImageView other : iconViews) {
                     highlightIcon(other, other == button);
                 }
+                updateIconNameLabel();
             });
             iconViews.add(iv);
             row.addView(iv);
+        }
+    }
+
+    private void updateIconNameLabel() {
+        if (iconName != null) {
+            iconName.setText("Selected: " + selectedIcon);
         }
     }
 
