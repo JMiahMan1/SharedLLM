@@ -232,7 +232,7 @@ if ssh $SSH_OPTS "$HOST" << EOF
             echo "       Publishing \$BUNDLE_SHA (what clients actually receive)."
         fi
 
-        BUILD_TIME=\$(date -u +\"%Y-%m-%dT%H:%M:%SZ\")
+        BUILD_TIME=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
         # Keep in sync with services/ui/android/app/build.gradle versionCode —
         # the app only offers an APK install when this exceeds its own build.
         APK_CODE=\$(grep -oE 'versionCode [0-9]+' services/ui/android/app/build.gradle | awk '{print \$2}' | head -1)
