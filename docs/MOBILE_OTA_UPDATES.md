@@ -105,11 +105,14 @@ Jarvis OS is a personal home app and will **never** ship on Google Play.
 
 | Piece | Location |
 | --- | --- |
-| Keystore | `services/ui/android/app/release.keystore` (alias `jarvisos`) |
-| Passwords | env `KEYSTORE_PASSWORD` / `KEY_PASSWORD`, defaults `jarvis-home-2026` |
+| Keystore | **Not in git.** Local: `services/ui/android/app/release.keystore` (alias `jarvisos`); CI: secret `RELEASE_KEYSTORE` (base64) |
+| Passwords | env `KEYSTORE_PASSWORD` / `KEY_PASSWORD` (GitHub Actions secrets). Local fallback: gitignored `keystore.properties`. **No default password in source.** |
 | Signing | `build.gradle` — **both** `debug` and `release` use this keystore |
 | CI artifact | `jarvis-os-release-apk` → `app-release.apk` (signed) |
 | In-app install | `ApkInstall` Capacitor plugin → FileProvider → system installer |
+
+The keystore file and passwords must never appear in the repository. CI restores
+the keystore from secrets before `assembleRelease` / `assembleDebug`.
 
 Because debug and release share one certificate, OTA-era installs upgrade in
 place without uninstall. First transition from an old debug-keystore build may

@@ -111,7 +111,7 @@ public class ApkInstallPlugin extends Plugin {
                 android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:" + getContext().getPackageName()));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(i);
+            getContext().startActivity(i);
         } catch (Exception e) {
             Log.w(TAG, "openInstallSettings failed: " + e.getMessage());
         }

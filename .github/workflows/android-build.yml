@@ -52,7 +52,25 @@ jobs:
         yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || yes | sdkmanager --licenses || true
         $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools" || true
 
+    # Keystore is NOT in git — restore from Actions secrets before any Gradle sign step
+    - name: Restore release keystore from secrets
+      env:
+        RELEASE_KEYSTORE: ${{ secrets.RELEASE_KEYSTORE }}
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      run: |
+        if [ -z "$RELEASE_KEYSTORE" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ]; then
+          echo "::error::Missing RELEASE_KEYSTORE / KEYSTORE_PASSWORD / KEY_PASSWORD secrets"
+          exit 1
+        fi
+        printf '%s' "$RELEASE_KEYSTORE" | base64 -d > android/app/release.keystore
+        printf 'storePassword=%s\nkeyPassword=%s\n' "$KEYSTORE_PASSWORD" "$KEY_PASSWORD" > android/app/keystore.properties
+        chmod 600 android/app/release.keystore android/app/keystore.properties
+
     - name: Build Debug APK
+      env:
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
         cd android
         chmod +x ./gradlew
@@ -75,6 +93,9 @@ jobs:
         retention-days: 30
 
     - name: Build Release APK (self-signed)
+      env:
+        KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
       run: |
         cd android
         ./gradlew assembleRelease -Dorg.gradle.jvmargs="-Xmx4096m -XX:MaxMetaspaceSize=1024m" --no-daemon --stacktrace

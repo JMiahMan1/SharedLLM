@@ -35,11 +35,20 @@ android {
         }
         // Self-signed release keystore — no Play Store. Same key signs debug
         // and release so device upgrades never hit a signature mismatch.
+        // Keystore file is NOT in git; passwords come only from env (CI secrets)
+        // or a local gitignored keystore.properties.
         release {
+            def ksPropsFile = file('keystore.properties')
+            def ksProps = new Properties()
+            if (ksPropsFile.exists()) {
+                ksPropsFile.withInputStream { ksProps.load(it) }
+            }
+            def envStore = System.getenv('KEYSTORE_PASSWORD')
+            def envKey = System.getenv('KEY_PASSWORD')
             storeFile file('release.keystore')
-            storePassword System.getenv('KEYSTORE_PASSWORD') ?: 'jarvis-home-2026'
+            storePassword envStore ?: ksProps.getProperty('storePassword')
             keyAlias 'jarvisos'
-            keyPassword System.getenv('KEY_PASSWORD') ?: 'jarvis-home-2026'
+            keyPassword envKey ?: ksProps.getProperty('keyPassword')
         }
     }
     buildTypes {
