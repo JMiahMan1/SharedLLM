@@ -454,9 +454,47 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         }
         patchSensor('location', { permission: 'granted', message: null });
 
-        const position = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await handleLocationUpdate(position as any);
+        // Start the continuous watch FIRST so a slow first fix never blocks
+        // tracking. A one-shot getCurrentPosition timeout used to abort here
+        // and surface "Could not obtain location in time" with no watch running.
+        const gpsOptions = { enableHighAccuracy: true, timeout: 30000, maximumAge: 5000 };
+        watchIdRef.current = await Geolocation.watchPosition(
+          gpsOptions,
+          (pos, err) => {
+            if (pos) {
+              setState((s) => ({ ...s, error: null }));
+              handleLocationUpdate(pos);
+            }
+            if (err) {
+              logSensor('location', 'native watch error', err);
+              // Transient timeout while acquiring a fix is not a hard failure —
+              // only surface permission-class errors as blocking errors.
+              if (err.code === 1) {
+                setState((s) => ({ ...s, error: err.message, isTracking: false }));
+                patchSensor('location', { enabled: false, permission: 'denied', message: err.message });
+                void storageSet(KEY_LOCATION_ENABLED, 'false');
+                toast.error('Location permission denied — tracking turned off');
+              } else if (err.code === 3) {
+                // POSITION_UNAVAILABLE / TIMEOUT — keep watching, soft message only
+                patchSensor('location', { message: 'Waiting for GPS fix…' });
+                logSensor('location', 'waiting for GPS fix', err.message);
+              } else {
+                setState((s) => ({ ...s, error: err.message }));
+                patchSensor('location', { message: err.message });
+              }
+            }
+          }
+        );
+
+        // Opportunistic first fix — failures are non-fatal; the watch is live.
+        try {
+          const position = await Geolocation.getCurrentPosition(gpsOptions);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await handleLocationUpdate(position as any);
+          setState((s) => ({ ...s, error: null }));
+        } catch (firstFixErr) {
+          logSensor('location', 'first fix not ready yet (watch continues)', firstFixErr);
+        }
 
         // Sync steps immediately on tracking start
         void syncDailySteps();
@@ -470,18 +508,6 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
             }
           }, DAILY_STEPS_SYNC_INTERVAL_MS);
         }
-
-        watchIdRef.current = await Geolocation.watchPosition(
-          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-          (pos, err) => {
-            if (pos) handleLocationUpdate(pos);
-            if (err) {
-              logSensor('location', 'native watch error', err);
-              setState((s) => ({ ...s, error: err.message }));
-              patchSensor('location', { message: err.message });
-            }
-          }
-        );
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to start location tracking';
         logSensor('location', 'startTracking failed', err);

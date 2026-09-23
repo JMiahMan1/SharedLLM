@@ -34,6 +34,11 @@ export interface CheckUpdateResult {
 let isInitialized = false;
 let currentRuntimeSha: string = typeof __BUILD_SHA__ === 'string' ? __BUILD_SHA__ : 'unknown';
 
+// Native build last known to CapGo. Bumping versionCode (new APK) must drop any
+// OTA web bundle that predates it — otherwise CapGo keeps serving stale JS over
+// the freshly installed APK assets (sensor UI, plugins, widget auth, etc.).
+const LAST_NATIVE_BUILD_KEY = 'jarvis_last_native_build';
+
 // --- OTA loop guard --------------------------------------------------------
 // `CapacitorUpdater.set()` destroys the JS context and reloads the app
 // immediately — it does not merely stage a bundle for later. So an update check
@@ -153,11 +158,40 @@ export async function initAppUpdater(): Promise<void> {
   reconcilePendingUpdate();
 
   if (Capacitor.isNativePlatform()) {
+    let nativeBuildNumber = 1;
+    try {
+      const appInfo = await App.getInfo();
+      nativeBuildNumber = parseInt(appInfo.build, 10) || 1;
+    } catch {
+      // keep default
+    }
+
+    // New APK install/upgrade: discard any OTA bundle from a previous native
+    // build so the APK's bundled assets are what the WebView loads.
+    // MUST record the build (and notify ready) BEFORE reset() — reset destroys
+    // this JS context and reloads the app; nothing after it runs.
+    const lastBuild = parseInt(readLocal(LAST_NATIVE_BUILD_KEY) || '0', 10) || 0;
+    const needsNativeReset = nativeBuildNumber > lastBuild;
+    if (needsNativeReset || !readLocal(LAST_NATIVE_BUILD_KEY)) {
+      writeLocal(LAST_NATIVE_BUILD_KEY, String(nativeBuildNumber));
+    }
+
     try {
       await CapacitorUpdater.notifyAppReady();
       console.log('[AppUpdater] CapGo updater notified: app ready, bundle verified');
     } catch (err) {
       console.warn('[AppUpdater] Failed to notify app ready:', err);
+    }
+
+    if (needsNativeReset) {
+      try {
+        console.log(
+          `[AppUpdater] Native build ${nativeBuildNumber} > ${lastBuild} — reset CapGo to bundled assets`,
+        );
+        await CapacitorUpdater.reset({ toLastSuccessful: false });
+      } catch (err) {
+        console.warn('[AppUpdater] CapGo reset after native upgrade failed:', err);
+      }
     }
 
     // Schedule background check 3 seconds after launch to keep startup lightning fast

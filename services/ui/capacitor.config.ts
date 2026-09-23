@@ -17,7 +17,10 @@ const config: CapacitorConfig = {
       enabled: true
     },
     CapacitorUpdater: {
-      autoUpdate: false
+      autoUpdate: false,
+      // Drop OTA bundles when a newer native APK is installed so stale web
+      // assets never override the APK's bundled build.
+      resetWhenUpdate: true
     }
   }
 };
