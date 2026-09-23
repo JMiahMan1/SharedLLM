@@ -1,5 +1,15 @@
 apply plugin: 'com.android.application'
 
+// Single source of truth for marketing version: services/ui/package.json
+// (web OTA bundle + Android versionName stay in lockstep — a bugfix release
+// bumps package.json once; versionCode still increments for APK installs).
+def uiPackageJson = file('../../package.json')
+def uiVersion = '1.4.0'
+if (uiPackageJson.exists()) {
+    def parsed = new groovy.json.JsonSlurper().parseText(uiPackageJson.text)
+    if (parsed?.version) uiVersion = parsed.version.toString()
+}
+
 android {
     namespace = "com.jarvisos.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +17,8 @@ android {
         applicationId "com.jarvisos.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 7
-        versionName "1.3.1"
+        versionCode 8
+        versionName uiVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

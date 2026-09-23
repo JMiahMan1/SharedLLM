@@ -37,6 +37,7 @@ public final class WidgetUpdater {
         request(context, MetricWidget.class);
         request(context, MediaWidget.class);
         request(context, DashboardWidget.class);
+        request(context, ActionButtonWidget.class);
     }
 
     public static void request(Context context, Class<?> cls) {
@@ -133,6 +134,37 @@ public final class WidgetUpdater {
             RemoteViews views = DashboardWidget.build(context);
             onMain(() -> {
                 for (int id : ids) mgr.updateAppWidget(id, views);
+            });
+        });
+    }
+
+    /** Fixed single-action tap (entity + configured service). */
+    public static PendingIntent actionPendingIntent(Context context, int appWidgetId,
+        String entityId, String service) {
+        Intent i = new Intent(context, WidgetActionReceiver.class);
+        i.setAction(ACTION_TOGGLE);
+        i.putExtra(EXTRA_ENTITY, entityId);
+        i.putExtra(EXTRA_SERVICE, service);
+        i.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId);
+        return PendingIntent.getBroadcast(context, 4000 + appWidgetId, i,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    /** Each action button has its own config — push per widget id. */
+    public static void pushActionButtons(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, ActionButtonWidget.class));
+        if (ids == null || ids.length == 0) return;
+        final int[] widgetIds = ids;
+        onBackground(() -> {
+            final android.util.SparseArray<RemoteViews> out = new android.util.SparseArray<>();
+            for (int id : widgetIds) {
+                out.put(id, ActionButtonWidget.build(context, id));
+            }
+            onMain(() -> {
+                for (int i = 0; i < out.size(); i++) {
+                    mgr.updateAppWidget(out.keyAt(i), out.valueAt(i));
+                }
             });
         });
     }

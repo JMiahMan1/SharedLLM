@@ -8,6 +8,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
 import com.jarvisos.app.MainActivity;
+import org.json.JSONObject;
 
 public class WidgetActionReceiver extends BroadcastReceiver {
     @Override
@@ -26,9 +27,32 @@ public class WidgetActionReceiver extends BroadcastReceiver {
             final String service = intent.getStringExtra(WidgetUpdater.EXTRA_SERVICE);
             if (entity == null || service == null) return;
             // Garage open while away → confirm on UI thread
-            if (entity.toLowerCase().contains("garage") && "turn_on".equals(service)
+            boolean opensGarage = "turn_on".equals(service) || "open_cover".equals(service)
+                || "toggle".equals(service);
+            if (entity.toLowerCase().contains("garage") && opensGarage
                 && WidgetApi.isAwayFromHome(app, WidgetUpdater.AWAY_THRESHOLD_M)) {
-                confirmGarage(app, entity, service, false);
+                if ("toggle".equals(service)) {
+                    // Resolve first; only confirm if it would actually open
+                    WidgetUpdater.onBackground(() -> {
+                        try {
+                            String domain = entity.substring(0, entity.indexOf('.'));
+                            JSONObject states = WidgetApi.entityStates(app,
+                                java.util.Collections.singletonList(entity));
+                            JSONObject e = states.optJSONObject(entity);
+                            String state = e != null ? e.optString("state", "off") : "off";
+                            String resolved = WidgetApi.toggleService(domain, state);
+                            if ("turn_on".equals(resolved) || "open_cover".equals(resolved)) {
+                                confirmGarage(app, entity, resolved, true);
+                            } else {
+                                executeToggle(app, entity, "toggle");
+                            }
+                        } catch (Exception ex) {
+                            postToast(app, ex.getMessage() != null ? ex.getMessage() : "Command failed");
+                        }
+                    });
+                    return;
+                }
+                confirmGarage(app, entity, service, true);
                 return;
             }
             executeToggle(app, entity, service);
@@ -61,7 +85,15 @@ public class WidgetActionReceiver extends BroadcastReceiver {
         WidgetUpdater.onBackground(() -> {
             try {
                 String domain = entity.substring(0, entity.indexOf('.'));
-                WidgetApi.haService(app, domain, service, entity);
+                String resolved = service;
+                if ("toggle".equals(service)) {
+                    JSONObject states = WidgetApi.entityStates(app,
+                        java.util.Collections.singletonList(entity));
+                    JSONObject e = states.optJSONObject(entity);
+                    String state = e != null ? e.optString("state", "off") : "off";
+                    resolved = WidgetApi.toggleService(domain, state);
+                }
+                WidgetApi.haService(app, domain, resolved, entity);
                 WidgetUpdater.requestAll(app);
             } catch (Exception e) {
                 postToast(app, e.getMessage() != null ? e.getMessage() : "Command failed");

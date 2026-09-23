@@ -19,7 +19,8 @@ COPY . .
 # Key name must be `git_sha` — the gateway's OTA endpoint and the mobile
 # updater both key off that. build.js overwrites this file after the Vite build
 # with the same schema; this copy is the fallback if packaging is skipped.
-RUN echo "{\"version\":\"1.2.0\",\"git_sha\":\"${GIT_SHA}\",\"build_timestamp\":\"${BUILD_DATE}\"}" > public/version.json
+# Version comes from package.json (single source of truth, matches Android versionName).
+RUN node -e "const p=require('./package.json');const fs=require('fs');fs.writeFileSync('public/version.json',JSON.stringify({version:p.version,git_sha:process.env.GIT_SHA||'unknown',build_timestamp:process.env.BUILD_DATE||'unknown'},null,2)+'\n')"
 
 # A bundle with no identifiable SHA cannot be offered as an OTA update (the app
 # could never tell whether it already has it), so refuse to build one.

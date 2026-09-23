@@ -173,7 +173,7 @@ ssh $SSH_OPTS "$HOST" << EOF
         fi
 
         BUNDLE_SHA=\$(python3 -c "import json;print(json.load(open('data/app_updates/.bundle_version.json')).get('git_sha') or json.load(open('data/app_updates/.bundle_version.json')).get('gitSha') or 'unknown')")
-        BUNDLE_VERSION=\$(python3 -c "import json;print(json.load(open('data/app_updates/.bundle_version.json')).get('version') or '1.2.0')")
+        BUNDLE_VERSION=\$(python3 -c "import json;print(json.load(open('data/app_updates/.bundle_version.json')).get('version') or json.load(open('services/ui/package.json')).get('version') or '0.0.0')")
         if [ "\$BUNDLE_SHA" = "unknown" ] || [ -z "\$BUNDLE_SHA" ]; then
             echo "[FAIL] Built UI bundle has no git_sha (was GIT_SHA passed as a build arg?)."
             echo "       Refusing to publish an unidentifiable bundle."
@@ -195,7 +195,7 @@ ssh $SSH_OPTS "$HOST" << EOF
   "version": "\$BUNDLE_VERSION",
   "git_sha": "\$BUNDLE_SHA",
   "build_timestamp": "\$BUILD_TIME",
-  "release_notes": "Jarvis OS 1.2.0 — step tracking, workouts, activity trends, route maps",
+  "release_notes": "Jarvis OS Over-The-Air Update",
   "apk_version_code": \$APK_CODE
 }
 JSON_EOF

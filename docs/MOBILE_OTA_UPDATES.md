@@ -67,12 +67,37 @@ Metadata uses `git_sha` (snake_case) throughout. The client also accepts
 `gitSha` when reading `/version.json`, and the gateway normalizes both, because
 an older `Dockerfile` wrote the camelCase spelling.
 
+## Version identity (web + native cannot drift)
+
+**`services/ui/package.json` `version` is the single marketing version** for
+both the web OTA bundle and the Android `versionName`. `build.gradle` reads it
+at build time; `build.js` and `services/ui/Dockerfile` embed it in
+`version.json`. Never hardcode a version elsewhere.
+
+**`git_sha` is the single build identity.** Web bundle, APK, and
+`/api/app-updates/version` all come from the same short commit. A bugfix
+release is one commit: bump `package.json` if the marketing version changes,
+push, build UI + APK from that SHA, deploy both artifacts together.
+
+| Channel | Carries | Advances when |
+| --- | --- | --- |
+| OTA `bundle.zip` | Web/JS fixes | Any `services/ui/src` (or shared web) change |
+| APK `versionCode` | Native/widget/plugin fixes | Android/Java/Capacitor native changes — **must** bump `versionCode` |
+
+A web-only fix does **not** require a new APK (users get it via OTA at the same
+`git_sha`). A native-only fix **does** require a new APK; bump `versionCode` so
+`apk_version_code` in published metadata exceeds older installs.
+
 ## Native APK updates
 
 The web bundle cannot change native code. `apk_version_code` in
 `data/app_updates/version.json` must be kept in sync with `versionCode` in
 `services/ui/android/app/build.gradle`; when the server's value exceeds the
 running build, the app offers the APK for manual install.
+
+`versionName` is **not** hardcoded in Gradle — it is parsed from
+`services/ui/package.json` so a release cannot ship web `1.4.0` against Android
+`1.3.1`.
 
 ## Verifying a deploy
 
