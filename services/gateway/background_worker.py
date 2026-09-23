@@ -1357,7 +1357,23 @@ class RavenWorker:
                 cache_all_states(entities)
 
             except Exception as e:
-                log.error(f"Cleanup: failed for user {username}: {e}")
+                msg = str(e)
+                transient = any(
+                    s in msg
+                    for s in (
+                        "Server disconnected",
+                        "Cannot connect to host",
+                        "Connection refused",
+                        "Cannot perform SSL",
+                        "ClientConnectionError",
+                    )
+                )
+                if transient:
+                    # Dependants (rag/execution) may still be starting after a
+                    # deploy — retry next interval instead of alarming.
+                    log.warning(f"Cleanup: deferred for user {username}: {e}")
+                else:
+                    log.error(f"Cleanup: failed for user {username}: {e}")
 
         if total_orphaned > 0:
             log.info(f"Cleanup pass complete: removed {total_orphaned} orphaned entity entries across all users")
