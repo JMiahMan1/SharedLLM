@@ -3,6 +3,7 @@ import { useBackgroundLocation } from '../../hooks/useBackgroundLocation';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
+import Toggle from '../ui/Toggle';
 import toast from 'react-hot-toast';
 import {
   MapPin,
@@ -437,19 +438,11 @@ const LocationPanel = () => {
             </div>
           </div>
 
-          <button
-            onClick={handleToggleTracking}
-            aria-label="Toggle location tracking"
-            className={`w-12 h-7 rounded-full relative transition-colors ${
-              isTracking ? 'bg-emerald-500' : 'bg-slate-600'
-            }`}
-          >
-            <div
-              className={`absolute top-1 w-5 h-5 rounded-full bg-white shadow-md transition-transform ${
-                isTracking ? 'translate-x-6' : 'translate-x-1'
-              }`}
-            />
-          </button>
+          <Toggle
+            checked={isTracking}
+            onChange={() => handleToggleTracking()}
+            ariaLabel="Toggle location tracking"
+          />
         </div>
 
         {isTracking && (

@@ -32,10 +32,36 @@ public final class WidgetApi {
         return prefs(context).getString(TokenBridgePlugin.KEY_API_KEY, null);
     }
 
+    public static String internalSecret(Context context) {
+        return prefs(context).getString(TokenBridgePlugin.KEY_INTERNAL_SECRET, null);
+    }
+
     public static String serverUrl(Context context) {
         String s = prefs(context).getString(TokenBridgePlugin.KEY_SERVER_URL, null);
         if (s == null || s.isEmpty()) return DEFAULT_SERVER;
         return s.endsWith("/") ? s.substring(0, s.length() - 1) : s;
+    }
+
+    /** Best-effort credential re-sync from Capacitor Preferences if widget prefs are empty. */
+    public static void ensureCredentials(Context context) {
+        SharedPreferences p = prefs(context);
+        if (p.getString(TokenBridgePlugin.KEY_API_KEY, null) != null) return;
+        try {
+            SharedPreferences cap = context.getSharedPreferences("CapacitorStorage", Context.MODE_PRIVATE);
+            String key = cap.getString("jarvis_api_key", null);
+            String url = cap.getString("jarvis_server_url", null);
+            String secret = cap.getString("internal_secret", null);
+            SharedPreferences.Editor ed = p.edit();
+            if (key != null && !key.isEmpty()) ed.putString(TokenBridgePlugin.KEY_API_KEY, key);
+            if (url != null && !url.isEmpty()) ed.putString(TokenBridgePlugin.KEY_SERVER_URL, url);
+            if (secret != null && !secret.isEmpty()) ed.putString(TokenBridgePlugin.KEY_INTERNAL_SECRET, secret);
+            ed.apply();
+            if (key != null) {
+                Log.i(TAG, "Migrated credentials from CapacitorStorage into widget prefs");
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "ensureCredentials failed: " + e.getMessage());
+        }
     }
 
     public static boolean isAwayFromHome(Context context, float thresholdMeters) {
@@ -67,6 +93,7 @@ public final class WidgetApi {
     }
 
     public static JSONObject request(Context context, String method, String path, JSONObject body) throws Exception {
+        ensureCredentials(context);
         String key = apiKey(context);
         if (key == null || key.isEmpty()) {
             throw new IllegalStateException("Not signed in");
@@ -79,6 +106,10 @@ public final class WidgetApi {
             conn.setReadTimeout(TIMEOUT_MS);
             conn.setRequestMethod(method);
             conn.setRequestProperty("Authorization", "Bearer " + key);
+            String secret = internalSecret(context);
+            if (secret != null && !secret.isEmpty()) {
+                conn.setRequestProperty("X-Internal-Secret", secret);
+            }
             conn.setRequestProperty("Content-Type", "application/json");
             conn.setRequestProperty("Accept", "application/json");
             if (body != null) {
@@ -103,7 +134,15 @@ public final class WidgetApi {
             }
             String text = sb.toString().trim();
             if (text.isEmpty()) return new JSONObject();
-            return new JSONObject(text);
+            JSONObject json = new JSONObject(text);
+            // Surface execution FAILURE payloads (e.g. HA not configured) instead of empty results
+            String status = json.optString("status", "");
+            if ("FAILURE".equals(status) || "ERROR".equals(status)) {
+                String msg = json.optString("message", "request failed");
+                Log.w(TAG, path + " FAILURE: " + msg);
+                throw new IllegalStateException(msg);
+            }
+            return json;
         } finally {
             conn.disconnect();
         }
@@ -144,9 +183,11 @@ public final class WidgetApi {
     public static JSONObject entityStates(Context context, List<String> entityIds) throws Exception {
         JSONObject body = new JSONObject();
         body.put("query", "");
-        body.put("domain", null);
-        body.put("area", null);
-        body.put("state", null);
+        // Omit null keys so Pydantic receives explicit nulls only when present;
+        // JSONObject.put(key, null) removes the key on Android's org.json.
+        body.put("domain", JSONObject.NULL);
+        body.put("area", JSONObject.NULL);
+        body.put("state", JSONObject.NULL);
         JSONObject resp = post(context, "/execute/entity/search", body);
         JSONObject byId = new JSONObject();
         JSONArray result = resp.optJSONArray("result");
@@ -154,7 +195,13 @@ public final class WidgetApi {
             JSONObject detail = resp.optJSONObject("detail");
             if (detail != null) result = detail.optJSONArray("entities");
         }
-        if (result == null) return byId;
+        if (result == null) {
+            // Distinguish "empty" from "wrong shape" so widgets can show a useful error
+            if (!resp.has("result") && !resp.has("detail")) {
+                throw new IllegalStateException("Unexpected entity search response");
+            }
+            return byId;
+        }
         for (int i = 0; i < result.length(); i++) {
             JSONObject e = result.getJSONObject(i);
             String id = e.optString("entity_id");

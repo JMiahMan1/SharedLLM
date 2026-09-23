@@ -3,11 +3,13 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
-import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw } from 'lucide-react';
+import { useLocation } from '../context/LocationContext';
+import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import type { GlobalSetting } from '../services/api';
 import LocationPanel from '../components/location/LocationPanel';
+import Toggle from '../components/ui/Toggle';
 import { isAdminPinSet, setAdminPin, clearAdminPin } from '../lib/adminPin';
 import { checkForAppUpdates, downloadAndInstallApk, getRunningVersion } from '../lib/appUpdater';
 import toast from 'react-hot-toast';
@@ -77,6 +79,8 @@ const Settings = () => {
           onChange={() => handleToggle(setNotifications, notifications)}
         />
       </div>
+
+      <SensorsSection />
 
       <AppUpdatesSection />
 
@@ -292,22 +296,107 @@ const SettingToggle = ({ icon, label, description, value, onChange }: {
   value: boolean;
   onChange: () => void;
 }) => (
-  <button
-    onClick={onChange}
-    className="w-full flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
-  >
-    <div className="flex items-center gap-3">
-      <span className="text-slate-400">{icon}</span>
-      <div className="text-left">
+  <div className="w-full flex items-center justify-between gap-3 p-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors">
+    <div className="flex items-center gap-3 min-w-0 text-left">
+      <span className="text-slate-400 shrink-0">{icon}</span>
+      <div className="min-w-0">
         <p className="text-white text-sm font-medium">{label}</p>
         <p className="text-xs text-slate-400">{description}</p>
       </div>
     </div>
-    <div className={`w-10 h-6 rounded-full relative transition-colors ${value ? 'bg-purple-500' : 'bg-slate-600'}`}>
-      <div className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${value ? 'translate-x-4' : 'translate-x-0.5'}`} />
-    </div>
-  </button>
+    <Toggle checked={value} onChange={() => onChange()} ariaLabel={label} />
+  </div>
 );
+
+/** Always-on info-gathering sensors — each can be turned off; related services stop with it. */
+const SensorsSection = () => {
+  const { sensors, enableSensor, disableSensor, openSensorSettings } = useLocation();
+  const { trigger } = useHaptics();
+
+  const handleSensorToggle = async (id: 'location' | 'steps', next: boolean) => {
+    trigger('light');
+    if (next) {
+      const ok = await enableSensor(id);
+      if (ok) toast.success(id === 'steps' ? 'Step counter enabled' : 'Location tracking enabled');
+    } else {
+      await disableSensor(id);
+      toast.success(id === 'steps' ? 'Step counter off' : 'Location tracking off');
+    }
+  };
+
+  const rows: Array<{
+    id: 'location' | 'steps';
+    icon: React.ReactNode;
+    label: string;
+    onDesc: string;
+    offDesc: string;
+  }> = [
+    {
+      id: 'location',
+      icon: <MapPin size={18} />,
+      label: 'Location tracking',
+      onDesc: 'GPS breadcrumbs, trips, and presence',
+      offDesc: 'Off — no location is recorded',
+    },
+    {
+      id: 'steps',
+      icon: <Footprints size={18} />,
+      label: 'Step counter',
+      onDesc: 'Hardware pedometer syncs to Wander',
+      offDesc: 'Off — pedometer not read or synced',
+    },
+  ];
+
+  return (
+    <div className="glass-panel rounded-2xl p-4 space-y-1">
+      <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider px-3 pt-1 mb-2">Sensors & Privacy</h2>
+      <p className="px-3 text-[11px] text-slate-500 mb-2">
+        Turn off any sensor to stop its related services. Re-enable to prompt for permission again.
+      </p>
+      {rows.map((row) => {
+        const s = sensors[row.id];
+        return (
+          <div key={row.id} className="p-3 rounded-xl bg-white/5 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-slate-400 shrink-0">{row.icon}</span>
+                <div className="min-w-0">
+                  <p className="text-white text-sm font-medium">{row.label}</p>
+                  <p className="text-xs text-slate-400">{s.enabled ? row.onDesc : row.offDesc}</p>
+                </div>
+              </div>
+              <Toggle
+                checked={s.enabled}
+                onChange={(next) => void handleSensorToggle(row.id, next)}
+                ariaLabel={row.label}
+              />
+            </div>
+            {s.message && (
+              <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
+                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <span>{s.message}</span>
+                  {s.permission === 'denied' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        trigger('light');
+                        void openSensorSettings(row.id);
+                      }}
+                      className="ml-2 inline-flex items-center gap-1 underline hover:text-amber-200"
+                    >
+                      Open settings <ExternalLink size={11} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 const SystemConfigSection = ({ isAdmin, onEdit }: { isAdmin: boolean; onEdit: () => void }) => {
   const { trigger } = useHaptics();

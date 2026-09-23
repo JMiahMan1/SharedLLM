@@ -80,9 +80,18 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             call.resolve(ret);
             return;
         }
-        if (getPermissionState("activityRecognition") == PermissionState.GRANTED) {
+        PermissionState state = getPermissionState("activityRecognition");
+        if (state == PermissionState.GRANTED) {
             JSObject ret = new JSObject();
             ret.put("granted", true);
+            call.resolve(ret);
+            return;
+        }
+        if (state == PermissionState.DENIED_WITH_ALWAYS) {
+            // System will not show the dialog again — UI must deep-link to Settings.
+            JSObject ret = new JSObject();
+            ret.put("granted", false);
+            ret.put("permanentlyDenied", true);
             call.resolve(ret);
             return;
         }
@@ -91,7 +100,8 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
 
     @PermissionCallback
     private void onPermissionResult(PluginCall call) {
-        boolean granted = getPermissionState("activityRecognition") == PermissionState.GRANTED;
+        PermissionState state = getPermissionState("activityRecognition");
+        boolean granted = state == PermissionState.GRANTED;
         // If this permission was requested so polling could start, attach the
         // sensor listener now — otherwise steps stay at 0 until the next open.
         if (granted && stepSensor != null && !listening) {
@@ -99,7 +109,23 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         }
         JSObject ret = new JSObject();
         ret.put("granted", granted);
+        ret.put("permanentlyDenied", state == PermissionState.DENIED_WITH_ALWAYS);
         call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void openSettings(PluginCall call) {
+        try {
+            android.content.Intent intent = new android.content.Intent(
+                android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.parse("package:" + bridge.getContext().getPackageName())
+            );
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            bridge.getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to open app settings: " + e.getMessage());
+        }
     }
 
     @PluginMethod
@@ -113,6 +139,8 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
             && ContextCompat.checkSelfPermission(bridge.getContext(), Manifest.permission.ACTIVITY_RECOGNITION)
                 != PackageManager.PERMISSION_GRANTED) {
+            // Explicit reject (not a silent empty read) so the JS layer can
+            // surface "permission denied" and disable the feature in Settings.
             call.reject("ACTIVITY_RECOGNITION permission not granted");
             return;
         }
@@ -143,6 +171,19 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         };
         if (!sensorManager.registerListener(oneShot, stepSensor, SensorManager.SENSOR_DELAY_UI)) {
             call.reject("Failed to register step counter listener");
+        } else {
+            // Fail loudly if the sensor never delivers (permission revoked mid-read,
+            // OEM sensor lock, etc.) instead of hanging the JS promise forever.
+            final PluginCall pending = call;
+            android.os.Handler timeout = new android.os.Handler(android.os.Looper.getMainLooper());
+            timeout.postDelayed(() -> {
+                try {
+                    sensorManager.unregisterListener(oneShot);
+                    pending.reject("Step counter sensor did not deliver a reading");
+                } catch (Exception ignored) {
+                    // call already resolved
+                }
+            }, 5000);
         }
     }
 
@@ -150,6 +191,12 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
     public void startPolling(PluginCall call) {
         if (stepSensor == null) {
             call.resolve();
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+            && ContextCompat.checkSelfPermission(bridge.getContext(), Manifest.permission.ACTIVITY_RECOGNITION)
+                != PackageManager.PERMISSION_GRANTED) {
+            call.reject("ACTIVITY_RECOGNITION permission not granted");
             return;
         }
         // Always re-register: a prior register without ACTIVITY_RECOGNITION can
@@ -160,6 +207,10 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             listening = false;
         }
         listening = sensorManager.registerListener(this, stepSensor, SensorManager.SENSOR_DELAY_UI);
+        if (!listening) {
+            call.reject("Failed to attach step counter listener");
+            return;
+        }
         call.resolve();
     }
 

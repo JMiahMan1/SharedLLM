@@ -19,6 +19,7 @@ public class TokenBridgePlugin extends Plugin {
     public static final String PREFS = "jarvis_widget";
     public static final String KEY_API_KEY = "jarvis_api_key";
     public static final String KEY_SERVER_URL = "jarvis_server_url";
+    public static final String KEY_INTERNAL_SECRET = "internal_secret";
     public static final String KEY_LAST_LAT = "last_lat";
     public static final String KEY_LAST_LNG = "last_lng";
     public static final String KEY_LAST_TS = "last_ts";
@@ -37,6 +38,7 @@ public class TokenBridgePlugin extends Plugin {
     public void setCredentials(PluginCall call) {
         String apiKey = call.getString("apiKey");
         String serverUrl = call.getString("serverUrl");
+        String internalSecret = call.getString("internalSecret");
         SharedPreferences.Editor ed = prefs(getContext()).edit();
         if (apiKey != null) {
             if (apiKey.isEmpty()) {
@@ -50,6 +52,13 @@ public class TokenBridgePlugin extends Plugin {
                 ed.remove(KEY_SERVER_URL);
             } else {
                 ed.putString(KEY_SERVER_URL, serverUrl);
+            }
+        }
+        if (internalSecret != null) {
+            if (internalSecret.isEmpty()) {
+                ed.remove(KEY_INTERNAL_SECRET);
+            } else {
+                ed.putString(KEY_INTERNAL_SECRET, internalSecret);
             }
         }
         ed.apply();

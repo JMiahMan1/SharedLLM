@@ -83,7 +83,12 @@ public class WidgetActionReceiver extends BroadcastReceiver {
                     .setPositiveButton("Open", (dialog, which) -> executeToggle(app, entity, service))
                     .setNegativeButton("Cancel", null)
                     .create();
-                d.getWindow().setType(android.view.WindowManager.LayoutParams.TYPE_SYSTEM_DIALOG);
+                // TYPE_SYSTEM_DIALOG requires system UID — use application overlay / activity window instead
+                try {
+                    d.getWindow().setType(android.view.WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY);
+                } catch (Exception ignored) {
+                    // fall through to default window type
+                }
                 d.show();
             } catch (Exception e) {
                 // No window token (background) — fall back to toast + require second path

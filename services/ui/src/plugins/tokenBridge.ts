@@ -6,7 +6,11 @@ export interface Credentials {
 }
 
 export interface TokenBridgePluginInterface {
-  setCredentials(options: { apiKey?: string; serverUrl?: string }): Promise<void>;
+  setCredentials(options: {
+    apiKey?: string;
+    serverUrl?: string;
+    internalSecret?: string;
+  }): Promise<void>;
   getCredentials(): Promise<Credentials>;
   setLastLocation(options: { latitude: number; longitude: number }): Promise<void>;
   setHome(options: { latitude: number; longitude: number }): Promise<void>;

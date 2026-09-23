@@ -6,6 +6,12 @@ export interface StepCounterAvailability {
   permissionGranted?: boolean;
 }
 
+export interface StepPermissionResult {
+  granted: boolean;
+  /** Android "Don't ask again" / previously denied forever — open system settings. */
+  permanentlyDenied?: boolean;
+}
+
 export interface StepReading {
   available: boolean;
   steps?: number;
@@ -14,10 +20,12 @@ export interface StepReading {
 
 export interface StepCounterPluginInterface {
   isAvailable(): Promise<StepCounterAvailability>;
-  requestPermission(): Promise<{ granted: boolean }>;
+  requestPermission(): Promise<StepPermissionResult>;
   getTodaySteps(): Promise<StepReading>;
   startPolling(): Promise<void>;
   stopPolling(): Promise<void>;
+  /** Open this app's system settings page (for permanently denied permissions). */
+  openSettings(): Promise<void>;
   addListener(
     eventName: "stepUpdate",
     listenerFunc: (data: StepReading) => void
@@ -32,6 +40,7 @@ const webFallback: StepCounterPluginInterface = {
   getTodaySteps: async () => ({ available: false }),
   startPolling: async () => undefined,
   stopPolling: async () => undefined,
+  openSettings: async () => undefined,
   addListener: async () => ({ remove: async () => undefined }),
 };
 
