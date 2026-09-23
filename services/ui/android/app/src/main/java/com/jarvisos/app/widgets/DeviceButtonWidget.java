@@ -94,7 +94,9 @@ public class DeviceButtonWidget extends AppWidgetProvider {
                 }
                 views.setTextViewText(LABEL_IDS[i], truncate(label, 18));
                 views.setTextViewText(STATE_IDS[i], state);
-                views.setBoolean(STATE_IDS[i], "setSelected", WidgetApi.isActiveState(state));
+                // RemoteViews cannot call setSelected on TextView; tint the state text instead.
+                views.setTextColor(STATE_IDS[i],
+                    WidgetApi.isActiveState(state) ? 0xFF4ADE80 : 0xFF94A3B8);
             }
         } catch (Exception e) {
             views.setTextViewText(LABEL_IDS[0], "Error");
