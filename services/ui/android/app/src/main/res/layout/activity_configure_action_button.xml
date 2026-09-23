@@ -56,12 +56,26 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:hint="switch.garage_door_2"
-            android:inputType="textNoSuggestions"
+            android:hint="Type to search entities…"
+            android:inputType="text"
+            android:imeOptions="actionSearch"
             android:maxLines="1"
+            android:completionHint="Tap a match"
+            android:dropDownWidth="match_parent"
+            android:dropDownHeight="240dp"
+            android:popupBackground="#1E293B"
             android:textColor="#F1F5F9"
             android:textColorHint="#64748B"
             android:textSize="14sp" />
+        <ListView
+            android:id="@+id/entity_results"
+            android:layout_width="match_parent"
+            android:layout_height="180dp"
+            android:layout_marginTop="4dp"
+            android:background="#1E293B"
+            android:divider="#33475569"
+            android:dividerHeight="1dp"
+            android:visibility="gone" />
         <TextView
             android:id="@+id/entity_preview"
             android:layout_width="match_parent"

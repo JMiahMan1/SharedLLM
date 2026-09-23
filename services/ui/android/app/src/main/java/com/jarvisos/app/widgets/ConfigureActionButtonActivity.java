@@ -14,6 +14,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ProgressBar;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -34,6 +35,7 @@ public class ConfigureActionButtonActivity extends Activity {
     private TextView entityStatus;
     private TextView entityPreview;
     private TextView iconName;
+    private ListView entityResults;
     private final List<String> serviceKeys = new ArrayList<>();
     private final List<String> serviceLabels = new ArrayList<>();
     private String selectedIcon = MaterialIcons.defaultIcon();
@@ -41,6 +43,7 @@ public class ConfigureActionButtonActivity extends Activity {
     private final List<String> entityIds = new ArrayList<>();
     private final List<String> entityLabels = new ArrayList<>();
     private ArrayAdapter<String> entityAdapter;
+    private ArrayAdapter<String> resultsAdapter;
     private int loadGeneration;
     private int previewGeneration;
     private android.os.Handler previewHandler;
@@ -64,11 +67,19 @@ public class ConfigureActionButtonActivity extends Activity {
         entityProgress = findViewById(R.id.entity_progress);
         entityStatus = findViewById(R.id.entity_status);
         entityPreview = findViewById(R.id.entity_preview);
+        entityResults = findViewById(R.id.entity_results);
         iconName = findViewById(R.id.icon_name);
         previewHandler = new android.os.Handler(getMainLooper());
         Button btnSave = findViewById(R.id.btn_save);
         Button btnCancel = findViewById(R.id.btn_cancel);
         LinearLayout iconRow = findViewById(R.id.icon_row);
+
+        resultsAdapter = makeDarkAdapter();
+        entityResults.setAdapter(resultsAdapter);
+        entityResults.setOnItemClickListener((parent, view, position, id) -> {
+            String full = resultsAdapter.getItem(position);
+            if (full != null) pickEntity(full);
+        });
 
         ActionButtonConfig existing = ActionButtonConfig.load(this, appWidgetId);
         if (existing != null) {
@@ -85,11 +96,15 @@ public class ConfigureActionButtonActivity extends Activity {
             @Override public void afterTextChanged(Editable s) {
                 rebuildServices(null);
                 String q = s != null ? s.toString().trim() : "";
-                // Live filter as the user types
-                if (entityAdapter != null) {
-                    entityAdapter.getFilter().filter(q);
-                }
                 scheduleLivePreview(q);
+                updateResultsList(q);
+            }
+        });
+        // Focus opens the search list once entities are loaded
+        fieldEntity.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                String q = fieldEntity.getText() != null ? fieldEntity.getText().toString().trim() : "";
+                updateResultsList(q);
             }
         });
         loadEntities();
@@ -99,6 +114,67 @@ public class ConfigureActionButtonActivity extends Activity {
             setResult(Activity.RESULT_CANCELED);
             finish();
         });
+    }
+
+    private ArrayAdapter<String> makeDarkAdapter() {
+        ArrayAdapter<String> a = new ArrayAdapter<String>(
+            this, android.R.layout.simple_list_item_1, new ArrayList<String>()) {
+            @Override public android.view.View getView(int position, android.view.View convertView, android.view.ViewGroup parent) {
+                android.view.View v = super.getView(position, convertView, parent);
+                if (v instanceof TextView) {
+                    TextView tv = (TextView) v;
+                    tv.setTextColor(0xFFF1F5F9);
+                    tv.setBackgroundColor(0xFF1E293B);
+                    tv.setPadding(MaterialIcons.dp(getResources(), 12),
+                        MaterialIcons.dp(getResources(), 10),
+                        MaterialIcons.dp(getResources(), 12),
+                        MaterialIcons.dp(getResources(), 10));
+                }
+                return v;
+            }
+        };
+        a.setNotifyOnChange(true);
+        return a;
+    }
+
+    /** Filter the always-visible match list under the entity field. */
+    private void updateResultsList(String query) {
+        if (entityResults == null || resultsAdapter == null) return;
+        if (entityLabels.isEmpty()) {
+            entityResults.setVisibility(View.GONE);
+            return;
+        }
+        String q = query == null ? "" : query.toLowerCase();
+        List<String> matches = new ArrayList<>();
+        // Empty query → show first matches so the list is discoverable
+        for (int i = 0; i < entityLabels.size(); i++) {
+            String label = entityLabels.get(i);
+            String id = i < entityIds.size() ? entityIds.get(i) : "";
+            if (q.isEmpty()
+                || label.toLowerCase().contains(q)
+                || id.toLowerCase().contains(q)) {
+                matches.add(label);
+                if (!q.isEmpty() && matches.size() >= 40) break;
+                if (q.isEmpty() && matches.size() >= 8) break;
+            }
+        }
+        resultsAdapter.clear();
+        resultsAdapter.addAll(matches);
+        resultsAdapter.notifyDataSetChanged();
+        entityResults.setVisibility(matches.isEmpty() ? View.GONE : View.VISIBLE);
+    }
+
+    private void pickEntity(String full) {
+        int open = full.lastIndexOf('(');
+        int close = full.lastIndexOf(')');
+        if (open >= 0 && close > open) {
+            fieldEntity.setText(full.substring(open + 1, close));
+            fieldEntity.setSelection(fieldEntity.getText().length());
+        }
+        rebuildServices(null);
+        scheduleLivePreview(fieldEntity.getText() != null
+            ? fieldEntity.getText().toString().trim() : "");
+        if (entityResults != null) entityResults.setVisibility(View.GONE);
     }
 
     @Override
@@ -227,6 +303,7 @@ public class ConfigureActionButtonActivity extends Activity {
     }
 
     private void loadEntities() {
+        WidgetApi.ensureCredentials(this);
         if (WidgetApi.apiKey(this) == null) {
             entityStatus.setVisibility(View.VISIBLE);
             entityStatus.setText("Sign in to Jarvis OS to browse entities, or type an entity_id.");
@@ -278,27 +355,16 @@ public class ConfigureActionButtonActivity extends Activity {
                     android.R.layout.simple_dropdown_item_1line,
                     entityLabels);
                 fieldEntity.setAdapter(entityAdapter);
-                // Re-filter current text if the field already has a value
-                CharSequence cur = fieldEntity.getText();
-                if (cur != null && cur.length() > 0) {
-                    entityAdapter.getFilter().filter(cur.toString());
-                }
                 fieldEntity.setOnItemClickListener((parent, view, position, id) -> {
                     String full = entityLabels.get(position);
-                    int open = full.lastIndexOf('(');
-                    int close = full.lastIndexOf(')');
-                    if (open >= 0 && close > open) {
-                        String picked = full.substring(open + 1, close);
-                        fieldEntity.setText(picked);
-                        fieldEntity.setSelection(fieldEntity.getText().length());
-                    }
-                    rebuildServices(null);
-                    scheduleLivePreview(fieldEntity.getText() != null
-                        ? fieldEntity.getText().toString().trim() : "");
+                    pickEntity(full);
                 });
-                // Live preview for whatever is already in the field
                 CharSequence now = fieldEntity.getText();
-                scheduleLivePreview(now != null ? now.toString().trim() : "");
+                updateResultsList(now != null ? now.toString().trim() : "");
+                CharSequence cur = fieldEntity.getText();
+                if (cur != null && cur.length() > 0) {
+                    scheduleLivePreview(cur.toString().trim());
+                }
             });
         });
     }
