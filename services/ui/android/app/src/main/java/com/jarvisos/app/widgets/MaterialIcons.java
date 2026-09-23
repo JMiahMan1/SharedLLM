@@ -20,6 +20,9 @@ public final class MaterialIcons {
 
     static {
         ICONS.put("garage", R.drawable.mi_garage);
+        ICONS.put("garage_closed", R.drawable.mi_garage_closed);
+        ICONS.put("garage_open", R.drawable.mi_garage_open);
+        ICONS.put("car", R.drawable.mi_car);
         ICONS.put("lightbulb", R.drawable.mi_lightbulb);
         ICONS.put("power", R.drawable.mi_power);
         ICONS.put("lock", R.drawable.mi_lock);
