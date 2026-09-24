@@ -713,7 +713,7 @@ export const api = {
    * Users with tracking off simply have no entry (or a stale one).
    */
   async getAllUserLocations(): Promise<Record<string, UserLiveLocation>> {
-    const resp = await apiClient.get('/api/users/locations');
+    const resp = await apiClient.get('/api/users/location/all');
     return resp.data || {};
   },
 

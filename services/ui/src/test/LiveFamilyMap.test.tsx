@@ -69,7 +69,7 @@ describe('LiveFamilyMap', () => {
 
   beforeEach(() => {
     server.use(
-      http.get('/api/users/locations', () =>
+      http.get('/api/users/location/all', () =>
         HttpResponse.json({
           jeremiah: { latitude: 33.4484, longitude: -112.074, accuracy: 15, updated_at: nowSec - 20 },
           work: { latitude: 33.5, longitude: -112.1, accuracy: 40, updated_at: nowSec - 300 },
@@ -91,7 +91,7 @@ describe('LiveFamilyMap', () => {
   });
 
   it('explains when nobody is sharing location', async () => {
-    server.use(http.get('/api/users/locations', () => HttpResponse.json({})));
+    server.use(http.get('/api/users/location/all', () => HttpResponse.json({})));
     renderMap();
     await waitFor(() => {
       expect(screen.getByTestId('live-map-count')).toHaveTextContent(
@@ -102,7 +102,7 @@ describe('LiveFamilyMap', () => {
 
   it('drops members whose tracking stopped (stale fixes)', async () => {
     server.use(
-      http.get('/api/users/locations', () =>
+      http.get('/api/users/location/all', () =>
         HttpResponse.json({
           offline_user: {
             latitude: 33.4,

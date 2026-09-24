@@ -7169,9 +7169,10 @@ async def get_presence_rooms():
     raise HTTPException(status_code=502, detail="Presence service unavailable")
 
 
-# Declared before every "/api/users/{user_id}/location" route so the literal
-# path is not captured as a user id (a POST match would return 405).
-@app.get("/api/users/locations")
+# NOTE: the path is deliberately "/api/users/location/all" and not
+# "/api/users/locations" — the latter is captured by the earlier
+# PATCH /api/users/{user_id} route, which answers 405 for GET.
+@app.get("/api/users/location/all")
 async def get_all_user_locations(request: Request):
     """Last known GPS position for every user who has location sharing on."""
     if not await _user_id_from_request(request):
