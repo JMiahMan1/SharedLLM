@@ -66,6 +66,17 @@ export interface ThemePackage {
   /** Semver of this theme entry */
   version: string;
   tokens: HealthThemeTokens;
+  /**
+   * Where this theme may be used. `site` (default) appears in the website
+   * picker; `android_widget` is only offered for the Android home-screen
+   * fitness widget; `both` is available everywhere.
+   */
+  scope?: 'site' | 'android_widget' | 'both';
+  /**
+   * Theme icon. A single emoji/glyph keeps packs portable as plain JSON and
+   * needs no image assets — e.g. "🌌" for Aurora, "🌸" for Bloom.
+   */
+  icon?: string;
 }
 
 /** A pack = named collection of themes that ships or imports as one unit. */
@@ -141,6 +152,12 @@ export function validateThemePackage(input: unknown, path = 'theme'): ThemeValid
   }
   requireString(errors, t, 'name', path);
   requireString(errors, t, 'version', path);
+  if (t.scope !== undefined && !['site', 'android_widget', 'both'].includes(String(t.scope))) {
+    errors.push(`${path}.scope must be one of site|android_widget|both`);
+  }
+  if (t.icon !== undefined && (typeof t.icon !== 'string' || t.icon.length > 8)) {
+    errors.push(`${path}.icon must be a short string (emoji or glyph)`);
+  }
 
   const tokens = t.tokens;
   if (tokens === null || typeof tokens !== 'object') {

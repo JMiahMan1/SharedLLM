@@ -208,6 +208,16 @@ public final class WidgetApi {
         return request(context, "GET", path, null);
     }
 
+    /**
+     * Today's recorded activity for the signed-in user.
+     *
+     * Read-only: the gateway resolves the user from the API key, and this never
+     * asks the model for an analysis.
+     */
+    public static JSONObject activityToday(Context context) throws Exception {
+        return get(context, "/api/geo/steps?days=1");
+    }
+
     /** Pinned device entity_ids from device_control widget settings. */
     public static List<String> pinnedDevices(Context context) {
         List<String> out = new ArrayList<>();

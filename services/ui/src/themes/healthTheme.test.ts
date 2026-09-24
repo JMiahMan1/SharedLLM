@@ -74,6 +74,35 @@ describe('ThemeRegistry', () => {
     }
   });
 
+  it('keeps android-only themes out of the website picker', () => {
+    const siteIds = registry.listThemesForSurface('site').map((t) => t.id);
+    const androidIds = registry.listThemesForSurface('android_widget').map((t) => t.id);
+
+    // Bloom is scoped to the Android home-screen widget
+    expect(androidIds).toContain('bloom');
+    expect(siteIds).not.toContain('bloom');
+
+    // The management views follow the same scoping, so the site UI never
+    // offers an Android-only theme...
+    expect(registry.listAllThemesForSurface('site').map((t) => t.id)).not.toContain('bloom');
+    // ...while the Android widget surface can still manage it.
+    expect(registry.listAllThemesForSurface('android_widget').map((t) => t.id)).toContain('bloom');
+  });
+
+  it('ships an icon with every default theme', () => {
+    for (const theme of registry.listAllThemes()) {
+      expect(theme.icon, `${theme.id} is missing an icon`).toBeTruthy();
+    }
+  });
+
+  it('bloom keeps the Jarvis-wide base with floral character', () => {
+    const bloom = registry.getTheme('bloom')!;
+    // same structure as the Jarvis default, but floral palette + motif
+    expect(bloom.tokens.bg).toBe(registry.getTheme('aurora')!.tokens.bg);
+    expect(bloom.tokens.motif).toBe('petal');
+    expect(bloom.scope).toBe('android_widget');
+  });
+
   it('resolves default theme and falls back when missing', () => {
     expect(registry.resolveTheme(DEFAULT_HEALTH_THEME_ID).id).toBe('aurora');
     expect(registry.resolveTheme('does-not-exist').id).toBe('aurora');
@@ -82,8 +111,8 @@ describe('ThemeRegistry', () => {
 
   it('exposes CSS vars from tokens (not hardcoded in widget)', () => {
     const vars = registry.cssVarsFor('bloom');
-    expect(vars['--ht-bg']).toBe('#470A1D');
-    expect(vars['--ht-accent']).toBe('#C36786');
+    expect(vars['--ht-bg']).toBe('#0F172A');
+    expect(vars['--ht-accent']).toBe('#E06A9A');
   });
 
   it('imports a user pack and persists it', () => {

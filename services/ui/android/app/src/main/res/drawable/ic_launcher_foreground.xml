@@ -1,72 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Jarvis mascot mark: a friendly visor face with a lightning-bolt crest.
+  Purple-forward, professional, slightly cute — deliberately not a stock
+  Android/robot glyph.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Jarvis shield + AI eye from services/ui/public/jarvis-icon.svg (512 → 108) -->
-    <group
-        android:scaleX="0.2109375"
-        android:scaleY="0.2109375"
-        android:pivotX="0"
-        android:pivotY="0">
-        <path
-            android:pathData="M256,32 L448,96 L448,272 C448,384 352,464 256,496 C160,464 64,384 64,272 L64,96 Z"
-            android:strokeColor="#26FFFFFF"
-            android:strokeWidth="2">
-            <aapt:attr name="android:fillColor">
-                <gradient
-                    android:startX="64"
-                    android:startY="48"
-                    android:endX="448"
-                    android:endY="464"
-                    android:type="linear">
-                    <item android:offset="0" android:color="#FF863BFF" />
-                    <item android:offset="1" android:color="#FF6366F1" />
-                </gradient>
-            </aapt:attr>
-        </path>
-        <path
-            android:pathData="M256,48 L432,104 L432,268 C432,372 340,448 256,478 C172,448 80,372 80,268 L80,104 Z"
-            android:fillColor="#0DFFFFFF" />
-        <path
-            android:pathData="M144,240 Q256,176 368,240 Q256,304 144,240 Z"
-            android:fillColor="#00000000"
-            android:strokeWidth="6"
-            android:strokeLineCap="round"
-            android:strokeLineJoin="round"
-            android:strokeColor="#FF38BDF8" />
-        <path
-            android:pathData="M256,208 L256,160 M256,272 L256,320 M224,240 L176,240 M288,240 L336,240"
-            android:fillColor="#00000000"
-            android:strokeWidth="3"
-            android:strokeLineCap="round"
-            android:strokeColor="#99A78BFA" />
-        <path
-            android:pathData="M233,217 L200,184 M279,217 L312,184 M233,263 L200,296 M279,263 L312,296"
-            android:fillColor="#00000000"
-            android:strokeWidth="2"
-            android:strokeLineCap="round"
-            android:strokeColor="#6638BDF8" />
-        <path
-            android:pathData="M256,208 A32,32 0 1,1 255.9,208 Z"
-            android:fillColor="#00000000"
-            android:strokeWidth="4"
-            android:strokeColor="#FFA78BFA" />
-        <path
-            android:pathData="M256,226 A14,14 0 1,1 255.9,226 Z"
-            android:fillColor="#FF38BDF8" />
-        <path
-            android:pathData="M256,155 A5,5 0 1,1 255.9,155 Z"
-            android:fillColor="#FFA78BFA" />
-        <path
-            android:pathData="M256,315 A5,5 0 1,1 255.9,315 Z"
-            android:fillColor="#FF38BDF8" />
-        <path
-            android:pathData="M176,235 A5,5 0 1,1 175.9,235 Z"
-            android:fillColor="#FFA78BFA" />
-        <path
-            android:pathData="M336,235 A5,5 0 1,1 335.9,235 Z"
-            android:fillColor="#FF38BDF8" />
-    </group>
+
+    <!-- ambient glow -->
+    <path
+        android:pathData="M54,52 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0 Z"
+        android:fillColor="#6D28D9"
+        android:fillAlpha="0.30" />
+
+    <!-- side accents (gives the head a little character) -->
+    <path
+        android:pathData="M27,48 h4 a3,3 0 0,1 3,3 v9 a3,3 0 0,1 -3,3 h-4 a2,2 0 0,1 -2,-2 v-11 a2,2 0 0,1 2,-2 Z"
+        android:fillColor="#7C3AED" />
+    <path
+        android:pathData="M81,48 h-4 a3,3 0 0,0 -3,3 v9 a3,3 0 0,0 3,3 h4 a2,2 0 0,0 2,-2 v-11 a2,2 0 0,0 -2,-2 Z"
+        android:fillColor="#7C3AED" />
+
+    <!-- head shell -->
+    <path android:pathData="M30,54 C30,37 40,27 54,27 C68,27 78,37 78,54 L78,65 C78,74 71,80 62,80 L46,80 C37,80 30,74 30,65 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="32"
+                android:startY="28"
+                android:endX="78"
+                android:endY="80"
+                android:type="linear">
+                <item android:offset="0" android:color="#FFA78BFA" />
+                <item android:offset="1" android:color="#FF7C3AED" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- soft top highlight -->
+    <path
+        android:pathData="M40,40 C45,33 63,33 68,40 C60,36 48,36 40,40 Z"
+        android:fillColor="#EDE9FE"
+        android:fillAlpha="0.55" />
+
+    <!-- visor -->
+    <path
+        android:pathData="M39,45 h30 a7,7 0 0,1 7,7 v6 a7,7 0 0,1 -7,7 h-30 a7,7 0 0,1 -7,-7 v-6 a7,7 0 0,1 7,-7 Z"
+        android:fillColor="#1E1B4B"
+        android:fillAlpha="0.92" />
+
+    <!-- eyes -->
+    <path
+        android:pathData="M46,55 m-4.2,0 a4.2,5.4 0 1,0 8.4,0 a4.2,5.4 0 1,0 -8.4,0 Z"
+        android:fillColor="#EDE9FE" />
+    <path
+        android:pathData="M62,55 m-4.2,0 a4.2,5.4 0 1,0 8.4,0 a4.2,5.4 0 1,0 -8.4,0 Z"
+        android:fillColor="#EDE9FE" />
+    <path
+        android:pathData="M47.4,52.6 m-1.5,0 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0 Z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.9" />
+    <path
+        android:pathData="M63.4,52.6 m-1.5,0 a1.5,1.5 0 1,0 3,0 a1.5,1.5 0 1,0 -3,0 Z"
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.9" />
+
+    <!-- smile -->
+    <path
+        android:pathData="M48,70 Q54,74.5 60,70"
+        android:fillColor="#00000000"
+        android:strokeWidth="2.4"
+        android:strokeLineCap="round"
+        android:strokeColor="#DDD6FE" />
+
+    <!-- cheeks -->
+    <path
+        android:pathData="M39,64 m-3,0 a3,2 0 1,0 6,0 a3,2 0 1,0 -6,0 Z"
+        android:fillColor="#F0ABFC"
+        android:fillAlpha="0.30" />
+    <path
+        android:pathData="M69,64 m-3,0 a3,2 0 1,0 6,0 a3,2 0 1,0 -6,0 Z"
+        android:fillColor="#F0ABFC"
+        android:fillAlpha="0.30" />
+
+    <!-- lightning-bolt crest -->
+    <path
+        android:pathData="M58,12 L46,26 H52.5 L49,38 L63,22 H56.5 L60,12 Z"
+        android:fillColor="#C4B5FD" />
+    <path
+        android:pathData="M58,12 L46,26 H52.5 L49,38 L63,22 H56.5 L60,12 Z"
+        android:fillColor="#00000000"
+        android:strokeWidth="1"
+        android:strokeColor="#F5F3FF"
+        android:strokeAlpha="0.65" />
 </vector>

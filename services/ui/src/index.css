@@ -16,6 +16,8 @@ body {
 ────────────────────────────────────────────────────────────── */
 :root {
   --color-bg-base: #030711;
+  --site-bg-glow-a: rgba(88, 28, 220, 0.18);
+  --site-bg-glow-b: rgba(15, 118, 200, 0.10);
   --color-surface-0: rgba(255, 255, 255, 0.03);
   --color-surface-1: rgba(255, 255, 255, 0.06);
   --color-surface-2: rgba(255, 255, 255, 0.10);
@@ -28,6 +30,28 @@ body {
   --radius-panel: 1.5rem;
   --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.45), 0 1px 0 var(--color-border-soft) inset;
   --shadow-panel: 0 8px 48px rgba(0, 0, 0, 0.6), 0 1px 0 var(--color-border-soft) inset;
+
+  /* Semantic tokens — these are what a theme pack actually drives. */
+  --site-text: #f1f5f9;
+  --site-text-muted: #94a3b8;
+  --site-accent: #8b5cf6;
+  --site-on-accent: #ffffff;
+  --site-accent-soft: rgba(139, 92, 246, 0.15);
+  --site-accent-hover: rgba(139, 92, 246, 0.25);
+  --site-accent-border: rgba(139, 92, 246, 0.30);
+  --site-accent-focus: rgba(139, 92, 246, 0.50);
+  --site-accent-text: #c4b5fd;
+  --site-panel-a: rgba(255, 255, 255, 0.07);
+  --site-panel-b: rgba(255, 255, 255, 0.03);
+  --site-card-bg: rgba(255, 255, 255, 0.03);
+  --site-card-bg-hover: rgba(255, 255, 255, 0.06);
+  --site-input-bg: rgba(0, 0, 0, 0.25);
+  --site-placeholder: #475569;
+  --site-radius-input: 0.625rem;
+  --site-radius-button: 0.625rem;
+  --site-glow: rgba(139, 92, 246, 0.20);
+  --site-motif: none;
+  --site-pattern: none;
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -46,10 +70,11 @@ body {
     @apply min-h-screen overflow-x-hidden;
     background-color: var(--color-bg-base);
     background-image:
-      radial-gradient(ellipse 80% 50% at 20% 0%, rgba(88, 28, 220, 0.18) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 40% at 80% 100%, rgba(15, 118, 200, 0.10) 0%, transparent 60%);
+      var(--site-pattern, none),
+      radial-gradient(ellipse 80% 50% at 20% 0%, var(--site-bg-glow-a) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 100%, var(--site-bg-glow-b) 0%, transparent 60%);
     background-attachment: fixed;
-    color: #f1f5f9;
+    color: var(--site-text);
   }
 
   /* Smooth scrolling for all scroll containers */
@@ -65,7 +90,7 @@ body {
 
   /* Panels — primary containers */
   .glass-panel {
-    background: linear-gradient(135deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.03) 100%);
+    background: linear-gradient(135deg, var(--site-panel-a) 0%, var(--site-panel-b) 100%);
     backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
     border: 1px solid var(--color-border-mid);
@@ -75,7 +100,7 @@ body {
 
   /* Cards — widget inner cards */
   .glass-card {
-    background: var(--color-surface-0);
+    background: var(--site-card-bg);
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid var(--color-border-soft);
@@ -85,17 +110,17 @@ body {
   }
 
   .glass-card:hover {
-    background: var(--color-surface-1);
+    background: var(--site-card-bg-hover);
     border-color: var(--color-border-mid);
     box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 1px 0 var(--color-border-soft) inset;
   }
 
   /* Inputs */
   .glass-input {
-    background: rgba(0, 0, 0, 0.25);
+    background: var(--site-input-bg);
     border: 1px solid var(--color-border-soft);
-    border-radius: 0.625rem;
-    color: #f1f5f9;
+    border-radius: var(--site-radius-input);
+    color: var(--site-text);
     padding: 0.5rem 1rem;
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
@@ -104,20 +129,20 @@ body {
   }
 
   .glass-input:focus {
-    border-color: rgba(139, 92, 246, 0.5);
-    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+    border-color: var(--site-accent-focus);
+    box-shadow: 0 0 0 3px var(--site-accent-focus);
   }
 
   .glass-input::placeholder {
-    color: #475569;
+    color: var(--site-placeholder);
   }
 
   /* Buttons */
   .glass-button {
-    background: rgba(139, 92, 246, 0.15);
-    border: 1px solid rgba(139, 92, 246, 0.30);
-    border-radius: 0.625rem;
-    color: #c4b5fd;
+    background: var(--site-accent-soft);
+    border: 1px solid var(--site-accent-border);
+    border-radius: var(--site-radius-button);
+    color: var(--site-accent-text);
     padding: 0.5rem 1rem;
     font-weight: 600;
     transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
@@ -132,9 +157,9 @@ body {
   }
 
   .glass-button:hover {
-    background: rgba(139, 92, 246, 0.25);
-    border-color: rgba(139, 92, 246, 0.50);
-    box-shadow: 0 0 16px rgba(139, 92, 246, 0.20);
+    background: var(--site-accent-hover);
+    border-color: var(--site-accent-focus);
+    box-shadow: 0 0 16px var(--site-glow);
   }
 
   .glass-button:active {
@@ -161,7 +186,7 @@ body {
 
   /* Sidebar */
   .glass-sidebar {
-    background: rgba(3, 7, 17, 0.60);
+    background: color-mix(in srgb, var(--color-bg-base) 80%, transparent);
     backdrop-filter: blur(24px) saturate(180%);
     -webkit-backdrop-filter: blur(24px) saturate(180%);
     border-right: 1px solid var(--color-border-soft);
@@ -172,16 +197,16 @@ body {
   .neon-border {
     border: 1px solid var(--color-border-mid);
     transition: border-color 0.25s ease, box-shadow 0.25s ease;
-    box-shadow: 0 0 12px var(--color-purple-dim), inset 0 0 8px rgba(139, 92, 246, 0.04);
+    box-shadow: 0 0 12px var(--color-purple-dim), inset 0 0 8px var(--site-accent-soft);
   }
 
   .neon-border:hover {
-    border-color: rgba(168, 85, 247, 0.45);
-    box-shadow: 0 0 24px var(--color-purple-glow), inset 0 0 12px rgba(168, 85, 247, 0.08);
+    border-color: var(--site-accent-focus);
+    box-shadow: 0 0 24px var(--color-purple-glow), inset 0 0 12px var(--site-accent-soft);
   }
 
   .neon-glow {
-    text-shadow: 0 0 10px rgba(168, 85, 247, 0.7), 0 0 20px rgba(168, 85, 247, 0.35);
+    text-shadow: 0 0 10px var(--site-glow), 0 0 20px var(--color-purple-dim);
   }
 
   /* Safe area padding for mobile notches */
@@ -284,8 +309,73 @@ body {
    Range inputs
 ────────────────────────────────────────────────────────────── */
 input[type="range"] {
-  accent-color: #8b5cf6;
+  accent-color: var(--site-accent);
   cursor: pointer;
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Active theme overrides
+   Applied only while a theme pack is active. These remap the most
+   widely used utility colors onto the theme's semantic tokens so a
+   theme visibly restyles the whole interface instead of only the
+   widget surfaces.
+ ────────────────────────────────────────────────────────────── */
+[data-site-theme-active] .text-slate-500,
+[data-site-theme-active] .text-slate-400 {
+  color: var(--site-text-muted) !important;
+}
+
+[data-site-theme-active] .text-slate-300,
+[data-site-theme-active] .text-slate-200,
+[data-site-theme-active] .text-slate-100 {
+  color: var(--site-text) !important;
+}
+
+[data-site-theme-active] .text-purple-300,
+[data-site-theme-active] .text-purple-400,
+[data-site-theme-active] .text-indigo-300,
+[data-site-theme-active] .text-indigo-400 {
+  color: var(--site-accent-text) !important;
+}
+
+[data-site-theme-active] .bg-purple-500,
+[data-site-theme-active] .bg-purple-600,
+[data-site-theme-active] .bg-indigo-500,
+[data-site-theme-active] .bg-indigo-600 {
+  background-color: var(--site-accent) !important;
+  color: var(--site-on-accent) !important;
+}
+
+[data-site-theme-active] .border-purple-500,
+[data-site-theme-active] .border-purple-400\/30,
+[data-site-theme-active] .border-purple-500\/30,
+[data-site-theme-active] .border-indigo-500\/30 {
+  border-color: var(--site-accent-border) !important;
+}
+
+[data-site-theme-active] .bg-purple-500\/10,
+[data-site-theme-active] .bg-purple-500\/20,
+[data-site-theme-active] .bg-indigo-500\/10,
+[data-site-theme-active] .bg-indigo-500\/20 {
+  background-color: var(--site-accent-soft) !important;
+}
+
+[data-site-theme-active] .border-white\/5,
+[data-site-theme-active] .border-white\/10 {
+  border-color: var(--color-border-soft) !important;
+}
+
+[data-site-theme-active] .bg-white\/\[0\.02\],
+[data-site-theme-active] .bg-white\/5 {
+  background-color: var(--site-card-bg) !important;
+}
+
+[data-site-theme-active] input[type="range"] {
+  accent-color: var(--site-accent);
+}
+
+[data-site-theme-active] ::-webkit-scrollbar-thumb {
+  background: var(--color-border-mid);
 }
 
 /* ──────────────────────────────────────────────────────────────

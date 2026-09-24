@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/health_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_card_bg"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:letterSpacing="0.08"
+            android:text="TODAY"
+            android:textColor="#94A3B8"
+            android:textSize="10sp"
+            android:textStyle="bold" />
+
+        <ImageView
+            android:id="@+id/health_refresh"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:contentDescription="Refresh"
+            android:src="@android:drawable/ic_popup_sync" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:baselineAligned="true"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/health_steps"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="—"
+            android:textColor="#F8FAFC"
+            android:textSize="30sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:text="steps"
+            android:textColor="#64748B"
+            android:textSize="11sp" />
+    </LinearLayout>
+
+    <ProgressBar
+        android:id="@+id/health_progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="6dp"
+        android:layout_marginTop="6dp"
+        android:max="100"
+        android:progress="0"
+        android:progressTint="#863BFF" />
+
+    <TextView
+        android:id="@+id/health_goal"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text=""
+        android:textColor="#64748B"
+        android:textSize="11sp" />
+
+    <TextView
+        android:id="@+id/health_sub"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:maxLines="2"
+        android:text=""
+        android:textColor="#94A3B8"
+        android:textSize="11sp" />
+</LinearLayout>

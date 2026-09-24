@@ -14,6 +14,8 @@ interface ThemePackageManagerProps {
   onSelectTheme?: (themeId: string) => void;
   /** Compact mode for embedding inside widget settings */
   compact?: boolean;
+  /** Which surface this manager is configuring (site or Android widget) */
+  surface?: 'site' | 'android_widget';
 }
 
 function swatchStyle(tokens: ThemePackage['tokens']): React.CSSProperties {
@@ -31,9 +33,10 @@ export function ThemePackageManager({
   selectedThemeId,
   onSelectTheme,
   compact = false,
+  surface = 'site',
 }: ThemePackageManagerProps) {
   const [packs, setPacks] = useState<ThemePack[]>(() => themeRegistry.listPacks());
-  const [themes, setThemes] = useState(() => themeRegistry.listAllThemes());
+  const [themes, setThemes] = useState(() => themeRegistry.listAllThemesForSurface(surface));
   const [importError, setImportError] = useState<string | null>(null);
   const [importOk, setImportOk] = useState<string | null>(null);
   const [importText, setImportText] = useState('');
@@ -46,8 +49,8 @@ export function ThemePackageManager({
 
   const refresh = useCallback(() => {
     setPacks(themeRegistry.listPacks());
-    setThemes(themeRegistry.listAllThemes());
-  }, []);
+    setThemes(themeRegistry.listAllThemesForSurface(surface));
+  }, [surface]);
 
   useEffect(() => themeRegistry.subscribe(refresh), [refresh]);
 
@@ -328,8 +331,16 @@ export function ThemePackageManager({
                     style={{ background: t.tokens.progress, width: '60%' }}
                   />
                 </div>
-                <div className="text-xs font-semibold" style={{ color: t.tokens.text }}>
-                  {t.name}
+                <div
+                  className="flex items-center gap-1.5"
+                  style={{ color: t.tokens.text }}
+                >
+                  {t.icon && (
+                    <span aria-hidden className="text-sm leading-none">
+                      {t.icon}
+                    </span>
+                  )}
+                  <span className="text-xs font-semibold">{t.name}</span>
                 </div>
                 <div className="text-[10px]" style={{ color: t.tokens.textMuted }}>
                   {t.packName}
