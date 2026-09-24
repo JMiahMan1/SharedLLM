@@ -52,13 +52,13 @@ public class HealthWidget extends AppWidgetProvider {
 
             if (goal > 0) {
                 int pct = Math.min(100, (int) Math.round((today * 100.0) / goal));
-                views.setProgressBar(R.id.health_progress, 100, pct);
+                views.setProgressBar(R.id.health_progress, 100, pct, false);
                 views.setTextViewText(
                     R.id.health_goal,
                     fmt.format(today) + " of " + fmt.format(goal) + " steps (" + pct + "%)"
                 );
             } else {
-                views.setProgressBar(R.id.health_progress, 100, 0);
+                views.setProgressBar(R.id.health_progress, 100, 0, false);
                 views.setTextViewText(R.id.health_goal, "No step goal set");
             }
             views.setTextViewText(R.id.health_sub, "");
