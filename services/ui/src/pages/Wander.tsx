@@ -634,6 +634,9 @@ const Wander = () => {
           <span className="text-xs text-slate-500">Live HA / GPS status</span>
         </div>
 
+        {/* Live GPS map renders whenever anyone is sharing, independent of HA presence */}
+        <LiveFamilyMap height={320} />
+
         {familyMembers.length === 0 ? (
           <div className="glass-panel p-6 rounded-2xl border border-white/5 text-center">
             <p className="text-sm text-slate-400">No family presence entities reporting yet.</p>
@@ -641,7 +644,6 @@ const Wander = () => {
           </div>
         ) : (
           <>
-            <LiveFamilyMap height={320} />
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {familyMembers.map((member) => (
               <div
@@ -969,6 +971,7 @@ const Wander = () => {
                     points={routePoints[workout.id]}
                     loadRoute={loadRoute}
                     fetcher={() => api.getWorkoutRoute(workout.id).then((r) => r.points)}
+                    hidden={Boolean(tripLocations)}
                   />
                 </div>
               );
@@ -1317,6 +1320,7 @@ const Wander = () => {
                   loadRoute={loadRoute}
                   fetcher={() => api.getTripRoute(trip.id).then((r) => r.points)}
                   onOpenMap={() => openTripLocations(trip)}
+                  hidden={Boolean(tripLocations)}
                 />
               </div>
             );
@@ -1660,16 +1664,22 @@ interface RoutePreviewProps {
   fetcher: () => Promise<RoutePoint[]>;
   /** Opens the full Route Map modal when the thumbnail is clicked. */
   onOpenMap?: () => void;
+  /**
+   * Hide while a map modal is open. A Leaflet canvas left mounted behind the
+   * modal can paint over the larger map (notably in the Android WebView).
+   */
+  hidden?: boolean;
 }
 
 /** Lazily loads and renders an OSM mini-map for a trip or workout. */
-const RoutePreview = ({ id, completed, points, loadRoute, fetcher, onOpenMap }: RoutePreviewProps) => {
+const RoutePreview = ({ id, completed, points, loadRoute, fetcher, onOpenMap, hidden }: RoutePreviewProps) => {
   useEffect(() => {
     if (!points && completed) {
       loadRoute(id, fetcher);
     }
   }, [points, completed, id, loadRoute, fetcher]);
 
+  if (hidden) return null;
   if (!points || points.length === 0) return null;
   return (
     <MiniRouteMap

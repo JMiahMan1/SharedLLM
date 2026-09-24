@@ -93,9 +93,29 @@ export default function LiveFamilyMap({
         .addTo(layer);
     }
 
-    if (points.length > 0) {
-      const bounds = L.latLngBounds(points);
-      map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 });
+    if (points.length === 1) {
+      map.setView(points[0], 15);
+    } else if (points.length > 1) {
+      try {
+        // Two people can be only metres apart, which produces a degenerate
+        // bounds that Leaflet renders as a blank canvas (or rejects outright).
+        // Only fit when there is a real spread; otherwise centre and zoom in.
+        const bounds = L.latLngBounds(points);
+        const center = bounds.getCenter();
+        const spreadMeters =
+          points.reduce((acc, p) => {
+            const ll = L.latLng(p as L.LatLngTuple);
+            return acc + ll.distanceTo(center);
+          }, 0) / points.length;
+        if (spreadMeters < 50) {
+          map.setView(center, 16);
+        } else {
+          map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 });
+        }
+      } catch {
+        // Never let a bad bounds calculation leave the map blank
+        map.setView(points[0] as L.LatLngTuple, 15);
+      }
     }
   }, [members]);
 
