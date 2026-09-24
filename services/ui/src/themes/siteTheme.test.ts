@@ -41,6 +41,7 @@ import { api } from '../services/api';
 describe('site theme application', () => {
   beforeEach(() => {
     localStorage.clear();
+    localStorage.setItem('jarvis_api_key', 'test-token');
     document.documentElement.removeAttribute('data-theme-id');
     document.documentElement.removeAttribute('data-site-theme-active');
     document.documentElement.removeAttribute('style');
@@ -85,6 +86,7 @@ describe('site theme application', () => {
 describe('useSiteTheme', () => {
   beforeEach(() => {
     localStorage.clear();
+    localStorage.setItem('jarvis_api_key', 'test-token');
     document.documentElement.removeAttribute('data-theme-id');
     document.documentElement.removeAttribute('data-site-theme-active');
     document.documentElement.removeAttribute('style');
@@ -114,8 +116,21 @@ describe('useSiteTheme', () => {
     expect(api.updateUserTheme).toHaveBeenCalledWith({ theme_id: 'clean-athletic' });
   });
 
-  it('continues when server theme fetch fails (local-only)', async () => {
-    vi.mocked(api.getUserTheme).mockRejectedValueOnce(new Error('offline'));
+  it('does not call the theme API when there is no session', async () => {
+    localStorage.removeItem('jarvis_api_key');
+    vi.mocked(api.getUserTheme).mockClear();
+
+    const { result } = renderHook(() => useSiteTheme());
+    await waitFor(() => expect(result.current.ready).toBe(true));
+
+    // A pre-auth 401 from this call would otherwise clear the session and
+    // bounce the app to /login on every cold start.
+    expect(api.getUserTheme).not.toHaveBeenCalled();
+    expect(localStorage.getItem('jarvis_api_key')).toBeNull();
+    expect(document.documentElement.getAttribute('data-theme-id')).toBe('aurora');
+  });
+
+  it('continues when server theme fetch fails (local-only)', async () => {    vi.mocked(api.getUserTheme).mockRejectedValueOnce(new Error('offline'));
     localStorage.setItem('jarvis_site_theme_id', 'iron');
     const { result } = renderHook(() => useSiteTheme());
     await waitFor(() => expect(result.current.ready).toBe(true));

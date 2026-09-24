@@ -205,9 +205,15 @@ export function useSiteTheme() {
       let serverPacks: ThemePack[] = [];
 
       try {
-        const pref = await api.getUserTheme();
-        if (pref?.theme_id) nextId = pref.theme_id;
-        serverPacks = Array.isArray(pref?.packs) ? (pref.packs as ThemePack[]) : [];
+        // Only ask the server when we actually have a session; this hook runs
+        // before AuthProvider resolves, so an unauthenticated 401 here would
+        // otherwise bounce the app to /login on every cold start.
+        const token = await storageGet('jarvis_api_key');
+        if (token) {
+          const pref = await api.getUserTheme();
+          if (pref?.theme_id) nextId = pref.theme_id;
+          serverPacks = Array.isArray(pref?.packs) ? (pref.packs as ThemePack[]) : [];
+        }
       } catch {
         // offline / not signed in — local only
       }

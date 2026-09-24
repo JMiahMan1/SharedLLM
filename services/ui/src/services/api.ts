@@ -133,6 +133,15 @@ export type {
 declare module 'axios' {
   export interface InternalAxiosRequestConfig {
     __retryCount?: number;
+    /**
+     * Set for pre-auth / optional calls. A 401 on these must NOT clear the
+     * stored session or redirect to /login — otherwise a call that races
+     * authentication can log the user out (and loop).
+     */
+    skipAuthRedirect?: boolean;
+  }
+  export interface AxiosRequestConfig {
+    skipAuthRedirect?: boolean;
   }
 }
 
@@ -314,7 +323,11 @@ apiClient.interceptors.response.use(
     console.error('[API] Response error:', error.message, error.config?.baseURL, error.config?.url);
     if (error.response?.status === 401 && !isLoggingOut) {
       const isLoginRequest = error.config?.url?.includes('/api/auth/login');
-      if (!isLoginRequest) {
+      // Pre-auth/optional calls (e.g. the site theme preference, which loads
+      // before AuthProvider resolves) are allowed to 401 without tearing down
+      // the session — otherwise the app bounces to /login on every start.
+      const isOptional = error.config?.skipAuthRedirect === true;
+      if (!isLoginRequest && !isOptional) {
         isLoggingOut = true;
         const { storageRemove } = await import('../lib/storage');
         await storageRemove('jarvis_api_key');
@@ -366,8 +379,9 @@ export const api = {
     const resp = await apiClient.patch('/api/users/me', mapUserPayload(data));
     return normalizeUser(resp.data);
   },
-
-  async getUserTheme(): Promise<{ theme_id: string; packs: unknown[] }> {    const resp = await apiClient.get('/api/users/me/theme');
+  async getUserTheme(): Promise<{ theme_id: string; packs: unknown[] }> {
+    // Runs before/independently of auth, so a 401 must not log the user out.
+    const resp = await apiClient.get('/api/users/me/theme', { skipAuthRedirect: true });
     return resp.data;
   },
 
