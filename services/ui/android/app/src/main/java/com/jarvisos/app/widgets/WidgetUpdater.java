@@ -38,6 +38,7 @@ public final class WidgetUpdater {
         request(context, MediaWidget.class);
         request(context, DashboardWidget.class);
         request(context, ActionButtonWidget.class);
+        request(context, HealthWidget.class);
     }
 
     public static void request(Context context, Class<?> cls) {
@@ -150,6 +151,19 @@ public final class WidgetUpdater {
                 for (int i = 0; i < out.size(); i++) {
                     mgr.updateAppWidget(out.keyAt(i), out.valueAt(i));
                 }
+            });
+        });
+    }
+
+    /** Fitness/health home-screen widget (display only, no analysis). */
+    public static void pushHealth(Context context) {
+        AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+        int[] ids = mgr.getAppWidgetIds(new ComponentName(context, HealthWidget.class));
+        if (ids == null || ids.length == 0) return;
+        onBackground(() -> {
+            RemoteViews views = HealthWidget.build(context);
+            onMain(() -> {
+                for (int id : ids) mgr.updateAppWidget(id, views);
             });
         });
     }

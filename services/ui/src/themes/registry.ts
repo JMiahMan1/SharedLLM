@@ -104,6 +104,32 @@ export class ThemeRegistry {
     return this.listAllThemes().filter((t) => !this.disabledThemeIds.has(t.id));
   }
 
+  /**
+   * Themes usable in a given surface. `android_widget` themes are deliberately
+   * hidden from the website picker and vice versa.
+   */
+  listThemesForSurface(
+    surface: 'site' | 'android_widget'
+  ): Array<ThemePackage & { packId: string; packName: string; builtin: boolean }> {
+    return this.listThemes().filter((t) => {
+      const scope = t.scope ?? 'both';
+      return scope === 'both' || scope === surface;
+    });
+  }
+
+  /**
+   * Management view: same surface filter but keeps disabled themes visible so
+   * they can be re-enabled (a picker must not show them, the manager must).
+   */
+  listAllThemesForSurface(
+    surface: 'site' | 'android_widget'
+  ): Array<ThemePackage & { packId: string; packName: string; builtin: boolean }> {
+    return this.listAllThemes().filter((t) => {
+      const scope = t.scope ?? 'both';
+      return scope === 'both' || scope === surface;
+    });
+  }
+
   /** All themes including disabled (for management UI). */
   listAllThemes(): Array<ThemePackage & { packId: string; packName: string; builtin: boolean }> {
     const out: Array<ThemePackage & { packId: string; packName: string; builtin: boolean }> = [];

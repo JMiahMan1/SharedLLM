@@ -125,7 +125,7 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
       <div
         data-theme-id={theme.id}
         data-testid="health-activity-widget"
-        className="h-full flex flex-col gap-3 p-1 rounded-xl"
+        className="h-full flex flex-col gap-3 p-1 rounded-xl relative overflow-hidden"
         style={{
           ...cssVars,
           background: cssVars['--ht-bg'],
@@ -139,10 +139,26 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
             : {}),
         }}
       >
+        {theme.tokens.motif === 'petal' && (
+          <svg
+            aria-hidden
+            viewBox="0 0 120 120"
+            className="pointer-events-none absolute -right-3 -top-3 h-20 w-20 opacity-60"
+            style={{ color: cssVars['--ht-accent-alt'] }}
+          >
+            <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeOpacity="0.5">
+              <path d="M30 22c8 6 8 16 0 22-8-6-8-16 0-22z" />
+              <path d="M58 60c7 5 7 14 0 19-7-5-7-14 0-19z" />
+              <circle cx="72" cy="30" r="3.2" />
+            </g>
+          </svg>
+        )}
+
         {showThemes && (
           <div className="rounded-lg p-2" style={{ background: cssVars['--ht-surface'] }}>
             <ThemePackageManager
               compact
+              surface="android_widget"
               selectedThemeId={themeId}
               onSelectTheme={setTheme}
             />
