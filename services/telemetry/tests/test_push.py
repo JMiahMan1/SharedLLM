@@ -110,3 +110,28 @@ async def test_send_never_raises_when_transport_explodes(rc, monkeypatch):
     monkeypatch.setattr(push, "_send_webpush", boom)
     result = await push.send_to_user("jeremiah", "Title", "Body")
     assert result["webpush"] == 0
+
+
+async def test_missing_pywebpush_degrades_loudly_without_raising(rc, caplog):
+    """A missing dependency must log an error, never fail silently."""
+    import builtins
+    import sys
+
+    await push.save_subscription("jeremiah", sub("https://push.example/1"))
+    real_import = builtins.__import__
+
+    def blocked(name, *args, **kwargs):
+        if name == "pywebpush":
+            raise ImportError("No module named 'pywebpush'")
+        return real_import(name, *args, **kwargs)
+
+    with caplog.at_level("ERROR"):
+        sys.modules.pop("pywebpush", None)
+        builtins.__import__ = blocked
+        try:
+            result = await push.send_to_user("jeremiah", "Title", "Body")
+        finally:
+            builtins.__import__ = real_import
+
+    assert result["webpush"] == 0
+    assert any("pywebpush" in r.message for r in caplog.records)
