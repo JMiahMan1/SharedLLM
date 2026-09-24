@@ -90,6 +90,7 @@ import type {
   TelemetryReportPeriod,
   TelemetryReportType,
   TelemetrySchedule,
+  UserLiveLocation,
 } from '../types/api';
 
 // Re-export domain types so consumers can import them from the api module.
@@ -705,6 +706,15 @@ export const api = {
     const query = userId && userId !== 'all' ? `?user_id=${encodeURIComponent(userId)}` : '';
     const resp = await apiClient.get(`/api/geo/trips${query}`);
     return resp.data;
+  },
+
+  /**
+   * Last known GPS position for every user whose app has location sharing on.
+   * Users with tracking off simply have no entry (or a stale one).
+   */
+  async getAllUserLocations(): Promise<Record<string, UserLiveLocation>> {
+    const resp = await apiClient.get('/api/users/locations');
+    return resp.data || {};
   },
 
   async getTrip(tripId: string): Promise<Trip> {

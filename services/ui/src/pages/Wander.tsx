@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import type { Trip, TripLocation, TripUpdatePayload, TripLocationsResponse, Workout, RoutePoint, StepsResponse, ActivityTrendsResponse } from '../types/api';
 import Modal from '../components/ui/Modal';
 import MiniRouteMap from '../components/geo/MiniRouteMap';
+import LiveFamilyMap from '../components/geo/LiveFamilyMap';
 import TripLocationsMap from '../components/geo/TripLocationsMap';
 import toast from 'react-hot-toast';
 import {
@@ -639,7 +640,9 @@ const Wander = () => {
             <p className="text-xs text-slate-500 mt-1">Location tracking starts automatically once family members share their GPS from the mobile app.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <>
+            <LiveFamilyMap height={320} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {familyMembers.map((member) => (
               <div
                 key={member.id}
@@ -688,7 +691,8 @@ const Wander = () => {
                 </div>
               </div>
             ))}
-          </div>
+            </div>
+          </>
         )}
       </div>
 

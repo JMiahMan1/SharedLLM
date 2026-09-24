@@ -891,8 +891,19 @@ export interface ActivityTrendsResponse {
   cached?: boolean;
 }
 
-export type TelemetryReportType = 'health' | 'power';
-export type TelemetryReportPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+/** A user's last known GPS fix as stored by Identity. */
+export interface UserLiveLocation {
+  latitude: number;
+  longitude: number;
+  accuracy?: number | null;
+  speed?: number | null;
+  bearing?: number | null;
+  battery?: number | null;
+  timestamp?: number;
+  updated_at?: number;
+}
+
+export type TelemetryReportType = 'health' | 'power';export type TelemetryReportPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export interface TelemetrySchedule {
   id: string;

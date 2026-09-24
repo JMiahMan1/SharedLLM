@@ -7207,6 +7207,24 @@ async def update_current_user_location(request: Request):
     raise HTTPException(status_code=502, detail="Identity service unavailable")
 
 
+# Must be declared before "/api/users/{user_id}/location" so the literal path
+# is not captured as a user id.
+@app.get("/api/users/locations")
+async def get_all_user_locations(request: Request):
+    """Last known GPS position for every user who has location sharing on."""
+    if not await _user_id_from_request(request):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/users/location/all",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Identity service unavailable")
+
+
 @app.get("/api/users/{user_id}/location")
 async def get_user_location(user_id: str):
     """Get user GPS location."""
