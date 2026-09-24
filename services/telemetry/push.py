@@ -153,8 +153,11 @@ def _fcm_available() -> bool:
 async def _send_webpush(subscription: dict, payload: dict, keys: dict) -> bool:
     try:
         from pywebpush import WebPushException, webpush
-    except Exception:
-        return False  # dependency absent: in-app delivery still works
+    except Exception as e:
+        # Missing dependency is a deployment gap, not a delivery failure:
+        # surface it loudly and keep the in-app outbox working.
+        log.error("pywebpush is not installed — Web Push disabled (%s)", e)
+        return False
     try:
         await asyncio.to_thread(
             webpush,
