@@ -163,7 +163,7 @@
     handle /api/users/*/location {
         reverse_proxy gateway:11435
     }
-    handle /api/users/location {
+    handle /api/users/location* {
         reverse_proxy gateway:11435
     }
     handle /api/users* {
