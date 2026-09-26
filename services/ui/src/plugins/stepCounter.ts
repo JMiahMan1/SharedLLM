@@ -18,10 +18,27 @@ export interface StepReading {
   cumulativeSinceBoot?: number;
 }
 
+/** One row of the on-device ledger (the source of truth for past days). */
+export interface StepLedgerDay {
+  day: string;
+  steps: number;
+  source: string;
+  updatedAt?: number;
+}
+
+export interface StepLedgerHistory {
+  days: StepLedgerDay[];
+  source: string;
+}
+
 export interface StepCounterPluginInterface {
   isAvailable(): Promise<StepCounterAvailability>;
   requestPermission(): Promise<StepPermissionResult>;
   getTodaySteps(): Promise<StepReading>;
+  /** Durable history: survives reboots, app kills and days the app never ran. */
+  getDayHistory(options?: { days?: number }): Promise<StepLedgerHistory>;
+  /** Days recorded after `since` (exclusive), oldest first — used for backfill. */
+  getDaysSince(options: { since?: string; max?: number }): Promise<StepLedgerHistory>;
   startPolling(): Promise<void>;
   stopPolling(): Promise<void>;
   /** Open this app's system settings page (for permanently denied permissions). */
@@ -38,6 +55,8 @@ const webFallback: StepCounterPluginInterface = {
   isAvailable: async () => ({ available: false, permissionGranted: false }),
   requestPermission: async () => ({ granted: false }),
   getTodaySteps: async () => ({ available: false }),
+  getDayHistory: async () => ({ days: [], source: "phone" }),
+  getDaysSince: async () => ({ days: [], source: "phone" }),
   startPolling: async () => undefined,
   stopPolling: async () => undefined,
   openSettings: async () => undefined,

@@ -10,7 +10,8 @@
 - **docs/AUTOMATION_SERVICE.md** — background tasks
 - **docs/CONTROL_PLANE_SERVICE.md** — Docker orchestration
 - **docs/GEO_SERVICE.md** — family location (wraps Home Assistant)
-- **docs/HEALTH_STEPS.md** — pedometer capture, step endpoints, widget surfaces
+- **docs/ACHIEVEMENTS.md** — goals, achievements, opt-in sharing, Skylight bonuses
+- **docs/HEALTH_STEPS.md** — pedometer capture, device ledger, fusion, widgets
 - **docs/LOGGING_SERVICE.md** — observability
 - **docs/NOTES.md** — Keep-style notes over Nextcloud markdown
 - **docs/SQLITE_VEC_MIGRATION.md** — RAG vector store (referenced by `services/rag/main.py`)

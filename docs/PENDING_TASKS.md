@@ -125,3 +125,14 @@ Of the 13 pre-existing failures found in this sweep, 12 are fixed (see the
   sync service (see `docs/HEALTH_STEPS.md`).
 - **Wander:** live map with Places, proximity clustering, member focus,
   accuracy/last-seen on cards. See the Geo update section.
+
+## Next major slice (design captured)
+
+- **Achievements + goals + opt-in sharing + Skylight bonus stars + chat card
+  delivery**: full design and phased plan in `docs/ACHIEVEMENTS.md`. Server
+  first (rules engine, sharing enforcement), then UI, then chat envelope,
+  then Skylight star grants.
+- **Device ledger** shipped (`StepLedger.java` + backfill); remaining gap is
+  true background sync (foreground service/WorkManager) — see
+  `docs/HEALTH_STEPS.md`.
+

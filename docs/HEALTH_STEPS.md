@@ -80,3 +80,34 @@ than misattributed; keeping them would require a background service (see gaps).
 `timestamp` (not arrival time), and each day keeps the **max** value seen, so a
 late-arriving post cannot seed a new day and a reboot (counter drops) cannot
 reduce a recorded day. `services/geo/tests/test_steps.py` pins all of this.
+
+## Device ledger (source of truth) and multi-source fusion
+
+**On-device ledger.** `StepLedger.java` keeps a tiny SQLite database
+(`step_ledger.db`): one row per day per source plus a small anchor table. It is
+the source of truth for days the app never got to sync — the day rollup is
+persisted on every reading, so history survives reboots (the raw
+`TYPE_STEP_COUNTER` resets on boot), app kills and days when the app never
+opened. The plugin exposes it as `getDayHistory` / `getDaysSince`, and
+`LocationContext.backfillStepHistory()` reconciles any day newer than
+`jarvis_steps_backfilled_through` back to the server, tagged with its source.
+
+**Server sources + fusion.** Readings carry a `source` (`phone`, `watch`, `ha`,
+`health_connect`, `intervals`). Per-source buckets live in
+`geo:steps_src:{user}:{source}`; the fused view (`geo:steps:{user}`, what the
+UI reads) is recomputed as the **max across sources** for that day:
+
+- summing would double-count a walk seen by both phone and watch
+- max never overstates a shared walk and still credits a watch for steps the
+  phone missed (e.g. phone left on the table)
+
+`GET /api/geo/steps` returns the fused value plus a `sources` breakdown for
+today so the UI can explain a difference. `services/geo/tests/test_steps.py`
+pins fidelity (timestamp-owned buckets, max-per-day, fusion, unknown-source
+fallback).
+
+**Online / other-app sync (planned).** Health Connect is the free on-device
+hub other health apps read/write (Google Fit is discontinued); a watch or
+Health Connect writer becomes another `source`. For an online target, the
+candidate is intervals.icu (free, wellness API incl. steps, bridges to
+Garmin/Strava). See `docs/ACHIEVEMENTS.md` for the sharing/points design.

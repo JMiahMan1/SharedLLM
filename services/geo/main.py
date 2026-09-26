@@ -312,14 +312,43 @@ async def record_point(
         log.warning(f"[Geo] Failed to process trip point: {e}")
 
 
-async def _record_daily_steps(r, clean_id: str, steps: int, timestamp: float | None = None):
-    """Record a hardware-pedometer reading (cumulative daily counter).
+STEP_SOURCES = ("phone", "watch", "ha", "health_connect", "intervals")
 
-    Stores per-day buckets in `geo:steps:{user}` (hash: day -> steps) with a
-    30-day retention, plus the latest raw counter reading for delta handling.
-    The Android TYPE_STEP_COUNTER resets on reboot, so each reading is treated
-    as a monotonic daily sample: we keep the max seen per day, which is the
-    standard approach for cumulative step counters.
+
+async def _fuse_day(r, clean_id: str, day: str) -> int:
+    """Fuse one day across sources.
+
+    Devices counting the same walk would double-count if summed, so the fused
+    value is the max across sources: it never overstates a shared walk, and a
+    watch still contributes steps the phone missed (left on the table).
+    """
+    fused = 0
+    for source in STEP_SOURCES:
+        raw = await r.hget(f"geo:steps_src:{clean_id}:{source}", day)
+        try:
+            value = int(raw) if raw is not None else 0
+        except (TypeError, ValueError):
+            value = 0
+        fused = max(fused, value)
+    return fused
+
+
+async def _record_daily_steps(
+    r,
+    clean_id: str,
+    steps: int,
+    timestamp: float | None = None,
+    source: str = "phone",
+):
+    """Record a pedometer reading for one source (cumulative daily counter).
+
+    Per-source buckets live in `geo:steps_src:{user}:{source}`; the fused view
+    in `geo:steps:{user}` is recomputed as the max across sources so existing
+    consumers (and the widgets) keep working unchanged.
+
+    The day comes from the reading's own timestamp, never the arrival time, and
+    each bucket keeps the max seen — the Android TYPE_STEP_COUNTER resets on
+    reboot and can arrive late, neither of which may reduce a recorded day.
     """
     try:
         steps = int(steps)
@@ -327,18 +356,21 @@ async def _record_daily_steps(r, clean_id: str, steps: int, timestamp: float | N
         return
     if steps < 0 or steps > 200000:
         return
+    if source not in STEP_SOURCES:
+        source = "phone"
     ts = timestamp or time.time()
     tz = ZoneInfo("America/Phoenix")
     day = datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d")
     try:
-        # Cumulative counter only goes up; a lower reading means reboot-reset, keep max
-        existing_raw = await r.hget(f"geo:steps:{clean_id}", day)
+        src_key = f"geo:steps_src:{clean_id}:{source}"
+        existing_raw = await r.hget(src_key, day)
         try:
             existing = int(existing_raw) if existing_raw else 0
         except (TypeError, ValueError):
             existing = 0
         if steps >= existing:
-            await r.hset(f"geo:steps:{clean_id}", day, steps)
+            await r.hset(src_key, day, steps)
+        await r.hset(f"geo:steps:{clean_id}", day, await _fuse_day(r, clean_id, day))
         await r.hset(f"geo:steps_meta:{clean_id}", "updated_at", str(ts))
     except Exception as e:
         log.warning(f"[Geo] Failed to record daily steps for {clean_id}: {e}")
@@ -407,7 +439,7 @@ async def _steps_from_ha(clean_id: str, days: int) -> dict[str, int]:
             # Persist so subsequent reads hit Redis without re-querying HA
             r = await get_redis()
             if r:
-                await _record_daily_steps(r, clean_id, steps, None)
+                await _record_daily_steps(r, clean_id, steps, None, source="ha")
     return dict(sorted(best.items()))
 
 
@@ -462,7 +494,7 @@ async def post_see(
 
     r_steps = await get_redis()
     if update.daily_steps is not None and r_steps:
-        await _record_daily_steps(r_steps, entity_id.split(".")[-1].lower(), update.daily_steps, update.timestamp)
+        await _record_daily_steps(r_steps, entity_id.split(".")[-1].lower(), update.daily_steps, update.timestamp, source="phone")
 
     await record_point(
         entity_id=entity_id,
@@ -510,7 +542,7 @@ async def post_record(
         raise HTTPException(status_code=403, detail="Forbidden")
     r_steps = await get_redis()
     if update.daily_steps is not None and r_steps:
-        await _record_daily_steps(r_steps, entity_id.split(".")[-1].lower(), update.daily_steps, update.timestamp)
+        await _record_daily_steps(r_steps, entity_id.split(".")[-1].lower(), update.daily_steps, update.timestamp, source="phone")
     await record_point(
         entity_id=entity_id,
         lat=update.latitude,
@@ -1932,8 +1964,9 @@ async def post_daily_steps(
     r = await get_redis()
     if not r:
         raise HTTPException(status_code=503, detail="Redis unavailable")
-    await _record_daily_steps(r, user, steps, update.get("timestamp"))
-    return {"status": "ok", "user_id": user, "steps": int(steps)}
+    source = str(update.get("source") or "phone").lower()
+    await _record_daily_steps(r, user, steps, update.get("timestamp"), source=source)
+    return {"status": "ok", "user_id": user, "steps": int(steps), "source": source}
 
 
 @app.get("/steps")
@@ -1953,12 +1986,23 @@ async def get_daily_steps(
     history = await _get_daily_steps(r, clean, days)
     tz = ZoneInfo("America/Phoenix")
     today = datetime.now(tz).strftime("%Y-%m-%d")
+    # Per-source breakdown for today, so the UI can show why a fused number
+    # differs from the phone (e.g. a watch contributed more on a walk).
+    sources: dict[str, int] = {}
+    for source in STEP_SOURCES:
+        raw = await r.hget(f"geo:steps_src:{clean}:{source}", today)
+        try:
+            if raw is not None:
+                sources[source] = int(raw)
+        except (TypeError, ValueError):
+            continue
     return {
         "user_id": clean,
         "days": days,
         "daily_steps": history,
         "today": history.get(today, 0),
         "goal": await _get_step_goal(r, clean),
+        "sources": sources,
     }
 
 

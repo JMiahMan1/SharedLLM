@@ -49,6 +49,7 @@ const GEOFENCE_RADIUS_M = 200; // ~1/8 mile — don't log routes under this when
 const DAILY_STEPS_SYNC_INTERVAL_MS = 30000; // sync steps at least every 30s when stationary
 const KEY_LOCATION_ENABLED = 'jarvis_sensor_location_enabled';
 const KEY_STEPS_ENABLED = 'jarvis_sensor_steps_enabled';
+const KEY_STEPS_BACKFILLED = 'jarvis_steps_backfilled_through';
 
 function logSensor(scope: string, message: string, err?: unknown) {
   if (err !== undefined) {
@@ -193,6 +194,59 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   }, [patchSensor, stopStepService]);
 
   // Sync steps independently of location updates (treadmill/stationary use)
+  /**
+   * Reconcile missed days from the on-device ledger.
+   *
+   * The ledger is the source of truth for days the app never got to sync (app
+   * not opened, phone off, no network). Each run sends any day newer than the
+   * last one we reconciled, tagged with the source, so a gap is filled from
+   * real device history instead of being silently lost.
+   */
+  const backfillStepHistory = useCallback(async () => {
+    try {
+      const token = await storageGet('jarvis_api_key');
+      const rawServerUrl = await storageGet('jarvis_server_url');
+      const serverUrl = rawServerUrl || getServerOrigin();
+      if (!token || !serverUrl) return;
+      if (!Capacitor.isNativePlatform()) return;
+
+      const since = (await storageGet(KEY_STEPS_BACKFILLED)) || undefined;
+      const history = await StepCounter.getDaysSince({ since, max: 60 });
+      if (!history?.days?.length) return;
+
+      const rawUser = await storageGet('jarvis_user');
+      let user = 'me';
+      if (rawUser) {
+        try {
+          const parsed = JSON.parse(rawUser);
+          user = parsed.username || parsed.user_id || parsed.id || 'me';
+        } catch {
+          user = rawUser;
+        }
+      }
+
+      let newest = since ?? '';
+      for (const entry of history.days) {
+        // Noon local keeps the reading clearly inside its own day.
+        const ts = new Date(`${entry.day}T12:00:00`).getTime() / 1000;
+        const resp = await fetch(`${serverUrl}/api/geo/steps`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ user_id: user, steps: entry.steps, timestamp: ts, source: entry.source || 'phone' }),
+        });
+        if (!resp.ok) {
+          logSensor('steps', `backfill for ${entry.day} failed HTTP ${resp.status}`);
+          return; // retry the whole window next time
+        }
+        if (entry.day > newest) newest = entry.day;
+      }
+      if (newest) await storageSet(KEY_STEPS_BACKFILLED, newest);
+      logSensor('steps', `backfilled ${history.days.length} ledger day(s) through ${newest || 'now'}`);
+    } catch (err) {
+      logSensor('steps', 'ledger backfill failed', err);
+    }
+  }, []);
+
   const syncDailySteps = useCallback(async () => {
     if (!sensorsRef.current.steps.enabled) return;
     try {
@@ -221,7 +275,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       const resp = await fetch(`${serverUrl}/api/geo/steps`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ user_id: user, steps: dailyStepsRef.current, timestamp: Date.now() / 1000 }),
+        body: JSON.stringify({ user_id: user, steps: dailyStepsRef.current, timestamp: Date.now() / 1000, source: 'phone' }),
       });
       if (!resp.ok) {
         const body = await resp.text().catch(() => '');
@@ -513,8 +567,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
           logSensor('location', 'first fix not ready yet (watch continues)', firstFixErr);
         }
 
-        // Sync steps immediately on tracking start
+        // Sync steps immediately on tracking start, then reconcile any days
+        // the ledger knows about that the server has not seen.
         void syncDailySteps();
+        void backfillStepHistory();
 
         // One intentional 30 s cadence for step sync (see ensureStepSyncTimer):
         // the old pair of timers raced each other — whichever registered first
@@ -595,6 +651,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         patchSensor('steps', { enabled: true, permission: 'granted', message: null });
         stepsPluginReadyRef.current = false;
         void refreshDailySteps().then(() => syncDailySteps());
+        void backfillStepHistory();
         try {
           await StepCounter.startPolling();
           if (!stepUpdateListenerRef.current) {
@@ -698,6 +755,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         }
         if (stepsOn) {
           void refreshDailySteps().then(() => syncDailySteps());
+          void backfillStepHistory();
           try {
             await StepCounter.startPolling();
             if (!stepUpdateListenerRef.current) {
