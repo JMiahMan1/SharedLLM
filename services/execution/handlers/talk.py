@@ -240,6 +240,41 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 detail={"messages": messages},
             )
 
+        if action == "reactions":
+            if not req.token or req.message_id is None:
+                return ExecutionResult(status="FAILURE", message="Conversation token and message_id are required.", service="talk_reactions")
+            ok, data, message = await _talk_request_with_retry(
+                provider,
+                "GET",
+                f"/ocs/v2.php/apps/spreed/api/v1/reactions/{urllib.parse.quote(req.token)}/{int(req.message_id)}",
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Failed to load reactions.", service="talk_reactions")
+            return ExecutionResult(
+                status="SUCCESS",
+                message="Reactions loaded.",
+                service="talk_reactions",
+                detail={"reactions": data or []},
+            )
+
+        if action == "react":
+            if not req.token or req.message_id is None or not req.reaction:
+                return ExecutionResult(status="FAILURE", message="Conversation token, message_id and reaction are required.", service="talk_react")
+            ok, data, message = await _talk_request_with_retry(
+                provider,
+                "POST",
+                f"/ocs/v2.php/apps/spreed/api/v1/reactions/{urllib.parse.quote(req.token)}/{int(req.message_id)}",
+                data={"reaction": req.reaction},
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Failed to react.", service="talk_react")
+            return ExecutionResult(
+                status="SUCCESS",
+                message="Reaction sent.",
+                service="talk_react",
+                detail={"reactions": data or []},
+            )
+
         if action == "send":
             if not req.token or not req.message:
                 return ExecutionResult(status="FAILURE", message="Conversation token and message are required.", service="talk_send")

@@ -4470,6 +4470,28 @@ async def proxy_send_talk_voice(request: Request):
     }
     return await _proxy_execution_with_identity(request, "/execute/talk", payload)
 
+@app.get("/api/communication/talk/reactions")
+async def proxy_get_talk_reactions(request: Request):
+    payload = {
+        "action": "reactions",
+        "token": request.query_params.get("token"),
+        "message_id": int(request.query_params.get("message_id", "0")),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
+@app.post("/api/communication/talk/react")
+async def proxy_react_talk_message(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "react",
+        "token": body.get("token"),
+        "message_id": body.get("message_id"),
+        "reaction": body.get("reaction"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
 @app.post("/api/generate")
 async def proxy_generate(request: Request):
     try:
