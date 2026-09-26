@@ -5,11 +5,15 @@ import 'leaflet/dist/leaflet.css';
 import { api } from '../../services/api';
 import {
   FRESHNESS_STYLE,
-  RECENT_THRESHOLD_MS,
+  STALE_MAX_AGE_MS,
   ageLabel,
   buildLiveMembers,
   clusterMembers,
 } from './liveLocations';
+
+/** Continental-US view used until there is a home zone or a member to centre on. */
+const DEFAULT_CENTER: L.LatLngExpression = [39.5, -98.35];
+const DEFAULT_ZOOM = 4;
 
 export interface MapPlace {
   id: string;
@@ -39,13 +43,15 @@ interface LiveFamilyMapProps {
 export default function LiveFamilyMap({
   height = 320,
   className = '',
-  maxAgeMs = RECENT_THRESHOLD_MS,
+  maxAgeMs = STALE_MAX_AGE_MS,
   focusUserId = null,
   zones = [],
 }: LiveFamilyMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
+  /** Only auto-fit once: 30 s polls must not yank the view away from the user. */
+  const hasFitMembersRef = useRef(false);
 
   const { data: members = [] } = useQuery({
     queryKey: ['user-locations', maxAgeMs],
@@ -57,18 +63,35 @@ export default function LiveFamilyMap({
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const map = L.map(containerRef.current, {
+    const container = containerRef.current;
+    const map = L.map(container, {
       zoomControl: true,
       attributionControl: true,
     });
     mapRef.current = map;
+    // A map with no view never draws tiles. Start at a real view so the map
+    // is usable (and visibly a map) even when nobody has a fresh fix yet.
+    map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
     layerRef.current = L.layerGroup().addTo(map);
 
+    // Android WebViews can settle the container size after the map mounts;
+    // without this the canvas stays blank/garbled until a manual resize.
+    const invalidate = () => map.invalidateSize();
+    const raf = requestAnimationFrame(invalidate);
+    let observer: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(invalidate);
+      observer.observe(container);
+    }
+
     return () => {
+      cancelAnimationFrame(raf);
+      observer?.disconnect();
       map.remove();
       mapRef.current = null;
       layerRef.current = null;
+      hasFitMembersRef.current = false;
     };
   }, []);
 
@@ -110,6 +133,8 @@ export default function LiveFamilyMap({
       }
 
       const others = cluster.members.filter((m) => m.userId !== member.userId).map((m) => m.userId);
+      const age = ageLabel(member.ageMs);
+      const ageText = member.freshness === 'stale' ? `last seen ${age}` : age;
       L.circleMarker(latlng, {
         radius: member.freshness === 'live' ? 8 : 6,
         color: style.color,
@@ -118,36 +143,42 @@ export default function LiveFamilyMap({
         weight: 2,
       })
         .bindPopup(
-          `<strong>${member.userId}</strong><br/>${ageLabel(member.ageMs)}` +
+          `<strong>${member.userId}</strong><br/>${ageText}` +
             (member.accuracy ? `<br/>±${Math.round(member.accuracy)} m` : '') +
             (others.length ? `<br/><span style="opacity:.7">also here: ${others.join(', ')}</span>` : '')
         )
         .addTo(layer);
     }
 
-    if (points.length === 1) {
-      map.setView(points[0], 15);
-    } else if (points.length > 1) {
-      try {
-        // Two people can be only metres apart, which produces a degenerate
-        // bounds that Leaflet renders as a blank canvas (or rejects outright).
-        // Only fit when there is a real spread; otherwise centre and zoom in.
-        const bounds = L.latLngBounds(points);
-        const center = bounds.getCenter();
-        const spreadMeters =
-          points.reduce((acc, p) => {
-            const ll = L.latLng(p as L.LatLngTuple);
-            return acc + ll.distanceTo(center);
-          }, 0) / points.length;
-        if (spreadMeters < 50) {
-          map.setView(center, 16);
-        } else {
-          map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 });
+    if (!hasFitMembersRef.current && points.length > 0) {
+      hasFitMembersRef.current = true;
+      if (points.length === 1) {
+        map.setView(points[0], 15);
+      } else {
+        try {
+          // Two people can be only metres apart, which produces a degenerate
+          // bounds that Leaflet renders as a blank canvas (or rejects outright).
+          // Only fit when there is a real spread; otherwise centre and zoom in.
+          const bounds = L.latLngBounds(points);
+          const center = bounds.getCenter();
+          const spreadMeters =
+            points.reduce((acc, p) => {
+              const ll = L.latLng(p as L.LatLngTuple);
+              return acc + ll.distanceTo(center);
+            }, 0) / points.length;
+          if (spreadMeters < 50) {
+            map.setView(center, 16);
+          } else {
+            map.fitBounds(bounds, { padding: [30, 30], maxZoom: 16 });
+          }
+        } catch {
+          // Never let a bad bounds calculation leave the map blank
+          map.setView(points[0] as L.LatLngTuple, 15);
         }
-      } catch {
-        // Never let a bad bounds calculation leave the map blank
-        map.setView(points[0] as L.LatLngTuple, 15);
       }
+    } else if (!hasFitMembersRef.current && zones.length > 0) {
+      // No one is sharing yet, but we know where home is: start there.
+      map.setView([zones[0].lat, zones[0].lon], 13);
     }
   }, [members, zones]);
 
@@ -163,6 +194,17 @@ export default function LiveFamilyMap({
     }
   }, [focusUserId, members]);
 
+  const freshCount = members.filter((m) => m.freshness !== 'stale').length;
+  const staleCount = members.length - freshCount;
+  const countText =
+    members.length === 0
+      ? 'No one is sharing location right now'
+      : freshCount === 0
+        ? `${staleCount} last seen (sharing is off)`
+        : staleCount > 0
+          ? `${freshCount} sharing location · ${staleCount} last seen`
+          : `${freshCount} sharing location`;
+
   return (
     <div className={`relative ${className}`} data-testid="live-family-map">
       <div ref={containerRef} style={{ height, width: '100%' }} className="rounded-xl" />
@@ -173,11 +215,10 @@ export default function LiveFamilyMap({
         <span className="flex items-center gap-1">
           <span className="inline-block h-2 w-2 rounded-full bg-amber-500" /> recent (15 min)
         </span>
-        <span data-testid="live-map-count">
-          {members.length === 0
-            ? 'No one is sharing location right now'
-            : `${members.length} sharing location`}
+        <span className="flex items-center gap-1">
+          <span className="inline-block h-2 w-2 rounded-full bg-slate-500" /> last seen (24 h)
         </span>
+        <span data-testid="live-map-count">{countText}</span>
       </div>
     </div>
   );

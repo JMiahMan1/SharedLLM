@@ -2,6 +2,10 @@ import type { UserLiveLocation } from '../../types/api';
 
 export const LIVE_THRESHOLD_MS = 2 * 60 * 1000; // fresh fix
 export const RECENT_THRESHOLD_MS = 15 * 60 * 1000; // still worth showing as "last seen"
+// How long a "last seen" pin stays on the map after sharing stops. Family
+// safety apps never hide someone just because their phone went quiet; the pin
+// renders dimmed with the age instead of disappearing.
+export const STALE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export type LocationFreshness = 'live' | 'recent' | 'stale';
 
@@ -38,11 +42,17 @@ export function classifyLocation(
   };
 }
 
-/** Users with a fix newer than `maxAgeMs`; a member with tracking off ages out. */
+/**
+ * Users with a fix newer than `maxAgeMs`.
+ *
+ * Defaults to 24 h so a member whose tracking stopped still shows a dimmed
+ * "last seen" pin instead of vanishing. Freshness in the result carries the
+ * live/recent/stale distinction.
+ */
 export function buildLiveMembers(
   locations: Record<string, UserLiveLocation> | undefined,
   now: number = Date.now(),
-  maxAgeMs: number = RECENT_THRESHOLD_MS
+  maxAgeMs: number = STALE_MAX_AGE_MS
 ): LiveFamilyMember[] {
   return Object.entries(locations ?? {})
     .map(([userId, loc]) => classifyLocation(userId, loc, now))
