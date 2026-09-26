@@ -21,6 +21,7 @@
 - **docs/THEMES.md** — theme packs, import/export, Android widget tinting
 - **docs/NOTES.md** — notes UX, actions, pin/colour prefs
 - **docs/FAMILY_HUB.md** — family chat/games/create hub (Nextcloud Talk based)
+- **docs/CHAT_UI_RESEARCH.md** — chat/canvas/call research, decisions and integration phases
 
 ## Mobile
 - **docs/MOBILE_OTA_UPDATES.md** — Android OTA bundle + APK update flow
