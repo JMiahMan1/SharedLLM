@@ -243,6 +243,7 @@ function CoverImage({ src, alt }: { src: string; alt: string }) {
 const NowPlayingCard = ({
   mediaStatus,
   selectedTarget,
+  targetLabel,
   localMode,
   volume,
   muted,
@@ -262,6 +263,8 @@ const NowPlayingCard = ({
 }: {
   mediaStatus: MediaStatus | null;
   selectedTarget: string;
+  /** Friendly name for the selected device, when known. */
+  targetLabel?: string;
   localMode?: boolean;
   volume: number;
   muted: boolean;
@@ -562,7 +565,7 @@ const NowPlayingCard = ({
         <div className="relative mt-4 pt-3 border-t border-white/5">
           <div className="flex items-center justify-center gap-2 py-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400 text-sm">
             <Cast size={14} />
-            Playing through {selectedTarget.replace('_', ' ')} (HA/MA Device)
+            Playing through {targetLabel || selectedTarget.replace(/^ma:/, '').replace(/_/g, ' ')} (HA/MA Device)
           </div>
         </div>
       )}
@@ -1078,6 +1081,11 @@ const Media = () => {
   const [localTrack, setLocalTrack] = useState<{ id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; source: 'abs' | 'ma' } | null>(null);
   const [localMode, setLocalMode] = useState(true);
   const isWebPlayer = !selectedTarget;
+  // Once the user taps a device (speaker or Web Player) the page must stop
+  // second-guessing them; before that, an already-playing speaker is adopted
+  // automatically so the page never shows an empty card over live music.
+  const userPickedDeviceRef = useRef(false);
+  const autoAdoptedRef = useRef(false);
   const [maPlayers, setMaPlayers] = useState<Array<{ player_id: string; name: string; available: boolean; state: string; powered: boolean }>>([]);
 
   // Local player states
@@ -1096,7 +1104,14 @@ const Media = () => {
       setLocalIsPlaying(playerState.isPlaying);
     }
     if (playerState.error) {
-      setError(playerState.error);
+      // The web player auto-connects speculatively on load. Don't alarm the
+      // user with a red banner for a player they never asked to use; only
+      // surface connection failures after they explicitly picked it.
+      if (userPickedDeviceRef.current) {
+        setError(playerState.error);
+      } else {
+        console.warn('[Media] Web player probe failed (not user-selected):', playerState.error);
+      }
       setLocalIsPlaying(false);
       setLoading(null);
     }
@@ -1400,6 +1415,19 @@ const Media = () => {
     select: (data: MediaEntity[]) => data.filter((e) => e.domain === 'media_player'),
   });
 
+  // Friendly name for whatever device is selected (HA entity, MA player, or
+  // the raw id as a last resort) so status lines don't show entity ids.
+  const selectedDeviceLabel = useMemo(() => {
+    if (!selectedTarget) return '';
+    const fromEntities = entities.find((e) => e.entity_id === selectedTarget)?.friendly_name;
+    if (fromEntities) return fromEntities;
+    if (selectedTarget.startsWith('ma:')) {
+      const id = selectedTarget.slice(3);
+      return maPlayers.find((p) => p.player_id === id)?.name || id;
+    }
+    return availablePlayers.find((p) => p.entity_id === selectedTarget)?.name || '';
+  }, [selectedTarget, entities, availablePlayers, maPlayers]);
+
   const quickResumeItems = useMemo(() => {
     const items: Array<{
       id: string; title: string; subtitle: string; type: 'audiobook' | 'music'; progress?: number; lastPlayed?: number;
@@ -1506,6 +1534,20 @@ const Media = () => {
               }
             }
           } else {
+            // Something is already playing on a real speaker. Until the user
+            // makes a choice, follow it instead of showing an idle web-player
+            // card over live music. No sync/idle POST — we're only observing.
+            if (
+              active &&
+              active.entity_id !== 'web_player' &&
+              !userPickedDeviceRef.current &&
+              !autoAdoptedRef.current &&
+              !selectedTarget
+            ) {
+              autoAdoptedRef.current = true;
+              setSelectedTarget(active.entity_id);
+              setLocalMode(false);
+            }
             setMediaStatus(active);
             const inGrace = Date.now() - lastVolumeChangeTimeRef.current < 4000;
             if (!inGrace && active.volume_level !== undefined && active.volume_level !== null) {
@@ -1550,6 +1592,7 @@ const Media = () => {
 
   const handleDeviceSelect = useCallback((entityId: string) => {
     trigger('light');
+    userPickedDeviceRef.current = true;
     setSelectedTarget(entityId);
     setLocalMode(false);
     setError(null);
@@ -1560,6 +1603,7 @@ const Media = () => {
   }, [trigger]);
 
   const handleLocalToggle = useCallback((mode: boolean) => {
+    userPickedDeviceRef.current = true;
     setLocalMode(mode);
     if (mode) {
       setSelectedTarget('');
@@ -2118,6 +2162,7 @@ const Media = () => {
               : null
         }
         selectedTarget={selectedTarget}
+        targetLabel={selectedDeviceLabel}
         localMode={localMode}
         volume={localMode ? localVolume : volume}
         muted={localMode ? localMuted : muted}
