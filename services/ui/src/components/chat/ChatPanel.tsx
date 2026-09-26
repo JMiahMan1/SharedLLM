@@ -222,7 +222,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
           </button>
         </div>
 
-        <div className="flex gap-2 overflow-x-auto pb-1 lg:block lg:space-y-2 lg:overflow-visible lg:pb-0 lg:max-h-[60vh] lg:overflow-y-auto lg:pr-1">
+        <div className="flex max-h-24 gap-2 overflow-x-auto overscroll-contain pb-1 lg:max-h-none lg:block lg:space-y-2 lg:overflow-visible lg:pb-0 lg:max-h-[60vh] lg:overflow-y-auto lg:pr-1">
           {conversations.map((conversation) => (
             <button
               key={conversation.token}
@@ -261,7 +261,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
       </div>
 
       {/* Feed + composer */}
-      <div className="flex min-h-[60vh] flex-col rounded-2xl border border-white/5 bg-black/20 lg:min-h-[560px]">
+      <div className="flex h-[calc(100dvh-17rem)] min-h-[360px] flex-col overflow-hidden rounded-2xl border border-white/5 bg-black/20 lg:h-[560px]">
         <div className="flex items-center justify-between gap-2 border-b border-white/5 px-4 py-3">
           <div className="flex items-center gap-2 min-w-0">
             <MessageSquare size={16} className="text-fuchsia-300 shrink-0" />
@@ -279,7 +279,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
           </button>
         </div>
 
-        <div ref={feedRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-4" data-testid="chat-feed">
+        <div ref={feedRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4" data-testid="chat-feed">
           {messages.map((message, index) => {
             const author = message.actor_display_name || 'Someone';
             const mine = currentUser && author.toLowerCase() === currentUser.toLowerCase();
@@ -312,7 +312,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
           )}
         </div>
 
-        <div className="sticky bottom-0 space-y-2 border-t border-white/5 bg-slate-950/80 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
+        <div className="shrink-0 space-y-2 border-t border-white/5 bg-slate-950/80 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
           <div className="flex items-end gap-2">
             <textarea
               value={draft}
