@@ -103,12 +103,22 @@ The UI reads `GET /api/users/location/all` (gateway route is
 latter is captured by `PATCH /api/users/{user_id}`).
 
 **Live map behaviour.**
-- freshness: live <2 min, recent <15 min; older fixes are dropped so a member
-  with tracking off never looks present (`liveLocations.ts`)
+- freshness: live <2 min, recent <15 min, **last seen up to 24 h** (dimmed
+  gray pin with "last seen X" in the popup, no accuracy circle). Past 24 h the
+  member is dropped. A member with tracking off still shows their last known
+  position — Life360-style — instead of disappearing (`liveLocations.ts`)
+- the map **always has a view**: it starts at the home zone (first Place) or a
+  default US view, and only auto-fits once so 30 s polls never yank the map
+  away while the user is panning/zooming (`LiveFamilyMap.tsx`)
+- `invalidateSize()` on mount (`requestAnimationFrame`) plus a `ResizeObserver`
+  guard against blank/garbled canvases in Android WebViews where the layout
+  settles after mount
 - members within 60 m are clustered into one pin (one phone can post under two
   keys: per-user + the legacy fallback)
 - HA zones render as "Places" geofences; `GET /api/geo/zones` is used
 - clicking a family card centres the map on that member
+- the footer count distinguishes the two states, e.g. `2 sharing location ·
+  1 last seen` or `1 last seen (sharing is off)`
 
 **Family cards** show zone, GPS accuracy, battery, in-zone chips, speed and a
 relative last-seen label (fields already returned by `GET /api/geo/people`).

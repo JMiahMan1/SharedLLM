@@ -5,7 +5,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from './setup';
 import LiveFamilyMap from '../components/geo/LiveFamilyMap';
 import {
+  STALE_MAX_AGE_MS,
   ageLabel,
+  buildLiveMembers,
   classifyLocation,
   clusterMembers,
   distanceMeters,
@@ -100,6 +102,28 @@ describe('clustering nearby members', () => {
   });
 });
 
+describe('buildLiveMembers', () => {
+  const now = 1_700_000_000_000;
+  const nowSec = now / 1000;
+
+  it('keeps a stale member as a dimmed last-seen pin', () => {
+    const members = buildLiveMembers(
+      { jeremiah: { latitude: 33.4, longitude: -112.0, updated_at: nowSec - 3600 } },
+      now
+    );
+    expect(members).toHaveLength(1);
+    expect(members[0].freshness).toBe('stale');
+  });
+
+  it('drops a member whose last fix is older than the 24 h cap', () => {
+    const members = buildLiveMembers(
+      { ghost: { latitude: 33.4, longitude: -112.0, updated_at: nowSec - STALE_MAX_AGE_MS / 1000 - 60 } },
+      now
+    );
+    expect(members).toHaveLength(0);
+  });
+});
+
 describe('ageLabel', () => {  it('formats freshness in human terms', () => {
     expect(ageLabel(5_000)).toBe('just now');
     expect(ageLabel(60_000)).toBe('1 min ago');
@@ -145,7 +169,7 @@ describe('LiveFamilyMap', () => {
     });
   });
 
-  it('drops members whose tracking stopped (stale fixes)', async () => {
+  it('shows a last-seen pin for a member whose tracking stopped', async () => {
     server.use(
       http.get('/api/users/location/all', () =>
         HttpResponse.json({
@@ -160,7 +184,24 @@ describe('LiveFamilyMap', () => {
     renderMap();
     await waitFor(() => {
       expect(screen.getByTestId('live-map-count')).toHaveTextContent(
-        'No one is sharing location right now'
+        '1 last seen (sharing is off)'
+      );
+    });
+  });
+
+  it('counts sharing and last-seen members separately', async () => {
+    server.use(
+      http.get('/api/users/location/all', () =>
+        HttpResponse.json({
+          jeremiah: { latitude: 33.4484, longitude: -112.074, accuracy: 15, updated_at: nowSec - 20 },
+          offline_user: { latitude: 33.4, longitude: -112.0, updated_at: nowSec - 60 * 60 },
+        })
+      )
+    );
+    renderMap();
+    await waitFor(() => {
+      expect(screen.getByTestId('live-map-count')).toHaveTextContent(
+        '1 sharing location · 1 last seen'
       );
     });
   });
