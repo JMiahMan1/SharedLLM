@@ -92,6 +92,46 @@ async def test_a_bad_reading_is_ignored(rc):
     assert not rc.hashes.get("geo:steps:jeremiah")
 
 
+async def test_sources_fuse_with_max_not_sum(rc):
+    """A watch and phone counting the same walk must not double-count.
+
+    8,000 on the phone and 9,200 on the watch is one walk plus a table trip;
+    the fused value is the max (9,200), never the sum (17,200).
+    """
+    import services.geo.main as geo
+
+    day = "2026-09-25"
+    await geo._record_daily_steps(rc, "jeremiah", 8000, ts_for(day), source="phone")
+    await geo._record_daily_steps(rc, "jeremiah", 9200, ts_for(day), source="watch")
+
+    assert rc.hashes["geo:steps_src:jeremiah:phone"][day] == "8000"
+    assert rc.hashes["geo:steps_src:jeremiah:watch"][day] == "9200"
+    assert rc.hashes["geo:steps:jeremiah"][day] == "9200"
+
+
+async def test_watch_can_lead_and_phone_can_later_exceed(rc):
+    import services.geo.main as geo
+
+    day = "2026-09-25"
+    # Watch leads while the phone is on the table
+    await geo._record_daily_steps(rc, "jeremiah", 4000, ts_for(day), source="watch")
+    assert rc.hashes["geo:steps:jeremiah"][day] == "4000"
+    # Phone catches up and passes it
+    await geo._record_daily_steps(rc, "jeremiah", 6000, ts_for(day), source="phone")
+    assert rc.hashes["geo:steps:jeremiah"][day] == "6000"
+    # And a stale, lower watch reading must not lower the fused day
+    await geo._record_daily_steps(rc, "jeremiah", 4100, ts_for(day), source="watch")
+    assert rc.hashes["geo:steps:jeremiah"][day] == "6000"
+
+
+async def test_unknown_source_falls_back_to_phone(rc):
+    import services.geo.main as geo
+
+    day = "2026-09-25"
+    await geo._record_daily_steps(rc, "jeremiah", 500, ts_for(day), source="hacked")
+    assert rc.hashes["geo:steps_src:jeremiah:phone"][day] == "500"
+
+
 async def test_step_goal_round_trip(rc, monkeypatch):
     import services.geo.main as geo
 

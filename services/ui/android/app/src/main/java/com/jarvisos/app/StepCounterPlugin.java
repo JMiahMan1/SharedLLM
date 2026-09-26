@@ -11,6 +11,7 @@ import android.hardware.SensorManager;
 import android.os.Build;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -54,9 +55,11 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
     private SensorManager sensorManager;
     private Sensor stepSensor;
     private boolean listening = false;
+    private StepLedger ledger;
 
     @Override
     public void load() {
+        ledger = new StepLedger(bridge.getContext());
         sensorManager = (SensorManager) bridge.getContext().getSystemService(Context.SENSOR_SERVICE);
         if (sensorManager != null) {
             stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
@@ -272,6 +275,49 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
      * The day bucket rolls over at local midnight (date change on any read or
      * sensor event); a reboot (counter drops) re-baselines without double-counting.
      */
+    /**
+     * Ledger history for client backfill. After a gap (app not opened for a
+     * day), the ledger still has those days, so the client can reconcile the
+     * server instead of losing them.
+     */
+    @PluginMethod
+    public void getDayHistory(PluginCall call) {
+        Integer days = call.getInt("days", 30);
+        JSArray out = new JSArray();
+        for (StepLedger.DayEntry entry : ledger.history(days == null ? 30 : days, StepLedger.SOURCE_PHONE)) {
+            JSObject row = new JSObject();
+            row.put("day", entry.day);
+            row.put("steps", entry.steps);
+            row.put("source", entry.source);
+            row.put("updatedAt", entry.updatedAt / 1000.0);
+            out.put(row);
+        }
+        JSObject ret = new JSObject();
+        ret.put("days", out);
+        ret.put("source", StepLedger.SOURCE_PHONE);
+        call.resolve(ret);
+    }
+
+    /** Days recorded after `since` (exclusive), oldest first, for backfill. */
+    @PluginMethod
+    public void getDaysSince(PluginCall call) {
+        String since = call.getString("since");
+        Integer max = call.getInt("max", 60);
+        JSArray out = new JSArray();
+        for (StepLedger.DayEntry entry : ledger.daysSince(since, max == null ? 60 : max)) {
+            JSObject row = new JSObject();
+            row.put("day", entry.day);
+            row.put("steps", entry.steps);
+            row.put("source", entry.source);
+            row.put("updatedAt", entry.updatedAt / 1000.0);
+            out.put(row);
+        }
+        JSObject ret = new JSObject();
+        ret.put("days", out);
+        ret.put("source", StepLedger.SOURCE_PHONE);
+        call.resolve(ret);
+    }
+
     private int computeTodaySteps(float cumulative) {
         SharedPreferences prefs = bridge.getContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String today = java.time.LocalDate.now().toString();
@@ -312,6 +358,8 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             editor.putLong(KEY_LAST_CUMULATIVE, (long) cumulative);
             editor.putLong(KEY_LAST_READ_AT, now);
             editor.apply();
+            // Persist the day rollup: history survives reboots and app kills.
+            ledger.recordDay(today, (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps)), StepLedger.SOURCE_PHONE);
             return (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps));
         }
 
@@ -327,6 +375,7 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         editor.putLong(KEY_LAST_CUMULATIVE, (long) cumulative);
         editor.putLong(KEY_LAST_READ_AT, now);
         editor.apply();
+        ledger.recordDay(today, (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps)), StepLedger.SOURCE_PHONE);
         return (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps));
     }
 }
