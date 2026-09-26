@@ -80,3 +80,7 @@ cannot reappear.
   duplicated there.
 - Target for the games slice: rules engine unit tests (deterministic question
   selection, scoring, no repeated questions) plus a room-level integration test.
+
+See **docs/CHAT_UI_RESEARCH.md** for the build-vs-reuse research
+(reactions/polls/calls already exist in Talk; Excalidraw for drawing; LiveKit as
+the call fallback) that drives these phases.
