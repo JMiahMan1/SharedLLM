@@ -68,3 +68,52 @@ export const FRESHNESS_STYLE: Record<
   recent: { color: '#f59e0b', fill: '#f59e0b', opacity: 0.85 },
   stale: { color: '#64748b', fill: '#64748b', opacity: 0.5 },
 };
+
+/** Metres between two coordinates (haversine). */
+export function distanceMeters(
+  aLat: number,
+  aLon: number,
+  bLat: number,
+  bLon: number
+): number {
+  const R = 6371000;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLon = ((bLon - aLon) * Math.PI) / 180;
+  const lat1 = (aLat * Math.PI) / 180;
+  const lat2 = (bLat * Math.PI) / 180;
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+export interface MemberCluster {
+  /** Freshest member in the cluster — the one the marker represents. */
+  lead: LiveFamilyMember;
+  members: LiveFamilyMember[];
+}
+
+/**
+ * Group members standing together.
+ *
+ * One phone can post under more than one key (the app posts per-user and has a
+ * legacy fallback), which showed up as duplicate pins stacked on the same spot.
+ * Anything within `radiusMeters` collapses into one marker.
+ */
+export function clusterMembers(
+  members: LiveFamilyMember[],
+  radiusMeters = 60
+): MemberCluster[] {
+  const clusters: MemberCluster[] = [];
+  for (const member of members) {
+    const hit = clusters.find((c) =>
+      c.members.some((m) => distanceMeters(m.lat, m.lon, member.lat, member.lon) <= radiusMeters)
+    );
+    if (hit) {
+      hit.members.push(member);
+      if (member.ageMs < hit.lead.ageMs) hit.lead = member;
+    } else {
+      clusters.push({ lead: member, members: [member] });
+    }
+  }
+  return clusters;
+}

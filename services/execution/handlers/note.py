@@ -136,6 +136,59 @@ async def _handle_nextcloud_note(req: NoteRequest) -> ExecutionResult:
             if resp["status_code"] in [200, 201, 204]:
                 return ExecutionResult(status="SUCCESS", message=f"Appended to '{req.title}'.", service="note_append")
 
+        elif action == "write":
+            # Full replace: this is what the editor's Save uses. "append" is a
+            # deliberate quick-capture action and must never back a save, or
+            # every save duplicates the body into a checklist line.
+            category = req.category or "Notes"
+            await provider.ensure_directory(category)
+            if req.path:
+                url = provider.file_url(req.path.lstrip("/"))
+            else:
+                file_title = provider.sanitize_filename(req.title or "untitled", "note")
+                url = provider.file_url(f"{category}/{file_title}.md")
+            content = f"# {req.title}\nCategory: {category}\n\n{req.content or ''}"
+            resp = await http_request(
+                "PUT", url, data=content.encode('utf-8'),
+                auth=(provider.username, provider.password), verify=False,
+                headers={"Content-Type": "text/markdown; charset=utf-8"},
+            )
+            if resp["status_code"] in [200, 201, 204]:
+                return ExecutionResult(status="SUCCESS", message=f"Note '{req.title}' saved.", service="note_write")
+
+        elif action == "check_off":
+            # Toggle one checklist item ("- [ ] text" <-> "- [x] text").
+            if not req.item:
+                return ExecutionResult(status="FAILURE", message="check_off requires item text.", service="note_check_off")
+            if req.path:
+                url = provider.file_url(req.path.lstrip("/"))
+            else:
+                file_title = provider.sanitize_filename(req.title or "", "note")
+                url = provider.file_url(f"Notes/{file_title}.md")
+            r_resp = await http_request("GET", url, auth=(provider.username, provider.password), verify=False)
+            if r_resp["status_code"] != 200:
+                return ExecutionResult(status="FAILURE", message=f"Note '{req.title}' not found.", service="note_check_off")
+            target = req.item.strip()
+            lines = r_resp["text"].splitlines()
+            changed = False
+            for idx, line in enumerate(lines):
+                if line.startswith("- [ ] ") and line[6:].strip() == target:
+                    lines[idx] = "- [x] " + line[6:]
+                    changed = True
+                    break
+                if line.lower().startswith("- [x] ") and line[6:].strip() == target:
+                    lines[idx] = "- [ ] " + line[6:]
+                    changed = True
+                    break
+            if not changed:
+                return ExecutionResult(status="FAILURE", message=f"Checklist item '{target}' not found.", service="note_check_off")
+            new_content = "\n".join(lines)
+            if r_resp["text"].endswith("\n"):
+                new_content += "\n"
+            resp = await http_request("PUT", url, data=new_content.encode('utf-8'), auth=(provider.username, provider.password), verify=False)
+            if resp["status_code"] in [200, 201, 204]:
+                return ExecutionResult(status="SUCCESS", message=f"Toggled '{target}'.", service="note_check_off")
+
         elif action == "delete":
             if req.path:
                 url = provider.file_url(req.path.lstrip("/"))

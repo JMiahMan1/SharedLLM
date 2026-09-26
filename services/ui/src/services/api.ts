@@ -781,9 +781,20 @@ export const api = {
 
   // Daily steps (hardware pedometer)
   async getDailySteps(userId?: string, days = 7): Promise<StepsResponse> {
-    const params = new URLSearchParams({ days: String(days) });
-    if (userId && userId !== 'all') params.set('user_id', userId);
-    const resp = await apiClient.get(`/api/geo/steps?${params.toString()}`);
+    const query = new URLSearchParams({ days: String(days) });
+    if (userId && userId !== 'all') query.set('user_id', userId);
+    const resp = await apiClient.get(`/api/geo/steps?${query.toString()}`);
+    return resp.data;
+  },
+
+  async getStepGoal(userId?: string): Promise<{ user_id: string; goal: number }> {
+    const query = userId && userId !== 'all' ? `?user_id=${encodeURIComponent(userId)}` : '';
+    const resp = await apiClient.get(`/api/geo/steps/goal${query}`);
+    return resp.data;
+  },
+
+  async setStepGoal(goal: number, userId?: string): Promise<{ user_id: string; goal: number }> {
+    const resp = await apiClient.put('/api/geo/steps/goal', { goal, user_id: userId });
     return resp.data;
   },
 
@@ -987,6 +998,29 @@ export const api = {
 
   async appendNote(payload: { title: string; content: string; storage?: string; path?: string }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/append', payload);
+    return resp.data;
+  },
+
+  /** Full replace — the editor's Save. Append would duplicate the body. */
+  async writeNote(payload: {
+    title: string;
+    content: string;
+    category?: string;
+    storage?: string;
+    path?: string;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/write', payload);
+    return resp.data;
+  },
+
+  /** Toggle a checklist item ("- [ ] x" <-> "- [x] x") inside a note. */
+  async checkOffNote(payload: {
+    title: string;
+    item: string;
+    storage?: string;
+    path?: string;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/check_off', payload);
     return resp.data;
   },
 

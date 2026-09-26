@@ -10,8 +10,15 @@
 - **docs/AUTOMATION_SERVICE.md** — background tasks
 - **docs/CONTROL_PLANE_SERVICE.md** — Docker orchestration
 - **docs/GEO_SERVICE.md** — family location (wraps Home Assistant)
+- **docs/HEALTH_STEPS.md** — pedometer capture, step endpoints, widget surfaces
 - **docs/LOGGING_SERVICE.md** — observability
+- **docs/NOTES.md** — Keep-style notes over Nextcloud markdown
 - **docs/SQLITE_VEC_MIGRATION.md** — RAG vector store (referenced by `services/rag/main.py`)
+- **docs/THEMES.md** — theme pack system (Jarvis-wide, per-user)
+
+## UI
+- **docs/THEMES.md** — theme packs, import/export, Android widget tinting
+- **docs/NOTES.md** — notes UX, actions, pin/colour prefs
 
 ## Mobile
 - **docs/MOBILE_OTA_UPDATES.md** — Android OTA bundle + APK update flow

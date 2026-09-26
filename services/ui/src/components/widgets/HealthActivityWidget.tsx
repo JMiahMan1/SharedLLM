@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Footprints, Flame, Mountain, Timer } from 'lucide-react';
+import { Activity, Footprints, Flame, Mountain } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
 import { useWidgetStore } from '../../stores/widgetStore';
 import { themeRegistry } from '../../themes';
@@ -23,24 +23,9 @@ export interface HealthActivityConfig {
   themeAccentText?: string;
 }
 
-const DEFAULT_CONFIG: Required<Pick<HealthActivityConfig, 'stepGoal' | 'floorGoal' | 'activeMinuteGoal'>> = {
+const DEFAULT_CONFIG: Required<Pick<HealthActivityConfig, 'stepGoal'>> = {
   stepGoal: 10000,
-  floorGoal: 10,
-  activeMinuteGoal: 30,
 };
-
-/**
- * Metrics come from the real recorded data source (same endpoint Wander uses),
- * never from placeholder numbers. Anything without a real source stays null and
- * renders as "—" so the dashboard can never disagree with Wander.
- */
-function readMetrics(config: HealthActivityConfig) {
-  return {
-    floors: config.floors ?? null,
-    activeMinutes: config.activeMinutes ?? null,
-    calories: config.calories ?? null,
-  };
-}
 
 function Ring({
   pct,
@@ -93,28 +78,32 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
   const theme = useMemo(() => themeRegistry.resolveTheme(themeId), [themeId]);
   const cssVars = useMemo(() => themeRegistry.cssVarsFor(themeId), [themeId]);
 
-  const goals = {
-    stepGoal: config.stepGoal ?? DEFAULT_CONFIG.stepGoal,
-    floorGoal: config.floorGoal ?? DEFAULT_CONFIG.floorGoal,
-    activeMinuteGoal: config.activeMinuteGoal ?? DEFAULT_CONFIG.activeMinuteGoal,
-  };
-  const metrics = readMetrics(config);
-
   // Same source Wander reads, so both screens always agree.
   const { data: stepsData } = useQuery({
     queryKey: ['daily-steps', 'health-widget'],
-    queryFn: () => api.getDailySteps(undefined, 1),
+    queryFn: () => api.getDailySteps(undefined, 7),
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
   const hasStepData = stepsData != null && Object.keys(stepsData.daily_steps ?? {}).length > 0;
   const steps = hasStepData ? (stepsData.today ?? 0) : null;
-  const stepsGoal = stepsData?.goal || goals.stepGoal;
+  const stepsGoal = stepsData?.goal || config.stepGoal || DEFAULT_CONFIG.stepGoal;
 
   const stepPct = steps == null ? 0 : steps / Math.max(1, stepsGoal);
-  const floorPct = metrics.floors == null ? 0 : metrics.floors / Math.max(1, goals.floorGoal);
-  const activePct =
-    metrics.activeMinutes == null ? 0 : metrics.activeMinutes / Math.max(1, goals.activeMinuteGoal);
+
+  // Real derived metrics — no data source is invented to fill a tile.
+  const weekValues = useMemo(
+    () => Object.values(stepsData?.daily_steps ?? {}).filter((v): v is number => typeof v === 'number' && v > 0),
+    [stepsData]
+  );
+  const weekAvg = weekValues.length
+    ? Math.round(weekValues.reduce((a, b) => a + b, 0) / weekValues.length)
+    : null;
+  const weekBest = weekValues.length ? Math.max(...weekValues) : null;
+  // Distance estimate from stride length, labelled "est." wherever it is shown.
+  const weekMiles = weekValues.length
+    ? (weekValues.reduce((a, b) => a + b, 0) * 0.7) / 1609.34
+    : null;
 
   // Publish the resolved theme colors so the native Android home-screen widget
   // can tint itself the same way. Keeps palettes in the pack data (never
@@ -203,30 +192,26 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
         <div className="grid grid-cols-3 gap-2">
           {[
             {
-              key: 'floors',
-              label: 'Stairs',
-              value: metrics.floors,
-              goal: goals.floorGoal,
-              pct: floorPct,
-              icon: Mountain,
+              key: 'avg',
+              label: '7-day avg',
+              value: weekAvg == null ? null : weekAvg.toLocaleString(),
+              pct: weekAvg == null ? 0 : weekAvg / Math.max(1, stepsGoal),
+              icon: Activity,
               ring: cssVars['--ht-ring-2'] ?? cssVars['--ht-accent'],
             },
             {
-              key: 'active',
-              label: 'Active',
-              value: metrics.activeMinutes,
-              goal: goals.activeMinuteGoal,
-              pct: activePct,
-              icon: Timer,
+              key: 'best',
+              label: 'Best day',
+              value: weekBest == null ? null : weekBest.toLocaleString(),
+              pct: weekBest == null ? 0 : weekBest / Math.max(1, stepsGoal),
+              icon: Mountain,
               ring: cssVars['--ht-ring-3'] ?? cssVars['--ht-progress'],
-              unit: 'm',
             },
             {
-              key: 'kcal',
-              label: 'Kcal',
-              value: metrics.calories,
-              goal: 500,
-              pct: metrics.calories == null ? 0 : metrics.calories / 500,
+              key: 'distance',
+              label: 'Miles (est.)',
+              value: weekMiles == null ? null : weekMiles.toFixed(1),
+              pct: weekMiles == null ? 0 : weekMiles / 10,
               icon: Flame,
               ring: cssVars['--ht-accent'],
             },
@@ -251,7 +236,6 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
                   }}
                 >
                   {tile.value == null ? '—' : tile.value}
-                  {tile.value == null ? '' : (tile.unit ?? '')}
                 </div>
                 <div className="text-[10px]" style={{ color: cssVars['--ht-text-muted'] }}>
                   {tile.label}

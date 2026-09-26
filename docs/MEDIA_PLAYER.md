@@ -403,3 +403,22 @@ The frontend tracks the active playback state using two mechanisms:
 * **Audio Format:** `mpeg` (119 kbps, 44100 Hz, 16-bit, stereo) from OpenSubsonic provider.
 * **MA JWT Token:** Stored in `.env` file. Admin token for user "summers" with long-lived expiry.
 
+---
+
+## Update (2026-09-24, v1.4.9) — progress scrubber behaviour
+
+The now-playing progress area was reworked after mobile UI reports:
+
+- **Drag survives polling.** The 3 s status poll used to cancel an in-flight
+  drag when it refreshed metadata (drag state was keyed on the title). It is
+  now keyed on the track identity (`media_content_id`), and pointer moves are
+  coalesced with `requestAnimationFrame` so the knob tracks the finger.
+- **Touch targets.** The hit area is ~44 px on mobile (`py-5`, thumb 20 px) and
+  the thumb is always visible on touch; hover-only reveal remains on desktop.
+  The dashboard widget scrubber got the same treatment.
+- **Live streams.** When `duration <= 0` (live radio, buffering) the UI now
+  shows a LIVE bar with the elapsed time instead of no progress UI at all.
+- **Seek failures surface.** Both the page and the widget report a toast when a
+  seek is rejected instead of silently snapping back on the next poll; the
+  widget no longer leaks an unhandled promise rejection.
+- **Retry buttons** in the Music Assistant explorer now actually refetch.

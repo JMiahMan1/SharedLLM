@@ -237,6 +237,21 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     }
   }, [patchSensor]);
 
+  /**
+   * Single 30 s step-sync cadence.
+   *
+   * There used to be two timers writing into the same ref: one gated on being
+   * stationary and one unconditional. Whichever registered first won, so the
+   * gate silently did nothing. One unconditional tick keeps server step counts
+   * fresh during walks too, and a pedometer read is cheap.
+   */
+  const ensureStepSyncTimer = useCallback(() => {
+    if (stationarySyncTimerRef.current !== null) return;
+    stationarySyncTimerRef.current = window.setInterval(() => {
+      void refreshDailySteps().then(() => syncDailySteps());
+    }, DAILY_STEPS_SYNC_INTERVAL_MS);
+  }, [refreshDailySteps, syncDailySteps]);
+
   const syncToGateway = useCallback(async (lat: number, lng: number, accuracy: number | null, speed: number | null) => {
     if (!sensorsRef.current.location.enabled) return;
     try {
@@ -501,15 +516,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         // Sync steps immediately on tracking start
         void syncDailySteps();
 
-        // Periodic step sync when stationary (treadmill etc.) — reads intervalRef,
-        // not state.interval, so the callback never goes stale
-        if (stationarySyncTimerRef.current === null) {
-          stationarySyncTimerRef.current = window.setInterval(() => {
-            if (intervalRef.current === 'stationary') {
-              void syncDailySteps();
-            }
-          }, DAILY_STEPS_SYNC_INTERVAL_MS);
-        }
+        // One intentional 30 s cadence for step sync (see ensureStepSyncTimer):
+        // the old pair of timers raced each other — whichever registered first
+        // won, which accidentally disabled the intended stationary gate.
+        ensureStepSyncTimer();
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Failed to start location tracking';
         logSensor('location', 'startTracking failed', err);
@@ -622,7 +632,6 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     if (id === 'steps') {
       patchSensor('steps', { enabled: false, message: null });
       await storageSet(KEY_STEPS_ENABLED, 'false');
-      await storageSet('jarvis_steps_enabled', 'false');
       await stopStepService();
       logSensor('steps', 'sensor disabled by user');
       return;
@@ -707,11 +716,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
               patchSensor('steps', { permission: 'unavailable', message: 'Step counter requires the native app' });
             }
           }
-          if (stationarySyncTimerRef.current === null) {
-            stationarySyncTimerRef.current = window.setInterval(() => {
-              void refreshDailySteps().then(() => syncDailySteps());
-            }, DAILY_STEPS_SYNC_INTERVAL_MS);
-          }
+          ensureStepSyncTimer();
         }
       } catch (err) {
         logSensor('init', 'failed to load sensor preferences', err);

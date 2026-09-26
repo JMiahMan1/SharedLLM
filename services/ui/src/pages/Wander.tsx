@@ -46,6 +46,19 @@ interface VehicleOption {
   fuel_type: string;
 }
 
+/** Compact "5 min ago" style label for a last-updated timestamp. */
+function relativeTime(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return '';
+  const mins = Math.round((Date.now() - then) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return hours === 1 ? '1 hr ago' : `${hours} hrs ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? 'yesterday' : `${days} days ago`;
+}
+
 interface FamilyMemberStatus {
   id: string;
   name: string;
@@ -55,6 +68,10 @@ interface FamilyMemberStatus {
   battery: number | null;
   assignedVehicle?: string;
   lastUpdated?: string;
+  /** GPS accuracy in metres, when the source reports it. */
+  accuracy?: number | null;
+  /** Zones the member is currently inside (from HA). */
+  inZones?: string[];
 }
 
 type ActivityType =
@@ -119,6 +136,11 @@ const Wander = () => {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
   const [familyMembers, setFamilyMembers] = useState<FamilyMemberStatus[]>([]);
+  const [focusMember, setFocusMember] = useState<string | null>(null);
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [goalDraft, setGoalDraft] = useState('10000');
+  /** HA zones ("Places") drawn on the live map. */
+  const [places, setPlaces] = useState<Array<{ id: string; name: string; lat: number; lon: number; radius: number }>>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [filterTab, setFilterTab] = useState<'all' | 'mine'>('all');
@@ -160,11 +182,40 @@ const Wander = () => {
   const fetchTripsAndTelemetry = useCallback(async () => {
     try {
       setIsRefreshing(true);
-      const [tripsRes, vehRes, peopleRes] = await Promise.allSettled([
+      const [tripsRes, vehRes, peopleRes, zonesRes] = await Promise.allSettled([
         api.getTrips(),
         api.getVehicles(),
         api.getGeoPeople(),
+        api.getGeoZones(),
       ]);
+
+      // HA zones become "Places" on the live map (Life360-style geofences).
+      if (zonesRes.status === 'fulfilled' && zonesRes.value) {
+        const geoJson = zonesRes.value as {
+          features?: Array<{
+            properties?: Record<string, unknown>;
+            geometry?: { coordinates?: [number, number] };
+          }>;
+        };
+        const parsed = (geoJson.features || [])
+          .map((feature) => {
+            const props = feature.properties || {};
+            const coords = feature.geometry?.coordinates;
+            const lat = Number(props.latitude ?? coords?.[1]);
+            const lon = Number(props.longitude ?? coords?.[0]);
+            const radius = Number(props.radius ?? 100);
+            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+            return {
+              id: String(props.entity_id || props.friendly_name || `${lat},${lon}`),
+              name: String(props.friendly_name || 'Place'),
+              lat,
+              lon,
+              radius: Number.isFinite(radius) && radius > 0 ? radius : 100,
+            };
+          })
+          .filter((z): z is { id: string; name: string; lat: number; lon: number; radius: number } => z !== null);
+        setPlaces(parsed);
+      }
 
       if (tripsRes.status === 'fulfilled' && tripsRes.value?.trips) {
         setTrips(tripsRes.value.trips);
@@ -187,6 +238,9 @@ const Wander = () => {
             const zone = String(props.state || 'Unknown');
             const speedRaw = Number(props.speed || 0);
             const battery = props.battery != null ? Number(props.battery) : null;
+            const accuracy = props.gps_accuracy != null ? Number(props.gps_accuracy) : null;
+            const lastUpdated = props.last_updated != null ? String(props.last_updated) : undefined;
+            const inZones = Array.isArray(props.in_zones) ? (props.in_zones as string[]) : [];
             members.push({
               id: entityId,
               name: rawName,
@@ -194,6 +248,9 @@ const Wander = () => {
               isMoving: speedRaw > 1.0,
               speedMph: Math.round(speedRaw * 2.23694), // m/s -> mph
               battery,
+              accuracy: Number.isFinite(accuracy) ? accuracy : null,
+              lastUpdated,
+              inZones,
             });
           }
         }
@@ -635,7 +692,11 @@ const Wander = () => {
         </div>
 
         {/* Live GPS map renders whenever anyone is sharing, independent of HA presence */}
-        <LiveFamilyMap height={320} />
+        <LiveFamilyMap
+          height={320}
+          focusUserId={familyMembers.find((m) => m.id === focusMember)?.name.toLowerCase() ?? null}
+          zones={places}
+        />
 
         {familyMembers.length === 0 ? (
           <div className="glass-panel p-6 rounded-2xl border border-white/5 text-center">
@@ -648,7 +709,14 @@ const Wander = () => {
             {familyMembers.map((member) => (
               <div
                 key={member.id}
-                className="glass-card p-4 rounded-2xl border border-white/5 hover:border-purple-500/30 transition-all flex flex-col justify-between gap-3 shadow-lg"
+                role="button"
+                tabIndex={0}
+                onClick={() => setFocusMember(member.id)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setFocusMember(member.id); }}
+                title="Show on the live map"
+                className={`glass-card p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 shadow-lg cursor-pointer ${
+                  focusMember === member.id ? 'border-purple-400/70 ring-1 ring-purple-400/40' : 'border-white/5 hover:border-purple-500/30'
+                }`}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-3">
@@ -667,6 +735,11 @@ const Wander = () => {
                       <div className="flex items-center gap-1.5 text-xs text-slate-400">
                         <MapPin size={12} className="text-purple-400" />
                         <span>{member.zone}</span>
+                        {member.accuracy != null && (
+                          <span className="text-[10px] text-slate-500" title="GPS accuracy">
+                            ±{Math.round(member.accuracy)} m
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -679,6 +752,19 @@ const Wander = () => {
                   )}
                 </div>
 
+                {(member.inZones?.length ?? 0) > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {member.inZones!.slice(0, 3).map((zone) => (
+                      <span
+                        key={zone}
+                        className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/25"
+                      >
+                        {zone.replace(/^zone\./, '').replace(/_/g, ' ')}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <div className="flex items-center justify-between text-xs pt-2 border-t border-white/5 text-slate-400">
                   <div className="flex items-center gap-1.5">
                     <Gauge size={13} className={member.isMoving ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
@@ -690,6 +776,11 @@ const Wander = () => {
                       )}
                     </span>
                   </div>
+                  {member.lastUpdated && (
+                    <span className="text-[10px] text-slate-500" title={new Date(member.lastUpdated).toLocaleString()}>
+                      {relativeTime(member.lastUpdated)}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
@@ -727,13 +818,64 @@ const Wander = () => {
               <Flame size={12} className="text-orange-400" />
               Steps Today
             </div>
-            {steps && steps.today > 0 ? (
+            {steps && Object.keys(steps.daily_steps || {}).length > 0 ? (
               <>
                 <p className="text-2xl font-bold text-white mt-0.5">{stepsToday.toLocaleString()}</p>
                 <p className="text-[11px] text-slate-500">
                   of {stepsGoal.toLocaleString()} goal
                   {stepsPct >= 100 ? ' — goal reached! 🎉' : ''}
+                  <button
+                    type="button"
+                    className="ml-1.5 underline hover:text-purple-300"
+                    onClick={() => {
+                      setGoalDraft(String(stepsGoal));
+                      setEditingGoal(true);
+                    }}
+                  >
+                    edit goal
+                  </button>
                 </p>
+                {editingGoal && (
+                  <div className="flex items-center gap-1 mt-1">
+                    <input
+                      type="number"
+                      min={1000}
+                      max={100000}
+                      step={500}
+                      value={goalDraft}
+                      onChange={(e) => setGoalDraft(e.target.value)}
+                      aria-label="Daily step goal"
+                      className="glass-input px-2 py-1 text-xs w-24"
+                    />
+                    <button
+                      type="button"
+                      className="glass-button px-2 py-1 text-[11px]"
+                      onClick={() => {
+                        const goal = Number(goalDraft);
+                        if (!Number.isFinite(goal) || goal < 1000 || goal > 100000) {
+                          toast.error('Goal must be between 1,000 and 100,000');
+                          return;
+                        }
+                        void api
+                          .setStepGoal(goal, currentUsername || undefined)
+                          .then(() => {
+                            setEditingGoal(false);
+                            return fetchStepsAndWorkouts();
+                          })
+                          .catch(() => toast.error('Could not save the step goal'));
+                      }}
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="glass-button px-2 py-1 text-[11px]"
+                      onClick={() => setEditingGoal(false)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
                 {Object.keys(steps.daily_steps || {}).length > 0 && (
                   <div className="flex items-end gap-1 mt-2 h-8">
                     {Object.entries(steps.daily_steps)

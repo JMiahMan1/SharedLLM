@@ -1958,8 +1958,68 @@ async def get_daily_steps(
         "days": days,
         "daily_steps": history,
         "today": history.get(today, 0),
-        "goal": 10000,
+        "goal": await _get_step_goal(r, clean),
     }
+
+
+DEFAULT_STEP_GOAL = 10000
+MIN_STEP_GOAL = 1000
+MAX_STEP_GOAL = 100000
+
+
+async def _get_step_goal(r, user: str) -> int:
+    """Per-user daily step goal, defaulting to 10k until the user sets one."""
+    try:
+        raw = await r.get(f"geo:steps_goal:{user}")
+        if raw is not None:
+            goal = int(float(raw))
+            if MIN_STEP_GOAL <= goal <= MAX_STEP_GOAL:
+                return goal
+    except Exception as e:
+        log.warning(f"[Geo] Step goal read failed for {user}: {e}")
+    return DEFAULT_STEP_GOAL
+
+
+@app.get("/steps/goal")
+async def get_step_goal(
+    user_id: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    clean = (user_id or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+    r = await get_redis()
+    if not r:
+        return {"user_id": clean, "goal": DEFAULT_STEP_GOAL}
+    return {"user_id": clean, "goal": await _get_step_goal(r, clean)}
+
+
+@app.put("/steps/goal")
+async def set_step_goal(
+    payload: dict,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Set the user's daily step goal (1000–100000)."""
+    user_id = payload.get("user_id")
+    clean = (str(user_id) if user_id else "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+    try:
+        goal = int(payload.get("goal"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="goal must be a number")
+    if not (MIN_STEP_GOAL <= goal <= MAX_STEP_GOAL):
+        raise HTTPException(
+            status_code=422,
+            detail=f"goal must be between {MIN_STEP_GOAL} and {MAX_STEP_GOAL}",
+        )
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    await r.set(f"geo:steps_goal:{clean}", goal)
+    return {"user_id": clean, "goal": goal}
 
 
 @app.get("/workouts")

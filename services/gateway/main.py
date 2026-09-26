@@ -4273,6 +4273,35 @@ async def proxy_append_note(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/note", payload)
 
 
+@app.post("/api/communication/notes/write")
+async def proxy_write_note(request: Request):
+    """Full replace save from the notes editor (create overwrites in place)."""
+    body = await request.json()
+    payload = {
+        "action": "write",
+        "title": body.get("title"),
+        "content": body.get("content"),
+        "category": body.get("category"),
+        "path": body.get("path"),
+        "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+
+
+@app.post("/api/communication/notes/check_off")
+async def proxy_check_off_note(request: Request):
+    """Toggle one checklist item in a note."""
+    body = await request.json()
+    payload = {
+        "action": "check_off",
+        "title": body.get("title"),
+        "item": body.get("item"),
+        "path": body.get("path"),
+        "storage": body.get("storage", "nextcloud"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+
+
 @app.post("/api/communication/notes/delete")
 async def proxy_delete_note(request: Request):
     body = await request.json()
@@ -7679,6 +7708,42 @@ async def proxy_geo_steps(request: Request):
         if resp.status == 200:
             return await resp.json()
     raise HTTPException(status_code=502, detail="Failed to record steps")
+
+
+@app.get("/api/geo/steps/goal")
+async def proxy_get_step_goal(request: Request, user_id: str | None = None):
+    if not user_id:
+        user_id = await _user_id_from_request(request) or ""
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/steps/goal",
+            params={"user_id": user_id},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to read step goal")
+
+
+@app.put("/api/geo/steps/goal")
+async def proxy_set_step_goal(request: Request):
+    body = await request.json()
+    if not body.get("user_id"):
+        body["user_id"] = await _user_id_from_request(request) or ""
+    if not body.get("user_id"):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    async with shared_http_client() as client:
+        resp = await client.put(
+            f"{GEO_SVC}/steps/goal",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        detail = await resp.text()
+    raise HTTPException(status_code=resp.status, detail=detail[:200])
 
 
 @app.get("/api/geo/trends/activity")

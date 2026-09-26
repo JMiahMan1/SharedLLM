@@ -98,8 +98,8 @@ Source: `docs/RAVEN_CAPABILITY_GAP_ANALYSIS.md`, `docs/RAVEN_AUDIT_BLUEPRINT.md`
   (implicit `any`, possibly-null `e.target`, private `core` access). It is a
   dev-only debug harness served at `/ma-stream-test.html`; the crash-level bug
   (`stopHeartbeat` out of scope) is fixed, the rest is cleanup.
-- `QuickNotesWidget` computes an `error` state that is never set to a message —
-  the `catch` swallows the failure and renders an empty list.
+- ~~`QuickNotesWidget` computes an `error` state that is never set —~~ fixed:
+  the widget sets and renders the error message (`QuickNotesWidget.tsx`).
 
 ### Test suite
 Of the 13 pre-existing failures found in this sweep, 12 are fixed (see the
@@ -113,3 +113,15 @@ Of the 13 pre-existing failures found in this sweep, 12 are fixed (see the
   it, which is the most likely candidate). Not run by any workflow that
   triggers on this branch — `python-tests.yml` is limited to `main` /
   `annoucements` and to `app/**` + `test/**` paths.
+
+## Added 2026-09-24 (v1.4.9)
+
+- **Notes:** the editor now saves with the `write` action (full replace);
+  `append` is quick-capture only. See `docs/NOTES.md`.
+- **Themes:** themes are Jarvis-wide; per-widget theme pickers were removed.
+  See `docs/THEMES.md`.
+- **Health/steps:** per-user step goal endpoints added; the Android widget and
+  dashboard now show only real derived metrics. Open gap: no background step
+  sync service (see `docs/HEALTH_STEPS.md`).
+- **Wander:** live map with Places, proximity clustering, member focus,
+  accuracy/last-seen on cards. See the Geo update section.

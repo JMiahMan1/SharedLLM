@@ -88,3 +88,35 @@ endpoints via MapLibre (Protomaps/OSM vector tiles) and call
 ## License notes
 MapLibre GL JS: BSD-2 · OSM data: ODbL · Protomaps: see their license · HA
 core: Apache-2 · Traccar: Apache-2. All self-hostable / FOSS.
+
+---
+
+## Update (2026-09-24, v1.4.9)
+
+**Client.** The in-app live map is **Leaflet** (`components/geo/LiveFamilyMap.tsx`,
+`MiniRouteMap.tsx`, `TripLocationsMap.tsx`), not MapLibre.
+
+**Live positions.** The app posts GPS to `POST /api/users/{user}/location`
+(Identity), which stores `user_location:{user}` and forwards to HA and Geo.
+The UI reads `GET /api/users/location/all` (gateway route is
+`/api/users/location/all`, deliberately not `/api/users/locations` — the
+latter is captured by `PATCH /api/users/{user_id}`).
+
+**Live map behaviour.**
+- freshness: live <2 min, recent <15 min; older fixes are dropped so a member
+  with tracking off never looks present (`liveLocations.ts`)
+- members within 60 m are clustered into one pin (one phone can post under two
+  keys: per-user + the legacy fallback)
+- HA zones render as "Places" geofences; `GET /api/geo/zones` is used
+- clicking a family card centres the map on that member
+
+**Family cards** show zone, GPS accuracy, battery, in-zone chips, speed and a
+relative last-seen label (fields already returned by `GET /api/geo/people`).
+
+**Steps.** `GET /api/geo/steps` now returns the per-user goal and
+`GET/PUT /api/geo/steps/goal` manage it (see `docs/HEALTH_STEPS.md`).
+
+**Other endpoints present but undocumented in the table above:** `/record`,
+`/telemetry/{id}`, `/trips*`, `/workouts*`, `/steps*`, `/trends/activity`
+(GET = read-only) and `POST /trends/activity/analyze` (explicit opt-in, per-user
+lock), `/android_auto`, `/fuel-prices`, `/vehicle-lookup*`.
