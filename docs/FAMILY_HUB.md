@@ -1,0 +1,82 @@
+# Family Hub — Chat, Games, Create
+
+One interactive space for the whole household, designed **mobile-first**:
+phones and tablets are the primary way this gets used, desktops are the
+exception.
+
+Route: `/family` (`src/pages/Family.tsx`). Navigation entry is called
+**Family** on both the sidebar and the bottom nav.
+
+## Rule: one implementation of everything
+
+This page reuses existing systems and must not grow parallel copies:
+
+| Need | Reuse |
+|---|---|
+| Chat (text, voice) | **Nextcloud Talk** via the existing `/api/communication/talk/*` APIs |
+| Chat UI | `src/components/chat/ChatPanel.tsx` — the **only** chat surface |
+| Drawing / recipes / creations | Nextcloud files (same credentials as Notes) |
+| Pictures, music, polish | Raven / Jarvis / Alpaca (`/v1/chat/completions`, image + audio paths) |
+| Points, badges, cheers | Achievements engine + points ledger (`docs/ACHIEVEMENTS.md`) |
+| Chores & rewards | Skylight integration (`/api/integrations/skylight/*`) |
+
+`Communication` no longer hosts chat: it renders a card linking here, and its
+tests assert the Talk composer is *not* present there — so a second chat UI
+cannot reappear.
+
+## Shipped
+
+- **Family page with Chat / Games / Create tabs** (segmented control on
+  phones, thumb-sized targets, bottom-nav clearance).
+- **ChatPanel on Nextcloud Talk**: conversation picker (full list on desktop,
+  horizontally scrolling pills with avatars on phones), message bubbles aligned
+  by author with per-person avatar tints, Enter-to-send composer, and voice
+  messages that **preview before sending** (playback + optional caption +
+  discard) before posting into Talk.
+- **Mobile-first rules** applied: 44 px minimum targets, sticky composer with
+  `safe-area-inset-bottom`, no hover-only affordances, `text-base` inputs so
+  iOS does not zoom, single-column stacking on phones, 60 vh feed on phones /
+  560 px on desktop.
+- Games and Create tabs list the planned features honestly ("planned") rather
+  than showing dead buttons.
+
+## Next slices
+
+### 1. Games (server first)
+- Question sets as **data** (`services/games/*.json`, like theme packs and
+  achievement definitions) so new quizzes need no deploy:
+  Bible trivia, Bible memorisation (fill-in-the-blank with hints), family
+  trivia (generated from names/dates you already have), draw & guess.
+- One active game per Talk room, state in Redis
+  (`game:{room}:{id}`), moves posted as **typed chat messages** so everyone
+  plays in the conversation they are already in and no new client is needed.
+- Scoring feeds the points ledger; winners can earn Skylight stars.
+
+### 2. Create
+- **Draw together**: shared canvas (one document per drawing, stored in
+  Nextcloud), then "make it better" sends the image + prompt to Raven/Alpaca
+  for an improved version (img2img), keeping the original.
+- **Make a picture**: prompt → generated image → saved to the family folder
+  and shareable into a chat as a card.
+- **Make music**: mood/lyrics → generated track, saved and shareable.
+- **Recipes**: a sheet-like Nextcloud note (markdown checklist) editable by the
+  whole family; "what's for dinner" can be asked in chat.
+
+### 3. Chat depth
+- **Voice/video calls**: Nextcloud Talk WebRTC needs the Talk signalling API
+  (`/ocs/v2.php/apps/spreed/api/v4/call/*`). Phase 1 is a join button that
+  opens the Talk room; phase 2 is in-app WebRTC via a Talk client library.
+- **Typed chat envelope** (`text | activity | game | creation | system`) with a
+  text fallback so old clients keep working — this is also what activity
+  cards and game moves ride on (`docs/ACHIEVEMENTS.md`).
+- Kid-friendly touches: emoji reactions, big buttons, optionally read-aloud
+  replies through the existing TTS path.
+
+## Tests
+
+- `src/test/Family.test.tsx` — opens on chat, tab switching, DM open, message
+  send, voice preview → caption → send.
+- `src/pages/Communication.test.tsx` — sections render and chat is *not*
+  duplicated there.
+- Target for the games slice: rules engine unit tests (deterministic question
+  selection, scoring, no repeated questions) plus a room-level integration test.

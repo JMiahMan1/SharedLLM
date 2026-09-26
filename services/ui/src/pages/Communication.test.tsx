@@ -9,11 +9,10 @@ describe('Communication page', () => {
 
     expect(await screen.findByText('Active Timers')).toBeInTheDocument();
     expect(screen.getByText('Announcements')).toBeInTheDocument();
-    expect(screen.getByText('Nextcloud Talk')).toBeInTheDocument();
     expect(screen.getByText('Calendar')).toBeInTheDocument();
     expect(screen.getAllByText('Notes').length).toBeGreaterThan(0);
     expect(await screen.findByText('Kitchen Timer')).toBeInTheDocument();
-    expect(await screen.findByText('Family')).toBeInTheDocument();
+    expect(await screen.findByText('Chat moved to Family')).toBeInTheDocument();
   });
 
   it('creates and deletes a timer', async () => {
@@ -35,38 +34,13 @@ describe('Communication page', () => {
     await waitFor(() => expect(screen.queryByText('Kitchen Timer')).not.toBeInTheDocument());
   });
 
-  it('opens a talk conversation and sends a chat message', async () => {
+  it('points chat at the Family page instead of hosting a second chat UI', async () => {
     renderWithProviders(<Communication />);
 
-    fireEvent.change(await screen.findByPlaceholderText('Nextcloud username to open'), {
-      target: { value: 'jeremiah' },
-    });
-    fireEvent.click(screen.getByText('Open Conversation'));
-
-    expect(await screen.findByText('DM jeremiah')).toBeInTheDocument();
-
-    fireEvent.change(screen.getByPlaceholderText('Send a live Nextcloud Talk message'), {
-      target: { value: 'Testing live talk.' },
-    });
-    fireEvent.click(screen.getByText('Send Message'));
-
-    expect(await screen.findByText('Testing live talk.')).toBeInTheDocument();
-  });
-
-  it('records and sends a talk voice message', async () => {
-    renderWithProviders(<Communication />);
-
-    expect(await screen.findByText('Family')).toBeInTheDocument();
-    fireEvent.click(screen.getByText('Record Voice'));
-    fireEvent.click(await screen.findByText('Stop Recording'));
-
-    await screen.findByText(/Recorded clip ready/);
-
-    fireEvent.change(screen.getByPlaceholderText('Optional caption for voice message'), {
-      target: { value: 'Voice update' },
-    });
-    fireEvent.click(screen.getByText('Send Voice'));
-
-    expect((await screen.findAllByText('Voice update')).length).toBeGreaterThan(0);
+    // Chat has one home now (Family). Communication must not grow its own copy
+    // again — the Talk composer and conversation controls are gone from here.
+    expect(await screen.findByText('Chat moved to Family')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /open family/i })).toHaveAttribute('href', '/family');
+    expect(screen.queryByPlaceholderText('Send a live Nextcloud Talk message')).not.toBeInTheDocument();
   });
 });

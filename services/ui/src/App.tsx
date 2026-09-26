@@ -13,6 +13,7 @@ import Admin from './pages/Admin';
 import Identity from './pages/Identity';
 import Communication from './pages/Communication';
 import Notes from './pages/Notes';
+import Family from './pages/Family';
 import Calendar from './pages/Calendar';
 import JarvisLab, { JarvisLabAdmin } from './pages/JarvisLab';
 import KnowledgeHub from './pages/KnowledgeHub';
@@ -116,6 +117,7 @@ function App() {
             <Route path="/identity" element={<ProtectedRoute isMobile={isMobile}><Identity /></ProtectedRoute>} />
             <Route path="/communication" element={<ProtectedRoute isMobile={isMobile}><Communication /></ProtectedRoute>} />
             <Route path="/notes" element={<ProtectedRoute isMobile={isMobile}><Notes /></ProtectedRoute>} />
+            <Route path="/family" element={<ProtectedRoute isMobile={isMobile}><Family /></ProtectedRoute>} />
             <Route path="/calendar" element={<ProtectedRoute isMobile={isMobile}><Calendar /></ProtectedRoute>} />
             <Route path="/media" element={<ProtectedRoute isMobile={isMobile}><Media /></ProtectedRoute>} />
             <Route path="/wander" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
