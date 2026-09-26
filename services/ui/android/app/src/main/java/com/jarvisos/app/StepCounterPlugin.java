@@ -43,6 +43,13 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
     private static final String KEY_BASELINE_DATE = "midnight_baseline_date";
     private static final String KEY_LAST_CUMULATIVE = "last_cumulative";
     private static final String KEY_HAS_BASELINE = "has_baseline";
+    private static final String KEY_LAST_READ_AT = "last_read_at";
+    /**
+     * Only credit the across-midnight delta to the new day when the previous
+     * reading was this recent. A longer gap can contain an entire unrecorded
+     * day, and attributing it to today would inflate today's count.
+     */
+    private static final long MIDNIGHT_CREDIT_WINDOW_MS = 60L * 60L * 1000L;
 
     private SensorManager sensorManager;
     private Sensor stepSensor;
@@ -272,6 +279,8 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         boolean hasBaseline = prefs.getBoolean(KEY_HAS_BASELINE, false);
         long baseline = prefs.getLong(KEY_BASELINE, 0L);
         long daySteps = prefs.getLong("day_steps", 0L);
+        long lastReadAt = prefs.getLong(KEY_LAST_READ_AT, 0L);
+        long now = System.currentTimeMillis();
 
         // Counter reset (reboot) invalidates the baseline; keep the day's total.
         if (hasBaseline && (long) cumulative < baseline) {
@@ -279,12 +288,17 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         }
 
         if (!hasBaseline || !today.equals(baselineDate)) {
-            if (hasBaseline && !today.equals(baselineDate) && (long) cumulative >= baseline) {
-                // Midnight rollover: credit steps taken since the last reading
-                // (sensor batches across the boundary) to the NEW day, then start fresh.
+            // Midnight rollover. The sensor only gives a cumulative count, so we
+            // can credit the delta to the new day — but ONLY when the gap is
+            // short (the classic case: a reading just before midnight and one
+            // just after, e.g. while asleep). Across a whole day with no reads,
+            // that delta contains an entire lost day of walking; attributing it
+            // to today would inflate today's count, which is exactly the bug
+            // users saw after the app went a day without syncing.
+            boolean recentReading = lastReadAt > 0 && (now - lastReadAt) <= MIDNIGHT_CREDIT_WINDOW_MS;
+            if (hasBaseline && !today.equals(baselineDate) && recentReading && (long) cumulative >= baseline) {
                 daySteps += (long) cumulative - baseline;
             } else {
-                // First read of the day (or reboot): start today's bucket at 0.
                 daySteps = 0;
             }
             baseline = (long) cumulative;
@@ -296,6 +310,7 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             editor.putBoolean(KEY_HAS_BASELINE, hasBaseline);
             editor.putLong("day_steps", daySteps);
             editor.putLong(KEY_LAST_CUMULATIVE, (long) cumulative);
+            editor.putLong(KEY_LAST_READ_AT, now);
             editor.apply();
             return (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps));
         }
@@ -310,6 +325,7 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
         editor.putLong(KEY_BASELINE, baseline);
         editor.putLong("day_steps", daySteps);
         editor.putLong(KEY_LAST_CUMULATIVE, (long) cumulative);
+        editor.putLong(KEY_LAST_READ_AT, now);
         editor.apply();
         return (int) Math.min(Integer.MAX_VALUE, Math.max(0, daySteps));
     }

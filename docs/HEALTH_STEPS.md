@@ -57,3 +57,26 @@ inventing numbers would make the dashboard disagree with Wander.
 - `services/geo/tests` — steps storage, workouts
 - `services/ui/src/test/WanderAnalysisOptIn.test.tsx` — analysis stays opt-in
 - Typecheck/lint cover the widget metric math
+
+## Midnight rollover (and the inflated-count bug)
+
+Android's `TYPE_STEP_COUNTER` only reports **steps since boot**, so every
+"today" number is app arithmetic. Two rules matter:
+
+**Plugin (`StepCounterPlugin.computeTodaySteps`).** When the local date changes,
+the delta since the previous reading is credited to the new day **only if the
+previous reading was within the last hour** (`MIDNIGHT_CREDIT_WINDOW_MS`).
+That covers the normal case (a reading just before midnight and one just after,
+e.g. overnight) while refusing to attribute a long gap to today.
+
+Before this rule, the delta was *always* credited to the new day. If the app
+went a whole day without a reading (app never opened, so the plugin never
+polled), every step from that missing day landed on today — which is exactly
+the "it didn't reset at midnight" report: a missing 2026-09-25 bucket and an
+inflated 2026-09-26 total. Steps taken during a long gap are now dropped rather
+than misattributed; keeping them would require a background service (see gaps).
+
+**Server (`_record_daily_steps`).** The day is derived from the reading's own
+`timestamp` (not arrival time), and each day keeps the **max** value seen, so a
+late-arriving post cannot seed a new day and a reboot (counter drops) cannot
+reduce a recorded day. `services/geo/tests/test_steps.py` pins all of this.
