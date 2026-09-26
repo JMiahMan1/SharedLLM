@@ -198,3 +198,18 @@ async def test_record_awards_is_idempotent():
     newly = [e for e in second.earned if e.achievement.id not in ledger_after_first]
     await ach.record_awards(rc, "jeremiah", newly)
     assert await ach.load_points_ledger(rc, "jeremiah") == ledger_after_first
+
+def test_next_up_is_ranked_by_completion_not_raw_units():
+    """1,360 steps to go must rank above 1 workout to go.
+
+    Raw `remaining` mixes steps, days and workouts; ranking by percent is
+    unit-free and is what the UI shows.
+    """
+    defs = definitions()
+    # 8,640 steps = 86% of the 10k badge; no workouts at all
+    result = ach.evaluate(
+        defs, {day(0): 8640}, [], ach.DEFAULT_GOALS, previously_earned={}, today=day(0)
+    )
+    ids = [p.achievement.id for p in result.next_up]
+    assert ids.index("steps_10k_day") < ids.index("workout_1")
+    assert result.next_up[0].achievement.id == "steps_10k_day"
