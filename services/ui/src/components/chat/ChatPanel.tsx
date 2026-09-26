@@ -12,6 +12,11 @@ interface TalkConversation {
   last_message?: string;
 }
 
+interface TalkReaction {
+  reaction?: string;
+  actor_display_name?: string;
+}
+
 interface TalkMessage {
   id?: number | string;
   actor_display_name?: string;
@@ -65,6 +70,8 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
   const [recording, setRecording] = useState(false);
   const [clip, setClip] = useState<{ url: string; base64: string; mimeType: string } | null>(null);
   const [caption, setCaption] = useState('');
+  const [reactingFor, setReactingFor] = useState<number | null>(null);
+  const [reactions, setReactions] = useState<Record<number, TalkReaction[]>>({});
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const feedRef = useRef<HTMLDivElement | null>(null);
@@ -191,6 +198,35 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
     setRecording(false);
   };
 
+  const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '🙏', '😮'];
+
+  const loadReactions = async (messageId: number) => {
+    try {
+      const res = await api.getTalkReactions(activeToken, messageId);
+      const list = (res.detail as { reactions?: TalkReaction[] } | undefined)?.reactions ?? [];
+      setReactions((prev) => ({ ...prev, [messageId]: list }));
+    } catch {
+      // Reactions are additive; failing to load them must not break chat.
+    }
+  };
+
+  const react = async (messageId: number, reaction: string) => {
+    setReactingFor(null);
+    try {
+      const res = await api.reactToTalkMessage({ token: activeToken, message_id: messageId, reaction });
+      const list = (res.detail as { reactions?: TalkReaction[] } | undefined)?.reactions;
+      if (Array.isArray(list)) setReactions((prev) => ({ ...prev, [messageId]: list }));
+      else void loadReactions(messageId);
+    } catch {
+      toast.error('Could not react — try again');
+    }
+  };
+
+  const openReactionBar = (messageId: number) => {
+    setReactingFor((current) => (current === messageId ? null : messageId));
+    if (!reactions[messageId]) void loadReactions(messageId);
+  };
+
   return (
     <div className={`grid gap-4 lg:grid-cols-[280px_1fr] ${className}`} data-testid="chat-panel">
       {/* Conversations */}
@@ -294,13 +330,48 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
                       </span>
                     )}
                   </div>
-                  <div
+                  <button
+                    type="button"
+                    onClick={() => typeof message.id === 'number' && openReactionBar(message.id)}
                     className={`mt-1 inline-block rounded-2xl px-3 py-2 text-sm break-words text-left ${
                       mine ? 'bg-purple-500/25 text-slate-100' : 'bg-white/10 text-slate-100'
                     }`}
+                    title="Tap to react"
                   >
                     {message.message || message.system_message || 'Empty message'}
-                  </div>
+                  </button>
+
+                  {typeof message.id === 'number' && (reactions[message.id]?.length ?? 0) > 0 && (
+                    <div className={`mt-1 flex flex-wrap gap-1 ${mine ? 'justify-end' : ''}`} data-testid="reaction-chips">
+                      {Object.entries(
+                        (reactions[message.id] || []).reduce<Record<string, number>>((acc, item) => {
+                          const key = item.reaction || '👍';
+                          acc[key] = (acc[key] || 0) + 1;
+                          return acc;
+                        }, {})
+                      ).map(([emoji, count]) => (
+                        <span key={emoji} className="rounded-full border border-white/10 bg-white/5 px-1.5 py-0.5 text-[11px]">
+                          {emoji} {count > 1 ? count : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {reactingFor === message.id && (
+                    <div className={`mt-1 flex gap-1 ${mine ? 'justify-end' : ''}`} data-testid="reaction-bar">
+                      {QUICK_REACTIONS.map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          aria-label={`React ${emoji}`}
+                          className="min-h-9 min-w-9 rounded-full border border-white/10 bg-white/5 text-base"
+                          onClick={() => typeof message.id === 'number' && void react(message.id, emoji)}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             );

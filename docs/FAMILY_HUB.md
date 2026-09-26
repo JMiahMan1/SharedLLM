@@ -42,7 +42,15 @@ cannot reappear.
 
 ## Next slices
 
-### 1. Games (server first)
+### 1a. Talk depth — reactions SHIPPED
+
+Tap any message to open a quick reaction bar (👍 ❤️ 😂 🎉 🙏 😮) and chips show
+the tallies. Runs entirely on Talk's reaction API through the gateway
+(`/api/communication/talk/reactions`, `/react`) and the execution action pair
+`reactions`/`react`, so every Talk client (phone, Skylight board) sees them too.
+Polls are the next part of this slice.
+
+### 1b. Games (server first)
 - Question sets as **data** (`services/games/*.json`, like theme packs and
   achievement definitions) so new quizzes need no deploy:
   Bible trivia, Bible memorisation (fill-in-the-blank with hints), family
