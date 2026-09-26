@@ -74,19 +74,41 @@ describe('ThemeRegistry', () => {
     }
   });
 
-  it('keeps android-only themes out of the website picker', () => {
-    const siteIds = registry.listThemesForSurface('site').map((t) => t.id);
-    const androidIds = registry.listThemesForSurface('android_widget').map((t) => t.id);
+  it('scopes themes by surface without leaking android-only ones into the site picker', () => {
+    // Synthetic pack: the shipped themes are Jarvis-wide, but the surface
+    // filter must still work for imported packs that opt into a scope.
+    const pack = createThemePack('scoped-pack', 'Scoped Pack');
+    pack.themes = [
+      {
+        ...createThemePackage('widget-only', 'Widget Only', {
+          bg: '#111111',
+          text: '#EEEEEE',
+          accent: '#22D3EE',
+        }),
+        scope: 'android_widget' as const,
+      },
+      createThemePackage('everywhere', 'Everywhere', {
+        bg: '#101010',
+        text: '#FAFAFA',
+        accent: '#A78BFA',
+      }),
+    ];
+    registry.importPackJson(serializeThemePack(pack));
 
-    // Bloom is scoped to the Android home-screen widget
-    expect(androidIds).toContain('bloom');
-    expect(siteIds).not.toContain('bloom');
+    const site = registry.listThemesForSurface('site').map((t) => t.id);
+    const android = registry.listThemesForSurface('android_widget').map((t) => t.id);
 
-    // The management views follow the same scoping, so the site UI never
-    // offers an Android-only theme...
-    expect(registry.listAllThemesForSurface('site').map((t) => t.id)).not.toContain('bloom');
-    // ...while the Android widget surface can still manage it.
-    expect(registry.listAllThemesForSurface('android_widget').map((t) => t.id)).toContain('bloom');
+    expect(site).toContain('everywhere');
+    expect(site).not.toContain('widget-only');
+    expect(android).toContain('widget-only');
+    expect(android).toContain('everywhere');
+  });
+
+  it('keeps every shipped theme available Jarvis-wide', () => {
+    const site = registry.listThemesForSurface('site').map((t) => t.id);
+    for (const id of ['aurora', 'bloom', 'iron', 'tron', 'neon', 'clean-athletic']) {
+      expect(site).toContain(id);
+    }
   });
 
   it('ships an icon with every default theme', () => {
@@ -100,7 +122,8 @@ describe('ThemeRegistry', () => {
     // same structure as the Jarvis default, but floral palette + motif
     expect(bloom.tokens.bg).toBe(registry.getTheme('aurora')!.tokens.bg);
     expect(bloom.tokens.motif).toBe('petal');
-    expect(bloom.scope).toBe('android_widget');
+    // Jarvis-wide: no surface restriction
+    expect(bloom.scope ?? 'both').toBe('both');
   });
 
   it('resolves default theme and falls back when missing', () => {

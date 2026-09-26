@@ -98,9 +98,11 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     localTimeRef.current = clamped;
     setPosition(clamped);
     if (media?.entity_id) {
-      try {
-        api.mediaTransport({ entity_id: media.entity_id, command: 'seek', position: Math.round(clamped) });
-      } catch { /* ignore */ }
+      // Await so a rejected seek is reported instead of becoming an unhandled
+      // promise rejection (and the knob silently snapping back).
+      api
+        .mediaTransport({ entity_id: media.entity_id, command: 'seek', position: Math.round(clamped) })
+        .catch(() => toast.error('Could not seek on that player'));
     }
   }, [media, duration]);
 
@@ -213,7 +215,7 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
               aria-valuemin={0}
               aria-valuemax={Math.round(duration)}
               aria-valuenow={Math.round(position)}
-              className="relative py-2 select-none touch-none cursor-pointer group"
+              className="relative py-4 sm:py-2 select-none touch-none cursor-pointer group"
             >
               <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative pointer-events-none">
                 <div
@@ -222,7 +224,7 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
                 />
               </div>
               <div
-                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-sm pointer-events-none -ml-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-1/2 -translate-y-1/2 w-4 h-4 sm:w-3 sm:h-3 bg-white rounded-full shadow-sm pointer-events-none -ml-2 sm:-ml-1.5 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                 style={{ left: `${Math.min(100, Math.max(0, progressPercent))}%` }}
               />
             </div>

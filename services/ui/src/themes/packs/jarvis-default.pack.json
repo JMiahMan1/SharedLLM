@@ -41,8 +41,8 @@
       "id": "bloom",
       "name": "Bloom (Android widget)",
       "icon": "\ud83c\udf38",
-      "description": "Feminine floral on Jarvis-wide dark glass \u2014 rose, blush and lavender petals",
-      "version": "1.3.0",
+      "description": "Feminine floral on Jarvis dark glass \u2014 rose, blush and lavender petals (tints the Android health widget too)",
+      "version": "1.4.0",
       "tokens": {
         "bg": "#0F172A",
         "surface": "#1E293B",
@@ -63,8 +63,7 @@
         "numberFontFamily": null,
         "showCornerCut": false,
         "motif": "petal"
-      },
-      "scope": "android_widget"
+      }
     },
     {
       "schemaVersion": 1,
