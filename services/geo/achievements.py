@@ -292,7 +292,9 @@ def evaluate(
                 )
             )
 
-    result.next_up.sort(key=lambda p: p.remaining)
+    # Rank by completion ratio, not raw remaining: "1,360 steps to go" and
+    # "1 workout to go" are not comparable units, but 86% vs 1% is.
+    result.next_up.sort(key=lambda p: (-p.percent, p.remaining))
     return result
 
 
