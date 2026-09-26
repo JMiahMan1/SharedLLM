@@ -24,12 +24,11 @@ wait_for_build() {
 
     while [ $attempt -lt $max_attempts ]; do
         local latest_status latest_conclusion latest_sha
-        latest_status=$(gh run list --branch=microservices --limit 5 --json status,name \
-            --jq '.[] | select(.name=="Build & Push Images") | .status' | head -1)
-        latest_conclusion=$(gh run list --branch=microservices --limit 5 --json conclusion,name \
-            --jq '.[] | select(.name=="Build & Push Images") | .conclusion' | head -1)
-        latest_sha=$(gh run list --branch=microservices --limit 5 --json headSha,name \
-            --jq '.[] | select(.name=="Build & Push Images") | .headSha' | head -1)
+        # Query the workflow itself: filtering the newest N branch runs missed
+        # this workflow entirely on commits that also trigger docs/UI/APK/E2E.
+        latest_status=$(gh run list --workflow=build-images.yml --branch=microservices --limit 1 --json status --jq '.[0].status' 2>/dev/null)
+        latest_conclusion=$(gh run list --workflow=build-images.yml --branch=microservices --limit 1 --json conclusion --jq '.[0].conclusion' 2>/dev/null)
+        latest_sha=$(gh run list --workflow=build-images.yml --branch=microservices --limit 1 --json headSha --jq '.[0].headSha' 2>/dev/null)
 
         if [ "$latest_status" = "completed" ] && [ "$latest_conclusion" = "success" ]; then
             echo "[OK] Build & Push Images (${latest_sha:0:8}) completed successfully."
@@ -78,7 +77,7 @@ echo "Branch: $BRANCH"
 # Check if a latest Android APK artifact is available from CI and sync it to update directory
 if command -v gh >/dev/null 2>&1; then
     echo "Checking for latest Android APK artifact from CI..."
-    APK_RUN_ID=$(gh run list --workflow=android-build.yml --branch="$BRANCH" --limit 1 --json databaseId,status,conclusion --jq '.[] | select(.conclusion=="success") | .databaseId' 2>/dev/null || true)
+    APK_RUN_ID=$(gh run list --workflow=android-build.yml --branch="$BRANCH" --limit 5 --json databaseId,status,conclusion --jq '.[] | select(.conclusion=="success") | .databaseId' 2>/dev/null | head -1 || true)
     if [ -n "$APK_RUN_ID" ]; then
     echo "Downloading APK artifact from CI run $APK_RUN_ID..."
     mkdir -p .tmp/apk
