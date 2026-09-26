@@ -51,6 +51,20 @@ describe('Family hub', () => {
     await waitFor(() => expect(screen.queryByTestId('voice-preview')).not.toBeInTheDocument());
   });
 
+  it('reacts to a message from the quick reaction bar', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Family />);
+
+    await waitFor(() => expect(screen.getByTestId('chat-feed')).toHaveTextContent('Dinner at 6.'));
+    await user.click(await screen.findByTitle('Tap to react'));
+
+    const bar = await screen.findByTestId('reaction-bar');
+    expect(bar).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /react \u2764\ufe0f/i }));
+
+    expect(await screen.findByTestId('reaction-chips')).toHaveTextContent('❤️');
+  });
+
   it('sends a chat message from the composer', async () => {
     const user = userEvent.setup();
     renderWithProviders(<Family />);

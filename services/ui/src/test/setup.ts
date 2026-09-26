@@ -620,6 +620,25 @@ export const server = setupServer(  http.post('/api/auth/login', async () => Htt
       detail: { message_record: entry },
     });
   }),
+  http.get('/api/communication/talk/reactions', () =>
+    HttpResponse.json({
+      status: 'SUCCESS',
+      service: 'talk_reactions',
+      detail: {
+        reactions: [
+          { reaction: '\u2764\ufe0f', actor_display_name: 'Michele' },
+        ],
+      },
+    })
+  ),
+  http.post('/api/communication/talk/react', async ({ request }) => {
+    const body = await request.json() as { reaction?: string };
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      service: 'talk_react',
+      detail: { reactions: [{ reaction: body.reaction || '\ud83d\udc4d', actor_display_name: 'You' }] },
+    });
+  }),
   http.post('/api/communication/talk/voice', async ({ request }) => {
     const body = await request.json() as Record<string, unknown>;
     const token = String(body.token);

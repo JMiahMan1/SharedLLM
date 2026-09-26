@@ -1089,6 +1089,22 @@ export const api = {
     return resp.data;
   },
 
+  async getTalkReactions(token: string, messageId: number): Promise<ExecutionResponse> {
+    const resp = await apiClient.get(
+      `/api/communication/talk/reactions?token=${encodeURIComponent(token)}&message_id=${messageId}`
+    );
+    return resp.data;
+  },
+
+  async reactToTalkMessage(payload: {
+    token: string;
+    message_id: number;
+    reaction: string;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/react', payload);
+    return resp.data;
+  },
+
   async sendTalkVoice(payload: {
     token: string;
     audio_base64: string;
