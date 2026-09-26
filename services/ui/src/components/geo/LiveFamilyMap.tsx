@@ -8,13 +8,26 @@ import {
   RECENT_THRESHOLD_MS,
   ageLabel,
   buildLiveMembers,
+  clusterMembers,
 } from './liveLocations';
+
+export interface MapPlace {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  radius: number;
+}
 
 interface LiveFamilyMapProps {
   height?: number;
   className?: string;
   /** Hide anyone whose fix is older than this (default 15 min). */
   maxAgeMs?: number;
+  /** Centre the map on this user (matches the location key, case-insensitive). */
+  focusUserId?: string | null;
+  /** HA zones rendered as "Places" geofences. */
+  zones?: MapPlace[];
 }
 
 /**
@@ -27,6 +40,8 @@ export default function LiveFamilyMap({
   height = 320,
   className = '',
   maxAgeMs = RECENT_THRESHOLD_MS,
+  focusUserId = null,
+  zones = [],
 }: LiveFamilyMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -63,8 +78,23 @@ export default function LiveFamilyMap({
     if (!map || !layer) return;
     layer.clearLayers();
 
+    // Places (HA zones) first so member pins always sit on top.
+    for (const place of zones) {
+      L.circle([place.lat, place.lon], {
+        radius: place.radius,
+        color: '#818CF8',
+        weight: 1,
+        dashArray: '4 4',
+        fillColor: '#818CF8',
+        fillOpacity: 0.06,
+      })
+        .bindTooltip(place.name, { permanent: false, direction: 'top' })
+        .addTo(layer);
+    }
+
     const points: L.LatLngExpression[] = [];
-    for (const member of members) {
+    for (const cluster of clusterMembers(members)) {
+      const member = cluster.lead;
       const style = FRESHNESS_STYLE[member.freshness];
       const latlng: L.LatLngExpression = [member.lat, member.lon];
       points.push(latlng);
@@ -79,6 +109,7 @@ export default function LiveFamilyMap({
         }).addTo(layer);
       }
 
+      const others = cluster.members.filter((m) => m.userId !== member.userId).map((m) => m.userId);
       L.circleMarker(latlng, {
         radius: member.freshness === 'live' ? 8 : 6,
         color: style.color,
@@ -88,7 +119,8 @@ export default function LiveFamilyMap({
       })
         .bindPopup(
           `<strong>${member.userId}</strong><br/>${ageLabel(member.ageMs)}` +
-            (member.accuracy ? `<br/>±${Math.round(member.accuracy)} m` : '')
+            (member.accuracy ? `<br/>±${Math.round(member.accuracy)} m` : '') +
+            (others.length ? `<br/><span style="opacity:.7">also here: ${others.join(', ')}</span>` : '')
         )
         .addTo(layer);
     }
@@ -117,7 +149,19 @@ export default function LiveFamilyMap({
         map.setView(points[0] as L.LatLngTuple, 15);
       }
     }
-  }, [members]);
+  }, [members, zones]);
+
+  // "Show on map" from a family card.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !focusUserId) return;
+    const target = members.find(
+      (m) => m.userId.toLowerCase() === focusUserId.toLowerCase()
+    );
+    if (target) {
+      map.flyTo([target.lat, target.lon], 16, { duration: 0.8 });
+    }
+  }, [focusUserId, members]);
 
   return (
     <div className={`relative ${className}`} data-testid="live-family-map">

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Brain, Calendar, Compass, Home, MessageSquare, Music, Settings } from 'lucide-react';
+import { Brain, Calendar, Compass, Home, MessageSquare, Music, Settings, StickyNote } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -21,6 +21,7 @@ const BottomNav = () => {
     { icon: Music, label: 'Media', path: '/media', roles: ['admin', 'user', 'child'] },
     { icon: Calendar, label: 'Calendar', path: '/calendar', roles: ['admin', 'user', 'child'] },
     { icon: MessageSquare, label: 'Chat', path: '/communication', roles: ['admin', 'user', 'child'] },
+    { icon: StickyNote, label: 'Notes', path: '/notes', roles: ['admin', 'user', 'child'] },
   ];
 
   if (isAdmin) {

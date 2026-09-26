@@ -368,7 +368,7 @@ class CalendarRequest(BaseRequest):
 
 class NoteRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["create", "append", "read", "delete", "check_off", "list", "sync_rag"]
+    action: Literal["create", "write", "append", "read", "delete", "check_off", "list", "sync_rag"]
     title: str | None = None
     content: str | None = None
     category: str | None = "General"

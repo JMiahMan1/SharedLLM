@@ -1,19 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  MessageSquare, 
-  Activity,
-  Database,
-  FolderKanban,
-  Music,
-  SlidersHorizontal,
-  Brain,
-  Loader2,
-  ShieldCheck,
-  Shield,
-  Calendar,
-  Compass,
-} from 'lucide-react';
+import { Activity, Brain, Calendar, Compass, Database, FolderKanban, LayoutDashboard, Loader2, MessageSquare, Music, Shield, ShieldCheck, SlidersHorizontal, StickyNote } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useAuth } from '../../context/AuthContext';
@@ -29,6 +15,7 @@ const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
   { icon: Compass, label: 'Wander', path: '/wander' },
   { icon: MessageSquare, label: 'Chat', path: '/communication' },
+  { icon: StickyNote, label: 'Notes', path: '/notes' },
   { icon: Calendar, label: 'Calendar', path: '/calendar' },
   { icon: Music, label: 'Media', path: '/media' },
   { icon: FolderKanban, label: 'Workspaces', path: '/workspaces' },

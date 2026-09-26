@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FileText, Plus, Trash2, Loader2 } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
 import { api } from '../../services/api';
@@ -14,6 +15,7 @@ interface NoteItem {
 }
 
 const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
+  const navigate = useNavigate();
   const [notes, setNotes] = useState<NoteItem[]>([]);
   const [newNote, setNewNote] = useState('');
   const [newTitle, setNewTitle] = useState('');
@@ -135,7 +137,12 @@ const QuickNotesWidget = ({ settingsButton }: IWidgetProps) => {
             notes.map((note) => (
               <div
                 key={note.id}
-                className="glass-card p-3 group"
+                role="button"
+                tabIndex={0}
+                onClick={() => navigate('/notes')}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/notes'); }}
+                title="Open in Notes"
+                className="glass-card p-3 group cursor-pointer hover:border-purple-500/40"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">

@@ -199,8 +199,15 @@ const resetMockState = () => {
   quickAssistantEnabled = false;
 };
 
-const userThemePref = {
-  theme_id: 'aurora',
+/** Notes fixtures shared by the notes page tests. */
+export const notesFixtures = [
+  { title: 'Shared Checklist', path: 'Notes/Shared Checklist.md', size: 64, modified: '2026-05-10T12:00:00.000Z' },
+  { title: 'Trip ideas', path: 'Notes/Trip ideas.md', size: 48, modified: '2026-05-09T12:00:00.000Z' },
+];
+export const notesWriteCalls: Array<{ title?: string; content?: string }> = [];
+export const notesCheckOffCalls: Array<{ item?: string }> = [];
+
+const userThemePref = {  theme_id: 'aurora',
   packs: [] as unknown[],
 };
 
@@ -261,8 +268,7 @@ const telemetryNotifications: Array<{
   },
 ];
 
-export const server = setupServer(
-  http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
+export const server = setupServer(  http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
   http.get('/api/users/me', () => HttpResponse.json(users[0])),
   http.get('/api/users/me/theme', () => HttpResponse.json({
     status: 'SUCCESS',
@@ -326,8 +332,7 @@ export const server = setupServer(
   ),
   http.get('/api/telemetry/push/key', () =>
     HttpResponse.json({ status: 'SUCCESS', public_key: 'test-vapid-public-key' })
-  ),
-  http.post('/api/telemetry/push/subscribe', () => HttpResponse.json({ status: 'SUCCESS' })),
+  ),  http.post('/api/telemetry/push/subscribe', () => HttpResponse.json({ status: 'SUCCESS' })),
   http.post('/api/telemetry/push/unsubscribe', () =>
     HttpResponse.json({ status: 'SUCCESS', removed: true })
   ),
@@ -483,11 +488,28 @@ export const server = setupServer(
     message: 'Note created.',
     service: 'note_create',
   })),
-  http.post('/api/communication/notes/read', () => HttpResponse.json({
+  http.post('/api/communication/notes/read', async ({ request }) => {
+    const body = await request.json() as { title?: string };
+    const message = body?.title === 'Trip ideas'
+      ? '# Trip ideas\nCategory: Notes\n\nSedona in the fall, then the coast.'
+      : '# Shared Checklist\nCategory: Notes\n\n- [ ] Pick up groceries\n- [x] Take out recycling';
+    return HttpResponse.json({ status: 'SUCCESS', message, service: 'note_read' });
+  }),
+  http.post('/api/communication/notes/list', () => HttpResponse.json({
     status: 'SUCCESS',
-    message: '# Shared Checklist\n- [ ] Pick up groceries',
-    service: 'note_read',
+    message: 'Notes listed',
+    detail: { notes: notesFixtures, directories: ['Notes'] },
   })),
+  http.post('/api/communication/notes/write', async ({ request }) => {
+    const body = await request.json() as { title?: string; content?: string };
+    notesWriteCalls.push(body);
+    return HttpResponse.json({ status: 'SUCCESS', message: 'Note saved.', service: 'note_write' });
+  }),
+  http.post('/api/communication/notes/check_off', async ({ request }) => {
+    const body = await request.json() as { item?: string };
+    notesCheckOffCalls.push(body);
+    return HttpResponse.json({ status: 'SUCCESS', message: 'Toggled.', service: 'note_check_off' });
+  }),
   http.post('/api/communication/notes/append', () => HttpResponse.json({
     status: 'SUCCESS',
     message: 'Note appended.',
@@ -884,6 +906,8 @@ afterEach(() => {
   cleanup();
   server.resetHandlers();
   telemetrySchedules = [];
+  notesWriteCalls.length = 0;
+  notesCheckOffCalls.length = 0;
 });
 
 afterAll(() => server.close());

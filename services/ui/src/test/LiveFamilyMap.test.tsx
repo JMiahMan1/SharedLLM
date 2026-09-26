@@ -4,7 +4,12 @@ import { http, HttpResponse } from 'msw';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from './setup';
 import LiveFamilyMap from '../components/geo/LiveFamilyMap';
-import { ageLabel, classifyLocation } from '../components/geo/liveLocations';
+import {
+  ageLabel,
+  classifyLocation,
+  clusterMembers,
+  distanceMeters,
+} from '../components/geo/liveLocations';
 
 function renderMap() {
   const client = new QueryClient({
@@ -54,8 +59,48 @@ describe('classifyLocation', () => {
   });
 });
 
-describe('ageLabel', () => {
-  it('formats freshness in human terms', () => {
+describe('clustering nearby members', () => {
+  const now = 1_700_000_000_000;
+  const nowSec = now / 1000;
+
+  it('measures distance between coordinates', () => {
+    // ~111 m per 0.001 degrees of latitude
+    const d = distanceMeters(33.0, -112.0, 33.001, -112.0);
+    expect(d).toBeGreaterThan(100);
+    expect(d).toBeLessThan(125);
+  });
+
+  it('collapses one phone posting under two keys into a single pin', () => {
+    const members = [
+      { userId: 'jeremiah', lat: 33.4484, lon: -112.074, accuracy: 15, ageMs: 20_000, freshness: 'live' as const },
+      { userId: 'default', lat: 33.44845, lon: -112.07403, accuracy: 60, ageMs: 200_000, freshness: 'recent' as const },
+    ];
+    const clusters = clusterMembers(members);
+    expect(clusters).toHaveLength(1);
+    // the freshest member leads
+    expect(clusters[0].lead.userId).toBe('jeremiah');
+    expect(clusters[0].members.map((m) => m.userId)).toContain('default');
+  });
+
+  it('keeps genuinely separate members apart', () => {
+    const members = [
+      { userId: 'a', lat: 33.4484, lon: -112.074, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+      { userId: 'b', lat: 33.5, lon: -112.1, accuracy: 10, ageMs: 10_000, freshness: 'live' as const },
+    ];
+    expect(clusterMembers(members)).toHaveLength(2);
+  });
+
+  it('ignores staleness when distance is what matters', () => {
+    const m = classifyLocation(
+      'jeremiah',
+      { latitude: 33.4484, longitude: -112.074, updated_at: nowSec - 10 },
+      now
+    );
+    expect(m).not.toBeNull();
+  });
+});
+
+describe('ageLabel', () => {  it('formats freshness in human terms', () => {
     expect(ageLabel(5_000)).toBe('just now');
     expect(ageLabel(60_000)).toBe('1 min ago');
     expect(ageLabel(5 * 60_000)).toBe('5 min ago');
