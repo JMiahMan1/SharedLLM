@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Footprints, Flame, Mountain, Timer } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
 import { useWidgetStore } from '../../stores/widgetStore';
 import { themeRegistry } from '../../themes';
-import { ThemePackageManager } from '../../themes/ThemePackageManager';
+import { useActiveThemeId } from '../../themes/siteTheme';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
 
@@ -87,9 +87,9 @@ function Ring({
 const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) => {
   const updateWidgetConfig = useWidgetStore((s) => s.updateWidgetConfig);
   const config = (userSettings.config ?? {}) as HealthActivityConfig;
-  const [showThemes, setShowThemes] = useState(false);
 
-  const themeId = config.themeId ?? 'aurora';
+  // Jarvis-wide theme: widgets follow the one active theme, never their own.
+  const themeId = useActiveThemeId();
   const theme = useMemo(() => themeRegistry.resolveTheme(themeId), [themeId]);
   const cssVars = useMemo(() => themeRegistry.cssVarsFor(themeId), [themeId]);
 
@@ -116,28 +116,19 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
   const activePct =
     metrics.activeMinutes == null ? 0 : metrics.activeMinutes / Math.max(1, goals.activeMinuteGoal);
 
-  const setTheme = (id: string) => {
-    void updateWidgetConfig(userSettings.widget_key, { themeId: id });
-  };
-
   // Publish the resolved theme colors so the native Android home-screen widget
   // can tint itself the same way. Keeps palettes in the pack data (never
   // hardcoded in the Java widget) and keeps both surfaces in sync.
   const accent = theme.tokens.accent;
   const accentText = theme.tokens.text;
   useEffect(() => {
-    if (
-      config.themeAccent !== accent ||
-      config.themeAccentText !== accentText ||
-      config.themeId !== themeId
-    ) {
+    if (config.themeAccent !== accent || config.themeAccentText !== accentText) {
       void updateWidgetConfig(userSettings.widget_key, {
-        themeId,
         themeAccent: accent,
         themeAccentText: accentText,
       });
     }
-  }, [accent, accentText, themeId, config.themeAccent, config.themeAccentText, config.themeId, updateWidgetConfig, userSettings.widget_key]);
+  }, [accent, accentText, config.themeAccent, config.themeAccentText, updateWidgetConfig, userSettings.widget_key]);
 
   const track = cssVars['--ht-progress-track'] ?? theme.tokens.border;
   const glow = theme.tokens.glow;
@@ -145,19 +136,7 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
   return (
     <WidgetCard
       title="Health"
-      settingsButton={
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            className="glass-button px-2 py-0.5 text-[11px]"
-            onClick={() => setShowThemes((v) => !v)}
-            aria-pressed={showThemes}
-          >
-            Themes
-          </button>
-          {settingsButton}
-        </div>
-      }
+      settingsButton={settingsButton}
       accentColor={theme.tokens.accent}
       expandedClassName="bg-black/80"
     >
@@ -191,17 +170,6 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
               <circle cx="72" cy="30" r="3.2" />
             </g>
           </svg>
-        )}
-
-        {showThemes && (
-          <div className="rounded-lg p-2" style={{ background: cssVars['--ht-surface'] }}>
-            <ThemePackageManager
-              compact
-              surface="android_widget"
-              selectedThemeId={themeId}
-              onSelectTheme={setTheme}
-            />
-          </div>
         )}
 
         <div className="flex items-center justify-between gap-2">
@@ -312,13 +280,9 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
         >
           Theme: <strong style={{ color: cssVars['--ht-accent'] }}>{theme.name}</strong>
           {' · '}
-          <button
-            type="button"
-            className="underline"
-            onClick={() => setShowThemes((v) => !v)}
-          >
-            change
-          </button>
+          <span title="Themes are Jarvis-wide — change it in Settings → Website theme">
+            set in Settings
+          </span>
         </div>
       </div>
     </WidgetCard>

@@ -1,10 +1,37 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useSyncExternalStore } from 'react';
 import { api } from '../services/api';
 import { storageGet, storageSet } from '../lib/storage';
 import { themeRegistry } from './registry';
 import { themeToCssVars, type HealthThemeCssVars, type ThemePack } from './types';
 
 const LS_SITE_THEME = 'jarvis_site_theme_id';
+
+/**
+ * The one active Jarvis theme. Every surface (site chrome and every dashboard
+ * widget) follows this — per-widget themes are deliberately not supported.
+ */
+let activeThemeId = 'aurora';
+const activeThemeListeners = new Set<(id: string) => void>();
+
+export function getActiveThemeId(): string {
+  return activeThemeId;
+}
+
+export function subscribeActiveTheme(listener: (id: string) => void): () => void {
+  activeThemeListeners.add(listener);
+  return () => activeThemeListeners.delete(listener);
+}
+
+/** React hook: the active Jarvis-wide theme id. */
+export function useActiveThemeId(): string {
+  return useSyncExternalStore(subscribeActiveTheme, getActiveThemeId, getActiveThemeId);
+}
+
+function setActiveThemeId(id: string): void {
+  if (activeThemeId === id) return;
+  activeThemeId = id;
+  for (const listener of activeThemeListeners) listener(id);
+}
 
 export interface SiteThemePreference {
   themeId: string;
@@ -160,6 +187,7 @@ export function applySiteTheme(themeId: string): string {
   const theme = themeRegistry.resolveTheme(themeId);
   applyVarsToRoot(siteThemeCssVars(theme.tokens));
   document.documentElement.setAttribute('data-theme-id', theme.id);
+  setActiveThemeId(theme.id);
   return theme.id;
 }
 

@@ -8,6 +8,7 @@ import {
   Mic2, Users
 } from 'lucide-react';
 import { api } from '../services/api';
+import toast from 'react-hot-toast';
 import { useHaptics } from '../hooks/useHaptics';
 import { storageGetSync } from '../lib/storage';
 import {
@@ -301,9 +302,20 @@ const NowPlayingCard = ({
   const displayAlbum = isWebPlayer ? undefined : mediaStatus?.media_album;
 
   const trackRef = useRef<HTMLDivElement>(null);
-  const [dragState, setDragState] = useState<{ title: string; time: number | null }>({ title: '', time: null });
-  const dragTime = dragState.title === (displayTitle || '') ? dragState.time : null;
-  const setDragTime = (time: number | null) => setDragState({ title: displayTitle || '', time });
+  const dragRaf = useRef<number | null>(null);
+  const dragClientX = useRef<number | null>(null);
+  const draggingRef = useRef(false);
+  const [dragTime, setDragTimeState] = useState<number | null>(null);
+  /**
+   * Drag state is keyed on the track identity (not the title/metadata), so a
+   * status refresh mid-drag — which happens every 3 s — no longer cancels the
+   * seek under the user's finger.
+   */
+  const trackKey = mediaStatus?.media_content_id || `${displayTitle || ''}|${displayArtist || ''}`;
+  useEffect(() => {
+    // New track: clear any leftover drag position (but never mid-drag).
+    if (!draggingRef.current) setDragTimeState(null);
+  }, [trackKey]);
 
   const getTimeFromPointer = (clientX: number): number => {
     if (!trackRef.current || duration <= 0) return 0;
@@ -318,21 +330,34 @@ const NowPlayingCard = ({
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
     } catch { /* ignore pointer capture error */ }
-    const time = getTimeFromPointer(e.clientX);
-    setDragTime(time);
+    draggingRef.current = true;
+    setDragTimeState(getTimeFromPointer(e.clientX));
   };
 
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragTime !== null && onSeek && duration > 0) {
-      const time = getTimeFromPointer(e.clientX);
-      setDragTime(time);
+    if (!draggingRef.current || !onSeek || duration <= 0) return;
+    // Coalesce moves into an animation frame: pointermove can fire far faster
+    // than the WebView can paint, which made the knob visibly lag the finger.
+    dragClientX.current = e.clientX;
+    if (dragRaf.current === null) {
+      dragRaf.current = requestAnimationFrame(() => {
+        dragRaf.current = null;
+        if (dragClientX.current !== null && draggingRef.current) {
+          setDragTimeState(getTimeFromPointer(dragClientX.current));
+        }
+      });
     }
   };
 
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragTime !== null && onSeek) {
+    if (dragRaf.current !== null) {
+      cancelAnimationFrame(dragRaf.current);
+      dragRaf.current = null;
+    }
+    if (draggingRef.current && onSeek) {
       const time = getTimeFromPointer(e.clientX);
-      setDragTime(null);
+      draggingRef.current = false;
+      setDragTimeState(null);
       try {
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
           e.currentTarget.releasePointerCapture(e.pointerId);
@@ -343,7 +368,12 @@ const NowPlayingCard = ({
   };
 
   const handlePointerCancel = (e: React.PointerEvent<HTMLDivElement>) => {
-    setDragTime(null);
+    if (dragRaf.current !== null) {
+      cancelAnimationFrame(dragRaf.current);
+      dragRaf.current = null;
+    }
+    draggingRef.current = false;
+    setDragTimeState(null);
     try {
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
@@ -465,7 +495,7 @@ const NowPlayingCard = ({
                 onSeek(Math.max(0, currentTime - 5));
               }
             } : undefined}
-            className={`relative py-3 select-none touch-none ${onSeek ? 'cursor-pointer group' : ''}`}
+            className={`relative py-5 sm:py-3 select-none touch-none ${onSeek ? 'cursor-pointer group' : ''}`}
           >
             {/* Visual track */}
             <div className="w-full h-2.5 sm:h-2 bg-white/10 rounded-full overflow-hidden relative pointer-events-none">
@@ -474,11 +504,11 @@ const NowPlayingCard = ({
                 style={{ width: `${Math.min(100, Math.max(0, (((dragTime !== null ? dragTime : currentTime) / duration) * 100)))}%` }}
               />
             </div>
-            {/* Thumb knob */}
+            {/* Thumb knob — always visible on touch, hover-revealed on desktop */}
             {onSeek && (
               <div
-                className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-md shadow-cyan-500/50 pointer-events-none -ml-2 transition-transform ${
-                  dragTime !== null ? 'scale-125' : 'group-hover:scale-110'
+                className={`absolute top-1/2 -translate-y-1/2 h-5 w-5 sm:h-4 sm:w-4 bg-white rounded-full shadow-md shadow-cyan-500/50 pointer-events-none -ml-2.5 sm:-ml-2 transition-transform ${
+                  dragTime !== null ? 'scale-125' : 'sm:opacity-0 sm:group-hover:opacity-100 sm:group-hover:scale-110'
                 }`}
                 style={{ left: `${Math.min(100, Math.max(0, (((dragTime !== null ? dragTime : currentTime) / duration) * 100)))}%` }}
               />
@@ -488,8 +518,18 @@ const NowPlayingCard = ({
             <span>{formatTime(dragTime !== null ? dragTime : currentTime)}</span>
             <span>{formatTime(duration)}</span>
           </div>
-        </div>
-      )}
+          </div>
+        )}
+        {nowPlaying && duration <= 0 && (
+          <div className="mt-4 pt-3 border-t border-white/5">
+            <div className="flex items-center gap-2 py-4 sm:py-2" aria-label="Live stream, duration unknown">
+              <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse" aria-hidden />
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-rose-300">Live</span>
+              <div className="flex-1 h-1.5 rounded-full bg-gradient-to-r from-rose-500/40 via-rose-400/20 to-transparent" />
+              <span className="text-[10px] text-slate-500 font-mono">{formatTime(currentTime)}</span>
+            </div>
+          </div>
+        )}
 
       {localMode ? (
         <div className="relative mt-4 pt-3 border-t border-white/5">
@@ -643,7 +683,7 @@ const MediaExplorerModal = ({
     staleTime: 60000,
   });
 
-  const { data: maPlaylists, isLoading: playlistsLoading, error: maPlaylistsError } = useQuery({
+  const { data: maPlaylists, isLoading: playlistsLoading, error: maPlaylistsError, refetch: refetchPlaylists } = useQuery({
     queryKey: ['ma-playlists'],
     queryFn: () => api.getMusicAssistantPlaylists(),
     enabled: show && tab === 'ma',
@@ -651,7 +691,7 @@ const MediaExplorerModal = ({
     staleTime: 60000,
   });
 
-  const { data: maRecent, isLoading: maRecentLoading, error: maRecentError } = useQuery({
+  const { data: maRecent, isLoading: maRecentLoading, error: maRecentError, refetch: refetchRecent } = useQuery({
     queryKey: ['ma-recent'],
     queryFn: () => api.getMusicAssistantRecent(),
     enabled: show && tab === 'ma',
@@ -794,7 +834,7 @@ const MediaExplorerModal = ({
                       <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
                         <p className="text-sm text-red-400">Failed to load playlists. Check your server connection.</p>
                         <button
-                          onClick={() => { /* query will auto-retry via staleTime */ }}
+                          onClick={() => { void refetchPlaylists(); }}
                           className="mt-2 text-xs text-red-300 underline hover:text-red-200"
                         >
                           Retry
@@ -819,7 +859,7 @@ const MediaExplorerModal = ({
                       <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-center">
                         <p className="text-sm text-red-400">Failed to load recent items. Check your server connection.</p>
                         <button
-                          onClick={() => { /* query will auto-retry via staleTime */ }}
+                          onClick={() => { void refetchRecent(); }}
                           className="mt-2 text-xs text-red-300 underline hover:text-red-200"
                         >
                           Retry
@@ -1935,12 +1975,20 @@ const Media = () => {
       try {
         if (!maPlayer.isConnected) await maPlayer.connect();
         await maPlayer.maCommand('players/cmd/seek', { player_id: pid, position: time });
-      } catch { /* ignore */ }
+      } catch (err) {
+        // Surface it: the optimistic position snaps back on the next poll, and
+        // silently doing nothing looked like a broken scrubber.
+        console.error('[Media] Seek failed:', err);
+        toast.error('Could not seek on that player');
+      }
       return;
     }
     try {
       await api.mediaTransport({ entity_id: selectedTarget, command: 'seek', position: time });
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.error('[Media] Seek failed:', err);
+      toast.error('Could not seek on that player');
+    }
   }, [selectedTarget, maPlayer.isConnected, maPlayer.connect, maPlayer.maCommand]);
 
   const handleStopPlayback = useCallback(() => {
