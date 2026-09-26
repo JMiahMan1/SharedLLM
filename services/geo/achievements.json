@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "kind": "jarvis.achievements",
+  "achievements": [
+    { "id": "first_steps", "name": "First Steps", "description": "Record your first steps", "points": 1, "rule": { "type": "steps_any", "value": 1 } },
+    { "id": "steps_5k_day", "name": "Five Thousand", "description": "Walk 5,000 steps in a day", "points": 3, "rule": { "type": "steps_in_day", "value": 5000 } },
+    { "id": "steps_10k_day", "name": "Ten Thousand", "description": "Walk 10,000 steps in a day", "points": 5, "rule": { "type": "steps_in_day", "value": 10000 } },
+    { "id": "steps_15k_day", "name": "Fifteen Thousand", "description": "Walk 15,000 steps in a day", "points": 10, "rule": { "type": "steps_in_day", "value": 15000 } },
+    { "id": "goal_1", "name": "Goal Day", "description": "Hit your daily step goal", "points": 3, "rule": { "type": "goal_days", "value": 1 } },
+    { "id": "goal_days_10", "name": "Ten Goal Days", "description": "Hit your daily goal 10 times", "points": 15, "rule": { "type": "goal_days", "value": 10 } },
+    { "id": "goal_streak_3", "name": "Three in a Row", "description": "Hit your daily goal three days running", "points": 8, "rule": { "type": "goal_streak", "value": 3 } },
+    { "id": "goal_streak_7", "name": "Week of Wins", "description": "Hit your daily goal seven days running", "points": 20, "rule": { "type": "goal_streak", "value": 7 } },
+    { "id": "goal_streak_30", "name": "Unstoppable", "description": "Hit your daily goal thirty days running", "points": 75, "rule": { "type": "goal_streak", "value": 30 } },
+    { "id": "week_50k", "name": "Fifty-K Week", "description": "Walk 50,000 steps in a week", "points": 20, "rule": { "type": "steps_in_week", "value": 50000 } },
+    { "id": "week_70k", "name": "Seventy-K Week", "description": "Walk 70,000 steps in a week", "points": 30, "rule": { "type": "steps_in_week", "value": 70000 } },
+    { "id": "comeback", "name": "Back At It", "description": "Hit your goal again after three quiet days", "points": 10, "rule": { "type": "goal_after_gap", "value": 3 } },
+    { "id": "workout_1", "name": "First Workout", "description": "Record your first workout", "points": 5, "rule": { "type": "workouts_total", "value": 1 } },
+    { "id": "workout_10", "name": "Getting Serious", "description": "Record 10 workouts", "points": 15, "rule": { "type": "workouts_total", "value": 10 } },
+    { "id": "workout_25", "name": "Regular", "description": "Record 25 workouts", "points": 30, "rule": { "type": "workouts_total", "value": 25 } },
+    { "id": "workout_100", "name": "Centurion", "description": "Record 100 workouts", "points": 100, "rule": { "type": "workouts_total", "value": 100 } },
+    { "id": "workout_week_4", "name": "Four This Week", "description": "Work out four times in one week", "points": 15, "rule": { "type": "workouts_in_week", "value": 4 } },
+    { "id": "distance_10", "name": "Ten Miles", "description": "Cover 10 miles in workouts", "points": 10, "rule": { "type": "distance_miles", "value": 10 } },
+    { "id": "distance_100", "name": "Century", "description": "Cover 100 miles in workouts", "points": 50, "rule": { "type": "distance_miles", "value": 100 } }
+  ]
+}

@@ -110,6 +110,32 @@ Skylight already models chores, stars and a reward vault
 - Everything is recorded in the points ledger first, then mirrored to
   Skylight, so a Skylight outage cannot lose the award.
 
+## Progress
+
+- **Phase 1 — goals + achievements (server): SHIPPED.** Rules engine
+  (`services/geo/achievements.py`), data-driven definitions
+  (`services/geo/achievements.json`), endpoints `GET /goals`, `PUT /goals`,
+  `GET /achievements`, `GET /points` (gateway proxies under `/api/geo/*`),
+  points ledger in `geo:points:{user}`, 15 tests in
+  `services/geo/tests/test_achievements.py`.
+- **Phase 3 (partial) — UI: SHIPPED.** `AchievementsPanel` on Wander shows
+  points, earned badges, next-up progress and an inline weekly/workout goal
+  editor (`src/components/wander/AchievementsPanel.tsx`,
+  `src/test/AchievementsPanel.test.tsx`). Daily goal still lives on the steps
+  card.
+- Phases 2 (sharing), 4 (chat envelope) and 5 (Skylight stars) are next.
+
+### Live endpoints
+
+| Endpoint | Notes |
+|---|---|
+| `GET /api/geo/achievements?days=30` | earned + next-up + points + goals |
+| `GET/PUT /api/geo/goals` | daily/weekly steps, workouts/week, distance/week |
+| `GET /api/geo/points` | points ledger with award dates |
+
+Awards are banked on first read into `geo:points:{user}`, so a badge keeps the
+date it was first earned even as the window rolls forward.
+
 ## Phases
 
 1. **Goals + achievements (server)**: rules engine, definitions JSON, endpoints,

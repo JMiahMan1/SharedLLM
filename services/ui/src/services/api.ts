@@ -85,6 +85,8 @@ import type {
   WorkoutsResponse,
   StepsResponse,
   ActivityTrendsResponse,
+  AchievementsResponse,
+  ActivityGoals,
   TelemetryNotification,
   TelemetryReport,
   TelemetryReportPeriod,
@@ -128,6 +130,8 @@ export type {
   WorkoutsResponse,
   StepsResponse,
   ActivityTrendsResponse,
+  AchievementsResponse,
+  ActivityGoals,
 } from '../types/api';
 
 declare module 'axios' {
@@ -795,6 +799,27 @@ export const api = {
 
   async setStepGoal(goal: number, userId?: string): Promise<{ user_id: string; goal: number }> {
     const resp = await apiClient.put('/api/geo/steps/goal', { goal, user_id: userId });
+    return resp.data;
+  },
+
+  async getGoals(userId?: string): Promise<{ user_id: string; goals: ActivityGoals }> {
+    const query = userId && userId !== 'all' ? `?user_id=${encodeURIComponent(userId)}` : '';
+    const resp = await apiClient.get(`/api/geo/goals${query}`);
+    return resp.data;
+  },
+
+  async updateGoals(
+    goals: Partial<ActivityGoals>,
+    userId?: string
+  ): Promise<{ user_id: string; goals: ActivityGoals }> {
+    const resp = await apiClient.put('/api/geo/goals', { goals, user_id: userId });
+    return resp.data;
+  },
+
+  async getAchievements(userId?: string, days = 30): Promise<AchievementsResponse> {
+    const query = new URLSearchParams({ days: String(days) });
+    if (userId && userId !== 'all') query.set('user_id', userId);
+    const resp = await apiClient.get(`/api/geo/achievements?${query.toString()}`);
     return resp.data;
   },
 

@@ -6,6 +6,7 @@ import type { Trip, TripLocation, TripUpdatePayload, TripLocationsResponse, Work
 import Modal from '../components/ui/Modal';
 import MiniRouteMap from '../components/geo/MiniRouteMap';
 import LiveFamilyMap from '../components/geo/LiveFamilyMap';
+import AchievementsPanel from '../components/wander/AchievementsPanel';
 import TripLocationsMap from '../components/geo/TripLocationsMap';
 import toast from 'react-hot-toast';
 import {
@@ -904,6 +905,8 @@ const Wander = () => {
             )}
           </div>
         </div>
+
+        <AchievementsPanel userId={currentUsername || undefined} />
 
         {/* Trends + LLM Analysis */}
         <div className="lg:col-span-2 glass-panel p-5 rounded-2xl border border-white/5">

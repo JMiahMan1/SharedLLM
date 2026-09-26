@@ -7710,6 +7710,76 @@ async def proxy_geo_steps(request: Request):
     raise HTTPException(status_code=502, detail="Failed to record steps")
 
 
+@app.get("/api/geo/goals")
+async def proxy_get_goals(request: Request, user_id: str | None = None):
+    if not user_id:
+        user_id = await _user_id_from_request(request) or ""
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/goals",
+            params={"user_id": user_id},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to read goals")
+
+
+@app.put("/api/geo/goals")
+async def proxy_put_goals(request: Request):
+    body = await request.json()
+    if not body.get("user_id"):
+        body["user_id"] = await _user_id_from_request(request) or ""
+    if not body.get("user_id"):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    async with shared_http_client() as client:
+        resp = await client.put(
+            f"{GEO_SVC}/goals",
+            json=body,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        detail = await resp.text()
+    raise HTTPException(status_code=resp.status, detail=detail[:200])
+
+
+@app.get("/api/geo/achievements")
+async def proxy_get_achievements(
+    request: Request, user_id: str | None = None, days: int = 30
+):
+    if not user_id:
+        user_id = await _user_id_from_request(request) or ""
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/achievements",
+            params={"user_id": user_id, "days": days},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to read achievements")
+
+
+@app.get("/api/geo/points")
+async def proxy_get_points(request: Request, user_id: str | None = None):
+    if not user_id:
+        user_id = await _user_id_from_request(request) or ""
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/points",
+            params={"user_id": user_id},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to read points")
+
+
 @app.get("/api/geo/steps/goal")
 async def proxy_get_step_goal(request: Request, user_id: str | None = None):
     if not user_id:

@@ -18,6 +18,7 @@ import os
 import re
 import time
 import urllib.parse
+import contextlib
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -27,6 +28,8 @@ import aiohttp
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
+
+from services.geo import achievements
 from pydantic import BaseModel
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -2022,6 +2025,158 @@ async def _get_step_goal(r, user: str) -> int:
     except Exception as e:
         log.warning(f"[Geo] Step goal read failed for {user}: {e}")
     return DEFAULT_STEP_GOAL
+
+
+async def _list_recent_workouts(r, clean_id: str, limit: int = 200) -> list[dict]:
+    """Workouts for one user, newest first, capped for the rules engine."""
+    ids = await r.zrevrange(f"geo:workouts:user:{clean_id}", 0, max(0, limit - 1))
+    out: list[dict] = []
+    for workout_id in ids:
+        raw = await r.get(f"geo:workout:{workout_id}")
+        if not raw:
+            continue
+        try:
+            out.append(json.loads(raw))
+        except Exception:
+            continue
+    return out
+
+@app.get("/goals")
+async def get_goals(
+    user_id: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """The user's goal set (daily/weekly steps, workouts, weekly distance)."""
+    clean = (user_id or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+    r = await get_redis()
+    if not r:
+        return {"user_id": clean, "goals": dict(achievements.DEFAULT_GOALS)}
+    return {"user_id": clean, "goals": await achievements.load_goals(r, clean)}
+
+
+@app.put("/goals")
+async def put_goals(
+    payload: dict,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Update any subset of goals; unknown/out-of-range keys are ignored."""
+    clean = (str(payload.get("user_id") or "")).split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+    updates = payload.get("goals") if isinstance(payload.get("goals"), dict) else {
+        k: v for k, v in payload.items() if k in achievements.GOAL_BOUNDS
+    }
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+    goals = await achievements.save_goals(r, clean, updates or {})
+    # Keep the classic daily goal key in sync for existing step consumers.
+    with contextlib.suppress(Exception):
+        await r.set(f"geo:steps_goal:{clean}", goals["daily_steps"])
+    return {"user_id": clean, "goals": goals}
+
+
+@app.get("/achievements")
+async def get_achievements(
+    user_id: str | None = None,
+    days: int = Query(30, ge=1, le=120),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Unlocked achievements (stable dates), next-up progress, and points.
+
+    Derived on read from the same buckets the widgets use; awards are banked in
+    `geo:points:{user}` so a badge keeps the date it was first earned.
+    """
+    clean = (user_id or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+    r = await get_redis()
+    definitions = achievements.load_definitions()
+    if not r:
+        return {
+            "user_id": clean,
+            "earned": [],
+            "next_up": [],
+            "points": 0,
+            "goals": dict(achievements.DEFAULT_GOALS),
+        }
+
+    daily_steps = await _get_daily_steps(r, clean, days)
+    goals = await achievements.load_goals(r, clean)
+    workouts = await _list_recent_workouts(r, clean, limit=200)
+    ledger = await achievements.load_points_ledger(r, clean)
+
+    evaluation = achievements.evaluate(
+        definitions, daily_steps, workouts, goals, previously_earned=ledger
+    )
+    newly_earned = [e for e in evaluation.earned if e.achievement.id not in ledger]
+    await achievements.record_awards(r, clean, newly_earned)
+
+    return {
+        "user_id": clean,
+        "earned": [
+            {
+                "id": e.achievement.id,
+                "name": e.achievement.name,
+                "description": e.achievement.description,
+                "points": e.points,
+                "earned_on": e.earned_on,
+            }
+            for e in sorted(evaluation.earned, key=lambda e: e.earned_on, reverse=True)
+        ],
+        "next_up": [
+            {
+                "id": p.achievement.id,
+                "name": p.achievement.name,
+                "description": p.achievement.description,
+                "points": p.achievement.points,
+                "current": p.current,
+                "target": p.target,
+                "remaining": p.remaining,
+                "percent": p.percent,
+            }
+            for p in evaluation.next_up[:5]
+        ],
+        "points": achievements.total_points(await achievements.load_points_ledger(r, clean), definitions),
+        "goals": goals,
+    }
+
+
+@app.get("/points")
+async def get_points(
+    user_id: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Points ledger: total plus each award with the date it was earned."""
+    clean = (user_id or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+    r = await get_redis()
+    definitions = achievements.load_definitions()
+    by_id = {d.id: d for d in definitions}
+    ledger = await achievements.load_points_ledger(r, clean) if r else {}
+    awards = [
+        {
+            "id": achievement_id,
+            "name": by_id[achievement_id].name,
+            "points": by_id[achievement_id].points,
+            "earned_on": earned_on,
+        }
+        for achievement_id, earned_on in ledger.items()
+        if achievement_id in by_id
+    ]
+    awards.sort(key=lambda a: a["earned_on"], reverse=True)
+    return {
+        "user_id": clean,
+        "points": sum(a["points"] for a in awards),
+        "awards": awards,
+    }
 
 
 @app.get("/steps/goal")
