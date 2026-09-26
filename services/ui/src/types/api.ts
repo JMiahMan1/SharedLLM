@@ -892,6 +892,39 @@ export interface ActivityTrendsResponse {
 }
 
 /** A user's last known GPS fix as stored by Identity. */
+export interface ActivityGoals {
+  daily_steps: number;
+  weekly_steps: number;
+  workouts_per_week: number;
+  weekly_distance_miles: number;
+}
+
+export interface EarnedAchievement {
+  id: string;
+  name: string;
+  description: string;
+  points: number;
+  earned_on: string;
+}
+
+export interface NextUpAchievement {
+  id: string;
+  name: string;
+  description: string;
+  points: number;
+  current: number;
+  target: number;
+  remaining: number;
+  percent: number;
+}
+
+export interface AchievementsResponse {
+  user_id: string;
+  earned: EarnedAchievement[];
+  next_up: NextUpAchievement[];
+  points: number;
+  goals: ActivityGoals;
+}
 export interface UserLiveLocation {
   latitude: number;
   longitude: number;

@@ -330,6 +330,33 @@ export const server = setupServer(  http.post('/api/auth/login', async () => Htt
   http.get('/api/telemetry/notifications', () =>
     HttpResponse.json({ status: 'SUCCESS', notifications: telemetryNotifications })
   ),
+  http.get('/api/geo/achievements', () =>
+    HttpResponse.json({
+      user_id: 'default',
+      earned: [
+        { id: 'first_steps', name: 'First Steps', description: 'Record your first steps', points: 1, earned_on: '2026-09-20' },
+        { id: 'goal_1', name: 'Goal Day', description: 'Hit your daily step goal', points: 3, earned_on: '2026-09-22' },
+      ],
+      next_up: [
+        { id: 'goal_streak_7', name: 'Week of Wins', description: 'Seven days running', points: 20, current: 3, target: 7, remaining: 4, percent: 43 },
+      ],
+      points: 4,
+      goals: { daily_steps: 10000, weekly_steps: 70000, workouts_per_week: 4, weekly_distance_miles: 15 },
+    })
+  ),
+  http.get('/api/geo/goals', () =>
+    HttpResponse.json({
+      user_id: 'default',
+      goals: { daily_steps: 10000, weekly_steps: 70000, workouts_per_week: 4, weekly_distance_miles: 15 },
+    })
+  ),
+  http.put('/api/geo/goals', async ({ request }) => {
+    const body = await request.json() as { goals?: Record<string, number> };
+    return HttpResponse.json({
+      user_id: 'default',
+      goals: { daily_steps: 10000, weekly_steps: 70000, workouts_per_week: 4, weekly_distance_miles: 15, ...(body.goals ?? {}) },
+    });
+  }),
   http.get('/api/telemetry/push/key', () =>
     HttpResponse.json({ status: 'SUCCESS', public_key: 'test-vapid-public-key' })
   ),  http.post('/api/telemetry/push/subscribe', () => HttpResponse.json({ status: 'SUCCESS' })),
