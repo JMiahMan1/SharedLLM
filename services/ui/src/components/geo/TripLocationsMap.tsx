@@ -91,5 +91,5 @@ export default function TripLocationsMap({ start, end, path = [] }: TripLocation
     };
   }, [start, end, path]);
 
-  return <div ref={containerRef} className="w-full rounded-xl overflow-hidden border border-white/10" style={{ height: 360 }} />;
+  return <div ref={containerRef} className="relative z-0 w-full rounded-xl overflow-hidden border border-white/10" style={{ height: 360 }} />;
 }

@@ -207,7 +207,7 @@ export default function LiveFamilyMap({
 
   return (
     <div className={`relative ${className}`} data-testid="live-family-map">
-      <div ref={containerRef} style={{ height, width: '100%' }} className="rounded-xl" />
+      <div ref={containerRef} style={{ height, width: '100%' }} className="relative z-0 rounded-xl" />
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-400">
         <span className="flex items-center gap-1">
           <span className="inline-block h-2 w-2 rounded-full bg-green-500" /> live (2 min)
