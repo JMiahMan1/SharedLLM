@@ -13,7 +13,7 @@ import aiohttp
 
 log = logging.getLogger("execution.abs_client")
 
-from services.config import GATEWAY_INTERNAL_URL
+from services.config import EXECUTION_EXTERNAL_HOST, GATEWAY_INTERNAL_URL
 from services.execution.http_client import get_session, host_of
 from services.shared.media_token import sign
 
@@ -328,7 +328,12 @@ async def get_stream_url(item_id: str, user: str, format: str = "mp4") -> str:
     authenticated with a short-lived signed media token (``?mt=``, §7.4) so the
     raw ABS API key never reaches a device (or Home Assistant history).
     """
-    base = GATEWAY_INTERNAL_URL or "http://localhost:11435"
+    # HA/Cast/Roku fetch this URL from the LAN: use the externally routable
+    # host (Caddy publishes :11435), never the docker-internal `gateway` alias.
+    if EXECUTION_EXTERNAL_HOST:
+        base = f"http://{EXECUTION_EXTERNAL_HOST}:11435"
+    else:
+        base = GATEWAY_INTERNAL_URL or "http://localhost:11435"
     token, _exp = sign(user)
     return (
         f"{base.rstrip('/')}/api/media/stream/audiobookshelf/{quote(str(item_id), safe='')}"
