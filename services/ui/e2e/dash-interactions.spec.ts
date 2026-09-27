@@ -21,7 +21,13 @@ function loadCredentials(): { user: string; pass: string } {
   if (!user || !pass) throw new Error('Credentials not found in .env.test');
   return { user, pass };
 }
-const { user: LOGIN_USER, pass: LOGIN_PASS } = loadCredentials();
+let LOGIN_USER: string | undefined;
+let LOGIN_PASS: string | undefined;
+try {
+  ({ user: LOGIN_USER, pass: LOGIN_PASS } = loadCredentials());
+} catch {
+  // Credentials are optional at collection time; tests skip in describe.
+}
 
 async function loginAsDefault(page: Page): Promise<void> {
   await page.goto(`${UI_URL}/login`);
@@ -40,6 +46,7 @@ async function loginAsDefault(page: Page): Promise<void> {
 }
 
 test.describe('Dashboard Interaction Deep Test', () => {
+  test.skip(!LOGIN_USER || !LOGIN_PASS, 'Credentials not found in .env.test');
   test('quick notes create + save flow', async ({ page }) => {
     test.setTimeout(90000);
     const consoleErrors: string[] = [];

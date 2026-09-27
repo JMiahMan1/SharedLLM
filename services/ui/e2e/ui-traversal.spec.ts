@@ -63,7 +63,13 @@ function loadCredentials(): { user: string; pass: string } {
   return { user, pass };
 }
 
-const { user: LOGIN_USER, pass: LOGIN_PASS } = loadCredentials();
+let LOGIN_USER: string | undefined;
+let LOGIN_PASS: string | undefined;
+try {
+  ({ user: LOGIN_USER, pass: LOGIN_PASS } = loadCredentials());
+} catch {
+  // Credentials are optional at collection time; tests skip in describe.
+}
 
 // ─── Route Registry ──────────────────────────────────────────────────────────
 
@@ -545,6 +551,7 @@ async function crawlPage(
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 test.describe('Comprehensive E2E UI Traversal', () => {
+  test.skip(!LOGIN_USER || !LOGIN_PASS, 'Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS.');
 
   // ── 1. Recursive Crawler from Dashboard ────────────────────────────────────
 
