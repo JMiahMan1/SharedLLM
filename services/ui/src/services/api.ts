@@ -290,6 +290,7 @@ apiClient.interceptors.response.use(
           const res = await apiClient(config);
           t.dismiss(toastId);
           t.success('Reconnected successfully!', {
+            id: toastId,
             duration: 2000,
             style: {
               background: 'rgba(16, 185, 129, 0.2)',

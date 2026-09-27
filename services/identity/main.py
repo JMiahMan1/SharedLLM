@@ -3233,7 +3233,7 @@ def _resolve_location_user_key(session: Session, user_id: str) -> str:
 
 
 @app.post("/api/users/{user_id}/location")
-def update_user_location(
+async def update_user_location(
     user_id: str,
     location: LocationUpdate,
     x_internal_secret: str | None = Header(None),
@@ -3244,7 +3244,6 @@ def update_user_location(
     matching the rest of the identity internal endpoints.
     """
     _require_internal_secret(x_internal_secret)
-    import asyncio
     import time
     location_data = {
         "latitude": location.latitude,
@@ -3272,15 +3271,10 @@ def update_user_location(
     log.info(f"[location] Updated location for {user_id}: ({location.latitude}, {location.longitude})")
 
     try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_forward_location_to_ha(user_id, location))
-        loop.create_task(_forward_location_to_geo(user_id, location))
-    except RuntimeError:
-        try:
-            asyncio.run(_forward_location_to_ha(user_id, location))
-            asyncio.run(_forward_location_to_geo(user_id, location))
-        except Exception:
-            pass
+        await _forward_location_to_ha(user_id, location)
+        await _forward_location_to_geo(user_id, location)
+    except Exception as exc:
+        log.warning(f"[location] Forward failed for {user_id}: {exc}")
 
     return {"status": "SUCCESS", "message": "Location updated"}
 

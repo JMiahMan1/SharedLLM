@@ -1499,7 +1499,9 @@ async def _estimate_speed_from_history(r, clean_user: str, lat: float, lon: floa
             return None
         prev = json.loads(pts[1])
         dt = ts - float(prev.get("t", 0))
-        if dt <= 0 or dt > 120:
+        # Queued breadcrumbs are flushed with identical timestamps; dividing a
+        # position jump by ~0 s produced 400+ mph readings (and bogus trips).
+        if dt < 1.0 or dt > 120:
             return None
         dist_m = _haversine_distance(prev.get("lat", lat), prev.get("lon", lon), lat, lon)
         return dist_m / dt
@@ -1521,6 +1523,12 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
         if derived is not None:
             spd_mps = derived
     spd_mph = spd_mps * 2.23694
+
+    # GPS teleports and junk speed attributes must never start or inflate a trip.
+    if spd_mph > 130.0:
+        log.warning(f"[Geo] Ignoring implausible speed sample {spd_mph:.1f} mph for {clean_user}")
+        spd_mph = 0.0
+        spd_mps = 0.0
 
     active_key = f"geo:active_trip:{clean_user}"
     active_raw = await r.get(active_key)

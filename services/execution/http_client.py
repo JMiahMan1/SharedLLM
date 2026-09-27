@@ -114,6 +114,10 @@ async def get_session(host: str, verify: bool = False) -> ClientSession:
             ssl=ssl.create_default_context(),
         )
 
+    previous = _SESSION_CACHE.get(host)
+    if previous is not None:
+        with contextlib.suppress(Exception):
+            await previous[0].close()
     session = ClientSession(connector=connector)
     _SESSION_CACHE[host] = (session, now)
     return session

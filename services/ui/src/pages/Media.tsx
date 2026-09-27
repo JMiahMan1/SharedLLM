@@ -1094,7 +1094,6 @@ const Media = () => {
   const [localMuted, setLocalMuted] = useState(false);
   const [localCurrentTime, setLocalCurrentTime] = useState(0);
   const [localDuration, setLocalDuration] = useState(0);
-  const connectAttemptedRef = useRef(false);
   const lastVolumeChangeTimeRef = useRef<number>(0);
   const volumeDebounceTimerRef = useRef<number | null>(null);
 
@@ -1147,20 +1146,6 @@ const Media = () => {
       });
     }
   }, []));
-
-  // Auto-connect Web Player when local mode is active
-  // maPlayer is intentionally excluded - it's a new object every render from useMAWebPlayer
-  useEffect(() => {
-    if (localMode && !connectAttemptedRef.current) {
-      connectAttemptedRef.current = true;
-      console.log('[Media] Auto-connecting Web Player since localMode is active...');
-      maPlayer.connect().catch(err => {
-        console.error('[Media] Auto-connect failed:', err);
-        connectAttemptedRef.current = false;
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [localMode]);
 
   // Fetch Music Assistant players for the device picker. Uses the browser's
   // ma-jsonrpc WebSocket, which reaches MA directly and avoids the gateway's
