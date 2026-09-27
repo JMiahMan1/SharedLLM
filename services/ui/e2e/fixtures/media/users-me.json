@@ -1,0 +1,9 @@
+{
+  "id": 1,
+  "username": "admin",
+  "display_name": "Test Admin",
+  "full_name": "Test Admin",
+  "role": "admin",
+  "is_admin": true,
+  "is_system_default": true
+}

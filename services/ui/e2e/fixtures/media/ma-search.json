@@ -1,0 +1,7 @@
+{
+  "status": "ok",
+  "tracks": [
+    { "name": "Midnight Drive", "artist": "The Synthwave Collective", "uri": "library://track/1", "library": "Music" },
+    { "name": "Midnight Sun", "artist": "Aurora Fields", "uri": "library://track/3", "library": "Music" }
+  ]
+}

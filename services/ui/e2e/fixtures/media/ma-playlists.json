@@ -1,0 +1,7 @@
+{
+  "status": "ok",
+  "playlists": [
+    { "name": "Late Night Synth", "items": 12, "uri": "library://playlist/1" },
+    { "name": "Focus Flow", "items": 24, "uri": "library://playlist/2" }
+  ]
+}

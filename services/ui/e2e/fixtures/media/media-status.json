@@ -1,0 +1,16 @@
+{
+  "status": "SUCCESS",
+  "message": "ok",
+  "service": "media",
+  "detail": {
+    "active": null,
+    "available": [
+      { "entity_id": "media_player.living_room", "friendly_name": "Living Room Speaker", "state": "idle" }
+    ],
+    "all_players": [
+      { "entity_id": "media_player.living_room", "friendly_name": "Living Room Speaker", "state": "idle" },
+      { "entity_id": "media_player.kitchen", "friendly_name": "Kitchen Speaker", "state": "idle" },
+      { "entity_id": "media_player.bedroom", "friendly_name": "Bedroom Speaker", "state": "paused" }
+    ]
+  }
+}

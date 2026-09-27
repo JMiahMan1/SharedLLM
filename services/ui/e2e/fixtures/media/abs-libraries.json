@@ -1,0 +1,7 @@
+{
+  "status": "ok",
+  "libraries": [
+    { "id": "lib-books", "name": "Audiobooks", "media_type": "book" },
+    { "id": "lib-podcasts", "name": "Podcasts", "media_type": "podcast" }
+  ]
+}

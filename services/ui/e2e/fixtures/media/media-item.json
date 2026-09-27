@@ -1,0 +1,11 @@
+{
+  "uri": "library://album/1",
+  "title": "Neon Nights",
+  "artist": "The Synthwave Collective",
+  "year": 2024,
+  "image": null,
+  "children": [
+    { "name": "Midnight Drive", "artist": "The Synthwave Collective", "uri": "library://track/1", "duration": 214 },
+    { "name": "Neon Rain", "artist": "Vector Hold", "uri": "library://track/2", "duration": 187 }
+  ]
+}

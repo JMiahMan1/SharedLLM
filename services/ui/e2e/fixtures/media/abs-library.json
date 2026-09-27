@@ -1,0 +1,7 @@
+{
+  "status": "ok",
+  "books": [
+    { "id": "book-1", "title": "Project Hail Mary", "author": "Andy Weir" },
+    { "id": "book-2", "title": "The Martian", "author": "Andy Weir" }
+  ]
+}
