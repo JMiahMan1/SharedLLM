@@ -306,18 +306,32 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         "DNS_FAILOVER_ENABLED": "dns_failover_enabled",
         "DNS_HEALTH_PORTS": "dns_health_ports",
         "DNS_HEALTH_PATH": "dns_health_path",
+        # Mail (Mailcow alongside Nextcloud). Seeded once so every runtime
+        # caller reads the database, not this file.
+        "MAIL_URL": "mail_url",
+        "MAIL_ADMIN_URL": "mail_admin_url",
+        "MAIL_ADMIN": "mail_admin",
+        "MAIL_USER": "mail_user",
     }
-    for env_key, global_key in env_to_global.items():
+    # Secrets are seeded into the same settings table but must never be logged
+    # or echoed back, so they are listed separately from the plain values above.
+    env_to_global_secret = {
+        "MAIL_PASS": "mail_pass",
+        # Per-user mailbox check (IMAP/SMTP) — distinct from the house admin.
+        "MAIL_USER_PASS": "mail_user_pass",
+    }
+    for env_key, global_key in {**env_to_global, **env_to_global_secret}.items():
         env_val = os.getenv(env_key)
         if env_val:
             existing = session.exec(select(GlobalSetting).where(GlobalSetting.key == global_key)).first()
+            shown = "***" if env_key in env_to_global_secret else env_val
             if not existing:
                 session.add(GlobalSetting(key=global_key, value=env_val))
-                log.info(f"[seed] Seeded {env_key} -> {global_key}: {env_val}")
+                log.info(f"[seed] Seeded {env_key} -> {global_key}: {shown}")
             elif not existing.value:
                 existing.value = env_val
                 session.add(existing)
-                log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {env_val}")
+                log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {shown}")
 
     # ── Seed network-aware service URLs (BRIDGE_*/HOST_*) ──────────────────────
     # Two explicit sets so the same variable is never reused for different
