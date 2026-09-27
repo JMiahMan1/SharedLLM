@@ -3771,6 +3771,21 @@ async def proxy_discover(request: Request):
         )
         return await _proxy_json_response(resp)
 
+@app.post("/api/users/{username}/service-token")
+async def proxy_create_service_token(username: str, request: Request):
+    """One-time password -> per-user service token (admin onboarding a user)."""
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/users/{username}/service-token",
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=60.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/users/me")
 async def proxy_get_me(request: Request):
     auth_header = request.headers.get("Authorization")
