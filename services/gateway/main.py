@@ -35,6 +35,8 @@ from services.gateway.agent_loop import (
 from services.gateway.background_worker import worker as raven_worker
 from services.gateway.config import (
     ABS_TIMEOUT,
+    ALPACA_ARCADE_PUBLIC_URL,
+    ALPACA_ARCADE_URL,
     ALPACA_SD_URL,
     CONFIG,
     CONTROL_PLANE_URL,
@@ -3780,6 +3782,144 @@ async def proxy_update_setting(key: str, request: Request):
         if resp.status < 400:
             from services.gateway.cache import invalidate_settings
             invalidate_settings()
+        return await _proxy_json_response(resp)
+
+
+# --- Arcade (alpaca) game shelf ---------------------------------------------
+
+ARCADE_FEATURED_SETTING_KEY = "arcade_featured_games"
+ARCADE_MIN_VOTES = 1
+ARCADE_FEATURED_LIMIT = 6
+
+
+async def _get_arcade_featured_slugs() -> list[str]:
+    """Admin-curated featured slugs from Identity's GlobalSetting.
+
+    Stored as a JSON array string under `arcade_featured_games`. A missing or
+    malformed value simply means "no curation" — the caller falls back to
+    rating-based picks.
+    """
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{IDENTITY_SVC}/api/settings/{ARCADE_FEATURED_SETTING_KEY}",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            )
+            if resp.status == 404:
+                return []
+            data = await _safe_json(resp)
+    except Exception as exc:  # noqa: BLE001 - curation is optional, never fatal
+        log.warning("arcade: featured-settings lookup failed: %s", exc)
+        return []
+    value = (data or {}).get("value")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _arcade_sort_key(game: dict) -> tuple:
+    rating = game.get("rating") or {}
+    return (
+        -(rating.get("average") or 0.0),
+        -(rating.get("count") or 0),
+        -(game.get("benchmark_score") or 0),
+        (game.get("title") or game.get("slug") or "").lower(),
+    )
+
+
+def _rank_arcade_games(games: list, featured_slugs: list) -> dict:
+    """Order the shelf: admin picks first, then best-rated; never hide a game."""
+    by_slug = {g.get("slug"): g for g in games}
+    featured: list = []
+    seen: set = set()
+    for slug in featured_slugs:
+        game = by_slug.get(slug)
+        if game and slug not in seen:
+            featured.append({**game, "featured": True})
+            seen.add(slug)
+    if featured:
+        source = "admin"
+    else:
+        rated = [g for g in games if ((g.get("rating") or {}).get("count") or 0) >= ARCADE_MIN_VOTES]
+        pool = rated if rated else games
+        featured = [{**g, "featured": True} for g in sorted(pool, key=_arcade_sort_key)[:ARCADE_FEATURED_LIMIT]]
+        source = "rating" if rated else "benchmark"
+    return {
+        "featured": featured,
+        "featured_source": source if featured else "none",
+        "games": sorted(games, key=_arcade_sort_key),
+    }
+
+
+async def _fetch_arcade_games() -> list:
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{ALPACA_ARCADE_URL}/api/games",
+            timeout=aiohttp.ClientTimeout(total=8.0),
+        )
+        data = await _safe_json(resp)
+    if resp.status >= 400 or not isinstance(data, dict) or not data.get("success"):
+        raise ValueError(f"arcade responded {resp.status}")
+    games = data.get("games")
+    if not isinstance(games, list):
+        raise ValueError("arcade returned no games list")
+    return games
+
+
+@app.get("/api/arcade/games")
+async def proxy_arcade_games():
+    """Featured + full game shelf from the alpaca Arcade service.
+
+    Always 200 with `arcade_available` so the Games tab can render an honest
+    offline state instead of failing, and `play_base` so the browser knows
+    where to open a game.
+    """
+    payload = {"play_base": ALPACA_ARCADE_PUBLIC_URL}
+    try:
+        games = await _fetch_arcade_games()
+        featured_slugs = await _get_arcade_featured_slugs()
+        ranked = _rank_arcade_games(games, featured_slugs)
+        return {"success": True, "arcade_available": True, **payload, **ranked, "count": len(games)}
+    except Exception as exc:  # noqa: BLE001 - report the failure, never swallow it
+        log.warning("arcade: games fetch failed: %s", exc)
+        return {
+            "success": False,
+            "arcade_available": False,
+            "error": f"Arcade unreachable: {exc}",
+            **payload,
+            "featured": [],
+            "featured_source": "none",
+            "games": [],
+            "count": 0,
+        }
+
+
+@app.put("/api/arcade/featured")
+async def proxy_arcade_featured(request: Request):
+    """Admin curation: set the featured slug order.
+
+    Identity enforces admin rights on the forwarded credentials, so a
+    non-admin caller gets its 403 back unchanged.
+    """
+    body = await request.json()
+    slugs = body.get("slugs")
+    if not isinstance(slugs, list) or not all(isinstance(s, str) for s in slugs):
+        raise HTTPException(status_code=422, detail="slugs must be a list of strings")
+    clean = [s.strip() for s in slugs if s.strip()]
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.patch(
+            f"{IDENTITY_SVC}/api/settings/{ARCADE_FEATURED_SETTING_KEY}",
+            json={"value": json.dumps(clean)},
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
         return await _proxy_json_response(resp)
 
 
@@ -9143,7 +9283,10 @@ async def sendspin_proxy(websocket: WebSocket):
 
 @app.get("/api/ma-jsonrpc/debug/players")
 async def debug_list_players(request: Request):
-    """Debug endpoint: list all MA players (raw MA payload)."""
+    """Debug endpoint: list all MA players (raw MA payload). Admin only."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
     mass_url, mass_token = await _resolve_ma_credentials(request)
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
@@ -9152,7 +9295,10 @@ async def debug_list_players(request: Request):
 
 @app.get("/api/ma-jsonrpc/debug/queues")
 async def debug_list_queues(request: Request):
-    """Debug endpoint: list all MA queues (raw MA payload)."""
+    """Debug endpoint: list all MA queues (raw MA payload). Admin only."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
     mass_url, mass_token = await _resolve_ma_credentials(request)
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
@@ -9161,7 +9307,10 @@ async def debug_list_queues(request: Request):
 
 @app.get("/api/ma-jsonrpc/debug/player/{player_id}")
 async def debug_get_player(request: Request, player_id: str):
-    """Debug endpoint: get specific player info (raw MA payload)."""
+    """Debug endpoint: get specific player info (raw MA payload). Admin only."""
+    creds = await _resolve_identity_from_request(request)
+    if not creds.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
     mass_url, mass_token = await _resolve_ma_credentials(request)
     if not mass_token:
         raise HTTPException(status_code=400, detail="MA token not configured")
@@ -9275,7 +9424,9 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                 log.info(f"[ma-jsonrpc] STEP 4.7: MA auth response received as binary ({len(auth_response)} bytes)")
 
             async def forward_client_to_ma():
-                """Forward browser JSON-RPC commands to MA."""
+                """Forward browser JSON-RPC commands to MA (allowlist-checked)."""
+                from services.gateway.ma_allowlist import validate_ma_frame
+
                 log.info("[ma-jsonrpc] STEP 5: Proxy loop started — browser→MA direction active")
                 try:
                     while True:
@@ -9292,6 +9443,14 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
                             except Exception:
                                 log.warning("[ma-jsonrpc] Proxy: browser sent unexpected non-text frame; ignoring")
                                 continue
+
+                        forbidden = validate_ma_frame(text_data)
+                        if forbidden is not None:
+                            log.warning(
+                                f"[ma-jsonrpc] Proxy: rejected non-allowlisted frame ({len(text_data)} chars)"
+                            )
+                            await websocket.send_text(forbidden)
+                            continue
                         log.info(f"[ma-jsonrpc] Proxy: browser→MA ({len(text_data)} chars)")
                         await ma_ws.send(text_data)
                 except WebSocketDisconnect:
