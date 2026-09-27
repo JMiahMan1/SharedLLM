@@ -77,6 +77,31 @@ The Games tab also features the highest-rated **Alpaca arcade** titles
 - **Recipes**: a sheet-like Nextcloud note (markdown checklist) editable by the
   whole family; "what's for dinner" can be asked in chat.
 
+### Admin identity switching in chat (requested)
+
+Admins may post as either **their own user** or the shared **Admin (default)**
+identity — for house announcements, chores and games that should look like
+they come from the house account rather than a parent.
+
+Rules:
+
+- **Default is always the caller's own user**, and the composer shows which
+  identity is active (e.g. a "Sending as Admin" badge) so nothing is sent
+  under the wrong name by accident.
+- The choice is **per admin and per device**; turning it on never changes
+  anyone else's default.
+- **The server decides, never the client.** `401`/identity spoofing is the
+  whole point of BUG-01 (`5ca9f00a`: client-supplied `user_context` is now
+  ignored), so the request carries only a flag (`as: "admin"`); the gateway
+  honours it **only when the authenticated caller is an admin**, otherwise
+  403, and then substitutes the admin/default user before calling execution.
+  A client can never name an arbitrary user.
+- One mechanism covers the whole Talk surface — messages, voice notes,
+  reactions and polls all ride the same `user_context` resolution, so the
+  switch is implemented once in the gateway proxy rather than per feature.
+- Switching identity is visible by design (messages display the author Talk
+  attributes) and audit-logged when an admin posts as the Admin identity.
+
 ### 3. Chat depth
 - **Voice/video calls**: Nextcloud Talk WebRTC needs the Talk signalling API
   (`/ocs/v2.php/apps/spreed/api/v4/call/*`). Phase 1 is a join button that
