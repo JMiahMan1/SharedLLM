@@ -87,3 +87,68 @@ def test_media_file_url_carries_valid_signed_token():
     # Device URLs have no refresh path: must survive long playback sessions.
     assert verify(mt, "testuser", now=time.time() + 6 * 3600) is True
     assert verify(mt, "testuser", now=time.time() + 13 * 3600) is False
+
+
+def test_no_unsigned_media_url_builders():
+    """Every device-facing 8888 URL must go through media_file_url (signed).
+
+    A raw ``http://{host}:8888/media/<id>`` f-string anywhere in production
+    execution code would hand devices an unsigned URL that the (now auth-gated)
+    file server rejects with 403 — breaking playback.
+    """
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parents[1]
+    pattern = re.compile(r"https?://\{[^}]*\}:8888/media/")
+    offenders = []
+    for path in root.rglob("*.py"):
+        if "tests" in path.parts or path.name == "media_links.py":
+            continue
+        for lineno, line in enumerate(path.read_text().splitlines(), 1):
+            if pattern.search(line):
+                offenders.append(f"{path.relative_to(root)}:{lineno}: {line.strip()}")
+    assert not offenders, "unsigned 8888 builders:\n" + "\n".join(offenders)
+
+
+async def test_android_tv_play_video_hands_cast_signed_url(monkeypatch):
+    """android_tv.play_video (user threaded through) must hand Cast a signed URL."""
+    from unittest.mock import AsyncMock, patch
+
+    from services.execution.handlers import android_tv, video
+
+    captured: dict = {}
+
+    async def fake_call_service(ha_url, ha_token, domain, service, entity, data=None, **kw):
+        if isinstance(data, dict) and "media_content_id" in data:
+            captured["url"] = data["media_content_id"]
+        return {"ok": True}
+
+    monkeypatch.setattr(android_tv.ha_client, "call_service", fake_call_service)
+    monkeypatch.setattr(android_tv, "_find_cast_sibling", AsyncMock(return_value=None))
+    monkeypatch.setattr(android_tv, "_ensure_volume_safe", AsyncMock())
+    monkeypatch.setattr(
+        video, "download_video_progressive", AsyncMock(return_value=("vid-abc", "Title"))
+    )
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        result = await android_tv.play_video(
+            "http://ha.local:8123",
+            "ha-token",
+            "media_player.tv",
+            "http://example.com/watch?v=x",
+            "some video",
+            user="testuser",
+        )
+
+    assert result.status == "SUCCESS", result.message
+    url = captured.get("url")
+    assert url, f"no media_content_id handed to cast: {captured}"
+    parsed = urlparse(url)
+    assert parsed.path == "/media/vid-abc"
+    query = parse_qs(parsed.query)
+    assert query.get("user") == ["testuser"]
+    mt = (query.get("mt") or [""])[0]
+    assert mt, f"no mt= in {url}"
+    assert verify(mt, "testuser") is True
+    assert "token=" not in url

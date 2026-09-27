@@ -4,12 +4,14 @@ import json
 import logging
 import os
 import re
+import secrets
 import urllib.parse
 
 import aiohttp
 
 from services.config import TEMP_MEDIA_DIR
 from services.execution import ha_client
+from services.execution.media_links import media_file_url
 from services.execution.schemas import ExecutionResult, VideoPlayRequest
 
 log = logging.getLogger("execution.video")
@@ -225,9 +227,7 @@ async def download_video(video_url: str) -> tuple[str | None, str | None]:
     Returns (media_id, title) or (None, None) on failure.
     Files are stored on disk and streamed via /media/{media_id} endpoint.
     """
-    import uuid
-
-    media_id = f"vid-{uuid.uuid4().hex[:8]}"
+    media_id = secrets.token_urlsafe(16)
     tmp_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
 
     try:
@@ -290,9 +290,7 @@ async def download_video_progressive(video_url: str, threshold: int = PROGRESSIV
     Returns (media_id, title) as soon as threshold bytes are downloaded,
     while continuing the download in the background.
     """
-    import uuid
-
-    media_id = f"vid-roku-{uuid.uuid4().hex[:8]}"
+    media_id = secrets.token_urlsafe(16)
     tmp_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
 
     try:
@@ -377,9 +375,7 @@ async def download_video_for_roku(video_url: str) -> tuple[str | None, str | Non
     Uses format 22 (720p) or 18 (360p) which are single-file containers
     that require no local muxing, ensuring immediate streaming readiness.
     """
-    import uuid
-
-    media_id = f"vid-roku-{uuid.uuid4().hex[:8]}"
+    media_id = secrets.token_urlsafe(16)
     tmp_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
 
     try:
@@ -478,7 +474,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
                 message="EXECUTION_EXTERNAL_HOST is not configured. Cannot stream video to Roku.",
                 service="video_play",
             )
-        stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+        stream_url = media_file_url(media_id, ctx.user, EXECUTION_EXTERNAL_HOST)
         return await roku_handler.roku_play_video(
             ctx.ha_url, ctx.ha_token, full_entity_id, stream_url, title or req.query,
         )
@@ -500,7 +496,7 @@ async def handle_video_play(req: VideoPlayRequest) -> ExecutionResult:
         return EXECUTION_EXTERNAL_HOST
 
     public_host = get_public_host()
-    media_url = f"http://{public_host}:8888/media/{media_id}"
+    media_url = media_file_url(media_id, ctx.user, public_host)
     log.info(f"[video/play] Casting URL: {media_url}")
 
     # Step 5: Power on the device

@@ -6,6 +6,7 @@ from typing import cast
 
 from services.config import MASS_CONFIG_ENTRY_ID
 from services.execution import ha_client
+from services.execution.media_links import media_file_url
 from services.execution.schemas import AudiobookshelfRequest, ExecutionResult, MediaPlayRequest
 from services.shared.ma_player import is_music_assistant_player
 
@@ -317,7 +318,7 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         from services.config import EXECUTION_EXTERNAL_HOST
         if not EXECUTION_EXTERNAL_HOST:
             return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
-        stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+        stream_url = media_file_url(media_id, ctx.user, EXECUTION_EXTERNAL_HOST)
         return await roku_handler.roku_play_video(
             ctx.ha_url, ctx.ha_token, entity_id, stream_url, title or query,
         )
@@ -327,7 +328,7 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     is_android_tv = await android_tv_handler.is_android_tv(ctx.ha_url, ctx.ha_token, entity_id)
     if is_android_tv:
         log.info(f"[media.video] Android TV detected ({entity_id}), delegating to android_tv handler")
-        return await android_tv_handler.play_video(ctx.ha_url, ctx.ha_token, entity_id, video_url, query)
+        return await android_tv_handler.play_video(ctx.ha_url, ctx.ha_token, entity_id, video_url, query, ctx.user)
 
     # Samsung Tizen TV: use dedicated handler with WOL wake and play_media
     from . import samsung as samsung_handler
@@ -345,7 +346,7 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
         from services.config import EXECUTION_EXTERNAL_HOST
         if not EXECUTION_EXTERNAL_HOST:
             return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
-        stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+        stream_url = media_file_url(media_id, ctx.user, EXECUTION_EXTERNAL_HOST)
         return await samsung_handler.play_video(ctx.ha_url, ctx.ha_token, entity_id, stream_url, title or query)
 
     # Cast/WebOS: stop active session, ensure TV is on, then play
@@ -383,7 +384,7 @@ async def play_video(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
     from services.config import EXECUTION_EXTERNAL_HOST
     if not EXECUTION_EXTERNAL_HOST:
         return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="media_play")
-    stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+    stream_url = media_file_url(media_id, ctx.user, EXECUTION_EXTERNAL_HOST)
     log.info(f"[media.video] Casting video to {entity_id}: {stream_url}")
 
     result = await ha_client.call_service(

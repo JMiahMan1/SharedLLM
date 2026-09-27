@@ -15,6 +15,8 @@ except ImportError:
     from .. import ha_client
     from ..schemas import ExecutionResult
 
+from services.execution.media_links import media_file_url
+
 log = logging.getLogger("execution.android_tv")
 
 ANDROID_TV_COMMANDS = {
@@ -191,7 +193,7 @@ async def _ensure_volume_safe(ha_url: str, ha_token: str, entity_id: str) -> Non
         log.warning(f"[android_tv] Volume safeguard failed: {e}")
 
 
-async def play_video(ha_url: str, ha_token: str, entity_id: str, video_url: str, query: str) -> ExecutionResult:
+async def play_video(ha_url: str, ha_token: str, entity_id: str, video_url: str, query: str, user: str = "") -> ExecutionResult:
     """
     Play video on Android TV by delegating to a Cast sibling.
 
@@ -241,7 +243,7 @@ async def play_video(ha_url: str, ha_token: str, entity_id: str, video_url: str,
     if not EXECUTION_EXTERNAL_HOST:
         return ExecutionResult(status="FAILURE", message="EXECUTION_EXTERNAL_HOST is not configured.", service="android_tv_video")
 
-    stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+    stream_url = media_file_url(media_id, user, EXECUTION_EXTERNAL_HOST)
     log.info(f"[android_tv/video] Streaming URL: {stream_url} -> {target_entity}")
 
     # Volume safeguard on target

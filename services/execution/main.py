@@ -68,6 +68,7 @@ from services.execution.handlers import gh as gh_handler
 from services.execution.handlers import git as git_handler
 from services.execution.handlers import ha_config as ha_config_handler
 from services.execution.handlers import volumes as volume_handler
+from services.execution.media_links import media_file_url
 from services.execution.media_playback_service import MediaPlaybackService
 from services.execution.schemas import (
     AnnouncementRequest,
@@ -331,56 +332,8 @@ async def lifespan(app: FastAPI):
         import threading
 
         import uvicorn
-        from fastapi import FastAPI, HTTPException
-        from fastapi.responses import FileResponse, Response
 
-        media_app = FastAPI(title="Media Server")
-
-        @media_app.get("/media/{media_id}")
-        @media_app.head("/media/{media_id}")
-        async def serve_media(media_id: str):  # pyright: ignore[reportUnusedFunction]
-            # TTS audio from memory cache
-            if media_id in TEMP_AUDIO_CACHE:
-                return Response(
-                    content=TEMP_AUDIO_CACHE[media_id],
-                    media_type="audio/wav",
-                    headers={"Accept-Ranges": "bytes"},
-                )
-
-            # TTS audio from disk (.wav)
-            wav_path = os.path.join(TEMP_AUDIO_DIR, f"{media_id}.wav")
-            if os.path.exists(wav_path):
-                return FileResponse(
-                    path=wav_path,
-                    media_type="audio/wav",
-                    headers={"Accept-Ranges": "bytes"},
-                )
-
-            # Video files from disk (.mp4) — FileResponse handles Range automatically
-            mp4_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
-            if os.path.exists(mp4_path):
-                return FileResponse(
-                    path=mp4_path,
-                    media_type="video/mp4",
-                    headers={
-                        "Accept-Ranges": "bytes",
-                        "Cache-Control": "no-cache",
-                    },
-                )
-
-            # Progressive download: serve .mp4.part files while download is in progress
-            part_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4.part")
-            if os.path.exists(part_path):
-                return FileResponse(
-                    path=part_path,
-                    media_type="video/mp4",
-                    headers={
-                        "Accept-Ranges": "bytes",
-                        "Cache-Control": "no-cache",
-                    },
-                )
-
-            raise HTTPException(status_code=404, detail="Media not found")
+        media_app = create_media_server_app()
 
         def _run():
             uvicorn.run(media_app, host="0.0.0.0", port=8888, log_level="warning")
@@ -499,6 +452,81 @@ from services.config import TEMP_MEDIA_DIR
 TEMP_AUDIO_DIR = os.path.join(TEMP_MEDIA_DIR, "tts")
 os.makedirs(TEMP_AUDIO_DIR, exist_ok=True)
 os.makedirs(TEMP_MEDIA_DIR, exist_ok=True)
+
+
+def create_media_server_app():
+    """Build the FastAPI app for the media file server (port 8888).
+
+    Every request must carry a short-lived signed media token (§7.4):
+    ``?user=<user>&mt=<token>``. In-progress ``.part`` files ARE served
+    (progressive playback) but only behind the same token auth.
+    """
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.responses import FileResponse, Response
+
+    from services.shared.media_token import verify as verify_media_token
+
+    media_app = FastAPI(title="Media Server")
+
+    @media_app.get("/media/{media_id}")
+    @media_app.head("/media/{media_id}")
+    async def serve_media(media_id: str, request: Request):  # pyright: ignore[reportUnusedFunction]
+        # Auth first: signed media token is the only credential devices can present.
+        mt = request.query_params.get("mt")
+        user = request.query_params.get("user", "")
+        if not mt or not verify_media_token(mt, user):
+            raise HTTPException(status_code=403, detail="Signed media token required")
+
+        if "/" in media_id or "\\" in media_id or ".." in media_id:
+            raise HTTPException(status_code=404, detail="Media not found")
+
+        # TTS audio from memory cache
+        if media_id in TEMP_AUDIO_CACHE:
+            return Response(
+                content=TEMP_AUDIO_CACHE[media_id],
+                media_type="audio/wav",
+                headers={"Accept-Ranges": "bytes"},
+            )
+
+        # TTS audio from disk (.wav)
+        wav_path = os.path.join(TEMP_AUDIO_DIR, f"{media_id}.wav")
+        if os.path.exists(wav_path):
+            return FileResponse(
+                path=wav_path,
+                media_type="audio/wav",
+                headers={"Accept-Ranges": "bytes"},
+            )
+
+        # Video files from disk (.mp4) — FileResponse handles Range automatically
+        mp4_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4")
+        if os.path.exists(mp4_path):
+            return FileResponse(
+                path=mp4_path,
+                media_type="video/mp4",
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-cache",
+                },
+            )
+
+        # Progressive download: serve .mp4.part files while download is in progress.
+        # Kept intentionally (progressive playback must not wait for the full
+        # download) — now gated behind the signed media token like everything else.
+        part_path = os.path.join(TEMP_MEDIA_DIR, f"{media_id}.mp4.part")
+        if os.path.exists(part_path):
+            return FileResponse(
+                path=part_path,
+                media_type="video/mp4",
+                headers={
+                    "Accept-Ranges": "bytes",
+                    "Cache-Control": "no-cache",
+                },
+            )
+
+        raise HTTPException(status_code=404, detail="Media not found")
+
+    return media_app
+
 
 def get_public_host():
     """Resolve the public host for media URLs (for external device access)."""
@@ -718,7 +746,7 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
         media_id, dl_title = await video_handler.download_video_progressive(video_url)
         if not media_id or not EXECUTION_EXTERNAL_HOST:
             return ExecutionResult(status="FAILURE", message="Could not resolve audio stream", service="resolve_stream")
-        stream_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{media_id}"
+        stream_url = media_file_url(media_id, req.user_context.user, EXECUTION_EXTERNAL_HOST)
         title = dl_title or query
 
     log.info(f"[media/resolve_stream] Resolved: title='{title}' stream_url='{stream_url[:80]}...'")
@@ -889,7 +917,7 @@ async def execute_trigger(payload: dict[str, Any]):
             TEMP_AUDIO_CACHE[audio_key] = audio_bytes
 
             from services.config import EXECUTION_EXTERNAL_HOST
-            media_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{audio_key}"
+            media_url = media_file_url(audio_key, creds.get("user") or str(user_id), EXECUTION_EXTERNAL_HOST)
 
             full_entity_id = ha_client.sanitize_entity_id("media_player", target_device)
 
@@ -1540,7 +1568,7 @@ async def execute_announce(req: AnnouncementRequest):
 
             public_host = get_public_host()
             # Use dedicated media port 8888 (accessible externally)
-            media_url = f"http://{public_host}:8888/media/{media_id}"
+            media_url = media_file_url(media_id, ctx.user, public_host)
             log.info(f"[announce] Media URL: {media_url}")
 
             # VERIFY: Ensure media endpoint is accessible before dispatching to HA

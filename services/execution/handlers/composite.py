@@ -7,6 +7,7 @@ import logging
 
 from services.execution import ha_client
 from services.execution.handlers import storage
+from services.execution.media_links import media_file_url
 from services.execution.schemas import ExecutionResult
 from services.execution.tts import text_to_speech
 
@@ -90,7 +91,7 @@ async def handle_document_broadcast(req) -> ExecutionResult:
         from services.config import EXECUTION_EXTERNAL_HOST
         if not EXECUTION_EXTERNAL_HOST:
             raise RuntimeError("EXECUTION_EXTERNAL_HOST not configured")
-        media_url = f"http://{EXECUTION_EXTERNAL_HOST}:8888/media/{audio_cache_key}"
+        media_url = media_file_url(audio_cache_key, ctx.user, EXECUTION_EXTERNAL_HOST)
     except Exception as e:
         return ExecutionResult(status="FAILURE", message=f"Cannot build media URL: {e}", service="composite_broadcast")
 
