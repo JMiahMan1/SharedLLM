@@ -63,6 +63,7 @@ export type WorkspaceListResponse =
     };
 
 export interface UserProfileRaw {
+  mail_user?: string;
   id: string | number;
   username: string;
   display_name?: string;
