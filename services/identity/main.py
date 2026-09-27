@@ -137,6 +137,8 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "audiobookshelf_user", "ALTER TABLE user ADD COLUMN audiobookshelf_user VARCHAR")
         _add_column("user", "audiobookshelf_pass_enc", "ALTER TABLE user ADD COLUMN audiobookshelf_pass_enc VARCHAR")
         _add_column("user", "audiobookshelf_api_key_enc", "ALTER TABLE user ADD COLUMN audiobookshelf_api_key_enc VARCHAR")
+        _add_column("user", "mailcow_url", "ALTER TABLE user ADD COLUMN mailcow_url VARCHAR")
+        _add_column("user", "mailcow_api_key_enc", "ALTER TABLE user ADD COLUMN mailcow_api_key_enc VARCHAR")
         _add_column("user", "mass_url", "ALTER TABLE user ADD COLUMN mass_url VARCHAR")
         _add_column("user", "mass_token_enc", "ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR")
         _add_column("user", "skylight_enabled", "ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1")
@@ -529,6 +531,8 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         audiobookshelf_user=user.audiobookshelf_user,
         audiobookshelf_pass=decrypt(user.audiobookshelf_pass_enc) if user.audiobookshelf_pass_enc else None,
         audiobookshelf_api_key=decrypt(user.audiobookshelf_api_key_enc) if user.audiobookshelf_api_key_enc else None,
+        mailcow_url=user.mailcow_url,
+        mailcow_api_key=decrypt(user.mailcow_api_key_enc) if user.mailcow_api_key_enc else None,
         mass_url=use_admin_mass_url,
         mass_token=use_admin_mass_token,
         git_url=user.git_url,
@@ -684,6 +688,7 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         "gitlab_token": "gitlab_token_enc",
         "audiobookshelf_pass": "audiobookshelf_pass_enc",
         "audiobookshelf_api_key": "audiobookshelf_api_key_enc",
+        "mailcow_api_key": "mailcow_api_key_enc",
         "mass_token": "mass_token_enc",
         "git_token": "git_token_enc",
         "huggingface_token": "huggingface_token_enc",
@@ -783,6 +788,8 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
         audiobookshelf_user=_coerce(body.audiobookshelf_user),
         audiobookshelf_pass_enc=encrypt(_coerce(body.audiobookshelf_pass)) if _coerce(body.audiobookshelf_pass) else None,
         audiobookshelf_api_key_enc=encrypt(_coerce(body.audiobookshelf_api_key)) if _coerce(body.audiobookshelf_api_key) else None,
+        mailcow_url=_coerce(body.mailcow_url),
+        mailcow_api_key_enc=encrypt(_coerce(body.mailcow_api_key)) if _coerce(body.mailcow_api_key) else None,
         mass_url=_coerce(body.mass_url),
         mass_token_enc=encrypt(_coerce(body.mass_token)) if _coerce(body.mass_token) else None,
         huggingface_token_enc=encrypt(_coerce(body.huggingface_token)) if _coerce(body.huggingface_token) else None,
@@ -1071,6 +1078,8 @@ SEEDABLE_CREDENTIALS = {
     "audiobookshelf_user": ("audiobookshelf_user", "audiobookshelf_user"),
     "audiobookshelf_pass": ("audiobookshelf_pass_enc", "audiobookshelf_pass"),
     "audiobookshelf_api_key": ("audiobookshelf_api_key_enc", "audiobookshelf_api_key"),
+    "mailcow_url": ("mailcow_url", "mailcow_url"),
+    "mailcow_api_key": ("mailcow_api_key_enc", "mailcow_api_key"),
     "mass_token": ("mass_token_enc", "mass_token"),
     "git_token": ("git_token_enc", "git_token"),
     "huggingface_token": ("huggingface_token_enc", "huggingface_token"),
@@ -1191,8 +1200,13 @@ def revoke_key(key_id: int, session: Session = Depends(get_session), user: User 
 
 @app.get("/api/auth/discover", response_model=DiscoverResponse)
 async def discover_users(session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
-    """Scan Home Assistant and Nextcloud for users to import.
-    Merges users found in both sources into a single entry with combined data."""
+    """Scan Home Assistant, Nextcloud, Audiobookshelf and Mailcow for users to import.
+
+    Sources are scanned with the admin's own credentials, falling back to the
+    default user's, so one admin can onboard the whole family without typing
+    every service's login. Usernames are merged across sources and existing
+    Jarvis users are always skipped.
+    """
     if not admin.is_admin:
         raise HTTPException(status_code=403, detail="Admin only")
 
@@ -1202,22 +1216,43 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
     # Resolve credentials to use (prefer admin's, fallback to default)
     default_user = session.exec(select(User).where(User.username == "default")).first()
 
-    ha_url = admin.ha_url or (default_user.ha_url if default_user else None)
-    ha_token_enc = admin.ha_token_enc or (default_user.ha_token_enc if default_user else None)
+    def _pick(attr: str, encrypted: bool = False):
+        mine = getattr(admin, attr, None)
+        if mine:
+            return decrypt(mine) if encrypted and mine else mine
+        theirs = getattr(default_user, attr, None) if default_user else None
+        if not theirs:
+            return None
+        return decrypt(theirs) if encrypted and theirs else theirs
 
-    nc_url = admin.nextcloud_url or (default_user.nextcloud_url if default_user else None)
-    nc_user = admin.nextcloud_user or (default_user.nextcloud_user if default_user else None)
-    nc_pass_enc = admin.nextcloud_pass_enc or (default_user.nextcloud_pass_enc if default_user else None)
+    ha_url = _pick("ha_url")
+    ha_token = _pick("ha_token_enc", encrypted=True)
 
-    log.info(f"[discovery] Starting scan. HA_URL: {ha_url}, NC_URL: {nc_url}")
+    nc_url = _pick("nextcloud_url")
+    nc_user = _pick("nextcloud_user")
+    nc_pass = _pick("nextcloud_pass_enc", encrypted=True)
 
-    # Collect users from each source into dicts keyed by username
+    abs_url = _pick("audiobookshelf_url")
+    abs_user = _pick("audiobookshelf_user")
+    abs_pass = _pick("audiobookshelf_pass_enc", encrypted=True)
+    abs_key = _pick("audiobookshelf_api_key_enc", encrypted=True)
+
+    # Mailcow lives beside Nextcloud, but the address is configuration, not a
+    # guess: without a URL the scan is skipped with a warning rather than
+    # silently probing somewhere.
+    mailcow_url = _pick("mailcow_url")
+    mailcow_key = _pick("mailcow_api_key_enc", encrypted=True)
+
+    log.info(f"[discovery] Starting scan. HA_URL: {ha_url}, NC_URL: {nc_url}, ABS_URL: {abs_url}, MAILCOW_URL: {mailcow_url}")
+
+    # Collect users from each source into dicts keyed by lowercase username
     ha_users: dict[str, dict] = {}
     nc_users: dict[str, dict] = {}
+    abs_users: dict[str, dict] = {}
+    mail_users: dict[str, dict] = {}
 
     # 1. Scan Home Assistant (Person entities)
-    if ha_url and ha_token_enc:
-        ha_token = decrypt(ha_token_enc)
+    if ha_url and ha_token:
         try:
             async with get_client() as client:
                 resp = await client.get(
@@ -1235,11 +1270,10 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                             }
         except Exception as e:
             log.error(f"[discovery] HA Error: {e!s}")
+            errors.append(f"Home Assistant: {e!s}")
 
     # 2. Scan Nextcloud (Provisioning API)
-    if nc_url and nc_user and nc_pass_enc:
-        nc_pass = decrypt(nc_pass_enc)
-        assert nc_pass is not None
+    if nc_url and nc_user and nc_pass:
         try:
             async with get_client() as client:
                 resp = await client.get(
@@ -1277,31 +1311,116 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
                                 pass
         except Exception as e:
             log.error(f"[discovery] Nextcloud Error: {e!s}")
+            errors.append(f"Nextcloud: {e!s}")
 
-    # 3. Merge users — combine HA and NC data when usernames match
-    all_usernames = set(ha_users.keys()) | set(nc_users.keys())
-    discovered = []
+    # 3. Scan Audiobookshelf (library users) — basic auth, or the API key header
+    if abs_url and (abs_key or (abs_user and abs_pass)):
+        try:
+            headers = {"Authorization": f"Bearer {abs_key}"} if abs_key else {}
+            auth = None if abs_key else aiohttp.BasicAuth(abs_user, abs_pass)
+            async with get_client() as client:
+                resp = await client.get(
+                    f"{abs_url.rstrip('/')}/api/users",
+                    headers=headers,
+                    auth=auth,
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                if resp.status == 200:
+                    payload = await resp.json()
+                    for entry in payload.get("users", []):
+                        username = (entry.get("username") or "").strip()
+                        if not username:
+                            continue
+                        abs_users[username.lower()] = {
+                            "abs_username": username,
+                            "display_name": entry.get("name") or username,
+                        }
+                else:
+                    warnings.append(f"Audiobookshelf returned {resp.status}")
+        except Exception as e:
+            log.error(f"[discovery] ABS Error: {e!s}")
+            errors.append(f"Audiobookshelf: {e!s}")
+
+    # 4. Scan Mailcow (mailboxes become the user's mail address)
+    if mailcow_url and mailcow_key:
+        try:
+            async with get_client() as client:
+                resp = await client.get(
+                    f"{mailcow_url.rstrip('/')}/api/v1/mailbox",
+                    headers={"Authorization": f"Token {mailcow_key}"},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                if resp.status == 200:
+                    for entry in (await resp.json()).get("items", []):
+                        address = (entry.get("local_part") or "").strip()
+                        if not address or address in ("admin", "postmaster"):
+                            continue
+                        mail_users[address.lower()] = {
+                            "mail_address": entry.get("email") or address,
+                            "display_name": entry.get("name") or address,
+                            "active": bool(entry.get("active", True)),
+                        }
+                else:
+                    warnings.append(f"Mailcow returned {resp.status}")
+        except Exception as e:
+            log.error(f"[discovery] Mailcow Error: {e!s}")
+            errors.append(f"Mailcow: {e!s}")
+    elif not mailcow_url:
+        warnings.append("Mailcow: not configured — set mailcow_url to include mailboxes in onboarding")
+
+    # 5. Merge users — one entry per username, combining every source.
+    #    Display names are matched loosely (case/punctuation) so "Mom" in HA
+    #    and "mom" in Nextcloud land on the same person instead of two rows.
+    all_usernames = set(ha_users) | set(nc_users) | set(abs_users) | set(mail_users)
+    def _norm(name: str) -> str:
+        return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+    known_norms = {_norm(u) for u in all_usernames}
+    aliases: dict[str, str] = {}
     for username in sorted(all_usernames):
+        bucket = {**ha_users.get(username, {}), **nc_users.get(username, {}),
+                  **abs_users.get(username, {}), **mail_users.get(username, {})}
+        for candidate in (bucket.get("display_name"), *sorted(all_usernames)):
+            if not candidate or username == candidate:
+                continue
+            # Never alias onto something that is itself a discovered login —
+            # otherwise "Mom" and "kiddo" can collapse into a single person.
+            if _norm(candidate) in known_norms and _norm(candidate) != _norm(username):
+                continue
+            aliases.setdefault(_norm(candidate), username)
+
+    buckets: dict[str, dict] = {}
+    for username in all_usernames:
+        canonical = aliases.get(_norm(username), username)
+        merged = buckets.setdefault(canonical, {"sources": [], "ha": {}, "nc": {}, "abs": {}, "mail": {}})
+        for key, store in (("ha", ha_users), ("nc", nc_users), ("abs", abs_users), ("mail", mail_users)):
+            if username in store:
+                merged[key] = store[username]
+                merged["sources"].append(key)
+
+    discovered = []
+    for username, merged in sorted(buckets.items()):
         existing = session.exec(select(User).where(User.username == username)).first()
         if existing:
             continue
 
-        in_ha = username in ha_users
-        in_nc = username in nc_users
-        ha_data = ha_users.get(username, {})
-        nc_data = nc_users.get(username, {})
+        ha_data = merged["ha"]
+        nc_data = merged["nc"]
+        abs_data = merged["abs"]
+        mail_data = merged["mail"]
 
-        # Determine source label
-        if in_ha and in_nc:
-            source = "Home Assistant + Nextcloud"
-        elif in_ha:
-            source = "Home Assistant"
-        else:
-            source = "Nextcloud"
+        labels = {"ha": "Home Assistant", "nc": "Nextcloud", "abs": "Audiobookshelf", "mail": "Mailcow"}
+        source = " + ".join(labels[s] for s in merged["sources"])
 
-        # Prefer NC display_name (usually more accurate), fall back to HA
-        display_name = nc_data.get("display_name") or ha_data.get("display_name") or username.capitalize()
-        email = nc_data.get("email")
+        # Prefer a real human name over a login handle
+        display_name = (
+            nc_data.get("display_name")
+            or ha_data.get("display_name")
+            or abs_data.get("display_name")
+            or mail_data.get("display_name")
+            or username.capitalize()
+        )
+        email = nc_data.get("email") or mail_data.get("mail_address")
 
         discovered.append(DiscoverUser(
             username=username,
@@ -1310,6 +1429,9 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
             email=email,
             ha_person_id=ha_data.get("entity_id"),
             nc_username=nc_data.get("nc_username"),
+            abs_username=abs_data.get("abs_username"),
+            mail_address=mail_data.get("mail_address"),
+            mailcow_address=mail_data.get("mailcow_address"),
         ))
 
     log.info(f"[discovery] Discovery complete. Found {len(discovered)} users.")

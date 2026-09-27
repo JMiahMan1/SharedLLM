@@ -4476,7 +4476,7 @@ async def proxy_write_note(request: Request):
         "path": body.get("path"),
         "storage": body.get("storage", "nextcloud"),
     }
-    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
 
 @app.post("/api/communication/notes/check_off")
@@ -4502,7 +4502,7 @@ async def proxy_delete_note(request: Request):
         "path": body.get("path"),
         "storage": body.get("storage", "nextcloud"),
     }
-    return await _proxy_execution_with_identity(request, "/execute/note", payload)
+    return await _proxy_execution_with_identity(request, "/execute/note", payload, as_user=body.get("as_user"))
 
 
 @app.post("/api/communication/notes/list")
