@@ -24,6 +24,9 @@
     handle /health/* {
         reverse_proxy gateway:11435
     }
+    handle /execute* {
+        reverse_proxy gateway:11435
+    }
     handle / {
         reverse_proxy gateway:11435
     }
