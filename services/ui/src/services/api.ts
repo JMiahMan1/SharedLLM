@@ -17,6 +17,7 @@ import type {
   GatewayConfig,
   EsphomeDevice,
   ExecutionResponse,
+  ArcadeGamesResponse,
   TimerRecord,
   SmokeTestResult,
   StorageEntry,
@@ -113,6 +114,7 @@ export type {
   RagStats,
   TelemetryEnrollment,
   ExecutionResponse,
+  ArcadeGamesResponse,
   TimerRecord,
   StorageEntry,
   TalkConversation,
@@ -1156,6 +1158,16 @@ export const api = {
     caption?: string;
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/voice', payload);
+    return resp.data;
+  },
+
+  async getArcadeGames(): Promise<ArcadeGamesResponse> {
+    const resp = await apiClient.get('/api/arcade/games');
+    return resp.data;
+  },
+
+  async setArcadeFeatured(slugs: string[]): Promise<ExecutionResponse> {
+    const resp = await apiClient.put('/api/arcade/featured', { slugs });
     return resp.data;
   },
 
