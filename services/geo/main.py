@@ -35,7 +35,7 @@ from pydantic import BaseModel
 _STATIC = Path(__file__).resolve().parent / "static"
 
 from services.common.http import get_client_insecure
-from services.config import HA_TOKEN, HA_URL, INTERNAL_SECRET, REDIS_URL
+from services.config import HA_TOKEN, HA_URL, IDENTITY_SVC_URL, INTERNAL_SECRET, REDIS_URL
 from services.shared.info_endpoint import info_router
 
 try:
@@ -2619,6 +2619,158 @@ async def _collect_activity_stats(r, clean: str, days: int) -> dict:
         "_workouts": workouts,
         "_trips": trips,
     }
+
+
+# ─── Opt-in activity sharing (private by default) ────────────────────────────
+
+ACTIVITY_WINDOWS = {"today": 1, "week": 7, "month": 30, "all": 365}
+
+
+async def _fetch_activity_sharing() -> dict:
+    """Read every user's sharing preference from Identity (internal).
+
+    Failure returns an empty set — the safe default is "nobody shares".
+    """
+    try:
+        async with get_client_insecure() as client:
+            async with client.get(
+                f"{IDENTITY_SVC_URL.rstrip('/')}/api/internal/activity-sharing",
+                headers={"X-Internal-Secret": INTERNAL_SECRET},
+                timeout=aiohttp.ClientTimeout(total=5.0),
+            ) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception as e:
+        log.warning(f"[Geo] Activity sharing lookup failed: {e}")
+    return {"users": []}
+
+
+async def _viewer_may_see(viewer: str, target: str) -> bool:
+    """True when `viewer` is allowed to read `target`'s activity.
+
+    Owners always see their own data. Everyone else requires the target to
+    have opted in and the viewer to be inside the chosen audience.
+    """
+    if not viewer:
+        return False
+    if viewer == target:
+        return True
+    sharing = await _fetch_activity_sharing()
+    for entry in sharing.get("users", []):
+        if str(entry.get("username", "")).strip().lower() != target:
+            continue
+        if not entry.get("enabled"):
+            return False
+        if entry.get("audience") == "circle":
+            return True
+        allowed = [str(u).strip().lower() for u in entry.get("user_ids", [])]
+        return viewer in allowed
+    return False
+
+
+async def _activity_points(r, clean: str) -> tuple[int, int]:
+    """(points, achievements_earned) from the ledger — exact, not estimated."""
+    definitions = achievements.load_definitions()
+    ledger = await achievements.load_points_ledger(r, clean)
+    return achievements.total_points(ledger, definitions), len(ledger)
+
+
+def _shared_scopes(stats: dict, scopes: list[str], points: int, earned: int) -> dict:
+    """Project a stats dict down to the scopes a user agreed to share."""
+    item: dict = {}
+    if "totals" in scopes:
+        item.update(
+            steps_total=stats["steps_total"],
+            steps_average=stats["steps_average"],
+            steps_today=stats["steps_today"],
+            workout_distance_miles=stats["workout_distance_miles"],
+            drive_distance_miles=stats["drive_distance_miles"],
+        )
+    if "workouts" in scopes:
+        item.update(
+            workout_count=stats["workout_count"],
+            recent_workouts=stats["recent_workouts"],
+        )
+    if "achievements" in scopes:
+        item.update(points=points, achievements_earned=earned)
+    return item
+
+
+@app.get("/activity/summary")
+async def get_activity_summary(
+    user_id: str | None = None,
+    window: str = Query("week"),
+    viewer: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Running totals for one user over a window. Cross-user reads require opt-in."""
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    clean = (user_id or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    if window not in ACTIVITY_WINDOWS:
+        raise HTTPException(status_code=422, detail=f"window must be one of {sorted(ACTIVITY_WINDOWS)}")
+    viewer_clean = (viewer or "").split(".")[-1].lower()
+    if not await _viewer_may_see(viewer_clean, clean):
+        raise HTTPException(status_code=404, detail="activity not shared")
+
+    r = await get_redis()
+    days = ACTIVITY_WINDOWS[window]
+    stats = await _collect_activity_stats(r, clean, days)
+    points, earned = await _activity_points(r, clean)
+    return {
+        "status": "SUCCESS",
+        "user_id": clean,
+        "window": window,
+        "days": days,
+        "steps_total": stats["steps_total"],
+        "steps_average": stats["steps_average"],
+        "steps_today": stats["steps_today"],
+        "workout_count": stats["workout_count"],
+        "workout_distance_miles": stats["workout_distance_miles"],
+        "drive_distance_miles": stats["drive_distance_miles"],
+        "points": points,
+        "achievements_earned": earned,
+    }
+
+
+@app.get("/activity/feed")
+async def get_activity_feed(
+    viewer: str | None = None,
+    window: str = Query("week"),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Opt-in activity of others the viewer may see. Never errors when empty."""
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    clean = (viewer or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="viewer is required")
+    if window not in ACTIVITY_WINDOWS:
+        raise HTTPException(status_code=422, detail=f"window must be one of {sorted(ACTIVITY_WINDOWS)}")
+
+    r = await get_redis()
+    days = ACTIVITY_WINDOWS[window]
+    sharing = await _fetch_activity_sharing()
+    entries = []
+    for entry in sharing.get("users", []):
+        target = str(entry.get("username", "")).strip().lower()
+        if not target or target == clean or not entry.get("enabled"):
+            continue
+        if entry.get("audience") != "circle":
+            allowed = [str(u).strip().lower() for u in entry.get("user_ids", [])]
+            if clean not in allowed:
+                continue
+        scopes = entry.get("share") or ["totals"]
+        stats = await _collect_activity_stats(r, target, days)
+        points, earned = await _activity_points(r, target)
+        entries.append(
+            {"username": target, "window": window, **_shared_scopes(stats, scopes, points, earned)}
+        )
+    return {"status": "SUCCESS", "viewer": clean, "window": window, "users": entries}
 
 
 @app.get("/trends/activity")

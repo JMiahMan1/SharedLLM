@@ -98,7 +98,9 @@ jobs:
           services/tests/test_execution_handlers.py \
           services/automation/tests/test_scheduler.py \
           services/telemetry/tests/test_jobs.py \
-          services/telemetry/tests/test_api.py
+          services/telemetry/tests/test_api.py \
+          services/identity/tests/test_activity_sharing.py \
+          services/geo/tests/test_activity_feed.py
 
     - name: Run Pytest
       env:
@@ -143,6 +145,8 @@ jobs:
           services/automation/tests/test_scheduler.py \
           services/telemetry/tests/test_jobs.py \
           services/telemetry/tests/test_api.py \
+          services/identity/tests/test_activity_sharing.py \
+          services/geo/tests/test_activity_feed.py \
           -m "not local_only and not server_only" \
           --junitxml=pytest-report.xml \
           --cov=services/ \

@@ -397,6 +397,26 @@ export const api = {
     return resp.data;
   },
 
+  async getActivitySharing(): Promise<{
+    enabled: boolean;
+    audience: 'circle' | 'users';
+    user_ids: string[];
+    share: string[];
+  }> {
+    const resp = await apiClient.get('/api/users/me/activity-sharing');
+    return resp.data;
+  },
+
+  async updateActivitySharing(body: {
+    enabled?: boolean;
+    audience?: 'circle' | 'users';
+    user_ids?: string[];
+    share?: string[];
+  }): Promise<{ status: string; enabled: boolean; audience: string; user_ids: string[]; share: string[] }> {
+    const resp = await apiClient.put('/api/users/me/activity-sharing', body);
+    return resp.data;
+  },
+
   async enrollVoice(audioBlob: Blob): Promise<{ status: string; message: string }> {
     const formData = new FormData();
     formData.append('file', audioBlob, 'enrollment.webm');

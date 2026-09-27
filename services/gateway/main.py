@@ -7832,6 +7832,50 @@ async def proxy_get_points(request: Request, user_id: str | None = None):
     raise HTTPException(status_code=502, detail="Failed to read points")
 
 
+@app.get("/api/geo/activity/summary")
+async def proxy_activity_summary(
+    request: Request, user_id: str | None = None, window: str = "week"
+):
+    """Running totals — own data always; anyone else's only with opt-in."""
+    viewer = await _user_id_from_request(request) or ""
+    if not user_id:
+        user_id = viewer
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    params = {"user_id": user_id, "window": window}
+    if viewer:
+        params["viewer"] = viewer
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/activity/summary",
+            params=params,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        detail = await resp.text()
+    raise HTTPException(status_code=resp.status, detail=detail[:200])
+
+
+@app.get("/api/geo/activity/feed")
+async def proxy_activity_feed(request: Request, window: str = "week"):
+    """Activity of others who opted in and included the caller in their audience."""
+    viewer = await _user_id_from_request(request) or ""
+    if not viewer:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/activity/feed",
+            params={"viewer": viewer, "window": window},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+    raise HTTPException(status_code=502, detail="Failed to read activity feed")
+
+
 @app.get("/api/geo/steps/goal")
 async def proxy_get_step_goal(request: Request, user_id: str | None = None):
     if not user_id:

@@ -64,13 +64,18 @@ achievement carries the date it was earned (`earned_on`) so it is stable.
 | `GET /api/geo/goals` / `PUT /api/geo/goals` | the goal set above |
 | `GET /api/geo/points` | points ledger total + recent awards |
 | `GET /api/geo/activity/summary?user_id=&window=today\|week\|month\|all` | running totals (steps, distance, workouts, points) |
-| `PUT /api/users/me/activity-sharing` | opt-in: `{enabled, audience: circle\|users, user_ids[], share: [totals, workouts, achievements]}` |
-| `GET /api/geo/activity/feed?audience=` | opt-in activity of others you may see |
+| `GET/PUT /api/users/me/activity-sharing` | opt-in state for the caller: `{enabled, audience: circle\|users, user_ids[], share: [totals, workouts, achievements]}` |
+| `GET /api/geo/activity/feed?window=` | opt-in activity of others you may see, scope-projected |
 
-Server-side enforcement: `/activity/feed` and any cross-user reads consult
-`activity-sharing` and return **404/empty** for users who have not opted in.
-Sharing state lives in Identity (`UserActivitySharing`, mirroring
-`UserThemeSetting`).
+Server-side enforcement: the identity sharing rows are authoritative.
+`/activity/summary` for another user and `/activity/feed` only return data the
+target opted into — a single-user (non-circle) audience requires the viewer in
+`user_ids`; a caller reading someone else's summary without access gets
+**404**, and the feed simply omits them (never errors). Each projected entry
+contains only the declared `share` scopes: `totals` → steps/distance tiles,
+`workouts` → workout count + recent list, `achievements` → points + badge
+count. Sharing state lives in Identity (`UserActivitySharing`, mirroring
+`UserThemeSetting`); geo reads it over `GET /api/internal/activity-sharing`.
 
 ## Chat / @Jarvis integration
 
@@ -118,12 +123,22 @@ Skylight already models chores, stars and a reward vault
   `GET /achievements`, `GET /points` (gateway proxies under `/api/geo/*`),
   points ledger in `geo:points:{user}`, 15 tests in
   `services/geo/tests/test_achievements.py`.
-- **Phase 3 (partial) — UI: SHIPPED.** `AchievementsPanel` on Wander shows
-  points, earned badges, next-up progress and an inline weekly/workout goal
-  editor (`src/components/wander/AchievementsPanel.tsx`,
+- **Phase 2 — opt-in activity sharing (server): SHIPPED.**
+  Per-user sharing state (`GET/PUT /api/users/me/activity-sharing`,
+  `UserActivitySharing` table, defaults fully private), audience enforcement in
+  geo (`circle` = everyone who opted in, `users` = explicit list), scope
+  projection so only the shared slices travel, `GET /activity/summary` for
+  consented cross-user reads (404 otherwise) and `GET /activity/feed` for the
+  friend surface. Tests: 7 identity (`test_activity_sharing.py`), 10 geo
+  (`test_activity_feed.py`).
+- **Phase 3 (partial) — UI: SHIPPED.** `AchievementsPanel` on the Health page
+  shows points, earned badges, next-up progress and an inline weekly/workout
+  goal editor (`src/components/wander/AchievementsPanel.tsx`,
   `src/test/AchievementsPanel.test.tsx`). Daily goal still lives on the steps
-  card.
-- Phases 2 (sharing), 4 (chat envelope) and 5 (Skylight stars) are next.
+  card. `ActivitySharingPanel` in Settings controls the new opt-in state
+  (audience picker, scope checkboxes). Remaining UI: running-totals/feed cards
+  and share affordances on Wander.
+- Phases 4 (chat envelope) and 5 (Skylight stars) are next.
 
 ### Live endpoints
 
@@ -132,6 +147,9 @@ Skylight already models chores, stars and a reward vault
 | `GET /api/geo/achievements?days=30` | earned + next-up + points + goals |
 | `GET/PUT /api/geo/goals` | daily/weekly steps, workouts/week, distance/week |
 | `GET /api/geo/points` | points ledger with award dates |
+| `GET/PUT /api/users/me/activity-sharing` | caller's sharing state (private by default) |
+| `GET /api/geo/activity/summary?window=` | own, or a consented user's, scope-filtered totals |
+| `GET /api/geo/activity/feed?window=` | opted-in activity of others |
 
 Awards are banked on first read into `geo:points:{user}`, so a badge keeps the
 date it was first earned even as the window rolls forward.
