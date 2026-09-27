@@ -5,3 +5,7 @@ uvicorn[standard]
 aiohttp
 pydantic
 websockets
+
+# Test dependencies
+pytest
+aioresponses

@@ -1,0 +1,139 @@
+"""Shared fixtures for media endpoint tests.
+
+Provides:
+- ``fake_identity``: patches ``services.gateway.main.resolve_identity`` so
+  media endpoints resolve a fixed user without a live identity service.
+- ``client``: authenticated TestClient for the gateway app.
+- ``upstream``: aioresponses mock for upstream MA/ABS/HA HTTP calls.
+"""
+import os
+import re
+import sys
+
+os.environ.setdefault("INTERNAL_SECRET", "test-secret")
+
+from unittest.mock import MagicMock
+
+import aiohttp
+import pytest
+from aioresponses import aioresponses
+from fastapi.testclient import TestClient
+
+
+# aioresponses 0.7.9 (latest) predates aiohttp 3.14, where ClientResponse
+# requires a `stream_writer` kwarg. Shim it with a stub so mocked responses
+# construct cleanly. Real callers always pass stream_writer, so behavior is
+# unchanged for non-mocked traffic.
+class _StreamWriterStub:
+    output_size = 0
+
+
+_orig_client_response_init = aiohttp.ClientResponse.__init__
+
+
+def _client_response_init(self, *args, **kwargs):
+    kwargs.setdefault("stream_writer", _StreamWriterStub())
+    return _orig_client_response_init(self, *args, **kwargs)
+
+
+aiohttp.ClientResponse.__init__ = _client_response_init
+
+# Heavy optional dependencies that main.py imports at module level. Stub them
+# before importing the app so tests don't need the real packages.
+sys.modules.setdefault("fastembed", MagicMock())
+if "intent_engine" not in sys.modules:
+    mock_engine = MagicMock()
+    mock_engine.engine = MagicMock()
+    mock_engine.engine.classify.return_value = ("unknown", 0.0)
+    mock_engine.engine.should_bypass_llm.return_value = False
+    sys.modules["intent_engine"] = mock_engine
+sys.modules.setdefault("background_worker", MagicMock())
+
+TEST_USER = "testuser"
+TEST_MASS_URL = "http://ma.local:8095"
+TEST_MASS_TOKEN = "test-mass-token"
+TEST_ABS_URL = "http://abs.local:13378"
+TEST_ABS_KEY = "test-abs-key"
+TEST_HA_URL = "http://ha.local:8123"
+TEST_HA_TOKEN = "test-ha-token"
+
+DEFAULT_IDENTITY = {
+    "user": TEST_USER,
+    "username": TEST_USER,
+    "user_id": 1,
+    "mass_url": TEST_MASS_URL,
+    "mass_token": TEST_MASS_TOKEN,
+    "audiobookshelf_url": TEST_ABS_URL,
+    "audiobookshelf_api_key": TEST_ABS_KEY,
+    "ha_url": TEST_HA_URL,
+    "ha_token": TEST_HA_TOKEN,
+    "is_admin": True,
+}
+
+
+@pytest.fixture
+def fake_identity(monkeypatch):
+    """Resolve every identity lookup to DEFAULT_IDENTITY."""
+    from services.gateway import main
+
+    async def _resolve(body):
+        return dict(DEFAULT_IDENTITY)
+
+    monkeypatch.setattr(main, "resolve_identity", _resolve)
+    return DEFAULT_IDENTITY
+
+
+# orchestrator._sync_main_constants() writes fetched settings into main.py's
+# module globals at request time. Tests that mock /api/settings with the plain
+# EXECUTION_SVC_URL env var (e.g. test_chat_storage_routing.py) therefore
+# pollute main.EXECUTION_SVC for the rest of the session. Pin the synced
+# constants to the canonical config values so media tests are order-independent.
+_SYNCED_CONSTANTS = (
+    "EXECUTION_SVC",
+    "IDENTITY_SVC",
+    "RAG_SVC",
+    "STORAGE_SVC",
+    "LOGGING_SVC",
+    "WORKSPACE_RUNTIME_SVC",
+    "CONTROL_PLANE_URL",
+    "OLLAMA_URL",
+)
+
+
+@pytest.fixture
+def client(fake_identity):
+    """Authenticated TestClient; identity resolution is faked."""
+    import services.gateway.config as gw_config
+    from services.gateway import main
+    from services.gateway.main import app
+
+    for attr in _SYNCED_CONSTANTS:
+        if hasattr(gw_config, attr):
+            setattr(main, attr, getattr(gw_config, attr))
+
+    return TestClient(
+        app,
+        headers={
+            "Authorization": "Bearer test-token",
+            "X-API-Key": "test-token",
+        },
+    )
+
+
+@pytest.fixture
+def upstream():
+    """Intercept upstream MA/ABS/HA HTTP calls."""
+    with aioresponses() as mock:
+        yield mock
+
+
+def mock_upstream(upstream, method: str, url: str, payload=None, status: int = 200):
+    """Query-string-agnostic upstream mock.
+
+    aioresponses matches exact URLs, so calls made with params (e.g.
+    ``?user_id=...``) never match a bare path. Register a regex instead.
+    """
+    pattern = re.compile(re.escape(url) + r".*")
+    verb = getattr(upstream, method.lower())
+    verb(pattern, payload=payload, status=status)
+    return pattern
