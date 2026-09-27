@@ -734,7 +734,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         const stepsOn = stepsPref !== 'true' ? stepsPref !== 'false' : true;
 
         setSensors(() => {
-          const next = {
+          const next: SensorsState = {
             location: {
               enabled: locationOn,
               permission: locationOn ? 'unknown' : 'disabled',

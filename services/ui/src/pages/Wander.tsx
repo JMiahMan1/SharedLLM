@@ -25,6 +25,9 @@ import {
   CheckCircle2,
   Compass,
   Share2,
+  Lock,
+  Zap,
+  Activity,
 } from 'lucide-react';
 
 interface VehicleOption {
