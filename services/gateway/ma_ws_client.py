@@ -32,6 +32,8 @@ from urllib.parse import urlparse
 
 import websockets
 
+from services.gateway.redact import redact_url
+
 log = logging.getLogger("gateway.ma_ws")
 
 # Event types we care about
@@ -385,7 +387,7 @@ class MAWebSocketClient:
         After connection, a server_info command is sent to complete authentication.
         """
         try:
-            log.info(f"[MA-WS] Connecting to {self._ws_url}")
+            log.info(f"[MA-WS] Connecting to {redact_url(self._ws_url)}")
             # Token is in the URL query string; no auth header needed.
             self._ws = await websockets.connect(
                 self._ws_url,
@@ -618,11 +620,11 @@ class MAWebSocketClient:
                 flow_url1 = f"http://{http_base}/flow/{queue_id}/{queue_item_id}/{track_index}/{provider}/{item_base}.{ext}"
                 # Try flow with queue_item_id as session_id
                 flow_url2 = f"http://{http_base}/flow/{queue_item_id}/{queue_id}/{track_index}/{provider}/{item_base}.{ext}"
-                log.info(f"[MA-WS] Trying flow URL patterns: {flow_url1[:150]}")
-                log.info(f"[MA-WS] Trying flow URL patterns: {flow_url2[:150]}")
+                log.info(f"[MA-WS] Trying flow URL patterns: {redact_url(flow_url1)[:150]}")
+                log.info(f"[MA-WS] Trying flow URL patterns: {redact_url(flow_url2)[:150]}")
                 # Use the first one for now
                 self._stream_url = flow_url1
-                log.info(f"[MA-WS] Stream URL from flow: {self._stream_url[:200]}")
+                log.info(f"[MA-WS] Stream URL from flow: {redact_url(self._stream_url)[:200]}")
                 log.info(f"[MA-WS] streamdetails full: {json.dumps(streamdetails)[:500]}")
                 log.info(f"[MA-WS] media_item keys: {list(media_item.keys()) if isinstance(media_item, dict) else 'none'}")
                 return
@@ -632,7 +634,7 @@ class MAWebSocketClient:
                 stream_url = current_item.get("stream_url")
             if stream_url:
                 self._stream_url = stream_url
-                log.info(f"[MA-WS] Stream URL resolved: {stream_url[:100]}...")
+                log.info(f"[MA-WS] Stream URL resolved: {redact_url(stream_url)[:100]}...")
                 return
 
         # Check for queue items with stream URLs
@@ -643,7 +645,7 @@ class MAWebSocketClient:
                     stream_url = item.get("stream_url")
                     if stream_url:
                         self._stream_url = stream_url
-                        log.info(f"[MA-WS] Stream URL from queue item {i}: {stream_url[:100]}...")
+                        log.info(f"[MA-WS] Stream URL from queue item {i}: {redact_url(stream_url)[:100]}...")
                         return
                     if i == 0:
                         log.info(f"[MA-WS] First queue item keys: {list(item.keys())}")
@@ -655,7 +657,7 @@ class MAWebSocketClient:
             stream_url = audio_player.get("stream_url")
             if stream_url:
                 self._stream_url = stream_url
-                log.info(f"[MA-WS] Stream URL from audio_player: {stream_url[:100]}...")
+                log.info(f"[MA-WS] Stream URL from audio_player: {redact_url(stream_url)[:100]}...")
                 return
 
         # Clear stream URL if not found (may indicate stopped state)
@@ -740,6 +742,6 @@ class MAWebSocketClient:
     def __repr__(self) -> str:
         status = "connected" if self._connected else "disconnected"
         return (
-            f"<MAWebSocketClient {status} url={self._ws_url} "
+            f"<MAWebSocketClient {status} url={redact_url(self._ws_url)} "
             f"reconnects={self._reconnect_count} stream_url={'set' if self._stream_url else 'none'}>"
         )
