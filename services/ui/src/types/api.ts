@@ -113,6 +113,11 @@ export interface DiscoveredUser {
   username: string;
   source: string;
   display_name?: string;
+  email?: string;
+  ha_person_id?: string;
+  nc_username?: string;
+  abs_username?: string;
+  mail_address?: string;
 }
 
 export interface DeviceAssignment {

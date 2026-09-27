@@ -45,6 +45,7 @@ import type {
 } from '../services/api';
 import Modal from '../components/ui/Modal';
 import HelpTooltip from '../components/ui/HelpTooltip';
+import ServiceAccessSetup from '../components/admin/ServiceAccessSetup';
 import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
 import EntityMultiSelect from '../components/ui/EntityMultiSelect';
 import LLMSettings from '../components/settings/LLMSettings';
@@ -760,11 +761,16 @@ const Admin = () => {
                     <div className="min-w-0 flex-1">
                       <p className="font-semibold text-white truncate">{user.display_name || user.username}</p>
                       <p className="text-xs text-slate-400 truncate">@{user.username}</p>
+                      {user.email && <p className="text-[11px] text-slate-500 truncate">{user.email}</p>}
                       <p className="mt-1 text-[11px] uppercase tracking-widest text-slate-500">{user.source}</p>
+                      <ServiceAccessSetup
+                        username={user.username}
+                        services={user.source.split(' + ')}
+                      />
                     </div>
                     <button
                       onClick={() => importUserMutation.mutate(user)}
-                      className="glass-button px-3 py-2 text-[10px] font-black uppercase tracking-widest"
+                      className="glass-button px-3 py-2 text-[10px] font-black uppercase tracking-widest shrink-0"
                     >
                       Import
                     </button>

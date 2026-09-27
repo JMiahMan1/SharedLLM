@@ -371,6 +371,20 @@ export const api = {
     return resp.data;
   },
 
+  async setUpServiceToken(
+    username: string,
+    service: 'home_assistant' | 'nextcloud' | 'audiobookshelf',
+    password?: string,
+    source_username?: string,
+  ): Promise<{ success: boolean; username: string; service: string; message: string; detail?: string }> {
+    const resp = await apiClient.post(`/api/users/${username}/service-token`, {
+      service,
+      password,
+      source_username,
+    });
+    return resp.data;
+  },
+
   async getUsers(): Promise<UserProfile[]> {
     const resp = await apiClient.get('/api/users');
     return (resp.data ?? []).map(normalizeUser);
