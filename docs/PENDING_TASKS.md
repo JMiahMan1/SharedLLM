@@ -94,10 +94,13 @@ Source: `docs/RAVEN_CAPABILITY_GAP_ANALYSIS.md`, `docs/RAVEN_AUDIT_BLUEPRINT.md`
   keyword lists, returning `null` to the caller instead of a FAILURE result.
 
 ### Frontend typing
-- `services/ui/src/ma-stream-test.ts` still has ~24 TypeScript strictness errors
-  (implicit `any`, possibly-null `e.target`, private `core` access). It is a
-  dev-only debug harness served at `/ma-stream-test.html`; the crash-level bug
-  (`stopHeartbeat` out of scope) is fixed, the rest is cleanup.
+- ~~`services/ui/src/ma-stream-test.ts` still has ~24 TypeScript strictness
+  errors~~ **resolved**: the dev-only harness and its `e2e/ma-stream.spec.ts`
+  were deleted (with the config entry) and **all pre-existing `tsc` errors are
+  now fixed** — `npx tsc -b` is clean as of `2b6a3552`.
+- ~~Playwright could not even collect the suite~~ **resolved**: the suite is
+  split into hermetic and live projects and module-load throws were fixed
+  (`d1a693b4`, `0d7126c2`).
 - ~~`QuickNotesWidget` computes an `error` state that is never set —~~ fixed:
   the widget sets and renders the error message (`QuickNotesWidget.tsx`).
 
@@ -114,7 +117,7 @@ Of the 13 pre-existing failures found in this sweep, 12 are fixed (see the
   triggers on this branch — `python-tests.yml` is limited to `main` /
   `annoucements` and to `app/**` + `test/**` paths.
 
-## Added 2026-09-24 (v1.4.9)
+## Added 2026-09-24 (v1.4.9) — historical
 
 - **Notes:** the editor now saves with the `write` action (full replace);
   `append` is quick-capture only. See `docs/NOTES.md`.
@@ -126,12 +129,19 @@ Of the 13 pre-existing failures found in this sweep, 12 are fixed (see the
 - **Wander:** live map with Places, proximity clustering, member focus,
   accuracy/last-seen on cards. See the Geo update section.
 
-## Next major slice (design captured)
+## Family hub roadmap — status
 
-- **Achievements + goals + opt-in sharing + Skylight bonus stars + chat card
-  delivery**: full design and phased plan in `docs/ACHIEVEMENTS.md`. Server
-  first (rules engine, sharing enforcement), then UI, then chat envelope,
-  then Skylight star grants.
+- **Phase 1 — goals + achievements: SHIPPED** (engine, endpoints, Wander panel).
+- **Phase 1a — Talk depth: SHIPPED** — reactions (`183d2757`) and polls
+  (`3a021061`), surfaced in `ChatPanel` via Talk's own APIs.
+- **Phase 2 — opt-in activity sharing: SHIPPED** — Identity rows + geo/achievement
+  enforcement, `ActivitySharingPanel` in Settings, tests. See
+  `docs/ACHIEVEMENTS.md`.
+- **Remaining:** chat envelope + activity cards and encouragement references;
+  Skylight star grants; games over a Talk bot; Excalidraw canvas with
+  Raven/Alpaca "make it way better"; calls (Talk signalling + TURN, LiveKit
+  fallback); music + recipes; arcade feature slice (prerequisite: a JSON games
+  endpoint in `../alpaca/arcade` — see `docs/ARCADE_INTEGRATION.md`).
 - **Device ledger** shipped (`StepLedger.java` + backfill); remaining gap is
   true background sync (foreground service/WorkManager) — see
   `docs/HEALTH_STEPS.md`.

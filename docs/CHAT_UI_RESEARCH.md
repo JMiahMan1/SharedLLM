@@ -98,8 +98,9 @@ if we need recording/agents/AI participation.
 
 ## Integration phases
 
-1. **Talk depth (small, high value)** — reactions on messages, polls for family
-   votes, read markers; gateway passthrough for `reaction/` and `poll/`.
+1. **Talk depth — SHIPPED** (`183d2757`, `3a021061`): tap-to-react on
+   messages and family polls, both through Talk's own APIs so every Talk
+   client sees them. Read markers remain.
 2. **Games over Talk bots** — question sets as data, one active game per room,
    state in Redis, moves posted by a bot as typed messages; scores into the
    points ledger and Skylight stars (`docs/ACHIEVEMENTS.md`).
