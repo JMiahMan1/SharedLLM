@@ -76,29 +76,18 @@ async def test_proxy_media_status_resolves_identity(monkeypatch, client):
 
 
 @pytest.mark.asyncio
-async def test_proxy_media_status_falls_back_to_first_user(monkeypatch, client):
-    """Test that media status proxy falls back to first user when identity resolution fails."""
+async def test_proxy_media_status_unauthenticated_returns_401(monkeypatch, client):
+    """BUG-02: media status proxy returns 401 when identity resolution fails.
+
+    The first-user fallback is gone: an unauthenticated call must never be
+    proxied with another user's credentials.
+    """
     from services.gateway import main as gateway_main
 
-    # Mock identity resolution to raise exception
-    with (
-        patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(side_effect=Exception("Identity service down"))),
-        patch.object(gateway_main, 'resolve_first_user', new=AsyncMock(return_value={
-            "user": "default", "ha_url": "http://ha.local", "ha_token": "secret"
-        })),
-        patch('aiohttp.ClientSession') as mock_client_cls,
-    ):
-                mock_client = AsyncMock()
-                mock_client.post = AsyncMock(return_value=MockAioResponse(json_data={
-                    "status": "SUCCESS",
-                    "detail": {"active": None, "available": [], "all_players": []}
-                }))
-                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(side_effect=Exception("Identity service down"))):
+        resp = client.post("/execute/media/status", json={})
 
-                resp = client.post("/execute/media/status", json={})
-
-                assert resp.status_code == 200
+        assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
