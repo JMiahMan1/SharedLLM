@@ -70,8 +70,16 @@ done
 
 echo "Deploying to $HOST:$DIR"
 
-# Detect current branch locally
-BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+# Detect current branch locally.
+# A detached HEAD (CI checkout, git worktree) resolves to the literal string
+# "HEAD", which turns every remote git op into a silent no-op and leaves the
+# server on a stale commit. Fall back to the real branch in that case.
+if [ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "HEAD" ]; then
+    BRANCH="${DEPLOY_BRANCH:-microservices}"
+    echo "WARN: detached HEAD — deploying branch '$BRANCH' explicitly."
+else
+    BRANCH=$(git rev-parse --abbrev-ref HEAD)
+fi
 echo "Branch: $BRANCH"
 
 # Check if a latest Android APK artifact is available from CI and sync it to update directory
@@ -150,6 +158,11 @@ if ssh $SSH_OPTS "$HOST" << EOF
     git checkout $BRANCH || git checkout -b $BRANCH origin/$BRANCH
     git reset --hard origin/$BRANCH
     git pull origin $BRANCH
+
+    # Say the resulting commit out loud. A silent no-op here is what let the
+    # server sit on a months-old commit while deploys reported success.
+    DEPLOYED_SHA=\$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    echo "Server now at commit: \$DEPLOYED_SHA"
 
     echo "Pulling latest images from GHCR and starting Docker containers..."
     docker compose pull
