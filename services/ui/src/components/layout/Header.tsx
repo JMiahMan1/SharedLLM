@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Bell, LogOut, Trash2, Satellite } from 'lucide-react';
+import { Search, Bell, LogOut, Trash2, Satellite, User as UserIcon, Settings, Shield, ChevronUp } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
 import type { LogEntry } from '../../services/api';
@@ -44,6 +44,8 @@ const Header = () => {
   const [navQuery, setNavQuery] = useState('');
   const [navOpen, setNavOpen] = useState(false);
   const navRef = useRef<HTMLDivElement>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const profileRef = useRef<HTMLDivElement>(null);
 
   const matches = useMemo(() => {
     const q = navQuery.trim().toLowerCase();
@@ -59,6 +61,21 @@ const Header = () => {
     };
     document.addEventListener('mousedown', onClick);
     return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) setProfileOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setProfileOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
   }, []);
   
   const { data: health, isLoading, error } = useQuery({
@@ -252,15 +269,85 @@ const Header = () => {
             <p className="text-sm font-semibold text-white">{user?.username || 'Guest'}</p>
             <p className="text-xs text-slate-500">{user?.is_admin ? 'Admin' : 'Family Member'}</p>
           </div>
-          <button 
-            onClick={logout}
-            className="w-11 h-11 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold border border-white/20 hover:scale-110 transition-transform group relative"
-          >
-            {user?.username?.[0].toUpperCase() || 'G'}
-            <div className="absolute inset-0 rounded-full bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-              <LogOut size={16} />
-            </div>
-          </button>
+          <div className="relative" ref={profileRef} data-testid="profile-menu-root">
+            <button
+              onClick={() => setProfileOpen((open) => !open)}
+              aria-haspopup="menu"
+              aria-expanded={profileOpen}
+              aria-label="Account menu"
+              className="w-11 h-11 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold border border-white/20 hover:scale-110 transition-transform group relative"
+            >
+              {user?.username?.[0].toUpperCase() || 'G'}
+              <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-slate-950 border border-white/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                <ChevronUp size={10} />
+              </div>
+            </button>
+
+            {profileOpen && (
+              <div
+                role="menu"
+                aria-label="Account menu"
+                data-testid="profile-menu"
+                className="absolute right-0 mt-2 w-60 glass-panel p-1.5 rounded-2xl border border-white/10 z-50"
+              >
+                <div className="px-3 py-2.5 border-b border-white/5 mb-1">
+                  <p className="text-sm font-semibold text-white truncate">{user?.username || 'Guest'}</p>
+                  <p className="text-[11px] text-slate-500">
+                    {user?.is_admin ? 'Admin' : 'Family Member'}
+                  </p>
+                </div>
+
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    navigate('/settings');
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-slate-200 hover:bg-white/5 transition-colors"
+                >
+                  <Settings size={15} className="text-slate-400" /> Profile Settings
+                </button>
+
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    navigate('/identity');
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-slate-200 hover:bg-white/5 transition-colors"
+                >
+                  <UserIcon size={15} className="text-slate-400" /> Family Members
+                </button>
+
+                {user?.is_admin && (
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setProfileOpen(false);
+                      navigate('/admin');
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-slate-200 hover:bg-white/5 transition-colors"
+                  >
+                    <Shield size={15} className="text-purple-300" /> Admin Control Panel
+                  </button>
+                )}
+
+                <div className="my-1 border-t border-white/5" />
+
+                <button
+                  role="menuitem"
+                  data-testid="profile-menu-logout"
+                  onClick={() => {
+                    setProfileOpen(false);
+                    logout();
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-rose-300 hover:bg-rose-500/10 transition-colors"
+                >
+                  <LogOut size={15} /> Log Out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </header>
