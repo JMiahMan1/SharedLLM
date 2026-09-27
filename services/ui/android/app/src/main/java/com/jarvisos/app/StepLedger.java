@@ -92,6 +92,28 @@ public class StepLedger extends SQLiteOpenHelper {
         }
     }
 
+    /**
+     * One-time repair hook: write a corrected total even when it is lower than
+     * the previously recorded (buggy) value. Normal writes must keep using
+     * {@link #recordDay}'s max semantics; this exists only for the migration
+     * that subtracts a midnight-carry error out of today's row.
+     */
+    public void replaceDay(String day, int steps, String source) {
+        if (day == null || day.isEmpty() || steps < 0) return;
+        if (source == null || source.isEmpty()) source = SOURCE_PHONE;
+        SQLiteDatabase db = getWritableDatabase();
+        try {
+            ContentValues values = new ContentValues();
+            values.put("day", day);
+            values.put("source", source);
+            values.put("steps", steps);
+            values.put("updated_at", System.currentTimeMillis());
+            db.insertWithOnConflict("days", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        } finally {
+            db.close();
+        }
+    }
+
     /** Read one day's total for a source (0 when unrecorded). */
     public int daySteps(String day, String source) {
         SQLiteDatabase db = getReadableDatabase();
