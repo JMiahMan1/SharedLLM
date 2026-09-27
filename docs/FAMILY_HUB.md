@@ -77,7 +77,7 @@ The Games tab also features the highest-rated **Alpaca arcade** titles
 - **Recipes**: a sheet-like Nextcloud note (markdown checklist) editable by the
   whole family; "what's for dinner" can be asked in chat.
 
-### Admin identity switching in chat (requested)
+### Admin identity switching in chat (shipped)
 
 Admins may post as either **their own user** or the shared **Admin (default)**
 identity — for house announcements, chores and games that should look like
@@ -101,6 +101,15 @@ Rules:
   switch is implemented once in the gateway proxy rather than per feature.
 - Switching identity is visible by design (messages display the author Talk
   attributes) and audit-logged when an admin posts as the Admin identity.
+
+**Shipped** (gateway `450ec020`): `as_user: "admin"` is accepted only when the
+resolved caller has `is_admin`, resolves user ID 1 (the same account Identity
+falls back to) and is forwarded by every Talk write (send, voice, react, poll
+create/vote, conversation open); reads deliberately ignore it. The composer
+shows a "Send as: Me | Admin" selector to admins only, defaults to Me,
+remembers the choice per device and badges "Sending as Admin" while active.
+Tests: 7 gateway (`test_talk_identity_switch.py`) + 6 UI
+(`SendAsSelector.test.tsx`).
 
 ### 3. Chat depth
 - **Voice/video calls**: Nextcloud Talk WebRTC needs the Talk signalling API

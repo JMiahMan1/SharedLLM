@@ -4,6 +4,7 @@ import { BarChart3, Loader2, MessageSquare, Mic, Plus, RefreshCw, Send, Square }
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
+import SendAsSelector, { useSendAsPref } from './SendAsSelector';
 
 interface TalkConversation {
   token: string;
@@ -92,6 +93,11 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
   const chunksRef = useRef<Blob[]>([]);
   const feedRef = useRef<HTMLDivElement | null>(null);
 
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
+  const isAdmin = Boolean(me?.is_admin);
+  const [sendAs, setSendAs] = useSendAsPref(isAdmin);
+  const asUser = isAdmin && sendAs === 'admin' ? ('admin' as const) : undefined;
+
   const { data: conversations = EMPTY_ARRAY, isFetching: loadingConversations } = useQuery<
     ExecutionResponse,
     Error,
@@ -137,7 +143,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
   }, [messages]);
 
   const openConversation = useMutation({
-    mutationFn: (user: string) => api.openTalkConversation({ target_user: user }),
+    mutationFn: (user: string) => api.openTalkConversation({ target_user: user, as_user: asUser }),
     onSuccess: (data) => {
       const token = (data.detail as { conversation?: TalkConversation } | undefined)?.conversation?.token;
       if (token) setSelectedToken(token);
@@ -148,7 +154,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
   });
 
   const sendMessage = useMutation({
-    mutationFn: (text: string) => api.sendTalkMessage({ token: activeToken, message: text }),
+    mutationFn: (text: string) => api.sendTalkMessage({ token: activeToken, message: text, as_user: asUser }),
     onSuccess: () => {
       setDraft('');
       queryClient.invalidateQueries({ queryKey: ['talk-messages', activeToken] });
@@ -158,7 +164,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
 
   const sendVoice = useMutation({
     mutationFn: (payload: { audio_base64: string; mime_type: string; caption?: string }) =>
-      api.sendTalkVoice({ token: activeToken, ...payload, file_name: `voice-${Date.now()}.webm` }),
+      api.sendTalkVoice({ token: activeToken, ...payload, file_name: `voice-${Date.now()}.webm`, as_user: asUser }),
     onSuccess: () => {
       toast.success('Voice message sent');
       if (clip) URL.revokeObjectURL(clip.url);
@@ -236,7 +242,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
       return;
     }
     try {
-      await api.createTalkPoll({ token: activeToken, question, options });
+      await api.createTalkPoll({ token: activeToken, question, options, as_user: asUser });
       setShowPollForm(false);
       setPollQuestion('');
       setPollOptions(['', '']);
@@ -249,7 +255,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
 
   const vote = async (pollId: number, optionId: number) => {
     try {
-      await api.voteTalkPoll({ token: activeToken, poll_id: pollId, option_id: optionId });
+      await api.voteTalkPoll({ token: activeToken, poll_id: pollId, option_id: optionId, as_user: asUser });
       await refetchPolls();
     } catch {
       toast.error('Could not record your vote');
@@ -269,7 +275,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
   const react = async (messageId: number, reaction: string) => {
     setReactingFor(null);
     try {
-      const res = await api.reactToTalkMessage({ token: activeToken, message_id: messageId, reaction });
+      const res = await api.reactToTalkMessage({ token: activeToken, message_id: messageId, reaction, as_user: asUser });
       const list = (res.detail as { reactions?: TalkReaction[] } | undefined)?.reactions;
       if (Array.isArray(list)) setReactions((prev) => ({ ...prev, [messageId]: list }));
       else void loadReactions(messageId);
@@ -516,6 +522,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
         </div>
 
         <div className="shrink-0 space-y-2 border-t border-white/5 bg-slate-950/80 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur">
+          {isAdmin && <SendAsSelector value={sendAs} onChange={setSendAs} />}
           <div className="flex items-end gap-2">
             <textarea
               value={draft}
