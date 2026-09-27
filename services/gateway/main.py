@@ -8926,7 +8926,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
 
         # Try API key first, then login with username/password
         if not abs_key and abs_user and abs_pass:
-            log.info(f"[stream/abs] No API key present. Attempting username/password login for user '{abs_user}' to {abs_url}")
+            log.info(f"[stream/abs] No API key present. Attempting username/password login for user '{abs_user}' to {redact_url(abs_url)}")
             try:
                 async with shared_http_client() as client:
                     login_resp = await client.post(
@@ -9090,7 +9090,7 @@ async def sendspin_proxy(websocket: WebSocket):
         await websocket.close(code=1008, reason="Missing token")
         return
 
-    log.info(f"[sendspin] Browser connection received (token={api_token[:8]}...{api_token[-4:]})")
+    log.info("[sendspin] Browser connection received (token redacted)")
 
     # Resolve MA credentials via identity service
     creds = None
@@ -9100,7 +9100,7 @@ async def sendspin_proxy(websocket: WebSocket):
             creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
-        log.info(f"[sendspin] Identity resolved: user={creds.get('user', 'unknown')}, mass_url={mass_url}, mass_token={'set' if mass_token else 'NOT SET'}")
+        log.info(f"[sendspin] Identity resolved: user={creds.get('user', 'unknown')}, mass_url={redact_url(mass_url)}, mass_token={'set' if mass_token else 'NOT SET'}")
     except HTTPException as e:
         log.error(f"[sendspin] Identity resolution HTTP error: status={e.status_code}, detail={e.detail}")
         await websocket.close(code=1008, reason="Authentication failed")
@@ -9119,7 +9119,7 @@ async def sendspin_proxy(websocket: WebSocket):
     ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
     ws_scheme = "ws" if ma_scheme == "http" else "wss"
     ma_sendspin_url = f"{ws_scheme}://{ma_host}:{ma_port}/sendspin"
-    log.info(f"[sendspin] Connecting to MA sendspin: {ma_sendspin_url}...")
+    log.info(f"[sendspin] Connecting to MA sendspin: {redact_url(ma_sendspin_url)}...")
 
     # Receive the first message from the browser (client/hello)
     log.info("[sendspin] STEP 1: Waiting for browser to send first message...")
@@ -9151,13 +9151,13 @@ async def sendspin_proxy(websocket: WebSocket):
     ma_ws = None
     try:
         # Connect to MA's sendspin endpoint (no query string)
-        log.info(f"[sendspin] STEP 3: Connecting to MA sendspin URL: {ma_sendspin_url}")
+        log.info(f"[sendspin] STEP 3: Connecting to MA sendspin URL: {redact_url(ma_sendspin_url)}")
         ma_ws = await websockets.connect(ma_sendspin_url)
         log.info("[sendspin] STEP 4: WebSocket connected to MA")
 
         # MA sendspin requires {"type":"auth","token":"..."} as FIRST message
         auth_msg = json.dumps({"type": "auth", "token": mass_token})
-        log.info(f"[sendspin] STEP 5: Sending auth to MA (token={mass_token[:8]}...{mass_token[-4:]})")
+        log.info("[sendspin] STEP 5: Sending auth to MA (token redacted)")
         await ma_ws.send(auth_msg)
 
         # MA responds to auth — expect server/hello
@@ -9428,7 +9428,7 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
     ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
     ws_scheme = "ws" if ma_scheme == "http" else "wss"
     ma_jsonrpc_url = f"{ws_scheme}://{ma_host}:{ma_port}/ws?token={mass_token}"
-    log.info(f"[ma-jsonrpc] STEP 3: Connecting to MA JSON-RPC: {ma_jsonrpc_url[:100]}...")
+    log.info(f"[ma-jsonrpc] STEP 3: Connecting to MA JSON-RPC: {redact_url(ma_jsonrpc_url)[:100]}...")
 
     try:
         log.info("[ma-jsonrpc] STEP 4: Opening WebSocket to MA...")
@@ -9579,7 +9579,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
         mass_url = creds.get("mass_url") or ""
         mass_token = creds.get("mass_token") or ""
 
-        log.info(f"[stream/ma] Credentials: url={mass_url}, has_token={bool(mass_token)}")
+        log.info(f"[stream/ma] Credentials: url={redact_url(mass_url)}, has_token={bool(mass_token)}")
 
         if not mass_url:
             log.error("[stream/ma] Music Assistant URL not configured")
@@ -9687,7 +9687,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
         )
         try:
             await ma_client.connect()
-            log.info(f"[stream/ma] WebSocket connected: {ma_client.ws_url}")
+            log.info(f"[stream/ma] WebSocket connected: {redact_url(ma_client.ws_url)}")
         except Exception as e:
             log.error(f"[stream/ma] WebSocket connection failed: {e}", exc_info=True)
             raise HTTPException(
@@ -9734,7 +9734,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                     ma_provided_url = ma_client.get_stream_url()
                     if ma_provided_url:
                         stream_url = ma_provided_url
-                        log.info(f"[stream/ma] Stream URL from MA: {stream_url[:150]}")
+                        log.info(f"[stream/ma] Stream URL from MA: {redact_url(stream_url)[:150]}")
                         break
                     # Priority 2: Check queue state directly for stream_url in current_item
                     queue_state = ma_client.get_queue_state()
@@ -9743,11 +9743,11 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                         media_item = current_item.get("media_item", {})
                         if isinstance(media_item, dict) and media_item.get("stream_url"):
                             stream_url = media_item["stream_url"]
-                            log.info(f"[stream/ma] Stream URL from media_item: {stream_url[:150]}")
+                            log.info(f"[stream/ma] Stream URL from media_item: {redact_url(stream_url)[:150]}")
                             break
                         if current_item.get("stream_url"):
                             stream_url = current_item["stream_url"]
-                            log.info(f"[stream/ma] Stream URL from current_item: {stream_url[:150]}")
+                            log.info(f"[stream/ma] Stream URL from current_item: {redact_url(stream_url)[:150]}")
                             break
                         # Last resort: construct flow URL using MA's actual queue_id + queue_item_id
                         # Use MA's generated session (queue_id), not the gateway-generated one
@@ -9756,7 +9756,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                         player_id = queue_state.get("player_id", target_player_id)
                         http_base = mass_url.replace("http://", "").replace("https://", "")
                         stream_url = f"http://{http_base}/flow/{queue_id}/{queue_item_id}/{player_id}.mp3"
-                        log.info(f"[stream/ma] Stream URL constructed (fallback): {stream_url[:150]}")
+                        log.info(f"[stream/ma] Stream URL constructed (fallback): {redact_url(stream_url)[:150]}")
                         break
                 await asyncio.sleep(0.2)
 
@@ -9774,7 +9774,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             log.info("[stream/ma] WebSocket closed after stream URL resolved")
 
             # ── Step 5: Proxy MA stream bytes through the Gateway ──────────────
-            log.info(f"[stream/ma] Initiating byte proxy from: {stream_url[:120]}...")
+            log.info(f"[stream/ma] Initiating byte proxy from: {redact_url(stream_url)[:120]}...")
 
             async def stream_generator_ma(cli, r):
                 try:
@@ -9888,7 +9888,7 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
     while HA and ABS require a Bearer token from the resolved identity. Use `service=ma|abs|ha` to force
     the upstream when it cannot be inferred from the path.
     """
-    log.info(f"[imageproxy] Proxy request path={path[:160]} service={service}")
+    log.info(f"[imageproxy] Proxy request path={redact_url(path)[:160]} service={service}")
     if not path:
         raise HTTPException(status_code=400, detail="path required")
     try:
@@ -9985,12 +9985,12 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
                 content_type = resp.headers.get("Content-Type", "image/jpeg")
                 data = await resp.read()
                 return Response(content=data, media_type=content_type)
-            log.error(f"[imageproxy] upstream {svc} status {resp.status} for {target_url}")
+            log.error(f"[imageproxy] upstream {svc} status {resp.status} for {redact_url(target_url)}")
             raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"[imageproxy] Exception proxying image ({svc}) {target_url}: {e}")
+        log.error(f"[imageproxy] Exception proxying image ({svc}) {redact_url(target_url)}: {e}")
         raise HTTPException(status_code=500, detail="Error fetching image") from e
 
 
@@ -10095,7 +10095,7 @@ async def workspaces_terminal_ws(websocket: WebSocket, workspace_id: str, token:
     # Connect to the workspace_runtime WebSocket terminal endpoint
     ws_url = WORKSPACE_RUNTIME_SVC.replace("http://", "ws://").replace("https://", "wss://")
     target_url = f"{ws_url}/ws/workspace/{workspace_id}/terminal?token={api_token}"
-    log.info(f"[workspaces-terminal] Connecting to workspace runtime terminal: {target_url}")
+    log.info(f"[workspaces-terminal] Connecting to workspace runtime terminal: {redact_url(target_url)}")
 
     import websockets
     try:
