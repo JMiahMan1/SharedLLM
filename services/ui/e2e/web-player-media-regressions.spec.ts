@@ -21,13 +21,8 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL;
-if (!UI_URL) {
-  throw new Error('Environment variable UI_URL is not set.');
-}
 const TEST_USER = process.env.TEST_USER;
-if (!TEST_USER) throw new Error('Environment variable TEST_USER is not set.');
 const TEST_PASS = process.env.TEST_PASS;
-if (!TEST_PASS) throw new Error('Environment variable TEST_PASS is not set.');
 
 async function loginAsDefault(page: Page) {
   await page.goto(`${UI_URL}/login`);
@@ -70,7 +65,10 @@ async function playFirstMaTrack(page: Page): Promise<boolean> {
 
 const playerCard = (page: Page) => page.locator('.glass-panel.border-cyan-500\\/20').first();
 
-test.describe('Web Player media regressions', () => {
+test.describe('@live Web Player media regressions', () => {
+  test.skip(!UI_URL, 'Set UI_URL to the target server URL (e.g., http://192.168.2.205:8080).');
+  test.skip(!TEST_USER, 'Set TEST_USER to the username for Playwright E2E tests.');
+  test.skip(!TEST_PASS, 'Set TEST_PASS to the password for Playwright E2E tests.');
   test('Album art renders (not just the gradient + music-note fallback)', async ({ page }) => {
     await loginAsDefault(page);
     await page.goto(`${UI_URL}/media`);

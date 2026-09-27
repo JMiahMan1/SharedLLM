@@ -16,7 +16,13 @@ function loadCredentials(): { user: string; pass: string } {
   const u = process.env.TEST_USER, pw = process.env.TEST_PASS;
   if (!u || !pw) throw new Error('no creds'); return { user: u, pass: pw };
 }
-const { user: LOGIN_USER, pass: LOGIN_PASS } = loadCredentials();
+let LOGIN_USER: string | undefined;
+let LOGIN_PASS: string | undefined;
+try {
+  ({ user: LOGIN_USER, pass: LOGIN_PASS } = loadCredentials());
+} catch {
+  // Credentials are optional at collection time; tests skip in describe.
+}
 
 async function login(page: Page) {
   await page.goto(`${UI_URL}/login`);
@@ -35,6 +41,7 @@ async function login(page: Page) {
 }
 
 test('Energy Insights widget shows enrolled telemetry', async ({ page }) => {
+  test.skip(!LOGIN_USER || !LOGIN_PASS, 'no creds');
   test.setTimeout(90000);
   const errs: string[] = [];
   page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });

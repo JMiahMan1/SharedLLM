@@ -59,7 +59,13 @@ function loadCredentials() {
   };
 }
 
-const { user: LOGIN_USER, pass: LOGIN_PASS } = loadCredentials();
+let LOGIN_USER: string | undefined;
+let LOGIN_PASS: string | undefined;
+try {
+  ({ user: LOGIN_USER, pass: LOGIN_PASS } = loadCredentials());
+} catch {
+  // Credentials are optional at collection time; tests skip in describe.
+}
 
 // Routes we consider "top-level pages" — used for context-aware validation
 const KNOWN_ROUTES: Record<string, { titlePattern: RegExp; headingPattern: RegExp }> = {
@@ -674,6 +680,7 @@ async function crawlPage(
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 test.describe('E2E Recursive UI Crawler', () => {
+  test.skip(!LOGIN_USER || !LOGIN_PASS, 'Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS.');
   test('comprehensive crawl from Dashboard', async ({ page }) => {
     // Validate credentials are provided
     if (!LOGIN_USER || !LOGIN_PASS) {

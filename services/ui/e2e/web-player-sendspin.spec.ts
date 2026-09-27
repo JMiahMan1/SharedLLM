@@ -13,28 +13,8 @@ import { test, expect } from '@playwright/test';
 import type { Page, WebSocket } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL;
-if (!UI_URL) {
-  throw new Error(
-    'Environment variable UI_URL is not set.\n' +
-    'Set UI_URL to the target server URL (e.g., http://192.168.2.205:8080).'
-  );
-}
-
 const TEST_USER = process.env.TEST_USER;
-if (!TEST_USER) {
-  throw new Error(
-    'Environment variable TEST_USER is not set.\n' +
-    'Set TEST_USER to the username for Playwright E2E tests.'
-  );
-}
-
 const TEST_PASS = process.env.TEST_PASS;
-if (!TEST_PASS) {
-  throw new Error(
-    'Environment variable TEST_PASS is not set.\n' +
-    'Set TEST_PASS to the password for Playwright E2E tests.'
-  );
-}
 
 async function loginAsDefault(page: Page) {
   await page.goto(`${UI_URL}/login`);
@@ -61,7 +41,11 @@ async function loginAsDefault(page: Page) {
   await page.waitForTimeout(2000);
 }
 
-test.describe('MA Web Player (Sendspin)', () => {
+test.describe('@live MA Web Player (Sendspin)', () => {
+  test.skip(!UI_URL, 'Set UI_URL to the target server URL (e.g., http://192.168.2.205:8080).');
+  test.skip(!TEST_USER, 'Set TEST_USER to the username for Playwright E2E tests.');
+  test.skip(!TEST_PASS, 'Set TEST_PASS to the password for Playwright E2E tests.');
+
   test('Web Player selection and MA track playback flow', async ({ page }) => {
     // Attach WebSocket listener BEFORE navigation (critical!)
     const sendspinUrls: string[] = [];
