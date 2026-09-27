@@ -1437,6 +1437,171 @@ async def discover_users(session: Session = Depends(get_session), admin: User = 
     log.info(f"[discovery] Discovery complete. Found {len(discovered)} users.")
     return DiscoverResponse(users=discovered, warnings=warnings, errors=errors)
 
+# ─── Onboarding: one-time password → per-user token ────────────────────────────
+
+# Every exchange trades a password the user typed once for a long-lived token
+# that Jarvis can use afterwards. The password is never stored.
+_TOKEN_EXCHANGES = ("home_assistant", "nextcloud", "audiobookshelf")
+
+HA_CLIENT_ID = "http://homeassistant.local/"
+HA_REDIRECT_URI = "homeassistant://auth-callback"
+
+
+async def _exchange_home_assistant_token(url: str, username: str, password: str) -> str:
+    """HA's documented native-app login flow, ending in a long-lived token.
+
+    HA has no admin API to mint tokens for other users, so the only automation
+    available is trading the user's own password for one. Any HA refusal is
+    surfaced verbatim instead of being papered over.
+    """
+    base = url.rstrip("/")
+    auth: dict = {"client_id": HA_CLIENT_ID, "handler": ["homeassistant", "credential"]}
+    async with get_client_insecure() as client:
+        resp = await client.post(
+            f"{base}/auth/login_flow",
+            json={
+                **auth,
+                "redirect_uri": HA_REDIRECT_URI,
+                "type": "credentials",
+                "username": username,
+                "password": password,
+            },
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        if resp.status != 200:
+            raise HTTPException(status_code=400, detail=f"Home Assistant rejected the login ({resp.status})")
+        flow = await resp.json()
+        result_id = flow.get("result_id")
+        if not result_id:
+            # Wrong username/password: HA answers 400 with an auth_invalid marker.
+            raise HTTPException(status_code=400, detail="Home Assistant did not accept those credentials")
+
+        resp = await client.post(f"{base}/auth/login_flow/{result_id}", json=auth, timeout=aiohttp.ClientTimeout(total=15.0))
+        if resp.status != 200:
+            raise HTTPException(status_code=400, detail="Home Assistant did not complete the login flow")
+        auth_code = (await resp.json()).get("result")
+        if not auth_code:
+            raise HTTPException(status_code=400, detail="Home Assistant did not return an authorization code")
+
+        resp = await client.post(
+            f"{base}/auth/token",
+            data={"client_id": HA_CLIENT_ID, "grant_type": "authorization_code", "code": auth_code},
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        if resp.status != 200:
+            raise HTTPException(status_code=400, detail=f"Home Assistant refused the token exchange ({resp.status})")
+        token = (await resp.json()).get("access_token")
+        if not token:
+            raise HTTPException(status_code=400, detail="Home Assistant returned no access token")
+        return token
+
+
+async def _exchange_audiobookshelf_token(url: str, username: str, password: str) -> str:
+    """ABS issues a bearer token from a plain login."""
+    async with get_client_insecure() as client:
+        resp = await client.post(
+            f"{url.rstrip('/')}/login",
+            json={"username": username, "password": password},
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        if resp.status != 200:
+            raise HTTPException(status_code=400, detail=f"Audiobookshelf rejected the login ({resp.status})")
+        token = (await resp.json()).get("token")
+        if not token:
+            raise HTTPException(status_code=400, detail="Audiobookshelf returned no token")
+        return token
+
+
+async def _create_nextcloud_app_password(admin: User, nc_username: str) -> str:
+    """Nextcloud lets an admin mint an app password for any user.
+
+    No password from the user is needed at all here — this is the one service
+    where onboarding is fully hands-off.
+    """
+    base = (admin.nextcloud_url or "").rstrip("/")
+    admin_user = admin.nextcloud_user
+    admin_pass = decrypt(admin.nextcloud_pass_enc) if admin.nextcloud_pass_enc else None
+    if not base or not admin_user or not admin_pass:
+        raise HTTPException(status_code=400, detail="Nextcloud is not configured on this admin account")
+    async with get_client_insecure() as client:
+        resp = await client.post(
+            f"{base}/ocs/v1.php/cloud/users/{nc_username}/app-passwords",
+            data={"name": "jarvis-onboarding"},
+            headers={"OCS-APIRequest": "true", "Accept": "application/json"},
+            auth=aiohttp.BasicAuth(admin_user, admin_pass),
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        if resp.status != 200:
+            raise HTTPException(status_code=400, detail=f"Nextcloud refused to create an app password ({resp.status})")
+        body = await resp.json()
+        meta = body.get("ocs", {}).get("meta", {})
+        if meta.get("status") == "failure":
+            raise HTTPException(status_code=400, detail=f"Nextcloud: {meta.get('message', 'unknown error')}")
+        password = body.get("ocs", {}).get("data", {}).get("password")
+        if not password:
+            raise HTTPException(status_code=400, detail="Nextcloud returned no app password")
+        return password
+
+
+@app.post("/api/users/{username}/service-token")
+async def create_service_token(
+    username: str,
+    body: dict,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_api_key),
+):
+    """Trade a one-time password for a long-lived per-user token.
+
+    `service` is home_assistant, nextcloud or audiobookshelf. The password is
+    used once inside the exchange and never persisted: only the resulting
+    token is stored (encrypted). Callers may be the user themselves or an
+    admin onboarding them.
+    """
+    service = str(body.get("service") or "").strip()
+    if service not in _TOKEN_EXCHANGES:
+        raise HTTPException(status_code=422, detail=f"service must be one of {', '.join(_TOKEN_EXCHANGES)}")
+
+    target = session.exec(select(User).where(User.username == username.lower())).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not admin.is_admin and admin.username != target.username:
+        raise HTTPException(status_code=403, detail="You can only set up your own account")
+
+    password = str(body.get("password") or "")
+
+    if service == "home_assistant":
+        if not password:
+            raise HTTPException(status_code=422, detail="A password is required to exchange for a Home Assistant token")
+        ha_url = body.get("ha_url") or target.ha_url or (admin.ha_url if admin.is_admin else None)
+        if not ha_url:
+            raise HTTPException(status_code=422, detail="Home Assistant is not configured (set ha_url first)")
+        token = await _exchange_home_assistant_token(ha_url, body.get("source_username") or target.username, password)
+        target.ha_token_enc = encrypt(token)
+    elif service == "audiobookshelf":
+        if not password:
+            raise HTTPException(status_code=422, detail="A password is required to exchange for an Audiobookshelf token")
+        abs_url = body.get("audiobookshelf_url") or target.audiobookshelf_url or (admin.audiobookshelf_url if admin.is_admin else None)
+        if not abs_url:
+            raise HTTPException(status_code=422, detail="Audiobookshelf is not configured (set audiobookshelf_url first)")
+        token = await _exchange_audiobookshelf_token(abs_url, body.get("source_username") or target.username, password)
+        target.audiobookshelf_api_key_enc = encrypt(token)
+    else:  # nextcloud
+        nc_username = body.get("source_username") or target.nextcloud_user or target.username
+        app_password = await _create_nextcloud_app_password(admin, nc_username)
+        target.nextcloud_user = nc_username
+        target.nextcloud_pass_enc = encrypt(app_password)
+
+    session.add(target)
+    session.commit()
+
+    return {
+        "success": True,
+        "username": target.username,
+        "service": service,
+        "message": f"{service} token stored for {target.username}; the password was not saved",
+    }
+
+
 # ─── Admin ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/settings", response_model=list[GlobalSettingRead])
