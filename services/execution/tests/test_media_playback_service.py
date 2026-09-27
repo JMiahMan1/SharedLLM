@@ -126,5 +126,15 @@ async def test_resolve_stream(mocker):
     res = await execute_media_resolve_stream(req)
     assert res.status == "SUCCESS"
     assert res.detail is not None
-    assert res.detail["stream_url"] == "http://192.168.2.205:8888/media/vid-123"
+    from urllib.parse import parse_qs, urlparse
+
+    parsed = urlparse(res.detail["stream_url"])
+    assert parsed.scheme == "http"
+    assert parsed.netloc == "192.168.2.205:8888"
+    assert parsed.path == "/media/vid-123"
+    query = parse_qs(parsed.query)
+    assert query.get("user") == ["test_user"]
+    from services.shared.media_token import verify
+
+    assert verify(query["mt"][0], "test_user") is True
 
