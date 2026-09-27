@@ -73,6 +73,7 @@ from services.gateway.prompts import (
     load_prompt,
     load_prompt_sync,
 )
+from services.gateway.redact import redact_url
 from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, StorageListRequest
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas
 from services.gateway.external_agent import run_external_agent
@@ -864,7 +865,7 @@ async def readiness():
           status_val = "UNREACHABLE"
           for _attempt in range(3):
               try:
-                log.info(f"[health] Checking {name} at {url} (attempt {_attempt + 1})")
+                log.info(f"[health] Checking {name} at {redact_url(url)} (attempt {_attempt + 1})")
                 resp = await client.get(url, timeout=aiohttp.ClientTimeout(total=5.0))
                 log.info(f"[health] {name} response: {resp.status}")
                 if resp.status == 200:
@@ -2090,14 +2091,43 @@ async def _ma_rpc(
 
 
 
+def _identity_cred_dict(creds: Any) -> dict:
+    """Normalize resolved credentials (dict or model) to a plain dict."""
+    if isinstance(creds, dict):
+        return creds
+    dump = getattr(creds, "model_dump", None) or getattr(creds, "dict", None)
+    return dump() if callable(dump) else {}
+
+
+async def _resolve_acting_identity(request: Request, as_user: str | None = None) -> Any:
+    """Resolve whose credentials an action should run as.
+
+    `as_user="admin"` lets an authenticated admin post as the shared Admin
+    (default) identity — user ID 1, the same account Identity falls back to
+    in /api/resolve. Anything else keeps the caller's own identity, and a
+    client can never name an arbitrary user: any other value is ignored, and
+    a non-admin asking for "admin" gets a 403.
+    """
+    creds = await _resolve_identity_from_request(request)
+    if as_user != "admin":
+        return creds
+    if not _identity_cred_dict(creds).get("is_admin"):
+        raise HTTPException(status_code=403, detail="Only admins can send as the Admin identity")
+    admin_creds = await resolve_first_user()
+    if not _identity_cred_dict(admin_creds):
+        raise HTTPException(status_code=503, detail="Admin identity is unavailable")
+    return admin_creds
+
+
 async def _proxy_execution_with_identity(
     request: Request,
     endpoint: str,
     payload: dict | None = None,
     *,
     method: str = "POST",
+    as_user: str | None = None,
 ) -> JSONResponse:
-    creds_data = await _resolve_identity_from_request(request)
+    creds_data = await _resolve_acting_identity(request, as_user)
     headers = {"X-Internal-Secret": INTERNAL_SECRET}
     url = f"{EXECUTION_SVC}{endpoint}"
     async with shared_http_client() as client:
@@ -2257,7 +2287,7 @@ async def secure_logging_middleware(request: Request, call_next):
         if key in safe_headers:
             safe_headers[key] = "[REDACTED]"
 
-    log.info(f"REQUEST: {request.method} {request.url} | Headers: {safe_headers}")
+    log.info(f"REQUEST: {request.method} {redact_url(str(request.url))} | Headers: {safe_headers}")
     _ =     _ = asyncio.create_task(emit_log("INFO", f"{request.method} {request.url.path}", {"headers": safe_headers}))
 
     try:
@@ -2275,7 +2305,7 @@ async def secure_logging_middleware(request: Request, call_next):
         )
 
     status_code = getattr(response, 'status_code', None) or getattr(response, 'status', 'N/A')
-    log.info(f"RESPONSE: {request.method} {request.url} | Status: {status_code}")
+    log.info(f"RESPONSE: {request.method} {redact_url(str(request.url))} | Status: {status_code}")
     _ =     _ = asyncio.create_task(emit_log("INFO", f"RESPONSE {request.method} {request.url.path} -> {status_code}", {}))
     return response
 
@@ -4574,7 +4604,7 @@ async def proxy_open_talk_conversation(request: Request):
         "token": body.get("token"),
         "target_user": body.get("target_user"),
     }
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
 @app.get("/api/communication/talk/messages")
@@ -4595,7 +4625,7 @@ async def proxy_send_talk_message(request: Request):
         "token": body.get("token"),
         "message": body.get("message"),
     }
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
 @app.post("/api/communication/talk/voice")
@@ -4609,7 +4639,7 @@ async def proxy_send_talk_voice(request: Request):
         "file_name": body.get("file_name"),
         "caption": body.get("caption"),
     }
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 @app.get("/api/communication/talk/reactions")
 async def proxy_get_talk_reactions(request: Request):
@@ -4630,7 +4660,7 @@ async def proxy_react_talk_message(request: Request):
         "message_id": body.get("message_id"),
         "reaction": body.get("reaction"),
     }
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
 @app.get("/api/communication/talk/polls")
@@ -4648,7 +4678,7 @@ async def proxy_create_talk_poll(request: Request):
         "question": body.get("question"),
         "options": body.get("options"),
     }
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
 @app.post("/api/communication/talk/polls/vote")
@@ -4660,7 +4690,7 @@ async def proxy_vote_talk_poll(request: Request):
         "poll_id": body.get("poll_id"),
         "option_id": body.get("option_id"),
     }
-    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
 @app.post("/api/generate")
@@ -7771,6 +7801,24 @@ async def get_geo_trip_route(trip_id: str):
     raise HTTPException(status_code=502, detail="Failed to fetch trip route")
 
 
+@app.get("/api/geo/locations/suggestions")
+async def get_geo_location_suggestions(lat: float, lon: float):
+    """Nearby place-name suggestions for a coordinate (trip editing)."""
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/locations/suggestions",
+            params={"lat": lat, "lon": lon},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        if resp.status == 422:
+            err = await resp.json()
+            raise HTTPException(status_code=422, detail=err.get("detail", "Invalid coordinates"))
+    raise HTTPException(status_code=502, detail="Failed to fetch location suggestions")
+
+
 @app.patch("/api/geo/trips/{trip_id}/share")
 async def share_geo_trip(trip_id: str, request: Request):
     body = await request.json()
@@ -8870,7 +8918,7 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         abs_user = creds.get("audiobookshelf_user") or ""
         abs_pass = creds.get("audiobookshelf_pass") or ""
 
-        log.info(f"[stream/abs] Resolved credentials: url={abs_url}, has_key={bool(abs_key)}, user={abs_user}, has_pass={bool(abs_pass)}")
+        log.info(f"[stream/abs] Resolved credentials: url={redact_url(abs_url)}, has_key={bool(abs_key)}, user={abs_user}, has_pass={bool(abs_pass)}")
 
         if not abs_url:
             log.error("[stream/abs] Audiobookshelf URL not configured in resolved credentials")
