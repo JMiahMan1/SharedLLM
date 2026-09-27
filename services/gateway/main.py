@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -9921,7 +9921,7 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
 
 
 @app.get("/api/media/imageproxy")
-async def media_imageproxy(path: str, request: Request, service: str = ""):
+async def media_imageproxy(path: str, request: Request, service: str = "", w: int | None = None):
     """Proxy image requests (entity pictures/covers) from Home Assistant, Music Assistant, or Audiobookshelf.
 
     The `path` may be a relative path (e.g. HA entity_picture, ABS /api/items/<id>/cover) or a full URL
@@ -10029,14 +10029,46 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
         if token:
             headers["Authorization"] = f"Bearer {token}"
 
+    # BUG-11: forward the client's conditional request upstream and the
+    # client's requested width to Music Assistant (imageproxy `size=`).
+    req_headers = dict(headers)
+    if_none_match = request.headers.get("if-none-match")
+    if if_none_match:
+        req_headers["If-None-Match"] = if_none_match
+
+    if w and svc == "ma":
+        parts = urlparse(target_url)
+        query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k != "size"]
+        query.append(("size", str(w)))
+        target_url = parts._replace(query=urlencode(query)).geturl()
+
     try:
-        async with shared_http_client() as client, client.get(target_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10.0)) as resp:
-            if resp.status == 200:
-                content_type = resp.headers.get("Content-Type", "image/jpeg")
-                data = await resp.read()
-                return Response(content=data, media_type=content_type)
-            log.error(f"[imageproxy] upstream {svc} status {resp.status} for {redact_url(target_url)}")
-            raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
+        async with shared_http_client() as client:
+            resp = await client.get(
+                target_url, headers=req_headers, timeout=aiohttp.ClientTimeout(total=30.0, connect=5.0)
+            )
+            if resp.status == 304:
+                await resp.release()
+                return Response(status_code=304)
+            if resp.status != 200:
+                log.error(f"[imageproxy] upstream {svc} status {resp.status} for {redact_url(target_url)}")
+                await resp.release()
+                raise HTTPException(status_code=resp.status, detail="Failed to fetch image from upstream")
+
+            content_type = resp.headers.get("Content-Type", "image/jpeg")
+            resp_headers = {"Cache-Control": "private, max-age=86400, immutable"}
+            upstream_etag = resp.headers.get("ETag")
+            if upstream_etag:
+                resp_headers["ETag"] = upstream_etag
+
+            async def _image_stream():
+                try:
+                    async for chunk in resp.content.iter_chunked(64 * 1024):
+                        yield chunk
+                finally:
+                    await resp.release()
+
+            return StreamingResponse(_image_stream(), media_type=content_type, headers=resp_headers)
     except HTTPException:
         raise
     except Exception as e:
