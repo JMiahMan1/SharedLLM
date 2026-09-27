@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
-import Wander from '../pages/Wander';
+import Health from '../pages/Health';
 
 const trendsRequests: string[] = [];
 
@@ -51,7 +51,7 @@ function useGeoHandlers() {
   );
 }
 
-describe('Wander health/fitness analysis is opt-in', () => {
+describe('Health health/fitness analysis is opt-in', () => {
   beforeEach(() => {
     trendsRequests.length = 0;
     useGeoHandlers();
@@ -62,7 +62,7 @@ describe('Wander health/fitness analysis is opt-in', () => {
   });
 
   it('does not request or render analysis on page load', async () => {
-    renderWithProviders(<Wander />);
+    renderWithProviders(<Health />);
 
     expect(await screen.findByTestId('analysis-opt-in')).toBeInTheDocument();
     expect(
@@ -75,9 +75,17 @@ describe('Wander health/fitness analysis is opt-in', () => {
     expect(screen.queryByText(/AI Insight/i)).not.toBeInTheDocument();
   });
 
+  it('renders the Health page shell with steps and workouts', async () => {
+    renderWithProviders(<Health />);
+
+    expect(await screen.findByTestId('health-page')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /health/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /workouts/i })).toBeInTheDocument();
+  });
+
   it('runs analysis only after the user explicitly requests it', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<Wander />);
+    renderWithProviders(<Health />);
 
     await screen.findByTestId('analysis-opt-in');
     expect(trendsRequests).toHaveLength(0);
@@ -96,7 +104,7 @@ describe('Wander health/fitness analysis is opt-in', () => {
 
   it('supports re-running analysis from the panel action', async () => {
     const user = userEvent.setup();
-    renderWithProviders(<Wander />);
+    renderWithProviders(<Health />);
 
     await screen.findByTestId('analysis-opt-in');
     await user.click(screen.getByRole('button', { name: /analyze my activity/i }));

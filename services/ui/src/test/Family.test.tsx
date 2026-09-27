@@ -65,6 +65,30 @@ describe('Family hub', () => {
     expect(await screen.findByTestId('reaction-chips')).toHaveTextContent('❤️');
   });
 
+  it('shows family polls and records a vote', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Family />);
+
+    const list = await screen.findByTestId('poll-list');
+    expect(list).toHaveTextContent('Dinner tonight?');
+    await user.click(screen.getByRole('button', { name: /tacos/i }));
+
+    await waitFor(() => expect(screen.getByTestId('poll-list')).toHaveTextContent('2'));
+  });
+
+  it('creates a poll from the poll form', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Family />);
+
+    await user.click(await screen.findByRole('button', { name: /new poll/i }));
+    await user.type(await screen.findByLabelText('Poll question'), 'Movie night?');
+    await user.type(screen.getByLabelText('Poll option 1'), 'Inside Out');
+    await user.type(screen.getByLabelText('Poll option 2'), 'Paddington');
+    await user.click(screen.getByRole('button', { name: /post poll/i }));
+
+    await waitFor(() => expect(screen.getByTestId('poll-list')).toHaveTextContent('Movie night?'));
+  });
+
   it('sends a chat message from the composer', async () => {
     const user = userEvent.setup();
     renderWithProviders(<Family />);

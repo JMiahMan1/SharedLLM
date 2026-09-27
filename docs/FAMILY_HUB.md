@@ -42,13 +42,17 @@ cannot reappear.
 
 ## Next slices
 
-### 1a. Talk depth — reactions SHIPPED
+### 1a. Talk depth — reactions and polls SHIPPED
 
 Tap any message to open a quick reaction bar (👍 ❤️ 😂 🎉 🙏 😮) and chips show
 the tallies. Runs entirely on Talk's reaction API through the gateway
 (`/api/communication/talk/reactions`, `/react`) and the execution action pair
 `reactions`/`react`, so every Talk client (phone, Skylight board) sees them too.
-Polls are the next part of this slice.
+Polls ride the same path: a poll button next to the composer creates one
+(Talk poll API, 2-4 options, blanks rejected before we call Nextcloud) and
+open polls render above the feed with tap-to-vote and live counts. Both
+surfaces therefore stay in sync with the Nextcloud phone app and the Skylight
+board, because Talk owns the data.
 
 ### 1b. Games (server first)
 - Question sets as **data** (`services/games/*.json`, like theme packs and

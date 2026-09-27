@@ -27,6 +27,7 @@
 - **docs/MOBILE_OTA_UPDATES.md** — Android OTA bundle + APK update flow
 
 ## Media
+- **docs/MEDIA_OVERHAUL.md** — phased plan for the media redesign: bug and UX ledgers, target architecture, tests and definition of done
 - **docs/MEDIA_PLAYER.md** — media pipeline, device targeting and transport commands
 - **docs/MA_STREAMING_FIX.md** — Music Assistant browser streaming path
 

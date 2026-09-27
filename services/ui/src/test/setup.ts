@@ -27,6 +27,7 @@ let apiKeys: Array<Record<string, unknown>> = [];
 let logs: Array<Record<string, unknown>> = [];
 let talkConversations: Array<Record<string, unknown>> = [];
 let talkMessages: Record<string, Array<Record<string, unknown>>> = {};
+let talkPolls: Array<Record<string, unknown>> = [];
 let widgetSettings: Array<Record<string, unknown>> = [];
 let quickAssistantEnabled = false;
 
@@ -74,6 +75,17 @@ const resetMockState = () => {
       unread_messages: 0,
       last_activity: 1715001000,
       last_message: 'Deploy complete.',
+    },
+  ];
+  talkPolls = [
+    {
+      id: 7,
+      question: 'Dinner tonight?',
+      status: 0,
+      options: [
+        { id: 1, label: 'Tacos', numVotes: 1 },
+        { id: 2, label: 'Pizza', numVotes: 0 },
+      ],
     },
   ];
   talkMessages = {
@@ -619,6 +631,31 @@ export const server = setupServer(  http.post('/api/auth/login', async () => Htt
       service: 'talk_send',
       detail: { message_record: entry },
     });
+  }),
+  http.get('/api/communication/talk/polls', () =>
+    HttpResponse.json({ status: 'SUCCESS', service: 'talk_polls', detail: { polls: talkPolls } })
+  ),
+  http.post('/api/communication/talk/polls/create', async ({ request }) => {
+    const body = await request.json() as { question?: string; options?: string[] };
+    const poll = {
+      id: 100 + talkPolls.length,
+      question: body.question,
+      status: 0,
+      options: (body.options || []).map((label, index) => ({ id: index + 1, label, numVotes: 0 })),
+    };
+    talkPolls = [poll, ...talkPolls];
+    return HttpResponse.json({ status: 'SUCCESS', service: 'talk_create_poll', detail: { poll } });
+  }),
+  http.post('/api/communication/talk/polls/vote', async ({ request }) => {
+    const body = await request.json() as { poll_id?: number; option_id?: number };
+    talkPolls = talkPolls.map((poll) => {
+      if (poll.id !== body.poll_id) return poll;
+      const options = (poll.options as Array<Record<string, unknown>>).map((option) =>
+        option.id === body.option_id ? { ...option, numVotes: Number(option.numVotes || 0) + 1 } : option
+      );
+      return { ...poll, options };
+    });
+    return HttpResponse.json({ status: 'SUCCESS', service: 'talk_vote_poll', detail: { poll: talkPolls.find((p) => p.id === body.poll_id) } });
   }),
   http.get('/api/communication/talk/reactions', () =>
     HttpResponse.json({

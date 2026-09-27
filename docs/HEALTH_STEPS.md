@@ -32,8 +32,9 @@ The goal is stored as `geo:steps_goal:{user}`; the default remains 10,000.
 
 | Surface | File | Notes |
 |---|---|---|
-| Wander steps card | `pages/Wander.tsx` | ring + 7-day bars, **edit goal** inline |
-| Dashboard Health widget | `components/widgets/HealthActivityWidget.tsx` | today + 7-day average, best day, estimated miles; all values real |
+| **Health page** | `pages/Health.tsx` | ring + 7-day bars, goal editor, achievements, opt-in AI trends, workout start/stop + history. Reached at `/fitness` (sidebar + mobile bottom bar) — `/health` is reserved for service health checks. |
+| Wander | `pages/Wander.tsx` | family presence, places and trips only — steps/workouts moved to Health |
+| Dashboard Health widget | `components/widgets/HealthActivityWidget.tsx` | today + 7-day average, best day, estimated miles; all values real; tapping opens `/health` |
 | Android home-screen widget | `android/.../widgets/HealthWidget.java` | today, progress, 7-day average; tints from the active theme |
 | Settings → Sensors | `pages/Settings.tsx` | enable/disable step + location sensors |
 
@@ -41,6 +42,14 @@ Widget tiles are derived from real data only: **7-day average**, **best day**,
 and **estimated miles** (steps × 0.7 m stride, labelled "est."). Stairs/active
 minutes/calories are deliberately *not* shown — there is no data source, and
 inventing numbers would make the dashboard disagree with Wander.
+
+## Navigation
+
+The split also unloaded the mobile bottom bar. It now pins five destinations —
+Home, Wander, Family, Media, Health — plus a **More** button that opens a
+bottom sheet with Calendar, Notes, Lab (admins) and Settings
+(`components/layout/BottomNav.tsx`, `data-testid="more-sheet"`). The sheet
+closes on selection, backdrop tap or Escape.
 
 ## Known gaps
 
@@ -55,7 +64,8 @@ inventing numbers would make the dashboard disagree with Wander.
 ## Tests
 
 - `services/geo/tests` — steps storage, workouts
-- `services/ui/src/test/WanderAnalysisOptIn.test.tsx` — analysis stays opt-in
+- `services/ui/src/test/HealthAnalysisOptIn.test.tsx` — analysis stays opt-in on the Health page
+- `services/ui/src/test/BottomNav.test.tsx` — pinned tabs + More sheet
 - Typecheck/lint cover the widget metric math
 
 ## Midnight rollover (and the inflated-count bug)
