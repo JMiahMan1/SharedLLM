@@ -170,6 +170,19 @@ if ssh $SSH_OPTS "$HOST" << EOF
         echo "[WARN] Gateway container not found via 'docker ps'; defaulting to 'sharedllm_gateway'."
         GATEWAY_CONTAINER="sharedllm_gateway"
     fi
+
+    # A recreate removes the old container before the new one registers, so
+    # wait for it to exist again instead of reading logs from a name that is
+    # (briefly) gone — that read used to abort the whole deploy.
+    CONTAINER_WAIT=0
+    while [ \$CONTAINER_WAIT -lt 120 ]; do
+        if docker ps -a --filter "name=\$GATEWAY_CONTAINER" --format '{{.Names}}' | grep -q .; then
+            break
+        fi
+        sleep 2
+        let CONTAINER_WAIT=CONTAINER_WAIT+2
+    done
+
     while [ \$ELAPSED -lt \$TIMEOUT ]; do
         if docker logs --tail 200 "\$GATEWAY_CONTAINER" 2>&1 | grep -q "Application startup complete"; then
             echo "[OK] Application started successfully!"
@@ -180,7 +193,7 @@ if ssh $SSH_OPTS "$HOST" << EOF
         # Check for immediate failure (Traceback)
         if docker logs --tail 20 \$GATEWAY_CONTAINER 2>&1 | grep -q "Traceback"; then
             echo "[FAIL] Application failed to start! Traceback detected."
-            docker logs --tail 20 \$GATEWAY_CONTAINER
+            docker logs --tail 20 \$GATEWAY_CONTAINER 2>&1 || true
             exit 1
         fi
 
@@ -193,7 +206,7 @@ if ssh $SSH_OPTS "$HOST" << EOF
     if [ \$SUCCESS -eq 0 ]; then
         echo "[FAIL] Timeout waiting for application startup."
         echo "Last 20 lines of logs:"
-        docker logs --tail 20 \$GATEWAY_CONTAINER
+        docker logs --tail 20 \$GATEWAY_CONTAINER 2>&1 || echo "(no logs available for \$GATEWAY_CONTAINER)"
         exit 1
     fi
 

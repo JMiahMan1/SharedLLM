@@ -359,18 +359,34 @@ const Admin = () => {
     onError: (error: Error) => toast.error(error.message || 'Failed to delete user'),
   });
 
-  const importUserMutation = useMutation({
-    mutationFn: (user: DiscoveredUser) => api.createUser({
-      username: user.username,
-      full_name: user.display_name || user.username,
-      is_admin: false,
-    }),
-    onSuccess: async () => {
+  const importUserMutation = useMutation<DiscoveredUser, Error, DiscoveredUser>({
+    mutationFn: async (user: DiscoveredUser) => {
+      await api.createUser({
+        username: user.username,
+        full_name: user.display_name || user.username,
+        is_admin: false,
+      });
+      return user;
+    },
+    onSuccess: async (user: DiscoveredUser) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['users'] }),
         queryClient.invalidateQueries({ queryKey: ['discovered-users'] }),
       ]);
       toast.success('Discovered user imported');
+
+      // Nextcloud is the one service that needs no password from anyone: the
+      // admin mints an app password for the new account. Failures are said out
+      // loud rather than leaving the user silently half-onboarded.
+      if (user.source.toLowerCase().includes('nextcloud')) {
+        try {
+          const res = await api.setUpServiceToken(user.username, 'nextcloud');
+          if (res.success) toast.success(res.message || 'Nextcloud access set up');
+          else toast.error(res.detail || 'Nextcloud access could not be set up automatically');
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Nextcloud access could not be set up automatically');
+        }
+      }
     },
     onError: (error: Error) => toast.error(error.message || 'Failed to import user'),
   });
