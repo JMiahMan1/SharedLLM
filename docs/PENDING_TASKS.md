@@ -140,8 +140,9 @@ Of the 13 pre-existing failures found in this sweep, 12 are fixed (see the
 - **Remaining:** chat envelope + activity cards and encouragement references;
   Skylight star grants; games over a Talk bot; Excalidraw canvas with
   Raven/Alpaca "make it way better"; calls (Talk signalling + TURN, LiveKit
-  fallback); music + recipes; arcade feature slice (prerequisite: a JSON games
-  endpoint in `../alpaca/arcade` — see `docs/ARCADE_INTEGRATION.md`).
+  fallback); music + recipes; arcade feature slice (alpaca prerequisite is
+  already satisfied — `GET /api/games` + `/api/games/<slug>` exist and are
+  regression-tested — see `docs/ARCADE_INTEGRATION.md`).
 - **Device ledger** shipped (`StepLedger.java` + backfill); remaining gap is
   true background sync (foreground service/WorkManager) — see
   `docs/HEALTH_STEPS.md`.

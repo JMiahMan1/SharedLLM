@@ -11,7 +11,9 @@ Source: `../alpaca/arcade/app.py` (Flask, port 5001, container
 
 | Thing | Where | Notes |
 |---|---|---|
-| Games index (JSON) | `app.py` `"/"` (377) | per-game payload includes `"rating": _rating_stats(d)` (342) |
+| Games index (HTML) | `app.py` `"/"` (377) | renders `list_games()` cards |
+| Games index (JSON) | `app.py` `"/api/games"` (684) | `{success, games: [card…]}` with `?category=` filter; each card includes `"rating": _rating_stats(d)` (342), `plays`, `top_score`; regression-tested in `../alpaca` `20cf10c` |
+| Game detail (JSON) | `app.py` `"/api/games/<slug>"` (690) | card + full `scores` list + `prompt` — what the Jarvis Games tab should list |
 | Star ratings | `app.py:95-99` | `ratings.json` per game: votes with `stars` 1-5 → `{count, average}` |
 | Scores / bests | per game dir (`scores.json`, `bests.json`) | top-five tables; scoring contract writes `/tmp/alpaca_score.json` on every finished run |
 | Web game | `/game/<slug>/index.html` (471) | HTML5/three.js games |
