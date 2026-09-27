@@ -79,3 +79,21 @@ async def test_stream_url_never_contains_abs_key_even_without_user():
     url = await abs_handler.abs_client.get_stream_url("book-9", "testuser")
     assert ABS_KEY not in url
     assert "token=" not in url
+
+
+async def test_stream_url_uses_lan_host_for_devices():
+    """HA/Cast fetch this URL from the LAN — must be the routable host.
+
+    The docker-internal alias (`http://gateway:11435`) is not resolvable from
+    devices, so when EXECUTION_EXTERNAL_HOST is configured (the same host used
+    for every :8888 device URL) the gateway URL must be built from it.
+    """
+    from urllib.parse import urlparse
+
+    from services.config import EXECUTION_EXTERNAL_HOST
+
+    url = await abs_handler.abs_client.get_stream_url("book-9", "testuser")
+    netloc = urlparse(url).netloc
+    assert netloc.endswith(":11435")
+    if EXECUTION_EXTERNAL_HOST:
+        assert netloc == f"{EXECUTION_EXTERNAL_HOST}:11435"

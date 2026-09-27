@@ -29,3 +29,19 @@ service.
 - **Still (VERIFY):** expiry behavior of `?mt=` acceptance across each caller
   (imageproxy, stream, events, 8888 file server, sendspin WS) — covered as
   each caller is wired in BUG-07/08 tests.
+
+## Device-facing ABS stream URL (P1-T7 follow-up, 2026-09-27)
+
+- The URL handed to HA/MA must be reachable from the LAN, so it is built from
+  `EXECUTION_EXTERNAL_HOST` (`http://<lan-ip>:11435`, Caddy publishes :11435
+  and routes `/api/*` → gateway). The previous
+  `http://gateway:11435/...` value is a docker-internal alias that devices
+  cannot resolve — verified: `GATEWAY_INTERNAL_URL` (`.env:143`) is the compose
+  service name, and no `GATEWAY_EXTERNAL_HOST` exists in the repo. Fallback
+  chain when `EXECUTION_EXTERNAL_HOST` is unset: `GATEWAY_INTERNAL_URL` →
+  `http://localhost:11435`.
+- **Stream proxy timeouts:** `stream/abs` and `stream/ma` upstream sessions
+  used `ClientTimeout(300.0, ...)` (aiohttp *total* covers body streaming),
+  which cut any uninterrupted stream at ~5 minutes. Now
+  `total=None, connect=15.0`. Behavior verified by code inspection; a live
+  long-stream check against production is still (VERIFY).

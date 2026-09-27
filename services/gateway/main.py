@@ -9013,7 +9013,8 @@ async def stream_audiobookshelf(book_id: str, request: Request):
         range_header = request.headers.get("range")
         log.info(f"[stream/abs] Client requested range: {range_header} for book {book_id}")
         client = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(300.0, connect=15.0),
+            # No total deadline: a long audiobook stream must not be cut at 5 min.
+            timeout=aiohttp.ClientTimeout(total=None, connect=15.0),
         )
         try:
             req_headers: dict[str, str] = {
@@ -9838,7 +9839,8 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             range_header = request.headers.get("range")
             log.info(f"[stream/ma] Client requested range: {range_header}")
             proxy_client = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(300.0, connect=15.0),
+                # No total deadline: a long MA stream must not be cut at 5 min.
+                timeout=aiohttp.ClientTimeout(total=None, connect=15.0),
             )
             try:
                 proxy_headers: dict[str, str] = {
