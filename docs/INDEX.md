@@ -22,6 +22,7 @@
 - **docs/NOTES.md** — notes UX, actions, pin/colour prefs
 - **docs/FAMILY_HUB.md** — family chat/games/create hub (Nextcloud Talk based)
 - **docs/CHAT_UI_RESEARCH.md** — chat/canvas/call research, decisions and integration phases
+- **docs/ARCADE_INTEGRATION.md** — featuring top-rated Alpaca arcade games in the Family hub
 
 ## Mobile
 - **docs/MOBILE_OTA_UPDATES.md** — Android OTA bundle + APK update flow
