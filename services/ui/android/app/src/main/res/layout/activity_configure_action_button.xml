@@ -143,7 +143,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Icon background"
+            android:text="Tile &amp; icon background"
             android:textColor="#CBD5E1"
             android:textSize="12sp" />
         <HorizontalScrollView
@@ -165,7 +165,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
-            android:text="None — transparent (no chip behind the icon)"
+            android:text="None — transparent tile, no background"
             android:textColor="#94A3B8"
             android:textSize="12sp" />
 

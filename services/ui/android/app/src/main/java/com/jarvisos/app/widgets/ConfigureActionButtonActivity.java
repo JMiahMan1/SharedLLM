@@ -398,8 +398,8 @@ public class ConfigureActionButtonActivity extends Activity {
                 nbg.setStroke(MaterialIcons.dp(getResources(), 2),
                     selected ? 0xFF4ADE80 : 0xFF64748B);
                 none.setBackground(nbg);
-                none.setContentDescription("None — transparent, no background");
-                none.setTooltipText("None — transparent, no background");
+                none.setContentDescription("None — transparent tile, no background");
+                none.setTooltipText("None — transparent tile, no background");
                 none.setOnClickListener(v -> {
                     selectedIconBg = 0;
                     buildIconBgRow();
@@ -435,7 +435,7 @@ public class ConfigureActionButtonActivity extends Activity {
         TextView status = findViewById(R.id.icon_bg_selected);
         if (status == null) return;
         if (selectedIconBg == 0) {
-            status.setText("None — transparent (no chip behind the icon)");
+            status.setText("None — transparent tile (icon floats on the wallpaper)");
         } else {
             String name = "Color";
             for (int i = 0; i < ICON_BG_CHOICES.length; i++) {
@@ -444,7 +444,7 @@ public class ConfigureActionButtonActivity extends Activity {
                     break;
                 }
             }
-            status.setText(name + " chip — tap None to clear");
+            status.setText(name + " chip on the dark tile — tap None for no background");
         }
     }
 
