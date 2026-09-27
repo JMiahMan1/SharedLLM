@@ -75,6 +75,7 @@ from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, S
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas
 from services.gateway.external_agent import run_external_agent
 from services.shared.info_endpoint import info_router
+from services.shared.media_token import sign
 
 START_TIME = time.time()
 
@@ -9825,6 +9826,26 @@ async def toggle_media_favorite(req: FavoriteRequest, request: Request):
         {"library_item_id": item_id, "media_type": media_type},
     )
     return {"status": "SUCCESS", "favorite": False}
+
+
+@app.post("/api/media/token")
+async def post_media_token(request: Request):
+    """Issue a short-lived signed media token for the caller (§7.4).
+
+    Authenticated with the normal API key header; the returned token is used
+    as ``?mt=`` on media URLs (image proxies, streams, SSE) instead of the
+    raw API key.
+    """
+    creds = await _resolve_identity_from_request(request)
+    if not isinstance(creds, dict):
+        creds = creds.model_dump() if hasattr(creds, "model_dump") else (
+            creds.dict() if hasattr(creds, "dict") else dict(creds)
+        )
+    user = creds.get("user") or ""
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    token, expires_at = sign(user)
+    return {"token": token, "expires_at": expires_at}
 
 
 @app.websocket("/api/workspaces/{workspace_id}/terminal")
