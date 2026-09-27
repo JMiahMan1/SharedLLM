@@ -78,7 +78,7 @@ from services.gateway.schemas import ResolvedCredentials, StorageIndexRequest, S
 from services.gateway.tool_registry import SVC_ALPACA_SD, SVC_EXECUTION, SVC_WORKSPACE, get_tool_schemas
 from services.gateway.external_agent import run_external_agent
 from services.shared.info_endpoint import info_router
-from services.shared.media_token import sign
+from services.shared.media_token import sign, verify
 
 START_TIME = time.time()
 
@@ -2004,6 +2004,26 @@ def _normalize_ma_url(mass_url: str) -> tuple[str, str, int]:
 
 async def _resolve_identity_from_request(request: Request, body: dict | None = None) -> Any:
     return await resolve_identity(_auth_body_from_request(request, body))
+
+
+async def _resolve_identity_from_media_token(request: Request) -> Any | None:
+    """Resolve identity from a short-lived signed media token (``?mt=&user=``).
+
+    Returns None when no ``mt`` param is present so callers can fall back to
+    normal header/token auth. When ``mt`` is present it is authoritative: an
+    invalid, tampered or expired token raises 403 even if other credentials
+    in the request would otherwise be valid (no fallback).
+    """
+    mt = request.query_params.get("mt")
+    if not mt:
+        return None
+    user = request.query_params.get("user", "")
+    if not user or not verify(mt, user):
+        raise HTTPException(status_code=403, detail="Invalid or expired media token")
+    try:
+        return await resolve_identity({"rag_user": user})
+    except HTTPException as e:
+        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
 
 
 async def _user_id_from_request(request: Request) -> str | None:
@@ -8900,9 +8920,13 @@ async def proxy_ha_service(request: Request):
 async def stream_audiobookshelf(book_id: str, request: Request):
     """Stream audiobook audio directly from ABS to mobile device."""
     log.info(f"[stream/abs] Received stream request for book_id={book_id}")
+    # Signed media token auth is authoritative and must run OUTSIDE the try
+    # below, which rewrites HTTPException to 401 (a 403 must stay a 403).
+    creds = await _resolve_identity_from_media_token(request)
     try:
         try:
-            creds = await _resolve_identity_from_request(request)
+            if creds is None:
+                creds = await _resolve_identity_from_request(request)
             if not isinstance(creds, dict):
                 creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
             log.info(f"[stream/abs] Identity resolved successfully for user: {creds.get('user')}")

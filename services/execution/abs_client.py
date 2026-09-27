@@ -7,12 +7,15 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
 log = logging.getLogger("execution.abs_client")
 
+from services.config import GATEWAY_INTERNAL_URL
 from services.execution.http_client import get_session, host_of
+from services.shared.media_token import sign
 
 
 @asynccontextmanager
@@ -318,11 +321,19 @@ async def update_progress(
     )
 
 
-async def get_stream_url(
-    abs_url: str, abs_api_key: str, item_id: str, format: str = "mp4"
-) -> str:
-    """Get the direct stream URL for an audiobook."""
-    return f"{abs_url.rstrip('/')}/api/items/{item_id}/stream?format={format}&token={abs_api_key}"
+async def get_stream_url(item_id: str, user: str, format: str = "mp4") -> str:
+    """Build a device-safe gateway stream URL for an audiobook.
+
+    Routes through the gateway's ``/api/media/stream/audiobookshelf`` endpoint
+    authenticated with a short-lived signed media token (``?mt=``, §7.4) so the
+    raw ABS API key never reaches a device (or Home Assistant history).
+    """
+    base = GATEWAY_INTERNAL_URL or "http://localhost:11435"
+    token, _exp = sign(user)
+    return (
+        f"{base.rstrip('/')}/api/media/stream/audiobookshelf/{quote(str(item_id), safe='')}"
+        f"?format={format}&user={quote(user)}&mt={token}"
+    )
 
 
 async def get_libraries(abs_url: str, abs_api_key: str) -> dict:
