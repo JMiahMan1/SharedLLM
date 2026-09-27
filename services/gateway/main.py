@@ -9854,6 +9854,18 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
     parsed = urlparse(path)
     is_full = bool(parsed.scheme and parsed.netloc)
 
+    # BUG-05: full URLs are fetched server-side as-is (see the MA branch
+    # below), so only allow hosts the user has actually configured
+    # (mass_url / audiobookshelf_url / ha_url). Anything else is SSRF.
+    if is_full:
+        allowed_hosts = set()
+        for _key in ("mass_url", "abs_url", "audiobookshelf_url", "ha_url"):
+            _h = (urlparse(creds.get(_key, "") or "").hostname or "").lower()
+            if _h:
+                allowed_hosts.add(_h)
+        if (parsed.hostname or "").lower() not in allowed_hosts:
+            raise HTTPException(status_code=400, detail="Image host not allowed")
+
     # Infer which upstream hosts the image.
     svc = (service or "").lower()
     if not svc:
