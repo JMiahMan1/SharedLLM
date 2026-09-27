@@ -21,6 +21,7 @@ You are implementing a large redesign of the **Media** feature of Jarvis OS (rep
 9. **If you are stuck for more than 3 attempts on the same failure, stop.** Write what you tried in `docs/MEDIA_OVERHAUL_BLOCKERS.md` and move to the next independent task.
 
 ### Glossary
+
 | Term | Meaning |
 |---|---|
 | MA | Music Assistant server (v2.10+). Its JSON-RPC WebSocket is reached through the gateway at `WS /api/ma-jsonrpc?token=` |
@@ -78,6 +79,7 @@ Design tokens: `src/index.css:17-55` (`--site-*`, `--color-surface-*`, `--radius
 Every row must be fixed **and** get a regression test (Rule 3). Severity: **P0** = security / data integrity, **P1** = user-visible broken behavior, **P2** = quality / perf / a11y.
 
 ### 3.1 Backend: security (Phase 1, do first)
+
 | ID | Sev | Where | Problem | Required fix | Required test |
 |---|---|---|---|---|---|
 | BUG-01 | P0 | `gateway/main.py:8537` `_resolve_user_context` | Trusts `body["user_context"]` sent by the client, so anyone can impersonate any user or admin, or inject `ha_url`/`ha_token` (SSRF) | **Always** delete `user_context` from the incoming body. Resolve only from the authenticated request (`_resolve_identity_from_request`) | pytest: POST `/execute/media/status` with a forged `user_context` → the forwarded body contains the *authenticated* user, not the forged one |
@@ -91,6 +93,7 @@ Every row must be fixed **and** get a regression test (Rule 3). Severity: **P0**
 | BUG-09 | P1 | `ha_client.py:20`, Roku handlers, `handlers/media.py:549` | TLS verify off by default | Default `verify_ssl=True`. Honor a per-user `allow_insecure_tls` identity flag only if it already exists; otherwise add env `MEDIA_ALLOW_INSECURE_TLS=false` | Unit test on the session factory |
 
 ### 3.2 Backend: functional bugs (Phase 2)
+
 | ID | Sev | Where | Problem | Fix | Test |
 |---|---|---|---|---|---|
 | BUG-10 | P1 | `gateway/main.py:9632,9669-9670` | imageproxy reads `creds["abs_url"]`/`["abs_api_key"]`, but identity returns `audiobookshelf_url`/`audiobookshelf_api_key` (`identity/schemas.py:40-43`), so **every ABS cover is a 400** | Use the correct keys | pytest: ABS cover path → upstream called with the Bearer ABS key |
@@ -119,6 +122,7 @@ Every row must be fixed **and** get a regression test (Rule 3). Severity: **P0**
 
 ### 3.3 Frontend: bugs (Phase 3)
 Paths are relative to `services/ui/src/`.
+
 | ID | Sev | Where | Problem | Fix / required test |
 |---|---|---|---|---|
 | BUG-40 | P1 | `pages/Media.tsx:1310-1318`, `lib/maWebPlayer.ts:616-644` | **Leaving /media kills web-player audio** | Move the player to an app-level provider (Phase 4). E2E: play → navigate to `/` → the audio element is still playing and the mini-player is visible |
@@ -216,6 +220,7 @@ These are the design and usability problems in the current UI: `pages/Media.tsx`
 | UX-53 | Favorite, seek, volume, and mute failures on remote players are silently ignored (`catch { /* ignore */ }`, Media.tsx:2076,2080,2094,2098) | Rollback + toast (§6.3 rules) | Store tests with a failing adapter |
 
 ### 3.5 Copy guide (UX-03/50)
+
 | Old | New |
 |---|---|
 | Select Device / Web Player / Browser Audio | **Playing on** · **This device** |
@@ -226,13 +231,15 @@ These are the design and usability problems in the current UI: `pages/Media.tsx`
 | Requires … Identity service | **Connect your music services** → [Open settings] |
 | Web Player Connection Failed — | **Couldn't connect this device.** [Try again] |
 | Failed to load playlists. Check your server connection. | **Couldn't load playlists from your music server.** [Retry] |
+
 Sentence case everywhere. No emoji. No product or protocol names in primary UI (settings screens may use them).
 
 ---
 
 ## 4. PRODUCT VISION: what "award-winning" means here
 
-**Principles**
+### Principles
+
 1. **Music never stops because of the UI.** Navigation, rotation, backgrounding, and reconnects are invisible.
 2. **One tap to sound.** From opening the app to audio in ≤ 2 taps (Home → a "Jump back in" card).
 3. **The room is the interface.** You always know *where* audio is playing and can move it anywhere (like Spotify Connect / AirPlay).
@@ -241,6 +248,7 @@ Sentence case everywhere. No emoji. No product or protocol names in primary UI (
 6. **Accessible by default.** WCAG 2.2 AA, full keyboard, screen-reader labels, reduced-motion support, 44×44px targets.
 
 ### 4.1 Information architecture (routes)
+
 | Route | Screen |
 |---|---|
 | `/media` | **Listen Now** (home) |
@@ -267,13 +275,13 @@ All detail routes are deep-linkable, and the browser/Android back button works.
 7. **Radio**: shelf (if MA has radio items).
 Each shelf has a "See all" → the matching Library tab. Loading = `.skeleton` tiles with the exact card dimensions (no layout shift). Error = inline card with a message + Retry. Empty = friendly illustration-free message + CTA ("Connect Music Assistant in Settings → Identity").
 
-**Mini-player (global, every route, when anything is loaded)**
+#### Mini-player (global, every route, when anything is loaded)
 - Mobile: floats **above BottomNav** (bottom offset = BottomNav height + safe area + 8px), height 64px, rounded `--radius-card`, glass with an artwork-tinted background. Content: 44px art, title/artist (marquee on overflow is **not** allowed; use truncation), play/pause, next. A 2px progress line along the bottom edge.
 - Desktop (≥1024px): a full-width **bottom dock** (72px) inside the main column. Left: art + title + artist + heart. Center: prev / play / next + scrubber with times. Right: queue button, output button, volume slider.
 - Gestures (mobile): tap = open Now Playing; swipe up = open Now Playing; swipe left/right on the text = next/previous (with haptic `light`).
 - Page content must get bottom padding so the mini-player never covers content.
 
-**Now Playing (full-screen sheet)**
+#### Now Playing (full-screen sheet)
 - Background: artwork blurred (`filter: blur(60px) saturate(1.4)`) + a dark scrim; the accent color is extracted from the art (§6.5).
 - Large square art (max 420px desktop / `min(86vw, 52dvh)` mobile) with a shared-element transition from the mini-player art (framer-motion `layoutId="np-art"`).
 - Title (large), artist (tap → artist page), album (tap → album page), heart.
@@ -312,6 +320,7 @@ Each shelf has a "See all" → the matching Library tab. Loading = `.skeleton` t
 ## 5. STACK CHANGES (dependencies)
 
 Add, pinned to latest stable at implementation time (check with `npm view <pkg> version`):
+
 | Package | Why |
 |---|---|
 | `@tanstack/react-virtual` | Virtualized queue, library, and track lists |
@@ -510,7 +519,7 @@ Plain TS classes, no React:
 
 ### 6.7 MediaSession (web and Android WebView)
 In `mediaSession.ts`, subscribed to the store:
-- `metadata`: title, artist, album, `artwork: [96,192,256,512].map(s => ({src: proxiedArtworkUrl(img, s), sizes: `${s}x${s}`, type: 'image/jpeg'}))`. It must go through the proxy (BUG-56).
+- `metadata`: title, artist, album, `artwork: [96,192,256,512].map(s => ({src: proxiedArtworkUrl(img, s), sizes:`${s}x${s}`, type: 'image/jpeg'}))`. It must go through the proxy (BUG-56).
 - `playbackState` mirrors the status.
 - `setPositionState({duration, position, playbackRate})` on every position anchor change. Skip it for live streams.
 - Handlers: `play`, `pause`, `stop`, `previoustrack`, `nexttrack`, `seekto`, `seekbackward` (15s), `seekforward` (30s). Wrap each `setActionHandler` in try/catch (not every browser supports every action).
@@ -571,6 +580,7 @@ Put it in `services/gateway/ma_allowlist.py` as a `frozenset`, and unit-test tha
 - Keep accepting `?token=` for **one release** behind env `MEDIA_ALLOW_LEGACY_TOKEN=true`, logged as a deprecation warning (redacted). The Android widget (`WidgetApi.java`) must be updated in Phase 8 before legacy support is removed.
 
 ### 7.5 New/changed REST endpoints for the new UI (gateway, all authenticated)
+
 | Method + path | Purpose | Implementation |
 |---|---|---|
 | `GET /api/media/home` | One call for Listen Now: `{recent, continue, playlists, favorites, radio, errors:{ma?:str, abs?:str}}` | Parallel `asyncio.gather` of the existing MA/ABS fetches with a timeout of 4s each; partial results + `errors` (§4.5 partial state) |
@@ -581,6 +591,7 @@ Put it in `services/gateway/ma_allowlist.py` as a `frozenset`, and unit-test tha
 | `POST /api/media/abs/progress` | `{item_id, episode_id?, current_time, duration, is_finished?}` | ABS `PATCH /api/me/progress/{id}[/{episode}]`. The UI calls it every 15s while an ABS item plays on **any** output, and on pause/stop |
 | `GET /api/media/events` | SSE (§7.2) | new |
 | `POST /api/media/token` | §7.4 | new |
+
 Response models are Pydantic in `services/gateway/media_models.py`. Mirror them as TS types in `features/media/types.ts`. **Contract test:** a pytest that dumps each model's JSON schema to `services/ui/src/features/media/__generated__/schemas.json`, and a vitest test that validates fixture responses against those schemas (use `ajv` as a dev dependency). CI then fails if they drift.
 
 ### 7.6 Docs
@@ -686,7 +697,7 @@ One task per bug, in ID order: **P1-T1 = BUG-01 … P1-T9 = BUG-09**. BUG-07/08 
 ### Phase 7: Accessibility and performance
 - P7-T1 axe on every media route and every sheet open state → 0 serious/critical.
 - P7-T2 Keyboard-only E2E: from `/media`, reach and play a track, open Now Playing, seek, change output, and reorder the queue, using only the keyboard.
-- P7-T3 Screen-reader labels: every icon button has an `aria-label`; the scrubber has `aria-valuetext`; live region announces "Now playing <title> on <output>" (polite).
+- P7-T3 Screen-reader labels: every icon button has an `aria-label`; the scrubber has `aria-valuetext`; live region announces "Now playing `<title>` on `<output>`" (polite).
 - P7-T4 Performance budget:
   - The media route chunk is lazy-loaded (`React.lazy` in `App.tsx`).
   - Initial JS for `/media` must not grow by more than 60KB gzip versus baseline. Measure with `npx vite build` and compare the `dist/assets` sizes; record them in the commit.
@@ -723,6 +734,7 @@ pytest services/tests -q
 Outputs from failing runs go to `.tmp/` (for example `npx vitest run > .tmp/vitest.log 2>&1`).
 
 ### 9.2 Test pyramid required
+
 | Layer | Tool | What |
 |---|---|---|
 | Unit | vitest | format, reducer/`ingest`, adapters, maRpc, sendspinEngine, tabLock, mediaSession, artworkColor/contrast, eventStream |
