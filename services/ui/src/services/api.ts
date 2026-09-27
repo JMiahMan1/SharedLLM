@@ -1154,6 +1154,11 @@ export const api = {
     return resp.data;
   },
 
+  async markTalkRead(token: string, as_user?: 'admin'): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/read', { token, as_user });
+    return resp.data;
+  },
+
   async getTalkPolls(token: string): Promise<ExecutionResponse> {
     const resp = await apiClient.get(`/api/communication/talk/polls?token=${encodeURIComponent(token)}`);
     return resp.data;

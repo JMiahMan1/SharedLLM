@@ -11,6 +11,7 @@ interface TalkConversation {
   display_name: string;
   description?: string;
   last_message?: string;
+  unread_messages?: number;
 }
 
 interface TalkPollOption {
@@ -141,6 +142,20 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
     // Keep the newest message in view as the feed grows.
     if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
   }, [messages]);
+
+  const markRead = useMutation({
+    mutationFn: (token: string) => api.markTalkRead(token, asUser),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['talk-conversations'] });
+    },
+  });
+
+  // Opening a conversation clears its badge — that is the read marker.
+  useEffect(() => {
+    if (!activeToken || markRead.isPending) return;
+    const unread = conversations.find((c) => c.token === activeToken)?.unread_messages ?? 0;
+    if (unread > 0) markRead.mutate(activeToken);
+  }, [activeToken, conversations, markRead]);
 
   const openConversation = useMutation({
     mutationFn: (user: string) => api.openTalkConversation({ target_user: user, as_user: asUser }),
@@ -348,6 +363,15 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
               <span className="max-w-24 truncate text-xs font-semibold text-slate-200 lg:hidden">
                 {(conversation.display_name || conversation.token).split(/\s+/)[0]}
               </span>
+              {(conversation.unread_messages ?? 0) > 0 && activeToken !== conversation.token && (
+                <span
+                  data-testid={`unread-badge-${conversation.token}`}
+                  aria-label={`${conversation.unread_messages} unread`}
+                  className="ml-auto shrink-0 rounded-full bg-purple-500 px-2 py-0.5 text-[10px] font-bold text-white"
+                >
+                  {conversation.unread_messages}
+                </span>
+              )}
             </button>
           ))}
           {conversations.length === 0 && (

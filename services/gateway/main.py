@@ -4698,6 +4698,14 @@ async def proxy_react_talk_message(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/communication/talk/read")
+async def proxy_mark_talk_read(request: Request):
+    """Clear the unread badge for a conversation."""
+    body = await request.json()
+    payload = {"action": "mark_read", "token": body.get("token")}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+
+
 @app.get("/api/communication/talk/polls")
 async def proxy_get_talk_polls(request: Request):
     payload = {"action": "polls", "token": request.query_params.get("token")}
