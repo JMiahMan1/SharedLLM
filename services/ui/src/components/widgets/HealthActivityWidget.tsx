@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Activity, Footprints, Flame, Mountain } from 'lucide-react';
 import type { IWidgetProps } from '../../types/widget';
@@ -70,6 +71,7 @@ function Ring({
  * Visual style comes exclusively from theme packages (themeRegistry).
  */
 const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) => {
+  const navigate = useNavigate();
   const updateWidgetConfig = useWidgetStore((s) => s.updateWidgetConfig);
   const config = (userSettings.config ?? {}) as HealthActivityConfig;
 
@@ -132,7 +134,11 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
       <div
         data-theme-id={theme.id}
         data-testid="health-activity-widget"
-        className="h-full flex flex-col gap-3 p-1 rounded-xl relative overflow-hidden"
+        role="button"
+        tabIndex={0}
+        onClick={() => navigate('/fitness')}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/fitness'); }}
+        className="h-full flex flex-col gap-3 p-1 rounded-xl relative overflow-hidden cursor-pointer"
         style={{
           ...cssVars,
           background: cssVars['--ht-bg'],

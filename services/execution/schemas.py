@@ -395,7 +395,7 @@ class TimerRequest(BaseRequest):
 
 class TalkRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["list", "open", "messages", "send", "send_voice", "reactions", "react"]
+    action: Literal["list", "open", "messages", "send", "send_voice", "reactions", "react", "polls", "create_poll", "vote_poll"]
     token: str | None = None
     target_user: str | None = None
     message: str | None = None
@@ -407,6 +407,10 @@ class TalkRequest(BaseRequest):
     caption: str | None = None
     message_id: int | None = Field(None, description="Target message for reactions")
     reaction: str | None = Field(None, description="Emoji reaction, e.g. \u2764\ufe0f")
+    question: str | None = None
+    options: list[str] | None = None
+    poll_id: int | None = None
+    option_id: int | None = None
 
 # ─── File Operations (Workspace vs Storage) ───────────────────────────────────
 

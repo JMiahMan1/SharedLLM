@@ -4492,6 +4492,36 @@ async def proxy_react_talk_message(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/talk", payload)
 
 
+@app.get("/api/communication/talk/polls")
+async def proxy_get_talk_polls(request: Request):
+    payload = {"action": "polls", "token": request.query_params.get("token")}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
+@app.post("/api/communication/talk/polls/create")
+async def proxy_create_talk_poll(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "create_poll",
+        "token": body.get("token"),
+        "question": body.get("question"),
+        "options": body.get("options"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
+@app.post("/api/communication/talk/polls/vote")
+async def proxy_vote_talk_poll(request: Request):
+    body = await request.json()
+    payload = {
+        "action": "vote_poll",
+        "token": body.get("token"),
+        "poll_id": body.get("poll_id"),
+        "option_id": body.get("option_id"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload)
+
+
 @app.post("/api/generate")
 async def proxy_generate(request: Request):
     try:

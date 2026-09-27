@@ -1089,6 +1089,29 @@ export const api = {
     return resp.data;
   },
 
+  async getTalkPolls(token: string): Promise<ExecutionResponse> {
+    const resp = await apiClient.get(`/api/communication/talk/polls?token=${encodeURIComponent(token)}`);
+    return resp.data;
+  },
+
+  async createTalkPoll(payload: {
+    token: string;
+    question: string;
+    options: string[];
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/polls/create', payload);
+    return resp.data;
+  },
+
+  async voteTalkPoll(payload: {
+    token: string;
+    poll_id: number;
+    option_id: number;
+  }): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/polls/vote', payload);
+    return resp.data;
+  },
+
   async getTalkReactions(token: string, messageId: number): Promise<ExecutionResponse> {
     const resp = await apiClient.get(
       `/api/communication/talk/reactions?token=${encodeURIComponent(token)}&message_id=${messageId}`

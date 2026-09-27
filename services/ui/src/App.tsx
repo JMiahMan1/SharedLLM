@@ -24,6 +24,7 @@ import Media from './pages/Media';
 import Remote from './pages/Remote';
 import Settings from './pages/Settings';
 import Wander from './pages/Wander';
+import Health from './pages/Health';
 import { initAppUpdater } from './lib/appUpdater';
 import { useSiteTheme } from './themes/siteTheme';
 
@@ -121,7 +122,7 @@ function App() {
             <Route path="/calendar" element={<ProtectedRoute isMobile={isMobile}><Calendar /></ProtectedRoute>} />
             <Route path="/media" element={<ProtectedRoute isMobile={isMobile}><Media /></ProtectedRoute>} />
             <Route path="/wander" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
-            <Route path="/family" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
+            <Route path="/fitness" element={<ProtectedRoute isMobile={isMobile}><Health /></ProtectedRoute>} />
             <Route path="/family-circle" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
             <Route path="/remote" element={<ProtectedRoute isMobile={isMobile}><Remote /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute isMobile={isMobile}><Settings /></ProtectedRoute>} />

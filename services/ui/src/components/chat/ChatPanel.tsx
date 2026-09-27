@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, MessageSquare, Mic, Plus, RefreshCw, Send, Square } from 'lucide-react';
+import { BarChart3, Loader2, MessageSquare, Mic, Plus, RefreshCw, Send, Square } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
@@ -10,6 +10,19 @@ interface TalkConversation {
   display_name: string;
   description?: string;
   last_message?: string;
+}
+
+interface TalkPollOption {
+  id: number;
+  label: string;
+  numVotes?: number;
+}
+
+interface TalkPoll {
+  id: number;
+  question: string;
+  options?: TalkPollOption[];
+  status?: number;
 }
 
 interface TalkReaction {
@@ -72,6 +85,9 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
   const [caption, setCaption] = useState('');
   const [reactingFor, setReactingFor] = useState<number | null>(null);
   const [reactions, setReactions] = useState<Record<number, TalkReaction[]>>({});
+  const [showPollForm, setShowPollForm] = useState(false);
+  const [pollQuestion, setPollQuestion] = useState('');
+  const [pollOptions, setPollOptions] = useState(['', '']);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const feedRef = useRef<HTMLDivElement | null>(null);
@@ -90,6 +106,18 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
   // Fall back to the first conversation so the panel is usable on open
   // without an effect that writes state during render.
   const activeToken = selectedToken || conversations[0]?.token || '';
+
+  const { data: polls = EMPTY_ARRAY, refetch: refetchPolls } = useQuery<
+    ExecutionResponse,
+    Error,
+    TalkPoll[]
+  >({
+    queryKey: ['talk-polls', activeToken],
+    queryFn: () => api.getTalkPolls(activeToken),
+    enabled: Boolean(activeToken),
+    refetchInterval: 30000,
+    select: (response) => detailList<TalkPoll>(response, 'polls'),
+  });
 
   const { data: messages = EMPTY_ARRAY, isFetching: loadingMessages } = useQuery<
     ExecutionResponse,
@@ -200,6 +228,34 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
 
   const QUICK_REACTIONS = ['👍', '❤️', '😂', '🎉', '🙏', '😮'];
 
+  const submitPoll = async () => {
+    const question = pollQuestion.trim();
+    const options = pollOptions.map((o) => o.trim()).filter(Boolean);
+    if (!question || options.length < 2) {
+      toast.error('A poll needs a question and at least two options');
+      return;
+    }
+    try {
+      await api.createTalkPoll({ token: activeToken, question, options });
+      setShowPollForm(false);
+      setPollQuestion('');
+      setPollOptions(['', '']);
+      toast.success('Poll posted');
+      await refetchPolls();
+    } catch {
+      toast.error('Could not create the poll');
+    }
+  };
+
+  const vote = async (pollId: number, optionId: number) => {
+    try {
+      await api.voteTalkPoll({ token: activeToken, poll_id: pollId, option_id: optionId });
+      await refetchPolls();
+    } catch {
+      toast.error('Could not record your vote');
+    }
+  };
+
   const loadReactions = async (messageId: number) => {
     try {
       const res = await api.getTalkReactions(activeToken, messageId);
@@ -308,12 +364,88 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
           <button
             type="button"
             className="glass-button p-2"
+            aria-label={showPollForm ? 'Close poll form' : 'New poll'}
+            onClick={() => setShowPollForm((v) => !v)}
+          >
+            <BarChart3 size={14} />
+          </button>
+          <button
+            type="button"
+            className="glass-button p-2"
             aria-label="Refresh messages"
             onClick={() => queryClient.invalidateQueries({ queryKey: ['talk-messages', selectedToken] })}
           >
             <RefreshCw size={14} className={loadingMessages ? 'animate-spin' : ''} />
           </button>
         </div>
+
+        {showPollForm && (
+          <div className="shrink-0 space-y-2 border-b border-white/5 bg-white/[0.03] p-3" data-testid="poll-form">
+            <input
+              value={pollQuestion}
+              onChange={(event) => setPollQuestion(event.target.value)}
+              placeholder="What should we do for dinner?"
+              aria-label="Poll question"
+              className="glass-input w-full text-base sm:text-sm"
+            />
+            {pollOptions.map((option, index) => (
+              <div key={index} className="flex gap-2">
+                <input
+                  value={option}
+                  onChange={(event) =>
+                    setPollOptions((prev) => prev.map((o, i) => (i === index ? event.target.value : o)))
+                  }
+                  placeholder={`Option ${index + 1}`}
+                  aria-label={`Poll option ${index + 1}`}
+                  className="glass-input flex-1 text-base sm:text-sm"
+                />
+                {pollOptions.length > 2 && (
+                  <button
+                    type="button"
+                    className="glass-button px-3"
+                    aria-label={`Remove option ${index + 1}`}
+                    onClick={() => setPollOptions((prev) => prev.filter((_, i) => i !== index))}
+                  >
+                    −
+                  </button>
+                )}
+              </div>
+            ))}
+            <div className="flex gap-2">
+              {pollOptions.length < 4 && (
+                <button type="button" className="glass-button px-3 py-2 text-sm" onClick={() => setPollOptions((prev) => [...prev, ''])}>
+                  <Plus size={14} /> Option
+                </button>
+              )}
+              <button type="button" className="glass-button flex-1 py-2 text-sm" onClick={() => void submitPoll()}>
+                Post poll
+              </button>
+            </div>
+          </div>
+        )}
+
+        {polls.length > 0 && (
+          <div className="shrink-0 space-y-2 border-b border-white/5 p-3" data-testid="poll-list">
+            {polls.slice(0, 3).map((poll) => (
+              <div key={poll.id} className="rounded-xl border border-white/10 bg-white/5 p-2">
+                <p className="text-sm font-semibold text-slate-100">{poll.question}</p>
+                <div className="mt-1 space-y-1">
+                  {(poll.options || []).map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => void vote(poll.id, option.id)}
+                      className="flex w-full items-center justify-between rounded-lg border border-white/10 px-2 py-1.5 text-left text-xs text-slate-200 min-h-9"
+                    >
+                      <span>{option.label}</span>
+                      <span className="text-slate-400">{option.numVotes ?? 0}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div ref={feedRef} className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4" data-testid="chat-feed">
           {messages.map((message, index) => {

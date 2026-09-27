@@ -275,6 +275,62 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 detail={"reactions": data or []},
             )
 
+        if action == "polls":
+            if not req.token:
+                return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_polls")
+            ok, data, message = await _talk_request_with_retry(
+                provider,
+                "GET",
+                f"/ocs/v2.php/apps/spreed/api/v1/poll/{urllib.parse.quote(req.token)}",
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Failed to load polls.", service="talk_polls")
+            return ExecutionResult(
+                status="SUCCESS",
+                message="Polls loaded.",
+                service="talk_polls",
+                detail={"polls": data or []},
+            )
+
+        if action == "create_poll":
+            if not req.token or not req.question or not req.options:
+                return ExecutionResult(status="FAILURE", message="Conversation token, question and options are required.", service="talk_create_poll")
+            options = [opt for opt in req.options if opt and opt.strip()][:4]
+            if len(options) < 2:
+                return ExecutionResult(status="FAILURE", message="A poll needs at least two options.", service="talk_create_poll")
+            ok, data, message = await _talk_request_with_retry(
+                provider,
+                "POST",
+                f"/ocs/v2.php/apps/spreed/api/v1/poll/{urllib.parse.quote(req.token)}",
+                data={"question": req.question.strip(), "options": options, "resultMode": 0, "maxVotes": 1},
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Failed to create poll.", service="talk_create_poll")
+            return ExecutionResult(
+                status="SUCCESS",
+                message="Poll created.",
+                service="talk_create_poll",
+                detail={"poll": data or {}},
+            )
+
+        if action == "vote_poll":
+            if not req.token or req.poll_id is None or req.option_id is None:
+                return ExecutionResult(status="FAILURE", message="Conversation token, poll_id and option_id are required.", service="talk_vote_poll")
+            ok, data, message = await _talk_request_with_retry(
+                provider,
+                "POST",
+                f"/ocs/v2.php/apps/spreed/api/v1/poll/{urllib.parse.quote(req.token)}/{int(req.poll_id)}",
+                data={"optionId": int(req.option_id)},
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Failed to vote.", service="talk_vote_poll")
+            return ExecutionResult(
+                status="SUCCESS",
+                message="Vote recorded.",
+                service="talk_vote_poll",
+                detail={"poll": data or {}},
+            )
+
         if action == "send":
             if not req.token or not req.message:
                 return ExecutionResult(status="FAILURE", message="Conversation token and message are required.", service="talk_send")
