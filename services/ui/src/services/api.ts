@@ -1065,8 +1065,8 @@ export const api = {
     return resp.data;
   },
 
-  async readNote(title: string, storage?: string, path?: string): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/read', { title, storage, path });
+  async readNote(title: string, storage?: string, path?: string, as_user?: 'admin'): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/read', { title, storage, path, as_user });
     return resp.data;
   },
 
@@ -1082,6 +1082,7 @@ export const api = {
     category?: string;
     storage?: string;
     path?: string;
+    as_user?: 'admin';
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/write', payload);
     return resp.data;
@@ -1093,17 +1094,18 @@ export const api = {
     item: string;
     storage?: string;
     path?: string;
+    as_user?: 'admin';
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/check_off', payload);
     return resp.data;
   },
 
-  async deleteNote(title: string, storage?: string, path?: string): Promise<ExecutionResponse> {
-    const resp = await apiClient.post('/api/communication/notes/delete', { title, storage, path });
+  async deleteNote(title: string, storage?: string, path?: string, as_user?: 'admin'): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/notes/delete', { title, storage, path, as_user });
     return resp.data;
   },
 
-  async listNotes(payload: { storage?: string; directories?: string[] } = {}): Promise<ExecutionResponse> {
+  async listNotes(payload: { storage?: string; directories?: string[]; as_user?: 'admin' } = {}): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/notes/list', payload);
     return resp.data;
   },

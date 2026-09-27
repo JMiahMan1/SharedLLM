@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import SendAsSelector, { useSendAsPref } from '../components/chat/SendAsSelector';
 import {
   Check,
   CheckSquare,
@@ -74,11 +75,16 @@ export default function Notes() {
   const [saving, setSaving] = useState(false);
   const [metaVersion, setMetaVersion] = useState(0);
 
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.getMe(), staleTime: 300_000 });
+  const isAdmin = Boolean(me?.is_admin);
+  const [sendAs, setSendAs] = useSendAsPref(isAdmin);
+  const asUser = isAdmin && sendAs === 'admin' ? ('admin' as const) : undefined;
+
   const keyOf = useCallback((note: { title: string; path: string }) => noteKey(note.title, note.path), []);
 
   const { data: listRes, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['notes-list'],
-    queryFn: () => api.listNotes({ storage: STORAGE }),
+    queryKey: ['notes-list', asUser ?? 'me'],
+    queryFn: () => api.listNotes({ storage: STORAGE, as_user: asUser }),
   });
 
   const notes = useMemo<NoteSummary[]>(
@@ -91,8 +97,8 @@ export default function Notes() {
   const previewBatch = useMemo(() => notes.slice(0, 24), [notes]);
   const contentQueries = useQueries({
     queries: previewBatch.map((n) => ({
-      queryKey: ['note-content', n.path || n.title],
-      queryFn: () => api.readNote(n.title, STORAGE, n.path),
+      queryKey: ['note-content', asUser ?? 'me', n.path || n.title],
+      queryFn: () => api.readNote(n.title, STORAGE, n.path, asUser),
       staleTime: 30_000,
     })),
   });
@@ -142,7 +148,7 @@ export default function Notes() {
     let content = contents[key];
     if (content === undefined) {
       try {
-        const res = await api.readNote(note.title, STORAGE, note.path);
+        const res = await api.readNote(note.title, STORAGE, note.path, asUser);
         content = res.status === 'SUCCESS' ? (res.message ?? '') : '';
         queryClient.setQueryData(['note-content', note.path || note.title], res);
       } catch {
@@ -173,6 +179,7 @@ export default function Notes() {
         category,
         path: draft.path,
         storage: STORAGE,
+        as_user: asUser,
       });
       if (res.status !== 'SUCCESS') {
         toast.error(res.message || 'Save failed');
@@ -192,7 +199,7 @@ export default function Notes() {
 
   const removeNote = async (note: NoteSummary) => {
     try {
-      const res = await api.deleteNote(note.title, STORAGE, note.path);
+      const res = await api.deleteNote(note.title, STORAGE, note.path, asUser);
       if (res.status !== 'SUCCESS') {
         toast.error(res.message || 'Delete failed');
         return;
@@ -215,12 +222,12 @@ export default function Notes() {
 
   const toggleChecklistItem = async (note: NoteSummary, item: string) => {
     try {
-      const res = await api.checkOffNote({ title: note.title, item, path: note.path, storage: STORAGE });
+      const res = await api.checkOffNote({ title: note.title, item, path: note.path, storage: STORAGE, as_user: asUser });
       if (res.status !== 'SUCCESS') {
         toast.error(res.message || 'Could not update the checklist');
         return;
       }
-      const fresh = await api.readNote(note.title, STORAGE, note.path);
+      const fresh = await api.readNote(note.title, STORAGE, note.path, asUser);
       if (fresh.status === 'SUCCESS') {
         queryClient.setQueryData(['note-content', note.path || note.title], fresh);
       }
@@ -253,6 +260,9 @@ export default function Notes() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {isAdmin && (
+            <SendAsSelector value={sendAs} onChange={setSendAs} />
+          )}
           <div className="relative flex-1 sm:flex-none">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
             <input
