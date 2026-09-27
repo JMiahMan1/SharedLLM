@@ -2,11 +2,12 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
+import type { JsonBodyType } from 'msw';
 import { server } from './setup';
 import { renderWithProviders } from './render';
 import FamilyActivityCard from '../components/health/FamilyActivityCard';
 
-const summaryByWindow: Record<string, unknown> = {
+const summaryByWindow: Record<string, JsonBodyType> = {
   week: {
     status: 'SUCCESS',
     user_id: 'jeremiah',
