@@ -4,6 +4,7 @@ import { useHaptics } from '../hooks/useHaptics';
 import { api } from '../services/api';
 import type { Workout, RoutePoint, StepsResponse, ActivityTrendsResponse } from '../types/api';
 import AchievementsPanel from '../components/wander/AchievementsPanel';
+import FamilyActivityCard from '../components/health/FamilyActivityCard';
 import RoutePreview from '../components/geo/RoutePreview';
 import toast from 'react-hot-toast';
 import {
@@ -352,6 +353,8 @@ const Health = () => {
         </div>
 
         <AchievementsPanel userId={currentUsername || undefined} />
+
+        <FamilyActivityCard />
 
         {/* Trends + LLM Analysis (on request only) */}
         <div className="lg:col-span-2 glass-panel p-5 rounded-2xl border border-white/5">

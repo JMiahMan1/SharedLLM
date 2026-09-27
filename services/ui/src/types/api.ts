@@ -934,6 +934,35 @@ export interface ActivityTrendsResponse {
   cached?: boolean;
 }
 
+export type ActivityWindow = 'today' | 'week' | 'month';
+
+/** One person's opt-in shared activity — only the scopes they chose appear. */
+export interface SharedActivityUser {
+  username: string;
+  window: string;
+  steps_total?: number;
+  steps_average?: number;
+  steps_today?: number;
+  workout_count?: number;
+  workout_distance_miles?: number;
+  drive_distance_miles?: number;
+  points?: number;
+  achievements_earned?: number;
+}
+
+export interface ActivityFeedResponse {
+  status: string;
+  viewer: string;
+  window: string;
+  users: SharedActivityUser[];
+}
+
+export interface ActivitySummaryResponse extends Omit<SharedActivityUser, 'username'> {
+  status: string;
+  user_id: string;
+  days: number;
+}
+
 /** A user's last known GPS fix as stored by Identity. */
 export interface ActivityGoals {
   daily_steps: number;

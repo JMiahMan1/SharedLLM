@@ -25,6 +25,9 @@
 | `GET /api/geo/steps/goal` | per-user daily goal |
 | `PUT /api/geo/steps/goal` | set the goal (1000–100000) |
 | `GET/POST /api/geo/workouts`, `GET /workouts/{id}/route` | workout sessions and routes |
+| `GET /api/geo/activity/summary?window=today\|week\|month` | your own activity totals for a window |
+| `GET /api/geo/activity/feed?window=…` | opt-in activity of people who share with you |
+| `GET/PUT /api/users/me/activity-sharing` | private-by-default sharing settings (audience + scopes) |
 
 The goal is stored as `geo:steps_goal:{user}`; the default remains 10,000.
 
@@ -42,6 +45,23 @@ Widget tiles are derived from real data only: **7-day average**, **best day**,
 and **estimated miles** (steps × 0.7 m stride, labelled "est."). Stairs/active
 minutes/calories are deliberately *not* shown — there is no data source, and
 inventing numbers would make the dashboard disagree with Wander.
+
+## Family activity feed
+
+Sharing is opt-in and private by default: Settings → *Activity sharing*
+(`components/settings/ActivitySharingPanel.tsx`) picks an audience (everyone in
+the circle, or specific people) and scopes (*totals*, *workouts*,
+*achievements*). Identity stores the row (`UserActivitySharing`); geo enforces
+it when serving `GET /activity/summary` (your own data — never requires
+sharing) and `GET /activity/feed` (only enabled rows whose audience includes
+the viewer; each entry is projected down to the scopes that person chose, and
+an empty feed is a normal empty list, never an error).
+
+The Health page renders both as **Family Activity**
+(`components/health/FamilyActivityCard.tsx`): Today/Week/Month toggle, your
+row first, then everyone else ranked by shared steps, with only their chosen
+scopes shown (`data-testid="family-activity-card"`, `feed-window-*`,
+`feed-user-{username}`, `feed-empty`).
 
 ## Navigation
 

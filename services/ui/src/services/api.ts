@@ -87,6 +87,9 @@ import type {
   WorkoutsResponse,
   StepsResponse,
   ActivityTrendsResponse,
+  ActivityFeedResponse,
+  ActivitySummaryResponse,
+  ActivityWindow,
   AchievementsResponse,
   ActivityGoals,
   TelemetryNotification,
@@ -135,6 +138,9 @@ export type {
   WorkoutsResponse,
   StepsResponse,
   ActivityTrendsResponse,
+  ActivityFeedResponse,
+  ActivitySummaryResponse,
+  ActivityWindow,
   AchievementsResponse,
   ActivityGoals,
 } from '../types/api';
@@ -868,6 +874,18 @@ export const api = {
     if (userId && userId !== 'all') params.set('user_id', userId);
     if (refresh) params.set('refresh', 'true');
     const resp = await apiClient.post(`/api/geo/trends/activity/analyze?${params.toString()}`);
+    return resp.data;
+  },
+
+  // Opt-in shared activity. The server enforces audiences; the client only
+  // ever requests what the viewer is allowed to see.
+  async getActivitySummary(window: ActivityWindow = 'week'): Promise<ActivitySummaryResponse> {
+    const resp = await apiClient.get('/api/geo/activity/summary', { params: { window } });
+    return resp.data;
+  },
+
+  async getActivityFeed(window: ActivityWindow = 'week'): Promise<ActivityFeedResponse> {
+    const resp = await apiClient.get('/api/geo/activity/feed', { params: { window } });
     return resp.data;
   },
 
