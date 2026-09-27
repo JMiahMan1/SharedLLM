@@ -8610,10 +8610,13 @@ async def get_abs_status():
 # ─── Execution service proxy routes (for UI access) ──────────────────────
 
 async def _resolve_user_context(request: Request, body: dict) -> Any:
-    """Resolve user context from request, falling back to first user."""
-    # If body already has user_context, use it
-    if body.get("user_context"):
-        return body["user_context"]
+    """Resolve user context from the authenticated request only.
+
+    Never trusts a client-supplied ``user_context`` (BUG-01): it is deleted
+    from the incoming body so a caller can't impersonate another user or
+    inject credentials (ha_url/ha_token) into upstream calls.
+    """
+    body.pop("user_context", None)
 
     # Try to resolve from request
     try:
