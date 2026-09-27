@@ -4,7 +4,7 @@ const UI_URL = 'https://jarvis.sumemail.com';
 const TEST_USER = 'testuser';
 const TEST_PASS = 'changeme';
 
-test('click sequence and screenshot', async ({ page }) => {
+test('@live click sequence and screenshot', async ({ page }) => {
   // Login
   await page.goto(`${UI_URL}/login`, { waitUntil: 'networkidle', timeout: 30000 });
   await page.getByPlaceholder('Enter username').fill(TEST_USER);

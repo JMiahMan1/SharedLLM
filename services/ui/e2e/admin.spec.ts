@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 
 const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 
-test.describe('Admin Page - System Matrix', () => {
+test.describe('@live Admin Page - System Matrix', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(`${UI_URL}/login`);
     await page.getByPlaceholder('Enter username').fill('default');
@@ -11,7 +11,7 @@ test.describe('Admin Page - System Matrix', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('loads admin page with all tabs', async ({ page }) => {
+  test('@live loads admin page with all tabs', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -30,7 +30,7 @@ test.describe('Admin Page - System Matrix', () => {
     }
   });
 
-  test('Users & Devices tab - loads users from API', async ({ page }) => {
+  test('@live Users & Devices tab - loads users from API', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -41,7 +41,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(page.getByText('@default', { exact: true })).toBeVisible({ timeout: 10000 });
   });
 
-  test('Users & Devices tab - entity search dropdown loads entities', async ({ page }) => {
+  test('@live Users & Devices tab - entity search dropdown loads entities', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -55,7 +55,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(dropdown).toBeVisible({ timeout: 10000 });
   });
 
-  test('Users & Devices tab - discovery import loads', async ({ page }) => {
+  test('@live Users & Devices tab - discovery import loads', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -66,7 +66,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(page.getByLabel('Refresh discovered users')).toBeVisible();
   });
 
-  test('Device Groups tab - media groups section loads', async ({ page }) => {
+  test('@live Device Groups tab - media groups section loads', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -76,7 +76,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(page.getByRole('heading', { name: 'Media Groups' })).toBeVisible();
   });
 
-  test('Device Groups tab - entity multi-select for media groups', async ({ page }) => {
+  test('@live Device Groups tab - entity multi-select for media groups', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -90,7 +90,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(dropdown).toBeVisible({ timeout: 10000 });
   });
 
-  test('Device Groups tab - light clusters section loads', async ({ page }) => {
+  test('@live Device Groups tab - light clusters section loads', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -101,7 +101,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(page.getByRole('heading', { name: 'Light Clusters' })).toBeVisible();
   });
 
-  test('Telemetry tab - loads enrollment section', async ({ page }) => {
+  test('@live Telemetry tab - loads enrollment section', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -111,7 +111,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(page.getByRole('heading', { name: 'Enrolled Devices' })).toBeVisible();
   });
 
-  test('Telemetry tab - entity search dropdown for enrollment', async ({ page }) => {
+  test('@live Telemetry tab - entity search dropdown for enrollment', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -125,7 +125,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(dropdown).toBeVisible({ timeout: 10000 });
   });
 
-  test('Intercom tab - sessions section loads', async ({ page }) => {
+  test('@live Intercom tab - sessions section loads', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -134,7 +134,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(page.getByRole('heading', { name: 'Active Intercom Sessions' })).toBeVisible();
   });
 
-  test('Intercom tab - broadcast section with multi-select', async ({ page }) => {
+  test('@live Intercom tab - broadcast section with multi-select', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -146,7 +146,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(multiSelect).toBeVisible();
   });
 
-  test('Intercom tab - announce tab button is accessible', async ({ page }) => {
+  test('@live Intercom tab - announce tab button is accessible', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -155,7 +155,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(page.getByRole('button', { name: 'Announce' })).toBeVisible();
   });
 
-  test('Raven Ops tab - loads queue', async ({ page }) => {
+  test('@live Raven Ops tab - loads queue', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -164,7 +164,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(page.getByRole('heading', { name: 'Active Missions Monitor' })).toBeVisible();
   });
 
-  test('LLM & Settings tab - loads settings', async ({ page }) => {
+  test('@live LLM & Settings tab - loads settings', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -173,7 +173,7 @@ test.describe('Admin Page - System Matrix', () => {
     await expect(page.getByRole('heading', { name: 'AI & Compute Pane' })).toBeVisible();
   });
 
-  test('Database & Audit tab - loads stats and logs', async ({ page }) => {
+  test('@live Database & Audit tab - loads stats and logs', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);

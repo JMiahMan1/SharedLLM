@@ -679,9 +679,9 @@ async function crawlPage(
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-test.describe('E2E Recursive UI Crawler', () => {
+test.describe('@live E2E Recursive UI Crawler', () => {
   test.skip(!LOGIN_USER || !LOGIN_PASS, 'Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS.');
-  test('comprehensive crawl from Dashboard', async ({ page }) => {
+  test('@live comprehensive crawl from Dashboard', async ({ page }) => {
     // Validate credentials are provided
     if (!LOGIN_USER || !LOGIN_PASS) {
       throw new Error('Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS variables.');
@@ -835,7 +835,7 @@ test.describe('E2E Recursive UI Crawler', () => {
     });
   });
 
-  test('sidebar navigation crawler', async ({ page }) => {
+  test('@live sidebar navigation crawler', async ({ page }) => {
     if (!LOGIN_USER || !LOGIN_PASS) {
       throw new Error('Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS variables.');
     }
@@ -997,7 +997,7 @@ test.describe('E2E Recursive UI Crawler', () => {
     });
   });
 
-  test('tab and accordion interaction crawler', async ({ page }) => {
+  test('@live tab and accordion interaction crawler', async ({ page }) => {
     if (!LOGIN_USER || !LOGIN_PASS) {
       throw new Error('Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS variables.');
     }
@@ -1116,7 +1116,7 @@ test.describe('E2E Recursive UI Crawler', () => {
     });
   });
 
-  test('dropdown and modal interaction crawler', async ({ page }) => {
+  test('@live dropdown and modal interaction crawler', async ({ page }) => {
     if (!LOGIN_USER || !LOGIN_PASS) {
       throw new Error('Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS variables.');
     }

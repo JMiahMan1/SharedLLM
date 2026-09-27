@@ -5,7 +5,7 @@ const UI_URL = 'https://jarvis.sumemail.com';
 const TEST_USER = 'testuser';
 const TEST_PASS = 'changeme';
 
-test('click sequence debug', async ({ page }) => {
+test('@live click sequence debug', async ({ page }) => {
   const wsEvents: string[] = [];
   const errors: string[] = [];
   const degradedStatuses: string[] = [];

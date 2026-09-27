@@ -28,7 +28,7 @@ async function login(page: Page) {
   await page.waitForTimeout(2000);
 }
 
-test('debug ma search', async ({ page }) => {
+test('@live debug ma search', async ({ page }) => {
   await login(page);
   await page.goto(`${UI_URL}/media`);
   await page.waitForLoadState('domcontentloaded');

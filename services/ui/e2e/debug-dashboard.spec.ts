@@ -4,7 +4,7 @@ const UI_URL = process.env.UI_URL || 'http://192.168.2.205:8080';
 const ADMIN_USER = 'default';
 const ADMIN_PASS = 'admin';
 
-test('debug dashboard content', async ({ page }) => {
+test('@live debug dashboard content', async ({ page }) => {
   await page.goto(`${UI_URL}/login`);
   await page.getByPlaceholder('Enter username').fill(ADMIN_USER);
   await page.getByPlaceholder('Enter password').fill(ADMIN_PASS);

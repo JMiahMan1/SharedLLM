@@ -12,39 +12,39 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.waitForURL('**/dashboard', { timeout: 10000 }).catch(() => {});
 }
 
-test.describe('Dashboard - Halo Banner', () => {
+test.describe('@live Dashboard - Halo Banner', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('halo banner is visible', async ({ page }) => {
+  test('@live halo banner is visible', async ({ page }) => {
     const haloBanner = page.locator('[class*="halo"], [class*="presence"]').first();
     await expect(haloBanner).toBeVisible({ timeout: 5000 }).catch(() => {});
   });
 });
 
-test.describe('Dashboard - Header and Search', () => {
+test.describe('@live Dashboard - Header and Search', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('dashboard title is visible', async ({ page }) => {
+  test('@live dashboard title is visible', async ({ page }) => {
     await expect(page.getByText('Jarvis Dashboard')).toBeVisible({ timeout: 10000 });
   });
 
-  test('welcome message shows username', async ({ page }) => {
+  test('@live welcome message shows username', async ({ page }) => {
     const welcomeText = page.locator('p').filter({ hasText: /welcome back/i }).first();
     await expect(welcomeText).toBeVisible({ timeout: 10000 });
   });
 
-  test('search bar placeholder is visible', async ({ page }) => {
+  test('@live search bar placeholder is visible', async ({ page }) => {
     const searchInput = page.getByPlaceholder(/search live rag/i);
     if (await searchInput.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(searchInput).toBeVisible();
     }
   });
 
-  test('search input accepts text', async ({ page }) => {
+  test('@live search input accepts text', async ({ page }) => {
     const searchInput = page.getByPlaceholder(/search live rag/i);
     if (await searchInput.isVisible({ timeout: 5000 }).catch(() => false)) {
       await searchInput.fill('test query');
@@ -53,19 +53,19 @@ test.describe('Dashboard - Header and Search', () => {
     }
   });
 
-  test('search button is visible', async ({ page }) => {
+  test('@live search button is visible', async ({ page }) => {
     const searchButton = page.locator('button[type="submit"]').first();
     await expect(searchButton).toBeVisible();
   });
 
-  test('voice command button is visible', async ({ page }) => {
+  test('@live voice command button is visible', async ({ page }) => {
     const voiceBtn = page.getByRole('button', { name: /voice command/i });
     if (await voiceBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(voiceBtn).toBeVisible();
     }
   });
 
-  test('search shows results when query is entered', async ({ page }) => {
+  test('@live search shows results when query is entered', async ({ page }) => {
     const searchInput = page.getByPlaceholder(/search live rag/i);
     if (await searchInput.isVisible({ timeout: 5000 }).catch(() => false)) {
       await searchInput.fill('test');
@@ -77,26 +77,26 @@ test.describe('Dashboard - Header and Search', () => {
   });
 });
 
-test.describe('Dashboard - Service Status Cards', () => {
+test.describe('@live Dashboard - Service Status Cards', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('live service status section is visible', async ({ page }) => {
+  test('@live live service status section is visible', async ({ page }) => {
     await expect(page.getByText('Live Service Status')).toBeVisible({ timeout: 10000 });
   });
 
-  test('service status cards are displayed', async ({ page }) => {
+  test('@live service status cards are displayed', async ({ page }) => {
     const serviceCards = page.locator('button.glass-card');
     expect(await serviceCards.count()).toBeGreaterThanOrEqual(1);
   });
 
-  test('service cards show status indicator', async ({ page }) => {
+  test('@live service cards show status indicator', async ({ page }) => {
     const statusIndicator = page.locator('div').filter({ hasText: /healthy|unhealthy|unknown|running/i }).first();
     await expect(statusIndicator).toBeVisible({ timeout: 10000 }).catch(() => {});
   });
 
-  test('service cards are clickable', async ({ page }) => {
+  test('@live service cards are clickable', async ({ page }) => {
     const serviceCard = page.locator('button.glass-card').first();
     if (await serviceCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       await serviceCard.click();
@@ -104,7 +104,7 @@ test.describe('Dashboard - Service Status Cards', () => {
     }
   });
 
-  test('service detail modal shows when card is clicked', async ({ page }) => {
+  test('@live service detail modal shows when card is clicked', async ({ page }) => {
     const serviceCard = page.locator('button.glass-card').first();
     if (await serviceCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       await serviceCard.click();
@@ -112,7 +112,7 @@ test.describe('Dashboard - Service Status Cards', () => {
     }
   });
 
-  test('service detail modal shows recent logs', async ({ page }) => {
+  test('@live service detail modal shows recent logs', async ({ page }) => {
     const serviceCard = page.locator('button.glass-card').first();
     if (await serviceCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       await serviceCard.click();
@@ -120,7 +120,7 @@ test.describe('Dashboard - Service Status Cards', () => {
     }
   });
 
-  test('service detail modal has close button', async ({ page }) => {
+  test('@live service detail modal has close button', async ({ page }) => {
     const serviceCard = page.locator('button.glass-card').first();
     if (await serviceCard.isVisible({ timeout: 5000 }).catch(() => false)) {
       await serviceCard.click();
@@ -132,56 +132,56 @@ test.describe('Dashboard - Service Status Cards', () => {
   });
 });
 
-test.describe('Dashboard - Recent Logs', () => {
+test.describe('@live Dashboard - Recent Logs', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('recent logs section is visible', async ({ page }) => {
+  test('@live recent logs section is visible', async ({ page }) => {
     await expect(page.getByText(/recent logs|system logs/i)).toBeVisible({ timeout: 10000 });
   });
 
-  test('log entries table is visible', async ({ page }) => {
+  test('@live log entries table is visible', async ({ page }) => {
     const logTable = page.locator('table').first();
     await expect(logTable).toBeVisible({ timeout: 10000 }).catch(() => {});
   });
 
-  test('log entries show timestamp', async ({ page }) => {
+  test('@live log entries show timestamp', async ({ page }) => {
     const timestamps = page.locator('td').filter({ hasText: /^\d{2}:\d{2}:\d{2}$/ }).first();
     await expect(timestamps).toBeVisible({ timeout: 10000 }).catch(() => {});
   });
 });
 
-test.describe('Dashboard - Workspace Summary', () => {
+test.describe('@live Dashboard - Workspace Summary', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('workspace summary section is visible', async ({ page }) => {
+  test('@live workspace summary section is visible', async ({ page }) => {
     await expect(page.getByText(/workspace.*summary|workspaces/i, { ignoreCase: true })).toBeVisible({ timeout: 10000 });
   });
 
-  test('workspace cards are displayed in summary', async ({ page }) => {
+  test('@live workspace cards are displayed in summary', async ({ page }) => {
     const workspaceCards = page.locator('div.glass-card').filter({ hasText: /workspace/i }).first();
     await expect(workspaceCards).toBeVisible({ timeout: 10000 }).catch(() => {});
   });
 });
 
-test.describe('Dashboard - Settings Management', () => {
+test.describe('@live Dashboard - Settings Management', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('settings section is visible', async ({ page }) => {
+  test('@live settings section is visible', async ({ page }) => {
     await expect(page.getByText(/global settings|settings/i)).toBeVisible({ timeout: 10000 });
   });
 
-  test('settings toggles are visible', async ({ page }) => {
+  test('@live settings toggles are visible', async ({ page }) => {
     const toggles = page.locator('input[type="checkbox"]').first();
     await expect(toggles).toBeVisible({ timeout: 10000 }).catch(() => {});
   });
 
-  test('settings can be updated', async ({ page }) => {
+  test('@live settings can be updated', async ({ page }) => {
     const toggle = page.locator('input[type="checkbox"]').first();
     if (await toggle.isVisible({ timeout: 5000 }).catch(() => false)) {
       await toggle.click();
@@ -190,12 +190,12 @@ test.describe('Dashboard - Settings Management', () => {
   });
 });
 
-test.describe('Dashboard - Voice Assistant', () => {
+test.describe('@live Dashboard - Voice Assistant', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('voice assistant overlay opens', async ({ page }) => {
+  test('@live voice assistant overlay opens', async ({ page }) => {
     const voiceBtn = page.getByRole('button', { name: /voice command/i });
     if (await voiceBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await voiceBtn.click();
@@ -204,17 +204,17 @@ test.describe('Dashboard - Voice Assistant', () => {
   });
 });
 
-test.describe('Dashboard - Bento Widgets', () => {
+test.describe('@live Dashboard - Bento Widgets', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('widget registry loads and bento widgets are visible', async ({ page }) => {
+  test('@live widget registry loads and bento widgets are visible', async ({ page }) => {
     const widgetCards = page.locator('.glass-card');
     expect(await widgetCards.count()).toBeGreaterThanOrEqual(1);
   });
 
-  test('device control widget loads and displays devices', async ({ page }) => {
+  test('@live device control widget loads and displays devices', async ({ page }) => {
     const deviceControlHeader = page.getByRole('heading', { name: /device control/i });
     if (await deviceControlHeader.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(deviceControlHeader).toBeVisible();
@@ -223,7 +223,7 @@ test.describe('Dashboard - Bento Widgets', () => {
     }
   });
 
-  test('widget context menu can be opened', async ({ page }) => {
+  test('@live widget context menu can be opened', async ({ page }) => {
     const optionsButton = page.getByTitle('Widget options').first();
     if (await optionsButton.isVisible({ timeout: 5000 }).catch(() => false)) {
       await optionsButton.click();

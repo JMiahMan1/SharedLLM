@@ -15,14 +15,14 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.waitForTimeout(2000);
 }
 
-test.describe('Android App - Mobile Layout & Navigation', () => {
+test.describe('@live Android App - Mobile Layout & Navigation', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('mobile viewport renders bottom navigation bar', async ({ page }) => {
+  test('@live mobile viewport renders bottom navigation bar', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -30,7 +30,7 @@ test.describe('Android App - Mobile Layout & Navigation', () => {
     await expect(bottomNav.or(page.locator('[class*="bottom-nav"]'))).toBeVisible({ timeout: 10000 });
   });
 
-  test('bottom nav has all core routes', async ({ page }) => {
+  test('@live bottom nav has all core routes', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -39,7 +39,7 @@ test.describe('Android App - Mobile Layout & Navigation', () => {
     expect(count).toBeGreaterThanOrEqual(4);
   });
 
-  test('tapping bottom nav items navigates correctly', async ({ page }) => {
+  test('@live tapping bottom nav items navigates correctly', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -62,7 +62,7 @@ test.describe('Android App - Mobile Layout & Navigation', () => {
     }
   });
 
-  test('hamburger menu is hidden on mobile (replaced by bottom nav)', async ({ page }) => {
+  test('@live hamburger menu is hidden on mobile (replaced by bottom nav)', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -71,7 +71,7 @@ test.describe('Android App - Mobile Layout & Navigation', () => {
     expect(isVisible).toBe(false);
   });
 
-  test('mobile header shows app title and user menu', async ({ page }) => {
+  test('@live mobile header shows app title and user menu', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -80,24 +80,24 @@ test.describe('Android App - Mobile Layout & Navigation', () => {
   });
 });
 
-test.describe('Android App - Authentication & Biometrics', () => {
+test.describe('@live Android App - Authentication & Biometrics', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
-  test('login page is mobile-optimized', async ({ page }) => {
+  test('@live login page is mobile-optimized', async ({ page }) => {
     await page.goto(`${UI_URL}/login`);
     await expect(page.getByRole('heading', { name: 'Jarvis OS' })).toBeVisible();
     await expect(page.getByPlaceholder('Enter username')).toBeVisible();
     await expect(page.getByPlaceholder('Enter password')).toBeVisible();
   });
 
-  test('login form fits mobile viewport without horizontal scroll', async ({ page }) => {
+  test('@live login form fits mobile viewport without horizontal scroll', async ({ page }) => {
     await page.goto(`${UI_URL}/login`);
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     const viewportWidth = await page.evaluate(() => window.innerWidth);
     expect(scrollWidth).toBeLessThanOrEqual(viewportWidth);
   });
 
-  test('session persists across page reloads', async ({ page }) => {
+  test('@live session persists across page reloads', async ({ page }) => {
     await loginAsAdmin(page);
     await page.reload();
     await page.waitForLoadState('domcontentloaded');
@@ -106,7 +106,7 @@ test.describe('Android App - Authentication & Biometrics', () => {
   });
 });
 
-test.describe('Android App - Wake Word & Voice Assistant', () => {
+test.describe('@live Android App - Wake Word & Voice Assistant', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test.beforeEach(async ({ page }) => {
@@ -116,14 +116,14 @@ test.describe('Android App - Wake Word & Voice Assistant', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('mic icon is visible for voice input', async ({ page }) => {
+  test('@live mic icon is visible for voice input', async ({ page }) => {
     const micBtn = page.getByRole('button', { name: /mic|voice|jarvis/i });
     if (await micBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(micBtn).toBeVisible();
     }
   });
 
-  test('tapping mic opens voice assistant overlay', async ({ page }) => {
+  test('@live tapping mic opens voice assistant overlay', async ({ page }) => {
     const micBtn = page.getByRole('button', { name: /mic|voice|jarvis/i });
     if (await micBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await micBtn.click();
@@ -134,7 +134,7 @@ test.describe('Android App - Wake Word & Voice Assistant', () => {
   });
 });
 
-test.describe('Android App - Intercom (Mobile Hold-to-Talk)', () => {
+test.describe('@live Android App - Intercom (Mobile Hold-to-Talk)', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test.beforeEach(async ({ page }) => {
@@ -144,11 +144,11 @@ test.describe('Android App - Intercom (Mobile Hold-to-Talk)', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('intercom section loads on mobile', async ({ page }) => {
+  test('@live intercom section loads on mobile', async ({ page }) => {
     await expect(page.getByText(/intercom|talk/i)).toBeVisible({ timeout: 10000 });
   });
 
-  test('hold-to-talk button is visible', async ({ page }) => {
+  test('@live hold-to-talk button is visible', async ({ page }) => {
     const holdBtn = page.getByRole('button', { name: /hold|talk|intercom/i });
     if (await holdBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(holdBtn).toBeVisible();
@@ -156,14 +156,14 @@ test.describe('Android App - Intercom (Mobile Hold-to-Talk)', () => {
   });
 });
 
-test.describe('Android App - NFC Tag Macros', () => {
+test.describe('@live Android App - NFC Tag Macros', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('NFC settings section exists in admin', async ({ page }) => {
+  test('@live NFC settings section exists in admin', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -175,14 +175,14 @@ test.describe('Android App - NFC Tag Macros', () => {
   });
 });
 
-test.describe('Android App - Location Tracking', () => {
+test.describe('@live Android App - Location Tracking', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('location permission prompt handling', async ({ page }) => {
+  test('@live location permission prompt handling', async ({ page }) => {
     await page.goto(`${UI_URL}/identity`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -193,7 +193,7 @@ test.describe('Android App - Location Tracking', () => {
   });
 });
 
-test.describe('Android App - Entity Dropdowns (Mobile)', () => {
+test.describe('@live Android App - Entity Dropdowns (Mobile)', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test.beforeEach(async ({ page }) => {
@@ -203,7 +203,7 @@ test.describe('Android App - Entity Dropdowns (Mobile)', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('entity search dropdown opens on mobile tap', async ({ page }) => {
+  test('@live entity search dropdown opens on mobile tap', async ({ page }) => {
     await page.getByRole('button', { name: 'Users & Devices' }).click();
     const searchInput = page.getByPlaceholder('Search Home Assistant entities...');
     await expect(searchInput).toBeVisible({ timeout: 10000 });
@@ -213,7 +213,7 @@ test.describe('Android App - Entity Dropdowns (Mobile)', () => {
     await expect(dropdown).toBeVisible({ timeout: 5000 });
   });
 
-  test('selecting entity from dropdown adds it (mobile)', async ({ page }) => {
+  test('@live selecting entity from dropdown adds it (mobile)', async ({ page }) => {
     await page.getByRole('button', { name: 'Users & Devices' }).click();
     const searchInput = page.getByPlaceholder('Search Home Assistant entities...');
     await searchInput.tap();
@@ -230,7 +230,7 @@ test.describe('Android App - Entity Dropdowns (Mobile)', () => {
     }
   });
 
-  test('entity multi-select works on mobile', async ({ page }) => {
+  test('@live entity multi-select works on mobile', async ({ page }) => {
     await page.getByRole('button', { name: 'Device Groups' }).click();
     const multiSelect = page.getByPlaceholder('Search and add media entities...');
     await expect(multiSelect).toBeVisible({ timeout: 10000 });
@@ -249,14 +249,14 @@ test.describe('Android App - Entity Dropdowns (Mobile)', () => {
   });
 });
 
-test.describe('Android App - Responsive Design', () => {
+test.describe('@live Android App - Responsive Design', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('dashboard adapts to mobile layout', async ({ page }) => {
+  test('@live dashboard adapts to mobile layout', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -265,7 +265,7 @@ test.describe('Android App - Responsive Design', () => {
     expect(scrollWidth).toBeLessThanOrEqual(viewportWidth);
   });
 
-  test('admin tabs scroll horizontally on mobile', async ({ page }) => {
+  test('@live admin tabs scroll horizontally on mobile', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -273,7 +273,7 @@ test.describe('Android App - Responsive Design', () => {
     await expect(tabContainer).toBeVisible({ timeout: 10000 });
   });
 
-  test('glass panels stack vertically on mobile', async ({ page }) => {
+  test('@live glass panels stack vertically on mobile', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -283,7 +283,7 @@ test.describe('Android App - Responsive Design', () => {
     expect(count).toBeGreaterThanOrEqual(2);
   });
 
-  test('touch targets are at least 44px on mobile', async ({ page }) => {
+  test('@live touch targets are at least 44px on mobile', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -298,14 +298,14 @@ test.describe('Android App - Responsive Design', () => {
   });
 });
 
-test.describe('Android App - Performance', () => {
+test.describe('@live Android App - Performance', () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('initial page load under 5 seconds', async ({ page }) => {
+  test('@live initial page load under 5 seconds', async ({ page }) => {
     const start = Date.now();
     await page.goto(`${UI_URL}/dashboard`);
     await page.waitForLoadState('domcontentloaded');
@@ -314,7 +314,7 @@ test.describe('Android App - Performance', () => {
     expect(elapsed).toBeLessThan(10000);
   });
 
-  test('entity dropdown renders within 2 seconds', async ({ page }) => {
+  test('@live entity dropdown renders within 2 seconds', async ({ page }) => {
     await page.goto(`${UI_URL}/admin`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);

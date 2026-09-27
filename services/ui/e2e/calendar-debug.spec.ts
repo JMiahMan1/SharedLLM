@@ -13,7 +13,7 @@ async function login(page: Page) {
   await page.waitForURL((u) => !u.pathname.includes('login'), { timeout: 20_000 });
 }
 
-test('debug events payload', async ({ page }) => {
+test('@live debug events payload', async ({ page }) => {
   page.on('response', async (resp) => {
     const u = resp.url();
     if (u.includes('/api/communication/calendar/events') || u.includes('/api/calendar/settings')) {

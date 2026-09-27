@@ -4,8 +4,8 @@ const UI_URL = process.env.UI_URL || 'https://jarvis.sumemail.com';
 const TEST_USER = process.env.TEST_USER || 'testuser';
 const TEST_PASS = process.env.TEST_PASS || 'changeme';
 
-test.describe('Rapid Menu Clicking', () => {
-  test('click through menu items rapidly', async ({ page }) => {
+test.describe('@live Rapid Menu Clicking', () => {
+  test('@live click through menu items rapidly', async ({ page }) => {
     console.log('[TEST] Navigating to UI...');
     await page.goto(`${UI_URL}/login`, { waitUntil: 'networkidle', timeout: 30000 });
     

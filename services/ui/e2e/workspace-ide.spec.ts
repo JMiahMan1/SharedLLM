@@ -54,8 +54,8 @@ async function openIdeWithFile(page: Page, fileName: string): Promise<Page | nul
   return null;
 }
 
-test.describe('Workspace IDE', () => {
-  test('opens: activity bar + Source Control / Tools / Raven Chat panels all render', async ({ page }) => {
+test.describe('@live Workspace IDE', () => {
+  test('@live opens: activity bar + Source Control / Tools / Raven Chat panels all render', async ({ page }) => {
     test.setTimeout(90000);
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
@@ -89,7 +89,7 @@ test.describe('Workspace IDE', () => {
     expect(errors).toEqual([]);
   });
 
-  test('file explorer lists files (no user-context error) and opens a file in the editor', async ({ page }) => {
+  test('@live file explorer lists files (no user-context error) and opens a file in the editor', async ({ page }) => {
     test.setTimeout(90000);
     // Try each workspace until one exposes file entries
     let opened = false;
@@ -118,7 +118,7 @@ test.describe('Workspace IDE', () => {
     expect(opened).toBe(true);
   });
 
-  test('image preview pane renders and Stable Diffusion panel is present', async ({ page }) => {
+  test('@live image preview pane renders and Stable Diffusion panel is present', async ({ page }) => {
     test.setTimeout(120000);
     const errors: string[] = [];
     page.on('pageerror', (e) => errors.push(e.message));
