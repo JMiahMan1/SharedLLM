@@ -221,6 +221,25 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 detail={"conversation": _conversation_summary(data)},
             )
 
+        if action == "mark_read":
+            if not req.token:
+                return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_mark_read")
+            # Nextcloud marks a room read by pointing the caller's read marker
+            # at "now"; unread counts then clear everywhere the user reads.
+            ok, _data, message = await _talk_request_with_retry(
+                provider,
+                "POST",
+                f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}/read",
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Failed to mark the conversation as read.", service="talk_mark_read")
+            return ExecutionResult(
+                status="SUCCESS",
+                message="Marked as read.",
+                service="talk_mark_read",
+                detail={"token": req.token, "unread_messages": 0},
+            )
+
         if action == "messages":
             if not req.token:
                 return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_messages")

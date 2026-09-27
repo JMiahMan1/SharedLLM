@@ -395,7 +395,7 @@ class TimerRequest(BaseRequest):
 
 class TalkRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["list", "open", "messages", "send", "send_voice", "reactions", "react", "polls", "create_poll", "vote_poll"]
+    action: Literal["list", "open", "messages", "send", "send_voice", "reactions", "react", "polls", "create_poll", "vote_poll", "mark_read"]
     token: str | None = None
     target_user: str | None = None
     message: str | None = None
