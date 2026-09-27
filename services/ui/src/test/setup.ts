@@ -3,6 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
+import { mediaHandlers } from './msw/handlers/media';
 
 const defaultUser = {
   id: 1,
@@ -287,7 +288,9 @@ const telemetryNotifications: Array<{
   },
 ];
 
-export const server = setupServer(  http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
+export const server = setupServer(
+  ...mediaHandlers,
+  http.post('/api/auth/login', async () => HttpResponse.json({ api_key: 'test-token', username: 'default', is_admin: true })),
   http.get('/api/users/me', () => HttpResponse.json(users[0])),
   http.get('/api/users/me/theme', () => HttpResponse.json({
     status: 'SUCCESS',
@@ -750,16 +753,7 @@ export const server = setupServer(  http.post('/api/auth/login', async () => Htt
     breakdown: { home_assistant: { chunks: 500, documents: 200 }, notes: { chunks: 200, documents: 50 } }
   })),
   http.get('/api/storage/collection/:name', () => HttpResponse.json({ items: [] })),
-  http.get('/api/entities', () => HttpResponse.json([
-    { entity_id: 'media_player.kitchen_echo', domain: 'media_player', friendly_name: 'Kitchen Echo' },
-    { entity_id: 'light.living_room', domain: 'light', friendly_name: 'Living Room Light' },
-    { entity_id: 'media_player.living_room_tv', domain: 'media_player', friendly_name: 'Living Room TV' },
-  ])),
-
   // Media groups / light clusters / light patterns
-  http.get('/api/groups/media', () => HttpResponse.json({ groups: [] })),
-  http.post('/api/groups/media', () => HttpResponse.json({ status: 'SUCCESS', message: 'Group created' })),
-  http.delete('/api/groups/media/:name', () => HttpResponse.json({ status: 'SUCCESS', message: 'Group deleted' })),
   http.get('/api/groups/lights', () => HttpResponse.json({ clusters: [] })),
   http.post('/api/groups/lights', () => HttpResponse.json({ status: 'SUCCESS', message: 'Cluster created' })),
   http.delete('/api/groups/lights/:name', () => HttpResponse.json({ status: 'SUCCESS', message: 'Cluster deleted' })),
@@ -846,22 +840,6 @@ export const server = setupServer(  http.post('/api/auth/login', async () => Htt
     message: 'Service called successfully'
   })),
 
-  // Media controls
-  http.post('/execute/media/status', () => HttpResponse.json({
-    status: 'SUCCESS',
-    data: {
-      title: 'Mock Song Title',
-      artist: 'Mock Artist',
-      device_name: 'Office Speaker',
-      state: 'playing',
-      volume_level: 0.5,
-    }
-  })),
-  http.post('/execute/media/transport', () => HttpResponse.json({
-    status: 'SUCCESS',
-    message: 'Transport command executed'
-  })),
-
   // Telemetry summaries
   http.get('/api/telemetry/summary/:entityId', ({ params }) => HttpResponse.json({
     entity_id: String(params.entityId),
@@ -878,53 +856,6 @@ export const server = setupServer(  http.post('/api/auth/login', async () => Htt
     }
   })),
 
-  // Media Playlists and Audiobookshelf mocks for Media.tsx page
-  http.get('/api/media/music-assistant/playlists', () => HttpResponse.json({
-    status: 'SUCCESS',
-    playlists: [
-      { name: 'Rock Classics', items: 25, uri: 'ma://playlist/rock' },
-      { name: 'Chill Vibes', items: 10, uri: 'ma://playlist/chill' }
-    ]
-  })),
-  http.get('/api/media/music-assistant/recent', () => HttpResponse.json({
-    status: 'SUCCESS',
-    recent: [
-      { name: 'Recent Rock Song', artist: 'Recent Rock Artist', uri: 'ma://track/recent1', last_played: '2026-05-06T11:00:00Z' }
-    ]
-  })),
-  http.get('/api/media/audiobookshelf/libraries', () => HttpResponse.json({
-    status: 'SUCCESS',
-    libraries: [
-      { id: 'lib-1', name: 'Audiobooks', media_type: 'audiobook' }
-    ]
-  })),
-  http.get('/api/media/audiobookshelf/library/:libraryId', () => HttpResponse.json({
-    status: 'SUCCESS',
-    books: [
-      { id: 'book-1', title: 'The Great Gatsby', author: 'F. Scott Fitzgerald' },
-      { id: 'book-2', title: '1984', author: 'George Orwell' }
-    ]
-  })),
-  http.get('/api/media/audiobookshelf/search', () => HttpResponse.json({
-    status: 'SUCCESS',
-    books: [
-      { id: 'book-1', title: 'The Great Gatsby', author: 'F. Scott Fitzgerald' }
-    ]
-  })),
-  http.get('/api/media/audiobookshelf/last-played', () => HttpResponse.json({
-    status: 'SUCCESS',
-    books: [
-      { id: 'book-1', title: 'The Great Gatsby', author: 'F. Scott Fitzgerald', progress: 0.45, last_played: '2026-05-06T12:00:00Z', library_id: 'lib-1' }
-    ]
-  })),
-  http.post('/execute/audiobookshelf', () => HttpResponse.json({
-    status: 'SUCCESS',
-    message: 'Audiobook play started'
-  })),
-  http.post('/execute/media/play', () => HttpResponse.json({
-    status: 'SUCCESS',
-    message: 'Media play started'
-  })),
 );
 
 class MockLocalStorage {
@@ -1004,6 +935,20 @@ beforeEach(() => {
         getTracks: () => [{ stop: () => undefined }],
       }),
     },
+  });
+});
+
+beforeEach(() => {
+  const mediaSession = {
+    metadata: null,
+    playbackState: 'none' as 'none' | 'playing' | 'paused',
+    setActionHandler: () => {},
+    clearActionHandler: () => {},
+  };
+  Object.defineProperty(window.navigator, 'mediaSession', {
+    configurable: true,
+    writable: true,
+    value: mediaSession,
   });
 });
 
