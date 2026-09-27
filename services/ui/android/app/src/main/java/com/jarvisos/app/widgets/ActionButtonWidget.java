@@ -85,16 +85,11 @@ public class ActionButtonWidget extends AppWidgetProvider {
                 pi = WidgetUpdater.actionPendingIntent(context, appWidgetId, cfg.entityId, service);
             }
             views.setOnClickPendingIntent(R.id.action_root, pi);
-            // Tap the icon to re-open settings without losing the widget
-            views.setOnClickPendingIntent(R.id.action_icon,
-                WidgetUpdater.configureActionButtonPendingIntent(context, appWidgetId));
         } catch (Exception ex) {
             views.setTextViewText(R.id.action_state,
                 ex.getMessage() != null ? DeviceButtonWidget.truncate(ex.getMessage(), 20) : "offline");
             views.setOnClickPendingIntent(R.id.action_root,
                 WidgetUpdater.actionPendingIntent(context, appWidgetId, cfg.entityId, cfg.service));
-            views.setOnClickPendingIntent(R.id.action_icon,
-                WidgetUpdater.configureActionButtonPendingIntent(context, appWidgetId));
         }
         return views;
     }
