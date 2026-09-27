@@ -97,7 +97,14 @@ Android's `TYPE_STEP_COUNTER` only reports **steps since boot**, so every
 the delta since the previous reading is credited to the new day **only if the
 previous reading was within the last hour** (`MIDNIGHT_CREDIT_WINDOW_MS`).
 That covers the normal case (a reading just before midnight and one just after,
-e.g. overnight) while refusing to attribute a long gap to today.
+e.g. overnight) while refusing to attribute a long gap to today. The new day's
+total is **only that delta** — never the previous day's accumulated
+`day_steps` added on top (a `+=` here once carried a full 10,000-step day into
+the next morning whenever the app stayed awake across midnight; fixed in the
+1.4.12 build). In-flight installs are repaired once by a `prefs_version`
+migration that recognizes the buggy signature (`day_steps` ≥ yesterday's
+ledger row by a small margin) and subtracts yesterday back out, rewriting both
+prefs and the ledger row via `StepLedger.replaceDay`.
 
 Before this rule, the delta was *always* credited to the new day. If the app
 went a whole day without a reading (app never opened, so the plugin never

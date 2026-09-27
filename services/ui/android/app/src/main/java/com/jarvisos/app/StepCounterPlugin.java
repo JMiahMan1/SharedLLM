@@ -45,6 +45,14 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
     private static final String KEY_LAST_CUMULATIVE = "last_cumulative";
     private static final String KEY_HAS_BASELINE = "has_baseline";
     private static final String KEY_LAST_READ_AT = "last_read_at";
+    private static final String KEY_PREFS_VERSION = "prefs_version";
+    /**
+     * Bumped to 2 by the midnight-carry fix. Installs that stored version < 2
+     * ran the version whose rollover branch added the across-midnight delta on
+     * top of yesterday's total (instead of replacing it), so today's number
+     * silently became yesterday_total + today_so_far.
+     */
+    private static final int PREFS_VERSION = 2;
     /**
      * Only credit the across-midnight delta to the new day when the previous
      * reading was this recent. A longer gap can contain an entire unrecorded
@@ -333,6 +341,25 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             hasBaseline = false;
         }
 
+        // One-time repair for installs that ran the midnight-carry bug
+        // (prefs_version < 2): day_steps kept yesterday's total and the rollover
+        // delta was added on top. The buggy value therefore looks like
+        // yesterday_total + today_so_far with only a small delta, and the
+        // ledger still holds yesterday_total — so both parts of the signature
+        // are checkable. Runs once per install; afterwards prefs_version = 2
+        // and this branch is dead.
+        int prefsVersion = prefs.getInt(KEY_PREFS_VERSION, 0);
+        if (prefsVersion < PREFS_VERSION) {
+            String yesterday = java.time.LocalDate.now().minusDays(1).toString();
+            int prevDay = ledger.daySteps(yesterday, StepLedger.SOURCE_PHONE);
+            if (prevDay > 0 && daySteps >= prevDay && daySteps - prevDay < 1000) {
+                daySteps -= prevDay;
+                if (daySteps < 0) daySteps = 0;
+                ledger.replaceDay(today, (int) Math.min(Integer.MAX_VALUE, daySteps), StepLedger.SOURCE_PHONE);
+            }
+            prefs.edit().putLong("day_steps", daySteps).putInt(KEY_PREFS_VERSION, PREFS_VERSION).apply();
+        }
+
         if (!hasBaseline || !today.equals(baselineDate)) {
             // Midnight rollover. The sensor only gives a cumulative count, so we
             // can credit the delta to the new day — but ONLY when the gap is
@@ -343,7 +370,10 @@ public class StepCounterPlugin extends Plugin implements SensorEventListener {
             // users saw after the app went a day without syncing.
             boolean recentReading = lastReadAt > 0 && (now - lastReadAt) <= MIDNIGHT_CREDIT_WINDOW_MS;
             if (hasBaseline && !today.equals(baselineDate) && recentReading && (long) cumulative >= baseline) {
-                daySteps += (long) cumulative - baseline;
+                // Only the across-midnight delta — never yesterday's accumulated
+                // total. (+= here was the bug that carried 10,000 steps into a
+                // new morning.)
+                daySteps = (long) cumulative - baseline;
             } else {
                 daySteps = 0;
             }
