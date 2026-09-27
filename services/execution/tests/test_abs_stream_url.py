@@ -69,6 +69,10 @@ async def test_handle_play_hands_ha_signed_gateway_url():
     mt = (query.get("mt") or [""])[0]
     assert mt, f"no mt= in URL: {url}"
     assert verify(mt, "testuser") is True
+    # Devices cannot refresh mt= mid-audiobook: the token must outlive
+    # long playback sessions (DEVICE_TOKEN_TTL_SECONDS, not the 1h default).
+    assert verify(mt, "testuser", now=time.time() + 6 * 3600) is True
+    assert verify(mt, "testuser", now=time.time() + 13 * 3600) is False
 
     expired, _exp = sign("testuser", now=time.time() - 7200)
     assert verify(expired, "testuser") is False

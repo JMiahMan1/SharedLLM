@@ -26,6 +26,12 @@ service.
 
 - Implemented in `services/shared/media_token.py` (HMAC-SHA256,
   `MEDIA_TOKEN_SECRET` or `INTERNAL_SECRET` fallback, TTL 3600s).
+- **Device-facing TTL (2026-09-27):** `DEVICE_TOKEN_TTL_SECONDS = 43200` (12h)
+  is used by `media_file_url` (8888) and `abs_client.get_stream_url`
+  (gateway ABS stream) because HA/Cast/Roku fetch those URLs for hours with no
+  `?mt=` refresh path — §7.4's "refresh 5 min before expiry" only applies to
+  the UI. Verification is TTL-agnostic (checks `exp` only), so no verify site
+  changed; the default UI TTL stays 3600s.
 - **Still (VERIFY):** expiry behavior of `?mt=` acceptance across each caller
   (imageproxy, stream, events, 8888 file server, sendspin WS) — covered as
   each caller is wired in BUG-07/08 tests.

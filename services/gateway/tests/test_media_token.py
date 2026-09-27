@@ -35,6 +35,21 @@ def test_verify_rejects_wrong_user():
     assert verify(token, "bob", now=1_000_000) is False
 
 
+def test_device_token_ttl_is_12_hours():
+    """Device-facing URLs (8888 file server, ABS gateway streams) carry a
+    longer-lived token: devices fetch these URLs for hours with no way to
+    refresh the mt= param (plan §7.4 assumes a UI refresh)."""
+    from services.shared.media_token import DEVICE_TOKEN_TTL_SECONDS
+
+    assert DEVICE_TOKEN_TTL_SECONDS == 43200
+    token, expires_at = sign("alice", now=1_000_000, ttl=DEVICE_TOKEN_TTL_SECONDS)
+    assert expires_at == 1_000_000 + 43200
+    assert verify(token, "alice", now=1_000_000 + 6 * 3600) is True
+    assert verify(token, "alice", now=1_000_000 + 13 * 3600) is False
+    # Default (UI/refreshable) TTL stays short.
+    assert TOKEN_TTL_SECONDS == 3600
+
+
 def test_verify_rejects_wrong_scope():
     import hashlib
     import hmac

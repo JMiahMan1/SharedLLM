@@ -14,6 +14,11 @@ import os
 import time
 
 TOKEN_TTL_SECONDS = 3600
+# Device-facing URLs (8888 file server, ABS gateway streams) are fetched by
+# HA/Cast/Roku for hours with no way to refresh ``?mt=`` — plan §7.4's
+# "refresh 5 min before expiry" only applies to the UI, so those signs use
+# this longer TTL. Verification is unchanged (it only checks exp).
+DEVICE_TOKEN_TTL_SECONDS = 43200
 SCOPE = "media"
 
 
