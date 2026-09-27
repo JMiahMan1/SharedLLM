@@ -39,13 +39,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: './index.html',
-        'ma-stream-test': './src/ma-stream-test.ts',
       },
       output: {
-        entryFileNames: (chunkInfo) => {
-          if (chunkInfo.name === 'ma-stream-test') return 'assets/ma-stream-test.js'
-          return 'assets/[name]-[hash].js'
-        },
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
       },

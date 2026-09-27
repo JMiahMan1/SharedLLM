@@ -1425,7 +1425,7 @@ const Media = () => {
       const id = selectedTarget.slice(3);
       return maPlayers.find((p) => p.player_id === id)?.name || id;
     }
-    return availablePlayers.find((p) => p.entity_id === selectedTarget)?.name || '';
+      return availablePlayers.find((p) => p.entity_id === selectedTarget)?.friendly_name || '';
   }, [selectedTarget, entities, availablePlayers, maPlayers]);
 
   const quickResumeItems = useMemo(() => {
@@ -1545,7 +1545,7 @@ const Media = () => {
               !selectedTarget
             ) {
               autoAdoptedRef.current = true;
-              setSelectedTarget(active.entity_id);
+              setSelectedTarget(active.entity_id || '');
               setLocalMode(false);
             }
             setMediaStatus(active);
