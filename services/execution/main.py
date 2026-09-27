@@ -732,7 +732,10 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
 
 @app.post("/execute/media/transport", response_model=ExecutionResult)
 async def execute_media_transport(req: MediaTransportRequest):
-    if req.entity_id and req.entity_id.lower() not in ("local", "web_player", "browser", "android"):
+    is_local = (req.entity_id or "").lower() in ("local", "web_player", "browser", "android")
+    if req.entity_id and not is_local:
+        if not await verify_entity_access(req.user_context, req.entity_id):
+            raise HTTPException(status_code=403, detail="Access denied to this device")
         _ensure_ha_creds(req.user_context)
     return await MediaPlaybackService.transport(req)
 
