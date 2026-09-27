@@ -1,0 +1,6 @@
+{
+  "status": "ok",
+  "books": [
+    { "id": "book-1", "title": "Project Hail Mary", "author": "Andy Weir", "progress": 0.42, "last_played": "2026-09-25T08:30:00Z", "library_id": "lib-books" }
+  ]
+}

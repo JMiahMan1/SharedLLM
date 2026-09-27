@@ -1,0 +1,22 @@
+{
+  "top": { "name": "Midnight Drive", "artist": "The Synthwave Collective", "uri": "library://track/1" },
+  "tracks": [
+    { "name": "Midnight Drive", "artist": "The Synthwave Collective", "uri": "library://track/1", "library": "Music" }
+  ],
+  "artists": [
+    { "name": "The Synthwave Collective", "uri": "library://artist/1" }
+  ],
+  "albums": [
+    { "name": "Neon Nights", "artist": "The Synthwave Collective", "uri": "library://album/1" }
+  ],
+  "playlists": [
+    { "name": "Late Night Synth", "uri": "library://playlist/1" }
+  ],
+  "audiobooks": [
+    { "id": "book-1", "title": "Project Hail Mary", "author": "Andy Weir" }
+  ],
+  "podcasts": [],
+  "authors": [
+    { "name": "Andy Weir", "uri": "library://author/1" }
+  ]
+}

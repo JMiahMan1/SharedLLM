@@ -1,0 +1,7 @@
+{
+  "entities": [
+    { "entity_id": "media_player.living_room", "friendly_name": "Living Room Speaker", "state": "idle", "domain": "media_player" },
+    { "entity_id": "media_player.kitchen", "friendly_name": "Kitchen Speaker", "state": "idle", "domain": "media_player" },
+    { "entity_id": "media_player.bedroom", "friendly_name": "Bedroom Speaker", "state": "paused", "domain": "media_player" }
+  ]
+}

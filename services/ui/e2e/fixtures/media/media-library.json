@@ -1,0 +1,7 @@
+{
+  "items": [
+    { "name": "Midnight Drive", "artist": "The Synthwave Collective", "uri": "library://track/1", "library": "Music", "favorite": true },
+    { "name": "Neon Rain", "artist": "Vector Hold", "uri": "library://track/2", "library": "Music", "favorite": false }
+  ],
+  "total": 2
+}
