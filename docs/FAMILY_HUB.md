@@ -55,6 +55,9 @@ surfaces therefore stay in sync with the Nextcloud phone app and the Skylight
 board, because Talk owns the data.
 
 ### 1b. Games (server first)
+
+The Games tab also features the highest-rated **Alpaca arcade** titles
+(admin-curated, rating fallback): see **docs/ARCADE_INTEGRATION.md**.
 - Question sets as **data** (`services/games/*.json`, like theme packs and
   achievement definitions) so new quizzes need no deploy:
   Bible trivia, Bible memorisation (fill-in-the-blank with hints), family
