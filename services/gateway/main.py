@@ -8618,23 +8618,17 @@ async def _resolve_user_context(request: Request, body: dict) -> Any:
     """
     body.pop("user_context", None)
 
-    # Try to resolve from request
+    # Resolve only from the authenticated request; never fall back to the
+    # first user (BUG-02) — unauthenticated calls must fail with 401.
     try:
         creds_data = await _resolve_identity_from_request(request)
-        if creds_data.get("user"):
-            return creds_data
-    except Exception:
-        pass
-
-    # Fall back to first user
-    try:
-        first_user = await resolve_first_user()
-        if first_user:
-            return first_user
-    except Exception:
-        pass
-
-    return {"user": ""}
+    except HTTPException as e:
+        raise HTTPException(status_code=401, detail="Authentication required") from e
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Authentication required") from e
+    if isinstance(creds_data, dict) and creds_data.get("user"):
+        return creds_data
+    raise HTTPException(status_code=401, detail="Authentication required")
 
 
 async def _forward_execution_request(

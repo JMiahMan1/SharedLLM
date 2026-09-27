@@ -667,18 +667,18 @@ async def verify_entity_access(ctx: UserContext, entity_id: str) -> bool:
     return ok
 
 
+def _ensure_ha_creds(ctx: UserContext) -> None:
+    """BUG-02: media commands require explicit HA creds — never fall back to another user's."""
+    if not ctx.ha_url or not ctx.ha_token:
+        raise HTTPException(status_code=400, detail="Missing Home Assistant credentials in user_context")
+
+
 # ─── Domain Endpoints ──────────────────────────────────────────────────────────
 
 @app.post("/execute/light", response_model=ExecutionResult)
 async def execute_light(req: LightControlRequest):
     if not await verify_entity_access(req.user_context, req.entity_id):
         raise HTTPException(status_code=403, detail="Access denied to this device")
-    ctx = req.user_context
-    if not ctx.ha_url or not ctx.ha_token:
-        creds = await resolve_first_user()
-        if creds:
-            ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
-            ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
     return await light.handle_light(req)
 
 @app.post("/execute/esphome", response_model=ExecutionResult)
@@ -688,16 +688,12 @@ async def execute_esphome(req: EsphomeRequest):
 
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
-    if req.entity_id and req.entity_id.lower() not in ("local", "web_player", "browser", "android"):
+    is_local = (req.entity_id or "").lower() in ("local", "web_player", "browser", "android")
+    if req.entity_id and not is_local:
         if not await verify_entity_access(req.user_context, req.entity_id):
             raise HTTPException(status_code=403, detail="Access denied to this device")
-    # Resolve HA credentials via Identity service if not in context
-    ctx = req.user_context
-    if not ctx.ha_url or not ctx.ha_token:
-        creds = await resolve_first_user()
-        if creds:
-            ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
-            ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
+    if not is_local:
+        _ensure_ha_creds(req.user_context)
     return await MediaPlaybackService.play(req)
 
 
@@ -736,12 +732,8 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
 
 @app.post("/execute/media/transport", response_model=ExecutionResult)
 async def execute_media_transport(req: MediaTransportRequest):
-    ctx = req.user_context
-    if not ctx.ha_url or not ctx.ha_token:
-        creds = await resolve_first_user()
-        if creds:
-            ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
-            ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
+    if req.entity_id and req.entity_id.lower() not in ("local", "web_player", "browser", "android"):
+        _ensure_ha_creds(req.user_context)
     return await MediaPlaybackService.transport(req)
 
 @app.post("/execute/tv_cast", response_model=ExecutionResult)
@@ -2231,13 +2223,8 @@ async def execute_ha_logbook(req: LogbookRequest):
 
 @app.post("/execute/media/status", response_model=ExecutionResult)
 async def execute_media_status(req: MediaStatusRequest):
-    ctx = req.user_context
-    log.info(f"[media/status] user={ctx.user} area={req.area} entity={req.entity_id}")
-    if not ctx.ha_url or not ctx.ha_token:
-        creds = await resolve_first_user()
-        if creds:
-            ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
-            ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
+    _ensure_ha_creds(req.user_context)
+    log.info(f"[media/status] user={req.user_context.user} area={req.area} entity={req.entity_id}")
     return await MediaPlaybackService.status(req)
 
 
@@ -2507,13 +2494,7 @@ async def execute_execution_logs(req: ExecutionLogRequest):
 
 @app.post("/execute/video/play", response_model=ExecutionResult)
 async def execute_video_play(req: VideoPlayRequest):
-    ctx = req.user_context
-    if not ctx.ha_url or not ctx.ha_token:
-        creds = await resolve_first_user()
-        if creds:
-            ctx.ha_url = ctx.ha_url or creds.get("ha_url", "")
-            ctx.ha_token = ctx.ha_token or creds.get("ha_token", "")
-    log.info(f"[video/play] user={ctx.user} entity={req.entity_id} query='{req.query}'")
+    log.info(f"[video/play] user={req.user_context.user} entity={req.entity_id} query='{req.query}'")
     return await video.handle_video_play(req)
 
 @app.post("/execute/diagnostics", response_model=ExecutionResult)
