@@ -210,7 +210,7 @@ async def roku_play_music(ha_url: str, ha_token: str, roku_entity: str, query: s
     ecp_url = f"http://{roku_ip}:8060/launch/{MEDIA_ASSISTANT_CHANNEL_ID}"
     try:
         log.info(f"[roku.music] Launching Media Assistant via ECP: {ecp_url}")
-        connector = aiohttp.TCPConnector(verify_ssl=False)
+        connector = aiohttp.TCPConnector()
         async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as client:
             async with client.post(ecp_url, params=params) as resp:
                 log.info(f"[roku.music] ECP response: {resp.status}")
@@ -296,7 +296,7 @@ async def roku_play_video(ha_url: str, ha_token: str, roku_entity: str, video_ur
     ecp_url = f"http://{roku_ip}:8060/launch/{MEDIA_ASSISTANT_CHANNEL_ID}"
     try:
         log.info(f"[roku.video] Launching Media Assistant via ECP: {ecp_url}")
-        connector = aiohttp.TCPConnector(verify_ssl=False)
+        connector = aiohttp.TCPConnector()
         async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=30)) as client:
             async with client.post(ecp_url, params=params, data={}) as resp:
                 log.info(f"[roku.video] ECP response: {resp.status}")

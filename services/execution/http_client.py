@@ -11,6 +11,7 @@ Provides:
 import asyncio
 import contextlib
 import logging
+import os
 
 from aiohttp import BasicAuth, ClientSession, ClientTimeout, TCPConnector
 
@@ -20,8 +21,8 @@ _DEFAULT_TIMEOUT = ClientTimeout(total=30, connect=5)
 _NEXTCLOUD_TIMEOUT = ClientTimeout(total=60, connect=10)
 _MAX_CONNECTIONS = 50
 _MAX_CONNECTIONS_PER_HOST = 10
-# Global session cache: {host: (session, created_at)}
-_SESSION_CACHE: dict[str, tuple[ClientSession, float]] = {}
+# Global session cache: {(host, effective_verify): (session, created_at)}
+_SESSION_CACHE: dict[tuple[str, bool], tuple[ClientSession, float]] = {}
 _CACHE_MAX_AGE = 300  # 5 minutes
 _DNS_TTL = 60  # re-resolve DNS at most every 60s so pooled connectors don't go stale
 
@@ -34,6 +35,11 @@ def host_of(url: str) -> str:
     return f"{parsed.scheme}://{parsed.hostname}"
 
 
+def _insecure_tls_allowed() -> bool:
+    """True only when the operator explicitly opted out via env (BUG-09)."""
+    return (os.getenv("MEDIA_ALLOW_INSECURE_TLS", "false") or "false").strip().lower() in ("1", "true", "yes")
+
+
 async def request(
     method: str,
     url: str,
@@ -44,7 +50,7 @@ async def request(
     data: bytes | str | dict | None = None,
     json: dict | None = None,
     timeout: ClientTimeout | int | None = None,
-    verify: bool = False,
+    verify: bool = True,
 ) -> dict:
     """
     Make an HTTP request using a pooled connection.
@@ -84,10 +90,29 @@ async def request(
         }
 
 
-async def get_session(host: str, verify: bool = False) -> ClientSession:
-    """Get or create a session for the given host with connection pooling."""
+async def get_session(host: str, verify: bool = True) -> ClientSession:
+    """Get or create a session for the given host with connection pooling.
+
+    TLS verification is ON by default (BUG-09). Passing verify=False is an
+    escape hatch for self-signed endpoints and only takes effect when the
+    operator sets MEDIA_ALLOW_INSECURE_TLS=true; otherwise we warn and
+    verify anyway (fail safe).
+    """
+    if verify:
+        effective_verify = True
+    elif _insecure_tls_allowed():
+        log.warning("TLS verification DISABLED for %s (MEDIA_ALLOW_INSECURE_TLS)", host)
+        effective_verify = False
+    else:
+        log.warning(
+            "TLS verification turned OFF for %s but MEDIA_ALLOW_INSECURE_TLS is not enabled; verifying anyway",
+            host,
+        )
+        effective_verify = True
+
     now = asyncio.get_running_loop().time()
-    cached = _SESSION_CACHE.get(host)
+    cache_key = (host, effective_verify)
+    cached = _SESSION_CACHE.get(cache_key)
 
     if cached:
         session, created = cached
@@ -97,29 +122,27 @@ async def get_session(host: str, verify: bool = False) -> ClientSession:
         if not session.closed and now - created < _CACHE_MAX_AGE:
             return session
 
+    if effective_verify:
+        import ssl
+
+        ssl_param: bool | ssl.SSLContext = ssl.create_default_context()
+    else:
+        ssl_param = False
+
     connector = TCPConnector(
         limit=_MAX_CONNECTIONS,
         limit_per_host=_MAX_CONNECTIONS_PER_HOST,
         enable_cleanup_closed=True,
         ttl_dns_cache=_DNS_TTL,
+        ssl=ssl_param,
     )
-    if verify:
-        import ssl
 
-        connector = TCPConnector(
-            limit=_MAX_CONNECTIONS,
-            limit_per_host=_MAX_CONNECTIONS_PER_HOST,
-            enable_cleanup_closed=True,
-            ttl_dns_cache=_DNS_TTL,
-            ssl=ssl.create_default_context(),
-        )
-
-    previous = _SESSION_CACHE.get(host)
+    previous = _SESSION_CACHE.get(cache_key)
     if previous is not None:
         with contextlib.suppress(Exception):
             await previous[0].close()
     session = ClientSession(connector=connector)
-    _SESSION_CACHE[host] = (session, now)
+    _SESSION_CACHE[cache_key] = (session, now)
     return session
 
 

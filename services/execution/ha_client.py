@@ -17,7 +17,7 @@ _TIMEOUT = aiohttp.ClientTimeout(total=45.0, connect=15.0)
 
 
 @asynccontextmanager
-async def _ha_session(ha_url: str, verify: bool = False):
+async def _ha_session(ha_url: str, verify: bool = True):
     """Yield the pooled HA session WITHOUT closing it (reused across calls)."""
     yield await get_session(host_of(ha_url), verify=verify)
 

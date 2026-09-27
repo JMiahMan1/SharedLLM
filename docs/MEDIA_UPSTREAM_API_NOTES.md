@@ -71,3 +71,39 @@ service.
   candidates — mismatched-host rebasing is therefore required, not
   theoretical. **Still (VERIFY):** re-probe the real user's cover URL after
   deploy.
+
+## TLS verification default (P1-T9 / BUG-09, 2026-09-27)
+
+- Plan row cites `ha_client.py:20`, Roku handlers, `handlers/media.py:549`
+  (actual line: media.py:550 PROPFIND). No `allow_insecure_tls` identity
+  flag exists anywhere in Identity → per plan, env gate added:
+  `MEDIA_ALLOW_INSECURE_TLS` (default off; documented in `.env.example`).
+- **aiohttp 3.14.3 verified:** `TCPConnector` `ssl` default = `True` (uses
+  default verification); `verify_ssl=False` is merged to `ssl=False` by
+  `_merge_ssl_params` (genuinely unverified). Therefore:
+  - `http_client.get_session(verify=False)` (plain connector, no ssl arg)
+    was a **no-op** — sessions verified regardless; the bug was intent +
+    explicit `ssl=False`/`verify_ssl=False` sites.
+  - Direct `TCPConnector(verify_ssl=False)` sites (webos.py:124/212,
+    audiobookshelf.py:516, ha_config.py:178) genuinely disable
+    verification. **Left as-is deliberately:** not in BUG-09 plan scope
+    and enabling verification could break self-signed TVs/ABS endpoints
+    (owner directive: do not break player functionality). Recorded here
+    so the choice is visible.
+  - `announce_handlers.py` / `device_discovery.py` `ssl=False` LAN scans
+    are intentional (plain-HTTP discovery), out of scope.
+- Changes: `get_session`/`request` default `verify=True`; `verify=False`
+  is now an env-gated escape hatch (warning + verify anyway unless
+  `MEDIA_ALLOW_INSECURE_TLS=true`, then "TLS verification DISABLED"
+  warning); session cache keyed by `(host, effective_verify)`;
+  `_ha_session`/`_abs_session`/`_mass_ha_session` defaults flipped to
+  `True` (behavior-neutral — they previously passed verify=False into the
+  no-op branch); Roku ECP `verify_ssl=False` removed (requests are
+  `http://...:8060` — SSL never involved, zero behavior change);
+  `media.py:550` keeps explicit `verify=False` as the self-signed
+  Nextcloud escape hatch (effective behavior unchanged unless the env
+  gate is enabled).
+- Unit test on the session factory: `execution/tests/test_http_client_tls.py`
+  (6 tests: default verified + no warning; env-off → warn + verified;
+  env-on → ssl=False + DISABLED warning; cache keyed per effective
+  verification; env-off sharing; signature defaults).
