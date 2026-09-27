@@ -15,7 +15,7 @@ log = logging.getLogger("execution.abs_client")
 
 from services.config import EXECUTION_EXTERNAL_HOST, GATEWAY_INTERNAL_URL
 from services.execution.http_client import get_session, host_of
-from services.shared.media_token import sign
+from services.shared.media_token import DEVICE_TOKEN_TTL_SECONDS, sign
 
 
 @asynccontextmanager
@@ -334,7 +334,7 @@ async def get_stream_url(item_id: str, user: str, format: str = "mp4") -> str:
         base = f"http://{EXECUTION_EXTERNAL_HOST}:11435"
     else:
         base = GATEWAY_INTERNAL_URL or "http://localhost:11435"
-    token, _exp = sign(user)
+    token, _exp = sign(user, ttl=DEVICE_TOKEN_TTL_SECONDS)
     return (
         f"{base.rstrip('/')}/api/media/stream/audiobookshelf/{quote(str(item_id), safe='')}"
         f"?format={format}&user={quote(user)}&mt={token}"
