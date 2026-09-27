@@ -15,7 +15,7 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
    Device Selector — horizontal card list (new design)
    ────────────────────────────────────────────────────────────── */
 
-test.describe('Device Selector — Rendering', () => {
+test.describe('@live Device Selector — Rendering', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
@@ -23,20 +23,20 @@ test.describe('Device Selector — Rendering', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('shows "Select Device" section header', async ({ page }) => {
+  test('@live shows "Select Device" section header', async ({ page }) => {
     await expect(
       page.getByRole('heading', { name: 'Select Device' }),
     ).toBeVisible();
   });
 
-  test('shows online device count next to header', async ({ page }) => {
+  test('@live shows online device count next to header', async ({ page }) => {
     const heading = page.getByRole('heading', { name: 'Select Device' });
     await expect(heading).toBeVisible();
     const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');
     await expect(panel).toBeVisible();
   });
 
-  test('renders device cards for media player entities', async ({ page }) => {
+  test('@live renders device cards for media player entities', async ({ page }) => {
     const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');
     await expect(panel).toBeVisible();
 
@@ -49,7 +49,7 @@ test.describe('Device Selector — Rendering', () => {
     }
   });
 
-  test('shows "Tap a device to start" prompt when no device selected', async ({
+  test('@live shows "Tap a device to start" prompt when no device selected', async ({
     page,
   }) => {
     // No device should be auto-selected on page load
@@ -61,7 +61,7 @@ test.describe('Device Selector — Rendering', () => {
     }
   });
 
-  test('device cards show device name and room', async ({ page }) => {
+  test('@live device cards show device name and room', async ({ page }) => {
     // Each device card has a name + room name derived from entity_id
     // e.g. "master_bedroom_tv" → room = "master bedroom"
     const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');
@@ -69,7 +69,7 @@ test.describe('Device Selector — Rendering', () => {
     await expect(cards.first()).toBeVisible();
   });
 
-  test('device cards have online/offline visual indicators', async ({ page }) => {
+  test('@live device cards have online/offline visual indicators', async ({ page }) => {
     // Online devices get bg-green-400, offline get bg-slate-600
     // These are small colored dots (w-2.5 h-2.5 rounded-full)
     const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');
@@ -79,19 +79,19 @@ test.describe('Device Selector — Rendering', () => {
     expect(count).toBeGreaterThan(0);
   });
 
-  test('shows Web Player card as first option', async ({ page }) => {
+  test('@live shows Web Player card as first option', async ({ page }) => {
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
   });
 
-  test('Web Player card shows Browser / Android App subtitle', async ({ page }) => {
+  test('@live Web Player card shows Browser / Android App subtitle', async ({ page }) => {
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     const subtitle = localPlayerCard.locator('p:text-is("Browser / Android App")');
     await expect(subtitle).toBeVisible({ timeout: 10000 });
   });
 
-  test('Web Player card has online indicator', async ({ page }) => {
+  test('@live Web Player card has online indicator', async ({ page }) => {
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     // Green dot indicator
@@ -100,7 +100,7 @@ test.describe('Device Selector — Rendering', () => {
   });
 });
 
-test.describe('Device Selector — Selection', () => {
+test.describe('@live Device Selector — Selection', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
@@ -108,7 +108,7 @@ test.describe('Device Selector — Selection', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('Web Player card is selected by default', async ({ page }) => {
+  test('@live Web Player card is selected by default', async ({ page }) => {
     // Web Player is auto-selected since localMode starts as true
     const selected = page.locator(
       '.glass-panel button.bg-cyan-500\\/15',
@@ -117,7 +117,7 @@ test.describe('Device Selector — Selection', () => {
     await expect(selected).toContainText('Web Player');
   });
 
-  test('clicking a device card selects it', async ({ page }) => {
+  test('@live clicking a device card selects it', async ({ page }) => {
     // Click the first available device card
     const deviceCard = page.locator(
       '.glass-panel button:has-text("Master Bedroom TV")',
@@ -130,7 +130,7 @@ test.describe('Device Selector — Selection', () => {
     }
   });
 
-  test('selected device shows cyan highlight ring', async ({ page }) => {
+  test('@live selected device shows cyan highlight ring', async ({ page }) => {
     const deviceCard = page.locator(
       '.glass-panel button:has-text("Office TV")',
     ).first();
@@ -142,7 +142,7 @@ test.describe('Device Selector — Selection', () => {
     }
   });
 
-  test('selecting a device shows its name in the player card', async ({
+  test('@live selecting a device shows its name in the player card', async ({
     page,
   }) => {
     const deviceCard = page.locator(
@@ -157,7 +157,7 @@ test.describe('Device Selector — Selection', () => {
     }
   });
 
-  test('clicking Web Player card highlights it', async ({ page }) => {
+  test('@live clicking Web Player card highlights it', async ({ page }) => {
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
     await localPlayerCard.click();
@@ -171,7 +171,7 @@ test.describe('Device Selector — Selection', () => {
    Player Header — layout and controls
    ────────────────────────────────────────────────────────────── */
 
-test.describe('Player Header', () => {
+test.describe('@live Player Header', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
@@ -179,7 +179,7 @@ test.describe('Player Header', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('player card is positioned above media sections', async ({ page }) => {
+  test('@live player card is positioned above media sections', async ({ page }) => {
     // Player card has cyan border (border-cyan-500/20)
     const playerCard = page.locator(
       '.glass-panel.border-cyan-500\\/20',
@@ -192,13 +192,13 @@ test.describe('Player Header', () => {
     ).toBeVisible({ timeout: 10000 });
   });
 
-  test('shows "No Active Playback" when no media playing', async ({
+  test('@live shows "No Active Playback" when no media playing', async ({
     page,
   }) => {
     await expect(page.getByText('No Active Playback')).toBeVisible();
   });
 
-  test('transport controls (prev, play/pause, next) are visible', async ({
+  test('@live transport controls (prev, play/pause, next) are visible', async ({
     page,
   }) => {
     // Scope to player card to avoid matching buttons in device selector
@@ -219,7 +219,7 @@ test.describe('Player Header', () => {
     }
   });
 
-  test('volume slider and mute button are visible', async ({ page }) => {
+  test('@live volume slider and mute button are visible', async ({ page }) => {
     const volumeSlider = page.getByLabel('Volume');
     if (await volumeSlider.isVisible({ timeout: 5000 })) {
       await expect(volumeSlider).toBeVisible();
@@ -231,7 +231,7 @@ test.describe('Player Header', () => {
     }
   });
 
-  test('volume displays numeric value', async ({ page }) => {
+  test('@live volume displays numeric value', async ({ page }) => {
     // Volume percentage or "M" for muted
     const volumeDisplay = page.locator(
       'span.tabular-nums',
@@ -246,7 +246,7 @@ test.describe('Player Header', () => {
    Media Sections — rendering and data
    ────────────────────────────────────────────────────────────── */
 
-test.describe('Media Sections', () => {
+test.describe('@live Media Sections', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
@@ -254,13 +254,13 @@ test.describe('Media Sections', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('Jump Back In section renders with heading', async ({ page }) => {
+  test('@live Jump Back In section renders with heading', async ({ page }) => {
     await expect(
       page.getByRole('heading', { name: 'Jump Back In' }),
     ).toBeVisible({ timeout: 10000 });
   });
 
-  test('Jump Back In shows ABS books when available', async ({ page }) => {
+  test('@live Jump Back In shows ABS books when available', async ({ page }) => {
     // ABS last-played returns books with titles like "Homilies of Saint John Chrysostom"
     const booksSection = page.getByRole('heading', { name: 'Jump Back In' }).locator('..');
     await expect(booksSection).toBeVisible({ timeout: 10000 });
@@ -272,7 +272,7 @@ test.describe('Media Sections', () => {
     expect(hasBooks || hasEmpty).toBe(true);
   });
 
-  test('Jump Back In shows maximum 3 entries', async ({ page }) => {
+  test('@live Jump Back In shows maximum 3 entries', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Jump Back In' })).toBeVisible({ timeout: 10000 });
     const jumpBackInSection = page.getByRole('heading', { name: 'Jump Back In' }).locator('..');
     await expect(jumpBackInSection).toBeVisible({ timeout: 10000 });
@@ -287,13 +287,13 @@ test.describe('Media Sections', () => {
     }
   });
 
-  test('Playlists section renders with heading', async ({ page }) => {
+  test('@live Playlists section renders with heading', async ({ page }) => {
     await expect(
       page.getByRole('heading', { name: 'Playlists' }),
     ).toBeVisible({ timeout: 10000 });
   });
 
-  test('Playlists section shows actual playlist names when available', async ({
+  test('@live Playlists section shows actual playlist names when available', async ({
     page,
   }) => {
     const hasPlaylists = await page.getByText('500 Random tracks').isVisible({ timeout: 5000 }).catch(() => false);
@@ -302,7 +302,7 @@ test.describe('Media Sections', () => {
     expect(hasPlaylists || hasEmpty).toBe(true);
   });
 
-  test('Browse All Media button is visible and opens modal', async ({ page }) => {
+  test('@live Browse All Media button is visible and opens modal', async ({ page }) => {
     await expect(
       page.getByRole('button', { name: 'Browse All Media' }),
     ).toBeVisible();
@@ -319,7 +319,7 @@ test.describe('Media Sections', () => {
    Media Explorer Modal
    ────────────────────────────────────────────────────────────── */
 
-test.describe('Media Explorer Modal', () => {
+test.describe('@live Media Explorer Modal', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
@@ -327,19 +327,19 @@ test.describe('Media Explorer Modal', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('has Music Assistant tab', async ({ page }) => {
+  test('@live has Music Assistant tab', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await expect(page.getByRole('button', { name: /Music Assistant/i })).toBeVisible();
   });
 
-  test('has Audiobooks tab', async ({ page }) => {
+  test('@live has Audiobooks tab', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await expect(page.getByRole('button', { name: /Audiobooks/i })).toBeVisible();
   });
 
-  test('MA tab playlists section exists with items', async ({ page }) => {
+  test('@live MA tab playlists section exists with items', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(3000);
 
@@ -353,7 +353,7 @@ test.describe('Media Explorer Modal', () => {
     expect(hasItems && !hasEmpty).toBe(true);
   });
 
-  test('MA tab shows recent items section', async ({ page }) => {
+  test('@live MA tab shows recent items section', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(3000);
 
@@ -366,7 +366,7 @@ test.describe('Media Explorer Modal', () => {
     expect(hasRecentItems).toBe(true);
   });
 
-  test('Audiobooks tab shows libraries with actual content', async ({ page }) => {
+  test('@live Audiobooks tab shows libraries with actual content', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await page.getByRole('button', { name: /Audiobooks/i }).click();
@@ -383,7 +383,7 @@ test.describe('Media Explorer Modal', () => {
     expect((hasBooks || hasPodcasts) && !hasEmpty).toBe(true);
   });
 
-  test('Audiobooks tab live search returns ABS results', async ({ page }) => {
+  test('@live Audiobooks tab live search returns ABS results', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await page.getByRole('button', { name: /Audiobooks/i }).click();
@@ -428,7 +428,7 @@ test.describe('Media Explorer Modal', () => {
     await expect(modal.getByText(book.title || query, { exact: false })).toBeVisible({ timeout: 10000 });
   });
 
-  test('search input filters content', async ({ page }) => {
+  test('@live search input filters content', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(3000);
 
@@ -439,7 +439,7 @@ test.describe('Media Explorer Modal', () => {
     await expect(searchInput).toHaveValue('test');
   });
 
-  test('modal closes when clicking close button', async ({ page }) => {
+  test('@live modal closes when clicking close button', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await expect(page.getByRole('heading', { name: 'Browse All Media' })).toBeVisible();
@@ -452,7 +452,7 @@ test.describe('Media Explorer Modal', () => {
     }
   });
 
-  test('modal closes when clicking overlay', async ({ page }) => {
+  test('@live modal closes when clicking overlay', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await expect(page.getByRole('heading', { name: 'Browse All Media' })).toBeVisible();
@@ -462,7 +462,7 @@ test.describe('Media Explorer Modal', () => {
     await expect(page.getByRole('heading', { name: 'Browse All Media' })).not.toBeVisible({ timeout: 5000 });
   });
 
-  test('audiobook library navigation shows back button', async ({ page }) => {
+  test('@live audiobook library navigation shows back button', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await page.getByRole('button', { name: /Audiobooks/i }).click();
@@ -488,8 +488,8 @@ test.describe('Media Explorer Modal', () => {
    API Data Integrity — verify backend returns correct data
    ────────────────────────────────────────────────────────────── */
 
-test.describe('API — Data Integrity', () => {
-  test('media entities API returns playable entities', async ({ request }) => {
+test.describe('@live API — Data Integrity', () => {
+  test('@live media entities API returns playable entities', async ({ request }) => {
     const resp = await request.get(`${UI_URL}/api/entities`);
     expect(resp.status()).toBe(200);
     const data = await resp.json();
@@ -502,7 +502,7 @@ test.describe('API — Data Integrity', () => {
     expect(mediaPlayers.length).toBeGreaterThan(0);
   });
 
-  test('MA playlists API returns valid structure with 8 playlists', async ({
+  test('@live MA playlists API returns valid structure with 8 playlists', async ({
     request,
   }) => {
     const resp = await request.get(
@@ -523,7 +523,7 @@ test.describe('API — Data Integrity', () => {
     expect(pl).toHaveProperty('items');
   });
 
-  test('MA recent API returns valid structure with tracks', async ({
+  test('@live MA recent API returns valid structure with tracks', async ({
     request,
   }) => {
     const resp = await request.get(
@@ -542,7 +542,7 @@ test.describe('API — Data Integrity', () => {
     expect(item).toHaveProperty('type');
   });
 
-  test('ABS last-played API returns valid structure with books', async ({
+  test('@live ABS last-played API returns valid structure with books', async ({
     request,
   }) => {
     const resp = await request.get(
@@ -562,7 +562,7 @@ test.describe('API — Data Integrity', () => {
     expect(book).toHaveProperty('progress');
   });
 
-  test('ABS libraries API returns valid structure', async ({ request }) => {
+  test('@live ABS libraries API returns valid structure', async ({ request }) => {
     const resp = await request.get(
       `${UI_URL}/api/media/audiobookshelf/libraries`,
     );
@@ -578,7 +578,7 @@ test.describe('API — Data Integrity', () => {
     expect(lib).toHaveProperty('media_type');
   });
 
-  test('media status API returns structured response', async ({ request }) => {
+  test('@live media status API returns structured response', async ({ request }) => {
     const resp = await request.post(`${UI_URL}/execute/media/status`);
     expect(resp.status()).toBe(200);
     const data = await resp.json();
@@ -586,7 +586,7 @@ test.describe('API — Data Integrity', () => {
     expect(data).toHaveProperty('detail');
   });
 
-  test('MA playlists have descriptive names', async ({ request }) => {
+  test('@live MA playlists have descriptive names', async ({ request }) => {
     const resp = await request.get(
       `${UI_URL}/api/media/music-assistant/playlists`,
     );
@@ -598,7 +598,7 @@ test.describe('API — Data Integrity', () => {
     }
   });
 
-  test('ABS books have unique titles in top results', async ({ request }) => {
+  test('@live ABS books have unique titles in top results', async ({ request }) => {
     const resp = await request.get(
       `${UI_URL}/api/media/audiobookshelf/last-played`,
     );
@@ -615,12 +615,12 @@ test.describe('API — Data Integrity', () => {
    Navigation
    ────────────────────────────────────────────────────────────── */
 
-test.describe('Navigation', () => {
+test.describe('@live Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
   });
 
-  test('can navigate to media page from dashboard', async ({ page }) => {
+  test('@live can navigate to media page from dashboard', async ({ page }) => {
     await page.goto(`${UI_URL}/dashboard`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
@@ -642,7 +642,7 @@ test.describe('Navigation', () => {
    Media Playback — full flow
    ────────────────────────────────────────────────────────────── */
 
-test.describe('Media Playback — End-to-End', () => {
+test.describe('@live Media Playback — End-to-End', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsAdmin(page);
     await page.goto(`${UI_URL}/media`);
@@ -650,7 +650,7 @@ test.describe('Media Playback — End-to-End', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('selecting a device shows it as active', async ({ page }) => {
+  test('@live selecting a device shows it as active', async ({ page }) => {
     // Click the Office TV device card
     const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
     if (await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -663,7 +663,7 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('playing a song updates media status', async ({ page }) => {
+  test('@live playing a song updates media status', async ({ page }) => {
     // Select Office TV
     const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
     if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -695,7 +695,7 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('stopping playback resets player card', async ({ page }) => {
+  test('@live stopping playback resets player card', async ({ page }) => {
     // Select Office TV
     const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
     if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -740,7 +740,7 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('playing from playlists updates media status', async ({ page }) => {
+  test('@live playing from playlists updates media status', async ({ page }) => {
     // Select Office TV
     const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
     if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -785,7 +785,7 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('transport controls respond to clicks', async ({ page }) => {
+  test('@live transport controls respond to clicks', async ({ page }) => {
     // Select Office TV
     const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
     if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -824,7 +824,7 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('volume slider updates on player card', async ({ page }) => {
+  test('@live volume slider updates on player card', async ({ page }) => {
     // Select Office TV
     const officeTvCard = page.locator('.glass-panel button:has-text("Office TV")').first();
     if (!await officeTvCard.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -852,7 +852,7 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('MA music plays via Web Player', async ({ page }) => {
+  test('@live MA music plays via Web Player', async ({ page }) => {
     // Click Web Player card first
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
@@ -882,7 +882,7 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('ABS audiobook plays via Web Player', async ({ page }) => {
+  test('@live ABS audiobook plays via Web Player', async ({ page }) => {
     // Click Web Player card first
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
@@ -912,7 +912,7 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('transport controls work in Web Player', async ({ page }) => {
+  test('@live transport controls work in Web Player', async ({ page }) => {
     // Click Web Player card first
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
@@ -943,7 +943,7 @@ test.describe('Media Playback — End-to-End', () => {
     }
   });
 
-  test('Web Player can play from playlists', async ({ page }) => {
+  test('@live Web Player can play from playlists', async ({ page }) => {
     // Click Web Player card first
     const localPlayerCard = page.locator('button:has-text("Web Player")').first();
     await expect(localPlayerCard).toBeVisible({ timeout: 10000 });
@@ -991,7 +991,7 @@ test.describe('Media Playback — End-to-End', () => {
    Mobile Viewport
    ────────────────────────────────────────────────────────────── */
 
-test.describe('Media Page — Mobile', () => {
+test.describe('@live Media Page — Mobile', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test.beforeEach(async ({ page }) => {
@@ -1001,17 +1001,17 @@ test.describe('Media Page — Mobile', () => {
     await page.waitForTimeout(3000);
   });
 
-  test('media page renders on mobile', async ({ page }) => {
+  test('@live media page renders on mobile', async ({ page }) => {
     await expect(page.getByRole('heading', { name: 'Media', level: 1 })).toBeVisible();
   });
 
-  test('browse all media button works on mobile', async ({ page }) => {
+  test('@live browse all media button works on mobile', async ({ page }) => {
     await page.getByRole('button', { name: 'Browse All Media' }).click();
     await page.waitForTimeout(2000);
     await expect(page.getByRole('heading', { name: 'Browse All Media' })).toBeVisible();
   });
 
-  test('device selector card list scrolls horizontally on mobile', async ({
+  test('@live device selector card list scrolls horizontally on mobile', async ({
     page,
   }) => {
     const panel = page.locator('.glass-panel:has(h2:text("Select Device"))');

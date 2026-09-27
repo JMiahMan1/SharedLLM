@@ -45,9 +45,9 @@ async function loginAsDefault(page: Page): Promise<void> {
   await page.waitForTimeout(2000);
 }
 
-test.describe('Dashboard Interaction Deep Test', () => {
+test.describe('@live Dashboard Interaction Deep Test', () => {
   test.skip(!LOGIN_USER || !LOGIN_PASS, 'Credentials not found in .env.test');
-  test('quick notes create + save flow', async ({ page }) => {
+  test('@live quick notes create + save flow', async ({ page }) => {
     test.setTimeout(90000);
     const consoleErrors: string[] = [];
     page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
@@ -84,7 +84,7 @@ test.describe('Dashboard Interaction Deep Test', () => {
     console.log('CONSOLE ERRORS:', consoleErrors.join(' || ') || '(none)');
   });
 
-  test('device controls toggle interaction', async ({ page }) => {
+  test('@live device controls toggle interaction', async ({ page }) => {
     test.setTimeout(90000);
     await loginAsDefault(page);
     await page.goto(`${UI_URL}/`, { waitUntil: 'networkidle' }).catch(() => {});
@@ -108,7 +108,7 @@ test.describe('Dashboard Interaction Deep Test', () => {
     }
   });
 
-  test('widget expand + gear menu', async ({ page }) => {
+  test('@live widget expand + gear menu', async ({ page }) => {
     test.setTimeout(90000);
     await loginAsDefault(page);
     await page.goto(`${UI_URL}/`, { waitUntil: 'networkidle' }).catch(() => {});

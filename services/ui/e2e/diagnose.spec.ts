@@ -2,7 +2,7 @@ import { test } from '@playwright/test';
 
 const UI_URL = 'http://192.168.2.205:8080';
 
-test('diagnose login v3', async ({ page }) => {
+test('@live diagnose login v3', async ({ page }) => {
   await page.goto(`${UI_URL}/login`, { waitUntil: 'domcontentloaded', timeout: 15000 });
   await page.waitForSelector('form', { timeout: 5000 });
   await page.waitForTimeout(500);

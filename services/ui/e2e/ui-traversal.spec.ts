@@ -550,12 +550,12 @@ async function crawlPage(
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-test.describe('Comprehensive E2E UI Traversal', () => {
+test.describe('@live Comprehensive E2E UI Traversal', () => {
   test.skip(!LOGIN_USER || !LOGIN_PASS, 'Credentials not found. Create a .env.test file with TEST_USER and TEST_PASS.');
 
   // ── 1. Recursive Crawler from Dashboard ────────────────────────────────────
 
-  test('recursive crawl from Dashboard', async ({ page }) => {
+  test('@live recursive crawl from Dashboard', async ({ page }) => {
     const consoleErrors: string[] = [];
     page.on('pageerror', (err) => consoleErrors.push(err.message));
     page.on('console', (msg) => {
@@ -615,7 +615,7 @@ test.describe('Comprehensive E2E UI Traversal', () => {
 
   // ── 2. Sidebar Navigation Crawler ──────────────────────────────────────────
 
-  test('sidebar navigation — all routes', async ({ page }) => {
+  test('@live sidebar navigation — all routes', async ({ page }) => {
     await test.step('Login', async () => {
       await loginAsDefault(page);
     });
@@ -724,7 +724,7 @@ test.describe('Comprehensive E2E UI Traversal', () => {
 
   // ── 3. Admin Tab Crawler ───────────────────────────────────────────────────
 
-  test('Admin page — all tabs and content validation', async ({ page }) => {
+  test('@live Admin page — all tabs and content validation', async ({ page }) => {
     await test.step('Login and navigate to Admin', async () => {
       await loginAsDefault(page);
       await page.goto(`${UI_URL}/admin`, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS }).catch(() => {});
@@ -827,7 +827,7 @@ test.describe('Comprehensive E2E UI Traversal', () => {
 
   // ── 4. Widget Context Menu Crawler ─────────────────────────────────────────
 
-  test('Dashboard widgets — gear icon & context menu interactions', async ({ page }) => {
+  test('@live Dashboard widgets — gear icon & context menu interactions', async ({ page }) => {
     await test.step('Login and navigate to Dashboard', async () => {
       await loginAsDefault(page);
       await page.goto(`${UI_URL}/`, { waitUntil: 'networkidle', timeout: NAV_TIMEOUT_MS }).catch(() => {});
@@ -932,7 +932,7 @@ test.describe('Comprehensive E2E UI Traversal', () => {
 
   // ── 5. Dropdown & Modal Crawler ────────────────────────────────────────────
 
-  test('dropdown and modal interactions across pages', async ({ page }) => {
+  test('@live dropdown and modal interactions across pages', async ({ page }) => {
     await test.step('Login', async () => {
       await loginAsDefault(page);
     });
@@ -1015,7 +1015,7 @@ test.describe('Comprehensive E2E UI Traversal', () => {
 
   // ── 6. API Health Checks ───────────────────────────────────────────────────
 
-  test('API endpoints return healthy responses', async ({ request }) => {
+  test('@live API endpoints return healthy responses', async ({ request }) => {
     await test.step('Health endpoint', async () => {
       const resp = await request.get(`${UI_URL}/health/ready`);
       expect(resp.status()).toBe(200);

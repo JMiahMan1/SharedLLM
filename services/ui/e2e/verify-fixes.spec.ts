@@ -45,7 +45,7 @@ async function openBrowseAllMedia(page: Page) {
   return searchInput;
 }
 
-test('MA (Songs) search returns results', async ({ page }) => {
+test('@live MA (Songs) search returns results', async ({ page }) => {
   await loginAsDefault(page);
   const searchInput = await openBrowseAllMedia(page);
 
@@ -70,7 +70,7 @@ test('MA (Songs) search returns results', async ({ page }) => {
   expect(count).toBeGreaterThan(0);
 });
 
-test('Audiobookshelf (Audiobooks) search returns results', async ({ page }) => {
+test('@live Audiobookshelf (Audiobooks) search returns results', async ({ page }) => {
   await loginAsDefault(page);
   await page.goto(`${UI_URL}/media`);
   await page.waitForLoadState('domcontentloaded');
@@ -127,7 +127,7 @@ test('Audiobookshelf (Audiobooks) search returns results', async ({ page }) => {
   expect(count).toBeGreaterThan(0);
 });
 
-test('Web Player playlist Next/Previous uses maPlayer (sendspin client/command)', async ({ page }) => {
+test('@live Web Player playlist Next/Previous uses maPlayer (sendspin client/command)', async ({ page }) => {
   test.setTimeout(90000);
   const logs: string[] = [];
   page.on('console', (msg) => logs.push(msg.text()));

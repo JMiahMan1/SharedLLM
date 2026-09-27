@@ -68,8 +68,8 @@ test.beforeEach(async ({ page, request }) => {
   await gotoCalendar(page);
 });
 
-test.describe('Calendar backend calls', () => {
-  test('GET events + GET settings both fire and return 200', async ({ page }) => {
+test.describe('@live Calendar backend calls', () => {
+  test('@live GET events + GET settings both fire and return 200', async ({ page }) => {
     const events = await waitForCall('/api/communication/calendar/events');
     const settings = await waitForCall('/api/calendar/settings');
     expect(events.status).toBe(200);
@@ -80,8 +80,8 @@ test.describe('Calendar backend calls', () => {
   });
 });
 
-test.describe('Calendar view switcher', () => {
-  test('Agenda / Day / Week / Month all render', async ({ page }) => {
+test.describe('@live Calendar view switcher', () => {
+  test('@live Agenda / Day / Week / Month all render', async ({ page }) => {
     await agendaLoaded(page);
 
     await page.getByRole('button', { name: 'Day', exact: true }).click();
@@ -100,8 +100,8 @@ test.describe('Calendar view switcher', () => {
   });
 });
 
-test.describe('Calendar date navigation', () => {
-  test('Today + prev/next shift the focused month', async ({ page }) => {
+test.describe('@live Calendar date navigation', () => {
+  test('@live Today + prev/next shift the focused month', async ({ page }) => {
     const label = page.locator('div.os-display', { hasText: /^\w+ \d{4}$/ }).first();
     const before = await label.innerText();
 
@@ -121,8 +121,8 @@ test.describe('Calendar date navigation', () => {
   });
 });
 
-test.describe('Calendar source chips', () => {
-  test('clicking All and per-integration chips filters without error', async ({ page }) => {
+test.describe('@live Calendar source chips', () => {
+  test('@live clicking All and per-integration chips filters without error', async ({ page }) => {
     await page.getByRole('button', { name: 'All', exact: true }).click();
     await page.waitForTimeout(300);
     const chips = page.getByRole('button').filter({ has: page.locator('span.rounded-full') })
@@ -142,8 +142,8 @@ test.describe('Calendar source chips', () => {
   });
 });
 
-test.describe('Calendar Sources panel', () => {
-  test('panel opens, shows connected sources, and disable toggles fire PUT settings', async ({ page }) => {
+test.describe('@live Calendar Sources panel', () => {
+  test('@live panel opens, shows connected sources, and disable toggles fire PUT settings', async ({ page }) => {
     await page.getByRole('button', { name: /sources/i }).click();
     await expect(page.getByText('Connected Sources')).toBeVisible();
     await expect(page.getByText('iCal Subscriptions')).toBeVisible();
@@ -170,8 +170,8 @@ test.describe('Calendar Sources panel', () => {
   });
 });
 
-test.describe('Calendar add event', () => {
-  test('valid add fires POST and toasts success', async ({ page }) => {
+test.describe('@live Calendar add event', () => {
+  test('@live valid add fires POST and toasts success', async ({ page }) => {
     const title = `E2E ${Date.now()}`;
     await page.getByPlaceholder('Event title').fill(title);
     await page.getByPlaceholder(/When/i).fill('tomorrow at 3pm');
@@ -183,7 +183,7 @@ test.describe('Calendar add event', () => {
     await expect(page.getByText('Event added')).toBeVisible({ timeout: 15_000 });
   });
 
-  test('empty add shows validation toast', async ({ page }) => {
+  test('@live empty add shows validation toast', async ({ page }) => {
     const addBtn = page.getByPlaceholder('Event title').locator('xpath=..').getByRole('button', { name: 'Add', exact: true });
     await addBtn.click();
     await expect(page.getByText(/Enter a title and time/i)).toBeVisible({ timeout: 8_000 });

@@ -40,7 +40,7 @@ async function login(page: Page) {
   await page.waitForTimeout(2000);
 }
 
-test('Energy Insights widget shows enrolled telemetry', async ({ page }) => {
+test('@live Energy Insights widget shows enrolled telemetry', async ({ page }) => {
   test.skip(!LOGIN_USER || !LOGIN_PASS, 'no creds');
   test.setTimeout(90000);
   const errs: string[] = [];

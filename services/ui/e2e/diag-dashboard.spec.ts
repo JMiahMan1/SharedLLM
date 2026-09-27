@@ -55,9 +55,9 @@ async function loginAsDefault(page: Page): Promise<void> {
   await page.waitForTimeout(2000);
 }
 
-test.describe('Dashboard Deep Diagnostic', () => {
+test.describe('@live Dashboard Deep Diagnostic', () => {
   test.skip(!LOGIN_USER || !LOGIN_PASS, 'Credentials not found in .env.test');
-  test('capture dashboard rendering state', async ({ page }) => {
+  test('@live capture dashboard rendering state', async ({ page }) => {
     test.setTimeout(90000);
     await loginAsDefault(page);
     await page.goto(`${UI_URL}/`, { waitUntil: 'networkidle', timeout: 15000 }).catch(() => {});

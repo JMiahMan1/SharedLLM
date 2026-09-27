@@ -22,7 +22,7 @@ function groupRows(page: Page) {
   return page.getByRole('button').filter({ hasText: /lesson/i });
 }
 
-test.describe('Knowledge Hub - Raven Lessons (grouped compact list)', () => {
+test.describe('@live Knowledge Hub - Raven Lessons (grouped compact list)', () => {
   test.beforeEach(async ({ page }) => {
     await loginAsDefault(page);
     await page.goto(`${UI_URL}/knowledge`);
@@ -33,7 +33,7 @@ test.describe('Knowledge Hub - Raven Lessons (grouped compact list)', () => {
     ).toBeVisible({ timeout: 45000 });
   });
 
-  test('Raven Lessons header and compact description render', async ({ page }) => {
+  test('@live Raven Lessons header and compact description render', async ({ page }) => {
     await expect(
       page.getByRole('heading', { name: /raven lessons/i }),
     ).toBeVisible();
@@ -45,7 +45,7 @@ test.describe('Knowledge Hub - Raven Lessons (grouped compact list)', () => {
     ).toBeVisible();
   });
 
-  test('lessons are grouped by topic into collapsible rows', async ({ page }) => {
+  test('@live lessons are grouped by topic into collapsible rows', async ({ page }) => {
     const rows = groupRows(page);
     await expect(rows.first()).toBeVisible({ timeout: 45000 });
     const count = await rows.count();
@@ -55,7 +55,7 @@ test.describe('Knowledge Hub - Raven Lessons (grouped compact list)', () => {
     expect(count).toBeLessThan(9);
   });
 
-  test('group row shows lesson count and reuse badge', async ({ page }) => {
+  test('@live group row shows lesson count and reuse badge', async ({ page }) => {
     const first = groupRows(page).first();
     await expect(first).toBeVisible({ timeout: 45000 });
     // The row filter already matches /lesson/i, proving the count text
@@ -65,7 +65,7 @@ test.describe('Knowledge Hub - Raven Lessons (grouped compact list)', () => {
     ).toBeVisible({ timeout: 10000 });
   });
 
-  test('lesson content is collapsed by default and expands on click', async ({ page }) => {
+  test('@live lesson content is collapsed by default and expands on click', async ({ page }) => {
     const first = groupRows(page).first();
     await first.waitFor({ state: 'visible', timeout: 45000 });
 
@@ -88,7 +88,7 @@ test.describe('Knowledge Hub - Raven Lessons (grouped compact list)', () => {
     ).toHaveCount(0).catch(async () => {});
   });
 
-  test('expanded lesson shows honest applied-vs-retrieved accounting', async ({ page }) => {
+  test('@live expanded lesson shows honest applied-vs-retrieved accounting', async ({ page }) => {
     const first = groupRows(page).first();
     await first.waitFor({ state: 'visible', timeout: 45000 });
     await first.click();
@@ -103,7 +103,7 @@ test.describe('Knowledge Hub - Raven Lessons (grouped compact list)', () => {
     await expect(page.getByText(/applied/i).first()).toBeVisible({ timeout: 30000 });
   });
 
-  test('sort toggle switches between Newest and Most Reused', async ({ page }) => {
+  test('@live sort toggle switches between Newest and Most Reused', async ({ page }) => {
     const sortBtn = page.getByRole('button', { name: /newest|most reused/i });
     await expect(sortBtn).toBeVisible({ timeout: 45000 });
     const labelBefore = (await sortBtn.textContent())?.toLowerCase() || '';

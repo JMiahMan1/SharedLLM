@@ -24,20 +24,20 @@ async function loginAsAdmin(page: import('@playwright/test').Page) {
   await page.waitForTimeout(2000);
 }
 
-test.describe('Raven live frontend checks', () => {
+test.describe('@live Raven live frontend checks', () => {
   test.beforeEach(async ({ page }) => {
     test.skip(!process.env.LIVE_E2E, 'LIVE_E2E not set — skipping live UI checks');
     await loginAsAdmin(page);
   });
 
-  test('Workspaces page loads and exposes repository management', async ({ page }) => {
+  test('@live Workspaces page loads and exposes repository management', async ({ page }) => {
     await page.goto(`${UI_URL}/workspaces`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
     await expect(page.getByRole('button', { name: /add repository/i })).toBeVisible({ timeout: 10000 });
   });
 
-  test('Integrations page shows GitHub / Nextcloud integration surface', async ({ page }) => {
+  test('@live Integrations page shows GitHub / Nextcloud integration surface', async ({ page }) => {
     await page.goto(`${UI_URL}/admin/integrations`);
     await page.waitForLoadState('domcontentloaded');
     await page.waitForTimeout(3000);
