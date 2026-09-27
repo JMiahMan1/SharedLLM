@@ -82,6 +82,7 @@ import type {
   TripsResponse,
   TripRouteResponse,
   TripLocationsResponse,
+  LocationSuggestionsResponse,
   Workout,
   WorkoutsResponse,
   StepsResponse,
@@ -126,6 +127,8 @@ export type {
   Trip,
   TripLocation,
   TripUpdatePayload,
+  TripLocationSuggestion,
+  LocationSuggestionsResponse,
   TripsResponse,
   TripRouteResponse,
   Workout,
@@ -772,6 +775,11 @@ export const api = {
     return resp.data;
   },
 
+  async getLocationSuggestions(lat: number, lon: number): Promise<LocationSuggestionsResponse> {
+    const resp = await apiClient.get('/api/geo/locations/suggestions', { params: { lat, lon } });
+    return resp.data;
+  },
+
   async getTripRoute(tripId: string): Promise<TripRouteResponse> {
     const resp = await apiClient.get(`/api/geo/trips/${encodeURIComponent(tripId)}/route`);
     return resp.data;
@@ -1096,7 +1104,7 @@ export const api = {
     return resp.data;
   },
 
-  async openTalkConversation(payload: { token?: string; target_user?: string }): Promise<ExecutionResponse> {
+  async openTalkConversation(payload: { token?: string; target_user?: string; as_user?: 'admin' }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/conversations/open', payload);
     return resp.data;
   },
@@ -1106,7 +1114,7 @@ export const api = {
     return resp.data;
   },
 
-  async sendTalkMessage(payload: { token: string; message: string }): Promise<ExecutionResponse> {
+  async sendTalkMessage(payload: { token: string; message: string; as_user?: 'admin' }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/messages', payload);
     return resp.data;
   },
@@ -1120,6 +1128,7 @@ export const api = {
     token: string;
     question: string;
     options: string[];
+    as_user?: 'admin';
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/polls/create', payload);
     return resp.data;
@@ -1129,6 +1138,7 @@ export const api = {
     token: string;
     poll_id: number;
     option_id: number;
+    as_user?: 'admin';
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/polls/vote', payload);
     return resp.data;
@@ -1145,6 +1155,7 @@ export const api = {
     token: string;
     message_id: number;
     reaction: string;
+    as_user?: 'admin';
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/react', payload);
     return resp.data;
@@ -1156,6 +1167,7 @@ export const api = {
     mime_type?: string;
     file_name?: string;
     caption?: string;
+    as_user?: 'admin';
   }): Promise<ExecutionResponse> {
     const resp = await apiClient.post('/api/communication/talk/voice', payload);
     return resp.data;
