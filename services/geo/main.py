@@ -973,6 +973,10 @@ class TripUpdatePayload(BaseModel):
     cost_per_gallon: float | None = None
     activity_type: str | None = None
     notes: str | None = None
+    start_name: str | None = None
+    end_name: str | None = None
+    start_address: str | None = None
+    end_address: str | None = None
 
 
 class TripSharePayload(BaseModel):
@@ -1251,6 +1255,195 @@ async def _resolve_place_name_cached(lat: float, lon: float) -> str:
     return name
 
 
+async def _resolve_place_details(lat: float, lon: float) -> dict:
+    """Resolve coordinates to {name, address, source}.
+
+    Name follows the same priority as _resolve_place_name (HA zone → POI →
+    street → coords). Address is the full Nominatim display_name; HA zones
+    carry no street address so it stays None there.
+    """
+    address = None
+    zone_name = await _closest_ha_zone(lat, lon)
+    if zone_name:
+        return {"name": zone_name, "address": None, "source": "ha_zone"}
+
+    data = await _nominatim_reverse_details(lat, lon)
+    if data:
+        display = data.get("display_name")
+        if display and isinstance(display, str):
+            address = display.strip()
+        poi = _poi_label_from_nominatim(data)
+        if poi:
+            try:
+                plat = float(data.get("lat")) if data.get("lat") is not None else None
+                plon = float(data.get("lon")) if data.get("lon") is not None else None
+                if plat is not None and plon is not None:
+                    if _haversine_distance(lat, lon, plat, plon) > _PLACE_RADIUS_M:
+                        poi = None
+            except (TypeError, ValueError):
+                pass
+        if poi:
+            return {"name": poi, "address": address, "source": "osm"}
+        street = _street_label_from_nominatim(data)
+        if street:
+            return {"name": street, "address": address, "source": "osm"}
+
+    return {
+        "name": f"Location ({round(lat, 3)}, {round(lon, 3)})",
+        "address": address,
+        "source": "coords",
+    }
+
+
+_PLACE_DETAILS_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+async def _resolve_place_details_cached(lat: float, lon: float) -> dict:
+    key = _place_cache_key(lat, lon)
+    hit = _PLACE_DETAILS_CACHE.get(key)
+    now = time.time()
+    if hit and (now - hit[0]) < _PLACE_NAME_CACHE_TTL:
+        return dict(hit[1])
+    details = await _resolve_place_details(lat, lon)
+    if len(_PLACE_DETAILS_CACHE) > 512:
+        _PLACE_DETAILS_CACHE.clear()
+    _PLACE_DETAILS_CACHE[key] = (now, details)
+    return dict(details)
+
+
+_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+_NEARBY_POI_RADIUS_M = 250
+_NEARBY_POI_LIMIT = 8
+
+
+async def _overpass_nearby_pois(lat: float, lon: float) -> list[dict]:
+    """Named businesses / places within ~250 m via OSM Overpass.
+
+    Returns best-first [{name, kind, latitude, longitude, distance_m}] or []
+    when Overpass is unreachable — callers fall back to the geocoded address.
+    """
+    query = (
+        f"[out:json][timeout:6];"
+        f"(nwr(around:{_NEARBY_POI_RADIUS_M},{lat},{lon})[name][amenity];"
+        f"nwr(around:{_NEARBY_POI_RADIUS_M},{lat},{lon})[name][shop];"
+        f"nwr(around:{_NEARBY_POI_RADIUS_M},{lat},{lon})[name][leisure];"
+        f"nwr(around:{_NEARBY_POI_RADIUS_M},{lat},{lon})[name][tourism];"
+        f");out center 24;"
+    )
+    try:
+        client = get_client_insecure()
+        async with client.post(
+            _OVERPASS_URL,
+            data={"data": query},
+            headers={"User-Agent": "SharedLLM/1.0"},
+            timeout=aiohttp.ClientTimeout(total=8),
+        ) as resp:
+            payload = await resp.json(content_type=None)
+    except Exception as e:
+        log.warning(f"[Geo] Overpass nearby lookup failed for ({lat}, {lon}): {e}")
+        return []
+
+    elements = payload.get("elements") if isinstance(payload, dict) else None
+    if not isinstance(elements, list):
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+    for el in elements:
+        if not isinstance(el, dict):
+            continue
+        tags = el.get("tags") or {}
+        name = tags.get("name")
+        if not isinstance(name, str):
+            continue
+        name = name.strip()
+        # Skip bare OSM type slugs ("fast_food", "convenience_store").
+        if not name or re.fullmatch(r"[a-z]+(_[a-z]+)*", name):
+            continue
+        key = name.lower()
+        if key in seen:
+            continue
+        plat = el.get("lat")
+        plon = el.get("lon")
+        if plat is None or plon is None:
+            center = el.get("center") or {}
+            plat = center.get("lat")
+            plon = center.get("lon")
+        try:
+            plat = float(plat)
+            plon = float(plon)
+        except (TypeError, ValueError):
+            continue
+        kind = (
+            tags.get("amenity") or tags.get("shop") or tags.get("leisure") or tags.get("tourism") or "place"
+        )
+        seen.add(key)
+        results.append({
+            "name": name,
+            "kind": str(kind),
+            "latitude": round(plat, 6),
+            "longitude": round(plon, 6),
+            "distance_m": round(_haversine_distance(lat, lon, plat, plon)),
+        })
+
+    results.sort(key=lambda c: c["distance_m"])
+    return results[:_NEARBY_POI_LIMIT]
+
+
+async def _ha_zones_containing(lat: float, lon: float) -> list[dict]:
+    """HA zones whose configured radius contains the point, nearest first."""
+    try:
+        states = await _ha_get_states()
+    except Exception:
+        return []
+    out: list[dict] = []
+    for z in _filter_entities(states, "zone"):
+        attrs = z.get("attributes", {})
+        zlat = attrs.get("latitude")
+        zlon = attrs.get("longitude")
+        if zlat is None or zlon is None:
+            continue
+        dist = _haversine_distance(lat, lon, float(zlat), float(zlon))
+        if dist <= float(attrs.get("radius", 100)):
+            out.append({
+                "name": attrs.get("friendly_name") or z.get("entity_id", "").replace("zone.", "").title(),
+                "kind": "zone",
+                "latitude": float(zlat),
+                "longitude": float(zlon),
+                "distance_m": round(dist),
+            })
+    out.sort(key=lambda c: c["distance_m"])
+    return out
+
+
+def _address_candidates_from_nominatim(data: dict | None) -> list[dict]:
+    """Street / neighbourhood / city labels from a Nominatim reverse result."""
+    if not isinstance(data, dict):
+        return []
+    addr = data.get("address") or {}
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(label, kind: str) -> None:
+        if not isinstance(label, str):
+            return
+        label = label.strip()
+        key = label.lower()
+        if not label or key in seen:
+            return
+        seen.add(key)
+        out.append({"name": label, "kind": kind})
+
+    road = addr.get("road")
+    if road:
+        house = addr.get("house_number")
+        add(f"{house} {road}".strip() if house else road, "address")
+    add(addr.get("neighbourhood"), "area")
+    add(addr.get("suburb"), "area")
+    add(addr.get("city") or addr.get("town") or addr.get("village"), "area")
+    return out
+
+
 async def _finalize_active_trip(r, clean_user: str, trip: dict, now_ts: float) -> dict | None:
     """Persist an active trip as completed. Returns the completed trip, or None
     if it was too short to keep (< 0.2 mi). Always clears the active-trip key
@@ -1350,7 +1543,10 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
     if spd_mph >= 10.0:
         if not active_raw:
             veh = await get_user_default_vehicle(clean_user)
-            start_name = await _resolve_zone_name(lat, lon)
+            start_details = await _resolve_place_details_cached(lat, lon)
+            start_loc = {"name": start_details["name"], "latitude": lat, "longitude": lon}
+            if start_details.get("address"):
+                start_loc["address"] = start_details["address"]
             trip_id = f"trip_{clean_user}_{int(ts)}"
             active_trip = {
                 "id": trip_id,
@@ -1360,8 +1556,8 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
                 "last_moving_time": ts,
                 "last_lat": lat,
                 "last_lon": lon,
-                "start_location": {"name": start_name, "latitude": lat, "longitude": lon},
-                "end_location": {"name": start_name, "latitude": lat, "longitude": lon},
+                "start_location": dict(start_loc),
+                "end_location": dict(start_loc),
                 "distance_miles": 0.0,
                 "top_speed_mph": round(spd_mph, 1),
                 "activity_type": "driving",
@@ -1394,14 +1590,23 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
                     )
                     need_name = moved >= 50.0 or _is_street_only_name(prev_end.get("name"))
                 if need_name:
-                    end_name = await _resolve_zone_name(lat, lon)
-                    trip["end_location"] = {"name": end_name, "latitude": lat, "longitude": lon}
-                else:
+                    end_details = await _resolve_place_details_cached(lat, lon)
                     trip["end_location"] = {
+                        "name": end_details["name"],
+                        "latitude": lat,
+                        "longitude": lon,
+                    }
+                    if end_details.get("address"):
+                        trip["end_location"]["address"] = end_details["address"]
+                else:
+                    end_loc = {
                         "name": prev_end.get("name"),
                         "latitude": lat,
                         "longitude": lon,
                     }
+                    if prev_end.get("address"):
+                        end_loc["address"] = prev_end["address"]
+                    trip["end_location"] = end_loc
                 await r.set(active_key, json.dumps(trip), ex=86400)
             except Exception as e:
                 log.warning(f"[Geo] Error updating active trip: {e}")
@@ -1530,9 +1735,11 @@ async def update_trip(
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
-    """Update a trip's vehicle, MPG, or fuel price. Only the trip's owner may update it.
+    """Update a trip's vehicle, MPG, fuel price, notes, or place names.
 
-    Locations and mileage are immutable GPS telemetry and cannot be edited.
+    Only the trip's owner may update it. Coordinates are immutable GPS
+    telemetry, but the display name and stored address for the start/end
+    points can be edited (e.g. pick "Fry's" instead of the street address).
     """
     if not _verify_internal_secret(x_internal_secret, query_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -1573,6 +1780,35 @@ async def update_trip(
         trip["activity_type"] = update.activity_type
     if update.notes is not None:
         trip["notes"] = update.notes
+
+    # Editable place names / addresses — coordinates stay untouched.
+    for field, key in (("start_name", "start_location"), ("end_name", "end_location")):
+        value = getattr(update, field)
+        if value is None:
+            continue
+        value = value.strip()
+        if not value or len(value) > 120:
+            raise HTTPException(status_code=422, detail=f"{field} must be 1-120 characters")
+        loc = trip.get(key)
+        if not isinstance(loc, dict):
+            loc = {}
+        loc["name"] = value
+        trip[key] = loc
+    for field, key in (("start_address", "start_location"), ("end_address", "end_location")):
+        value = getattr(update, field)
+        if value is None:
+            continue
+        value = value.strip()
+        if len(value) > 240:
+            raise HTTPException(status_code=422, detail=f"{field} must be 240 characters or fewer")
+        loc = trip.get(key)
+        if not isinstance(loc, dict):
+            loc = {}
+        if value:
+            loc["address"] = value
+        else:
+            loc.pop("address", None)
+        trip[key] = loc
 
     # Recompute fuel used and cost — only meaningful for driving
     dist = float(trip.get("distance_miles", 0.0))
@@ -1759,6 +1995,60 @@ async def _resolve_place_if_better(stored: str | None, lat: float, lon: float) -
             return stored, "stored"
         return resolved, "coords"
     return resolved, "osm"
+
+
+@app.get("/locations/suggestions")
+async def get_location_suggestions(
+    lat: float | None = Query(None),
+    lon: float | None = Query(None),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Nearby name suggestions for a coordinate (used when editing trips).
+
+    Returns the current resolved place plus candidate labels: HA zones the
+    point falls inside, named businesses/POIs within ~250 m (OSM Overpass),
+    and address components (street / area / city). Coordinates themselves are
+    GPS telemetry and are never edited by clients — only the display name and
+    stored address change.
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if lat is None or lon is None:
+        raise HTTPException(status_code=422, detail="lat and lon are required")
+    if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+        raise HTTPException(status_code=422, detail="lat/lon out of range")
+
+    current = await _resolve_place_details_cached(lat, lon)
+    data = await _nominatim_reverse_details(lat, lon)
+
+    candidates: list[dict] = []
+    seen: set[str] = set()
+
+    def add(cand: dict) -> None:
+        name = cand.get("name")
+        if not isinstance(name, str):
+            return
+        key = name.strip().lower()
+        if not key or key in seen:
+            return
+        seen.add(key)
+        candidates.append(cand)
+
+    for zone in await _ha_zones_containing(lat, lon):
+        add(zone)
+    for poi in await _overpass_nearby_pois(lat, lon):
+        add(poi)
+    for label in _address_candidates_from_nominatim(data):
+        add(label)
+
+    return {
+        "status": "ok",
+        "latitude": lat,
+        "longitude": lon,
+        "current": current,
+        "candidates": candidates,
+    }
 
 
 @app.get("/trips/{trip_id}/locations")

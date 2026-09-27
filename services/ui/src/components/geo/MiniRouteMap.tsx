@@ -65,7 +65,7 @@ export default function MiniRouteMap({ points, height = 140, className = "", onC
   return (
     <div
       ref={containerRef}
-      className={`${className}${clickable ? " cursor-pointer hover:opacity-90 transition-opacity" : ""}`}
+      className={`relative z-0 ${className}${clickable ? " cursor-pointer hover:opacity-90 transition-opacity" : ""}`}
       style={{ height, width: "100%" }}
       onClick={clickable ? onClick : undefined}
       onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); } } : undefined}

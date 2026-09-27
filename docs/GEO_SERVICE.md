@@ -57,6 +57,15 @@ it is already deployed and bridges to Jarvis Execution 8003.
 | GET | `/zones` | GeoJSON FeatureCollection of HA `zone` entities (geofences) |
 | GET | `/people/{entity_id}/history?samples=` | trip points from HA Recorder (minimal_response) for replay |
 | POST | `/people/{entity_id}/see` | push location via HA `device_tracker.see` (guarded by `X-Internal-Secret`) |
+| GET | `/locations/suggestions?lat=&lon=` | nearby named places for trip pin edits: current resolved name/address/source + candidates (HA zones containing the point, Overpass POIs within 250 m — shops/restaurants/leisure/tourism, Nominatim address components) |
+
+Trip start/end locations store `{name, latitude, longitude, address?}`. The
+coordinates and distance are locked GPS telemetry, but `PATCH /trips/{trip_id}`
+accepts `start_name` / `end_name` / `start_address` / `end_address` so a user can
+rename a pin (or pick a nearby store/restaurant/zone from `/locations/suggestions`)
+while the street address stays stored. User-picked names win on read — the
+resolver only re-derives street-level names and returns stored names unchanged
+with `source: "stored"`.
 
 Live push to the Android client is done by the client subscribing to HA
 websocket `subscribe_entities` directly; a `/stream` proxy can be added here

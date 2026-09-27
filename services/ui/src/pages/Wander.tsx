@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { api } from '../services/api';
-import type { Trip, TripLocation, TripUpdatePayload, TripLocationsResponse, RoutePoint } from '../types/api';
+import type { Trip, TripLocation, TripUpdatePayload, TripLocationsResponse, TripLocationSuggestion, RoutePoint } from '../types/api';
 import Modal from '../components/ui/Modal';
 import LiveFamilyMap from '../components/geo/LiveFamilyMap';
 import TripLocationsMap from '../components/geo/TripLocationsMap';
@@ -28,6 +28,8 @@ import {
   Lock,
   Zap,
   Activity,
+  MapPinned,
+  Loader2,
 } from 'lucide-react';
 
 interface VehicleOption {
@@ -49,6 +51,13 @@ function relativeTime(iso: string): string {
   if (hours < 24) return hours === 1 ? '1 hr ago' : `${hours} hrs ago`;
   const days = Math.round(hours / 24);
   return days === 1 ? 'yesterday' : `${days} days ago`;
+}
+
+/** " · 120 m" style distance suffix for nearby-place chips. */
+function formatDistanceMeters(m?: number): string {
+  if (typeof m !== 'number' || !Number.isFinite(m)) return '';
+  if (m >= 1609.34) return ` · ${(m / 1609.34).toFixed(1)} mi`;
+  return ` · ${Math.round(m)} m`;
 }
 
 interface FamilyMemberStatus {
@@ -115,6 +124,14 @@ const Wander = () => {
   const [editActivityType, setEditActivityType] = useState<string>('driving');
   const [editNotes, setEditNotes] = useState<string>('');
   const [isSavingTrip, setIsSavingTrip] = useState(false);
+  // Editable place names + nearby-place picker
+  const [editStartName, setEditStartName] = useState<string>('');
+  const [editEndName, setEditEndName] = useState<string>('');
+  const [editStartAddress, setEditStartAddress] = useState<string>('');
+  const [editEndAddress, setEditEndAddress] = useState<string>('');
+  const [suggestTarget, setSuggestTarget] = useState<'start' | 'end' | null>(null);
+  const [suggestLoading, setSuggestLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<TripLocationSuggestion[]>([]);
 
   // Share Trip Modal state
   const [sharingTrip, setSharingTrip] = useState<Trip | null>(null);
@@ -369,6 +386,58 @@ const Wander = () => {
     setEditCostPerGallon(trip.cost_per_gallon || 3.65);
     setEditActivityType(trip.activity_type || 'driving');
     setEditNotes(trip.notes || '');
+    setEditStartName(trip.start_location?.name || '');
+    setEditEndName(trip.end_location?.name || '');
+    setEditStartAddress(trip.start_location?.address || '');
+    setEditEndAddress(trip.end_location?.address || '');
+    setSuggestTarget(null);
+    setSuggestions([]);
+  };
+
+  // Coordinates for a trip endpoint (tolerates legacy lat/lon spelling)
+  const tripLocationCoords = (loc?: TripLocation): { lat: number; lon: number } | null => {
+    const lat = loc?.latitude ?? loc?.lat;
+    const lon = loc?.longitude ?? loc?.lon;
+    return typeof lat === 'number' && typeof lon === 'number' ? { lat, lon } : null;
+  };
+
+  // Load nearby store/restaurant/zone names for a trip endpoint
+  const handleOpenSuggestions = async (target: 'start' | 'end') => {
+    if (!editingTrip) return;
+    const loc = target === 'start' ? editingTrip.start_location : editingTrip.end_location;
+    const coords = tripLocationCoords(loc);
+    if (!coords) {
+      toast.error('No GPS coordinates recorded for this location.');
+      return;
+    }
+    trigger('light');
+    setSuggestTarget(target);
+    setSuggestLoading(true);
+    setSuggestions([]);
+    try {
+      const res = await api.getLocationSuggestions(coords.lat, coords.lon);
+      setSuggestions(res.candidates || []);
+    } catch {
+      toast.error('Could not load nearby places.');
+      setSuggestions([]);
+    } finally {
+      setSuggestLoading(false);
+    }
+  };
+
+  // Apply a picked place: display name changes, address stays stored
+  const applySuggestion = (s: TripLocationSuggestion) => {
+    if (!suggestTarget) return;
+    trigger('light');
+    if (suggestTarget === 'start') {
+      setEditStartName(s.name);
+      if (s.address) setEditStartAddress(s.address);
+    } else {
+      setEditEndName(s.name);
+      if (s.address) setEditEndAddress(s.address);
+    }
+    setSuggestTarget(null);
+    setSuggestions([]);
   };
 
   // When user selects a vehicle from the dropdown, populate fields
@@ -397,6 +466,10 @@ const Wander = () => {
         cost_per_gallon: Number(editCostPerGallon) >= 0 ? Number(editCostPerGallon) : 3.65,
         activity_type: editActivityType,
         notes: editNotes.trim() || undefined,
+        start_name: editStartName.trim() || undefined,
+        end_name: editEndName.trim() || undefined,
+        ...(editStartAddress.trim() ? { start_address: editStartAddress.trim() } : {}),
+        ...(editEndAddress.trim() ? { end_address: editEndAddress.trim() } : {}),
       };
 
       const updated = await api.updateTrip(editingTrip.id, payload);
@@ -965,11 +1038,77 @@ const Wander = () => {
             <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-200 space-y-1">
               <div className="flex items-center gap-2 font-semibold">
                 <Lock size={14} className="text-purple-400" />
-                <span>GPS Telemetry Locked</span>
+                <span>GPS Verified Trip</span>
               </div>
               <p className="text-slate-400">
-                Route locations and distance ({editingTrip.distance_miles} miles) are verified telemetry and cannot be altered. You can change the activity, vehicle, MPG, and fuel price to recalculate fuel usage and costs.
+                Distance ({editingTrip.distance_miles} miles) comes from recorded GPS and can&apos;t be altered. Place names can be edited, or picked from nearby stores, restaurants, and zones — the street address stays stored with the coordinates.
               </p>
+            </div>
+
+            {/* Route Locations: editable display names + nearby place picker */}
+            <div className="space-y-4">
+              <label className="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                <MapPinned size={14} className="text-purple-400" />
+                Route Locations
+              </label>
+              {[
+                { target: 'start' as const, label: 'Starting Place', value: editStartName, setValue: setEditStartName, address: editStartAddress },
+                { target: 'end' as const, label: 'Destination', value: editEndName, setValue: setEditEndName, address: editEndAddress },
+              ].map((field) => (
+                <div key={field.target} className="space-y-1.5 p-3 rounded-xl bg-slate-900/50 border border-white/5">
+                  <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">{field.label}</p>
+                  <input
+                    type="text"
+                    value={field.value}
+                    onChange={(e) => field.setValue(e.target.value)}
+                    placeholder={field.target === 'start' ? 'Starting place' : 'Destination'}
+                    aria-label={field.label}
+                    className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-purple-500"
+                  />
+                  {field.address && (
+                    <p className="text-[11px] text-slate-500 truncate" title={field.address}>
+                      {field.address}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void handleOpenSuggestions(field.target)}
+                    disabled={suggestLoading && suggestTarget === field.target}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-slate-800/80 border border-white/10 text-slate-200 hover:border-purple-500/50 hover:text-white transition-colors disabled:opacity-50"
+                  >
+                    {suggestLoading && suggestTarget === field.target ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <MapPinned size={13} />
+                    )}
+                    Pick nearby place
+                  </button>
+                  {suggestTarget === field.target && (
+                    <div className="flex flex-wrap gap-2 pt-1" data-testid={`suggestions-${field.target}`}>
+                      {suggestLoading && <p className="text-[11px] text-slate-500">Looking around…</p>}
+                      {!suggestLoading && suggestions.length === 0 && (
+                        <p className="text-[11px] text-slate-500">
+                          No named places nearby — keep the address or type a name.
+                        </p>
+                      )}
+                      {suggestions.map((s) => (
+                        <button
+                          key={`${s.kind}-${s.name}`}
+                          type="button"
+                          onClick={() => applySuggestion(s)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs bg-slate-800/80 border border-white/10 text-slate-200 hover:border-purple-500/50 hover:text-white transition-colors max-w-full"
+                        >
+                          <span className="truncate">{s.name}</span>
+                          <span className="text-slate-500 shrink-0">
+                            · {s.kind}
+                            {formatDistanceMeters(s.distance_m)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
 
             {/* Activity Type */}

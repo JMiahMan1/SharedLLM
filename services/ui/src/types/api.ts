@@ -783,6 +783,7 @@ export interface NetworkScanResponse {
  */
 export interface TripLocation {
   name?: string;
+  address?: string;
   latitude?: number;
   longitude?: number;
   lat?: number;
@@ -801,6 +802,21 @@ export interface TripLocationsResponse {
   trip_id: string;
   start: ResolvedTripLocation;
   end: ResolvedTripLocation;
+}
+
+export interface TripLocationSuggestion {
+  name: string;
+  kind: string;
+  distance_m?: number;
+  address?: string;
+}
+
+export interface LocationSuggestionsResponse {
+  status: string;
+  latitude: number;
+  longitude: number;
+  current: { name: string; address?: string | null; source: string };
+  candidates: TripLocationSuggestion[];
 }
 
 export interface Trip {
@@ -841,6 +857,10 @@ export interface TripUpdatePayload {
   cost_per_gallon?: number;
   activity_type?: string;
   notes?: string;
+  start_name?: string;
+  end_name?: string;
+  start_address?: string;
+  end_address?: string;
 }
 
 export interface TripsResponse {
