@@ -9943,22 +9943,26 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
     parsed = urlparse(path)
     is_full = bool(parsed.scheme and parsed.netloc)
 
-    # BUG-05: full URLs are fetched server-side as-is (see the MA branch
-    # below), so only allow hosts the user has actually configured
-    # (mass_url / audiobookshelf_url / ha_url). Anything else is SSRF.
+    # BUG-05: full URLs are fetched server-side (the MA branch below can fetch
+    # them as-is), so only hosts the user has actually configured may be
+    # contacted (SSRF). An unknown host is never fetched: instead of failing
+    # outright, the request is REBASED onto the configured base for the service
+    # implied by the path — the original host is discarded — which keeps
+    # mismatched-host MA/HA covers working (owner directive: never break player
+    # functionality). 400 remains only when that service is not configured.
+    rebase = False
     if is_full:
         allowed_hosts = set()
         for _key in ("mass_url", "abs_url", "audiobookshelf_url", "ha_url"):
             _h = (urlparse(creds.get(_key, "") or "").hostname or "").lower()
             if _h:
                 allowed_hosts.add(_h)
-        if (parsed.hostname or "").lower() not in allowed_hosts:
-            raise HTTPException(status_code=400, detail="Image host not allowed")
+        rebase = (parsed.hostname or "").lower() not in allowed_hosts
 
     # Infer which upstream hosts the image.
     svc = (service or "").lower()
     if not svc:
-        if is_full:
+        if is_full and not rebase:
             host = (parsed.hostname or "").lower()
             mhost = (urlparse(creds.get("mass_url", "") or "").hostname or "").lower()
             ahost = (urlparse(creds.get("abs_url", "") or "").hostname or "").lower()
@@ -9973,6 +9977,10 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
             p = parsed.path
             if "/api/items/" in p:
                 svc = "abs"
+            elif "/api/image/serve" in p:
+                # HA entity_picture (…/api/image/serve/…), even on an
+                # external host such as Nabu Casa — fetch from configured HA.
+                svc = "ha"
             elif p.startswith("/imageproxy") or "/api/image" in p:
                 svc = "ma"
             else:
@@ -9984,7 +9992,8 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
     if svc == "ma":
         # MA imageproxy is publicly reachable (no auth) and may embed an internal IP the
         # browser cannot reach, so fetch the supplied URL server-side as-is when possible.
-        if is_full and (parsed.path.startswith("/imageproxy") or "/api/image" in parsed.path):
+        # Only for configured hosts; unknown hosts are rebased onto mass_url below.
+        if is_full and not rebase and (parsed.path.startswith("/imageproxy") or "/api/image" in parsed.path):
             target_url = path
         else:
             base = creds.get("mass_url") or ""

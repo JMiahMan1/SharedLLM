@@ -45,3 +45,23 @@ service.
   which cut any uninterrupted stream at ~5 minutes. Now
   `total=None, connect=15.0`. Behavior verified by code inspection; a live
   long-stream check against production is still (VERIFY).
+
+## Imageproxy host gate → rebase (P1-T5 rework, 2026-09-27)
+
+- The original BUG-05 fix (hard 400 for any full URL whose host ∉ configured
+  mass/abs/ha hosts) was verified against production and **broke real cover
+  art**: `path=http://192.168.2.20:8095/imageproxy/...` (the actual MA
+  image host, probed live → 400) plus Nabu Casa / docker-alias HA
+  `entity_picture` URLs. Deviation approved under the owner directive
+  "ensure your changes DO NOT break ANY Player functionality" (2026-09-27),
+  same precedent as the BUG-08 `.part` decision; plan row amended.
+- **New behavior (verified by `gateway/tests/test_imageproxy_ssrf.py`):**
+  configured host → fetched as-is; unknown host → rebased onto the
+  configured base for the path-implied service (metadata IP never contacted);
+  `/api/image/serve/...` now implies `ha` (was `ma` — HA entity_picture on
+  Nabu Casa-style hosts); 400 only when the implied service has no base.
+- Probed live: test-key identity has MA configured (reaches MA via
+  `/api/media/detail`) yet its host matches none of the earlier allowlist
+  candidates — mismatched-host rebasing is therefore required, not
+  theoretical. **Still (VERIFY):** re-probe the real user's cover URL after
+  deploy.
