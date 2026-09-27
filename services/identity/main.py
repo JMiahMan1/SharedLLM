@@ -31,6 +31,7 @@ from services.identity.models import (
     GlobalSetting,
     RavenMission,
     User,
+    UserActivitySharing,
     UserCalendarSetting,
     UserThemeSetting,
     UserWidget,
@@ -188,6 +189,16 @@ def _ensure_schema_upgrades() -> None:
         with engine.connect() as conn:
             conn.execute(text("""
                 CREATE TABLE userthemesetting (
+                    username VARCHAR PRIMARY KEY,
+                    data VARCHAR NOT NULL DEFAULT '{}'
+                )
+            """))
+            conn.commit()
+
+    if not _table_exists("useractivitysharing"):
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE useractivitysharing (
                     username VARCHAR PRIMARY KEY,
                     data VARCHAR NOT NULL DEFAULT '{}'
                 )
@@ -1852,6 +1863,101 @@ def update_user_theme(
         "status": "SUCCESS",
         "theme_id": data.get("theme_id") or "aurora",
         "packs": data.get("packs") or [],
+    }
+
+
+# ─── Per-user opt-in activity sharing (private by default) ───────────────────
+
+ACTIVITY_SHARE_SCOPES = {"totals", "workouts", "achievements"}
+ACTIVITY_AUDIENCES = {"circle", "users"}
+
+
+def _activity_sharing_data(row: UserActivitySharing | None) -> dict:
+    raw = json.loads(row.data) if row and row.data else {}
+    share = raw.get("share")
+    if not isinstance(share, list):
+        share = ["totals"]
+    user_ids = raw.get("user_ids")
+    if not isinstance(user_ids, list):
+        user_ids = []
+    return {
+        "enabled": bool(raw.get("enabled", False)),
+        "audience": raw.get("audience") if raw.get("audience") in ACTIVITY_AUDIENCES else "circle",
+        "user_ids": [str(u).strip() for u in user_ids if str(u).strip()],
+        "share": [s for s in share if s in ACTIVITY_SHARE_SCOPES],
+    }
+
+
+@app.get("/api/users/me/activity-sharing")
+def get_activity_sharing(
+    session: Session = Depends(get_session),
+    user: User = Depends(require_api_key),
+):
+    """Current user's activity-sharing preference (defaults to off)."""
+    row = session.exec(
+        select(UserActivitySharing).where(UserActivitySharing.username == user.username)
+    ).first()
+    return {"status": "SUCCESS", **_activity_sharing_data(row)}
+
+
+@app.put("/api/users/me/activity-sharing")
+def update_activity_sharing(
+    body: dict,
+    session: Session = Depends(get_session),
+    user: User = Depends(require_api_key),
+):
+    """Opt in/out of sharing activity. Nothing is visible to others until enabled."""
+    row = session.exec(
+        select(UserActivitySharing).where(UserActivitySharing.username == user.username)
+    ).first()
+    if row is None:
+        row = UserActivitySharing(username=user.username, data="{}")
+        session.add(row)
+
+    data = _activity_sharing_data(row)
+    for key, value in (body or {}).items():
+        if key == "enabled":
+            if not isinstance(value, bool):
+                raise HTTPException(status_code=422, detail="enabled must be a boolean")
+            data["enabled"] = value
+        elif key == "audience":
+            if value not in ACTIVITY_AUDIENCES:
+                raise HTTPException(status_code=422, detail='audience must be "circle" or "users"')
+            data["audience"] = value
+        elif key == "user_ids":
+            if not isinstance(value, list) or not all(isinstance(u, str) and u.strip() for u in value):
+                raise HTTPException(status_code=422, detail="user_ids must be a list of usernames")
+            data["user_ids"] = [u.strip() for u in value]
+        elif key == "share":
+            if (
+                not isinstance(value, list)
+                or not value
+                or any(s not in ACTIVITY_SHARE_SCOPES for s in value)
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"share must be a non-empty subset of {sorted(ACTIVITY_SHARE_SCOPES)}",
+                )
+            data["share"] = sorted(set(value))
+    row.data = json.dumps(data)
+    session.add(row)
+    session.commit()
+    return {"status": "SUCCESS", **data}
+
+
+@app.get("/api/internal/activity-sharing")
+def internal_activity_sharing(
+    session: Session = Depends(get_session),
+    _: None = Depends(require_internal),
+):
+    """Internal: every stored activity-sharing preference (for the geo feed).
+
+    A user with no row has never opted in and is simply absent.
+    """
+    rows = session.exec(select(UserActivitySharing)).all()
+    return {
+        "status": "SUCCESS",
+        "users": [{"username": r.username, **_activity_sharing_data(r)} for r in rows],
     }
 
 

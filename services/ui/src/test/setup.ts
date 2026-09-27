@@ -223,6 +223,13 @@ const userThemePref = {  theme_id: 'aurora',
   packs: [] as unknown[],
 };
 
+export const userActivitySharing = {
+  enabled: false,
+  audience: 'circle' as 'circle' | 'users',
+  user_ids: [] as string[],
+  share: ['totals'],
+};
+
 let telemetrySchedules: Array<{
   id: string;
   user: string;
@@ -293,6 +300,21 @@ export const server = setupServer(  http.post('/api/auth/login', async () => Htt
     return HttpResponse.json({
       status: 'SUCCESS',
       ...userThemePref,
+    });
+  }),
+  http.get('/api/users/me/activity-sharing', () => HttpResponse.json({
+    status: 'SUCCESS',
+    ...userActivitySharing,
+  })),
+  http.put('/api/users/me/activity-sharing', async ({ request }) => {
+    const body = await request.json() as Partial<typeof userActivitySharing>;
+    if (body.enabled !== undefined) userActivitySharing.enabled = body.enabled;
+    if (body.audience !== undefined) userActivitySharing.audience = body.audience;
+    if (body.user_ids !== undefined) userActivitySharing.user_ids = body.user_ids;
+    if (body.share !== undefined) userActivitySharing.share = body.share;
+    return HttpResponse.json({
+      status: 'SUCCESS',
+      ...userActivitySharing,
     });
   }),
   http.get('/api/telemetry/schedules', () => HttpResponse.json({ status: 'SUCCESS', jobs: telemetrySchedules })),

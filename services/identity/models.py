@@ -166,6 +166,20 @@ class UserThemeSetting(SQLModel, table=True):  # type: ignore
     username: str = Field(primary_key=True, foreign_key="user.username")
     data: str = Field(default="{}")
 
+
+class UserActivitySharing(SQLModel, table=True):  # type: ignore
+    """Per-user opt-in activity sharing (steps/workouts/achievements).
+
+    Private by default. data JSON keys:
+      - enabled: bool (default False)
+      - audience: "circle" (everyone) or "users" (explicit list)
+      - user_ids: list[str] usernames allowed when audience == "users"
+      - share: list[str] subset of {totals, workouts, achievements}
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    data: str = Field(default="{}")
+
 DEFAULT_GLOBAL_SETTINGS = [
     {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
     {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},
