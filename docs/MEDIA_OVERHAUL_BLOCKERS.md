@@ -19,9 +19,13 @@ Recorded per P0-T1. Baseline outputs are in `.tmp/baseline-*.log`.
    - After the fix: `npx tsc -b` exits 0; vitest 171 passed; lint 0 errors;
      `vite build` succeeds.
 
-2. **`npx playwright test --list` — fails with 0 tests listed** because
-   `services/ui/e2e/web-player-sendspin.spec.ts:17` throws at module load when
-   env vars are missing. This is BUG-73, fixed in P0-T2 (part of this plan).
+2. **`npx playwright test --list` — failed with 0 tests listed** because
+   `services/ui/e2e/web-player-sendspin.spec.ts:17` (and 6 other specs) threw
+   at module load when env vars were missing. **FIXED** (user directive "Fix
+   ALL Errors"): replaced top-level throws with `test.skip(!env, …)` inside
+   `describe`, lazy-loaded credentials, tagged the web-player specs `@live`.
+   `npx playwright test --list` now exits 0 with 720 tests in 33 files.
+   (Supersedes the P0-T2 approach; P0-T3's project split still pending.)
 
 3. **Gates that PASS at baseline** (must stay green):
    - `npm run lint` — 0 errors, 10 warnings (pre-existing warnings only).
