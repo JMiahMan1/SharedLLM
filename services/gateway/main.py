@@ -9965,7 +9965,7 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
         if is_full and not rebase:
             host = (parsed.hostname or "").lower()
             mhost = (urlparse(creds.get("mass_url", "") or "").hostname or "").lower()
-            ahost = (urlparse(creds.get("abs_url", "") or "").hostname or "").lower()
+            ahost = (urlparse(creds.get("audiobookshelf_url", "") or "").hostname or "").lower()
             hhost = (urlparse(creds.get("ha_url", "") or "").hostname or "").lower()
             if mhost and host == mhost:
                 svc = "ma"
@@ -10007,8 +10007,8 @@ async def media_imageproxy(path: str, request: Request, service: str = ""):
             if token:
                 headers["Authorization"] = f"Bearer {token}"
     elif svc == "abs":
-        base = creds.get("abs_url") or ""
-        token = creds.get("abs_api_key") or ""
+        base = creds.get("audiobookshelf_url") or ""
+        token = creds.get("audiobookshelf_api_key") or ""
         if not base:
             raise HTTPException(status_code=400, detail="Audiobookshelf not configured")
         rel = parsed.path if is_full else (path if path.startswith("/") else "/" + path)
