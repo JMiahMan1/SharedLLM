@@ -20,7 +20,7 @@ from services.shared.ma_player import is_music_assistant_player
 
 
 @asynccontextmanager
-async def _mass_ha_session(ha_url: str, verify: bool = False):
+async def _mass_ha_session(ha_url: str, verify: bool = True):
     """Yield the pooled session WITHOUT closing it (reused across calls)."""
     yield await get_session(host_of(ha_url), verify=verify)
 

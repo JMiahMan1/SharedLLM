@@ -19,7 +19,7 @@ from services.shared.media_token import DEVICE_TOKEN_TTL_SECONDS, sign
 
 
 @asynccontextmanager
-async def _abs_session(abs_url: str, verify: bool = False):
+async def _abs_session(abs_url: str, verify: bool = True):
     """Yield the pooled ABS session WITHOUT closing it (reused across calls)."""
     yield await get_session(host_of(abs_url), verify=verify)
 
