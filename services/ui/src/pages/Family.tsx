@@ -9,6 +9,7 @@ import {
   UtensilsCrossed,
 } from 'lucide-react';
 import ChatPanel from '../components/chat/ChatPanel';
+import ArcadeGames from '../components/family/ArcadeGames';
 
 type Tab = 'chat' | 'games' | 'create';
 
@@ -70,10 +71,11 @@ export default function Family() {
 
       {tab === 'games' && (
         <div className="space-y-4" data-testid="family-games">
+          <ArcadeGames />
           <div className="glass-panel p-4 rounded-2xl border border-white/5">
-            <h2 className="text-sm font-semibold text-slate-200">Games</h2>
+            <h2 className="text-sm font-semibold text-slate-200">Family games — in the works</h2>
             <p className="text-xs text-slate-400 mt-1">
-              Games run in the same conversation as chat, so scores and cheers land where the family already is.
+              These run in the same conversation as chat, so scores and cheers land where the family already is.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">

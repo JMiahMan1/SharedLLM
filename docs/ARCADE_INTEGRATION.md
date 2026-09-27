@@ -25,6 +25,28 @@ Source: `../alpaca/arcade/app.py` (Flask, port 5001, container
 So ratings, scores and play routes already exist — we integrate, we do not
 re-implement.
 
+## Shipped: game shelf in the Family hub (slice 1)
+
+- **Gateway** `GET /api/arcade/games` proxies the arcade JSON endpoint and
+  returns `{success, arcade_available, play_base, featured_source, featured,
+  games, count}`. It always answers 200, so an unreachable arcade renders an
+  honest offline card instead of an error.
+- **Featured order**: admin curation wins (`PUT /api/arcade/featured` stores a
+  JSON slug array in the Identity `GlobalSetting` `arcade_featured_games`;
+  Identity enforces admin rights on the forwarded credentials), else
+  highest-rated games with ≥1 vote, else best benchmark score.
+- **UI**: `services/ui/src/components/family/ArcadeGames.tsx` on the Family →
+  Games tab — featured shelf, full list, star ratings, plays, play links.
+- **Config**: `ALPACA_ARCADE_URL` (default `http://jeremiah-home-desktop.local:5001`)
+  and `ALPACA_ARCADE_PUBLIC_URL` (default = the internal URL) decide fetch and
+  play targets.
+- **Tests**: `services/gateway/tests/test_arcade_proxy.py`,
+  `services/ui/src/components/family/ArcadeGames.test.tsx`.
+- **Still open**: in-app play. Games are opened on the arcade host directly for
+  now; embedding the play screen needs the gateway to also own the game pages'
+  own `/api/games/...` calls (score bridge), which is the phase-2 transport
+  question below.
+
 ## Design
 
 1. **Admin curation (explicit request).** New admin-only setting

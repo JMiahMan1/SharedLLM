@@ -162,6 +162,29 @@ export interface ExecutionResponse {
   } | null;
 }
 
+export interface ArcadeGameCard {
+  slug: string;
+  title: string;
+  category?: string;
+  plays?: number;
+  top_score?: number | null;
+  score_count?: number;
+  benchmark_score?: number | null;
+  rating?: { count: number; average: number };
+  featured?: boolean;
+}
+
+export interface ArcadeGamesResponse {
+  success: boolean;
+  arcade_available: boolean;
+  error?: string;
+  play_base: string;
+  featured_source: 'admin' | 'rating' | 'benchmark' | 'none';
+  featured: ArcadeGameCard[];
+  games: ArcadeGameCard[];
+  count: number;
+}
+
 export interface TimerRecord {
   id: string;
   type: string;

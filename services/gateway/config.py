@@ -33,6 +33,11 @@ TELEMETRY_SVC = os.getenv("TELEMETRY_SVC_URL", "http://telemetry:11438").rstrip(
 # alpaca Stable Diffusion image backend (exposed to external clients as a tool).
 ALPACA_SD_URL = os.getenv("ALPACA_SD_URL", "http://jeremiah-home-desktop.local:8081")
 
+# alpaca Arcade game shelf (JSON cards + playable HTML games, port 5001).
+ALPACA_ARCADE_URL = os.getenv("ALPACA_ARCADE_URL", "http://jeremiah-home-desktop.local:5001").rstrip("/")
+# URL the browser uses to open a game (defaults to the internal URL for LAN installs).
+ALPACA_ARCADE_PUBLIC_URL = os.getenv("ALPACA_ARCADE_PUBLIC_URL", ALPACA_ARCADE_URL).rstrip("/")
+
 # Use runtime-resolved values (or fallback to env vars)
 IDENTITY_SVC = IDENTITY_SVC_URL
 EXECUTION_SVC = EXECUTION_SVC_URL
