@@ -1,6 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#E60F1724" />
-    <corners android:radius="16dp" />
-    <stroke android:width="1dp" android:color="#33475569" />
-</shape>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true">
+        <inset
+            android:insetLeft="3dp"
+            android:insetTop="3dp"
+            android:insetRight="3dp"
+            android:insetBottom="3dp">
+            <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+                <solid android:color="#F22B3D5C" />
+                <corners android:radius="16dp" />
+                <stroke android:width="1dp" android:color="#804A5F85" />
+            </shape>
+        </inset>
+    </item>
+    <item>
+        <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+            <solid android:color="#E60F1724" />
+            <corners android:radius="16dp" />
+            <stroke android:width="1dp" android:color="#33475569" />
+        </shape>
+    </item>
+</selector>

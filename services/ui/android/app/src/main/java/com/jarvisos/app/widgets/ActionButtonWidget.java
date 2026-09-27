@@ -49,6 +49,9 @@ public class ActionButtonWidget extends AppWidgetProvider {
         views.setImageViewResource(R.id.action_icon, iconRes);
         // Transparent by default; optional per-widget chip color from configure
         views.setInt(R.id.action_icon, "setBackgroundColor", cfg.iconBg);
+        // "None" means a fully transparent tile; a chip colour keeps the dark card.
+        views.setInt(R.id.action_root, "setBackgroundResource",
+            cfg.iconBg == 0 ? R.drawable.widget_transparent_bg : R.drawable.widget_card_bg);
         views.setTextViewText(R.id.action_label, DeviceButtonWidget.truncate(
             cfg.displayLabel(null), 18));
         views.setTextViewText(R.id.action_state, "");
