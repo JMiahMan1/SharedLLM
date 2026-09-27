@@ -311,14 +311,11 @@ def seed_from_env(session: Session, force: bool = False) -> int:
         "MAIL_URL": "mail_url",
         "MAIL_ADMIN_URL": "mail_admin_url",
         "MAIL_ADMIN": "mail_admin",
-        "MAIL_USER": "mail_user",
     }
     # Secrets are seeded into the same settings table but must never be logged
     # or echoed back, so they are listed separately from the plain values above.
     env_to_global_secret = {
         "MAIL_PASS": "mail_pass",
-        # Per-user mailbox check (IMAP/SMTP) — distinct from the house admin.
-        "MAIL_USER_PASS": "mail_user_pass",
     }
     for env_key, global_key in {**env_to_global, **env_to_global_secret}.items():
         env_val = os.getenv(env_key)
@@ -332,6 +329,33 @@ def seed_from_env(session: Session, force: bool = False) -> int:
                 existing.value = env_val
                 session.add(existing)
                 log.info(f"[seed] Backfilled empty {global_key} from {env_key}: {shown}")
+
+    # ── Per-user mailbox credentials ───────────────────────────────────────────
+    # MAIL_USER / MAIL_USER_PASS belong to one person, not the whole system, so
+    # they are applied to the Jarvis user with that username. A value that
+    # matches nobody is reported rather than parked in global settings, where
+    # it would silently become a shared account.
+    mail_user = os.getenv("MAIL_USER")
+    mail_pass = os.getenv("MAIL_USER_PASS")
+    if mail_user:
+        owner = session.exec(select(User).where(User.username == mail_user.lower())).first()
+        if owner is None:
+            log.warning(
+                "[seed] MAIL_USER=%s matches no Jarvis user — not seeded. "
+                "Create that user first, or set mail credentials on their account.",
+                mail_user,
+            )
+        else:
+            changed = False
+            if not owner.mail_user:
+                owner.mail_user = mail_user
+                changed = True
+            if mail_pass and not owner.mail_pass_enc:
+                owner.mail_pass_enc = encrypt(mail_pass)
+                changed = True
+            if changed:
+                session.add(owner)
+                log.info("[seed] Applied MAIL_USER credentials to Jarvis user '%s'", owner.username)
 
     # ── Seed network-aware service URLs (BRIDGE_*/HOST_*) ──────────────────────
     # Two explicit sets so the same variable is never reused for different

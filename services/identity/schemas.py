@@ -42,7 +42,9 @@ class ResolvedCredentials(BaseModel):
     audiobookshelf_pass: str | None = None  # decrypted at resolution time
     audiobookshelf_api_key: str | None = None
     mailcow_url: str | None = None
-    mailcow_api_key: str | None = None  # decrypted at resolution time
+    mailcow_api_key: str | None = None
+    mail_user: str | None = None
+    mail_pass: str | None = None  # decrypted at resolution time
     mass_url: str | None = None
     mass_token: str | None = None           # decrypted at resolution time
     git_url: str | None = None
@@ -83,6 +85,8 @@ class UserCreate(BaseModel):
     audiobookshelf_api_key: str | None = None
     mailcow_url: str | None = None
     mailcow_api_key: str | None = None
+    mail_user: str | None = None
+    mail_pass: str | None = None
     mass_url: str | None = None
     mass_token: str | None = None
     huggingface_token: str | None = None
@@ -113,6 +117,8 @@ class UserUpdate(BaseModel):
     audiobookshelf_api_key: str | None = None
     mailcow_url: str | None = None
     mailcow_api_key: str | None = None
+    mail_user: str | None = None
+    mail_pass: str | None = None
     mass_url: str | None = None
     mass_token: str | None = None
     git_url: str | None = None
@@ -147,6 +153,8 @@ class UserRead(BaseModel):
     audiobookshelf_api_key: str | None = None
     mailcow_url: str | None = None
     mailcow_api_key: str | None = None
+    mail_user: str | None = None
+    mail_pass: str | None = None
     mass_url: str | None = None
     git_url: str | None = None
     git_user: str | None = None

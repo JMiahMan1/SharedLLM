@@ -139,6 +139,8 @@ def _ensure_schema_upgrades() -> None:
         _add_column("user", "audiobookshelf_api_key_enc", "ALTER TABLE user ADD COLUMN audiobookshelf_api_key_enc VARCHAR")
         _add_column("user", "mailcow_url", "ALTER TABLE user ADD COLUMN mailcow_url VARCHAR")
         _add_column("user", "mailcow_api_key_enc", "ALTER TABLE user ADD COLUMN mailcow_api_key_enc VARCHAR")
+        _add_column("user", "mail_user", "ALTER TABLE user ADD COLUMN mail_user VARCHAR")
+        _add_column("user", "mail_pass_enc", "ALTER TABLE user ADD COLUMN mail_pass_enc VARCHAR")
         _add_column("user", "mass_url", "ALTER TABLE user ADD COLUMN mass_url VARCHAR")
         _add_column("user", "mass_token_enc", "ALTER TABLE user ADD COLUMN mass_token_enc VARCHAR")
         _add_column("user", "skylight_enabled", "ALTER TABLE user ADD COLUMN skylight_enabled BOOLEAN NOT NULL DEFAULT 1")
@@ -533,6 +535,8 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
         audiobookshelf_api_key=decrypt(user.audiobookshelf_api_key_enc) if user.audiobookshelf_api_key_enc else None,
         mailcow_url=user.mailcow_url,
         mailcow_api_key=decrypt(user.mailcow_api_key_enc) if user.mailcow_api_key_enc else None,
+        mail_user=user.mail_user,
+        mail_pass=decrypt(user.mail_pass_enc) if user.mail_pass_enc else None,
         mass_url=use_admin_mass_url,
         mass_token=use_admin_mass_token,
         git_url=user.git_url,
@@ -689,6 +693,7 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
         "audiobookshelf_pass": "audiobookshelf_pass_enc",
         "audiobookshelf_api_key": "audiobookshelf_api_key_enc",
         "mailcow_api_key": "mailcow_api_key_enc",
+        "mail_pass": "mail_pass_enc",
         "mass_token": "mass_token_enc",
         "git_token": "git_token_enc",
         "huggingface_token": "huggingface_token_enc",
@@ -790,6 +795,8 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
         audiobookshelf_api_key_enc=encrypt(_coerce(body.audiobookshelf_api_key)) if _coerce(body.audiobookshelf_api_key) else None,
         mailcow_url=_coerce(body.mailcow_url),
         mailcow_api_key_enc=encrypt(_coerce(body.mailcow_api_key)) if _coerce(body.mailcow_api_key) else None,
+        mail_user=_coerce(body.mail_user),
+        mail_pass_enc=encrypt(_coerce(body.mail_pass)) if _coerce(body.mail_pass) else None,
         mass_url=_coerce(body.mass_url),
         mass_token_enc=encrypt(_coerce(body.mass_token)) if _coerce(body.mass_token) else None,
         huggingface_token_enc=encrypt(_coerce(body.huggingface_token)) if _coerce(body.huggingface_token) else None,
@@ -1080,6 +1087,8 @@ SEEDABLE_CREDENTIALS = {
     "audiobookshelf_api_key": ("audiobookshelf_api_key_enc", "audiobookshelf_api_key"),
     "mailcow_url": ("mailcow_url", "mailcow_url"),
     "mailcow_api_key": ("mailcow_api_key_enc", "mailcow_api_key"),
+    "mail_user": ("mail_user", "mail_user"),
+    "mail_pass": ("mail_pass_enc", "mail_pass"),
     "mass_token": ("mass_token_enc", "mass_token"),
     "git_token": ("git_token_enc", "git_token"),
     "huggingface_token": ("huggingface_token_enc", "huggingface_token"),

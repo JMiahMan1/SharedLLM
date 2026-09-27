@@ -365,6 +365,9 @@ const Admin = () => {
         username: user.username,
         full_name: user.display_name || user.username,
         is_admin: false,
+        // A Mailcow mailbox's local part is the mail login, and discovery
+        // already matched it to the right person.
+        ...(user.source.toLowerCase().includes('mailcow') ? { mail_user: user.username } : {}),
       });
       return user;
     },
