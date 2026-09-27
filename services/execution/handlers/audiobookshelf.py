@@ -179,7 +179,7 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
     else:
         return ExecutionResult(status="FAILURE", message="book_id or query is required.", service="audiobookshelf")
 
-    stream_url = await abs_client.get_stream_url(abs_url, abs_key, book_id)
+    stream_url = await abs_client.get_stream_url(book_id, ctx_user(req))
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
     ha_url = ctx_ha_url(req)
     ha_token = ctx_ha_token(req)
@@ -243,7 +243,7 @@ async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
 
     title = latest.get("media", {}).get("metadata", {}).get("title", "Unknown")
 
-    stream_url = await abs_client.get_stream_url(abs_url, abs_key, item_id)
+    stream_url = await abs_client.get_stream_url(item_id, ctx_user(req))
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
     ha_url = ctx_ha_url(req)
     ha_token = ctx_ha_token(req)
@@ -545,3 +545,7 @@ def ctx_ha_url(req) -> str:
 
 def ctx_ha_token(req) -> str:
     return getattr(req.user_context, "ha_token", "")
+
+
+def ctx_user(req) -> str:
+    return getattr(req.user_context, "user", "") or ""
