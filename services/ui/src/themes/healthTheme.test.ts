@@ -4,6 +4,7 @@ import {
   createThemePackage,
   createThemePack,
   parseThemePackJson,
+  resolveScheme,
   serializeThemePack,
   validateThemePack,
 } from './types';
@@ -121,9 +122,18 @@ describe('ThemeRegistry', () => {
     const bloom = registry.getTheme('bloom')!;
     // same structure as the Jarvis default, but floral palette + motif
     expect(bloom.tokens.bg).toBe(registry.getTheme('aurora')!.tokens.bg);
-    expect(bloom.tokens.motif).toBe('petal');
+    // floral motif drives the theme-generated SVG overlay (see motifPattern)
+    expect(bloom.tokens.motif).toBe('bloom');
     // Jarvis-wide: no surface restriction
     expect(bloom.scope ?? 'both').toBe('both');
+  });
+
+  it('declares an explicit light/dark scheme per theme', () => {
+    expect(registry.getTheme('clean-athletic')!.tokens.scheme).toBe('light');
+    expect(registry.getTheme('aurora')!.tokens.scheme).toBe('dark');
+    // a light bg without an explicit token is still derived as light
+    expect(resolveScheme({ bg: '#F6F6F4' })).toBe('light');
+    expect(resolveScheme({ bg: '#0F172A' })).toBe('dark');
   });
 
   it('resolves default theme and falls back when missing', () => {

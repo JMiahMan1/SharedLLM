@@ -30,6 +30,7 @@
         "ring3": "#4ADE80",
         "glow": null,
         "radius": 16,
+        "scheme": "dark",
         "fontFamily": null,
         "numberFontFamily": null,
         "showCornerCut": false,
@@ -59,10 +60,11 @@
         "ring3": "#F3B6CE",
         "glow": "#C4A7F3",
         "radius": 20,
+        "scheme": "dark",
         "fontFamily": null,
         "numberFontFamily": null,
         "showCornerCut": false,
-        "motif": "petal"
+        "motif": "bloom"
       }
     },
     {
@@ -88,6 +90,7 @@
         "ring3": "#C9A227",
         "glow": null,
         "radius": 4,
+        "scheme": "dark",
         "fontFamily": null,
         "numberFontFamily": null,
         "showCornerCut": false,
@@ -117,6 +120,7 @@
         "ring3": "#00E5FF",
         "glow": "#00E5FF",
         "radius": 6,
+        "scheme": "dark",
         "fontFamily": "Rajdhani, ui-sans-serif, system-ui, sans-serif",
         "numberFontFamily": "Orbitron, Rajdhani, ui-monospace, monospace",
         "showCornerCut": true,
@@ -146,6 +150,7 @@
         "ring3": "#FF2E97",
         "glow": "#FF2E97",
         "radius": 14,
+        "scheme": "dark",
         "fontFamily": null,
         "numberFontFamily": null,
         "showCornerCut": false,
@@ -175,6 +180,7 @@
         "ring3": "#FF5A1F",
         "glow": null,
         "radius": 22,
+        "scheme": "light",
         "fontFamily": null,
         "numberFontFamily": null,
         "showCornerCut": false,
