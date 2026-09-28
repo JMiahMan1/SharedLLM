@@ -373,7 +373,8 @@ async def test_stream_ma_targets_browser_player_without_muting(monkeypatch, clie
         patch('services.gateway.main.aiohttp.ClientSession', return_value=session),
         patch('services.gateway.main.MAWebSocketClient', return_value=mock_ma_client),
     ):
-        resp = client.get("/api/media/stream/music-assistant?uri=library://track/123")
+        # BUG-19: starting playback is a POST; GET is bytes-only now.
+        resp = client.post("/api/media/stream/music-assistant?uri=library://track/123")
 
         # Verify the response is successful (streaming audio)
         assert resp.status_code == 200, (

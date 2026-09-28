@@ -9729,142 +9729,318 @@ async def ma_jsonrpc_proxy(websocket: WebSocket):
             await websocket.close(code=1011, reason=str(e))
 
 
-@app.get("/api/media/stream/music-assistant")
-async def stream_music_assistant(uri: str, request: Request, player_id: str | None = None):
-    """Proxy Music Assistant audio stream to the browser.
+# ── Music Assistant stream: start (POST) vs bytes (GET) — BUG-19 ──────────────
+# Every GET (including Range/seek) used to re-run player_queues/play_media
+# (option=replace), restarting the queue on each byte-range request. Starting
+# playback is now an explicit POST; GET only ever fetches bytes — from the
+# session cache, or by resolving an ALREADY-RUNNING queue (never play_media).
 
-    This endpoint is browser-local only. The browser's Sendspin player owns the
-    queue, and the gateway proxies the resolved MA bytes back to that same browser.
-    We never mutate a random physical player to make the stream work.
+_MA_STREAM_CACHE: dict[str, tuple[float, str]] = {}
+_MA_STREAM_CACHE_TTL = 7200.0  # seconds
 
-    Flow:
-    1. Resolve credentials (mass_url, mass_token) from the Jarvis identity service.
-    2. Select the browser Sendspin player, either by explicit `player_id` or by
-       matching the connected browser player name.
-    3. Connect to MA WebSocket and authenticate.
-    4. Send player_queues/play_media to populate the browser queue.
-    5. Resolve the queue's stream URL from MA state.
-    6. Disconnect MA and proxy the bytes through the Gateway.
-    """
-    log.info(f"[stream/ma] Received stream request for uri='{uri}'")
+
+def _ma_stream_cache_get(user: str, uri: str) -> str | None:
+    key = f"{user}|{uri}"
+    entry = _MA_STREAM_CACHE.get(key)
+    if not entry:
+        return None
+    expires_at, url = entry
+    if time.time() > expires_at:
+        _MA_STREAM_CACHE.pop(key, None)
+        return None
+    return url
+
+
+def _ma_stream_cache_put(user: str, uri: str, url: str) -> None:
+    now = time.time()
+    for key in [k for k, (exp, _) in _MA_STREAM_CACHE.items() if now > exp]:
+        _MA_STREAM_CACHE.pop(key, None)
+    _MA_STREAM_CACHE[f"{user}|{uri}"] = (now + _MA_STREAM_CACHE_TTL, url)
+
+
+async def _ma_stream_creds(request: Request) -> dict[str, Any]:
+    """Resolve identity for the MA stream endpoints (401 on auth failure)."""
     try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException as e:
+        log.error(f"[stream/ma] Identity resolution failed: {e.detail}")
+        raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
+    except Exception as e:
+        log.error(f"[stream/ma] Identity resolution crashed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error resolving identity") from e
+    if not isinstance(creds, dict):
+        creds = creds.model_dump() if hasattr(creds, "model_dump") else (creds.dict() if hasattr(creds, "dict") else dict(creds))
+    log.info(f"[stream/ma] Identity resolved for user: {creds.get('user')}")
+    return creds
+
+
+async def _ma_discover_and_select(creds: dict[str, Any], player_id: str | None) -> tuple[str, str, str]:
+    """Discover MA players and select the browser Sendspin player.
+
+    Returns ``(mass_url, mass_token, target_player_id)``.
+    Raises 400 (MA not configured), 404 (no players), 409 (no browser player).
+    """
+    mass_url = creds.get("mass_url") or ""
+    mass_token = creds.get("mass_token") or ""
+
+    log.info(f"[stream/ma] Credentials: url={redact_url(mass_url)}, has_token={bool(mass_token)}")
+
+    if not mass_url:
+        log.error("[stream/ma] Music Assistant URL not configured")
+        raise HTTPException(status_code=400, detail="Music Assistant not configured")
+
+    ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
+    ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
+
+    auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
+
+    # ── Step 1: Discover MA players via JSON-RPC ──────────────────────────
+    log.info("[stream/ma] Discovering MA players...")
+    available_players: dict[str, dict[str, Any]] = {}
+    async with shared_http_client() as client:
         try:
-            creds = await _resolve_identity_from_request(request)
-            if not isinstance(creds, dict):
-                creds = creds.model_dump() if hasattr(creds, "model_dump") else (creds.dict() if hasattr(creds, "dict") else dict(creds))
-            log.info(f"[stream/ma] Identity resolved for user: {creds.get('user')}")
-        except HTTPException as e:
-            log.error(f"[stream/ma] Identity resolution failed: {e.detail}")
-            raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
-        except Exception as e:
-            log.error(f"[stream/ma] Identity resolution crashed: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Internal server error resolving identity") from e
+            resp = await client.post(
+                ma_api,
+                json={"message_id": uuid.uuid4().hex, "command": "players/all"},
+                headers={"Content-Type": "application/json", **auth_headers},
+                timeout=aiohttp.ClientTimeout(total=15.0),
+            )
+            log.info(f"[stream/ma] players/all status: {resp.status}")
+            if resp.status == 200:
+                data = await resp.json()
+                # MA v2 REST returns data directly (not wrapped in {"result": ...})
+                if isinstance(data, list):
+                    for p in data:
+                        if isinstance(p, dict):
+                            pid = p.get("player_id") or p.get("id")
+                            if pid:
+                                player_info: dict[str, Any] = {
+                                    "player_id": str(pid),
+                                    "name": str(p.get("name") or p.get("friendly_name") or ""),
+                                    "state": str(p.get("state") or p.get("available_state") or "").lower(),
+                                }
+                                device_info = p.get("device_info")
+                                if isinstance(device_info, dict):
+                                    player_info["device_info"] = device_info
+                                available_players[str(pid)] = player_info
+                                player_name = player_info["name"] or "unnamed"
+                                log.info(f"[stream/ma] Found player: {pid} ({player_name})")
+        except Exception as err:
+            log.warning(f"[stream/ma] players/all call failed: {err}", exc_info=True)
 
-        mass_url = creds.get("mass_url") or ""
-        mass_token = creds.get("mass_token") or ""
+    if not available_players:
+        log.error("[stream/ma] No MA players found")
+        raise HTTPException(status_code=404, detail="No Music Assistant players available")
 
-        log.info(f"[stream/ma] Credentials: url={redact_url(mass_url)}, has_token={bool(mass_token)}")
+    # ── Step 2: Select the browser Sendspin player ────────────────────────
+    log.info("[stream/ma] Selecting browser player...")
 
-        if not mass_url:
-            log.error("[stream/ma] Music Assistant URL not configured")
-            raise HTTPException(status_code=400, detail="Music Assistant not configured")
+    def _player_text(player: dict[str, Any]) -> str:
+        parts = [
+            str(player.get("name") or ""),
+            str(player.get("friendly_name") or ""),
+        ]
+        device_info = player.get("device_info")
+        if isinstance(device_info, dict):
+            parts.extend(
+                str(device_info.get(key) or "")
+                for key in ("product_name", "manufacturer", "model", "software_version")
+            )
+        return " ".join(parts).lower()
 
-        ma_scheme, ma_host, ma_port = _normalize_ma_url(mass_url)
-        ma_api = f"{ma_scheme}://{ma_host}:{ma_port}/api"
+    def _is_browser_player(player: dict[str, Any]) -> bool:
+        player_text = _player_text(player)
+        return any(term in player_text for term in ("sendspin", "browser", "web player", "webplayer"))
 
-        auth_headers = {"Authorization": f"Bearer {mass_token}"} if mass_token else {}
-
-        # ── Step 1: Discover MA players via JSON-RPC ──────────────────────────
-        log.info("[stream/ma] Discovering MA players...")
-        available_players: dict[str, dict[str, Any]] = {}
-        import uuid as _uuid
-        async with shared_http_client() as client:
-            try:
-                resp = await client.post(
-                    ma_api,
-                    json={"message_id": _uuid.uuid4().hex, "command": "players/all"},
-                    headers={"Content-Type": "application/json", **auth_headers},
-                     timeout=aiohttp.ClientTimeout(total=15.0),
-                )
-                log.info(f"[stream/ma] players/all status: {resp.status}")
-                if resp.status == 200:
-                    data = await resp.json()
-                    # MA v2 REST returns data directly (not wrapped in {"result": ...})
-                    if isinstance(data, list):
-                        for p in data:
-                            if isinstance(p, dict):
-                                pid = p.get("player_id") or p.get("id")
-                                if pid:
-                                    player_info: dict[str, Any] = {
-                                        "player_id": str(pid),
-                                        "name": str(p.get("name") or p.get("friendly_name") or ""),
-                                        "state": str(p.get("state") or p.get("available_state") or "").lower(),
-                                    }
-                                    device_info = p.get("device_info")
-                                    if isinstance(device_info, dict):
-                                        player_info["device_info"] = device_info
-                                    available_players[str(pid)] = player_info
-                                    player_name = player_info["name"] or "unnamed"
-                                    log.info(f"[stream/ma] Found player: {pid} ({player_name})")
-            except Exception as err:
-                log.warning(f"[stream/ma] players/all call failed: {err}", exc_info=True)
-
-        if not available_players:
-            log.error("[stream/ma] No MA players found")
-            raise HTTPException(status_code=404, detail="No Music Assistant players available")
-
-        # ── Step 2: Select the browser Sendspin player ────────────────────────
-        log.info("[stream/ma] Selecting browser player...")
-
-        def _player_text(player: dict[str, Any]) -> str:
-            parts = [
-                str(player.get("name") or ""),
-                str(player.get("friendly_name") or ""),
-            ]
-            device_info = player.get("device_info")
-            if isinstance(device_info, dict):
-                parts.extend(
-                    str(device_info.get(key) or "")
-                    for key in ("product_name", "manufacturer", "model", "software_version")
-                )
-            return " ".join(parts).lower()
-
-        def _is_browser_player(player: dict[str, Any]) -> bool:
-            player_text = _player_text(player)
-            return any(term in player_text for term in ("sendspin", "browser", "web player", "webplayer"))
-
-        target_player: dict[str, Any] | None = None
-        if player_id:
-            target_player = available_players.get(player_id)
-            if not target_player:
-                log.error(f"[stream/ma] Requested browser player_id '{player_id}' is not available")
-                raise HTTPException(
-                    status_code=409,
-                    detail="Browser player is not connected. Open the browser Web Player first.",
-                )
+    target_player: dict[str, Any] | None = None
+    if player_id:
+        target_player = available_players.get(player_id)
+        if not target_player:
+            log.error(f"[stream/ma] Requested browser player_id '{player_id}' is not available")
+            raise HTTPException(
+                status_code=409,
+                detail="Browser player is not connected. Open the browser Web Player first.",
+            )
+        log.info(
+            f"[stream/ma] Using explicit browser player '{player_id}' "
+            f"({target_player.get('name') or 'unnamed'})"
+        )
+    else:
+        browser_players = [p for p in available_players.values() if _is_browser_player(p)]
+        if browser_players:
+            target_player = browser_players[0]
             log.info(
-                f"[stream/ma] Using explicit browser player '{player_id}' "
+                f"[stream/ma] Using detected browser player '{target_player['player_id']}' "
                 f"({target_player.get('name') or 'unnamed'})"
             )
         else:
-            browser_players = [p for p in available_players.values() if _is_browser_player(p)]
-            if browser_players:
-                target_player = browser_players[0]
-                log.info(
-                    f"[stream/ma] Using detected browser player '{target_player['player_id']}' "
-                    f"({target_player.get('name') or 'unnamed'})"
-                )
-            else:
-                log.error("[stream/ma] No browser Sendspin player is connected")
-                raise HTTPException(
-                    status_code=409,
-                    detail="Browser player is not connected. Open the browser Web Player first.",
-                )
+            log.error("[stream/ma] No browser Sendspin player is connected")
+            raise HTTPException(
+                status_code=409,
+                detail="Browser player is not connected. Open the browser Web Player first.",
+            )
 
-        target_player_id = str(target_player["player_id"])
+    return mass_url, mass_token, str(target_player["player_id"])
 
-        # ── Step 3: Connect to MA WebSocket and get stream URL ────────────────
-        log.info("[stream/ma] Connecting to MA WebSocket...")
+
+def _ma_pick_stream_url(ma_client: Any, mass_url: str, target_player_id: str) -> str | None:
+    """Single-pass stream URL resolution from MA's current state.
+
+    Never sends commands — priorities mirror the original poll loop:
+    1. MA-provided stream URL (queue_updated events),
+    2. queue_state current_item.media_item.stream_url,
+    3. queue_state current_item.stream_url,
+    4. constructed flow URL from queue_id/queue_item_id.
+    Returns None when the queue has no resolvable current item.
+    """
+    ma_provided_url = ma_client.get_stream_url()
+    if ma_provided_url:
+        log.info(f"[stream/ma] Stream URL from MA: {redact_url(ma_provided_url)[:150]}")
+        return ma_provided_url
+    queue_state = ma_client.get_queue_state()
+    current_item = queue_state.get("current_item", {})
+    if isinstance(current_item, dict) and current_item.get("queue_item_id"):
+        media_item = current_item.get("media_item", {})
+        if isinstance(media_item, dict) and media_item.get("stream_url"):
+            log.info(f"[stream/ma] Stream URL from media_item: {redact_url(media_item['stream_url'])[:150]}")
+            return media_item["stream_url"]
+        if current_item.get("stream_url"):
+            log.info(f"[stream/ma] Stream URL from current_item: {redact_url(current_item['stream_url'])[:150]}")
+            return current_item["stream_url"]
+        # Last resort: construct flow URL using MA's actual queue_id + queue_item_id
+        # Use MA's generated session (queue_id), not the gateway-generated one
+        queue_item_id = current_item["queue_item_id"]
+        queue_id = queue_state.get("queue_id", target_player_id)
+        flow_player_id = queue_state.get("player_id", target_player_id)
+        http_base = mass_url.replace("http://", "").replace("https://", "")
+        constructed = f"http://{http_base}/flow/{queue_id}/{queue_item_id}/{flow_player_id}.mp3"
+        log.info(f"[stream/ma] Stream URL constructed (fallback): {redact_url(constructed)[:150]}")
+        return constructed
+    return None
+
+
+async def _ma_proxy_bytes(request: Request, stream_url: str) -> StreamingResponse:
+    """Proxy MA stream bytes through the Gateway (Range passthrough, Step 5)."""
+    log.info(f"[stream/ma] Initiating byte proxy from: {redact_url(stream_url)[:120]}...")
+
+    async def stream_generator_ma(cli, r):
+        try:
+            bytes_sent = 0
+            async for chunk in r.content.iter_chunked(64 * 1024):
+                try:
+                    if await request.is_disconnected():
+                        log.info(f"[stream/ma/generator] Client disconnected after {bytes_sent} bytes")
+                        break
+                except Exception:
+                    pass
+                yield chunk
+                bytes_sent += len(chunk)
+            log.info(f"[stream/ma/generator] Finished streaming {bytes_sent} bytes")
+        except Exception as e:
+            log.error(f"[stream/ma/generator] Error streaming chunks: {e}", exc_info=True)
+            raise
+        finally:
+            await r.release()
+            await cli.close()
+
+    range_header = request.headers.get("range")
+    log.info(f"[stream/ma] Client requested range: {range_header}")
+    proxy_client = aiohttp.ClientSession(
+        # No total deadline: a long MA stream must not be cut at 5 min.
+        timeout=aiohttp.ClientTimeout(total=None, connect=15.0),
+    )
+    try:
+        proxy_headers: dict[str, str] = {
+            "User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)",
+            "Accept": "audio/*,*/*;q=0.9",
+        }
+        if range_header:
+            proxy_headers["Range"] = range_header
+
+        proxy_resp: aiohttp.ClientResponse | None = None
+        last_status_code: int | None = None
+        for attempt in range(1, 11):
+            proxy_resp = await proxy_client.get(
+                stream_url, headers=proxy_headers, allow_redirects=False
+            )
+            last_status_code = proxy_resp.status
+            log.info(f"[stream/ma] MA stream response status: {proxy_resp.status} (attempt {attempt}/10)")
+            if proxy_resp.status != 404:
+                break
+            await proxy_resp.release()
+            proxy_resp = None
+            if attempt < 10:
+                await asyncio.sleep(0.5)
+
+        if proxy_resp is None:
+            raise HTTPException(
+                status_code=502,
+                detail=f"MA stream endpoint returned HTTP {last_status_code} while waiting for audio readiness",
+            )
+
+        if proxy_resp.status >= 400:
+            body = ""
+            with suppress(Exception):
+                body = (await proxy_resp.read()).decode("utf-8", errors="ignore").strip()
+            await proxy_resp.release()
+            raise HTTPException(
+                status_code=502,
+                detail=f"MA stream endpoint returned HTTP {proxy_resp.status}{f': {body[:200]}' if body else ''}",
+            )
+
+        proxy_response_headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache",
+        }
+        for key in ("Content-Range", "Content-Length", "Content-Type"):
+            val = proxy_resp.headers.get(key)
+            if val:
+                proxy_response_headers[key] = val
+
+        proxy_status_code = proxy_resp.status
+
+        return StreamingResponse(
+            stream_generator_ma(proxy_client, proxy_resp),
+            status_code=proxy_status_code,
+            media_type=proxy_response_headers.get("Content-Type", "audio/mpeg"),
+            headers=proxy_response_headers,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"[stream/ma] Stream proxy failed: {e}", exc_info=True)
+        await proxy_client.close()
+        raise HTTPException(status_code=502, detail=f"Failed to proxy MA stream: {e}") from e
+
+
+@app.post("/api/media/stream/music-assistant")
+async def start_music_assistant_stream(uri: str, request: Request, player_id: str | None = None):
+    """Start Music Assistant playback for `uri` on the browser player (BUG-19).
+
+    The ONLY place that may send player_queues/play_media. Resolves the queue's
+    stream URL (15s event loop), caches it for GET byte fetches, and returns
+    SUCCESS without streaming any bytes.
+
+    Flow:
+    1. Resolve credentials (mass_url, mass_token) from the Jarvis identity service.
+    2. Select the browser Sendspin player (explicit `player_id` or name match).
+    3. Connect to MA WebSocket and authenticate.
+    4. Send player_queues/play_media (option=replace) to populate the queue.
+    5. Resolve the queue's stream URL from MA state (15s poll).
+    6. Cache the session (user|uri -> url) and return SUCCESS.
+    """
+    log.info(f"[stream/ma] Received start request for uri='{uri}'")
+    try:
+        creds = await _ma_stream_creds(request)
+        mass_url, mass_token, target_player_id = await _ma_discover_and_select(creds, player_id)
+
+        # Convert ABS book IDs to MA-compatible URIs
+        ma_uri = uri
+        if not re.match(r'^[a-z]+://', uri) and re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', uri, re.IGNORECASE):
+            ma_uri = f"library://audiobookshelf/book/{uri}"
+            log.info(f"[stream/ma] Detected ABS book ID, converted to MA URI: {ma_uri}")
+
+        session_id = str(uuid.uuid4())
         ma_client = MAWebSocketClient(
             mass_url=mass_url,
             mass_token=mass_token,
@@ -9880,16 +10056,6 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             ) from e
 
         try:
-            # Generate session_id for MA stream URL construction
-            session_id = str(_uuid.uuid4())
-            # Convert ABS book IDs to MA-compatible URIs
-            import re as _re
-            ma_uri = uri
-            if not _re.match(r'^[a-z]+://', uri) and _re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', uri, _re.IGNORECASE):
-                # URI has no scheme and looks like an ABS book ID (UUID) — convert to MA URI
-                ma_uri = f"library://audiobookshelf/book/{uri}"
-                log.info(f"[stream/ma] Detected ABS book ID, converted to MA URI: {ma_uri}")
-
             # Send play_media using the MA frontend signature so the requested URI
             # replaces the active queue instead of reusing the previous item.
             log.info(f"[stream/ma] Sending play_media for uri='{ma_uri}' on player='{target_player_id}' (session_id={session_id})")
@@ -9908,46 +10074,23 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                 ma_error = ma_client.get_ma_error()
                 if ma_error:
                     log.error(f"[stream/ma] MA returned error: {ma_error}")
-                    await ma_client.disconnect()
+                    with suppress(Exception):
+                        await ma_client.disconnect()
                     raise HTTPException(
                         status_code=502,
                         detail=f"MA error: {ma_error['code']}: {ma_error['details']}"
                     )
                 if ma_client.connected:
-                    # Priority 1: Use stream URL that MA provides in queue state events
-                    ma_provided_url = ma_client.get_stream_url()
-                    if ma_provided_url:
-                        stream_url = ma_provided_url
-                        log.info(f"[stream/ma] Stream URL from MA: {redact_url(stream_url)[:150]}")
-                        break
-                    # Priority 2: Check queue state directly for stream_url in current_item
-                    queue_state = ma_client.get_queue_state()
-                    current_item = queue_state.get("current_item", {})
-                    if isinstance(current_item, dict) and current_item.get("queue_item_id"):
-                        media_item = current_item.get("media_item", {})
-                        if isinstance(media_item, dict) and media_item.get("stream_url"):
-                            stream_url = media_item["stream_url"]
-                            log.info(f"[stream/ma] Stream URL from media_item: {redact_url(stream_url)[:150]}")
-                            break
-                        if current_item.get("stream_url"):
-                            stream_url = current_item["stream_url"]
-                            log.info(f"[stream/ma] Stream URL from current_item: {redact_url(stream_url)[:150]}")
-                            break
-                        # Last resort: construct flow URL using MA's actual queue_id + queue_item_id
-                        # Use MA's generated session (queue_id), not the gateway-generated one
-                        queue_item_id = current_item["queue_item_id"]
-                        queue_id = queue_state.get("queue_id", target_player_id)
-                        player_id = queue_state.get("player_id", target_player_id)
-                        http_base = mass_url.replace("http://", "").replace("https://", "")
-                        stream_url = f"http://{http_base}/flow/{queue_id}/{queue_item_id}/{player_id}.mp3"
-                        log.info(f"[stream/ma] Stream URL constructed (fallback): {redact_url(stream_url)[:150]}")
+                    stream_url = _ma_pick_stream_url(ma_client, mass_url, target_player_id)
+                    if stream_url:
                         break
                 await asyncio.sleep(0.2)
 
             if not stream_url:
-                queue_state = ma_client.get_queue_state()
                 queue_desc = ma_client.get_queue_state_description()
-                log.error(f"[stream/ma] Stream URL not resolved within timeout. queue_state={queue_state}")
+                log.error(f"[stream/ma] Stream URL not resolved within timeout. queue_state={ma_client.get_queue_state()}")
+                with suppress(Exception):
+                    await ma_client.disconnect()
                 raise HTTPException(
                     status_code=502,
                     detail=f"MA did not resolve queue state within {stream_timeout}s. Queue state: {queue_desc}. Session ID: {session_id}"
@@ -9956,99 +10099,6 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
             # ── Step 4: Disconnect MA WebSocket (no longer needed) ──────────────
             await ma_client.disconnect()
             log.info("[stream/ma] WebSocket closed after stream URL resolved")
-
-            # ── Step 5: Proxy MA stream bytes through the Gateway ──────────────
-            log.info(f"[stream/ma] Initiating byte proxy from: {redact_url(stream_url)[:120]}...")
-
-            async def stream_generator_ma(cli, r):
-                try:
-                    bytes_sent = 0
-                    async for chunk in r.content.iter_chunked(64 * 1024):
-                        try:
-                            if await request.is_disconnected():
-                                log.info(f"[stream/ma/generator] Client disconnected after {bytes_sent} bytes")
-                                break
-                        except Exception:
-                            pass
-                        yield chunk
-                        bytes_sent += len(chunk)
-                    log.info(f"[stream/ma/generator] Finished streaming {bytes_sent} bytes")
-                except Exception as e:
-                    log.error(f"[stream/ma/generator] Error streaming chunks: {e}", exc_info=True)
-                    raise
-                finally:
-                    await r.release()
-                    await cli.close()
-
-            range_header = request.headers.get("range")
-            log.info(f"[stream/ma] Client requested range: {range_header}")
-            proxy_client = aiohttp.ClientSession(
-                # No total deadline: a long MA stream must not be cut at 5 min.
-                timeout=aiohttp.ClientTimeout(total=None, connect=15.0),
-            )
-            try:
-                proxy_headers: dict[str, str] = {
-                    "User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)",
-                    "Accept": "audio/*,*/*;q=0.9",
-                }
-                if range_header:
-                    proxy_headers["Range"] = range_header
-
-                proxy_resp: aiohttp.ClientResponse | None = None
-                last_status_code: int | None = None
-                for attempt in range(1, 11):
-                    proxy_resp = await proxy_client.get(
-                        stream_url, headers=proxy_headers, allow_redirects=False
-                    )
-                    last_status_code = proxy_resp.status
-                    log.info(f"[stream/ma] MA stream response status: {proxy_resp.status} (attempt {attempt}/10)")
-                    if proxy_resp.status != 404:
-                        break
-                    await proxy_resp.release()
-                    proxy_resp = None
-                    if attempt < 10:
-                        await asyncio.sleep(0.5)
-
-                if proxy_resp is None:
-                    raise HTTPException(
-                        status_code=502,
-                        detail=f"MA stream endpoint returned HTTP {last_status_code} while waiting for audio readiness",
-                    )
-
-                if proxy_resp.status >= 400:
-                    body = ""
-                    with suppress(Exception):
-                        body = (await proxy_resp.read()).decode("utf-8", errors="ignore").strip()
-                    await proxy_resp.release()
-                    raise HTTPException(
-                        status_code=502,
-                        detail=f"MA stream endpoint returned HTTP {proxy_resp.status}{f': {body[:200]}' if body else ''}",
-                    )
-
-                proxy_response_headers = {
-                    "Accept-Ranges": "bytes",
-                    "Cache-Control": "no-cache",
-                }
-                for key in ("Content-Range", "Content-Length", "Content-Type"):
-                    val = proxy_resp.headers.get(key)
-                    if val:
-                        proxy_response_headers[key] = val
-
-                proxy_status_code = proxy_resp.status
-
-                return StreamingResponse(
-                    stream_generator_ma(proxy_client, proxy_resp),
-                    status_code=proxy_status_code,
-                    media_type=proxy_response_headers.get("Content-Type", "audio/mpeg"),
-                    headers=proxy_response_headers,
-                )
-            except HTTPException as he:
-                raise he
-            except Exception as e:
-                log.error(f"[stream/ma] Stream proxy failed: {e}", exc_info=True)
-                await proxy_client.close()
-                raise HTTPException(status_code=502, detail=f"Failed to proxy MA stream: {e}") from e
-
         except HTTPException:
             raise
         except Exception as e:
@@ -10057,6 +10107,86 @@ async def stream_music_assistant(uri: str, request: Request, player_id: str | No
                 await ma_client.disconnect()
             raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}") from e
 
+        _ma_stream_cache_put(str(creds.get("user") or ""), uri, stream_url)
+        return {"status": "SUCCESS"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"[stream/ma] Unhandled exception: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}") from e
+
+
+@app.get("/api/media/stream/music-assistant")
+async def stream_music_assistant(uri: str, request: Request, player_id: str | None = None):
+    """Fetch bytes for a Music Assistant stream — NEVER starts playback (BUG-19).
+
+    This endpoint is browser-local only: the browser's Sendspin player owns the
+    queue, and the gateway proxies the resolved MA bytes back to that same
+    browser. We never mutate a random physical player to make the stream work,
+    and (since BUG-19) we never re-send player_queues/play_media from GET —
+    every Range/seek request would otherwise restart the queue.
+
+    Cache hit: proxy immediately (no players/all discovery, no WebSocket).
+    Cache miss: resolve the ALREADY-RUNNING queue via player_queues/get and
+    proxy. No resolvable session -> 409 (start playback via POST first).
+    """
+    log.info(f"[stream/ma] Received stream request for uri='{uri}'")
+    try:
+        creds = await _ma_stream_creds(request)
+        user = str(creds.get("user") or "")
+
+        cached_url = _ma_stream_cache_get(user, uri)
+        if cached_url:
+            log.info(f"[stream/ma] Session cache hit for uri='{uri}', fetching bytes only")
+            return await _ma_proxy_bytes(request, cached_url)
+
+        mass_url, mass_token, target_player_id = await _ma_discover_and_select(creds, player_id)
+
+        ma_client = MAWebSocketClient(
+            mass_url=mass_url,
+            mass_token=mass_token,
+        )
+        try:
+            await ma_client.connect()
+            log.info(f"[stream/ma] WebSocket connected: {redact_url(ma_client.ws_url)}")
+        except Exception as e:
+            log.error(f"[stream/ma] WebSocket connection failed: {e}", exc_info=True)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to connect to Music Assistant WebSocket: {e}"
+            ) from e
+
+        stream_url: str | None = None
+        try:
+            # Adopt the live queue state over the wire (player_queues/get is on
+            # the COMMAND_PREFIX allowlist) instead of play_media: an
+            # already-running queue produces no events to wait for.
+            result = await ma_client.send_command("player_queues/get", {"queue_id": target_player_id})
+            if isinstance(result, dict) and result:
+                ma_client.ingest_queue_state(result)
+            stream_url = _ma_pick_stream_url(ma_client, mass_url, target_player_id)
+        except HTTPException:
+            with suppress(Exception):
+                await ma_client.disconnect()
+            raise
+        except Exception as e:
+            log.error(f"[stream/ma] Queue state resolution failed: {e}", exc_info=True)
+            with suppress(Exception):
+                await ma_client.disconnect()
+            raise HTTPException(status_code=502, detail=f"Failed to resolve Music Assistant stream: {e}") from e
+
+        with suppress(Exception):
+            await ma_client.disconnect()
+
+        if not stream_url:
+            log.error(f"[stream/ma] No resolvable session for uri='{uri}' (queue idle or empty)")
+            raise HTTPException(
+                status_code=409,
+                detail="Playback session not started for this URI. Start playback first.",
+            )
+
+        _ma_stream_cache_put(user, uri, stream_url)
+        return await _ma_proxy_bytes(request, stream_url)
     except HTTPException:
         raise
     except Exception as e:

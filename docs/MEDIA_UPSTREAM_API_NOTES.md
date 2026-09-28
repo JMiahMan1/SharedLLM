@@ -280,3 +280,42 @@ Source: Home Assistant core `dev` branch, integration lives IN HA core at
   `config_entry_id`; when it is empty the field is omitted entirely (never
   sent as `""`), keeping older HA installs that predate `required: true`
   working.
+
+## MA stream start vs bytes (P2-T10 / BUG-19, 2026-09-27)
+
+- Split: `POST /api/media/stream/music-assistant` = start (play_media
+  `option=replace`, then up to 15s of stream-URL discovery over the MA WS via
+  `player_queues/get`, cached per user+URI for 2h); `GET` = bytes only. A GET
+  that finds no stream URL answers **409 "Playback session not started for
+  this URI. Start playback first."** — it never calls `play_media`
+  (acceptance: two Range GETs → 0 `play_media` calls,
+  `tests/test_ma_stream_start_split.py`).
+- Cold-GET discovery order: `get_stream_url` → queue-state
+  `current_item.media_item.stream_url` (only with a matching `queue_item_id`)
+  → `current_item.stream_url` → constructed
+  `http://{host}/flow/{queue_id}/{queue_item_id}/{flow_player_id}.mp3`.
+  Results feed `MAWebSocketClient.ingest_queue_state` (synchronous, no I/O) so
+  the cold path reuses the same `_extract_stream_url` as live events.
+- The `responseURL` helpers in `services/ui/src/services/api.ts`
+  (`getAudiobookStreamUrl`, `getMusicAssistantStreamUrl`) had **zero callers**
+  (repo-wide grep) — deleted with their stale "Mobile-local audio streaming"
+  comment.
+- Interaction to re-verify on the live stack: `@live` e2e
+  `e2e/media-playback.spec.ts:578/:749` await a **200** from
+  GET `/api/media/stream/music-assistant` after clicking Web Player. The
+  browser Web Player (`lib/maWebPlayer.ts`) starts playback itself through
+  `/api/ma-jsonrpc` (+ sendspin audio straight to MA), so the queue is playing
+  before the GET — but a cold queue now yields 409 instead of auto-starting.
+
+## Gateway test config freeze pitfall (P2-T10 follow-up, 2026-09-27)
+
+- `services/gateway/config.py` freezes `INTERNAL_SECRET` and
+  `ALPACA_AUDIO_URL` at its **first import**, while the root `conftest.py`
+  pre-sets `INTERNAL_SECRET=test-secret-ci`. Whichever test module imports
+  gateway `main` first therefore wins: `test_music_proxy.py` (which sets both
+  to its own values at module import) got 401/503 whenever an
+  earlier-alphabetical file (e.g. `test_ma_jsonrpc_allowlist.py`) imported the
+  app first — full-suite order dependence, not a product bug.
+  `tests/conftest_media.py` now **force-sets** both values (it loads before
+  every module in the directory), so config can only ever freeze the gateway
+  test values. Prefer forcing over `setdefault` here.

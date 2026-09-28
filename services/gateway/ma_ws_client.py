@@ -333,6 +333,24 @@ class MAWebSocketClient:
         """
         return dict(self._queue_state)
 
+    def ingest_queue_state(self, data: dict[str, Any]) -> None:
+        """Adopt a queue state snapshot fetched over the wire.
+
+        Queue state normally only arrives via ``queue_updated`` events, which
+        never fire for an already-stable queue. The cold byte-fetch path
+        (BUG-19 GET) resolves the stream by asking MA for the queue directly
+        (``player_queues/get`` RESULT) and adopts the answer here, so
+        ``get_stream_url``/``get_queue_state`` see it without ever sending
+        ``play_media``.
+
+        Args:
+            data: Queue state dict returned by MA. Ignored if empty or not a dict.
+        """
+        if not isinstance(data, dict) or not data:
+            return
+        self._queue_state = data
+        self._extract_stream_url(data)
+
     def get_current_item(self) -> dict[str, Any] | None:
         """
         Get the currently playing media item from queue state.
