@@ -43,7 +43,7 @@ health widget all follow the same theme.
 
 Required tokens: `bg, surface, text, textMuted, border, accent, onAccent,
 progress, ring, radius`. Optional: `accentAlt, progressTrack, ring2, ring3,
-glow, fontFamily, numberFontFamily, showCornerCut, motif (none|petal|hud|grid)`,
+glow, fontFamily, numberFontFamily, showCornerCut, motif (none|petal|bloom|leaf|hud|grid)`,
 plus the theme-level `icon` (short emoji/glyph) and `scope` (see below).
 
 Validation lives in `validateThemePack` and runs on import, on server packs,
@@ -87,6 +87,41 @@ Settings → **Website theme** → Theme package manager:
 
 User packs are stored locally and can be synced to the account with
 **Sync packs to account** (persisted per user by Identity).
+
+## Generated assets
+
+A pack is a flat JSON document, so it cannot ship image **files** — it round-trips through
+`localStorage`, a `Blob` export and a `GET/PUT /api/users/me/theme` column, and the import
+control accepts only `application/json`. Generated art therefore has to arrive as a
+**string**, either a `url("data:image/svg+xml,…")` value or a public-dir path, attached
+under an `assets` key beside `tokens`.
+
+`assets` is **not** part of the schema: `validateThemePackage` only knows `HealthThemeTokens`,
+and the server validates only `kind` and `schemaVersion`. It is validated by the code that
+reads it. That is the right trade — the alternative (a required asset field) would need six
+places changed together (the interface, the validator's two loops, the README, this doc, and
+the Identity handler) for every new asset kind.
+
+`alpaca/scripts/install_theme_pack.py` is the reference producer: it validates a model answer
+against the contract below and writes a real `.pack.json` into
+`services/ui/src/themes/packs/`. A motif tile must be:
+
+- **square, with `width` == `height` == the viewBox extent** — CSS repeats it on a square
+  lattice, so anything else seams at every edge;
+- **`fill="none"` with `stroke-width` 1–1.5 and `stroke-opacity` 0.06–0.22** — the tile is a
+  whisper behind the UI, which is what `motifPattern()` produces today;
+- **coloured with `var(--site-accent)` / `var(--site-accent-alt)`**, so one tile works on
+  every theme rather than being right on exactly one;
+- **free of `<text>` and `font-family`** — the UI ships Google Fonts only and the Android
+  widget receives colours alone, so a glyph falls back to whatever the render host has.
+
+`clearSiteTheme()` (`siteTheme.ts:191-251`) **hardcodes the name of every CSS variable it
+removes**. A new `--site-*` var must be added there or it leaks across a clear; that is
+exactly what `siteTheme.test.ts:93-98` guards.
+
+Android is a **separate surface**: the native widget receives `themeAccent` / `themeAccentText`
+as colours only (`HealthActivityWidget.tsx:112-121` → `HealthWidget.java`). Generated images
+do not reach it unless that config contract is extended.
 
 ## Tests
 

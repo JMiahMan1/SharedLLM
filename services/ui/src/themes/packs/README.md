@@ -43,7 +43,31 @@ Theme packs are portable JSON documents. Widgets **never** hardcode palettes —
 
 ### Optional tokens
 
-`accentAlt`, `progressTrack`, `ring2`, `ring3`, `glow` (or `null`), `fontFamily`, `numberFontFamily`, `showCornerCut`, `motif` (`none` | `petal` | `hud` | `grid`).
+`accentAlt`, `progressTrack`, `ring2`, `ring3`, `glow` (or `null`), `fontFamily`, `numberFontFamily`, `showCornerCut`, `motif` (`none` | `petal` | `bloom` | `leaf` | `hud` | `grid`).
+
+## Generated assets (`assets`)
+
+A pack **cannot carry files**. It round-trips through `localStorage`, a `Blob` export
+(`${packId}.pack.json`) and a `GET/PUT /api/users/me/theme` JSON column, and the import
+control only accepts `application/json`. So an asset has to be a **string**: a
+`url("data:image/svg+xml,…")` value or a public-dir path.
+
+`assets` is a **non-schema key** sitting beside `tokens` — `validateThemePackage` only knows
+the `HealthThemeTokens` list, so it is validated only by the code that reads it. That is
+deliberate: the server hard-validates `kind` and `schemaVersion` only, so a new asset field
+rides through `PUT /api/users/me/theme` untouched.
+
+Three rules for a generated motif tile, or it will look broken:
+
+1. **Square, with `width` == `height` == the viewBox extent.** CSS repeats the tile on a
+   square lattice, so anything else seams at every edge.
+2. **Colours as `var(--site-accent)` / `var(--site-accent-alt)`**, not baked hex. One tile
+   then works on every theme in the pack instead of being right on exactly one.
+3. **No `<text>` and no `font-family`.** The UI ships Google Fonts only, and the Android
+   widget gets colours alone, so a glyph falls back to whatever the render host has.
+
+See `alpaca/scripts/install_theme_pack.py`, which turns a benchmark answer into a pack, and
+`alpaca/docs/BENCHMARKS.md` for the grader that checks all three.
 
 ## Create / import / edit / remove
 
