@@ -488,3 +488,13 @@ Gateway implementation (BUG-26), `services/gateway/main.py`:
 - Test-side gotcha: aioresponses JSON-encodes `payload=`; raw upstream
   bodies (m3u8 text, ts bytes, plain-text errors) must use `body=` (+
   `content_type=`) — `conftest_media.mock_upstream` now supports both.
+
+### Book sessions work — the missing playlist was a cold-transcode race (BUG-33, 2026-09-28)
+
+Live probe of a book (item `510e38dd-3196-4755-8a9b-7c81208c373b`, "God's Smuggler (Unabridged)", one 8.8h track, `media.tracks[0].index == 1`):
+
+- `POST /api/items/{bookId}/play` (no body) → 200 session. `bookId` is **not** the same value as the item's `libraryItemId` (the item JSON also carries an ebook `bookId` field).
+- `GET /public/session/{sid}/track/0` → 404, `track/1` → **302** to `/hls/{sid}/output.m3u8` (root-relative), `track/2` → 404. The redirect appears **immediately**, even while the playlist does not exist.
+- `GET /hls/{sid}/output.m3u8` → 404 at first (25s in), then 200 `application/vnd.apple.mpegurl`: VOD, `TARGETDURATION 6`, **5291 segments** (`output-0.ts`…`output-5290.ts`, 136606 bytes). Minutes later a **new** session for the same book was ready in 0.2s (warm transcode cache) — so the earlier "book HLS is broken" conclusion was wrong; it was a cold-start race. Any client (or gateway) must tolerate tens of seconds before the playlist exists.
+- `GET /hls/{sid}/output-0.ts` → 200 `video/mp2t` 44932 bytes, and `Range: bytes=0-1023` → 206 + `Content-Range`. `output-1.m3u8`/`index.m3u8` do not exist.
+- `POST /api/items/{podcastId}/play` with **no** episode id → session + 302, but the playlist **never** appears (404 for a full 120s poll): a podcast session is only playable with an episode id, which is exactly what BUG-26 fixed.

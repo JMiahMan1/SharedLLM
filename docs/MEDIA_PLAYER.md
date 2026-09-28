@@ -129,11 +129,23 @@ In alignment with the **"Neon Glass"** design system, the Media Player uses semi
 * **Supported response headers:** `Content-Range`, `Content-Length`, `Content-Type` (properly proxied to support seeking in browser/mobile audio players).
 * **Implementation:** `services/gateway/main.py` → `stream_music_assistant()` (lines 5022-5199)
 
-#### Local Audiobookshelf Stream
+#### Audiobookshelf Session Stream (HLS)
 
-* **Endpoint:** `GET /api/media/stream/audiobookshelf/{id}`
-* **Query Params:** `token` (Jarvis API key)
-* **Description:** Streams direct audio files from ABS to the local client.
+* **Endpoint:** `GET /api/media/stream/abs-session/{session_id}/{track_index}`
+* **Query Params:** `user`, `mt` (short-lived signed media token, §7.4)
+* **Segment endpoint:** `GET /api/media/stream/abs-session/{session_id}/{track_index}/{segment}` (same auth; `Range` is forwarded)
+* **Description:** ABS 2.x removed `GET /api/items/:id/stream`, so playback is
+  session-based: the execution service starts a session
+  (`POST /api/items/{bookId}/play` for books, `POST /api/items/{podcastId}/play/{episodeId}`
+  for podcast episodes) and hands the device this URL. The gateway fetches
+  `GET {ABS}/public/session/{session_id}/track/{track_index}` (a session id is the
+  capability — no ABS key is needed), follows the 302 to `{ABS}/hls/{session_id}/output.m3u8`
+  and rewrites the playlist's relative segment URIs back to this endpoint. The
+  playlist only appears once ABS has started transcoding, so a cold session is
+  polled (`ABS_PLAYLIST_POLL_INTERVAL`, `ABS_PLAYLIST_MAX_ATTEMPTS`,
+  `ABS_PLAYLIST_READY_TIMEOUT`) and answers `504` if it never appears. Book tracks
+  are 1-based (`media.tracks[0].index`), podcast episodes 0.
+* **Implementation:** `services/gateway/main.py` → `stream_abs_session()` / `stream_abs_session_segment()`
 
 ---
 

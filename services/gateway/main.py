@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, quote, urlencode, urlparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlsplit
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -8628,138 +8628,12 @@ async def proxy_ha_service(request: Request):
     return await _forward_execution_request(request, "/execute/ha_service", "ha_service")
 
 
-@app.get("/api/media/stream/audiobookshelf/{book_id}")
-async def stream_audiobookshelf(book_id: str, request: Request):
-    """Stream audiobook audio directly from ABS to mobile device."""
-    log.info(f"[stream/abs] Received stream request for book_id={book_id}")
-    # Signed media token auth is authoritative and must run OUTSIDE the try
-    # below, which rewrites HTTPException to 401 (a 403 must stay a 403).
-    creds = await _resolve_identity_from_media_token(request)
-    try:
-        try:
-            if creds is None:
-                creds = await _resolve_identity_from_request(request)
-            if not isinstance(creds, dict):
-                creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
-            log.info(f"[stream/abs] Identity resolved successfully for user: {creds.get('user')}")
-        except HTTPException as e:
-            log.error(f"[stream/abs] Identity resolution failed: {e.detail}")
-            raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
-        except Exception as e:
-            log.error(f"[stream/abs] Identity resolution crashed: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail="Internal server error resolving identity") from e
-
-        abs_url = creds.get("audiobookshelf_url") or ""
-        abs_key = creds.get("audiobookshelf_api_key") or ""
-        abs_user = creds.get("audiobookshelf_user") or ""
-        abs_pass = creds.get("audiobookshelf_pass") or ""
-
-        log.info(f"[stream/abs] Resolved credentials: url={redact_url(abs_url)}, has_key={bool(abs_key)}, user={abs_user}, has_pass={bool(abs_pass)}")
-
-        if not abs_url:
-            log.error("[stream/abs] Audiobookshelf URL not configured in resolved credentials")
-            raise HTTPException(status_code=400, detail="Audiobookshelf URL not configured")
-
-        # Try API key first, then login with username/password
-        if not abs_key and abs_user and abs_pass:
-            log.info(f"[stream/abs] No API key present. Attempting username/password login for user '{abs_user}' to {redact_url(abs_url)}")
-            try:
-                async with shared_http_client() as client:
-                    login_resp = await client.post(
-                        f"{abs_url.rstrip('/')}/login",
-                        json={"username": abs_user, "password": abs_pass}
-                        , timeout=aiohttp.ClientTimeout(total=10.0),
-                    )
-                    log.info(f"[stream/abs] Login response code: {login_resp.status}")
-                    if login_resp.status == 200:
-                        login_data = await login_resp.json()
-                        abs_key = login_data.get("user", {}).get("token")
-                        log.info("[stream/abs] Successfully obtained token from ABS login")
-                    else:
-                        log.error(f"[stream/abs] Login failed with status {login_resp.status}: {await login_resp.text()}")
-            except Exception as e:
-                log.error(f"[stream/abs] Exception during login attempt: {e}", exc_info=True)
-
-        if not abs_key:
-            log.error("[stream/abs] Audiobookshelf credentials/token not configured or resolved")
-            raise HTTPException(status_code=400, detail="Audiobookshelf credentials not configured")
-
-        stream_url = f"{abs_url.rstrip('/')}/api/items/{book_id}/stream?format=mp4&token={abs_key}"
-        log.info(f"[stream/abs] Constructed ABS stream URL for book {book_id}")
-
-        async def stream_generator(cli, r):
-            try:
-                bytes_sent = 0
-                async for chunk in r.content.iter_chunked(64 * 1024):
-                    try:
-                        if await request.is_disconnected():
-                            log.info(f"[stream/abs/generator] Client disconnected after {bytes_sent} bytes for book {book_id}")
-                            break
-                    except Exception:
-                        pass
-                    yield chunk
-                    bytes_sent += len(chunk)
-                log.info(f"[stream/abs/generator] Finished streaming {bytes_sent} bytes for book {book_id}")
-            except Exception as e:
-                log.error(f"[stream/abs/generator] Error streaming chunks for book {book_id}: {e}", exc_info=True)
-                raise
-            finally:
-                await r.release()
-                await cli.close()
-
-        range_header = request.headers.get("range")
-        log.info(f"[stream/abs] Client requested range: {range_header} for book {book_id}")
-        client = aiohttp.ClientSession(
-            # No total deadline: a long audiobook stream must not be cut at 5 min.
-            timeout=aiohttp.ClientTimeout(total=None, connect=15.0),
-        )
-        try:
-            req_headers: dict[str, str] = {
-                # Mimic a browser so CDN servers don't reject the proxy request
-                "User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)",
-                "Accept": "audio/*,*/*;q=0.9",
-                "Authorization": f"Bearer {abs_key}",
-            }
-            if range_header:
-                req_headers["Range"] = range_header
-
-            resp = await client.get(stream_url, headers=req_headers, allow_redirects=True)
-            log.info(f"[stream/abs] ABS stream response status: {resp.status}, headers: {dict(resp.headers)}")
-
-            response_headers = {
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "no-cache",
-            }
-            for key in ("Content-Range", "Content-Length", "Content-Type"):
-                val = resp.headers.get(key)
-                if val:
-                    response_headers[key] = val
-
-            status_code = resp.status
-
-            return StreamingResponse(
-                stream_generator(client, resp),
-                status_code=status_code,
-                media_type=response_headers.get("Content-Type", "audio/mpeg"),
-                headers=response_headers
-            )
-        except Exception as e:
-            log.error(f"[stream/abs] Stream initiation failed: {e}", exc_info=True)
-            await client.close()
-            raise HTTPException(status_code=502, detail="Failed to connect to media source") from e
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        log.error(f"[stream/abs] Unhandled exception in stream_audiobookshelf: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal stream error: {e!s}") from e
-
-
 async def _resolve_abs_session_creds(request: Request) -> dict:
     """Auth (signed media token is authoritative) + identity for ABS session streams.
 
     ABS session routes (/public/session/:sid/track/:i and /hls/:sid/...) need no
     API key — the session id itself is the capability — so only the user's
-    ABS URL matters. Mirrors stream_audiobookshelf's auth semantics (§7.4).
+    ABS URL matters. Mirrors the sibling MA stream route's auth semantics (§7.4).
     """
     creds = await _resolve_identity_from_media_token(request)
     if creds is None:
@@ -8774,6 +8648,15 @@ async def _resolve_abs_session_creds(request: Request) -> dict:
     if not isinstance(creds, dict):
         creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
     return creds
+
+
+# ABS writes a session's HLS playlist only once ffmpeg has probed the source
+# and started emitting segments, so a freshly started session redirects to a
+# URL that 404s for a while (a cold 8.8h audiobook took >25s live). Poll it
+# instead of handing the device the 404; a warm transcode cache is instant.
+ABS_PLAYLIST_POLL_INTERVAL = float(os.getenv("ABS_PLAYLIST_POLL_INTERVAL", "2.0"))
+ABS_PLAYLIST_MAX_ATTEMPTS = int(os.getenv("ABS_PLAYLIST_MAX_ATTEMPTS", "45"))
+ABS_PLAYLIST_READY_TIMEOUT = float(os.getenv("ABS_PLAYLIST_READY_TIMEOUT", "90"))
 
 
 def _rewrite_m3u8_segments(playlist: str, base: str, session_id: str, track_index: int, user: str, mt: str) -> str:
@@ -8793,6 +8676,42 @@ def _rewrite_m3u8_segments(playlist: str, base: str, session_id: str, track_inde
     return "\n".join(lines) + "\n"
 
 
+def _abs_playlist_url(abs_url: str, location: str) -> str:
+    """Resolve a session track's redirect target against the ABS origin.
+
+    ABS redirects to ``/hls/:sid/output.m3u8`` at the server origin, which is
+    *not* under a configured router base path (``/audiobookshelf``), so the
+    location is joined to the origin only. An absolute Location (a CDN, or a
+    LAN IP with no Caddy) is used verbatim.
+    """
+    if location.startswith(("http://", "https://")):
+        return location
+    parsed = urlsplit(abs_url)
+    return f"{parsed.scheme}://{parsed.netloc}{location if location.startswith('/') else '/' + location}"
+
+
+async def _await_abs_playlist(client: aiohttp.ClientSession, playlist_url: str):
+    """Poll the HLS playlist until ABS has written it, or give up loudly.
+
+    Returns the live ``aiohttp`` response, or ``None`` when the playlist is
+    still missing after ``ABS_PLAYLIST_MAX_ATTEMPTS`` tries. Non-404 upstream
+    errors are returned immediately so a real failure (401/500) is not masked
+    by retrying.
+    """
+    for attempt in range(1, ABS_PLAYLIST_MAX_ATTEMPTS + 1):
+        resp = await client.get(
+            playlist_url,
+            allow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)"},
+        )
+        if resp.status != 404:
+            return resp
+        await resp.release()
+        if attempt < ABS_PLAYLIST_MAX_ATTEMPTS:
+            await asyncio.sleep(ABS_PLAYLIST_POLL_INTERVAL)
+    return None
+
+
 @app.get("/api/media/stream/abs-session/{session_id}/{track_index}")
 async def stream_abs_session(session_id: str, track_index: int, request: Request):
     """Proxy an ABS 2.x playback-session track (m3u8 playlist) to a device.
@@ -8802,6 +8721,10 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
     which 302-redirects to an HLS playlist whose segment URIs are relative to
     the ABS host. Those URIs are rewritten to this endpoint's sibling segment
     route so all media bytes stay on the gateway domain (§7.4).
+
+    The playlist appears only once ABS has started transcoding, so the
+    redirect target is polled (see the ABS_PLAYLIST_* settings) instead of
+    passing its 404 straight to the device.
     """
     log.info(f"[stream/abs-session] track request: session={session_id} track={track_index}")
     creds = await _resolve_abs_session_creds(request)
@@ -8818,13 +8741,47 @@ async def stream_abs_session(session_id: str, track_index: int, request: Request
     try:
         resp = await client.get(
             track_url,
-            allow_redirects=True,
+            allow_redirects=False,
             headers={"User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)"},
         )
     except Exception as e:
         log.error(f"[stream/abs-session] Track fetch failed: {e}", exc_info=True)
         await client.close()
         raise HTTPException(status_code=502, detail="Failed to connect to media source") from e
+
+    if 300 <= resp.status < 400:
+        location = resp.headers.get("Location")
+        await resp.release()
+        if not location:
+            await client.close()
+            log.error(f"[stream/abs-session] Session {session_id} track {track_index} redirected without a Location")
+            return Response(
+                content="Audiobookshelf redirected to the HLS playlist without a Location header.",
+                status_code=502,
+                media_type="text/plain",
+            )
+        playlist_url = _abs_playlist_url(abs_url, location)
+        log.info(f"[stream/abs-session] Waiting for {playlist_url} (session={session_id} track={track_index})")
+        try:
+            resp = await _await_abs_playlist(client, playlist_url)
+        except Exception as e:
+            log.error(f"[stream/abs-session] Playlist fetch failed: {e}", exc_info=True)
+            await client.close()
+            raise HTTPException(status_code=502, detail="Failed to connect to media source") from e
+        if resp is None:
+            await client.close()
+            log.error(
+                f"[stream/abs-session] Playlist for session {session_id} track {track_index} "
+                f"was not ready after {ABS_PLAYLIST_MAX_ATTEMPTS} attempts"
+            )
+            return Response(
+                content=(
+                    f"Audiobookshelf is still transcoding session {session_id} "
+                    f"(the HLS playlist does not exist yet). Try again shortly."
+                ),
+                status_code=504,
+                media_type="text/plain",
+            )
 
     if resp.status >= 400:
         body = await resp.text()

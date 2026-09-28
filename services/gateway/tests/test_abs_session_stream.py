@@ -117,6 +117,106 @@ class TestAbsSessionTrackEndpoint:
         assert resp.status_code == 400
 
 
+class TestAbsSessionPlaylistReadiness:
+    """BUG-33: ABS writes the HLS playlist only once transcoding starts.
+
+    A freshly started session answers ``/public/session/:sid/track/:i`` with a
+    302 straight away, but the playlist it points at 404s for as long as ffmpeg
+    needs to probe the source (a cold 8.8h audiobook took >25s live). The
+    gateway must poll that URL instead of handing the device the 404.
+    """
+
+    def _fast_poll(self, monkeypatch, attempts: int = 3):
+        from services.gateway import main
+
+        monkeypatch.setattr(main, "ABS_PLAYLIST_MAX_ATTEMPTS", attempts)
+        monkeypatch.setattr(main, "ABS_PLAYLIST_POLL_INTERVAL", 0.0)
+        monkeypatch.setattr(main, "ABS_PLAYLIST_READY_TIMEOUT", 5.0)
+
+    def test_polls_until_the_playlist_appears(self, client, upstream, monkeypatch):
+        self._fast_poll(monkeypatch)
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/public/session/sess1/track/0",
+            status=302, headers={"Location": "http://abs.local:13378/hls/sess1/output.m3u8"},
+        )
+        # Not ready yet, not ready yet, then ready.
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output.m3u8",
+            body="Not Found", status=404, content_type="text/plain",
+        )
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output.m3u8",
+            body="Not Found", status=404, content_type="text/plain",
+        )
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output.m3u8",
+            body=M3U8, status=200, content_type="application/vnd.apple.mpegurl",
+        )
+        mt, _exp = sign("testuser")
+        resp = client.get(
+            "/api/media/stream/abs-session/sess1/0",
+            params={"user": "testuser", "mt": mt},
+        )
+        assert resp.status_code == 200
+        assert "abs-session/sess1/0/output-0.ts" in resp.text
+
+    def test_playlist_never_ready_is_a_504_naming_the_session(self, client, upstream, monkeypatch):
+        self._fast_poll(monkeypatch, attempts=2)
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/public/session/sess1/track/0",
+            status=302, headers={"Location": "http://abs.local:13378/hls/sess1/output.m3u8"},
+        )
+        mock_upstream(
+            upstream, "GET", "http://abs.local:13378/hls/sess1/output.m3u8",
+            body="Not Found", status=404, content_type="text/plain", repeat=5,
+        )
+        mt, _exp = sign("testuser")
+        resp = client.get(
+            "/api/media/stream/abs-session/sess1/0",
+            params={"user": "testuser", "mt": mt},
+        )
+        assert resp.status_code == 504
+        assert "sess1" in resp.text
+
+    def test_root_relative_redirect_does_not_repeat_the_base_path(
+        self, client, upstream, monkeypatch,
+    ):
+        """ABS redirects with /hls/... at the origin, not under its router base."""
+        from services.gateway import main
+
+        self._fast_poll(monkeypatch, attempts=1)
+
+        async def _resolve(body):
+            return {
+                "user": "testuser",
+                "audiobookshelf_url": "https://abs.example.com/audiobookshelf",
+            }
+
+        monkeypatch.setattr(main, "resolve_identity", _resolve)
+        # The track request keeps the configured router base path; the redirect
+        # target is at the origin.
+        mock_upstream(
+            upstream, "GET",
+            "https://abs.example.com/audiobookshelf/public/session/sess1/track/1",
+            status=302, headers={"Location": "/hls/sess1/output.m3u8"},
+        )
+        mock_upstream(
+            upstream, "GET", "https://abs.example.com/hls/sess1/output.m3u8",
+            body=M3U8, status=200, content_type="application/vnd.apple.mpegurl", repeat=3,
+        )
+        mt, _exp = sign("testuser")
+        resp = client.get(
+            "/api/media/stream/abs-session/sess1/1",
+            params={"user": "testuser", "mt": mt},
+        )
+        # Both URLs above are the only ones registered, and aioresponses raises
+        # ClientConnectionError (-> 502) for an unregistered URL: reaching 200
+        # proves the track kept its /audiobookshelf base path while the
+        # redirect target resolved to the origin, not .../audiobookshelf/hls.
+        assert resp.status_code == 200
+        assert "abs-session/sess1/1/output-0.ts" in resp.text
+
+
 class TestAbsSessionSegmentEndpoint:
     def test_proxies_segment_bytes(self, client, upstream):
         mock_upstream(

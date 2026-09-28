@@ -388,26 +388,6 @@ def get_session_track_url(session_id: str, user: str, track_index: int = 0) -> s
     )
 
 
-async def get_stream_url(item_id: str, user: str, format: str = "mp4") -> str:
-    """Build a device-safe gateway stream URL for an audiobook.
-
-    Routes through the gateway's ``/api/media/stream/audiobookshelf`` endpoint
-    authenticated with a short-lived signed media token (``?mt=``, §7.4) so the
-    raw ABS API key never reaches a device (or Home Assistant history).
-    """
-    # HA/Cast/Roku fetch this URL from the LAN: use the externally routable
-    # host (Caddy publishes :11435), never the docker-internal `gateway` alias.
-    if EXECUTION_EXTERNAL_HOST:
-        base = f"http://{EXECUTION_EXTERNAL_HOST}:11435"
-    else:
-        base = GATEWAY_INTERNAL_URL or "http://localhost:11435"
-    token, _exp = sign(user, ttl=DEVICE_TOKEN_TTL_SECONDS)
-    return (
-        f"{base.rstrip('/')}/api/media/stream/audiobookshelf/{quote(str(item_id), safe='')}"
-        f"?format={format}&user={quote(user)}&mt={token}"
-    )
-
-
 async def get_libraries(abs_url: str, abs_api_key: str) -> dict:
     """List all ABS libraries."""
     return await abs_get(abs_url, abs_api_key, "/api/libraries")

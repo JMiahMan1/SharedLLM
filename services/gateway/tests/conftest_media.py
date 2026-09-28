@@ -140,6 +140,7 @@ def mock_upstream(
     headers=None,
     body=None,
     content_type=None,
+    repeat: int = 1,
 ):
     """Query-string-agnostic upstream mock.
 
@@ -148,10 +149,14 @@ def mock_upstream(
 
     ``payload`` is JSON-encoded by aioresponses; use ``body`` (str or bytes)
     with ``content_type`` for raw (non-JSON) upstream responses.
+
+    ``repeat`` reuses the same response for N calls — aioresponses raises
+    ``ClientConnectionError`` once a registration is exhausted, which is how
+    polling code is tested (a 404 that never turns into a 200).
     """
     pattern = re.compile(re.escape(url) + r".*")
     verb = getattr(upstream, method.lower())
-    kwargs = {"status": status}
+    kwargs = {"status": status, "repeat": repeat}
     if payload is not None:
         kwargs["payload"] = payload
     if body is not None:

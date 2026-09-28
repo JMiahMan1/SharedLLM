@@ -185,7 +185,9 @@ export async function mockMediaApi(page: Page, scenario: MediaScenario = 'happy'
     }
     await route.fulfill({ contentType: 'audio/wav', body: silentWav() });
   });
-  await page.route('**/api/media/stream/audiobookshelf/**', async (route) => {
+  // ABS audio is served from the session HLS route (BUG-33); this mock only
+  // shapes the network (latency/offline/upstream-down), not the HLS bytes.
+  await page.route('**/api/media/stream/abs-session/**', async (route) => {
     if (scenario === 'slow') await delay(2000);
     if (scenario === 'offline') {
       await route.abort();

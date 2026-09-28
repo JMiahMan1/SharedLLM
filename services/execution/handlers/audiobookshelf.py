@@ -240,19 +240,58 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
 
     if req.book_id:
         book_id = req.book_id
-        book_title = req.book_id
     elif req.query:
         search = await abs_client.search_library(abs_url, abs_key, req.query, limit=1)
         if "error" in search or not search.get("results"):
             return ExecutionResult(status="FAILURE", message=f"No audiobook found for '{req.query}'.", service="audiobookshelf")
         book = search["results"][0]
         book_id = book.get("id")
-        book_title = book.get("media", {}).get("metadata", {}).get("title", req.query)
+        if not book_id:
+            return ExecutionResult(status="FAILURE", message=f"Search result for '{req.query}' has no id.", service="audiobookshelf")
     else:
         return ExecutionResult(status="FAILURE", message="book_id or query is required.", service="audiobookshelf")
 
-    stream_url = await abs_client.get_stream_url(book_id, ctx_user(req))
-    return await _dispatch_stream(stream_url, "audio/mp4", req, book_title)
+    return await _play_book_session(abs_url, abs_key, req, book_id)
+
+
+async def _play_book_session(abs_url: str, abs_key: str, req, book_id: str) -> ExecutionResult:
+    """Start an ABS 2.x playback session for a book and stream its first track.
+
+    Live ABS removed /api/items/:id/stream; book audio is now served through a
+    session (POST /api/items/{bookId}/play) whose tracks are 1-based, so the
+    index comes from the expanded item rather than a guess. The device gets a
+    gateway-routed, mt-token-signed HLS URL (§7.4) — never the ABS API key.
+    """
+    item = await abs_client.get_book(abs_url, abs_key, book_id)
+    if "error" in item:
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Could not load audiobook '{book_id}': {item['error']}",
+            service="audiobookshelf",
+        )
+
+    media = item.get("media") or {}
+    title = (media.get("metadata") or {}).get("title") or book_id
+    tracks = media.get("tracks") or []
+    track_index = tracks[0].get("index") if tracks else None
+    if not isinstance(track_index, int) or track_index < 1:
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Audiobook '{title}' has no playable audio track.",
+            service="audiobookshelf",
+        )
+
+    session = await abs_client.start_playback_session(abs_url, abs_key, book_id, None)
+    if "error" in session or not session.get("id"):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Could not start a playback session for '{title}': {session.get('error', 'unknown')}",
+            service="audiobookshelf",
+        )
+
+    stream_url = abs_client.get_session_track_url(session["id"], ctx_user(req), track_index=track_index)
+    log.info(f"[abs] Book session started: item={book_id} track={track_index} session={session['id']}")
+    return await _dispatch_stream(stream_url, "application/x-mpegurl", req, title)
 
 
 async def _dispatch_stream(stream_url: str, content_type: str, req, title: str) -> ExecutionResult:
@@ -377,52 +416,17 @@ async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
 
     latest = sorted(items, key=lambda x: x.get("progressLastUpdate", 0), reverse=True)[0]
     item_id = latest.get("id", "")
+    if not item_id:
+        return ExecutionResult(status="FAILURE", message="In-progress item has no id.", service="audiobookshelf")
 
-    title = latest.get("media", {}).get("metadata", {}).get("title", "Unknown")
-
-    stream_url = await abs_client.get_stream_url(item_id, ctx_user(req))
-    full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
-    ha_url = ctx_ha_url(req)
-    ha_token = ctx_ha_token(req)
-
-    # Detect if this is a Roku device
-    from . import roku as roku_handler
-    is_roku = await roku_handler.is_roku_device(ha_url, ha_token, full_entity_id)
-
-    if is_roku:
-        return await _roku_play_audiobook(full_entity_id, stream_url, title, ha_url, ha_token)
-
-    state = await ha_client.get_state(ha_url, ha_token, full_entity_id)
-    # Detect if this is a Music Assistant player
-    is_ma = False
-    if state:
-        is_ma = is_music_assistant_player(
-            state.get("attributes", {}), full_entity_id
-        )
-
-    if is_ma:
-        log.info(f"[abs] Resuming on MA player '{full_entity_id}' using music_assistant.play_media")
-        result = await ha_client.call_service(
-            ha_url, ha_token,
-            "music_assistant", "play_media",
-            full_entity_id,
-            {"media_id": stream_url, "media_type": "track", "enqueue": "play"},
-        )
-    else:
-        result = await ha_client.call_service(
-            ha_url, ha_token,
-            "media_player", "play_media",
-            full_entity_id,
-            {"media_content_id": stream_url, "media_content_type": "audio/mp4"},
-        )
-
-    if result.get("ok"):
-        return ExecutionResult(
-            status="SUCCESS",
-            message=f"Resuming '{title}'",
-            service="audiobookshelf",
-        )
-    return ExecutionResult(status="FAILURE", message=f"Resume failed: {result.get('error')}", service="audiobookshelf")
+    result = await _play_book_session(abs_url, abs_key, req, item_id)
+    if result.status != "SUCCESS":
+        return result
+    return ExecutionResult(
+        status="SUCCESS",
+        message=result.message.replace("Now playing: ", "Resuming ", 1),
+        service="audiobookshelf",
+    )
 
 
 def _progress_pct(record: dict) -> int:
