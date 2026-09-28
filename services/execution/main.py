@@ -69,7 +69,7 @@ from services.execution.handlers import git as git_handler
 from services.execution.handlers import ha_config as ha_config_handler
 from services.execution.handlers import volumes as volume_handler
 from services.execution.media_links import media_file_url
-from services.execution.media_playback_service import MediaPlaybackService
+from services.execution.media_playback_service import LOCAL_PLAYER_ALIASES, MediaPlaybackService
 from services.execution.schemas import (
     AnnouncementRequest,
     AudiobookshelfRequest,
@@ -716,7 +716,7 @@ async def execute_esphome(req: EsphomeRequest):
 
 @app.post("/execute/media/play", response_model=ExecutionResult)
 async def execute_media_play(req: MediaPlayRequest):
-    is_local = (req.entity_id or "").lower() in ("local", "web_player", "browser", "android")
+    is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
     if req.entity_id and not is_local:
         if not await verify_entity_access(req.user_context, req.entity_id):
             raise HTTPException(status_code=403, detail="Access denied to this device")
@@ -760,7 +760,7 @@ async def execute_media_resolve_stream(req: ResolveStreamRequest):
 
 @app.post("/execute/media/transport", response_model=ExecutionResult)
 async def execute_media_transport(req: MediaTransportRequest):
-    is_local = (req.entity_id or "").lower() in ("local", "web_player", "browser", "android")
+    is_local = (req.entity_id or "").lower() in LOCAL_PLAYER_ALIASES
     if req.entity_id and not is_local:
         if not await verify_entity_access(req.user_context, req.entity_id):
             raise HTTPException(status_code=403, detail="Access denied to this device")
