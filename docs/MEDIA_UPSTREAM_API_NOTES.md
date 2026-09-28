@@ -427,3 +427,64 @@ pass-through ×3 incl. direct-URI) + plan-driven update of
 `test_execution_main.py::test_media_play_valid` (now supplies a real search
 match; adds `test_media_play_no_match_is_failure`). Execution suite: **389
 passed / 1 failed (pre-existing, unrelated family_games) / 59 skipped**.
+
+## ABS 2.x session-based playback (P2-T17 / BUG-26, 2026-09-28)
+
+Live probes against `https://abs.sumemail.com` (the `/audiobookshelf`
+prefix base and the root base serve the same instance; the prefix works for
+every route below).
+
+- **The legacy item stream route is gone.**
+  `GET /api/items/:id/stream?format=mp4` → **404 for both books and
+  podcasts**. The old gateway `stream_audiobookshelf` endpoint and
+  `abs_client.get_stream_url` book flow therefore 404 live — book playback
+  was NOT switched to the session flow in BUG-26 (see book-HLS caveat
+  below); that path is a separate bug (surfaced to user, 2026-09-28).
+- Podcast library search matches via `GET /api/libraries/{id}/search?q=…`
+  (param is `q`, not `search`); its `episodes` section returns *podcast*
+  items matching the title, wrapped in `libraryItem`.
+- `GET /api/items/{podcastId}?expanded=1` → `media.episodes[]` = FLAT
+  episode objects: `id`, `title`, `publishedAt` (ms), `pubDate`, `season`,
+  `episode`, `audioTrack`, `duration`, `libraryItemId`, `podcastId` (88
+  episodes for Culture Apothecary). `GET /api/items/{episodeId}` → 404 —
+  episodes are NOT standalone items.
+- **Starting a session:** book → `POST /api/items/{bookId}/play` (no body);
+  podcast episode → `POST /api/items/{podcastItemId}/play/{episodeId}`
+  (no body) → 200 session `{id, userId, libraryItemId, episodeId,
+  mediaType: "podcast"|"book", …}`.
+- **Audio:** `GET /public/session/{sid}/track/{i}` — unauthenticated (the
+  session id is the capability; the `/public` router is mounted without API
+  auth). Podcasts: track **0** (index 1 serves the same playlist). Books:
+  track **1** (index 0 → 404). The track URL 302-redirects to HLS:
+  `Location: {abs-root}/hls/{sid}/output.m3u8` (absolute URL uses the root
+  base, but the prefix-base equivalent works too) → 200
+  `application/vnd.apple.mpegurl`: VOD playlist, RELATIVE segment URIs
+  (`output-0.ts`, ~6 s segments, `video/mp2t`, ~105 KB each). The `/hls`
+  router is likewise unauthenticated.
+- **Book HLS was not live at probe time:** the book session 302s correctly
+  but `{abs}/hls/{bookSid}/output.m3u8` → 404 even after waiting ~25 s —
+  the transcode pipeline had not produced the playlist. Podcast episode
+  HLS was available immediately.
+- No item listing route: `GET /api/items?libraryId=…` → 404; use
+  `GET /api/libraries/{id}/items` (`{results,total}`) or library search.
+
+Gateway implementation (BUG-26), `services/gateway/main.py`:
+- `GET /api/media/stream/abs-session/{sid}/{i}` — mt-token auth (authoritative,
+  §7.4) or header auth; resolves the user's `audiobookshelf_url` (400 if
+  unset — no key needed, session routes are unauthenticated); fetches
+  `/public/session/{sid}/track/{i}` following the 302; mpegurl bodies get
+  every relative segment URI rewritten to
+  `{request.base_url}/api/media/stream/abs-session/{sid}/{i}/{segment}?user=&mt=`
+  — devices fetch segments without headers, so each rewritten URL carries a
+  signed media token (the request's own `mt` when present, else a fresh one
+  minted for the identity user); non-mpegurl upstream content streams through;
+  upstream error statuses pass through with their body.
+- `GET /api/media/stream/abs-session/{sid}/{i}/{segment}` — same auth;
+  proxies `{abs}/hls/{sid}/{segment}` bytes (Range forwarded;
+  Content-Range/Length/Type passed through).
+- The m3u8/segment base is the user's configured `audiobookshelf_url` —
+  verified 2026-09-28 that `/public` and `/hls` are both served under that
+  prefix live; no host guessing (fail-fast).
+- Test-side gotcha: aioresponses JSON-encodes `payload=`; raw upstream
+  bodies (m3u8 text, ts bytes, plain-text errors) must use `body=` (+
+  `content_type=`) — `conftest_media.mock_upstream` now supports both.

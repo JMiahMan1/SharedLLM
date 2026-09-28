@@ -409,10 +409,14 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
             pod_id = pod.get("id")
             pod_title = pod.get("title", req.query)
             log.info(f"[media/podcast] Found podcast in Audiobookshelf: '{pod_title}' (id={pod_id})")
+            # BUG-26: play a real episode (latest, or one matching the query),
+            # not the podcast item itself — the legacy item stream route is
+            # gone on live ABS 2.x.
             play_res = await abs_handler.handle_audiobookshelf(
                 AudiobookshelfRequest(
-                    action="play",
+                    action="play_podcast_episode",
                     book_id=pod_id,
+                    query=req.query,
                     entity_id=entity_id,
                     user_context=abs_uctx,
                 )
@@ -498,7 +502,9 @@ async def play_podcast(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionR
     try:
         from ..nextcloud_client import resolve_credentials, webdav_url
         from ..http_client import request as http_request
-        nc_url, nc_user, nc_pass = resolve_credentials(ctx.user_context)
+        # BUG-26: ctx IS the UserContext — the old `.user_context` read raised
+        # AttributeError (swallowed below), silently killing this fallback.
+        nc_url, nc_user, nc_pass = resolve_credentials(ctx)
         if nc_url and nc_user and nc_pass:
             podcasts_url = webdav_url(nc_url, nc_user, "Podcasts")
             resp = await http_request("PROPFIND", podcasts_url, auth=(nc_user, nc_pass), headers={"Depth": "1"}, timeout=10, verify=False)

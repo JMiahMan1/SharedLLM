@@ -45,6 +45,9 @@ async def handle_audiobookshelf(req: AudiobookshelfRequest) -> ExecutionResult:
         elif action == "play":
             return await _handle_play(abs_url, abs_key, req)
 
+        elif action == "play_podcast_episode":
+            return await _handle_play_podcast_episode(abs_url, abs_key, req)
+
         elif action == "resume":
             return await _handle_resume(abs_url, abs_key, req)
 
@@ -249,6 +252,11 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
         return ExecutionResult(status="FAILURE", message="book_id or query is required.", service="audiobookshelf")
 
     stream_url = await abs_client.get_stream_url(book_id, ctx_user(req))
+    return await _dispatch_stream(stream_url, "audio/mp4", req, book_title)
+
+
+async def _dispatch_stream(stream_url: str, content_type: str, req, title: str) -> ExecutionResult:
+    """Send a stream URL to a media player (power-on, Roku, MA, or direct)."""
     full_entity_id = ha_client.sanitize_entity_id("media_player", req.entity_id)
     ha_url = ctx_ha_url(req)
     ha_token = ctx_ha_token(req)
@@ -256,7 +264,6 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
     state = await ha_client.get_state(ha_url, ha_token, full_entity_id)
     if state and state.get("state") == "off":
         await ha_client.call_service(ha_url, ha_token, "media_player", "turn_on", full_entity_id)
-        import asyncio
         await asyncio.sleep(2)
 
     # Detect if this is a Roku device — needs two-step MASS flow
@@ -264,7 +271,7 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
     is_roku = await roku_handler.is_roku_device(ha_url, ha_token, full_entity_id)
 
     if is_roku:
-        return await _roku_play_audiobook(full_entity_id, stream_url, book_title, ha_url, ha_token)
+        return await _roku_play_audiobook(full_entity_id, stream_url, title, ha_url, ha_token)
 
     # Detect if this is a Music Assistant player
     is_ma = False
@@ -282,17 +289,78 @@ async def _handle_play(abs_url: str, abs_key: str, req) -> ExecutionResult:
             {"media_id": stream_url, "media_type": "track", "enqueue": "play"},
         )
     else:
-        # All other devices: direct play_media with ABS stream URL
         result = await ha_client.call_service(
             ha_url, ha_token,
             "media_player", "play_media",
             full_entity_id,
-            {"media_content_id": stream_url, "media_content_type": "audio/mp4"},
+            {"media_content_id": stream_url, "media_content_type": content_type},
         )
 
     if result.get("ok"):
-        return ExecutionResult(status="SUCCESS", message=f"Now playing: {book_title}", service="audiobookshelf")
+        return ExecutionResult(status="SUCCESS", message=f"Now playing: {title}", service="audiobookshelf")
     return ExecutionResult(status="FAILURE", message=f"Playback failed: {result.get('error')}", service="audiobookshelf")
+
+
+def _pick_episode(episodes: list[dict], query: str | None) -> dict:
+    """Pick the requested episode (case-insensitive title match) or the latest."""
+    eps = [e for e in episodes if isinstance(e, dict) and e.get("id")]
+    if not eps:
+        return {}
+    if query:
+        q = query.lower().strip()
+        if q:
+            for e in eps:
+                if q in (e.get("title") or "").lower():
+                    return e
+    return max(eps, key=lambda e: e.get("publishedAt") or 0)
+
+
+async def _handle_play_podcast_episode(abs_url: str, abs_key: str, req) -> ExecutionResult:
+    """Play a podcast episode through an ABS 2.x playback session.
+
+    Live ABS removed /api/items/:id/stream; audio now comes from a session
+    (POST /api/items/:id/play/:episodeId) via /public/session/:sid/track/:i,
+    which 302-redirects to an HLS playlist. The device gets a gateway-routed,
+    mt-token-signed URL for that playlist (§7.4).
+    """
+    if not req.book_id:
+        return ExecutionResult(status="FAILURE", message="book_id (podcast item ID) is required to play an episode.", service="audiobookshelf")
+    if not req.entity_id:
+        return ExecutionResult(status="FAILURE", message="entity_id is required to play.", service="audiobookshelf")
+
+    item = await abs_client.get_book(abs_url, abs_key, req.book_id)
+    if "error" in item:
+        return ExecutionResult(status="FAILURE", message=f"Could not load podcast: {item['error']}", service="audiobookshelf")
+    episodes = item.get("media", {}).get("episodes") or []
+
+    if req.episode_id:
+        episode = next((e for e in episodes if e.get("id") == req.episode_id), None)
+        if not episode:
+            return ExecutionResult(
+                status="FAILURE",
+                message=f"Episode '{req.episode_id}' not found on podcast '{req.book_id}'.",
+                service="audiobookshelf",
+            )
+    else:
+        episode = _pick_episode(episodes, req.query)
+        if not episode:
+            return ExecutionResult(
+                status="FAILURE",
+                message=f"No episodes found for podcast '{req.book_id}'.",
+                service="audiobookshelf",
+            )
+
+    session = await abs_client.start_playback_session(abs_url, abs_key, req.book_id, episode["id"])
+    if "error" in session or not session.get("id"):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Could not start a playback session for episode '{episode.get('title') or episode['id']}': {session.get('error', 'unknown')}",
+            service="audiobookshelf",
+        )
+
+    stream_url = abs_client.get_session_track_url(session["id"], ctx_user(req))
+    log.info(f"[abs] Podcast episode session started: item={req.book_id} episode={episode['id']} session={session['id']}")
+    return await _dispatch_stream(stream_url, "application/x-mpegurl", req, episode.get("title") or "Podcast episode")
 
 
 async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:

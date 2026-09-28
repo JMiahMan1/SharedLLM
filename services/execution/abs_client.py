@@ -350,6 +350,44 @@ async def play_item(abs_url: str, abs_api_key: str, item_id: str) -> dict:
     return await abs_post(abs_url, abs_api_key, f"/api/items/{item_id}/play", json={})
 
 
+async def start_playback_session(
+    abs_url: str, abs_api_key: str, item_id: str, episode_id: str | None = None
+) -> dict:
+    """Start a playback session for a library item (ABS 2.x).
+
+    Books:  POST /api/items/{item_id}/play
+    Podcasts: POST /api/items/{item_id}/play/{episode_id}
+
+    ABS 2.x removed the legacy /api/items/:id/stream route; audio is now
+    served through the returned session: /public/session/:sid/track/:i.
+    """
+    path = f"/api/items/{item_id}/play"
+    if episode_id:
+        path += f"/{episode_id}"
+    return await abs_post(abs_url, abs_api_key, path)
+
+
+def get_session_track_url(session_id: str, user: str, track_index: int = 0) -> str:
+    """Build a device-safe gateway URL for an ABS playback-session track.
+
+    Routes through the gateway's ``/api/media/stream/abs-session`` endpoint
+    authenticated with a short-lived signed media token (``?mt=``, §7.4) so the
+    raw ABS API key never reaches a device (or Home Assistant history).
+    Podcast episodes live at track index 0; books at index 1.
+    """
+    # HA/Cast/Roku fetch this URL from the LAN: use the externally routable
+    # host (Caddy publishes :11435), never the docker-internal `gateway` alias.
+    if EXECUTION_EXTERNAL_HOST:
+        base = f"http://{EXECUTION_EXTERNAL_HOST}:11435"
+    else:
+        base = GATEWAY_INTERNAL_URL or "http://localhost:11435"
+    token, _exp = sign(user, ttl=DEVICE_TOKEN_TTL_SECONDS)
+    return (
+        f"{base.rstrip('/')}/api/media/stream/abs-session/{session_id}/{track_index}"
+        f"?user={quote(user)}&mt={token}"
+    )
+
+
 async def get_stream_url(item_id: str, user: str, format: str = "mp4") -> str:
     """Build a device-safe gateway stream URL for an audiobook.
 

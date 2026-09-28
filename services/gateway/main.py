@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -8708,6 +8708,174 @@ async def stream_audiobookshelf(book_id: str, request: Request):
     except Exception as e:
         log.error(f"[stream/abs] Unhandled exception in stream_audiobookshelf: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal stream error: {e!s}") from e
+
+
+async def _resolve_abs_session_creds(request: Request) -> dict:
+    """Auth (signed media token is authoritative) + identity for ABS session streams.
+
+    ABS session routes (/public/session/:sid/track/:i and /hls/:sid/...) need no
+    API key — the session id itself is the capability — so only the user's
+    ABS URL matters. Mirrors stream_audiobookshelf's auth semantics (§7.4).
+    """
+    creds = await _resolve_identity_from_media_token(request)
+    if creds is None:
+        try:
+            creds = await _resolve_identity_from_request(request)
+        except HTTPException as e:
+            log.error(f"[stream/abs-session] Identity resolution failed: {e.detail}")
+            raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
+        except Exception as e:
+            log.error(f"[stream/abs-session] Identity resolution crashed: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail="Internal server error resolving identity") from e
+    if not isinstance(creds, dict):
+        creds = creds.dict() if hasattr(creds, "dict") else (creds.model_dump() if hasattr(creds, "model_dump") else dict(creds))
+    return creds
+
+
+def _rewrite_m3u8_segments(playlist: str, base: str, session_id: str, track_index: int, user: str, mt: str) -> str:
+    """Rewrite ABS-host-relative segment URIs to this gateway's segment route.
+
+    Devices fetch the segments without headers, so each rewritten URL carries
+    the signed media token; the ABS host never reaches the device (§7.4).
+    """
+    suffix = f"?user={quote(user, safe='')}&mt={quote(mt, safe='')}" if mt else ""
+    lines = []
+    for line in playlist.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            lines.append(line)
+            continue
+        lines.append(f"{base.rstrip('/')}/api/media/stream/abs-session/{session_id}/{track_index}/{quote(stripped, safe='')}{suffix}")
+    return "\n".join(lines) + "\n"
+
+
+@app.get("/api/media/stream/abs-session/{session_id}/{track_index}")
+async def stream_abs_session(session_id: str, track_index: int, request: Request):
+    """Proxy an ABS 2.x playback-session track (m3u8 playlist) to a device.
+
+    Live ABS removed /api/items/:id/stream; audio now comes from a session
+    (POST /api/items/:id/play[/episode]) via /public/session/:sid/track/:i,
+    which 302-redirects to an HLS playlist whose segment URIs are relative to
+    the ABS host. Those URIs are rewritten to this endpoint's sibling segment
+    route so all media bytes stay on the gateway domain (§7.4).
+    """
+    log.info(f"[stream/abs-session] track request: session={session_id} track={track_index}")
+    creds = await _resolve_abs_session_creds(request)
+    abs_url = (creds.get("audiobookshelf_url") or "").rstrip("/")
+    if not abs_url:
+        log.error("[stream/abs-session] Audiobookshelf URL not configured in resolved credentials")
+        raise HTTPException(status_code=400, detail="Audiobookshelf URL not configured")
+
+    user = request.query_params.get("user") or creds.get("user") or creds.get("username") or ""
+    mt = request.query_params.get("mt") or (sign(user)[0] if user else None)
+
+    track_url = f"{abs_url}/public/session/{session_id}/track/{track_index}"
+    client = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60.0, connect=15.0))
+    try:
+        resp = await client.get(
+            track_url,
+            allow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)"},
+        )
+    except Exception as e:
+        log.error(f"[stream/abs-session] Track fetch failed: {e}", exc_info=True)
+        await client.close()
+        raise HTTPException(status_code=502, detail="Failed to connect to media source") from e
+
+    if resp.status >= 400:
+        body = await resp.text()
+        await resp.release()
+        await client.close()
+        log.info(f"[stream/abs-session] Upstream error {resp.status} for session {session_id} track {track_index}")
+        return Response(content=body, status_code=resp.status, media_type="text/plain")
+
+    ctype = resp.headers.get("Content-Type", "")
+    if "mpegurl" in ctype.lower():
+        body = await resp.text()
+        await resp.release()
+        await client.close()
+        base = str(request.base_url)
+        rewritten = _rewrite_m3u8_segments(body, base, session_id, track_index, user, mt)
+        return Response(
+            content=rewritten,
+            media_type="application/vnd.apple.mpegurl",
+            headers={"Cache-Control": "no-cache", "Accept-Ranges": "bytes"},
+        )
+
+    # Not a playlist (direct audio on some deployments): stream bytes through.
+    async def stream_generator(cli, r):
+        bytes_sent = 0
+        async for chunk in r.content.iter_chunked(64 * 1024):
+            try:
+                if await request.is_disconnected():
+                    log.info(f"[stream/abs-session/generator] Client disconnected after {bytes_sent} bytes")
+                    break
+            except Exception:
+                pass
+            yield chunk
+            bytes_sent += len(chunk)
+        log.info(f"[stream/abs-session/generator] Finished streaming {bytes_sent} bytes")
+
+    response_headers = {"Accept-Ranges": "bytes", "Cache-Control": "no-cache"}
+    for key in ("Content-Range", "Content-Length", "Content-Type"):
+        val = resp.headers.get(key)
+        if val:
+            response_headers[key] = val
+    return StreamingResponse(
+        stream_generator(client, resp),
+        status_code=resp.status,
+        media_type=response_headers.get("Content-Type", "audio/mpeg"),
+        headers=response_headers,
+    )
+
+
+@app.get("/api/media/stream/abs-session/{session_id}/{track_index}/{segment}")
+async def stream_abs_session_segment(session_id: str, track_index: int, segment: str, request: Request):
+    """Proxy one HLS segment of an ABS playback session from the ABS /hls route."""
+    creds = await _resolve_abs_session_creds(request)
+    abs_url = (creds.get("audiobookshelf_url") or "").rstrip("/")
+    if not abs_url:
+        log.error("[stream/abs-session] Audiobookshelf URL not configured in resolved credentials")
+        raise HTTPException(status_code=400, detail="Audiobookshelf URL not configured")
+
+    seg_url = f"{abs_url}/hls/{session_id}/{segment}"
+    range_header = request.headers.get("range")
+    client = aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=None, connect=15.0),
+    )
+    try:
+        req_headers = {"User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)"}
+        if range_header:
+            req_headers["Range"] = range_header
+        resp = await client.get(seg_url, headers=req_headers, allow_redirects=True)
+    except Exception as e:
+        log.error(f"[stream/abs-session] Segment fetch failed: {e}", exc_info=True)
+        await client.close()
+        raise HTTPException(status_code=502, detail="Failed to connect to media source") from e
+
+    async def stream_generator(cli, r):
+        bytes_sent = 0
+        async for chunk in r.content.iter_chunked(64 * 1024):
+            try:
+                if await request.is_disconnected():
+                    break
+            except Exception:
+                pass
+            yield chunk
+            bytes_sent += len(chunk)
+        log.info(f"[stream/abs-session/segment] Finished streaming {bytes_sent} bytes for {segment}")
+
+    response_headers = {"Accept-Ranges": "bytes", "Cache-Control": "no-cache"}
+    for key in ("Content-Range", "Content-Length", "Content-Type"):
+        val = resp.headers.get(key)
+        if val:
+            response_headers[key] = val
+    return StreamingResponse(
+        stream_generator(client, resp),
+        status_code=resp.status,
+        media_type=response_headers.get("Content-Type", "video/mp2t"),
+        headers=response_headers,
+    )
 
 
 def _fix_sendspin_client_hello(msg: dict) -> dict:
