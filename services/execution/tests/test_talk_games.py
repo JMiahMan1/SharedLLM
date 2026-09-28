@@ -90,3 +90,46 @@ def test_stopping_a_game_clears_it(talk, monkeypatch):
     assert games.registry.get("room-1") is not None
     asyncio.run(talk.handle_talk(_request(game_command="stop")))
     assert games.registry.get("room-1") is None
+
+
+def test_correct_trivia_answers_bank_a_star(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    import asyncio
+
+    banked: list[dict] = []
+
+    async def fake_bank(user, stars, reason):
+        banked.append({"user": user, "stars": stars, "reason": reason})
+
+    monkeypatch.setattr(talk, "_bank_game_stars", fake_bank)
+
+    from services.execution.handlers import family_games as games
+
+    state = games.registry.start_trivia("room-1")
+    asyncio.run(
+        talk.handle_talk(_request(game_command="answer", message=state.answers[0], card_detail="Kiddo"))
+    )
+
+    assert banked and banked[0]["user"] == "Kiddo"
+    assert banked[0]["stars"] == 1
+    assert "Trivia" in banked[0]["reason"]
+
+
+def test_star_banking_failure_never_breaks_a_game(talk, monkeypatch):
+    monkeypatch.setenv("FAMILY_GAMES_ENABLED", "1")
+    import asyncio
+
+    async def boom(user, stars, reason):
+        raise RuntimeError("geo is down")
+
+    monkeypatch.setattr(talk, "_bank_game_stars", boom)
+
+    from services.execution.handlers import family_games as games
+
+    state = games.registry.start_trivia("room-1")
+    result = asyncio.run(
+        talk.handle_talk(_request(game_command="answer", message=state.answers[0], card_detail="Kiddo"))
+    )
+    # The answer still counted in the game, whatever geo thinks.
+    assert state.player("Kiddo").stars == 1
+    assert result is not None
