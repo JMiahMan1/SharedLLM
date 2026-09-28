@@ -401,3 +401,29 @@ hangs the same way, while the same script with `await db.close()` (or a local
 Until a session-end fixture closes both registries, wrap execution-suite runs in
 `timeout N pytest … > log 2>&1` and read the summary from the log (exit code 124
 is expected and does NOT mean the tests failed).
+
+## MASS search enqueue pass-through + no random fallback (P2-T16 / BUG-25, 2026-09-27)
+
+Upstream check: HA core's `music_assistant` integration `services.yaml`
+(`play_media.service_data.enqueue`) declares `select` options
+**`play | replace | next | replace_next | add`** (fetched from the HA repo,
+cached `.tmp/ha_music_assistant_services.yaml`). Our schema
+(`MediaPlayRequest.enqueue: Literal["add", "next", "replace"]`) is a subset,
+so `req.enqueue` maps 1:1 and must pass through to `music_assistant.play_media`
+unchanged — the old code rewrote `replace` → `play`, silently dropping
+clear-queue semantics.
+
+Contract change in `services/execution/handlers/media.py::play_music`
+(BUG-25): when the MASS `search` call returns no usable track/album/artist/
+playlist/radio item, the endpoint now returns `FAILURE "No match for '<query>'."`
+instead of the two fallbacks: `music_assistant.get_library` with
+`order_by=random` (playing a random library track) and a last-resort
+`play_media` with the raw query string as `media_id` (upstream rejects or
+mis-resolves arbitrary strings). If `play_media` on a *found* match fails, the
+error is surfaced as `FAILURE "Failed to play '<query>': <reason>"`.
+
+Tests: `test_media_music_no_random_fallback.py` (5 — no-match ×2, enqueue
+pass-through ×3 incl. direct-URI) + plan-driven update of
+`test_execution_main.py::test_media_play_valid` (now supplies a real search
+match; adds `test_media_play_no_match_is_failure`). Execution suite: **389
+passed / 1 failed (pre-existing, unrelated family_games) / 59 skipped**.

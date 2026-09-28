@@ -40,7 +40,14 @@ def test_light_control_valid(mocker):
     assert resp.json()["status"] == "SUCCESS"
 
 def test_media_play_valid(mocker):
-    mocker.patch("services.execution.handlers.media.ha_client.call_service", return_value={"ok": True})
+    # BUG-25 (P2-T16): a failed/empty MASS search returns "No match" instead of
+    # playing a random track, so this test supplies a real search match.
+    def fake_call_service(*a, **kw):
+        if kw.get("service") == "search" or (len(a) >= 4 and a[3] == "search"):
+            return {"ok": True, "service_response": {"service_response": {"tracks": [{"uri": "library://track/1", "name": "Beatles Track"}]}}}
+        return {"ok": True, "status_code": 200}
+
+    mocker.patch("services.execution.handlers.media.ha_client.call_service", side_effect=fake_call_service)
 
     resp = client.post("/execute/media/play",
         headers={"X-Internal-Secret": "test-secret"},
@@ -52,6 +59,32 @@ def test_media_play_valid(mocker):
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "SUCCESS"
+
+
+def test_media_play_no_match_is_failure(mocker):
+    # BUG-25 (P2-T16): no search match → FAILURE "No match", nothing played.
+    calls = []
+
+    def fake_call_service(*a, **kw):
+        calls.append(a[3] if len(a) > 3 else kw.get("service"))
+        return {"ok": True, "service_response": {"service_response": {"tracks": []}}}
+
+    mocker.patch("services.execution.handlers.media.ha_client.call_service", side_effect=fake_call_service)
+
+    resp = client.post("/execute/media/play",
+        headers={"X-Internal-Secret": "test-secret"},
+        json={
+            "user_context": valid_context,
+            "entity_id": "media_player.kitchen",
+            "query": "zzz no such song zzz"
+        }
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "FAILURE"
+    assert "No match" in body["message"]
+    assert "play_media" not in calls
+    assert "get_library" not in calls
 
 def test_media_transport_play_and_volume_set(mocker):
     mocker.patch("services.execution.handlers.media.ha_client.call_service", return_value={"ok": True})

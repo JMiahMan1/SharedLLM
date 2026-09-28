@@ -177,7 +177,7 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
 
             result = await ha_client.call_service(
                 ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
-                {"media_id": req.query, "enqueue": "play" if req.enqueue == "replace" else req.enqueue},
+                {"media_id": req.query, "enqueue": req.enqueue or "replace"},
             )
             log.info(f"[media/play] play_media service call response for direct URI: {result}")
             if result.get("ok"):
@@ -228,65 +228,19 @@ async def play_music(req: MediaPlayRequest, entity_id: str, ctx) -> ExecutionRes
                 log.info(f"[media/play] Calling music_assistant.play_media on '{mass_entity}' with media_id='{uri}'")
                 result = await ha_client.call_service(
                     ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
-                    {"media_id": uri, "enqueue": "play" if req.enqueue == "replace" else req.enqueue},
+                    {"media_id": uri, "enqueue": req.enqueue or "replace"},
                 )
                 log.info(f"[media/play] play_media service call response: {result}")
                 if result.get("ok"):
                     return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' ({media_type_label}) on {entity_id}.", service="media_play")
                 else:
                     log.error(f"[media/play] play_media service call failed: {result.get('error')}")
+                    return ExecutionResult(status="FAILURE", message=f"Failed to play '{req.query}': {result.get('error')}", service="media_play")
 
-        # Search returned nothing — try get_library random for generic queries
-        log.warning(f"[media/play] MASS search returned 0 results or failed for query='{req.query}' (config_entry={mass_entry}), falling back to library random")
-        library_result = await ha_client.call_service(
-            ctx.ha_url, ctx.ha_token, "music_assistant", "get_library", entity_id="",
-            service_data={
-                "config_entry_id": mass_entry,
-                "media_type": "track",
-                "limit": 1,
-                "order_by": "random",
-            },
-            return_response=True,
-        )
-        log.info(f"[media/play] Library fallback search response: {library_result}")
-
-        if library_result.get("ok") and library_result.get("service_response"):
-            raw = library_result["service_response"]
-            resp = raw.get("service_response", raw)
-            items = resp.get("items", [])
-            if items:
-                uri = items[0].get("uri")
-                track_name = items[0].get("name", "unknown")
-                log.info(f"[media/play] Library random fallback selected: '{track_name}' ({uri})")
-
-                # Samsung TV: play the MA URL directly via play_media
-                if is_samsung:
-                    log.info("[media/play] Samsung TV fallback play")
-                    return await samsung_handler.play_music(
-                        ctx.ha_url, ctx.ha_token, entity_id, uri,
-                    )
-
-                log.info(f"[media/play] Calling fallback play_media on '{mass_entity}' with media_id='{uri}'")
-                result = await ha_client.call_service(
-                    ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
-                    {"media_id": uri, "enqueue": "play" if req.enqueue == "replace" else req.enqueue},
-                )
-                log.info(f"[media/play] Fallback play_media response: {result}")
-                if result.get("ok"):
-                    return ExecutionResult(status="SUCCESS", message=f"Playing random track on {entity_id}.", service="media_play")
-                else:
-                    log.error(f"[media/play] Fallback play_media service call failed: {result.get('error')}")
-
-        log.info(f"[media/play] Trying direct play_media fallback as last resort for media_id='{req.query}'")
-        result = await ha_client.call_service(
-            ctx.ha_url, ctx.ha_token, "music_assistant", "play_media", mass_entity,
-            {"media_id": req.query, "media_type": "track", "enqueue": "play"},
-        )
-        log.info(f"[media/play] Last resort play_media response: {result}")
-        if result.get("ok"):
-            return ExecutionResult(status="SUCCESS", message=f"Playing '{req.query}' on {entity_id}.", service="media_play")
-        else:
-            log.error(f"[media/play] Last resort play_media service call failed: {result.get('error')}")
+        # No usable match: do NOT play a random/last-resort track — the user
+        # asked for a specific thing and nothing matched it (BUG-25).
+        log.warning(f"[media/play] MASS search returned no usable match for query='{req.query}' (config_entry={mass_entry}); returning FAILURE")
+        return ExecutionResult(status="FAILURE", message=f"No match for '{req.query}'.", service="media_play")
 
     return ExecutionResult(status="FAILURE", message=f"Could not play '{req.query}' on {entity_id}.", service="media_play")
 
