@@ -42,11 +42,16 @@ ALPACA_ARCADE_PUBLIC_URL = os.getenv("ALPACA_ARCADE_PUBLIC_URL", ALPACA_ARCADE_U
 # value fails with a clear message instead of probing a guessed host.
 ALPACA_AUDIO_URL = (os.getenv("ALPACA_AUDIO_URL") or "").rstrip("/")
 
-# alpaca dashboard (port 5000). This is the *front door* for the audio server:
-# it owns /api/audio/* and /api/podcast/*, and it is what knows about the
-# Podcaster's mixer and the OpenVoice voice profiles. Prefer it over talking to
-# the audio server directly — the dashboard is the only place the mixing and the
-# speaker-identification live.
+# alpaca dashboard (port 5000). This is the *front door* for most of the audio
+# work: it owns /api/audio/* and /api/podcast/*, and it is what knows about the
+# podcast mixer and the OpenVoice voice profiles, so prefer it over talking to
+# the audio server directly.
+#
+# Speaker identification is the ONE exception and goes to ALPACA_AUDIO_URL
+# instead: it needs OpenVoice's reference encoder, which only exists in the
+# audio-server container because it is the only one with torch. An earlier
+# version of this comment said the dashboard hosted identification too, which
+# would have led a reader to move that call to port 5000 and 404 it.
 ALPACA_WEB_URL = os.getenv("ALPACA_WEB_URL", "http://jeremiah-home-desktop.local:5000").rstrip("/")
 
 # Use runtime-resolved values (or fallback to env vars)

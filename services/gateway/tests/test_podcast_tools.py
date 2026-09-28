@@ -198,3 +198,110 @@ def test_the_prompt_error_tool_table_names_the_new_tools():
     row = source.split('"Voice Tools": [', 1)[1].split("]", 1)[0]
     for name in re.findall(r'"([^"]+)"', row):
         assert name in ALLOWED_TOOLS, f"the error-message tool table advertises {name!r}, which is not a tool"
+
+
+# --------------------------------------------------------------------------
+# The dispatch timeout must exceed the handler's own budget
+# --------------------------------------------------------------------------
+
+#: Every Raven action whose handler blocks for longer than the standard ceiling.
+#: Each is a synthetic job - rendering speech, converting an image, re-synthesizing
+#: every chapter of a book - so a client-side timeout does not save any time: the
+#: worker keeps going and the model, told the call failed, dispatches the same
+#: job again.
+LONG_RUNNING_ACTIONS = {
+    "imageeditrequest": 590.0,
+    "audiobookregeneraterequest": 5400.0,
+    "podcastrenderrequest": 2400.0,
+    "speakeridentifyrequest": 180.0,
+}
+STANDARD_DISPATCH_TIMEOUT_S = 120.0
+
+
+def _dispatch_timeout_expr() -> ast.expr:
+    """The dispatch-timeout expression node, straight out of the parsed module.
+
+    Locating it by AST rather than by slicing text: the ladder is written across
+    several lines, and a text slice that stops at the first newline captures one
+    line of it rather than the whole conditional.
+    """
+    module = ast.parse((GATEWAY / "agent_loop.py").read_text())
+    for node in ast.walk(module):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "_dispatch_timeout" for t in node.targets
+        ):
+            return node.value
+    raise AssertionError("agent_loop no longer assigns _dispatch_timeout")  # pragma: no cover
+
+
+def _dispatch_timeout_for(action: str) -> float:
+    """The ceiling this action actually gets, by evaluating the real expression.
+
+    Read rather than imported (importing ``agent_loop`` builds the FastAPI app and
+    demands FERNET_KEY) and evaluated rather than re-parsed, so the test cannot
+    pass by agreeing with a second copy of the ladder that a future edit leaves
+    behind. The expression is a literal-only ternary over ``lookup_action``.
+    """
+    expr = ast.Expression(body=ast.fix_missing_locations(_dispatch_timeout_expr()))
+    code = compile(expr, "<dispatch-timeout>", "eval")
+    return float(eval(code, {"__builtins__": {}}, {"lookup_action": action}))  # noqa: S307
+
+
+def _handler_budget(action: str) -> float | None:
+    """The aiohttp timeout the execution handler budgets for this action."""
+    source = (GATEWAY.parent / "execution" / "handlers" / "podcast.py").read_text()
+    for const, name in (
+        ("_RENDER_TIMEOUT_S", "podcastrenderrequest"),
+        ("_IDENTIFY_TIMEOUT_S", "speakeridentifyrequest"),
+        ("_VOICES_TIMEOUT_S", "listvoicesrequest"),
+    ):
+        if name == action and f"{const} = " in source:
+            return float(source.split(f"{const} = ", 1)[1].split("\n", 1)[0].rstrip(".f"))
+    return None
+
+
+@pytest.mark.parametrize("action,budget", sorted(LONG_RUNNING_ACTIONS.items()))
+def test_a_long_running_action_has_a_dispatch_timeout_row(action, budget):
+    """A podcast render was dispatched with the standard 120 s ceiling while the
+    handler budgets 1800 s, so every episode past two minutes was abandoned by the
+    client while the dashboard went on mixing - and the model was told it had
+    failed, so it re-dispatched the same half-hour job."""
+    assert _dispatch_timeout_for(action) == budget
+
+
+def test_the_dispatch_timeout_exceeds_the_handler_budget_it_covers():
+    """Strictly greater, not greater-or-equal. A tie is a race and the loser is
+    whichever side fires first, so the upstream's own 422/500 mapping gets
+    replaced by a client TimeoutError that says nothing useful."""
+    for action in ("podcastrenderrequest", "speakeridentifyrequest"):
+        budget = _handler_budget(action)
+        assert budget is not None, f"no handler budget found for {action}"
+        assert _dispatch_timeout_for(action) > budget, (action, budget, _dispatch_timeout_for(action))
+
+
+def test_a_list_voices_call_does_not_need_a_long_dispatch_timeout():
+    """It is a read of two JSON lists; the standard ceiling is correct and a
+    longer one would only delay the report that it is unreachable."""
+    assert _handler_budget("listvoicesrequest") < STANDARD_DISPATCH_TIMEOUT_S
+
+
+def test_every_podcast_action_is_covered_by_the_ladder():
+    """Generalises the check: a new podcast action whose handler outlasts the
+    standard ceiling but has no row falls back to 120 s silently, and that silent
+    fallback is the whole failure mode."""
+    from services.gateway.tool_registry import TOOL_LIST_VOICES, TOOL_PODCAST_RENDER, TOOL_SPEAKER_IDENTIFY
+
+    for const, action in (
+        (TOOL_PODCAST_RENDER, "podcastrenderrequest"),
+        (TOOL_SPEAKER_IDENTIFY, "speakeridentifyrequest"),
+        (TOOL_LIST_VOICES, "listvoicesrequest"),
+    ):
+        assert const  # the const is what a reader would add the row next to
+        budget = _handler_budget(action)
+        assert budget is not None, action
+        # >=, not >: a budget of exactly the standard ceiling is a tie, and a tie
+        # still needs its own row - the client would race the upstream.
+        if budget >= STANDARD_DISPATCH_TIMEOUT_S:
+            assert _dispatch_timeout_for(action) > budget, (action, budget)
+        else:
+            assert _dispatch_timeout_for(action) == STANDARD_DISPATCH_TIMEOUT_S, action

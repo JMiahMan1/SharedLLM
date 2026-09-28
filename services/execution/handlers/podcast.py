@@ -51,7 +51,14 @@ _VOICES_TIMEOUT_S = 30.0
 _SAVE_TIMEOUT_S = 60.0
 
 _DEFAULT_OUTPUT = "podcast.wav"
-_AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".ogg", ".flac", ".aac", ".opus")
+# What alpaca's voice_clone.decode_to_22k can actually open. .webm is here
+# because a browser MediaRecorder produces it by default, which makes it the
+# most likely real doorbell/visitor clip - it was missing, so the commonest
+# input was the one hard-refused.
+_AUDIO_SUFFIXES = (".wav", ".mp3", ".m4a", ".m4b", ".ogg", ".oga", ".opus", ".webm", ".flac", ".aac", ".aiff", ".amr")
+#: voice_clone.MAX_UPLOAD_BYTES, mirrored so an oversize clip is refused before
+#: it is read and base64-encoded (+33%) only for the audio server to reject it.
+_MAX_CLIP_BYTES = 25 * 1024 * 1024
 
 
 def _user_context_dict(req) -> dict | None:
@@ -115,6 +122,20 @@ async def handle_podcast_render(req) -> ExecutionResult:
         )
 
     output_path = (req.output_path or "").strip() or _default_output()
+    if not output_path.lower().endswith(_AUDIO_SUFFIXES):
+        # The path is contained to the workspace, so this is not an escape - but
+        # `output_path: "services/gateway/main.py"` returns SUCCESS and leaves a
+        # workspace with a Python file full of WAV bytes. An audio tool writing a
+        # non-audio file is always a mistake, so refuse it.
+        return ExecutionResult(
+            status="FAILURE",
+            message=(
+                f"Podcast render failed: output_path {output_path!r} does not end in an audio "
+                f"extension (expected one of {', '.join(_AUDIO_SUFFIXES)})."
+            ),
+            service="podcast_render",
+            detail={"output_path": output_path},
+        )
 
     payload = {
         "script": script,
@@ -172,7 +193,16 @@ async def handle_podcast_render(req) -> ExecutionResult:
             detail={"output_path": output_path},
         )
 
-    ok, save_msg = await _write_to_workspace(req, output_path, b64)
+    # Wrapped here rather than inside _write_to_workspace because this is the
+    # one call that runs AFTER a successful render: an exception escaping here
+    # turns a finished episode into a 500 with no trace of the audio, and the
+    # model re-runs a half-hour job to produce the same file. Every other
+    # aiohttp call in this module is inside a try for the same reason.
+    try:
+        ok, save_msg = await _write_to_workspace(req, output_path, b64)
+    except Exception as e:
+        log.error(f"[podcast] workspace save raised: {e}")
+        ok, save_msg = False, f"the workspace save failed outright: {e}"
     if not ok:
         return ExecutionResult(
             status="FAILURE",
@@ -251,14 +281,35 @@ async def handle_speaker_identify(req) -> ExecutionResult:
             detail={"audio_path": req.audio_path},
         )
 
-    with open(safe_path, "rb") as f:
-        clip = f.read()
+    try:
+        with open(safe_path, "rb") as f:
+            clip = f.read()
+    except OSError as e:
+        # isfile() above already passed, so this is a permission or I/O problem
+        # rather than a missing file, and it would otherwise escape the handler.
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Speaker identification failed: cannot read '{req.audio_path}': {e}",
+            service="speaker_identify",
+            detail={"audio_path": req.audio_path},
+        )
     if not clip:
         return ExecutionResult(
             status="FAILURE",
             message=f"Speaker identification failed: '{req.audio_path}' is empty.",
             service="speaker_identify",
             detail={"audio_path": req.audio_path},
+        )
+
+    if len(clip) > _MAX_CLIP_BYTES:
+        return ExecutionResult(
+            status="FAILURE",
+            message=(
+                f"Speaker identification failed: '{req.audio_path}' is {len(clip) // 1048576} MB and the "
+                f"audio server accepts at most {_MAX_CLIP_BYTES // 1048576} MB. Trim or compress it first."
+            ),
+            service="speaker_identify",
+            detail={"audio_path": req.audio_path, "bytes": len(clip)},
         )
 
     payload = {"audio_b64": base64.b64encode(clip).decode("ascii")}
@@ -287,7 +338,13 @@ async def handle_speaker_identify(req) -> ExecutionResult:
             if resp.status == 422:
                 return ExecutionResult(
                     status="FAILURE",
-                    message=f"Speaker identification failed: not enough speech in the clip. {(await resp.text())[:200]}",
+                    # The audio server maps every ValueError to 422 - "not
+                    # enough speech" is only one of them, and the other two
+                    # (over the 25 MB cap, an undecodable container) are not
+                    # about the speech at all. Leading with the wrong diagnosis
+                    # sends a model looking in the wrong place, so report what
+                    # the server actually said.
+                    message=f"Speaker identification failed: {(await resp.text())[:300]}",
                     service="speaker_identify",
                     detail={"audio_path": req.audio_path},
                 )
@@ -312,6 +369,14 @@ async def handle_speaker_identify(req) -> ExecutionResult:
     score = (data or {}).get("score")
     candidates = (data or {}).get("candidates") or []
     runner_up = (data or {}).get("runner_up")
+    # The server returns runner_up as a profile id (voice_clone ranks ids), so
+    # printing it verbatim addressed a model as "b81e0d55aa02". The candidates
+    # carry the display name and are already ordered by descending score, so
+    # look the name up rather than assuming one.
+    runner_up_name = next(
+        (c.get("name") for c in candidates if isinstance(c, dict) and c.get("id") == runner_up),
+        None,
+    )
     detail = {
         "audio_path": req.audio_path,
         "matched": (data or {}).get("matched"),
@@ -324,8 +389,8 @@ async def handle_speaker_identify(req) -> ExecutionResult:
     }
     if matched:
         msg = f"Clip matches {matched} (score {score})"
-        if runner_up:
-            msg += f"; next closest is {runner_up}"
+        if runner_up_name or runner_up:
+            msg += f"; next closest is {runner_up_name or runner_up}"
         return ExecutionResult(status="SUCCESS", message=msg, service="speaker_identify", detail=detail)
 
     # No match still returns the ranking on purpose: "closest is X but it is not
@@ -372,9 +437,9 @@ async def handle_list_voices(req) -> ExecutionResult:
 
     profiles = (data or {}).get("saved_profiles") or []
     roster = (data or {}).get("roster") or []
-    if req.pair_id:
-        roster = [r for r in roster if r.get("pair_id") == req.pair_id]
-
+    # No pre-filter: it is the only place a row is touched before the
+    # isinstance guard below, so one junk row (alpaca cannot emit one today, but
+    # it is a list it forwards) would AttributeError straight out of the handler.
     hosts = [
         {
             "pair_id": r.get("pair_id"),
@@ -387,7 +452,7 @@ async def handle_list_voices(req) -> ExecutionResult:
             "clone": r.get("clone"),
         }
         for r in roster
-        if isinstance(r, dict)
+        if isinstance(r, dict) and (not req.pair_id or r.get("pair_id") == req.pair_id)
     ]
     saved = [
         {"id": p.get("id"), "name": p.get("name"), "engine": p.get("engine")}

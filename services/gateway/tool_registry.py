@@ -372,7 +372,11 @@ _SPEAKER_IDENTIFY_TOOL = {
                 "workspace_id": {"type": "string", "description": "Target workspace id."},
                 "audio_path": {
                     "type": "string",
-                    "description": "Path to the audio clip inside the workspace (e.g. 'visitor/doorbell.wav').",
+                    "description": (
+                        "Path to the audio clip inside the workspace (e.g. 'visitor/doorbell.webm'). "
+                        "Accepted extensions: .wav .mp3 .m4a .m4b .ogg .oga .opus .webm .flac .aac .aiff .amr. "
+                        "Maximum 25 MB - trim or compress a longer recording first."
+                    ),
                 },
                 "threshold": {
                     "type": "number",
