@@ -54,6 +54,25 @@ function useTripHandlers() {
         ],
       })
     ),
+    // Opening a trip card lazily fetches its resolved endpoints and route line.
+    // Without these, MSW's onUnhandledRequest: 'error' fires and the pending
+    // requests race the assertions, which made this suite order-dependent.
+    http.get('/api/geo/trips/:id/locations', ({ params }) =>
+      HttpResponse.json({
+        trip_id: String(params.id),
+        start: { name: 'Home', lat: 33.1667, lon: -111.5646, source: 'stored' },
+        end: { name: 'Mall', lat: 33.25, lon: -111.63, source: 'coords' },
+      })
+    ),
+    http.get('/api/geo/trips/:id/route', ({ params }) =>
+      HttpResponse.json({
+        trip_id: String(params.id),
+        points: [
+          { t: 1700000000, lat: 33.1667, lon: -111.5646, spd: 0 },
+          { t: 1700001800, lat: 33.25, lon: -111.63, spd: 22 },
+        ],
+      })
+    ),
     http.patch('/api/geo/trips/:id', async ({ request }) => {
       patchBody = (await request.json()) as Record<string, unknown>;
       return HttpResponse.json({ ...baseTrip, ...patchBody });
