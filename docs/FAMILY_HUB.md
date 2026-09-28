@@ -204,3 +204,15 @@ audio is reported, not treated as a silent success.
 UI: Family → Create → `MakeMusic.tsx` — presets, a length slider, inline
 playback, and the failure shown in place. Sharing a finished song into the chat
 room (Talk file upload) is the next step. 5 gateway + 5 UI tests.
+
+## Calls (signalling shipped; media is the next slice)
+
+`call_join` / `call_leave` go through Nextcloud's own call API
+(`/ocs/v2.php/apps/spreed/api/v4/call/<token>`) and return the call id, call
+token and signalling URL — no second media stack and no TURN server of ours.
+The composer has a call button that reflects in-call state and reports a
+refusal in place. Gateway: `POST /api/communication/talk/call`.
+
+**Not yet:** media. Carrying audio/video in-app needs a Talk client library
+(or LiveKit as a fallback), and restrictive networks still need a reachable
+STUN/TURN server — which is infrastructure to run, not code to write. 4 tests.
