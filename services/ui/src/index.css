@@ -382,11 +382,84 @@ input[type="range"] {
    Theme modes (optional body class)
 ────────────────────────────────────────────────────────────── */
 .day-mode {
-  background-image: radial-gradient(ellipse 80% 50% at 20% 0%, rgba(79, 70, 229, 0.25) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(14, 165, 233, 0.15) 0%, transparent 60%);
+  background-image:
+    var(--site-pattern, none),
+    radial-gradient(ellipse 90% 60% at 15% 0%, var(--site-bg-glow-a) 0%, transparent 65%),
+    radial-gradient(ellipse 70% 50% at 85% 100%, var(--site-bg-glow-b) 0%, transparent 65%);
 }
 
 .night-mode {
-  background-image: radial-gradient(ellipse 80% 50% at 20% 0%, rgba(30, 27, 75, 0.70) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(2, 6, 23, 0.90) 0%, transparent 60%);
+  background-image:
+    var(--site-pattern, none),
+    radial-gradient(ellipse 80% 50% at 20% 0%, var(--site-bg-glow-a) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, var(--site-bg-glow-b) 0%, transparent 60%);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Light-scheme utility overrides.
+   The interface was authored dark-first with raw Tailwind utils
+   (text-white, bg-black/20, bg-white/5, text-slate-600/700). When a
+   light pack is active those become invisible, so remap the most
+   common ones onto the theme's semantic tokens. Scope is
+   [data-theme-scheme="light"] so dark packs are untouched.
+ ────────────────────────────────────────────────────────────── */
+[data-theme-scheme="light"] .text-white {
+  color: var(--site-text) !important;
+}
+
+[data-theme-scheme="light"] .text-slate-600,
+[data-theme-scheme="light"] .text-slate-700,
+[data-theme-scheme="light"] .text-slate-800 {
+  color: var(--site-text-muted) !important;
+}
+
+[data-theme-scheme="light"] .bg-black\/10,
+[data-theme-scheme="light"] .bg-black\/20,
+[data-theme-scheme="light"] .bg-black\/25,
+[data-theme-scheme="light"] .bg-black\/30 {
+  background-color: var(--site-card-bg) !important;
+}
+
+[data-theme-scheme="light"] .bg-white\/10 {
+  background-color: rgba(17, 24, 39, 0.06) !important;
+}
+
+[data-theme-scheme="light"] .bg-white\/\[0\.02\],
+[data-theme-scheme="light"] .bg-white\/5 {
+  background-color: rgba(17, 24, 39, 0.04) !important;
+}
+
+[data-theme-scheme="light"] .border-white\/5,
+[data-theme-scheme="light"] .border-white\/10 {
+  border-color: var(--color-border-soft) !important;
+}
+
+/* Light surfaces read as soft shadows rather than white glows. */
+[data-theme-scheme="light"] {
+  --shadow-card: 0 2px 10px rgba(17, 24, 39, 0.08), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+  --shadow-panel: 0 8px 40px rgba(17, 24, 39, 0.12), 0 1px 0 rgba(255, 255, 255, 0.7) inset;
+}
+
+[data-theme-scheme="light"] .glass-panel,
+[data-theme-scheme="light"] .glass-card {
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+}
+
+[data-theme-scheme="light"] .glass-card:hover {
+  box-shadow: 0 6px 24px rgba(17, 24, 39, 0.12), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+}
+
+[data-theme-scheme="light"] .skeleton {
+  background: rgba(17, 24, 39, 0.06);
+}
+[data-theme-scheme="light"] .skeleton::after {
+  background: linear-gradient(90deg, transparent 0%, rgba(17, 24, 39, 0.06) 50%, transparent 100%);
+}
+
+[data-theme-scheme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(17, 24, 39, 0.18);
+}
+[data-theme-scheme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(17, 24, 39, 0.28);
 }

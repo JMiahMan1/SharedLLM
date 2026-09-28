@@ -69,6 +69,21 @@ describe('site theme application', () => {
     expect(root.style.getPropertyValue('--ht-accent')).toBe(neon.tokens.accent);
   });
 
+  it('reflects the theme scheme on the document (light vs dark)', () => {
+    const root = document.documentElement;
+    applySiteTheme('clean-athletic');
+    expect(root.getAttribute('data-theme-scheme')).toBe('light');
+    expect(root.style.colorScheme).toBe('light');
+    expect(root.classList.contains('dark')).toBe(false);
+    expect(document.body.classList.contains('day-mode')).toBe(true);
+
+    applySiteTheme('aurora');
+    expect(root.getAttribute('data-theme-scheme')).toBe('dark');
+    expect(root.classList.contains('dark')).toBe(true);
+    expect(document.body.classList.contains('night-mode')).toBe(true);
+    expect(document.body.classList.contains('day-mode')).toBe(false);
+  });
+
   it('falls back to aurora when theme id is unknown', () => {
     const resolved = applySiteTheme('missing-theme-xyz');
     expect(resolved).toBe('aurora');

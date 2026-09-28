@@ -47,11 +47,43 @@ export interface HealthThemeTokens {
   numberFontFamily?: string | null;
   /** Decorative corner cuts (Tron HUD) */
   showCornerCut?: boolean;
-  /** Motif overlay id: none | petal | hud | grid */
+  /** Motif overlay id: none | petal | bloom | leaf | hud | grid */
   motif?: ThemeMotif;
+  /**
+   * Light or dark appearance for this theme. Drives `data-theme-scheme`,
+   * `color-scheme` and the day/night body treatment. When omitted it is
+   * derived from the perceived luminance of `bg`, so imported packs "just
+   * work" without declaring it explicitly.
+   */
+  scheme?: ThemeScheme;
 }
 
-export type ThemeMotif = 'none' | 'petal' | 'hud' | 'grid';
+export type ThemeMotif = 'none' | 'petal' | 'bloom' | 'leaf' | 'hud' | 'grid';
+export type ThemeScheme = 'light' | 'dark';
+
+/** Perceived luminance (0..1) of an #rgb/#rrggbb/#rrggbbaa hex. NaN-safe. */
+export function hexLuminance(hex: string): number {
+  let h = (hex || '').replace('#', '').trim();
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  if (h.length === 8) h = h.slice(0, 6);
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) return NaN;
+  const lin = (x: number) => {
+    const s = x / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const r = lin(parseInt(h.slice(0, 2), 16));
+  const g = lin(parseInt(h.slice(2, 4), 16));
+  const b = lin(parseInt(h.slice(4, 6), 16));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** Resolve a theme's light/dark scheme: explicit token wins, else derive from bg. */
+export function resolveScheme(tokens: Pick<HealthThemeTokens, 'bg' | 'scheme'>): ThemeScheme {
+  if (tokens.scheme === 'light' || tokens.scheme === 'dark') return tokens.scheme;
+  const lum = hexLuminance(tokens.bg);
+  if (Number.isNaN(lum)) return 'dark';
+  return lum > 0.5 ? 'light' : 'dark';
+}
 
 /** A single installable theme (one visual style). */
 export interface ThemePackage {
@@ -174,8 +206,14 @@ export function validateThemePackage(input: unknown, path = 'theme'): ThemeValid
     if (typeof tok.radius !== 'number' || !Number.isFinite(tok.radius) || tok.radius < 0) {
       errors.push(`${pathT}.radius must be a non-negative number`);
     }
-    if (tok.motif !== undefined && !['none', 'petal', 'hud', 'grid'].includes(String(tok.motif))) {
-      errors.push(`${pathT}.motif must be one of none|petal|hud|grid`);
+    if (
+      tok.motif !== undefined &&
+      !['none', 'petal', 'bloom', 'leaf', 'hud', 'grid'].includes(String(tok.motif))
+    ) {
+      errors.push(`${pathT}.motif must be one of none|petal|bloom|leaf|hud|grid`);
+    }
+    if (tok.scheme !== undefined && !['light', 'dark'].includes(String(tok.scheme))) {
+      errors.push(`${pathT}.scheme must be one of light|dark`);
     }
   }
 
@@ -288,6 +326,7 @@ export function themeToCssVars(tokens: HealthThemeTokens): HealthThemeCssVars {
     '--ht-ring': tokens.ring,
     '--ht-radius': `${tokens.radius}px`,
     '--ht-motif': tokens.motif ?? 'none',
+    '--ht-scheme': resolveScheme(tokens),
   };
   if (tokens.accentAlt) vars['--ht-accent-alt'] = tokens.accentAlt;
   if (tokens.ring2) vars['--ht-ring-2'] = tokens.ring2;
