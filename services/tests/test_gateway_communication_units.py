@@ -5,14 +5,6 @@ from unittest.mock import AsyncMock
 import pytest
 from starlette.requests import Request
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
-os.environ.setdefault("OLLAMA_URL", "http://ollama")
-os.environ.setdefault("IDENTITY_SVC_URL", "http://identity")
-os.environ.setdefault("EXECUTION_SVC_URL", "http://execution")
-os.environ.setdefault("RAG_SVC_URL", "http://rag")
-os.environ.setdefault("STORAGE_SVC_URL", "http://storage")
-os.environ.setdefault("LOGGING_SVC_URL", "http://logging")
-os.environ.setdefault("WORKSPACE_RUNTIME_SVC_URL", "http://workspace_runtime")
 
 import services.gateway.main as gateway_main
 

@@ -10,11 +10,6 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
-os.environ.setdefault("FAST_PATH_THRESHOLD", "0.85")
-os.environ.setdefault("IDENTITY_SVC_URL", "http://identity")
-os.environ.setdefault("EXECUTION_SVC_URL", "http://execution")
-os.environ.setdefault("OLLAMA_URL", "http://ollama")
 
 from sqlmodel import Session, create_engine, select
 
@@ -73,9 +68,6 @@ ASSISTANT_MODEL = TEST_SETTINGS.get("assistant_model") or "test-assistant-model"
 CODING_MODEL = TEST_SETTINGS.get("coding_model") or "test-coding-model"
 LIBRARIAN_MODEL = TEST_SETTINGS.get("librarian_model") or "test-librarian-model"
 
-os.environ["ASSISTANT_MODEL"] = ASSISTANT_MODEL
-os.environ["CODING_MODEL"] = CODING_MODEL
-os.environ["LIBRARIAN_MODEL"] = LIBRARIAN_MODEL
 
 # Live gateway detection for integration tests
 LIVE_GATEWAY_ENDPOINTS = [

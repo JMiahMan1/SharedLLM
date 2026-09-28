@@ -7,8 +7,10 @@ the trusted internal ``/workspace/resolve`` endpoint).
 """
 import os
 
-# Must be set BEFORE importing the workspace_runtime app (it builds its engine
-# and reads FERNET_KEY / INTERNAL_SECRET at import time).
+# conftest.py pins FERNET_KEY and INTERNAL_SECRET for the whole suite before any
+# service module is imported, so this file must not set them: at module scope
+# that is collection time, and whichever module ran first would decide the value
+# every other module then captured.
 from pathlib import Path
 
 # Scratch state goes in the workspace .tmp/ (see AGENTS.md), never /tmp.
@@ -16,9 +18,6 @@ _TMP = Path(__file__).resolve().parents[2] / ".tmp"
 _TMP.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault(
     "WORKSPACE_DATABASE_URL", f"sqlite:///{_TMP / 'test_ws_env_enc_unit.db'}"
-)
-os.environ.setdefault(
-    "FERNET_KEY", "g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14="
 )
 # conftest.py pins INTERNAL_SECRET for the whole suite now, and restores the
 # environment after each test, so read the value rather than asserting a literal
