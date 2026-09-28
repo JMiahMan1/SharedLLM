@@ -14,10 +14,7 @@ already proven (from memory / history) instead of re-deriving every step, which
 is what kept autonomous builds burning the full 1800s timeout.
 """
 
-import os
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
-os.environ.setdefault("FERNET_KEY", "test-fernet-key-for-unit-tests-only")
 
 import json
 

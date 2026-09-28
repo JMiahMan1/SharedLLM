@@ -30,17 +30,6 @@ import time
 import httpx
 import pytest
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
-os.environ.setdefault("OLLAMA_URL", "http://localhost:11434")
-os.environ.setdefault("IDENTITY_SVC_URL", "http://identity:8001")
-os.environ.setdefault("EXECUTION_SVC_URL", "http://execution:8003")
-os.environ.setdefault("RAG_SVC_URL", "http://rag:8004")
-os.environ.setdefault("STORAGE_SVC_URL", "http://storage:8005")
-os.environ.setdefault("LOGGING_SVC_URL", "http://logging:8006")
-os.environ.setdefault("WORKSPACE_RUNTIME_SVC_URL", "http://workspace_runtime:8007")
-os.environ.setdefault("CONTROL_PLANE_URL", "http://control_plane:8008")
-os.environ.setdefault("SEARXNG_URL", "http://searxng:8080")
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 from pathlib import Path
 

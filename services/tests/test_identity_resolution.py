@@ -1,15 +1,5 @@
 import os
 
-# Set environment variables BEFORE any imports (must be first lines)
-if "DEFAULT_ADMIN_PASSWORD" not in os.environ:
-    os.environ["DEFAULT_ADMIN_PASSWORD"] = "test-admin-password"
-if "INTERNAL_SECRET" not in os.environ:
-    os.environ["INTERNAL_SECRET"] = "test-secret"
-if "FERNET_KEY" not in os.environ:
-    os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
-if "INIT_DB" not in os.environ:
-    os.environ["INIT_DB"] = "false"
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool

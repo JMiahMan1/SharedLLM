@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-os.environ["DEVICE_REGISTRY_PATH"] = ":memory:"
 
 from services.execution.handlers import climate, light, media, security, talk, volumes
 from services.execution.handlers.security import SecurityRequest

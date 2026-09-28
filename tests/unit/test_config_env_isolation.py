@@ -462,6 +462,25 @@ def _module_scope_env_writes() -> dict[str, list[str]]:
                 elif isinstance(node, ast.AnnAssign):
                     targets = [node.target]
                 else:
+                    # os.environ.setdefault("X", ...) is a statement, not an
+                    # assignment, so it needs its own arm. It is also the *most*
+                    # misleading of the three: it reads like a defensive default
+                    # but at collection time it is a silent no-op whenever any
+                    # other module set the var first, which is how
+                    # ALPACA_AUDIO_URL froze as "" and turned four passing
+                    # music-proxy tests into "not configured on this deployment".
+                    if (
+                        isinstance(node, ast.Expr)
+                        and isinstance(node.value, ast.Call)
+                        and isinstance(node.value.func, ast.Attribute)
+                        and node.value.func.attr in {"setdefault", "pop"}
+                        and isinstance(node.value.func.value, ast.Attribute)
+                        and node.value.func.value.attr == "environ"
+                        and node.value.args
+                    ):
+                        arg = node.value.args[0]
+                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                            found.setdefault(arg.value, []).append(str(py.relative_to(ROOT)))
                     continue
                 for target in targets:
                     if not (

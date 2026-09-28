@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 
 import pytest
@@ -17,7 +16,6 @@ from services.workspace_runtime.main import (
     write_file,
 )
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 
 @pytest.fixture
