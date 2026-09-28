@@ -115,9 +115,14 @@ Tests: 7 gateway (`test_talk_identity_switch.py`) + 6 UI
 - **Voice/video calls**: Nextcloud Talk WebRTC needs the Talk signalling API
   (`/ocs/v2.php/apps/spreed/api/v4/call/*`). Phase 1 is a join button that
   opens the Talk room; phase 2 is in-app WebRTC via a Talk client library.
-- **Typed chat envelope** (`text | activity | game | creation | system`) with a
-  text fallback so old clients keep working — this is also what activity
-  cards and game moves ride on (`docs/ACHIEVEMENTS.md`).
+- **Typed chat envelope** (`text | activity | game | creation | system`) — **shipped**
+  (`services/ui/src/lib/chatEnvelope.ts`, `components/chat/EnvelopeBody.tsx`).
+  The wire format is a fenced `jarvis-envelope` JSON block appended to
+  human-readable text, so a bot can post a card while old clients still see
+  plain text. Malformed cards degrade to text instead of blanking a
+  conversation. `encodeEnvelope` / `decodeEnvelope` / `activityEnvelope` are the
+  whole contract; 7 unit + 6 component tests.
+  **Next:** have the achievements worker post one when a badge is earned.
 - Kid-friendly touches: emoji reactions, big buttons, optionally read-aloud
   replies through the existing TTS path.
 
