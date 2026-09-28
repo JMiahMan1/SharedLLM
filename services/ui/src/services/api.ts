@@ -92,6 +92,8 @@ import type {
   ActivityWindow,
   AchievementsResponse,
   ActivityGoals,
+  StarsResponse,
+  StarGrant,
   TelemetryNotification,
   TelemetryReport,
   TelemetryReportPeriod,
@@ -864,6 +866,23 @@ export const api = {
     userId?: string
   ): Promise<{ user_id: string; goals: ActivityGoals }> {
     const resp = await apiClient.put('/api/geo/goals', { goals, user_id: userId });
+    return resp.data;
+  },
+
+  async getStars(userId?: string): Promise<StarsResponse> {
+    const query = new URLSearchParams();
+    if (userId && userId !== 'all') query.set('user_id', userId);
+    const resp = await apiClient.get(`/api/geo/stars?${query.toString()}`);
+    return resp.data;
+  },
+
+  async grantStars(payload: {
+    user_id: string;
+    stars: number;
+    reason?: string;
+    note?: string;
+  }): Promise<StarGrant> {
+    const resp = await apiClient.post('/api/geo/stars', payload);
     return resp.data;
   },
 

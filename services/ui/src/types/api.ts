@@ -970,6 +970,21 @@ export interface ActivitySummaryResponse extends Omit<SharedActivityUser, 'usern
 }
 
 /** A user's last known GPS fix as stored by Identity. */
+export interface StarGrant {
+  stars: number;
+  balance: number;
+  reason: string;
+  note?: string;
+  granted_by: string;
+  at: number;
+}
+
+export interface StarsResponse {
+  user_id: string;
+  stars: number;
+  grants: StarGrant[];
+}
+
 export interface ActivityGoals {
   daily_steps: number;
   weekly_steps: number;

@@ -166,3 +166,16 @@ date it was first earned even as the window rolls forward.
    encouragement references; renderer updates on mobile + desktop.
 5. **Skylight**: bonus endpoint (admin + achievement), star mirroring, chores
    page wiring.
+
+## Bonus stars (shipped)
+
+- `GET /api/geo/stars` — balance plus the ledger of who granted what, when and
+  why. `POST /api/geo/stars` grants or deducts (−100…100, non-zero, reason from
+  `bonus | achievement | game | chore | manual`); you cannot remove more stars
+  than someone has. Grants are recorded in Jarvis first, so a Skylight outage
+  can never lose one the family was already told about.
+- Gateway proxies both; admins grant from `StarBalance` on Wander → Achievements.
+- Skylight write-through (`POST /api/integrations/skylight/stars`) posts through
+  the private frame API **at a configured path**, `skylight_stars_path`. There is
+  no default: an unset path returns a clear failure naming the setting, because
+  posting to a guessed path would look like a grant that never landed.

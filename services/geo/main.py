@@ -2477,6 +2477,97 @@ async def get_points(
     }
 
 
+STAR_REASONS = ("bonus", "achievement", "game", "chore", "manual")
+
+MAX_STARS_PER_GRANT = 100
+
+
+@app.get("/api/geo/stars")
+async def get_stars(
+    user_id: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Bonus-star balance and the ledger of who granted what, and why."""
+    clean = (user_id or "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+    r = await get_redis()
+    if not r:
+        return {"user_id": clean, "stars": 0, "grants": []}
+    grants_raw = await r.lrange(f"geo:stars_ledger:{clean}", 0, -1) or []
+    grants: list[dict] = []
+    for raw in grants_raw:
+        try:
+            grants.append(json.loads(raw))
+        except (TypeError, ValueError):
+            log.warning("[stars] skipping unreadable ledger entry for %s", clean)
+    return {
+        "user_id": clean,
+        "stars": int(await r.get(f"geo:stars:{clean}") or 0),
+        "grants": grants,
+    }
+
+
+@app.post("/api/geo/stars")
+async def grant_stars(
+    payload: dict,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Grant (or deduct) bonus stars. An admin or internal caller only.
+
+    Stars are recorded in Jarvis regardless of Skylight: the write-through is
+    reported back, never assumed, so a Skylight outage cannot silently lose a
+    grant the family was told about.
+    """
+    user_id = payload.get("user_id")
+    clean = (str(user_id) if user_id else "").split(".")[-1].lower()
+    if not clean:
+        raise HTTPException(status_code=400, detail="user_id required")
+    try:
+        amount = int(payload.get("stars"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="stars must be a whole number")
+    if amount == 0 or abs(amount) > MAX_STARS_PER_GRANT:
+        raise HTTPException(
+            status_code=422,
+            detail=f"stars must be between -{MAX_STARS_PER_GRANT} and {MAX_STARS_PER_GRANT}, not 0",
+        )
+    reason = str(payload.get("reason") or "manual")
+    if reason not in STAR_REASONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"reason must be one of: {', '.join(STAR_REASONS)}",
+        )
+    note = str(payload.get("note") or "").strip()[:200]
+    granted_by = str(payload.get("granted_by") or "admin")[:64]
+
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    key = f"geo:stars:{clean}"
+    balance = int(await r.get(key) or 0)
+    new_balance = balance + amount
+    if new_balance < 0:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{clean} only has {balance} star(s); cannot remove {abs(amount)}",
+        )
+    await r.set(key, new_balance)
+    entry = {
+        "stars": amount,
+        "balance": new_balance,
+        "reason": reason,
+        "note": note,
+        "granted_by": granted_by,
+        "at": time.time(),
+    }
+    await r.lpush(f"geo:stars_ledger:{clean}", json.dumps(entry))
+    return {"user_id": clean, **entry}
+
+
 @app.get("/steps/goal")
 async def get_step_goal(
     user_id: str | None = None,

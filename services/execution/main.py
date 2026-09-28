@@ -3413,6 +3413,74 @@ def _skylight_chore_ids(chore_id: str) -> tuple[str, str]:
     return chore_id, date_cls.today().isoformat()
 
 
+async def _skylight_setting(key: str) -> str:
+    """Read one Identity setting. Empty string when absent — callers decide
+    whether that is fatal (for the stars path it is)."""
+    try:
+        from services.gateway.config import IDENTITY_SVC, INTERNAL_SECRET
+
+        async with get_client().get(
+            f"{IDENTITY_SVC}/api/settings",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        ) as resp:
+            if resp.status != 200:
+                log.warning("[skylight] settings read failed: %s", resp.status)
+                return ""
+            return {item["key"]: item.get("value") or "" for item in await resp.json()}.get(key, "")
+    except Exception as exc:  # noqa: BLE001 - reported to the caller as a failure
+        log.error("[skylight] settings read error: %s", exc)
+        return ""
+
+
+@app.post("/api/integrations/skylight/stars", dependencies=[Depends(require_internal)])
+async def push_skylight_stars(
+    payload: dict,
+    x_internal_secret: str = Header(None),
+):
+    """Write bonus stars through to Skylight.
+
+    The private API path is configuration, not a guess: set
+    `skylight_stars_path` (e.g. "/rewards") in Identity settings. Without it
+    this returns a clear failure instead of posting to a URL we invented —
+    a silently-wrong path would look like a grant that never lands.
+    """
+    path = await _skylight_setting("skylight_stars_path")
+    if not path:
+        return {
+            "status": "FAILURE",
+            "message": "skylight_stars_path is not configured — set it in Settings to the frames path that awards stars",
+        }
+    if not path.startswith("/"):
+        return {"status": "FAILURE", "message": f"skylight_stars_path must start with '/': {path!r}"}
+
+    member = str(payload.get("member") or "").strip()
+    stars = payload.get("stars")
+    reason = str(payload.get("note") or payload.get("reason") or "").strip()[:200]
+    if not member:
+        return {"status": "FAILURE", "message": "member is required"}
+    try:
+        amount = int(stars)
+    except (TypeError, ValueError):
+        return {"status": "FAILURE", "message": "stars must be a whole number"}
+    if amount == 0:
+        return {"status": "FAILURE", "message": "stars must not be zero"}
+
+    session = await _get_skylight_session(payload.get("user") or None)
+    if not session:
+        return {"status": "FAILURE", "message": "Skylight is not configured"}
+
+    result = await _skylight_request(
+        session,
+        "POST",
+        path,
+        json_body={"member": member, "stars": amount, "reason": reason},
+    )
+    if result is None:
+        return {"status": "FAILURE", "message": f"Skylight rejected the star grant on {path}"}
+    return {"status": "SUCCESS", "message": f"Granted {amount} star(s) to {member}", "response": result}
+
+
 @app.get("/api/integrations/skylight/chores", dependencies=[Depends(require_internal)])
 async def get_skylight_chores(
     user: str | None = None,
