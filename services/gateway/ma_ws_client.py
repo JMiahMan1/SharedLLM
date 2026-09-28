@@ -25,7 +25,7 @@ import inspect
 import json
 import logging
 import os.path
-import time
+import random
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
@@ -128,6 +128,7 @@ class MAWebSocketClient:
 
         # Queue state tracking
         self._queue_state: dict[str, Any] = {}
+        self._queue_id: str | None = None
         self._stream_url: str | None = None
 
         # Event callbacks
@@ -232,6 +233,8 @@ class MAWebSocketClient:
         if not self._connected:
             raise ConnectionError("MA WebSocket client is not connected")
 
+        self._track_queue_id(args)
+
         msg_id = self._next_msg_id()
         payload: dict[str, Any] = {
             "message_id": msg_id,
@@ -271,6 +274,8 @@ class MAWebSocketClient:
         """
         if not self._connected:
             raise ConnectionError("MA WebSocket client is not connected")
+
+        self._track_queue_id(args)
 
         msg_id = self._next_msg_id()
         payload: dict[str, Any] = {
@@ -348,6 +353,9 @@ class MAWebSocketClient:
         """
         if not isinstance(data, dict) or not data:
             return
+        tracked_queue_id = data.get("queue_id")
+        if isinstance(tracked_queue_id, str) and tracked_queue_id:
+            self._queue_id = tracked_queue_id
         self._queue_state = data
         self._extract_stream_url(data)
 
@@ -467,12 +475,14 @@ class MAWebSocketClient:
             else:
                 log.warning(f"[MA-WS] Connection closed normally: {e}")
             self._connected = False
+            self._schedule_reconnect()
         except asyncio.CancelledError:
             raise
         except Exception as e:
             log.error(f"[MA-WS] Message loop error: {e}", exc_info=True)
             self._last_error = e
             self._connected = False
+            self._schedule_reconnect()
 
     async def _handle_message(self, message: str) -> None:
         """
@@ -520,7 +530,20 @@ class MAWebSocketClient:
         # ── Error messages ──────────────────────────────────────────────
         elif msg_type == "ERROR":
             error = data.get("error", {})
-            log.error(f"[MA-WS] Received error: msg_id={data.get('message_id')}, error={json.dumps(error) if isinstance(error, dict) else error}")
+            msg_id = data.get("message_id")
+            log.error(f"[MA-WS] Received error: msg_id={msg_id}, error={json.dumps(error) if isinstance(error, dict) else error}")
+            if isinstance(error, dict):
+                error_code = str(error.get("code") or error.get("error_code") or "ERROR")
+                details = error.get("description") or error.get("message") or error
+            else:
+                error_code = "ERROR"
+                details = error
+            self._ma_error_code = error_code
+            self._ma_error_details = str(details)
+            self._last_error = RuntimeError(f"MA error: {error_code}: {details}")
+            # Resolve the waiting command immediately — never wait the full
+            # timeout for a command MA has already rejected (BUG-23).
+            self._fail_pending_response(msg_id, details)
 
         # ── Partial results (no type field, from commands like play_media) ─
         elif "message_id" in data and "result" in data:
@@ -550,6 +573,7 @@ class MAWebSocketClient:
             self._ma_error_details = str(details)
             self._last_error = RuntimeError(f"MA error: {error_code}: {details}")
             log.error(f"[MA-WS] MA error response (no type field): msg_id={msg_id}, error_code={error_code!r}, details={details!r}")
+            self._fail_pending_response(msg_id, details)
 
         # ── Unknown message types ───────────────────────────────────────
         else:
@@ -565,13 +589,10 @@ class MAWebSocketClient:
             event_type: The event type string
             data: The event data payload
         """
-        # Update queue state for queue-related events
-        if event_type == EVENT_QUEUE_UPDATED:
-            self._queue_state = data
-            self._extract_stream_url(data)
-        elif event_type == EVENT_PLAYER_UPDATED:
-            self._queue_state = data
-        elif event_type in (EVENT_QUEUE_ENDED, EVENT_QUEUE_STARTED, EVENT_QUEUE_VOLATILE_UPDATED):
+        # Update queue state for queue-related events. Player events describe
+        # the PLAYER (volume, active source) — they must never replace queue
+        # state (BUG-23); callbacks below still receive every event.
+        if event_type in (EVENT_QUEUE_UPDATED, EVENT_QUEUE_ENDED, EVENT_QUEUE_STARTED, EVENT_QUEUE_VOLATILE_UPDATED) and self._event_matches_tracked_queue(data):
             self._queue_state = data
             self._extract_stream_url(data)
 
@@ -687,6 +708,21 @@ class MAWebSocketClient:
     # Internal - Reconnect Logic
     # ------------------------------------------------------------------
 
+    def _schedule_reconnect(self) -> None:
+        """Start the reconnect loop after the message loop dies (BUG-23).
+
+        Previously the message loop only logged the close and left the client
+        dead: ``_reconnect`` existed but nothing ever started it. Suppressed
+        during shutdown (deliberate disconnect) and when a reconnect is
+        already pending.
+        """
+        if self._shutdown_event.is_set():
+            return
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            return
+        self._reconnect_task = asyncio.create_task(self._reconnect())
+        log.info("[MA-WS] Reconnect scheduled after message loop exit")
+
     async def _reconnect(self) -> None:
         """
         Attempt to reconnect with exponential backoff and jitter.
@@ -696,8 +732,11 @@ class MAWebSocketClient:
             self._reconnect_base_delay * (self._reconnect_backoff_factor ** (self._reconnect_count - 1)),
             self._reconnect_max_delay,
         )
-        # Add jitter to prevent thundering herd
-        jitter = delay * RECONNECT_JITTER * (1.0 - 2.0 * hash(str(time.time())) % 1)
+        # Add jitter to prevent thundering herd. The old expression
+        # `1.0 - 2.0 * hash(str(time.time())) % 1` always evaluated to 1.0
+        # ((2.0 * int) % 1 is identically 0), i.e. a constant offset with no
+        # randomness at all — use a real uniform sample instead (BUG-23).
+        jitter = random.uniform(0, delay * RECONNECT_JITTER)
         delay = max(0.1, delay + jitter)
 
         log.warning(
@@ -740,6 +779,52 @@ class MAWebSocketClient:
         """Generate a unique MA-format message ID: 'counter{n}'."""
         self._msg_id += 1
         return f"counter{self._msg_id}"
+
+    def _track_queue_id(self, args: dict[str, Any] | None) -> None:
+        """Arm the queue_id filter from a command we are about to send (BUG-23).
+
+        Gateway commands address queues by player id (``queue_id`` ==
+        ``target_player_id`` in main.py), so recording it here guarantees the
+        filter knows our queue before the first event arrives.
+        """
+        if isinstance(args, dict):
+            queue_id = args.get("queue_id")
+            if isinstance(queue_id, str) and queue_id:
+                self._queue_id = queue_id
+
+    def _fail_pending_response(self, msg_id: Any, error: Any) -> None:
+        """Resolve a waiting command future from an MA error frame (BUG-23).
+
+        Without this, ``send_command`` blocks for the full timeout after MA
+        has already rejected the command.
+        """
+        if not msg_id:
+            return
+        future = self._pending_responses.get(msg_id)
+        if future is None or future.done():
+            return
+        detail = json.dumps(error) if isinstance(error, dict) else str(error)
+        future.set_exception(RuntimeError(f"MA error: {detail}"))
+        log.info(f"[MA-WS] Failed pending response for msg_id={msg_id}")
+
+    def _event_matches_tracked_queue(self, data: Any) -> bool:
+        """Whether a queue event belongs to the queue we are tracking (BUG-23).
+
+        Accepts events until a queue_id is known (first event or
+        ``ingest_queue_state``/command args), then ignores events for other
+        queues so they cannot overwrite our queue state or stream URL.
+        """
+        if not isinstance(data, dict):
+            return False
+        event_queue_id = data.get("queue_id")
+        if self._queue_id is None:
+            if isinstance(event_queue_id, str) and event_queue_id:
+                self._queue_id = event_queue_id
+            return True
+        if not (isinstance(event_queue_id, str) and event_queue_id):
+            # No queue_id on the event — cannot attribute it to another queue.
+            return True
+        return event_queue_id == self._queue_id
 
     # ------------------------------------------------------------------
     # Context Manager Support

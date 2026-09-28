@@ -330,3 +330,54 @@ swallowed. Those calls consume `side_effect` lists and inflate call counts
 (observed: real call + 2 log emits = 3). Filter doubles by URL (e.g. count
 only `/execute/…` targets) or return a benign stub for non-target URLs —
 see `tests/test_execution_proxy_retry.py::ExecPost`.
+
+## MA WS client reconnect/error/state hardening (P2-T14 / BUG-23, 2026-09-27)
+
+Five sub-bugs fixed in `services/gateway/ma_ws_client.py` (plan row 112; the
+row's refs `444-455,501,525,552,670,680` were pre-P2-T11 and stale):
+
+1. **Reconnect never started** — `_message_loop` logged the close and set
+   `_connected = False`, but nothing ever started the existing `_reconnect`
+   (it could only self-reschedule after a first attempt had run). The loop
+   now arms `_schedule_reconnect()` from both `ConnectionClosed` (any close
+   code, so a graceful MA restart with 1000/1001 reconnects too) and the
+   generic-error exit. Guards: no-op when `_shutdown_event` is set
+   (deliberate `disconnect()`) or a reconnect task is already pending.
+2. **ERROR frames did not resolve futures** — `send_command` waited the FULL
+   timeout after MA had already rejected the command. Both error branches
+   (typed `{"type":"ERROR","message_id":…,"error":{…}}` and the no-type
+   `error_code`/`details` shape) now call `_fail_pending_response(msg_id,
+   details)` so the waiting future raises `RuntimeError("MA error: …")`
+   immediately, and both record `_ma_error_code`/`_ma_error_details` so
+   `get_ma_error()` sees typed errors too. Both main.py call sites already
+   wrap `send_command` in `except Exception` → HTTP 502, so they now fail
+   fast with the real reason instead of a timed-out `None`.
+3. **`player_updated` overwrote queue state** — the payload is player-shaped
+   (volume/active source); assigning it to `_queue_state` destroyed
+   `current_item`/`queue_id`. Player events no longer touch `_queue_state`;
+   registered callbacks still receive every event.
+4. **"Jitter" was a constant, not random** — the old expression
+   `delay * RECONNECT_JITTER * (1.0 - 2.0 * hash(str(time.time())) % 1)`
+   evaluates `2.0 * int % 1`, which is identically `0.0` (any integer-valued
+   float ≥ 2^52 has no fractional part), so the bracket was always `1.0` and
+   the jitter was a fixed `0.5 * delay` offset with zero spread across
+   processes. Replaced per plan with `random.uniform(0, delay *
+   RECONNECT_JITTER)`.
+5. **No `queue_id` filter** — any queue event (including another player's)
+   replaced our queue state and stream URL. New `_queue_id` is adopted from
+   (a) `ingest_queue_state` (authoritative: the `player_queues/get` answer),
+   (b) the first queue event seen, (c) `queue_id` on outgoing command args
+   (`_track_queue_id`), which arms the filter before the first event can
+   arrive. Gateway commands address queues by player id — main.py passes
+   `queue_id=target_player_id` to both `play_media` and `player_queues/get`
+   (MA keys the per-player queue by the player id) — so command args are a   reliable source. Events whose `queue_id` differs from the tracked one are
+   ignored for state/stream extraction but still dispatched to callbacks;
+   events with no `queue_id` are accepted (cannot be attributed).
+
+Tests: `test_ma_ws_client.py::TestBug23Hardening` (6 — one per sub-bug plus
+command-arg tracking). Plan-driven updates to 3 existing tests: the
+player-event dispatch test now asserts queue state is preserved, the
+full-command integration test's event carries the command's `queue_id`
+(`player_1`), and the message-loop close test patches `_reconnect` and
+asserts the reconnect task is armed. Gateway suite: **482 passed / 2 skipped
+/ 0 failed**.

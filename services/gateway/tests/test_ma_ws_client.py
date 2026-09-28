@@ -10,6 +10,7 @@ Tests cover:
 - Error handling for various failure modes
 - Context manager support
 """
+import asyncio
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -360,6 +361,13 @@ class TestEventHandling:
         callback = MagicMock()
         client.register_event_callback("player_updated", callback)
 
+        prior_state = {
+            "queue_id": "q1",
+            "state": "playing",
+            "current_item": {"name": "Song"},
+        }
+        client._queue_state = dict(prior_state)
+
         event_data = {
             "state": "paused",
             "volume_level": 0.5,
@@ -367,7 +375,9 @@ class TestEventHandling:
         await client._dispatch_event("player_updated", event_data)
 
         callback.assert_called_once_with("player_updated", event_data)
-        assert client._queue_state == event_data
+        # Player events describe the player, not the queue — they must never
+        # replace queue state (BUG-23).
+        assert client._queue_state == prior_state
 
     @pytest.mark.asyncio
     async def test_dispatch_event_calls_async_callback(self, client):
@@ -752,10 +762,14 @@ class TestErrorHandling:
         client._ws = mock_ws
         client._connected = True
 
-        with patch.object(client, "_handle_message"):
+        with patch.object(client, "_handle_message"), patch.object(client, "_reconnect", AsyncMock()):
             await client._message_loop()
+            await asyncio.sleep(0)
 
         assert client._connected is False
+        # Closing the loop must arm the reconnect task (BUG-23); the real
+        # _reconnect is patched so no backoff task escapes the test.
+        assert client._reconnect_task is not None
 
     @pytest.mark.asyncio
     async def test_message_loop_handles_handler_exception(self, client, mock_websocket):
@@ -911,11 +925,12 @@ class TestIntegration:
 
         client.register_event_callback("queue_updated", on_queue_update)
 
-        # Simulate receiving a queue updated event
+        # Simulate receiving a queue updated event. queue_id must match the
+        # command's queue_id — MA keys queues by player id (BUG-23 filter).
         stream_url = "http://ha.sumemail.com:8096/flow/session1/queue1/1/player1.mp3"
         event_data = {
             "state": "playing",
-            "queue_id": "queue1",
+            "queue_id": "player_1",
             "current_item": {
                 "name": "Test Song",
                 "stream_url": stream_url,
@@ -1064,3 +1079,147 @@ class TestIntegration:
 
         sent = json.loads(mock_websocket.send.call_args[0][0])
         assert sent["message_id"] == "counter6"  # Continues from 5
+
+
+# ---------------------------------------------------------------------------
+# BUG-23 hardening (P2-T14): reconnect, ERROR futures, state, jitter, queue filter
+# ---------------------------------------------------------------------------
+
+class TestBug23Hardening:
+    @pytest.mark.asyncio
+    async def test_message_loop_schedules_reconnect_on_close(self, client):
+        """BUG-23.1: message-loop exit must start the reconnect loop; shutdown suppresses it."""
+        import websockets as ws_module
+        import websockets.frames as frames
+
+        close_frame = frames.Close(1006, "abnormal")
+        exc = ws_module.ConnectionClosed(close_frame, None)
+
+        async def raise_on_iter():
+            raise exc
+
+        mock_ws = AsyncMock()
+        mock_ws.__aiter__ = MagicMock(return_value=raise_on_iter())
+        client._ws = mock_ws
+        client._connected = True
+
+        with patch.object(client, "_handle_message"), patch.object(client, "_reconnect", AsyncMock()):
+            await client._message_loop()
+            await asyncio.sleep(0)
+
+        assert client._connected is False
+        assert client._reconnect_task is not None
+
+        # Shutdown must suppress scheduling (deliberate disconnect).
+        client._reconnect_task = None
+        client._connected = True
+        client._shutdown_event.set()
+        with patch.object(client, "_handle_message"), patch.object(client, "_reconnect", AsyncMock()):
+            await client._message_loop()
+            await asyncio.sleep(0)
+        assert client._reconnect_task is None
+
+    @pytest.mark.asyncio
+    async def test_error_frame_resolves_pending_response(self, client, mock_websocket):
+        """BUG-23.2: ERROR frames must resolve the pending future, not wait the full timeout."""
+        client._ws = mock_websocket
+        client._connected = True
+
+        task = asyncio.create_task(
+            client.send_command("player_queues/play", {"queue_id": "q1"}, timeout=5.0)
+        )
+        await asyncio.sleep(0.01)
+        assert "counter1" in client._pending_responses
+
+        await client._handle_message(json.dumps({
+            "type": "ERROR",
+            "message_id": "counter1",
+            "error": {"description": "Player not found"},
+        }))
+
+        with pytest.raises(RuntimeError, match="Player not found"):
+            await asyncio.wait_for(task, timeout=1.0)
+        assert client.has_error()
+
+    @pytest.mark.asyncio
+    async def test_player_event_does_not_overwrite_queue_state(self, client):
+        """BUG-23.3: player_updated must not replace queue state (callbacks still fire)."""
+        queue_data = {
+            "queue_id": "q1",
+            "state": "playing",
+            "current_item": {
+                "name": "Mine",
+                "stream_url": "http://ha.sumemail.com:8096/flow/q1/1/p.mp3",
+            },
+        }
+        await client._dispatch_event("queue_updated", queue_data)
+
+        callback = MagicMock()
+        client.register_event_callback("player_updated", callback)
+        await client._dispatch_event("player_updated", {"state": "paused", "volume_level": 0.5})
+
+        callback.assert_called_once()
+        assert client.get_queue_state() == queue_data
+
+    @pytest.mark.asyncio
+    async def test_reconnect_delay_uses_random_jitter(self, client):
+        """BUG-23.4: jitter must come from random.uniform(0, base), not the constant expression."""
+        with (
+            patch("services.gateway.ma_ws_client.random.uniform", return_value=0.25) as mock_uniform,
+            patch("asyncio.sleep", AsyncMock()) as mock_sleep,
+            patch.object(client, "_establish_connection", AsyncMock()),
+        ):
+            await client._reconnect()
+
+        mock_uniform.assert_called_once_with(0, 1.0 * 0.5)
+        mock_sleep.assert_called_once()
+        assert mock_sleep.call_args[0][0] == pytest.approx(1.25)
+
+    @pytest.mark.asyncio
+    async def test_foreign_queue_event_does_not_overwrite_queue_state(self, client):
+        """BUG-23.5: queue events for a different queue_id must be ignored."""
+        mine = {
+            "queue_id": "q1",
+            "state": "playing",
+            "current_item": {
+                "name": "Mine",
+                "stream_url": "http://ha.sumemail.com:8096/flow/q1/1/p.mp3",
+            },
+        }
+        client.ingest_queue_state(mine)
+
+        callback = MagicMock()
+        client.register_event_callback("queue_updated", callback)
+
+        await client._dispatch_event("queue_updated", {
+            "queue_id": "q-other",
+            "state": "stopped",
+            "current_item": {
+                "name": "Theirs",
+                "stream_url": "http://ha.sumemail.com:8096/flow/q2/2/p.mp3",
+            },
+        })
+        callback.assert_called_once()
+        assert client.get_queue_state() == mine
+        assert client.get_stream_url() == mine["current_item"]["stream_url"]
+
+        await client._dispatch_event("queue_updated", {
+            "queue_id": "q1",
+            "state": "paused",
+            "current_item": {
+                "name": "Mine",
+                "stream_url": "http://ha.sumemail.com:8096/flow/q1/3/p.mp3",
+            },
+        })
+        assert client.get_queue_state()["state"] == "paused"
+        assert client.get_stream_url() == "http://ha.sumemail.com:8096/flow/q1/3/p.mp3"
+
+    @pytest.mark.asyncio
+    async def test_send_command_tracks_queue_id_for_filtering(self, client, mock_websocket):
+        """BUG-23.5: commands carrying queue_id arm the filter before any event arrives."""
+        client._ws = mock_websocket
+        client._connected = True
+
+        await client.send_command("player_queues/play_media", {"queue_id": "player_9"}, timeout=0.05)
+
+        assert client._queue_id == "player_9"
