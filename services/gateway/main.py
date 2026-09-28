@@ -9986,6 +9986,10 @@ async def _ma_proxy_bytes(request: Request, stream_url: str) -> StreamingRespons
         # No total deadline: a long MA stream must not be cut at 5 min.
         timeout=aiohttp.ClientTimeout(total=None, connect=15.0),
     )
+    # BUG-22: close proxy_client on every exit except the streaming hand-off,
+    # where stream_generator_ma's finally owns it. Covers HTTPException
+    # (upstream 404/5xx), generic errors, and cancellation alike.
+    handed_to_generator = False
     try:
         proxy_headers: dict[str, str] = {
             "User-Agent": "Mozilla/5.0 (compatible; JarvisOS/2.0; audio-proxy)",
@@ -10036,18 +10040,22 @@ async def _ma_proxy_bytes(request: Request, stream_url: str) -> StreamingRespons
 
         proxy_status_code = proxy_resp.status
 
-        return StreamingResponse(
+        response = StreamingResponse(
             stream_generator_ma(proxy_client, proxy_resp),
             status_code=proxy_status_code,
             media_type=proxy_response_headers.get("Content-Type", "audio/mpeg"),
             headers=proxy_response_headers,
         )
+        handed_to_generator = True
+        return response
     except HTTPException:
         raise
     except Exception as e:
         log.error(f"[stream/ma] Stream proxy failed: {e}", exc_info=True)
-        await proxy_client.close()
         raise HTTPException(status_code=502, detail=f"Failed to proxy MA stream: {e}") from e
+    finally:
+        if not handed_to_generator:
+            await proxy_client.close()
 
 
 @app.post("/api/media/stream/music-assistant")
