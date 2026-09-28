@@ -6,7 +6,6 @@ Provides:
 - ``client``: authenticated TestClient for the gateway app.
 - ``upstream``: aioresponses mock for upstream MA/ABS/HA HTTP calls.
 """
-import os
 import re
 import sys
 
@@ -16,8 +15,6 @@ import sys
 # gateway main first. This conftest loads before every module in this
 # directory, so pin the gateway test values here (401/503 in
 # test_music_proxy.py otherwise, depending on file order).
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["ALPACA_AUDIO_URL"] = "http://audio.test:8082"
 
 from unittest.mock import MagicMock
 

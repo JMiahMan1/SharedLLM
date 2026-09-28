@@ -1,12 +1,9 @@
-import os
 import sys
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["EXECUTION_SVC"] = "http://execution:8003"
 
 # Mock dependencies before importing main
 mock_redis = MagicMock()

@@ -1,4 +1,3 @@
-import os
 import sys
 from typing import cast
 from unittest.mock import AsyncMock, MagicMock
@@ -7,7 +6,6 @@ import pytest
 from fastapi import Request
 from fastapi.testclient import TestClient
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 @pytest.fixture(name="client")
 def client_fixture(monkeypatch):

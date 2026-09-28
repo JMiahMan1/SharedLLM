@@ -13,7 +13,6 @@ Verified against homeassistant/components/music_assistant on HA core dev
 """
 import os
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 from unittest.mock import AsyncMock, patch
 

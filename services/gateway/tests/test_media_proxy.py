@@ -1,8 +1,6 @@
 """Comprehensive tests for gateway media proxy routes."""
-import os
 import sys
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 from unittest.mock import AsyncMock, MagicMock, patch
 

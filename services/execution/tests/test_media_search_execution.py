@@ -1,6 +1,4 @@
-import os
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 from unittest.mock import AsyncMock, patch
 

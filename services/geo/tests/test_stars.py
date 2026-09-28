@@ -1,6 +1,4 @@
-import os
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 import pytest
 from fastapi.testclient import TestClient

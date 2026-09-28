@@ -3,10 +3,7 @@
 The rules are pure functions so they can be pinned precisely: a bug here would
 either withhold a badge the user earned or hand out one they did not.
 """
-import os
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
-os.environ.setdefault("FERNET_KEY", "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=")
 
 from datetime import date, timedelta
 

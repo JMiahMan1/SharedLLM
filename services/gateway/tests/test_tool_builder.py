@@ -1,7 +1,5 @@
 """Unit tests for the Raven tool-builder decision logic."""
-import os
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 
 from services.gateway.tool_builder import decide, scaffold_source, slugify
 

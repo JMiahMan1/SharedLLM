@@ -3,12 +3,9 @@
 Covers POST-safe flows: suggestions degrade gracefully when Overpass is down,
 and PATCH accepts display-name/address edits while coordinates stay locked.
 """
-import os
 import time
 from unittest.mock import AsyncMock
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
-os.environ.setdefault("FERNET_KEY", "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=")
 
 import json
 

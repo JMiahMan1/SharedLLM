@@ -18,10 +18,6 @@ sys.modules['redis'] = _mock_redis
 sys.modules['redis.asyncio'] = _mock_redis_async
 
 # Provide default model values so get_test_settings() doesn't raise
-os.environ.setdefault("ASSISTANT_MODEL", "qwen3:8b")
-os.environ.setdefault("CODING_MODEL", "qwen2.5-coder:7b")
-os.environ.setdefault("LIBRARIAN_MODEL", "qwen3:8b")
-os.environ.setdefault("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
 
 
 class MockRequestContextManager:

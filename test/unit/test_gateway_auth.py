@@ -9,10 +9,6 @@ _mock_redis.asyncio = _mock_redis_async
 sys.modules['redis'] = _mock_redis
 sys.modules['redis.asyncio'] = _mock_redis_async
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["IDENTITY_SVC_URL"] = "http://identity"
-os.environ["REDIS_URL"] = "redis://localhost:6379/0"
-os.environ["RAG_SVC"] = "http://localhost:8004"
 
 import json  # noqa: E402
 

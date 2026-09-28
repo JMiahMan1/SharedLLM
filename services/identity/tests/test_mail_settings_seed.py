@@ -1,22 +1,37 @@
+import logging
 import os
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
-os.environ["DEFAULT_ADMIN_PASSWORD"] = "changeme"
-os.environ["MAIL_URL"] = "https://mail.sumemail.com"
-os.environ["MAIL_ADMIN_URL"] = "https://mail.sumemail.com/admin"
-os.environ["MAIL_ADMIN"] = "house-admin"
-os.environ["MAIL_PASS"] = "super-secret-mail-password"
-os.environ["MAIL_USER"] = "mom"
-os.environ["MAIL_USER_PASS"] = "super-secret-user-password"
-
-import logging
-
+import pytest
 from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 
 from services.identity.crypto import decrypt
 from services.identity.models import GlobalSetting, User
 from services.identity.seed import seed_from_env
+
+# These values are asserted verbatim below, so they cannot come from conftest's
+# shared _TEST_ENV_DEFAULTS (which pins mail.example.test). They are set by an
+# autouse fixture rather than at module scope: module scope runs at collection
+# time, so whichever test module imported services.identity.seed first would
+# decide what every other module saw. conftest's _isolate_environ fixture
+# snapshots os.environ per test, so these overrides never leak.
+_MAIL_ENV = {
+    "INTERNAL_SECRET": "test-secret",
+    "FERNET_KEY": "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=",
+    "DEFAULT_ADMIN_PASSWORD": "changeme",
+    "MAIL_URL": "https://mail.sumemail.com",
+    "MAIL_ADMIN_URL": "https://mail.sumemail.com/admin",
+    "MAIL_ADMIN": "house-admin",
+    "MAIL_PASS": "super-secret-mail-password",
+    "MAIL_USER": "mom",
+    "MAIL_USER_PASS": "super-secret-user-password",
+}
+
+
+@pytest.fixture(autouse=True)
+def _mail_env():
+    for key, value in _MAIL_ENV.items():
+        os.environ[key] = value
+    yield
 
 
 def _session():

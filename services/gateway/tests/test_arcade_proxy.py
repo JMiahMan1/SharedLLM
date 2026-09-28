@@ -1,11 +1,8 @@
-import os
 import sys
 from unittest.mock import MagicMock
 
 import pytest
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["EXECUTION_SVC"] = "http://execution:8003"
 
 # Mock dependencies before importing main (same preamble as test_calendar_proxy).
 mock_redis = MagicMock()

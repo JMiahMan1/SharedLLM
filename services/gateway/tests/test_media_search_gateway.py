@@ -1,8 +1,6 @@
-import os
 import sys
 from contextlib import asynccontextmanager
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 from unittest.mock import AsyncMock, MagicMock, patch
 

@@ -1,9 +1,5 @@
 import json
-import os
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
-os.environ.setdefault("FERNET_KEY", "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3ZlcyE=")
 
 import pytest
 

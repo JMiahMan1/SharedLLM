@@ -1,9 +1,7 @@
 """Tests for the RAG dreaming mode (lesson consolidation)."""
 
 import json
-import os
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 
 import pytest
 

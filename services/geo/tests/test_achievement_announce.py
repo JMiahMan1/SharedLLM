@@ -1,7 +1,6 @@
 import os
 import sys
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 sys.path.insert(0, os.path.abspath("."))
 
 import pytest

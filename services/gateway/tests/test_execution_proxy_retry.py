@@ -9,7 +9,6 @@ Note: the gateway's request logging middleware (``emit_log``) also posts
 through the same HTTP client, so the doubles below count only calls whose
 URL targets the execution service.
 """
-import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,7 +16,6 @@ import aiohttp
 import pytest
 from fastapi.testclient import TestClient
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 
 @pytest.fixture(name="client")

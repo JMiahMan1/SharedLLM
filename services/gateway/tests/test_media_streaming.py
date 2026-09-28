@@ -5,11 +5,9 @@ credential fields from the dict returned by _resolve_identity_from_request and
 that the aiohttp streaming API (client.get / resp.content.iter_chunked /
 resp.release) is used correctly after the httpx -> aiohttp migration.
 """
-import os
 import sys
 from contextlib import asynccontextmanager
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 from unittest.mock import AsyncMock, MagicMock, patch
 

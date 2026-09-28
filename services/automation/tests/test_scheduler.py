@@ -1,9 +1,6 @@
 import json
-import os
 from datetime import UTC, datetime, timedelta
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
-os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 
 import pytest
 

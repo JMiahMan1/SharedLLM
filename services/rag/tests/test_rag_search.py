@@ -13,10 +13,8 @@ verify reindex + default-user fallback.
 """
 import asyncio
 import hashlib
-import os
 import re
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 
 import numpy as np
 import pytest

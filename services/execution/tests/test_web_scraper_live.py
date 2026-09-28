@@ -12,7 +12,6 @@ Requires:
 
 import os
 
-os.environ.setdefault("INTERNAL_SECRET", "RAVEN_SECURE_2026")
 
 import pytest
 import httpx

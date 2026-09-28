@@ -3,7 +3,6 @@ import os
 
 import pytest
 
-os.environ["DEVICE_REGISTRY_PATH"] = ":memory:"
 
 import contextlib
 

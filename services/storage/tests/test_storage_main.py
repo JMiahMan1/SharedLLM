@@ -1,8 +1,6 @@
-import os
 
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 
 from services.storage.main import app, health
 from services.storage.providers import StorageProvider

@@ -20,11 +20,9 @@ os.environ.setdefault(
 os.environ.setdefault(
     "FERNET_KEY", "g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14="
 )
-# Not setdefault: other test modules set INTERNAL_SECRET at import time, and
-# whichever imported first would win, leaving these tests asserting against a
-# secret the app does not hold (403). The autouse fixture below pins it for
-# the duration of each test regardless of import order.
-os.environ["INTERNAL_SECRET"] = "test-secret-ci"
+# conftest.py pins INTERNAL_SECRET for the whole suite now, and restores the
+# environment after each test, so read the value rather than asserting a literal
+# that another module could have changed.
 
 import json
 
@@ -37,12 +35,16 @@ from services.workspace_runtime.database import engine, init_db
 from services.workspace_runtime.models import Workspace
 
 pytestmark = pytest.mark.unit
-SECRET = "test-secret-ci"
+SECRET = os.environ["INTERNAL_SECRET"]
 
 
 @pytest.fixture(autouse=True)
 def _pin_internal_secret(monkeypatch):
-    """Keep INTERNAL_SECRET stable no matter what else ran first."""
+    """Re-assert the suite-wide value in case a test mutated it.
+
+    services.workspace_runtime.main captures the secret at import, so the test's
+    own requests must use the same one the app holds.
+    """
     monkeypatch.setenv("INTERNAL_SECRET", SECRET)
 
 

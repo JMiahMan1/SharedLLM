@@ -1,7 +1,4 @@
-import os
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["EXECUTION_EXTERNAL_HOST"] = "localhost"
 
 from fastapi.testclient import TestClient
 
