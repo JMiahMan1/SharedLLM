@@ -13,6 +13,10 @@ log = logging.getLogger(__name__)
 from services.execution.http_client import get_session, host_of
 
 
+class MASearchError(Exception):
+    """Direct Music Assistant search failed — callers should fall back (HA proxy)."""
+
+
 @asynccontextmanager
 async def _mass_session(mass_url: str, verify: bool = False):
     """Yield the pooled MA session WITHOUT closing it (reused across calls)."""
@@ -117,13 +121,26 @@ async def get_recent(mass_url: str, mass_token: str) -> list[dict[str, Any]]:
         return []
 
 
-async def search(mass_url: str, mass_token: str, query: str, limit: int = 20, media_types: list[str] | None = None) -> list[dict[str, Any]]:
+async def search(
+    mass_url: str,
+    mass_token: str,
+    query: str,
+    limit: int = 20,
+    media_types: list[str] | None = None,
+    artist: str = "",
+    album: str = "",
+    library_only: bool = True,
+) -> list[dict[str, Any]]:
     """Search Music Assistant via the MA WebSocket JSON-RPC API using the MA token.
 
     The MA REST `/api` search endpoint is unreliable in MA 2.9.x (returns
     "Internal server error"), and the search command requires the `search_query`
     argument plus a `config.providers` filter (searching all providers hangs).
     The WebSocket JSON-RPC path is the real MA API and works correctly.
+
+    Raises MASearchError on any failure (connection, timeout, MA error_code)
+    so callers can fall back to the HA proxy — failures must never look like
+    an empty result set (BUG-17).
     """
     if not mass_url or not mass_token or not query:
         return []
@@ -133,14 +150,17 @@ async def search(mass_url: str, mass_token: str, query: str, limit: int = 20, me
         host = parsed.hostname
         port = parsed.port or 8095
         if not host:
-            return []
+            raise MASearchError(f"Invalid mass_url (no host): {mass_url!r}")
         ws_url = f"ws://{host}:{port}/ws?token={mass_token}"
 
         args: dict[str, Any] = {
             "search_query": query,
             "limit": limit,
-            "config": {"providers": ["library"]},
         }
+        if library_only:
+            # library_only=False leaves MA's own provider defaults in place;
+            # explicitly listing every provider hangs (see docstring above).
+            args["config"] = {"providers": ["library"]}
         if media_types:
             args["media_type"] = [mt.lower() for mt in media_types]
 
@@ -162,8 +182,9 @@ async def search(mass_url: str, mass_token: str, query: str, limit: int = 20, me
                             if data.get("message_id") != "mass_search":
                                 continue
                             if data.get("error_code"):
-                                log.warning(f"[mass] MA search error {data.get('error_code')}: {data.get('details')}")
-                                break
+                                raise MASearchError(
+                                    f"MA search error {data.get('error_code')}: {data.get('details')}"
+                                )
                             raw = data.get("result", {})
                             items: list[dict[str, Any]] = []
                             if isinstance(raw, dict):
@@ -175,28 +196,35 @@ async def search(mass_url: str, mass_token: str, query: str, limit: int = 20, me
                             for item in items:
                                 if not isinstance(item, dict):
                                     continue
-                                artists = item.get("artists") or []
-                                artist = artists[0].get("name", "") if artists and isinstance(artists[0], dict) else (item.get("artist", "") or "")
-                                album = item.get("album")
-                                album_name = album.get("name", "") if isinstance(album, dict) else (album or "")
+                                item_artists = item.get("artists") or []
+                                item_artist = item_artists[0].get("name", "") if item_artists and isinstance(item_artists[0], dict) else (item.get("artist", "") or "")
+                                item_album = item.get("album")
+                                album_name = item_album.get("name", "") if isinstance(item_album, dict) else (item_album or "")
                                 image = item.get("image")
                                 image_path = image.get("path", "") if isinstance(image, dict) else (image or "")
                                 results.append({
                                     "name": item.get("name", ""),
                                     "uri": item.get("uri", ""),
                                     "type": item.get("media_type", "track"),
-                                    "artist": artist,
+                                    "artist": item_artist,
                                     "album": album_name,
                                     "duration": item.get("duration", 0),
                                     "image": image_path,
                                 })
                             break
                         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                            break
-                except TimeoutError:
-                    log.warning("[mass] MA search timed out")
+                            raise MASearchError("MA search socket closed before a result arrived")
+                except TimeoutError as e:
+                    raise MASearchError("MA search timed out") from e
+        if artist:
+            needle = artist.casefold()
+            results = [r for r in results if needle in (r.get("artist") or "").casefold()]
+        if album:
+            needle = album.casefold()
+            results = [r for r in results if needle in (r.get("album") or "").casefold()]
         return results[:limit]
+    except MASearchError:
+        raise
     except Exception as e:
-        log.error(f"[mass] Failed to search via MA websocket: {e}")
-        return []
+        raise MASearchError(f"MA search failed: {e}") from e
 

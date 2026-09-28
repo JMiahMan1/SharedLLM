@@ -2462,6 +2462,9 @@ async def search_ma(user_id: str = "", query: str = "", media_type: str = "", li
                     mass_url, mass_token, query,
                     limit=limit,
                     media_types=[media_type.lower()] if media_type else None,
+                    artist=artist,
+                    album=album,
+                    library_only=library_only,
                 )
                 return {"status": "SUCCESS", "results": results, "query": query, "source": "music_assistant"}
             except Exception as e:

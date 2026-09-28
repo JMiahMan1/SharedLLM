@@ -225,3 +225,24 @@ service.
   `audiobookshelf_url` (trailing-slash normalized) instead of reading the
   global identity settings list (which also left `abs_url` unbound on a
   non-200 settings response → UnboundLocalError → generic ERROR).
+
+## MA direct search: typed failure + filter params (P2-T8 / BUG-17, 2026-09-27)
+
+- `mass_client.search` (WS `music/search`) now raises `MASearchError` for
+  every failure mode: connection errors, receive-loop timeout (20s),
+  socket CLOSED/ERROR before a result, and MA `error_code` responses.
+  Previously all of these returned `[]`, which `search_ma` treated as an
+  authoritative "no matches" — the HA-proxy fallback never ran.
+- Legitimately-empty results still return `[]` on purpose (do NOT fall
+  through to HA on empty — that produced spurious FAILUREs, see comment
+  in `search_ma`).
+- `library_only=True` keeps `config.providers=["library"]` (explicitly
+  listing every provider hangs in MA 2.9.x, per the original docstring);
+  `library_only=False` omits `config` so MA's own provider defaults apply.
+- `artist`/`album` are applied as casefold substring filters over the
+  returned tracks client-side (MA's `music/search` has no author/album
+  filter args; the HA `music_assistant.search` service does the same kind
+  of narrowing server-side). Params were previously dropped entirely on
+  the direct path.
+- Scope note: `mass_ha_client.search` (HA proxy path) already accepted and
+  forwarded all three params; only the direct path was missing them.
