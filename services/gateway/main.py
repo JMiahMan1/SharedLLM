@@ -8727,16 +8727,22 @@ async def get_ma_playlists(request: Request):
     except HTTPException as e:
         log.error(f"[media/playlists] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "playlists": []}
-    async with shared_http_client() as client:
-        resp = await client.get(
-            f"{EXECUTION_SVC}/execute/media/music-assistant/playlists",
-            params={"user_id": creds.get("user") or ""},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-            , timeout=aiohttp.ClientTimeout(total=10.0),
-        )
-        if resp.status == 200:
-            return await resp.json()
-    return {"status": "SUCCESS", "playlists": []}
+    # BUG-21: an unreachable execution service is a gateway upstream failure,
+    # not a 500 — report it explicitly so the UI can distinguish it from empty.
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/execute/media/music-assistant/playlists",
+                params={"user_id": creds.get("user") or ""},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            if resp.status == 200:
+                return await resp.json()
+        return {"status": "SUCCESS", "playlists": []}
+    except (TimeoutError, aiohttp.ClientError) as e:
+        log.error(f"[media/playlists] upstream unavailable ({type(e).__name__}): {e}")
+        return JSONResponse(status_code=502, content={"status": "ERROR", "error": str(e)})
 
 
 @app.get("/api/media/music-assistant/recent")
@@ -8747,16 +8753,21 @@ async def get_ma_recent(request: Request):
     except HTTPException as e:
         log.error(f"[media/recent] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "recent": []}
-    async with shared_http_client() as client:
-        resp = await client.get(
-            f"{EXECUTION_SVC}/execute/media/music-assistant/recent",
-            params={"user_id": creds.get("user") or ""},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-            , timeout=aiohttp.ClientTimeout(total=10.0),
-        )
-        if resp.status == 200:
-            return await resp.json()
-    return {"status": "SUCCESS", "recent": []}
+    # BUG-21: unreachable execution service → 502 {status:ERROR}, not a 500.
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/execute/media/music-assistant/recent",
+                params={"user_id": creds.get("user") or ""},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            if resp.status == 200:
+                return await resp.json()
+        return {"status": "SUCCESS", "recent": []}
+    except (TimeoutError, aiohttp.ClientError) as e:
+        log.error(f"[media/recent] upstream unavailable ({type(e).__name__}): {e}")
+        return JSONResponse(status_code=502, content={"status": "ERROR", "error": str(e)})
 
 
 @app.get("/api/media/music-assistant/browse")
@@ -8767,16 +8778,21 @@ async def get_ma_browse(request: Request, media_type: str = "TRACKS", offset: in
     except HTTPException as e:
         log.error(f"[ma/browse] identity resolution failed: {e.detail}")
         return {"status": "SUCCESS", "items": []}
-    async with shared_http_client() as client:
-        resp = await client.get(
-            f"{EXECUTION_SVC}/execute/media/music-assistant/browse",
-            params={"user_id": creds.get("user") or "", "media_type": media_type, "offset": offset, "limit": limit, "search": search, "order_by": order_by},
-            headers={"X-Internal-Secret": INTERNAL_SECRET}
-            , timeout=aiohttp.ClientTimeout(total=10.0),
-        )
-        if resp.status == 200:
-            return await resp.json()
-    return {"status": "SUCCESS", "items": []}
+    # BUG-21: unreachable execution service → 502 {status:ERROR}, not a 500.
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(
+                f"{EXECUTION_SVC}/execute/media/music-assistant/browse",
+                params={"user_id": creds.get("user") or "", "media_type": media_type, "offset": offset, "limit": limit, "search": search, "order_by": order_by},
+                headers={"X-Internal-Secret": INTERNAL_SECRET}
+                , timeout=aiohttp.ClientTimeout(total=10.0),
+            )
+            if resp.status == 200:
+                return await resp.json()
+        return {"status": "SUCCESS", "items": []}
+    except (TimeoutError, aiohttp.ClientError) as e:
+        log.error(f"[ma/browse] upstream unavailable ({type(e).__name__}): {e}")
+        return JSONResponse(status_code=502, content={"status": "ERROR", "error": str(e)})
 
 
 @app.get("/api/media/music-assistant/search")
