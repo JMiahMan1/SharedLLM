@@ -181,3 +181,13 @@ than a rewrite. Multi-user live drawing on one board is the next slice.
 Handling notes worth keeping: pointer capture and PNG export are feature-
 detected, and "has anyone drawn yet" tracks the first stroke rather than
 reading pixels back.
+
+## Family recipes (shipped)
+
+`/recipes` (also on Family → Create) keeps a shared cookbook as markdown in
+Nextcloud under `Recipes/`. It reuses the notes storage the house already has,
+so there is one backup, one sync and one mobile app — no new service.
+
+Because notes resolve to the caller's own account, an admin can flip the same
+"Send as" control to the Admin identity to keep one house cookbook, and every
+other member keeps their own. Non-admins never see the control. 8 tests.

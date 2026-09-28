@@ -11,6 +11,7 @@ import {
 import ChatPanel from '../components/chat/ChatPanel';
 import ArcadeGames from '../components/family/ArcadeGames';
 import DrawCanvas from '../components/family/DrawCanvas';
+import Recipes from './Recipes';
 
 type Tab = 'chat' | 'games' | 'create';
 
@@ -32,7 +33,7 @@ const CREATE = [
   { icon: Brush, name: 'Shared canvas together', detail: 'Drawings everyone can add to — next, live on one board' },
   { icon: Sparkles, name: 'Make a picture', detail: 'Describe it and Jarvis/Raven paints it' },
   { icon: Music, name: 'Make music', detail: 'Turn a mood or a phrase into a song to share' },
-  { icon: UtensilsCrossed, name: 'Family recipes', detail: 'Collect dinner ideas the whole house can edit' },
+  { icon: UtensilsCrossed, name: 'Family recipes', detail: 'A shared cookbook the whole house can edit' },
 ];
 
 /**
@@ -97,6 +98,7 @@ export default function Family() {
       {tab === 'create' && (
         <div className="space-y-4" data-testid="family-create">
           <DrawCanvas />
+          <Recipes />
           <div className="glass-panel p-4 rounded-2xl border border-white/5">
             <h2 className="text-sm font-semibold text-slate-200">Create</h2>
             <p className="text-xs text-slate-400 mt-1">
