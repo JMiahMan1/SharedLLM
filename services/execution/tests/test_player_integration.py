@@ -729,7 +729,7 @@ class TestGatewayStreamEndpoint:
     async def test_stream_ma_prefers_browser_player(self, ctx):
         """Stream endpoint should prefer the browser Sendspin player."""
         from contextlib import asynccontextmanager
-        from fastapi import Request
+        from fastapi import HTTPException, Request
 
         from services.gateway.ma_ws_client import MAWebSocketClient
         from services.gateway.main import stream_music_assistant
@@ -790,14 +790,18 @@ class TestGatewayStreamEndpoint:
             patch.object(MAWebSocketClient, "disconnect", new=mock_disconnect),
             patch.object(MAWebSocketClient, "send_command", new=mock_send_command),
         ):
-            # This will fail once the stream URL loop times out, but we can
-            # verify that the browser player was selected first.
-            with pytest.raises(Exception):
+            # P2-T10 (BUG-19): GET never starts playback. With no running
+            # session it must 409, and only read the queue on the browser
+            # (Sendspin) player — never send player_queues/play_media.
+            with pytest.raises(Exception) as exc_info:
                 await stream_music_assistant("music://track/12345", cast(Request, FakeRequest()))
 
+            assert isinstance(exc_info.value, HTTPException)
+            assert exc_info.value.status_code == 409
             assert sent_commands, "Expected at least one MA command to be sent"
-            assert sent_commands[0][0] == "player_queues/play_media"
+            assert sent_commands[0][0] == "player_queues/get"
             assert sent_commands[0][1].get("queue_id") == "browser_player"
+            assert all(cmd != "player_queues/play_media" for cmd, _ in sent_commands)
 
 
 
