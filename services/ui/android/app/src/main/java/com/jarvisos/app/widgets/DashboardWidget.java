@@ -93,14 +93,8 @@ public class DashboardWidget extends AppWidgetProvider {
                     String svc = WidgetApi.toggleService(domain, value);
                     boolean garage = id.toLowerCase().contains("garage") && "turn_on".equals(svc);
                     if (garage && WidgetApi.isAwayFromHome(context, WidgetUpdater.AWAY_THRESHOLD_M)) {
-                        android.content.Intent conf = new android.content.Intent(context, WidgetActionReceiver.class);
-                        conf.setAction(WidgetUpdater.ACTION_CONFIRM_GARAGE);
-                        conf.putExtra(WidgetUpdater.EXTRA_ENTITY, id);
-                        conf.putExtra(WidgetUpdater.EXTRA_SERVICE, svc);
-                        android.app.PendingIntent pi = android.app.PendingIntent.getBroadcast(
-                            context, id.hashCode() + 88, conf,
-                            android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
-                        views.setOnClickPendingIntent(CELL_HIT_IDS[i], pi);
+                        views.setOnClickPendingIntent(CELL_HIT_IDS[i],
+                            WidgetUpdater.confirmGaragePendingIntent(context, id, svc));
                     } else {
                         views.setOnClickPendingIntent(CELL_HIT_IDS[i],
                             WidgetUpdater.togglePendingIntent(context, id, svc));
