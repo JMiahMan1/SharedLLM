@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
 import SendAsSelector, { useSendAsPref } from './SendAsSelector';
+import EnvelopeBody from './EnvelopeBody';
 
 interface TalkConversation {
   token: string;
@@ -500,7 +501,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
                     }`}
                     title="Tap to react"
                   >
-                    {message.message || message.system_message || 'Empty message'}
+                    <EnvelopeBody raw={message.message} fallback={message.system_message} />
                   </button>
 
                   {typeof message.id === 'number' && (reactions[message.id]?.length ?? 0) > 0 && (
