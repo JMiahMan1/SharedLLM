@@ -8030,6 +8030,36 @@ async def proxy_put_goals(request: Request):
     raise HTTPException(status_code=resp.status, detail=detail[:200])
 
 
+@app.get("/api/geo/stars")
+async def proxy_get_stars(request: Request):
+    user = request.query_params.get("user_id") or _user_id_from_request(request) or ""
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/api/geo/stars",
+            params={"user_id": user},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.post("/api/geo/stars")
+async def proxy_grant_stars(request: Request):
+    """Grant bonus stars. Identity enforces admin rights on the caller."""
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    if not body.get("user_id"):
+        body["user_id"] = _user_id_from_request(request) or ""
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{GEO_SVC}/api/geo/stars",
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/geo/achievements")
 async def proxy_get_achievements(
     request: Request, user_id: str | None = None, days: int = 30
@@ -8687,9 +8717,10 @@ async def get_abs_libraries(request: Request):
             if resp.status == 200:
                 data = await resp.json()
                 detail = data.get("detail") or {}
-                if detail.get("libraries"):
+                # BUG-15: key presence means execution answered; [] libraries is valid.
+                if "libraries" in detail:
                     # Normalize 'type' → 'media_type' for UI compatibility
-                    libs = detail["libraries"]
+                    libs = detail["libraries"] or []
                     return {
                         "status": "SUCCESS",
                         "libraries": [
@@ -8723,7 +8754,8 @@ async def get_abs_last_played(request: Request):
             if resp.status == 200:
                 data = await resp.json()
                 detail = data.get("detail") or {}
-                if detail.get("books"):
+                # BUG-15: key presence (not a non-empty list) means execution answered.
+                if "books" in detail:
                     return {"status": "SUCCESS", "books": detail["books"]}
     except (TimeoutError, aiohttp.ClientConnectionError) as e:
         log.warning(f"[abs/last-played] ABS timeout: {e}")
@@ -8751,7 +8783,8 @@ async def get_abs_library_items(library_id: str, request: Request, limit: int = 
             if resp.status == 200:
                 data = await resp.json()
                 detail = data.get("detail") or {}
-                if detail.get("books"):
+                # BUG-15: an empty library is a valid answer, not "ABS unavailable".
+                if "books" in detail:
                     return {"status": "SUCCESS", "books": detail["books"]}
     except (TimeoutError, aiohttp.ClientConnectionError) as e:
         log.warning(f"[abs/library] ABS timeout: {e}")

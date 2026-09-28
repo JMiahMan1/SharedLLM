@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Award, Target, Trophy } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
+import StarBalance from './StarBalance';
 import type { ActivityGoals } from '../../types/api';
 
 interface AchievementsPanelProps {
@@ -62,6 +63,7 @@ export default function AchievementsPanel({ userId }: AchievementsPanelProps) {
 
   return (
     <div className="glass-panel p-5 rounded-2xl border border-white/5 space-y-4" data-testid="achievements-panel">
+      <StarBalance userId={userId} />
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <Trophy size={16} className="text-amber-300" />
