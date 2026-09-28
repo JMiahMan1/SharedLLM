@@ -219,6 +219,7 @@ DEFAULT_GLOBAL_SETTINGS = [
     {"key": "raven_scan_interval", "value": "300", "description": "Frequency in seconds to scan container logs"},
     {"key": "raven_error_threshold", "value": "5", "description": "Number of errors required to trigger an anomaly alert"},
     {"key": "raven_max_total_seconds", "value": "1800", "description": "Maximum total seconds for a Raven mission"},
+    {"key": "raven_max_iterations", "value": "60", "description": "Maximum agent-loop tool iterations for a Raven mission"},
     {"key": "raven_iteration_timeout", "value": "600", "description": "Timeout in seconds for a single Raven iteration"},
     {"key": "raven_heartbeat_interval", "value": "30", "description": "Heartbeat interval in seconds for Raven missions"},
     {"key": "raven_hung_threshold", "value": "600", "description": "Seconds before a mission is considered hung"},

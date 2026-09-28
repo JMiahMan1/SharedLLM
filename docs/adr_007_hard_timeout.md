@@ -6,9 +6,17 @@ Proposed
 
 ## Context
 
-Raven's `AgentLoop` iterates up to `MAX_TOOL_ITERATIONS = 30`. There is no **total elapsed time** cap. A single iteration — LLM inference + tool execution — can take 2-5 minutes (Ollama ~40 tokens/s on 7B, plus tool latency). In pathological cases (model hallucination, infinite reasoning), a job could run for hours, holding the `INFERENCE_LOCK` and blocking all other LLM usage.
+Raven's `AgentLoop` iterates up to `MAX_TOOL_ITERATIONS = 60`. There is no **total elapsed time** cap. A single iteration — LLM inference + tool execution — can take 2-5 minutes (Ollama ~40 tokens/s on 7B, plus tool latency). In pathological cases (model hallucination, infinite reasoning), a job could run for hours, holding the `INFERENCE_LOCK` and blocking all other LLM usage.
 
 Additionally, background worker `_process_inference_job` does not implement a hard timeout around the entire `AgentLoop` call.
+
+> **Superseded values (corrected 2026-09-27).** The original text recorded
+> `MAX_TOOL_ITERATIONS = 30` and `RAVEN_MAX_TOTAL_SECONDS = 600`, which were
+> never the shipped values: a 528-line duplicate `AgentLoop` in `main.py`
+> carried the 30 while the live `agent_loop.py` carries 60, and the timeout
+> was raised to 1800. A second copy of the loop is exactly how documentation
+> drifts from behaviour, so the dead copy has been deleted and the numbers
+> below now match `services/gateway/agent_loop.py` and `services/config.py`.
 
 ## Decision
 
@@ -20,7 +28,7 @@ Enforce `MAX_TOTAL_SECONDS` per Raven job.
 
 ```python
 import os
-RAVEN_MAX_TOTAL_SECONDS = int(os.getenv("RAVEN_MAX_TOTAL_SECONDS", "600"))  # 10 min
+RAVEN_MAX_TOTAL_SECONDS = int(os.getenv("RAVEN_MAX_TOTAL_SECONDS", "1800"))  # 30 min
 RAVEN_ITERATION_TIMEOUT = int(os.getenv("RAVEN_ITERATION_TIMEOUT", "180"))  # 3 min per iteration
 ```
 
