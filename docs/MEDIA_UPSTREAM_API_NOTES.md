@@ -319,3 +319,14 @@ Source: Home Assistant core `dev` branch, integration lives IN HA core at
   `tests/conftest_media.py` now **force-sets** both values (it loads before
   every module in the directory), so config can only ever freeze the gateway
   test values. Prefer forcing over `setdefault` here.
+
+## Gateway emit_log pollutes HTTP-client mocks (P2-T11 / BUG-20, 2026-09-27)
+
+Any gateway test that mocks `get_http_client()` (or `shared_http_client()`)
+and counts/queues `post` side effects must ignore the request-logging
+middleware: `emit_log` (`gateway/main.py:995`) posts every REQUEST/RESPONSE
+log line to `{LOGGING_SVC}/log` through the same client, with exceptions
+swallowed. Those calls consume `side_effect` lists and inflate call counts
+(observed: real call + 2 log emits = 3). Filter doubles by URL (e.g. count
+only `/execute/…` targets) or return a benign stub for non-target URLs —
+see `tests/test_execution_proxy_retry.py::ExecPost`.
