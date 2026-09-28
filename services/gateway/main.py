@@ -4698,6 +4698,23 @@ async def proxy_react_talk_message(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/communication/talk/card")
+async def proxy_post_talk_card(request: Request):
+    """Post a typed card (achievement, game move, creation) into a room."""
+    body = await request.json()
+    payload = {
+        "action": "post_card",
+        "token": body.get("token"),
+        "message": body.get("message"),
+        "card_kind": body.get("card_kind"),
+        "card_title": body.get("card_title"),
+        "card_detail": body.get("card_detail"),
+        "card_stars": body.get("card_stars"),
+        "card_stats": body.get("card_stats"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+
+
 @app.post("/api/communication/talk/read")
 async def proxy_mark_talk_read(request: Request):
     """Clear the unread badge for a conversation."""
