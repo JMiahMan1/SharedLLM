@@ -203,6 +203,31 @@ GAME_COMMANDS = ("start", "answer", "flip", "stop")
 GAME_KINDS = ("trivia", "memory")
 
 
+async def _bank_game_stars(user: str, total_stars: int, reason: str) -> None:
+    """Record a game's stars in geo's ledger so they outlive the round.
+
+    A geo outage must not break a game that is already being played, so a
+    failure here is logged and swallowed — the game itself is unaffected.
+    """
+    if not user or user == "family" or total_stars <= 0:
+        return
+    try:
+        import aiohttp
+
+        from services.gateway.config import GEO_SVC, INTERNAL_SECRET
+
+        async with get_client().post(
+            f"{GEO_SVC}/api/geo/stars",
+            json={"user_id": user, "stars": 1, "reason": "game", "note": reason[:200], "granted_by": "game"},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=5.0),
+        ) as resp:
+            if resp.status >= 400:
+                log.warning("[talk] star banking rejected for %s: %s", user, resp.status)
+    except Exception as exc:  # noqa: BLE001 - never break a game over telemetry
+        log.warning("[talk] star banking failed for %s: %s", user, exc)
+
+
 async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
     """Family games in the room: trivia and memory, no model involved.
 
@@ -271,6 +296,8 @@ async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
     if state.kind == "trivia":
         result = games.apply_trivia_answer(state, who, req.message or "")
         if result["correct"]:
+            # Bank the win in the real star ledger, not just the in-memory game.
+            await _bank_game_stars(who, result["stars"], f"Trivia: {state.question}")
             await say(
                 f"✅ {result['player']} got it!",
                 games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐"),

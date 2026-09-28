@@ -158,5 +158,6 @@ One game per room, a leaderboard in every card, and `FAMILY_GAMES_ENABLED` must
 be set or the bot refuses to start — a deployment that does not want a bot
 answering in chat never gets one by accident. Gateway:
 `POST /api/communication/talk/game` with `game_command` (start/answer/flip/stop).
-Scores are Jarvis stars today; wiring them into the geo star ledger is the next
-step. 11 unit tests + 4 integration tests.
+Correct answers are banked in geo's star ledger (`reason: "game"`) so stars
+outlive the round; a geo outage is logged and never breaks a game in progress.
+11 unit + 6 integration tests.
