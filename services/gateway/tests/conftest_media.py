@@ -131,13 +131,34 @@ def upstream():
         yield mock
 
 
-def mock_upstream(upstream, method: str, url: str, payload=None, status: int = 200):
+def mock_upstream(
+    upstream,
+    method: str,
+    url: str,
+    payload=None,
+    status: int = 200,
+    headers=None,
+    body=None,
+    content_type=None,
+):
     """Query-string-agnostic upstream mock.
 
     aioresponses matches exact URLs, so calls made with params (e.g.
     ``?user_id=...``) never match a bare path. Register a regex instead.
+
+    ``payload`` is JSON-encoded by aioresponses; use ``body`` (str or bytes)
+    with ``content_type`` for raw (non-JSON) upstream responses.
     """
     pattern = re.compile(re.escape(url) + r".*")
     verb = getattr(upstream, method.lower())
-    verb(pattern, payload=payload, status=status)
+    kwargs = {"status": status}
+    if payload is not None:
+        kwargs["payload"] = payload
+    if body is not None:
+        kwargs["body"] = body
+    if headers:
+        kwargs["headers"] = headers
+    if content_type:
+        kwargs["content_type"] = content_type
+    verb(pattern, **kwargs)
     return pattern
