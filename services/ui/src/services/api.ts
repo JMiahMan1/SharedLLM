@@ -879,6 +879,16 @@ export const api = {
     return resp.data;
   },
 
+  async joinTalkCall(token: string, as_user?: 'admin'): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/call', { token, as_user });
+    return resp.data;
+  },
+
+  async leaveTalkCall(token: string, as_user?: 'admin'): Promise<ExecutionResponse> {
+    const resp = await apiClient.post('/api/communication/talk/call', { token, leave: true, as_user });
+    return resp.data;
+  },
+
   async getStars(userId?: string): Promise<StarsResponse> {
     const query = new URLSearchParams();
     if (userId && userId !== 'all') query.set('user_id', userId);

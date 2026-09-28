@@ -228,6 +228,51 @@ async def _bank_game_stars(user: str, total_stars: int, reason: str) -> None:
         log.warning("[talk] star banking failed for %s: %s", user, exc)
 
 
+async def _talk_call(token: str, provider: Any, action: str) -> ExecutionResult:
+    """Join or leave a Talk call and return the signalling details.
+
+    Nextcloud serves a WebRTC call over its own signalling server, so this is
+    the whole transport: no TURN of our own, no second media stack. The
+    browser still needs a reachable STUN/TURN server for restrictive networks,
+    which is reported back rather than hidden.
+    """
+    if not token:
+        return ExecutionResult(status="FAILURE", message="Conversation token is required.", service=f"talk_{action}")
+
+    verb = "POST" if action == "call_join" else "DELETE"
+    ok, data, message = await _talk_request_with_retry(
+        provider,
+        verb,
+        f"/ocs/v2.php/apps/spreed/api/v4/call/{urllib.parse.quote(token)}",
+    )
+    if not ok:
+        return ExecutionResult(
+            status="FAILURE",
+            message=message or f"Could not {action.replace('call_', '')} the call.",
+            service=f"talk_{action}",
+        )
+
+    payload = data if isinstance(data, dict) else {}
+    call = payload.get("call") if isinstance(payload.get("call"), dict) else payload
+    signaling = call.get("signaling") or {}
+    return ExecutionResult(
+        status="SUCCESS",
+        message="In the call." if action == "call_join" else "Left the call.",
+        service=f"talk_{action}",
+        detail={
+            "token": token,
+            "call_id": call.get("callId") or call.get("call_id"),
+            "call_token": call.get("callToken") or call.get("call_token"),
+            "signaling": {
+                "url": signaling.get("url"),
+                "room_id": signaling.get("roomId") or signaling.get("room_id"),
+                "server_version": (call.get("participantType") or call.get("participant_type")),
+            } if isinstance(signaling, dict) else {},
+            "in_call": True if action == "call_join" else False,
+        },
+    )
+
+
 async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
     """Family games in the room: trivia and memory, no model involved.
 
@@ -376,6 +421,9 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 service="talk_open",
                 detail={"conversation": _conversation_summary(data)},
             )
+
+        if action in ("call_join", "call_leave"):
+            return await _talk_call(req.token, provider, action)
 
         if action == "game":
             return await _run_game_command(req, provider)
