@@ -24,6 +24,16 @@ Live probes of ``https://abs.sumemail.com`` could not discriminate routes:
 ABS auth runs before routing and returns 401 for every path (including
 nonexistent ones), so the source router above is the authority.
 """
+# aioresponses 0.7.9 predates aiohttp 3.14, where ClientResponse gained a
+# required `stream_writer` kwarg, so a mocked response cannot be constructed.
+# The shim is applied ONLY when the installed aiohttp actually takes that
+# kwarg: injecting it unconditionally breaks aiohttp < 3.14, whose
+# ClientResponse has no such parameter, and the resulting TypeError
+# ("unexpected keyword argument 'stream_writer'") reads like an application
+# bug rather than a harness one. Detected by signature rather than by version
+# number so an aiohttp that adds or drops the parameter does not need a code
+# change here.
+import inspect
 import re
 
 import aiohttp
@@ -32,9 +42,9 @@ from aioresponses import aioresponses
 
 from services.execution import abs_client
 
-# aioresponses 0.7.9 predates aiohttp 3.14, where ClientResponse requires a
-# `stream_writer` kwarg. Shim it (same as gateway tests/conftest_media.py).
-if not getattr(aiohttp.ClientResponse.__init__, "_stream_writer_shim", False):
+_NEEDS_STREAM_WRITER = "stream_writer" in inspect.signature(aiohttp.ClientResponse.__init__).parameters
+
+if _NEEDS_STREAM_WRITER and not getattr(aiohttp.ClientResponse.__init__, "_stream_writer_shim", False):
 
     class _StreamWriterStub:
         output_size = 0
