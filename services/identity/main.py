@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from datetime import datetime as dt
@@ -1300,7 +1301,7 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
 
                 resp = await client.get(
                     f"{url.rstrip('/')}/user",
-                    auth=aiohttp.BasicAuth(user, password)
+                    headers={"Authorization": f"token {token}"}
                 )
                 if resp.status == 200:
                     json_data = await resp.json()
@@ -1326,12 +1327,26 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
 
             elif service == "Audiobookshelf":
                 url = config.get("audiobookshelf_url") or config.get("abs_url")
+                api_key = config.get("audiobookshelf_api_key")
                 username = config.get("audiobookshelf_user") or config.get("abs_user")
                 password = config.get("audiobookshelf_pass") or config.get("abs_pass")
                 if not url:
                     return {"status": "ERROR", "message": "URL is required"}
+                if api_key:
+                    # An API key is enough on its own: ABS accepts it as a
+                    # Bearer token on the authenticated /api/me route
+                    # (verified live 2026-09-28; a bad key gets 401).
+                    resp = await client.get(
+                        f"{url.rstrip('/')}/api/me",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        timeout=aiohttp.ClientTimeout(total=5.0),
+                    )
+                    if resp.status == 200:
+                        data = await resp.json()
+                        return {"status": "SUCCESS", "message": f"Connected to Audiobookshelf as {data.get('username')}"}
+                    return {"status": "ERROR", "message": f"Audiobookshelf returned {resp.status}: {(await resp.text())[:100]}"}
                 if not username or not password:
-                    return {"status": "ERROR", "message": "Username and Password are required"}
+                    return {"status": "ERROR", "message": "An API key, or username and password, are required"}
 
                 resp = await client.post(
                     f"{url.rstrip('/')}/api/login",
@@ -1343,6 +1358,30 @@ async def test_connection(req: dict, session: Session = Depends(get_session), ad
                     return {"status": "SUCCESS", "message": f"Connected to Audiobookshelf as {user_info.get('username')}"}
                 else:
                     return {"status": "ERROR", "message": f"Audiobookshelf returned {resp.status}: {(await resp.text())[:100]}"}
+
+            elif service == "Music Assistant":
+                # MA is token-only. Its JSON-RPC endpoint rejects a bad Bearer
+                # token with 401 (verified live against MA 2.10.4 on
+                # 2026-09-28), so one cheap read proves both reachability and
+                # the token.
+                url = config.get("mass_url")
+                token = config.get("mass_token")
+                if not url or not token:
+                    return {"status": "ERROR", "message": "mass_url and mass_token are required"}
+
+                resp = await client.post(
+                    f"{url.rstrip('/')}/api",
+                    json={
+                        "message_id": uuid.uuid4().hex,
+                        "command": "music/playlists/library_items",
+                        "args": {},
+                    },
+                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                )
+                if resp.status == 200:
+                    return {"status": "SUCCESS", "message": "Connected to Music Assistant"}
+                return {"status": "ERROR", "message": f"Music Assistant returned {resp.status}: {(await resp.text())[:100]}"}
 
             return {"status": "ERROR", "message": f"Service {service} not testable yet"}
 

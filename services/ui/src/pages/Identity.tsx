@@ -21,7 +21,8 @@ import {
   User,
   Zap,
   Calendar,
-  Shield
+  Shield,
+  ListMusic
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -30,6 +31,7 @@ import type { UserProfile, APIKey } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import toast from 'react-hot-toast';
 import HelpTooltip from '../components/ui/HelpTooltip';
+import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 
 interface ModalProps {
   isOpen: boolean;
@@ -74,19 +76,14 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   const [listInputs, setListInputs] = useState<Record<string, string>>({});
   const [testResult, setTestResult] = useState<{ status: 'SUCCESS' | 'ERROR', message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
-  const { role } = useAuth();
+  const isAdmin = useAuth().role === 'admin';
   const queryClient = useQueryClient();
 
   const connectionKey = Object.values(configKeys)[0];
   const isConnected = !!(userData && (userData as Record<string, unknown>)[connectionKey]);
 
-  const defaultShare = role === 'admin';
-
   const updateMutation = useMutation({
-    mutationFn: (data: Partial<UserProfile>) => api.updateProfile({ 
-      ...data, 
-      share_with_all: (data.share_with_all as boolean) ?? defaultShare 
-    }),
+    mutationFn: (data: Partial<UserProfile>) => api.updateProfile(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['me'] });
       setIsOpen(false);
@@ -125,7 +122,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
   };
 
   const handleOpen = () => {
-    const initialForm: Record<string, string | boolean> = { share_with_all: userData?.share_with_all ?? defaultShare };
+    const initialForm: Record<string, string | boolean> = {};
     Object.values(configKeys).forEach((key) => {
       initialForm[key] = (userData as Record<string, string | boolean>)?.[key] || '';
     });
@@ -157,7 +154,7 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             {isConnected ? ((userData as Record<string, string>)?.[connectionKey]?.replace(/^https?:\/\//, '')) : 'DISCONNECTED'}
           </p>
         </div>
-        <button onClick={handleOpen} className="glass-button w-full text-[10px] uppercase font-bold tracking-widest mt-2 py-2">
+        <button onClick={handleOpen} aria-label={`${isConnected ? 'Manage' : 'Connect'} ${name}`} className="glass-button w-full text-[10px] uppercase font-bold tracking-widest mt-2 py-2">
           {isConnected ? 'Manage Integration' : 'Connect Service'}
         </button>
         <div className="flex items-center gap-2 mt-2">
@@ -288,25 +285,17 @@ const IntegrationTile: FC<IntegrationTileProps> = ({ name, icon: Icon, color, co
             );
           })}
 
-          <div className="p-4 glass-card border-white/5 bg-white/5 rounded-xl">
-             <div className="flex items-center justify-between mb-4">
-                <div>
-                   <p className="text-xs font-bold text-white">Data Sharing Rule</p>
-                   <p className="text-[10px] text-slate-500 mt-1">Allow Jarvis to index this service for all family members (RAG).</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={form.share_with_all as boolean}
-                    onChange={(e) => setForm({...form, share_with_all: e.target.checked})}
-                    className="sr-only peer" 
-                  />
-                  <div className="w-10 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full rtl:peer-checked:after:-translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
-                </label>
-             </div>
-
-
-          </div>
+          {/* Home Assistant, Music Assistant, Audiobookshelf and Nextcloud can
+              fall back to the system default user's credentials (per-service
+              grant, admin-only). Skylight is system-shared by design, so it is
+              not listed here. */}
+          {name !== 'Skylight' && name !== 'OpenRouter' && !!userData?.username && (
+            <SharedCredentialsCard
+              username={userData.username}
+              isAdmin={isAdmin}
+              isSystemDefault={!!userData.is_system_default}
+            />
+          )}
 
           {testResult && (
             <div className={`p-4 rounded-xl flex items-center gap-3 border ${
@@ -591,7 +580,18 @@ const Identity = () => {
                 configKeys={{
                   "Server URL": "audiobookshelf_url",
                   "Username": "audiobookshelf_user",
-                  "Password": "audiobookshelf_pass"
+                  "Password": "audiobookshelf_pass",
+                  "API Key": "audiobookshelf_api_key"
+                }}
+              />
+              <IntegrationTile 
+                name="Music Assistant" 
+                icon={ListMusic} 
+                color="fuchsia" 
+                userData={fullUser}
+                configKeys={{
+                  "Server URL": "mass_url",
+                  "Access Token": "mass_token"
                 }}
               />
               <IntegrationTile 

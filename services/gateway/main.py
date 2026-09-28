@@ -3309,6 +3309,37 @@ async def proxy_update_user(username: str, request: Request):
         )
         return await _proxy_json_response(resp)
 
+@app.get("/api/users/{username}/credential-shares")
+async def proxy_get_credential_shares(username: str, request: Request):
+    """Which shared (system default) services this user may borrow.
+
+    Readable by the user themselves and by admins; Identity enforces that.
+    """
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/users/{username}/credential-shares",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.put("/api/users/{username}/credential-shares")
+async def proxy_put_credential_shares(username: str, request: Request):
+    """Grant/revoke shared services for a user. Identity allows admins only."""
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.put(
+            f"{IDENTITY_SVC}/api/users/{username}/credential-shares",
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/settings")
 async def proxy_get_settings(request: Request):
     auth_header = request.headers.get("Authorization")

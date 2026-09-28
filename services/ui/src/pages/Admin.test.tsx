@@ -97,6 +97,25 @@ describe('Admin page', () => {
     expect(await screen.findByDisplayValue('enabled')).toBeInTheDocument();
   });
 
+  it('lets an admin edit a user\'s shared service access from the user row', async () => {
+    renderWithProviders(<Admin />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Shared service access for default' }));
+
+    const dialog = await screen.findByTestId('shared-credentials');
+    expect(dialog).toHaveTextContent(/own credentials always win/i);
+
+    const nextcloudToggle = screen.getByRole('checkbox', { name: 'Use shared Nextcloud credentials' });
+    expect(nextcloudToggle).not.toBeChecked();
+    fireEvent.click(nextcloudToggle);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('checkbox', { name: 'Use shared Nextcloud credentials' }),
+      ).toBeChecked();
+    });
+  });
+
   it('shows Raven Ops panel when tab is clicked', async () => {
     renderWithProviders(<Admin />);
 

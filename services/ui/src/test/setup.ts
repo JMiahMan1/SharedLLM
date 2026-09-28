@@ -30,10 +30,12 @@ let talkConversations: Array<Record<string, unknown>> = [];
 let talkMessages: Record<string, Array<Record<string, unknown>>> = {};
 let talkPolls: Array<Record<string, unknown>> = [];
 let widgetSettings: Array<Record<string, unknown>> = [];
+let credentialShares: Record<string, Record<string, unknown>> = {};
 let quickAssistantEnabled = false;
 
 const resetMockState = () => {
   users = [structuredClone(defaultUser)];
+  credentialShares = {};
   discoveredUsers = [
     { username: 'jeremiah', source: 'Home Assistant', display_name: 'Jeremiah' },
     { username: 'michele', source: 'Home Assistant', display_name: 'Michele' },
@@ -422,7 +424,34 @@ export const server = setupServer(
   http.delete('/api/users/:username', ({ params }) => {
     const username = String(params.username);
     users = users.filter((user) => user.username !== username);
+    delete credentialShares[username];
     return HttpResponse.json({ status: 'SUCCESS' });
+  }),
+  http.get('/api/users/:username/credential-shares', ({ params }) => {
+    const username = String(params.username);
+    return HttpResponse.json(
+      credentialShares[username] ?? { username, services: [], shared_owner: 'default' },
+    );
+  }),
+  http.put('/api/users/:username/credential-shares', async ({ params, request }) => {
+    const username = String(params.username);
+    const body = await request.json() as { services?: string[]; note?: string };
+    const services = body.services ?? [];
+    if (services.length === 0) {
+      delete credentialShares[username];
+    } else {
+      credentialShares[username] = {
+        username,
+        services,
+        granted_by: 'default',
+        granted_at: '2026-09-28T12:00:00Z',
+        note: body.note ?? null,
+        shared_owner: 'default',
+      };
+    }
+    return HttpResponse.json(
+      credentialShares[username] ?? { username, services: [], shared_owner: 'default' },
+    );
   }),
   http.get('/api/auth/discover', () => {
     console.log('[MSW] /api/auth/discover called, discoveredUsers:', JSON.stringify(discoveredUsers));

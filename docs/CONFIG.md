@@ -147,6 +147,12 @@ All other configuration is stored in the Identity service's database and fetched
 
 **Runtime variables are optional.** If Identity is unavailable at startup, variables retain their empty-string or default values. Services should handle missing values gracefully at runtime.
 
+**Not in this table:** Music Assistant (`MA_URL` / `MA_TOKEN`) and Git providers are
+per-user credentials, not global settings. `.env` values seed the system default
+user once (`services/identity/seed.py`); after that every caller is served from
+Identity resolution, per user, with explicit admin grants for sharing. See
+`docs/PER_USER_CREDENTIALS.md`.
+
 ### Special Variables Sync
 
 If `INTERNAL_SECRET` or `FERNET_KEY` are changed via the Identity UI, they are automatically synced to the `.env` file. This ensures all services have access to the current values.
