@@ -553,6 +553,16 @@ ALLOWED_TOOLS = {
     "entitysearchrequest", "logbookrequest", "executionlogrequest",
     "documentbroadcastrequest", "nightmoderequest", "ttsrequest", "sttrequest", "storagetexttorequest",
     "audiobookregeneraterequest",
+    # Advertised by tool_builder._Tool and dispatched by prose_tools, but absent
+    # from this set until now. ALLOWED_TOOLS is the hard gate at the action
+    # dispatcher (`if action_name not in ALLOWED_TOOLS:`), so a model naming any
+    # of these correctly fell through to the Tier-3 fuzzy matcher, which rewrote
+    # the call to a DIFFERENT tool and dispatched it: ImageEditRequest ->
+    # climaterequest, ImageGenerationRequest -> gitoperationrequest, OcrRequest ->
+    # the bare token "request", RavenMissionRequest -> redisinspectrequest.
+    # Editing a photo silently turned the heating on. Same class of bug as the
+    # git-verb fast-path below; same fix.
+    "imagegenerationrequest", "imageeditrequest", "ocrrequest", "ravenmissionrequest",
     "ghrequest",
     "ravenrecallrequest",
     "workspaceportexposerequest", "workspace_expose_port", "expose_port", "port_expose",
@@ -3794,8 +3804,9 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         "Media Tools": ["mediaplayrequest", "mediatransportrequest", "mediastatusrequest", "videoplayrequest", "ttsrequest", "sttrequest", "audiobookregeneraterequest"],
                         "Web Tools": ["websearchrequest", "webreadrequest", "webscraperrequest"],
                         "Docker Tools": ["dockerlogsrequest", "dockercomposerequest"],
-                        "HA Tools": ["lightcontrolrequest", "haservicerequest", "climate", "securityrequest", "announcementrequest", "entitysearchrequest", "logbookrequest", "executionlogrequest", "haconfigrequest"],
-                        "Other": ["calendarrequest", "noterequest", "timerrequest", "talkrequest", "tvcastrequest", "systemlearningrequest", "discoverysyncrequest", "identityrequest", "identitymanagerequest", "audiobookshelfrequest", "llminforequest", "contextsearchrequest", "deploymentrequest", "capabilityindexrequest", "volumeinventoryrequest", "controlplanerequest"],
+                        "HA Tools": ["lightcontrolrequest", "haservicerequest", "climaterequest", "securityrequest", "announcementrequest", "entitysearchrequest", "logbookrequest", "executionlogrequest", "haconfigrequest"],
+                        "Image Tools": ["imagegenerationrequest", "imageeditrequest", "ocrrequest"],
+                        "Other": ["calendarrequest", "noterequest", "timerrequest", "talkrequest", "tvcastrequest", "systemlearningrequest", "discoverysyncrequest", "identityrequest", "identitymanagerequest", "audiobookshelfrequest", "llminforequest", "contextsearchrequest", "deploymentrequest", "capabilityindexrequest", "volumeinventoryrequest", "controlplanerequest", "ravenmissionrequest", "ravenrecallrequest", "redisinspectrequest"],
                     }
                     tool_table = "\n".join(f"  {cat}: {', '.join(tools)}" for cat, tools in tool_categories.items())
                     closest = difflib.get_close_matches(action_name, list(ALLOWED_TOOLS), n=3, cutoff=0.4)
