@@ -10,7 +10,14 @@ import os
 import re
 import sys
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
+# Forced, not setdefault: the root conftest already sets INTERNAL_SECRET to
+# test-secret-ci, and services.gateway.config freezes INTERNAL_SECRET and
+# ALPACA_AUDIO_URL at its first import — whichever test module imports
+# gateway main first. This conftest loads before every module in this
+# directory, so pin the gateway test values here (401/503 in
+# test_music_proxy.py otherwise, depending on file order).
+os.environ["INTERNAL_SECRET"] = "test-secret"
+os.environ["ALPACA_AUDIO_URL"] = "http://audio.test:8082"
 
 from unittest.mock import MagicMock
 
