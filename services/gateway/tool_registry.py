@@ -32,6 +32,9 @@ TOOL_RAVEN_MISSION = "sharedllm_raven_mission"
 TOOL_WEBSCRAPER = "sharedllm_web_scraper"
 TOOL_OCR = "sharedllm_ocr"
 TOOL_WORKSPACE_EXPOSE_PORT = "workspaceportexposerequest"
+TOOL_PODCAST_RENDER = "sharedllm_podcast_render"
+TOOL_SPEAKER_IDENTIFY = "sharedllm_speaker_identify"
+TOOL_LIST_VOICES = "sharedllm_list_voices"
 
 # Service identifiers used by the resolver / proxy layer.
 SVC_EXECUTION = "execution"
@@ -277,6 +280,136 @@ _OCR_TOOL = {
     },
 }
 
+# --- Alpaca audio / Podcast Studio -----------------------------------------
+# These three target the alpaca DASHBOARD (port 5000), not the audio server
+# directly. The dashboard is the front door: it owns /api/audio/* and
+# /api/podcast/*, it is where the podcast mixer and the OpenVoice speaker
+# profiles live, and it is the only place that knows about voice gender
+# matching. Routing around it would mean re-implementing all of that here.
+#
+# All three resolve to SVC_EXECUTION rather than to a dedicated service id, the
+# same as image_edit: the execution handler is what writes the rendered WAV into
+# the workspace, so the call has to land there. A separate SVC_ALPACA_AUDIO
+# would be a const nothing routes to. SVC_ALPACA_SD exists only because those
+# tools call the SD backend directly instead of going through execution.
+
+_PODCAST_RENDER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": TOOL_PODCAST_RENDER,
+        "description": (
+            "Render a two-host podcast episode to a single mixed WAV and save it "
+            "into a workspace. Supply a `script` of speaker-tagged turns "
+            "('HOST A: ...' / 'HOST B: ...'), and the renderer speaks each turn "
+            "with that host's curated voice, ducks a procedurally synthesized "
+            "music bed under the speech, and writes the result as a WAV. Use this "
+            "for anything with narration, a voice-over, a briefing, or a "
+            "multi-voice explainer — not for a single short utterance, which "
+            "TTSRequest already covers."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {"type": "string", "description": "Target workspace id."},
+                "script": {
+                    "type": "string",
+                    "description": (
+                        "Speaker-tagged script. One turn per line, tagged "
+                        "'HOST A:' or 'HOST B:' (also accepts 'host_a' / 'Guest:'). "
+                        "Untagged lines continue the previous speaker."
+                    ),
+                },
+                "pair_id": {
+                    "type": "string",
+                    "description": (
+                        "Curated voice pair. One of 'duo_warm', 'duo_bright', "
+                        "'duo_deep', 'duo_witty'. Each is one female and one male "
+                        "Kokoro voice. Omit for the default."
+                    ),
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": "WAV path to write in the workspace (default 'podcast.wav').",
+                },
+                "bed_preset": {
+                    "type": "string",
+                    "description": (
+                        "Music bed style: 'ambient_warm', 'lofi_calm', "
+                        "'minimal_pulse', 'acoustic_morning', 'deep_focus'."
+                    ),
+                },
+                "voice_profiles": {
+                    "type": "object",
+                    "description": (
+                        "Optional OpenVoice speaker clones keyed "
+                        "'host_clone_<pair_id>_<a|b>'. Only attach a clone whose "
+                        "recorded gender matches the host's source voice; the "
+                        "renderer warns and degrades when it does not."
+                    ),
+                    "additionalProperties": {"type": "string"},
+                },
+            },
+            "required": ["workspace_id", "script"],
+        },
+    },
+}
+
+_SPEAKER_IDENTIFY_TOOL = {
+    "type": "function",
+    "function": {
+        "name": TOOL_SPEAKER_IDENTIFY,
+        "description": (
+            "Identify who a recorded voice clip belongs to, out of the enrolled "
+            "speaker profiles on this deployment. Returns a ranked list with "
+            "similarity scores and a margin, so a near miss is visibly a near "
+            "miss. Use this when you need to attach an identity to audio that "
+            "arrived from a caller, a visitor panel, or a voice message — for "
+            "example to log who spoke, or to greet someone by name."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "workspace_id": {"type": "string", "description": "Target workspace id."},
+                "audio_path": {
+                    "type": "string",
+                    "description": "Path to the audio clip inside the workspace (e.g. 'visitor/doorbell.wav').",
+                },
+                "threshold": {
+                    "type": "number",
+                    "description": (
+                        "Optional similarity floor in 0..1. Omit it: the "
+                        "deployment derives one from how much its own enrolled "
+                        "speakers vary between takes."
+                    ),
+                },
+            },
+            "required": ["workspace_id", "audio_path"],
+        },
+    },
+}
+
+_LIST_VOICES_TOOL = {
+    "type": "function",
+    "function": {
+        "name": TOOL_LIST_VOICES,
+        "description": (
+            "List the enrolled speaker profiles and the curated podcast host "
+            "pairs available on this deployment, with each host's voice, role and "
+            "source gender. Call this before assigning narration to a host so the "
+            "clone you pick actually matches the voice it is being layered onto."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pair_id": {
+                    "type": "string",
+                    "description": "Restrict the host list to one pair id (e.g. 'duo_warm'). Omit for all of them.",
+                },
+            },
+        },
+    },
+}
+
 
 def get_tool_schemas() -> list[dict]:
     """Return the OpenAI ``tools`` schemas for all SharedLLM tools."""
@@ -291,6 +424,9 @@ def get_tool_schemas() -> list[dict]:
         _WEBSCRAPER_TOOL,
         _OCR_TOOL,
         _WORKSPACE_EXPOSE_PORT_TOOL,
+        _PODCAST_RENDER_TOOL,
+        _SPEAKER_IDENTIFY_TOOL,
+        _LIST_VOICES_TOOL,
         *get_raven_tool_schemas(),
     ]
 
@@ -474,6 +610,15 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
     ("ControlPlaneRequest", SVC_CONTROL_PLANE, "POST", "/api/restart/{service_name}", False,
      "Restart a SharedLLM service via the control plane.",
      "payload fields: service_name (fills the path)."),
+    ("PodcastRenderRequest", SVC_EXECUTION, "POST", "/execute/podcast_render", True,
+     "Render a two-host podcast (TTS per turn, ducked music bed) into a workspace WAV.",
+     "payload fields: script (speaker-tagged), pair_id, output_path, bed_preset, voice_profiles."),
+    ("SpeakerIdentifyRequest", SVC_EXECUTION, "POST", "/execute/speaker_identify", True,
+     "Identify which enrolled speaker a recorded clip belongs to.",
+     "payload fields: audio_path, threshold (optional)."),
+    ("ListVoicesRequest", SVC_EXECUTION, "POST", "/execute/list_voices", False,
+     "List enrolled speaker profiles and the curated podcast host pairs.",
+     "payload fields: pair_id (optional)."),
 )
 
 
@@ -622,6 +767,51 @@ def resolve_tool_call(
             json={
                 "query": arguments.get("mission", ""),
                 "workspace_id": arguments.get("workspace_id"),
+            },
+        )
+
+    if name == TOOL_PODCAST_RENDER:
+        # Workspace-scoped: the rendered WAV lands in the mission workspace, so
+        # a later step (index it, read it, hand the path to a human) can find it
+        # without Raven having to remember a temp filename.
+        return ResolvedToolCall(
+            method="POST",
+            service=SVC_EXECUTION,
+            path="/execute/podcast_render",
+            json={
+                "workspace_id": ws,
+                "user_context": uc,
+                "script": arguments.get("script"),
+                "pair_id": arguments.get("pair_id"),
+                "output_path": arguments.get("output_path"),
+                "bed_preset": arguments.get("bed_preset"),
+                "voice_profiles": arguments.get("voice_profiles") or {},
+            },
+            requires_workspace=True,
+        )
+
+    if name == TOOL_SPEAKER_IDENTIFY:
+        return ResolvedToolCall(
+            method="POST",
+            service=SVC_EXECUTION,
+            path="/execute/speaker_identify",
+            json={
+                "workspace_id": ws,
+                "user_context": uc,
+                "audio_path": arguments.get("audio_path"),
+                "threshold": arguments.get("threshold"),
+            },
+            requires_workspace=True,
+        )
+
+    if name == TOOL_LIST_VOICES:
+        return ResolvedToolCall(
+            method="POST",
+            service=SVC_EXECUTION,
+            path="/execute/list_voices",
+            json={
+                "user_context": uc,
+                "pair_id": arguments.get("pair_id"),
             },
         )
 

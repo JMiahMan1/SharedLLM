@@ -42,6 +42,13 @@ ALPACA_ARCADE_PUBLIC_URL = os.getenv("ALPACA_ARCADE_PUBLIC_URL", ALPACA_ARCADE_U
 # value fails with a clear message instead of probing a guessed host.
 ALPACA_AUDIO_URL = (os.getenv("ALPACA_AUDIO_URL") or "").rstrip("/")
 
+# alpaca dashboard (port 5000). This is the *front door* for the audio server:
+# it owns /api/audio/* and /api/podcast/*, and it is what knows about the
+# Podcaster's mixer and the OpenVoice voice profiles. Prefer it over talking to
+# the audio server directly — the dashboard is the only place the mixing and the
+# speaker-identification live.
+ALPACA_WEB_URL = os.getenv("ALPACA_WEB_URL", "http://jeremiah-home-desktop.local:5000").rstrip("/")
+
 # Use runtime-resolved values (or fallback to env vars)
 IDENTITY_SVC = IDENTITY_SVC_URL
 EXECUTION_SVC = EXECUTION_SVC_URL

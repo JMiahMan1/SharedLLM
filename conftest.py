@@ -162,6 +162,11 @@ _TEST_ENV_DEFAULTS = {
     "MAIL_PASS": "test-mail-pass",
     "MAIL_USER": "test-user",
     "MAIL_USER_PASS": "test-user-pass",
+    # Alpaca dashboard, which owns the podcast mixer and the /api/podcast/*
+    # routes the execution handlers call. (ALPACA_AUDIO_URL above is the
+    # audio-server itself — speaker identification needs OpenVoice's reference
+    # encoder, and only that container has torch.)
+    "ALPACA_WEB_URL": "http://web.test:5000",
     # Presentation
     "TIMEZONE": "UTC",
     "ANNOUNCEMENT_BLACKLIST": "test-announcement",
