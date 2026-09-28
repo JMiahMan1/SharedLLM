@@ -8998,6 +8998,26 @@ async def _resolve_user_context(request: Request, body: dict) -> Any:
     raise HTTPException(status_code=401, detail="Authentication required")
 
 
+# BUG-20: a transient ClientError can surface AFTER the execution service
+# already performed the command (e.g. while reading the response), so retrying
+# a non-idempotent command would run it twice on the player. Only known
+# idempotent operations may go through the retry path; everything else
+# (play/next/volume_up, ha_service, ABS actions, …) gets exactly one attempt.
+_IDEMPOTENT_TRANSPORT_COMMANDS = frozenset({"pause", "volume_set", "seek"})
+_IDEMPOTENT_EXECUTION_ENDPOINTS = frozenset({
+    "/execute/media/status",
+    "/execute/media/state/sync",
+    "/execute/entity/search",
+})
+
+
+def _execution_request_is_idempotent(endpoint: str, body: dict) -> bool:
+    """Whether proxying this request is safe to retry on a transient error."""
+    if endpoint == "/execute/media/transport":
+        return str(body.get("command") or "").lower() in _IDEMPOTENT_TRANSPORT_COMMANDS
+    return endpoint in _IDEMPOTENT_EXECUTION_ENDPOINTS
+
+
 async def _forward_execution_request(
     request: Request,
     endpoint: str,
@@ -9007,9 +9027,10 @@ async def _forward_execution_request(
 ):
     """Unified proxy forwarding helper for execution service endpoints."""
     client = get_http_client()
+    body = await request.json() if await request.body() else {}
+    max_retries = 2 if _execution_request_is_idempotent(endpoint, body) else 0
 
     async def do_proxy():
-        body = await request.json() if await request.body() else {}
         user_ctx = await _resolve_user_context(request, body)
         exec_body = {**body, "user_context": user_ctx}
         resp = await client.post(
@@ -9027,7 +9048,7 @@ async def _forward_execution_request(
         return await _proxy_json_response(resp)
 
     try:
-        return await retry_http_request(do_proxy, f"Execution service ({service_label})", max_retries=2, base_delay=0.1)
+        return await retry_http_request(do_proxy, f"Execution service ({service_label})", max_retries=max_retries, base_delay=0.1)
     except (TimeoutError, aiohttp.ClientError) as e:
         log.error(f"Execution service unreachable for {service_label}: {e}")
         raise HTTPException(status_code=503, detail="Execution service unreachable") from e
