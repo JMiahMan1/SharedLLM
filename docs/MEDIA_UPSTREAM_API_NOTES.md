@@ -133,3 +133,35 @@ service.
 - Tests: `gateway/tests/test_imageproxy_cache.py` (4). Note: the gateway's
   request log also captures logging-service POSTs — helpers must filter
   upstream requests by host.
+
+## ABS API route verification (P2-T3 / BUG-12, 2026-09-27)
+
+- **Authority:** ABS server source `advplyr/audiobookshelf`
+  `server/routers/ApiRouter.js` @ master (fetched this day; router mounted
+  under `/api`). Live probes of `https://abs.sumemail.com` are useless for
+  route discovery: ABS auth runs before routing and 401s every path
+  (including nonexistent `/api/v1/...` ones).
+- Verified YES: `GET /api/items/:id` (L108), `GET /api/me/progress/:id`
+  (L183), **`PATCH /api/me/progress/:id`** (L185 — code used POST+wrong
+  path), `GET /api/me/items-in-progress` (L191), `POST /api/items/:id/play`
+  (L117), `POST /api/session/:id/sync` (L242), `POST /api/session/:id/close`
+  (L243), `GET /api/libraries/:id/search` (L84), `GET
+  /api/libraries/:id/personalized` (L82), plus `POST /session/local` (L238),
+  `PATCH /me/progress/batch/update` (L184), `GET /me/listening-sessions`
+  (L179), `GET /libraries/:id/collections` (L80), `GET /libraries/:id/series`
+  (L78), `GET /me/progress` (L176).
+- Verified NO: `/api/v1/items/:id`, `/api/v1/users/:id/progress`,
+  `/users/:id/progress` — no such routes (why get_book/progress were dead).
+- Changes in `execution/abs_client.py`: fixed get_book (+`?expanded=1`),
+  get_progress (→ `/api/me/progress`, token-scoped; `user_id` kept for
+  compat), get_book_progress, update_progress (new `abs_patch` helper,
+  PATCH), sync_session_position/close_session/sync_local_session (+
+  `/api` prefix), get_listening_sessions, batch_update_progress (PATCH),
+  get_library_collections/series (+ `/api` prefix); NEW `play_item`,
+  `search_library_items`, `get_personalized_shelves`.
+- `?expanded=1` param: route verified; the expanded param itself is from
+  ABS docs/client usage (accepted; harmless if ignored).
+- Tests: `execution/tests/test_abs_client_paths.py` — 15 parametrized
+  method+path assertions (includes the aiohttp 3.14 `stream_writer` shim
+  for aioresponses, same as gateway conftest_media).
+- yarl normalizes query strings alphabetically (`limit` before `q`).

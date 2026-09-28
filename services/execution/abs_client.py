@@ -137,6 +137,26 @@ async def abs_post(
             return {"error": f"Audiobookshelf is unreachable: {e}"}
 
 
+async def abs_patch(
+    abs_url: str, abs_api_key: str, path: str, json: dict | None = None
+) -> dict:
+    """PATCH request to ABS API (progress updates use PATCH, not POST)."""
+    url = f"{abs_url.rstrip('/')}{path}"
+    headers = {"Authorization": f"Bearer {abs_api_key}", "Content-Type": "application/json"}
+    async with _abs_session(abs_url) as client:
+        try:
+            async with client.patch(url, headers=headers, json=json, timeout=_TIMEOUT) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
+                return data
+        except aiohttp.ClientResponseError as e:
+            log.error(f"[abs_client] HTTP error on PATCH {path}: {e}")
+            return {"error": f"ABS returned {e.status}: {e.message}"}
+        except Exception as e:
+            log.error(f"[abs_client] PATCH {path} failed: {e}")
+            return {"error": f"Audiobookshelf is unreachable: {e}"}
+
+
 async def get_all_library_items(
     abs_url: str, abs_api_key: str, library_id: str, page_size: int = 500
 ) -> list | dict:
@@ -285,19 +305,23 @@ async def get_library_items(
 
 async def get_book(abs_url: str, abs_api_key: str, book_id: str) -> dict:
     """Get full details for a specific audiobook."""
-    return await abs_get(abs_url, abs_api_key, f"/api/v1/items/{book_id}")
+    return await abs_get(abs_url, abs_api_key, f"/api/items/{book_id}", params={"expanded": "1"})
 
 
 async def get_progress(abs_url: str, abs_api_key: str, user_id: str = "me") -> dict:
-    """Get the user's playback progress for all books."""
-    return await abs_get(abs_url, abs_api_key, f"/api/v1/users/{user_id}/progress")
+    """Get the user's playback progress for all books.
+
+    Token-scoped (``/api/me/progress``); ``user_id`` kept for call-site
+    compatibility — ABS has no /users/:id/progress route.
+    """
+    return await abs_get(abs_url, abs_api_key, "/api/me/progress")
 
 
 async def get_book_progress(
     abs_url: str, abs_api_key: str, item_id: str, user_id: str = "me"
 ) -> dict:
     """Get playback progress for a specific book."""
-    return await abs_get(abs_url, abs_api_key, f"/api/v1/users/{user_id}/progress/{item_id}")
+    return await abs_get(abs_url, abs_api_key, f"/api/me/progress/{item_id}")
 
 
 async def update_progress(
@@ -308,17 +332,22 @@ async def update_progress(
     duration: float,
     is_complete: bool = False,
 ) -> dict:
-    """Update playback progress for a book."""
-    return await abs_post(
+    """Update playback progress for a book (ABS route is PATCH, not POST)."""
+    return await abs_patch(
         abs_url,
         abs_api_key,
-        f"/me/progress/{item_id}",
+        f"/api/me/progress/{item_id}",
         json={
             "currentTime": current_time,
             "duration": duration,
             "isComplete": is_complete,
         },
     )
+
+
+async def play_item(abs_url: str, abs_api_key: str, item_id: str) -> dict:
+    """Start a playback session for a library item (POST /api/items/:id/play)."""
+    return await abs_post(abs_url, abs_api_key, f"/api/items/{item_id}/play", json={})
 
 
 async def get_stream_url(item_id: str, user: str, format: str = "mp4") -> str:
@@ -358,7 +387,7 @@ async def get_items_in_progress(abs_url: str, abs_api_key: str) -> dict:
 
 async def get_listening_sessions(abs_url: str, abs_api_key: str, limit: int = 10) -> dict:
     """Get user's recent listening sessions."""
-    return await abs_get(abs_url, abs_api_key, "/me/listening-sessions", params={"limit": limit})
+    return await abs_get(abs_url, abs_api_key, "/api/me/listening-sessions", params={"limit": limit})
 
 
 async def sync_local_session(
@@ -367,7 +396,7 @@ async def sync_local_session(
     """Sync a local (offline) playback session to the server.
     session_data should be a full PlaybackSession object with UUIDv4 id.
     """
-    return await abs_post(abs_url, abs_api_key, "/session/local", json=session_data)
+    return await abs_post(abs_url, abs_api_key, "/api/session/local", json=session_data)
 
 
 async def sync_session_position(
@@ -376,7 +405,7 @@ async def sync_session_position(
 ) -> dict:
     """Sync position during active playback."""
     return await abs_post(
-        abs_url, abs_api_key, f"/session/{session_id}/sync",
+        abs_url, abs_api_key, f"/api/session/{session_id}/sync",
         json={"currentTime": current_time, "timeListened": time_listened, "duration": duration}
     )
 
@@ -391,7 +420,7 @@ async def close_session(
         payload["currentTime"] = current_time
     if duration is not None:
         payload["duration"] = duration
-    return await abs_post(abs_url, abs_api_key, f"/session/{session_id}/close", json=payload if payload else None)
+    return await abs_post(abs_url, abs_api_key, f"/api/session/{session_id}/close", json=payload if payload else None)
 
 
 async def batch_update_progress(
@@ -400,20 +429,35 @@ async def batch_update_progress(
     """Batch update progress for multiple items.
     Each update: {"libraryItemId": str, "currentTime": float, "duration": float, "isComplete": bool}
     """
-    return await abs_post(
-        abs_url, abs_api_key, "/me/progress/batch/update",
+    return await abs_patch(
+        abs_url, abs_api_key, "/api/me/progress/batch/update",
         json={"progress": progress_updates}
     )
 
 
+async def search_library_items(
+    abs_url: str, abs_api_key: str, library_id: str, query: str, limit: int = 10
+) -> dict:
+    """Server-side search within a library (GET /api/libraries/:id/search)."""
+    return await abs_get(
+        abs_url, abs_api_key, f"/api/libraries/{library_id}/search",
+        params={"q": query, "limit": limit},
+    )
+
+
+async def get_personalized_shelves(abs_url: str, abs_api_key: str, library_id: str) -> dict:
+    """User-personalized shelves for a library (GET /api/libraries/:id/personalized)."""
+    return await abs_get(abs_url, abs_api_key, f"/api/libraries/{library_id}/personalized")
+
+
 async def get_library_collections(abs_url: str, abs_api_key: str, library_id: str) -> dict:
     """Get collections in a library."""
-    return await abs_get(abs_url, abs_api_key, f"/libraries/{library_id}/collections")
+    return await abs_get(abs_url, abs_api_key, f"/api/libraries/{library_id}/collections")
 
 
 async def get_library_series(abs_url: str, abs_api_key: str, library_id: str) -> dict:
     """Get series in a library."""
-    return await abs_get(abs_url, abs_api_key, f"/libraries/{library_id}/series")
+    return await abs_get(abs_url, abs_api_key, f"/api/libraries/{library_id}/series")
 
 
 async def get_user_playlists(abs_url: str, abs_api_key: str, library_id: str) -> dict:
