@@ -125,8 +125,11 @@ Tests: 7 gateway (`test_talk_identity_switch.py`) + 6 UI
   Posting side: execution action `post_card` (and gateway
   `POST /api/communication/talk/card`) sends `card_kind`/`card_title`/
   `card_detail`/`card_stars`/`card_stats`; an unknown kind or a missing title
-  is rejected rather than posted. **Next:** have the achievements worker call
-  it when a badge is earned.
+  is rejected rather than posted.
+  **Shipped:** `achievements.announce_awards()` posts an activity card when a
+  badge is first earned — after banking, so a Talk outage can never cost the
+  badge — and stays silent unless `FAMILY_CHAT_TOKEN` names a room, so a
+  deployment with no family chat never posts anything. 3 tests.
 - Kid-friendly touches: emoji reactions, big buttons, optionally read-aloud
   replies through the existing TTS path.
 

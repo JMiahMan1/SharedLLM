@@ -2414,6 +2414,9 @@ async def get_achievements(
     )
     newly_earned = [e for e in evaluation.earned if e.achievement.id not in ledger]
     await achievements.record_awards(r, clean, newly_earned)
+    if newly_earned:
+        # Announced after banking, so a Talk outage can never cost the badge.
+        await achievements.announce_awards(newly_earned)
 
     return {
         "user_id": clean,
