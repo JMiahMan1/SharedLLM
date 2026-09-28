@@ -1921,22 +1921,6 @@ export const api = {
     return api.updateSetting('esphome_devices', JSON.stringify(devices));
   },
 
-  // Mobile-local audio streaming
-  async getAudiobookStreamUrl(bookId: string): Promise<string> {
-    const resp = await apiClient.get(`/api/media/stream/audiobookshelf/${bookId}`, {
-      responseType: 'text',
-    });
-    return resp.request.responseURL || '';
-  },
-
-  async getMusicAssistantStreamUrl(uri: string, playerId?: string): Promise<string> {
-    const resp = await apiClient.get('/api/media/stream/music-assistant', {
-      params: playerId ? { uri, player_id: playerId } : { uri },
-      responseType: 'text',
-    });
-    return resp.request.responseURL || '';
-  },
-
   async getSystemHealth(): Promise<SystemHealthStatus> {
     const resp = await apiClient.get('/api/admin/services/health');
     return resp.data;
