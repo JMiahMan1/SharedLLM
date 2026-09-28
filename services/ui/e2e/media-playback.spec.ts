@@ -470,7 +470,10 @@ test.describe('@live ABS Audiobook → Web Player (Browser)', () => {
     if (hasBook) {
       const streamResponse = await page.waitForResponse(
         (resp) =>
-          resp.url().includes('/api/media/stream/audiobookshelf/') &&
+          // ABS audio is session-based now (BUG-33): the gateway serves the
+          // HLS playlist/segments, or MA serves the Web Player's own stream.
+          (resp.url().includes('/api/media/stream/abs-session/') ||
+            resp.url().includes('/api/media/stream/music-assistant')) &&
           resp.status() === 200,
         { timeout: 15000 },
       );
@@ -647,7 +650,10 @@ test.describe('@live ABS Audiobook → Web Player (Android App / Mobile)', () =>
     if (hasBook) {
       const streamResponse = await page.waitForResponse(
         (resp) =>
-          resp.url().includes('/api/media/stream/audiobookshelf/') &&
+          // ABS audio is session-based now (BUG-33): the gateway serves the
+          // HLS playlist/segments, or MA serves the Web Player's own stream.
+          (resp.url().includes('/api/media/stream/abs-session/') ||
+            resp.url().includes('/api/media/stream/music-assistant')) &&
           resp.status() === 200,
         { timeout: 15000 },
       );
