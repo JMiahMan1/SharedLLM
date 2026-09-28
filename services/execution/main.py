@@ -2429,12 +2429,13 @@ async def get_ma_library(user_id: str = "", media_type: str = "TRACKS", offset: 
         creds = await _resolve_mass_ha_creds(user_id)
         ha_url = creds.get("ha_url") if creds else None
         ha_token = creds.get("ha_token") if creds else None
+        mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
 
         if not ha_url or not ha_token:
             return {"status": "SUCCESS", "items": [], "notice": "MA/HA not configured"}
 
         from services.execution.handlers.mass_ha_client import get_library as _ma_get_library
-        items = await _ma_get_library(ha_url, ha_token, media_type, limit=limit, offset=offset, search=search, order_by=order_by)
+        items = await _ma_get_library(ha_url, ha_token, media_type, limit=limit, offset=offset, search=search, order_by=order_by, mass_entry_id=mass_entry_id)
         return {"status": "SUCCESS", "items": items, "media_type": media_type, "offset": offset, "limit": limit}
     except Exception as e:
         log.error(f"[ma/browse] Error: {e}")
