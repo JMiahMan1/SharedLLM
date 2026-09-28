@@ -6,6 +6,16 @@ Provides:
 - ``client``: authenticated TestClient for the gateway app.
 - ``upstream``: aioresponses mock for upstream MA/ABS/HA HTTP calls.
 """
+# aioresponses 0.7.9 predates aiohttp 3.14, where ClientResponse gained a
+# required `stream_writer` kwarg, so a mocked response cannot be constructed.
+# The shim is applied ONLY when the installed aiohttp actually takes that
+# kwarg: injecting it unconditionally breaks aiohttp < 3.14, whose
+# ClientResponse has no such parameter, and the resulting TypeError
+# ("unexpected keyword argument 'stream_writer'") reads like an application
+# bug rather than a harness one. Detected by signature rather than by version
+# number so an aiohttp that adds or drops the parameter does not need a code
+# change here.
+import inspect
 import re
 import sys
 
@@ -15,7 +25,6 @@ import sys
 # gateway main first. This conftest loads before every module in this
 # directory, so pin the gateway test values here (401/503 in
 # test_music_proxy.py otherwise, depending on file order).
-
 from unittest.mock import MagicMock
 
 import aiohttp
@@ -23,24 +32,21 @@ import pytest
 from aioresponses import aioresponses
 from fastapi.testclient import TestClient
 
+_NEEDS_STREAM_WRITER = "stream_writer" in inspect.signature(aiohttp.ClientResponse.__init__).parameters
 
-# aioresponses 0.7.9 (latest) predates aiohttp 3.14, where ClientResponse
-# requires a `stream_writer` kwarg. Shim it with a stub so mocked responses
-# construct cleanly. Real callers always pass stream_writer, so behavior is
-# unchanged for non-mocked traffic.
-class _StreamWriterStub:
-    output_size = 0
+if _NEEDS_STREAM_WRITER and not getattr(aiohttp.ClientResponse.__init__, "_stream_writer_shim", False):
 
+    class _StreamWriterStub:
+        output_size = 0
 
-_orig_client_response_init = aiohttp.ClientResponse.__init__
+    _orig_client_response_init = aiohttp.ClientResponse.__init__
 
+    def _client_response_init(self, *args, **kwargs):
+        kwargs.setdefault("stream_writer", _StreamWriterStub())
+        return _orig_client_response_init(self, *args, **kwargs)
 
-def _client_response_init(self, *args, **kwargs):
-    kwargs.setdefault("stream_writer", _StreamWriterStub())
-    return _orig_client_response_init(self, *args, **kwargs)
-
-
-aiohttp.ClientResponse.__init__ = _client_response_init
+    _client_response_init._stream_writer_shim = True
+    aiohttp.ClientResponse.__init__ = _client_response_init
 
 # Heavy optional dependencies that main.py imports at module level. Stub them
 # before importing the app so tests don't need the real packages.
