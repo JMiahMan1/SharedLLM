@@ -165,3 +165,22 @@ service.
   method+path assertions (includes the aiohttp 3.14 `stream_writer` shim
   for aioresponses, same as gateway conftest_media).
 - yarl normalizes query strings alphabetically (`limit` before `q`).
+
+## ABS progress join (P2-T4 / BUG-13, 2026-09-27)
+
+- `GET /api/me/items-in-progress` response verified from ABS source
+  (`server/controllers/MeController.js` `getAllLibraryItemsInProgress`,
+  L485-518): items = `toOldJSONMinified()` + `progressLastUpdate` ONLY —
+  no `currentTime`/`progress`/`isComplete`. Percent cannot come from this
+  endpoint alone (the plan's literal single call would still show 0%).
+- `GET /api/me/progress` (`getAllMediaProgress` L112-115) returns
+  `{mediaProgress: [...]}`; each record (`MediaProgress.getOldMediaProgress`
+  L155-176) carries `libraryItemId`, `duration`, `currentTime`, `isFinished`,
+  `progress` (0..1), `lastUpdate` — enough for percent + is_complete.
+- Fix: handlers join the two with ONE `/api/me/progress` fetch
+  (`_all_progress_by_item`), so upstream calls are fixed (2) regardless of
+  item count, vs old 1+N for last_played; the `progress` action now shows
+  real percentages. Plan row amended accordingly (test = fixed call count,
+  no per-item fetch; progress value passed through).
+- Graceful degradation: progress fetch error → warning log, books still
+  returned at 0% (same UX as the old broken per-item path, minus N calls).

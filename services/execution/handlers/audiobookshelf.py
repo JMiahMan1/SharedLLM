@@ -288,6 +288,40 @@ async def _handle_resume(abs_url: str, abs_key: str, req) -> ExecutionResult:
     return ExecutionResult(status="FAILURE", message=f"Resume failed: {result.get('error')}", service="audiobookshelf")
 
 
+def _progress_pct(record: dict) -> int:
+    """Percent (0-100) from a /api/me/progress mediaProgress record."""
+    if not record:
+        return 0
+    duration = record.get("duration") or 0
+    current = record.get("currentTime") or 0
+    if duration and duration > 0:
+        return max(0, min(100, int(round(current / duration * 100))))
+    progress = record.get("progress")
+    if isinstance(progress, (int, float)):
+        pct = progress * 100 if 0 < progress <= 1 else progress
+        return max(0, min(100, int(round(pct))))
+    return 0
+
+
+async def _all_progress_by_item(abs_url: str, abs_key: str) -> dict:
+    """One upstream call: GET /api/me/progress -> {libraryItemId: mediaProgress}.
+
+    Returns {} when ABS reports an error or the call fails so callers degrade
+    to 0% instead of failing the listing (BUG-13: was one call per book).
+    """
+    try:
+        data = await abs_client.get_progress(abs_url, abs_key)
+    except Exception as e:
+        log.warning(f"[abs] media progress fetch failed: {e}")
+        return {}
+    if not isinstance(data, dict) or "error" in data:
+        detail = data.get("error") if isinstance(data, dict) else data
+        log.warning(f"[abs] media progress unavailable: {detail}")
+        return {}
+    records = data.get("mediaProgress") or []
+    return {r["libraryItemId"]: r for r in records if isinstance(r, dict) and r.get("libraryItemId")}
+
+
 async def _handle_progress(abs_url: str, abs_key: str, req) -> ExecutionResult:
     progress = await abs_client.get_items_in_progress(abs_url, abs_key)
     if "error" in progress:
@@ -297,15 +331,17 @@ async def _handle_progress(abs_url: str, abs_key: str, req) -> ExecutionResult:
     if not items:
         return ExecutionResult(status="SUCCESS", message="No audiobooks currently in progress.", service="audiobookshelf")
 
+    progress_by_item = await _all_progress_by_item(abs_url, abs_key)
     summaries = []
     for i in sorted(items, key=lambda x: x.get("progressLastUpdate", 0), reverse=True)[:10]:
         media = i.get("media", {})
         meta = media.get("metadata", {})
+        pct = _progress_pct(progress_by_item.get(i.get("id", ""), {}))
         if not meta.get("title"):
             summaries.append({
                 "title": i.get("title", "Unknown"),
                 "author": meta.get("authorName", ""),
-                "progress": "0%",
+                "progress": f"{pct}%",
                 "time": f"{_format_time(media.get('duration', 0))}",
             })
             continue
@@ -313,7 +349,7 @@ async def _handle_progress(abs_url: str, abs_key: str, req) -> ExecutionResult:
         summaries.append({
             "title": meta.get("title", "Unknown"),
             "author": meta.get("authorName", ""),
-            "progress": "0%",
+            "progress": f"{pct}%",
             "time": f"{_format_time(duration)}",
         })
 
@@ -404,6 +440,7 @@ async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
 
         # Sort by most recently played first
         library_items.sort(key=lambda x: x.get("progressLastUpdate", 0), reverse=True)
+        progress_by_item = await _all_progress_by_item(abs_url, abs_key)
 
         books = []
         for item in library_items[:20]:
@@ -432,16 +469,11 @@ async def _handle_last_played(abs_url: str, abs_key: str) -> ExecutionResult:
             duration = media.get("duration", item.get("duration", 0))
             last_update = item.get("progressLastUpdate", 0)
 
-            # Fetch individual progress for this book to get actual percentage
-            try:
-                progress_data = await abs_client.get_book_progress(abs_url, abs_key, item.get("id", ""))
-                current_time = progress_data.get("currentTime", 0)
-                is_complete = progress_data.get("isComplete", False)
-                pct = min(100, int(current_time / duration * 100)) if duration and duration > 0 else progress_data.get("progress", 0)
-            except Exception:
-                current_time = 0
-                is_complete = False
-                pct = 0
+            # Real progress from the single GET /api/me/progress join (BUG-13)
+            record = progress_by_item.get(item.get("id", ""), {})
+            current_time = record.get("currentTime", 0) or 0
+            is_complete = bool(record.get("isFinished", False))
+            pct = _progress_pct(record)
 
             # Build chapters info
             chapters = media.get("chapters", [])
