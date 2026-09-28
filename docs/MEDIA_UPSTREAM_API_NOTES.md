@@ -381,3 +381,23 @@ full-command integration test's event carries the command's `queue_id`
 (`player_1`), and the message-loop close test patches `_reconnect` and
 asserts the reconnect task is armed. Gateway suite: **482 passed / 2 skipped
 / 0 failed**.
+
+## aiosqlite registry connections hang test-process exit (P2-T15 / BUG-24, 2026-09-27)
+
+Pre-existing infra pitfall found while gating BUG-24: any pytest run that opens
+`services/execution/media_playback_registry.py::_db` (or `device_registry.py::_db`)
+never exits cleanly. aiosqlite's connection worker thread is non-daemon and only
+stops when `Connection.close()`/`stop()` sends its sentinel (or `__del__` fires on
+GC). Both registries hold the connection in a module global (`_db`) that is never
+closed and never garbage-collected, so at interpreter shutdown
+`threading._shutdown` joins the blocked worker forever — the pytest summary is
+printed first, then the process hangs.
+
+Verification: faulthandler dump showed main thread in `threading._shutdown` joining
+`_connection_worker_thread`; a minimal script that opens the registry connection
+hangs the same way, while the same script with `await db.close()` (or a local
+`db` that gets GC'd) exits cleanly.
+
+Until a session-end fixture closes both registries, wrap execution-suite runs in
+`timeout N pytest … > log 2>&1` and read the summary from the log (exit code 124
+is expected and does NOT mean the tests failed).

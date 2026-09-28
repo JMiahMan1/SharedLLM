@@ -91,66 +91,55 @@ async def get_playback_state(username: str) -> dict[str, Any] | None:
         return None
 
 async def save_playback_state(username: str, data: dict[str, Any]) -> bool:
-    """Save/update the media playback state for a user."""
+    """Save/update the media playback state for a user.
+
+    Atomic upsert (INSERT ... ON CONFLICT DO UPDATE). The old read-then-write
+    sequence (SELECT, then INSERT or UPDATE) lost a race: a concurrent writer
+    inserting the same username between our existence check and our INSERT
+    raised UNIQUE constraint failed (BUG-24).
+    """
     db = await _get_conn()
     try:
         now_str = get_az_timestamp_str()
         queue_json = json.dumps(data.get("queue", [])) if "queue" in data else None
         is_muted_val = 1 if data.get("is_volume_muted") else 0
 
-        # Check if row exists
-        existing = await get_playback_state(username)
-        if existing:
-            # Update fields dynamically
-            fields_to_update = []
-            params = []
-            updatable = [
-                "entity_id", "state", "media_type", "query", "media_content_id",
-                "position", "duration", "volume_level", "is_volume_muted",
-                "media_title", "media_artist", "media_album", "queue"
-            ]
-            for key in updatable:
-                if key in data:
-                    fields_to_update.append(f"{key}=?")
-                    if key == "queue":
-                        params.append(queue_json)
-                    elif key == "is_volume_muted":
-                        params.append(is_muted_val)
-                    else:
-                        params.append(data[key])
-
-            fields_to_update.append("updated_at=?")
-            params.append(now_str)
-            params.append(username)
-
-            query = f"UPDATE media_playback_states SET {', '.join(fields_to_update)} WHERE username=?"
-            await db.execute(query, tuple(params))
-        else:
-            # Insert new row
-            await db.execute("""
-                INSERT INTO media_playback_states (
-                    username, entity_id, state, media_type, query, media_content_id,
-                    position, duration, volume_level, is_volume_muted,
-                    media_title, media_artist, media_album, queue, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                username,
-                data.get("entity_id", "local"),
-                data.get("state", "idle"),
-                data.get("media_type"),
-                data.get("query"),
-                data.get("media_content_id"),
-                data.get("position", 0.0),
-                data.get("duration", 0.0),
-                data.get("volume_level", 0.5),
-                is_muted_val,
-                data.get("media_title"),
-                data.get("media_artist"),
-                data.get("media_album"),
-                queue_json or "[]",
-                now_str
-            ))
-
+        # INSERT values use the same defaults as before for missing fields.
+        values = (
+            username,
+            data.get("entity_id", "local"),
+            data.get("state", "idle"),
+            data.get("media_type"),
+            data.get("query"),
+            data.get("media_content_id"),
+            data.get("position", 0.0),
+            data.get("duration", 0.0),
+            data.get("volume_level", 0.5),
+            is_muted_val,
+            data.get("media_title"),
+            data.get("media_artist"),
+            data.get("media_album"),
+            queue_json or "[]",
+            now_str,
+        )
+        # On conflict only overwrite columns the caller actually provided
+        # (matches the old UPDATE semantics); updated_at always advances.
+        updatable = (
+            "entity_id", "state", "media_type", "query", "media_content_id",
+            "position", "duration", "volume_level", "is_volume_muted",
+            "media_title", "media_artist", "media_album", "queue",
+        )
+        assignments = [f"{col}=excluded.{col}" for col in updatable if col in data]
+        assignments.append("updated_at=excluded.updated_at")
+        query = (
+            "INSERT INTO media_playback_states ("
+            "username, entity_id, state, media_type, query, media_content_id, "
+            "position, duration, volume_level, is_volume_muted, "
+            "media_title, media_artist, media_album, queue, updated_at"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            f"ON CONFLICT(username) DO UPDATE SET {', '.join(assignments)}"
+        )
+        await db.execute(query, values)
         await db.commit()
         log.info(f"[media_playback_registry] Saved state for {username} (America/Phoenix timestamp: {now_str})")
         return True

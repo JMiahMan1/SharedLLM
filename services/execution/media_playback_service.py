@@ -13,6 +13,11 @@ from services.execution.schemas import ExecutionResult, MediaPlayRequest, MediaS
 
 log = logging.getLogger("execution.media_playback_service")
 
+# Single source of truth for targets that mean "this client plays locally"
+# (was previously two divergent tuples: status only checked local/web_player,
+# which left browser/android routed to the HA path — BUG-24).
+LOCAL_PLAYER_ALIASES = frozenset({"local", "web_player", "browser", "android"})
+
 class MediaPlaybackService:
     """
     Service to abstract differences between HA/MA and direct ABS API calls,
@@ -27,7 +32,7 @@ class MediaPlaybackService:
 
         # Determine target
         target = req.entity_id or ""
-        is_local = target.lower() in ("local", "web_player", "browser", "android")
+        is_local = target.lower() in LOCAL_PLAYER_ALIASES
 
         log.info(f"[MediaPlaybackService] Play request for user={username}, target={target} (local={is_local}), query={req.query}")
 
@@ -84,21 +89,22 @@ class MediaPlaybackService:
                 }
             )
         else:
-            # Hardware target - save active target in DB first
+            # Hardware target - resolve the entity, delegate first, and only
+            # persist "playing" after the handler reports success (BUG-24).
             ha_url = ctx.ha_url or ""
             ha_token = ctx.ha_token or ""
             entity_id = await media_handler.resolve_entity(req, ha_url, ha_token, media_type)
-            await registry.save_playback_state(username, {
-                "entity_id": entity_id,
-                "state": "playing",
-                "media_type": media_type,
-                "query": req.query,
-                "media_content_id": req.media_content_id,
-                "updated_at": registry.get_az_timestamp_str()
-            })
-
-            # Delegate to standard media handler
-            return await media_handler.handle_media_play(req)
+            result = await media_handler.handle_media_play(req)
+            if result.status == "SUCCESS":
+                await registry.save_playback_state(username, {
+                    "entity_id": entity_id,
+                    "state": "playing",
+                    "media_type": media_type,
+                    "query": req.query,
+                    "media_content_id": req.media_content_id,
+                    "updated_at": registry.get_az_timestamp_str()
+                })
+            return result
 
     @staticmethod
     async def transport(req: MediaTransportRequest) -> ExecutionResult:
@@ -110,9 +116,9 @@ class MediaPlaybackService:
         # If no target specified, look up active target in DB
         if not target:
             db_state = await registry.get_playback_state(username)
-            target = db_state.get("entity_id") if db_state else "local"
+            target = (db_state.get("entity_id") or "local") if db_state else "local"
 
-        is_local = target.lower() in ("local", "web_player", "browser", "android")
+        is_local = target.lower() in LOCAL_PLAYER_ALIASES
 
         log.info(f"[MediaPlaybackService] Transport request user={username}, command={req.command}, target={target} (local={is_local})")
 
@@ -160,9 +166,9 @@ class MediaPlaybackService:
 
         # Read the user's active playback target choice from DB
         db_state = await registry.get_playback_state(username)
-        active_target = db_state.get("entity_id") if db_state else ""
+        active_target = (db_state.get("entity_id") or "") if db_state else ""
 
-        is_local = active_target.lower() in ("local", "web_player")
+        is_local = active_target.lower() in LOCAL_PLAYER_ALIASES
 
         log.debug(f"[MediaPlaybackService] Status request user={username}, active_target={active_target} (is_local={is_local})")
 
