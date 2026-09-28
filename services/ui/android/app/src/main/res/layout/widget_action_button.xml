@@ -1,48 +1,66 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  1x1 home-screen action button.
+
+  The icon carries the leftover height (0dp + weight + fitCenter) instead of
+  being a fixed 44dp box, so the glyph is centred in whatever space the
+  launcher gives us with no dead gap under it and no clipping when the widget
+  is resized. The label keeps the remaining lines; the state row collapses
+  (GONE) when there is no state so it never reserves an empty band.
+
+  The whole card is one tap target: clickable on the root plus the root
+  PendingIntent set from ActionButtonWidget.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/action_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_card_bg"
+    android:clickable="true"
+    android:focusable="false"
     android:gravity="center"
     android:orientation="vertical"
-    android:padding="10dp">
+    android:padding="8dp">
     <ImageView
         android:id="@+id/action_icon"
-        android:layout_width="44dp"
-        android:layout_height="44dp"
-        android:background="@android:color/transparent"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:adjustViewBounds="false"
         android:contentDescription="Action icon"
-        android:padding="2dp"
+        android:scaleType="fitCenter"
         android:src="@drawable/mi_garage"
         android:tint="#F1F5F9" />
     <TextView
         android:id="@+id/action_label"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_marginTop="4dp"
         android:ellipsize="end"
         android:gravity="center"
+        android:includeFontPadding="false"
         android:maxLines="2"
-        android:text="Action"
-        android:textColor="#F1F5F9"
         android:shadowColor="#99000000"
         android:shadowDx="0"
         android:shadowDy="1"
         android:shadowRadius="3"
-        android:textSize="12sp"
+        android:text="Action"
+        android:textColor="#F1F5F9"
+        android:textSize="11sp"
         android:textStyle="bold" />
     <TextView
         android:id="@+id/action_state"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:ellipsize="end"
         android:gravity="center"
+        android:includeFontPadding="false"
         android:maxLines="1"
-        android:text=""
-        android:textColor="#94A3B8"
         android:shadowColor="#99000000"
         android:shadowDx="0"
         android:shadowDy="1"
         android:shadowRadius="3"
-        android:textSize="10sp" />
+        android:textColor="#94A3B8"
+        android:textSize="10sp"
+        android:visibility="gone" />
 </LinearLayout>

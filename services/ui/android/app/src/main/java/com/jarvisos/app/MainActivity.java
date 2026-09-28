@@ -1,5 +1,8 @@
 package com.jarvisos.app;
 
+import android.app.AlertDialog;
+import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.os.Build;
 import android.os.Bundle;
@@ -8,8 +11,11 @@ import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.widget.Toast;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.Plugin;
+import com.jarvisos.app.widgets.WidgetApi;
+import com.jarvisos.app.widgets.WidgetUpdater;
 
 public class MainActivity extends BridgeActivity {
     @Override
@@ -43,6 +49,62 @@ public class MainActivity extends BridgeActivity {
         getWindow().setNavigationBarColor(Color.TRANSPARENT);
 
         configureWebView();
+        maybeConfirmGarage(getIntent());
+    }
+
+    @Override
+    public void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        if (intent != null) {
+            setIntent(intent);
+            maybeConfirmGarage(intent);
+        }
+    }
+
+    /**
+     * A home-screen tap that would open the garage while away routes here
+     * (jarvis://confirm-garage) — a widget tap cannot show a dialog itself.
+     */
+    private void maybeConfirmGarage(Intent intent) {
+        if (intent == null || intent.getData() == null) return;
+        if (!"jarvis".equals(intent.getData().getScheme())) return;
+        if (!"confirm-garage".equals(intent.getData().getHost())) return;
+        final String entity = intent.getStringExtra(WidgetUpdater.EXTRA_ENTITY);
+        final String service = intent.getStringExtra(WidgetUpdater.EXTRA_SERVICE);
+        // Consume the deep link so a recreate does not ask a second time.
+        intent.setData(null);
+        intent.removeExtra(WidgetUpdater.EXTRA_ENTITY);
+        intent.removeExtra(WidgetUpdater.EXTRA_SERVICE);
+        if (entity == null || entity.isEmpty()) return;
+        try {
+            new AlertDialog.Builder(this)
+                .setTitle("Open garage?")
+                .setMessage("You appear to be away from home. Open " + entity + " anyway?")
+                .setPositiveButton("Open", (d, which) -> runGarageCommand(entity, service))
+                .setNegativeButton("Cancel", null)
+                .show();
+        } catch (Exception e) {
+            Toast.makeText(this, "Could not ask for confirmation", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void runGarageCommand(String entity, String service) {
+        final Context app = getApplicationContext();
+        final String resolved = service == null || service.isEmpty() ? "turn_on" : service;
+        WidgetUpdater.onBackground(() -> {
+            try {
+                int dot = entity.indexOf('.');
+                String domain = dot > 0 ? entity.substring(0, dot) : "";
+                WidgetApi.haService(app, domain, resolved, entity);
+                WidgetUpdater.onMain(() -> Toast.makeText(app,
+                    "✓ " + resolved + " → " + entity, Toast.LENGTH_SHORT).show());
+            } catch (Exception e) {
+                final String msg = e.getMessage() != null ? e.getMessage() : "Command failed";
+                WidgetUpdater.onMain(() -> Toast.makeText(app,
+                    "✕ " + msg, Toast.LENGTH_SHORT).show());
+            }
+            WidgetUpdater.requestAll(app);
+        });
     }
 
     @Override

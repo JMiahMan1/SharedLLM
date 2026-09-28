@@ -83,6 +83,25 @@ public final class WidgetUpdater {
             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
     }
 
+    /**
+     * Garage-opened-while-away confirmation.
+     *
+     * A dialog cannot be raised straight from a widget tap: the tap delivers a
+     * broadcast, and background activity starts are blocked from a receiver, so
+     * an AlertDialog there never reaches the screen. The tap therefore opens
+     * the app itself (activity PendingIntent carries the user-gesture flag) and
+     * MainActivity asks for the confirmation.
+     */
+    public static PendingIntent confirmGaragePendingIntent(Context context, String entityId, String service) {
+        Intent i = new Intent(context, MainActivity.class);
+        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        i.setData(Uri.parse("jarvis://confirm-garage"));
+        i.putExtra(EXTRA_ENTITY, entityId);
+        i.putExtra(EXTRA_SERVICE, service);
+        return PendingIntent.getActivity(context, 5000 + (entityId.hashCode() ^ service.hashCode()), i,
+            PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
     /** Re-open Action Button configure for an existing widget id. */
     public static PendingIntent configureActionButtonPendingIntent(Context context, int appWidgetId) {
         Intent i = new Intent(context, ConfigureActionButtonActivity.class);

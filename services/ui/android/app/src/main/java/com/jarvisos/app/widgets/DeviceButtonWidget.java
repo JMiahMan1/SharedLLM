@@ -79,15 +79,9 @@ public class DeviceButtonWidget extends AppWidgetProvider {
                 boolean garage = label.toLowerCase().contains("garage")
                     || id.toLowerCase().contains("garage");
                 if (garage && "turn_on".equals(service) && WidgetApi.isAwayFromHome(context, WidgetUpdater.AWAY_THRESHOLD_M)) {
-                    // Route through confirm receiver when opening garage while away
-                    android.content.Intent conf = new android.content.Intent(context, WidgetActionReceiver.class);
-                    conf.setAction(WidgetUpdater.ACTION_CONFIRM_GARAGE);
-                    conf.putExtra(WidgetUpdater.EXTRA_ENTITY, id);
-                    conf.putExtra(WidgetUpdater.EXTRA_SERVICE, service);
-                    android.app.PendingIntent pi = android.app.PendingIntent.getBroadcast(
-                        context, id.hashCode() + 77, conf,
-                        android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
-                    views.setOnClickPendingIntent(HIT_IDS[i], pi);
+                    // Opening the garage while away needs an on-screen confirmation
+                    views.setOnClickPendingIntent(HIT_IDS[i],
+                        WidgetUpdater.confirmGaragePendingIntent(context, id, service));
                 } else {
                     views.setOnClickPendingIntent(HIT_IDS[i],
                         WidgetUpdater.togglePendingIntent(context, id, service));
