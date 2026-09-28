@@ -142,3 +142,21 @@ Tests: 7 gateway (`test_talk_identity_switch.py`) + 6 UI
 See **docs/CHAT_UI_RESEARCH.md** for the build-vs-reuse research
 (reactions/polls/calls already exist in Talk; Excalidraw for drawing; LiveKit as
 the call fallback) that drives these phases.
+
+## Family games (shipped)
+
+`services/execution/handlers/family_games.py` is a small, dependency-free game
+kit the Jarvis bot runs inside a conversation — no model in the loop, so it
+never wanders off mid-game:
+
+- **Trivia**: gentle multiple choice, forgiving answer matching (case, articles,
+  punctuation). One ⭐ per correct answer.
+- **Memory**: pick the words, then duplicate them, shuffle, and flip two at a
+  time. A pair stays up; a miss flips back.
+
+One game per room, a leaderboard in every card, and `FAMILY_GAMES_ENABLED` must
+be set or the bot refuses to start — a deployment that does not want a bot
+answering in chat never gets one by accident. Gateway:
+`POST /api/communication/talk/game` with `game_command` (start/answer/flip/stop).
+Scores are Jarvis stars today; wiring them into the geo star ledger is the next
+step. 11 unit tests + 4 integration tests.

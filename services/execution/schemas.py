@@ -395,7 +395,7 @@ class TimerRequest(BaseRequest):
 
 class TalkRequest(BaseRequest):
     user_context: UserContext
-    action: Literal["list", "open", "messages", "send", "send_voice", "reactions", "react", "polls", "create_poll", "vote_poll", "mark_read", "post_card"]
+    action: Literal["list", "open", "messages", "send", "send_voice", "reactions", "react", "polls", "create_poll", "vote_poll", "mark_read", "post_card", "game"]
     token: str | None = None
     target_user: str | None = None
     message: str | None = None
@@ -416,6 +416,9 @@ class TalkRequest(BaseRequest):
     card_detail: str | None = None
     card_stars: int | None = None
     card_stats: list[dict] | None = Field(None, description="[{label, value}] tiles on the card")
+    game_command: str | None = Field(None, description="start | answer | flip | stop")
+    game_kind: str | None = Field(None, description="trivia | memory")
+    game_words: str | None = None
 
 # ─── File Operations (Workspace vs Storage) ───────────────────────────────────
 

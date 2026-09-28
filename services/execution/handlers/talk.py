@@ -199,6 +199,106 @@ def _encode_envelope(text: str, card: dict) -> str:
     return f"{text.strip()}\n\n{ENVELOPE_FENCE}\n{json.dumps(body)}\n{ENVELOPE_FENCE}"
 
 
+GAME_COMMANDS = ("start", "answer", "flip", "stop")
+GAME_KINDS = ("trivia", "memory")
+
+
+async def _run_game_command(req: TalkRequest, provider: Any) -> ExecutionResult:
+    """Family games in the room: trivia and memory, no model involved.
+
+    Games are disabled unless FAMILY_GAMES_ENABLED is set, so a deployment that
+    does not want a bot answering in chat never accidentally does.
+    """
+    from services.execution.handlers import family_games as games
+
+    if not games.env_flag("FAMILY_GAMES_ENABLED"):
+        return ExecutionResult(
+            status="FAILURE",
+            message="Family games are not enabled on this deployment.",
+            service="talk_game",
+        )
+    if not req.token:
+        return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_game")
+
+    command = (req.game_command or "start").strip().lower()
+    if command not in GAME_COMMANDS:
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"game_command must be one of: {', '.join(GAME_COMMANDS)}",
+            service="talk_game",
+        )
+
+    async def say(text: str, card: dict | None = None) -> None:
+        wire = _encode_envelope(text, card) if card else text
+        await _talk_request_with_retry(
+            provider,
+            "POST",
+            f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}",
+            data={"message": wire},
+        )
+
+    if command == "stop":
+        games.registry.drop(req.token)
+        await say("🛑 Game over — good game.")
+        return ExecutionResult(status="SUCCESS", message="Game stopped.", service="talk_game")
+
+    if command == "start":
+        kind = (req.game_kind or "trivia").strip().lower()
+        if kind not in GAME_KINDS:
+            return ExecutionResult(
+                status="FAILURE",
+                message=f"game_kind must be one of: {', '.join(GAME_KINDS)}",
+                service="talk_game",
+            )
+        state = games.registry.start_trivia(req.token) if kind == "trivia" else games.registry.start_memory(req.token)
+        await say(games.trivia_prompt(state) if kind == "trivia" else games.memory_prompt(state))
+        return ExecutionResult(
+            status="SUCCESS",
+            message=f"Started a {kind} game.",
+            service="talk_game",
+            detail={"kind": kind, "token": req.token},
+        )
+
+    state = games.registry.get(req.token)
+    if state is None:
+        return ExecutionResult(
+            status="FAILURE",
+            message="No game is running here — say 'start a game' first.",
+            service="talk_game",
+        )
+
+    who = (req.card_detail or "family").strip()
+    if state.kind == "trivia":
+        result = games.apply_trivia_answer(state, who, req.message or "")
+        if result["correct"]:
+            await say(
+                f"✅ {result['player']} got it!",
+                games.game_card(state, "Correct!", f"{result['player']} is on {result['stars']} ⭐"),
+            )
+            return ExecutionResult(status="SUCCESS", message="Answer correct.", service="talk_game", detail=result)
+
+        # Wrong answers stay quiet unless everyone has had a go.
+        if all(p.attempts for p in state.players.values()) and len(state.players) > 1:
+            await say(f"The answer was {state.answers[0]} — next question coming.", None)
+            games.registry.start_trivia(req.token)
+            fresh = games.registry.get(req.token)
+            await say(games.trivia_prompt(fresh))
+        return ExecutionResult(status="SUCCESS", message="Not this time.", service="talk_game", detail=result)
+
+    words = [w for w in (req.game_words or req.message or "").split() if w][:2]
+    result = games.apply_memory_flip(state, who, words)
+    card = games.game_card(
+        state,
+        "Pair found!" if result["matched"] else "Not a pair",
+        f"{result['message']} {who} has {result['stars']} ⭐",
+    )
+    await say(result["message"], card)
+    if state.over:
+        board = ", ".join(f"{p.name} {p.stars} ⭐" for p in state.leaderboard)
+        await say(f"🏆 All pairs found! {board}")
+    return ExecutionResult(status="SUCCESS", message="Flip processed.", service="talk_game", detail=result)
+
+
 async def handle_talk(req: TalkRequest) -> ExecutionResult:
     provider = resolve_personal_data_provider(req.user_context)
     if not provider:
@@ -249,6 +349,9 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 service="talk_open",
                 detail={"conversation": _conversation_summary(data)},
             )
+
+        if action == "game":
+            return await _run_game_command(req, provider)
 
         if action == "post_card":
             if not req.token:
