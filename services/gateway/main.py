@@ -2271,9 +2271,22 @@ async def discovery_sync(request: Request):
 @app.get("/api/entities")
 async def get_entities(request: Request):
     """Return all Home Assistant entities for searchable dropdowns."""
+    creds = await _resolve_identity_from_request(request)
+    ha_url = creds.get("ha_url") if creds else None
+    ha_token = creds.get("ha_token") if creds else None
+    if not ha_url or not ha_token:
+        return {
+            "entities": [],
+            "status": "FAILURE",
+            "message": (
+                f"Home Assistant credentials not configured for user "
+                f"'{creds.get('user') if creds else 'unknown'}' (Identity -> Services)."
+            ),
+        }
     try:
         resp = await get_http_client().get(
             f"{EXECUTION_SVC}/discovery/entities",
+            params={"ha_url": ha_url, "ha_token": ha_token},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=15.0),
         )

@@ -1323,6 +1323,7 @@ class RavenWorker:
                 async with _shared_http_client() as client:
                     resp = await client.get(
                         f"{EXECUTION_SVC}/discovery/entities",
+                        params={"ha_url": ha_url, "ha_token": ha_token},
                         headers={"X-Internal-Secret": INTERNAL_SECRET}
                     )
                     if resp.status != 200:

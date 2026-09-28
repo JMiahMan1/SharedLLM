@@ -57,6 +57,30 @@ class ResolvedCredentials(BaseModel):
     skylight_enabled: bool = True
     preferred_tts_voice: str | None = "af_heart"
     calendar_settings: dict = {}  # per-user calendar integration prefs (default/disabled/priority/ical_urls)
+    # Where each shared-able service's credentials came from:
+    #   "own"     -> this user's own entry
+    #   "granted" -> borrowed from the system default user under an explicit grant
+    #   "shared"  -> the system default user's shared account (skylight only)
+    #   "absent"  -> not configured and not granted; the consumer must fail loudly
+    credential_sources: dict = {}
+    # Username whose credentials were borrowed, when a grant was used.
+    shared_credential_owner: str | None = None
+
+
+class CredentialSharesRead(BaseModel):
+    """Which shared (system default user) services a user may borrow."""
+    username: str
+    services: list[str] = []
+    granted_by: str | None = None
+    granted_at: str | None = None
+    note: str | None = None
+    # The account the borrowed credentials come from.
+    shared_owner: str | None = None
+
+
+class CredentialSharesUpdate(BaseModel):
+    services: list[str] = []
+    note: str | None = None
 
 
 # ─── External CRUD schemas ─────────────────────────────────────────────────────
