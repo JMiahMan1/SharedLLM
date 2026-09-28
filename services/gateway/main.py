@@ -8882,7 +8882,7 @@ async def get_abs_status(request: Request):
         log.error(f"[abs/status] identity resolution failed: {e}")
         raise HTTPException(status_code=401, detail="Authentication required") from e
 
-    abs_url = (creds.get("audiobookshelf_url") or "") if isinstance(creds, dict) else ""
+    abs_url = (creds.get("audiobookshelf_url") or "").rstrip("/") if isinstance(creds, dict) else ""
     if not abs_url:
         return {"status": "UNAVAILABLE", "error": "ABS URL not configured", "reachable": False}
     try:
