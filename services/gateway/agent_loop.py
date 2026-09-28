@@ -4610,12 +4610,26 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         # the exec service keeps working makes the model believe
                         # the job failed, so it re-dispatches the identical tool
                         # and burns the whole mission budget redundantly.
+                        #
+                        # A podcast render is the same shape of work and was
+                        # missed here once: the handler budgets 1800 s, so the
+                        # standard 120 s ceiling abandoned every episode past
+                        # two minutes while the dashboard kept mixing. Speaker
+                        # identification is sized above its handler's 120 s
+                        # budget for the same reason - a tie is a race, and the
+                        # loser is whichever side happens to fire first, so the
+                        # upstream's own 422/500 mapping gets replaced by a
+                        # client TimeoutError.
                         # Everything else stays on the standard 120s ceiling.
                         _dispatch_timeout = (
                             590.0
                             if lookup_action == "imageeditrequest"
                             else 5400.0
                             if lookup_action == "audiobookregeneraterequest"
+                            else 2400.0
+                            if lookup_action == "podcastrenderrequest"
+                            else 180.0
+                            if lookup_action == "speakeridentifyrequest"
                             else 120.0
                         )
                         resp = await getattr(client, _http_method)(

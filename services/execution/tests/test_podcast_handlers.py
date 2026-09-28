@@ -457,3 +457,227 @@ def test_the_routes_are_registered():
     source = (Path(H.__file__).resolve().parents[1] / "main.py").read_text()
     for path in ("/execute/podcast_render", "/execute/speaker_identify", "/execute/list_voices"):
         assert f'@app.post("{path}"' in source, f"{path} is not registered on the execution service"
+
+
+# ------------------------------------------------- regressions from the review
+#
+# Each of these raised out of the handler, escaped the FAILURE contract the
+# module docstring promises, or reported a value in the wrong form. The
+# workspace-write one is the serious one: it is the only aiohttp call that runs
+# AFTER a successful 30-minute render, so an exception there discarded a finished
+# episode and the model re-ran the job.
+
+
+class _RaisingSession:
+    """A ClientSession whose *Nth* session raises, so the guarded first call can
+    succeed and the unguarded later one fail.
+
+    `test_every_handler_returns_rather_than_raises` faked a session that raises
+    outright, which fires on the first call - the render, which is guarded - so it
+    never reached the workspace write. That is how the gap survived.
+    """
+
+    def __init__(self, fail_on=1, responses=()):
+        self.sessions = 0
+        self._fail_on = fail_on
+        self._queue = list(responses)
+        self.calls = []
+
+    def __call__(self, *a, **k):
+        self.sessions += 1
+        if self.sessions == self._fail_on:
+            return self._raising()
+        return _Client(self._queue)
+
+    @staticmethod
+    def _raising():
+        client = _Client([])
+        client._next = lambda: (_ for _ in ()).throw(OSError("Cannot connect to host workspace_runtime:8000"))
+        return client
+
+
+def _install_failing_aiohttp(monkeypatch, fail_on, responses=()):
+    fake = _RaisingSession(fail_on=fail_on, responses=responses)
+    module = types.ModuleType("aiohttp")
+    module.ClientSession = fake
+    module.ClientTimeout = lambda **k: ("timeout", k)
+    monkeypatch.setitem(sys.modules, "aiohttp", module)
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_save_that_raises_still_reports_the_render(ws, monkeypatch):
+    """The render succeeded. An exception escaping the save turned a finished
+    episode into a 500 whose message contained no trace of the audio, and the
+    mission re-ran a half-hour job to produce the same file."""
+    _install_failing_aiohttp(monkeypatch, fail_on=2, responses=[_Resp(200, {"data_uri": "data:audio/wav;base64,QUJD"})])
+    res = await H.handle_podcast_render(_render_req())
+    assert res.status == "FAILURE"
+    # "rendered but" is the distinction: the script was fine, the save was not.
+    assert "rendered but" in res.message
+    assert "workspace save failed" in res.message
+
+
+@pytest.mark.asyncio
+async def test_a_failed_save_does_not_lose_the_mix_statistics(ws, monkeypatch):
+    _install_failing_aiohttp(
+        monkeypatch,
+        fail_on=2,
+        responses=[_Resp(200, {"data_uri": "data:audio/wav;base64,QUJD", "duration_s": 61.0, "turn_count": 2})],
+    )
+    res = await H.handle_podcast_render(_render_req())
+    assert res.detail["output_path"] == "podcast.wav"
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_clip_returns_a_failure_rather_than_raising(ws, monkeypatch):
+    """`os.path.isfile()` passes on a mode-000 file, and the open() that follows
+    raised PermissionError straight out of the handler."""
+    locked = ws / "locked.wav"
+    locked.write_bytes(b"RIFF" + b"\0" * 64)
+    locked.chmod(0o000)
+    try:
+        _install_aiohttp(monkeypatch, [_Resp(200, {})])
+        res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="locked.wav"))
+    finally:
+        locked.chmod(0o644)
+    assert res.status == "FAILURE"
+    assert "cannot read" in res.message
+    assert "locked.wav" in res.message
+
+
+@pytest.mark.asyncio
+async def test_the_runner_up_is_named_not_identified_by_hash(ws, monkeypatch):
+    """`voice_clone.identify` returns `runner_up` as a profile id, so the message
+    addressed the model as "b81e0d55aa02" while holding the name in `candidates`.
+    The existing test mocked a name the server never produces."""
+    (ws / "clip.wav").write_bytes(b"RIFF" + b"\0" * 64)
+    payload = {
+        "matched": "ada-1",
+        "matched_name": "Ada",
+        "score": 0.9137,
+        "runner_up": "b81e0d55aa02",
+        "candidates": [{"id": "ada-1", "name": "Ada", "score": 0.9137}, {"id": "b81e0d55aa02", "name": "Rowan", "score": 0.7992}],
+    }
+    _install_aiohttp(monkeypatch, [_Resp(200, payload)])
+    res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav"))
+    assert res.status == "SUCCESS"
+    assert "next closest is Rowan" in res.message
+    assert "b81e0d55aa02" not in res.message
+    # the raw id is still in detail, where a caller can join on it
+    assert res.detail["runner_up"] == "b81e0d55aa02"
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_runner_up_id_falls_back_to_printing_it(ws, monkeypatch):
+    """Defensive: a server that returns an id absent from candidates must not
+    produce "next closest is None"."""
+    (ws / "clip.wav").write_bytes(b"RIFF" + b"\0" * 64)
+    payload = {"matched_name": "Ada", "score": 0.9, "runner_up": "gone", "candidates": [{"id": "ada-1", "name": "Ada", "score": 0.9}]}
+    _install_aiohttp(monkeypatch, [_Resp(200, payload)])
+    res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav"))
+    assert "next closest is gone" in res.message
+
+
+@pytest.mark.parametrize(
+    "upstream,expected_fragment",
+    [
+        ("not enough speech to build a voice embedding", "not enough speech"),
+        ("recording is larger than 25 MB", "25 MB"),
+        ("could not decode the recording: moov atom not found", "moov atom"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_422_reports_what_the_server_said(ws, monkeypatch, upstream, expected_fragment):
+    """The audio server maps every ValueError to 422, and "not enough speech" is
+    only one of the three. Leading with the wrong diagnosis sends a model looking
+    in the wrong place - an oversize clip is a file-size problem, not a speech one.
+    """
+    (ws / "clip.wav").write_bytes(b"RIFF" + b"\0" * 64)
+    _install_aiohttp(monkeypatch, [_Resp(422, None, text=upstream)])
+    res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="clip.wav"))
+    assert res.status == "FAILURE"
+    assert expected_fragment in res.message
+    assert "not enough speech in the clip" not in res.message
+
+
+@pytest.mark.asyncio
+async def test_an_oversize_clip_is_refused_before_it_is_uploaded(ws, monkeypatch):
+    """The handler read the whole file and base64-encoded it (+33%) only for the
+    audio server to reject it on a limit the handler already knows."""
+    big = ws / "big.wav"
+    big.write_bytes(b"\0" * 16)
+    monkeypatch.setattr(H, "_MAX_CLIP_BYTES", 8)
+    http = _install_aiohttp(monkeypatch, [_Resp(200, {})])
+    res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="big.wav"))
+    assert res.status == "FAILURE"
+    assert "MB" in res.message
+    assert http.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_path", ["README.md", "services/gateway/main.py", "podcast.txt", "noextension"])
+async def test_a_non_audio_output_path_is_refused(ws, monkeypatch, output_path):
+    """Contained to the workspace, so not an escape - but
+    `output_path: "services/gateway/main.py"` returned SUCCESS and left a Python
+    file full of WAV bytes. An audio tool writing a non-audio file is always a
+    mistake, so refuse it before spending the render."""
+    http = _install_aiohttp(monkeypatch, [_Resp(200, {"data_uri": "data:audio/wav;base64,QUJD"})] * 2)
+    res = await H.handle_podcast_render(_render_req(output_path=output_path))
+    assert res.status == "FAILURE"
+    assert "audio" in res.message
+    assert http.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_path", ["podcast.wav", "episodes/s01.mp3", "S02.WAV", "clip.webm", "a.opus"])
+async def test_an_audio_output_path_in_any_accepted_container_is_allowed(ws, monkeypatch, output_path):
+    http = _install_aiohttp(monkeypatch, [_Resp(200, {"data_uri": "data:audio/wav;base64,QUJD"})] * 2)
+    res = await H.handle_podcast_render(_render_req(output_path=output_path))
+    assert res.status == "SUCCESS", res.message
+    assert http.calls[1][2]["json"]["relative_path"] == output_path
+
+
+@pytest.mark.asyncio
+async def test_a_webm_clip_is_accepted(ws, monkeypatch):
+    """A browser MediaRecorder produces .webm by default, so the commonest real
+    doorbell clip was the one hard-refused."""
+    (ws / "doorbell.webm").write_bytes(b"\x1a\x45\xdf\xa3" + b"\0" * 64)
+    _install_aiohttp(monkeypatch, [_Resp(200, {"matched_name": None, "candidates": []})])
+    res = await H.handle_speaker_identify(SpeakerIdentifyRequest(workspace_id="w1", user_context=UC, audio_path="doorbell.webm"))
+    assert res.status == "SUCCESS"
+    assert "audio server returned" not in res.message
+
+
+@pytest.mark.asyncio
+async def test_a_junk_roster_row_does_not_break_a_pair_filtered_list(ws, monkeypatch):
+    """The pair_id filter was the one place a roster row was touched before the
+    isinstance guard three lines below it."""
+    payload = {
+        "saved_profiles": [{"id": "p1", "name": "Ada", "engine": "openvoice-v2"}],
+        "roster": [None, "junk", {"pair_id": "duo_deep", "slot": "a", "name": "Vera", "voice": "af_heart"}],
+    }
+    _install_aiohttp(monkeypatch, [_Resp(200, payload)])
+    res = await H.handle_list_voices(ListVoicesRequest(workspace_id="w1", user_context=UC, pair_id="duo_deep"))
+    assert res.status == "SUCCESS"
+    assert [h["name"] for h in res.detail["hosts"]] == ["Vera"]
+    assert res.detail["saved_profiles"][0]["id"] == "p1"
+
+
+def test_the_audio_suffix_list_covers_what_the_upstream_decoder_accepts():
+    """Mirrors voice_clone.decode_to_22k's documented containers. .webm is here
+    because MediaRecorder produces it by default."""
+    for suffix in (".wav", ".mp3", ".m4a", ".m4b", ".ogg", ".oga", ".opus", ".webm", ".flac", ".aac", ".aiff", ".amr"):
+        assert suffix in H._AUDIO_SUFFIXES, suffix
+
+
+def test_the_clip_cap_matches_the_upstream_upload_cap():
+    assert H._MAX_CLIP_BYTES == 25 * 1024 * 1024
+
+
+def test_the_dispatch_timeout_covers_every_handler_budget():
+    """The client-side ceiling must exceed what the handler waits for, or the
+    model is told the job failed while it is still running. See the same check in
+    test_podcast_tools.py, which reads the ladder from agent_loop."""
+    assert H._RENDER_TIMEOUT_S > 120.0
+    assert H._RENDER_TIMEOUT_S <= 3600.0  # a mission cannot outlast this
