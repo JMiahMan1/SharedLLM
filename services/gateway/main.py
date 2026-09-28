@@ -37,6 +37,7 @@ from services.gateway.config import (
     ABS_TIMEOUT,
     ALPACA_ARCADE_PUBLIC_URL,
     ALPACA_ARCADE_URL,
+    ALPACA_AUDIO_URL,
     ALPACA_SD_URL,
     CONFIG,
     CONTROL_PLANE_URL,
@@ -5081,6 +5082,68 @@ async def sd_image_generate_proxy(request: Request):
         return JSONResponse(status_code=400, content={"status": "ERROR", "message": str(exc)})
     except Exception as exc:
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
+
+
+@app.post("/api/music/generate")
+async def music_generate_proxy(request: Request):
+    """Generate a short piece of music from a prompt.
+
+    The audio backend is optional and must be configured: an unset
+    ALPACA_AUDIO_URL is a clear failure, not a probe of some remembered host.
+    The backend's own error text is passed through so a refused prompt reads
+    as refused instead of as silence.
+    """
+    if not _sd_request_authorized(request):
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    if not ALPACA_AUDIO_URL:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "ERROR",
+                "message": "Music generation is not configured on this deployment (set ALPACA_AUDIO_URL)",
+            },
+        )
+
+    body = await request.json()
+    prompt = str(body.get("prompt") or "").strip()
+    if not prompt:
+        return JSONResponse(status_code=422, content={"status": "ERROR", "message": "A prompt is required"})
+
+    payload = {"prompt": prompt}
+    for key in ("duration_s", "temperature", "guidance_scale", "seed", "top_k"):
+        if body.get(key) is not None:
+            payload[key] = body[key]
+
+    try:
+        resp = await get_http_client().post(
+            f"{ALPACA_AUDIO_URL}/api/music", json=payload, timeout=aiohttp.ClientTimeout(total=600.0)
+        )
+        result = await resp.json()
+    except Exception as exc:  # noqa: BLE001 - reported to the caller
+        return JSONResponse(
+            status_code=502, content={"status": "ERROR", "message": f"Audio backend unreachable: {exc}"}
+        )
+
+    if resp.status >= 400 or result.get("error"):
+        return JSONResponse(
+            status_code=resp.status if resp.status >= 400 else 502,
+            content={"status": "ERROR", "message": result.get("error") or f"Audio backend returned {resp.status}"},
+        )
+
+    audio_b64 = result.get("audio_b64")
+    if not audio_b64:
+        return JSONResponse(
+            status_code=502, content={"status": "ERROR", "message": "Audio backend returned no audio"}
+        )
+    mime = result.get("mime") or "audio/wav"
+    return JSONResponse(
+        content={
+            "status": "SUCCESS",
+            "mime": mime,
+            # A data URL so the browser can play it without a temp file.
+            "audio_url": f"data:{mime};base64,{audio_b64}",
+        }
+    )
 
 
 @app.post("/api/images/edit")
