@@ -33,11 +33,14 @@ from services.identity.models import (
     User,
     UserActivitySharing,
     UserCalendarSetting,
+    UserCredentialShare,
     UserThemeSetting,
     UserWidget,
 )
 from services.identity.schemas import (
     ChangePasswordRequest,
+    CredentialSharesRead,
+    CredentialSharesUpdate,
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
     DiscoverResponse,
@@ -208,6 +211,132 @@ def _ensure_schema_upgrades() -> None:
                 )
             """))
             conn.commit()
+
+    if not _table_exists("usercredentialshare"):
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE usercredentialshare (
+                    username VARCHAR PRIMARY KEY,
+                    services VARCHAR NOT NULL DEFAULT '[]',
+                    granted_by VARCHAR,
+                    granted_at VARCHAR,
+                    note VARCHAR
+                )
+            """))
+            conn.commit()
+
+
+# ─── Credential sharing policy ────────────────────────────────────────────────
+# Every user resolves a service with their OWN credentials. The system default
+# user ("User 1": is_system_default, or id 1, or username "default" — it may
+# have been renamed) additionally owns the shared credentials. Any other user
+# may borrow them for a service only when an admin granted that service to them
+# (UserCredentialShare). Ungranted + unconfigured resolves to None so the
+# consumer fails loudly rather than acting as the shared account.
+SHARED_CREDENTIAL_SERVICES = (
+    "home_assistant",
+    "music_assistant",
+    "audiobookshelf",
+    "nextcloud",
+)
+
+
+def _is_system_default_user(user: User | None) -> bool:
+    """True for the "User 1" account that owns the shared credentials."""
+    if user is None:
+        return False
+    return bool(user.is_system_default or user.id == 1 or user.username == "default")
+
+
+def _system_default_user(session: Session) -> User | None:
+    """The shared-credential owner: is_system_default first, then the legacy keys."""
+    user = session.exec(select(User).where(User.is_system_default == True)).first()  # noqa: E712
+    if user:
+        return user
+    user = session.exec(select(User).where(User.id == 1)).first()
+    if user:
+        return user
+    return session.exec(select(User).where(User.username == "default")).first()
+
+
+def _granted_services(session: Session, username: str) -> list[str]:
+    row = session.exec(
+        select(UserCredentialShare).where(UserCredentialShare.username == username)
+    ).first()
+    if not row or not row.services:
+        return []
+    try:
+        parsed = json.loads(row.services)
+    except (ValueError, TypeError):
+        log.warning(f"[credentials] Grant row for {username} is not valid JSON: {row.services!r}; ignoring")
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [s for s in parsed if isinstance(s, str)]
+
+
+def _decrypt_field(enc: str | None) -> str | None:
+    return decrypt(enc) if enc else None
+
+
+def _own_service_creds(user: User, service: str) -> dict[str, str | None]:
+    """The user's own plaintext credentials for one service."""
+    if service == "home_assistant":
+        return {"ha_url": user.ha_url, "ha_token": _decrypt_field(user.ha_token_enc)}
+    if service == "music_assistant":
+        return {"mass_url": user.mass_url, "mass_token": _decrypt_field(user.mass_token_enc)}
+    if service == "audiobookshelf":
+        return {
+            "audiobookshelf_url": user.audiobookshelf_url,
+            "audiobookshelf_user": user.audiobookshelf_user,
+            "audiobookshelf_pass": _decrypt_field(user.audiobookshelf_pass_enc),
+            "audiobookshelf_api_key": _decrypt_field(user.audiobookshelf_api_key_enc),
+        }
+    if service == "nextcloud":
+        return {
+            "nextcloud_url": user.nextcloud_url,
+            "nextcloud_user": user.nextcloud_user,
+            "nextcloud_pass": _decrypt_field(user.nextcloud_pass_enc),
+        }
+    raise ValueError(f"Unknown credential service: {service}")
+
+
+def _resolve_service_creds(
+    session: Session, user: User, service: str, granted: set[str]
+) -> tuple[dict[str, str | None], str, str | None]:
+    """Return (values, source, shared_owner) for one shared-able service."""
+    own = _own_service_creds(user, service)
+    if any(own.values()):
+        return own, "own", None
+
+    # The shared account uses its own entry; nothing to borrow.
+    if _is_system_default_user(user):
+        return own, "absent", None
+
+    if service not in granted:
+        return own, "absent", None
+
+    shared_user = _system_default_user(session)
+    if shared_user is None:
+        log.warning(
+            f"[credentials] {user.username} is granted the shared {service} credentials "
+            f"but no system default user exists; nothing to borrow"
+        )
+        return own, "absent", None
+
+    shared = _own_service_creds(shared_user, service)
+    if not any(shared.values()):
+        log.warning(
+            f"[credentials] {user.username} is granted the shared {service} credentials "
+            f"but the system default user ({shared_user.username}) has none configured"
+        )
+        return own, "absent", None
+
+    log.info(
+        f"[credentials] {user.username} is using the shared {service} credentials "
+        f"granted to them (owner={shared_user.username})"
+    )
+    return shared, "granted", shared_user.username
 
 
 async def _ensure_default_settings(session: Session) -> None:
@@ -500,55 +629,87 @@ def resolve_identity(req: ResolveRequest, session: Session = Depends(get_session
                 log.error("[resolve] No system default user found in database!")
                 raise HTTPException(status_code=404, detail="No valid identity found")
 
-    # Fetch system user for shared skylight credentials and MA fallback
-    sys_user = session.exec(select(User).where(User.id == 1)).first()
-    if not sys_user:
-        sys_user = session.exec(select(User).where(User.username == "default")).first()
+    # Per-service credential policy: the user's own credentials, else the
+    # system default user's shared ones when an admin granted that service.
+    granted = set(_granted_services(session, user.username))
+    if granted:
+        log.info(f"[resolve] {user.username} has shared-credential grants for: {sorted(granted)}")
 
-    # Fallback MA credentials to admin if user doesn't have them
-    use_admin_mass_url = sys_user.mass_url if (not user.mass_url and sys_user and sys_user.mass_url) else user.mass_url
-    use_admin_mass_token = (
-        decrypt(sys_user.mass_token_enc) if (sys_user and sys_user.mass_token_enc) else None
-    ) if (not user.mass_token_enc) else (decrypt(user.mass_token_enc) if user.mass_token_enc else None)
+    service_creds: dict[str, dict[str, str | None]] = {}
+    credential_sources: dict[str, str] = {}
+    shared_owner: str | None = None
+    for service in SHARED_CREDENTIAL_SERVICES:
+        values, source, owner = _resolve_service_creds(session, user, service, granted)
+        service_creds[service] = values
+        credential_sources[service] = source
+        if owner and shared_owner is None:
+            shared_owner = owner
 
-    log.info(f"[resolve] Returning credentials for user={user.username}, mass_token={'set' if (user.mass_token_enc or use_admin_mass_token) else 'NOT SET'}, using_admin_mass={'YES' if use_admin_mass_url != user.mass_url else 'NO'}")
+    ha = service_creds["home_assistant"]
+    mass = service_creds["music_assistant"]
+    abs_ = service_creds["audiobookshelf"]
+    nextcloud = service_creds["nextcloud"]
+
+    # Skylight is one shared system account, so every user logs in with the
+    # configured system email — unless they configured an account of their own.
+    if any((user.skylight_url, user.skylight_email, user.skylight_pass_enc)):
+        skylight_user: User | None = user
+        skylight_source = "own"
+    else:
+        default_owner = _system_default_user(session)
+        skylight_user = default_owner
+        skylight_source = "shared" if default_owner is not None and any(
+            (default_owner.skylight_url, default_owner.skylight_email, default_owner.skylight_pass_enc)
+        ) else "absent"
+    credential_sources["skylight"] = skylight_source
+
+    log.info(
+        f"[resolve] Returning credentials for user={user.username}, "
+        f"credential_sources={credential_sources}"
+    )
 
     return ResolvedCredentials(
         user=user.username,
         id=user.id,
         is_admin=user.is_admin,
         api_key=decrypt(user.api_key_enc) if user.api_key_enc else req.api_key,
-        nextcloud_url=user.nextcloud_url,
-        nextcloud_user=user.nextcloud_user,
-        nextcloud_pass=decrypt(user.nextcloud_pass_enc) if user.nextcloud_pass_enc else None,
-        ha_url=user.ha_url,
-        ha_token=decrypt(user.ha_token_enc) if user.ha_token_enc else None,
+        nextcloud_url=nextcloud["nextcloud_url"],
+        nextcloud_user=nextcloud["nextcloud_user"],
+        nextcloud_pass=nextcloud["nextcloud_pass"],
+        ha_url=ha["ha_url"],
+        ha_token=ha["ha_token"],
         github_url=user.github_url,
         github_user=user.github_user,
         github_token=decrypt(user.github_token_enc) if user.github_token_enc else None,
         gitlab_url=user.gitlab_url,
         gitlab_user=user.gitlab_user,
         gitlab_token=decrypt(user.gitlab_token_enc) if user.gitlab_token_enc else None,
-        audiobookshelf_url=user.audiobookshelf_url,
-        audiobookshelf_user=user.audiobookshelf_user,
-        audiobookshelf_pass=decrypt(user.audiobookshelf_pass_enc) if user.audiobookshelf_pass_enc else None,
-        audiobookshelf_api_key=decrypt(user.audiobookshelf_api_key_enc) if user.audiobookshelf_api_key_enc else None,
+        audiobookshelf_url=abs_["audiobookshelf_url"],
+        audiobookshelf_user=abs_["audiobookshelf_user"],
+        audiobookshelf_pass=abs_["audiobookshelf_pass"],
+        audiobookshelf_api_key=abs_["audiobookshelf_api_key"],
         mailcow_url=user.mailcow_url,
         mailcow_api_key=decrypt(user.mailcow_api_key_enc) if user.mailcow_api_key_enc else None,
         mail_user=user.mail_user,
         mail_pass=decrypt(user.mail_pass_enc) if user.mail_pass_enc else None,
-        mass_url=use_admin_mass_url,
-        mass_token=use_admin_mass_token,
+        mass_url=mass["mass_url"],
+        mass_token=mass["mass_token"],
         git_url=user.git_url,
         git_user=user.git_user,
         git_token=decrypt(user.git_token_enc) if user.git_token_enc else None,
         huggingface_token=decrypt(user.huggingface_token_enc) if user.huggingface_token_enc else None,
-        skylight_url=sys_user.skylight_url if sys_user else None,
-        skylight_email=sys_user.skylight_email if sys_user else user.username,
-        skylight_pass=decrypt(sys_user.skylight_pass_enc) if (sys_user and sys_user.skylight_pass_enc) else None,
+        skylight_url=skylight_user.skylight_url if skylight_user else None,
+        skylight_email=(skylight_user.skylight_email if skylight_user else None) or user.username,
+        skylight_pass=(
+            decrypt(skylight_user.skylight_pass_enc)
+            if skylight_user and skylight_user.skylight_pass_enc
+            else None
+        ),
         skylight_enabled=user.skylight_enabled,
         preferred_tts_voice=user.preferred_tts_voice or "af_heart",
         calendar_settings=_load_calendar_settings(session, user.username),
+        credential_sources=credential_sources,
+        shared_credential_owner=shared_owner,
     )
 
 
@@ -647,6 +808,7 @@ def update_me(body: UserUpdate, session: Session = Depends(get_session), user: U
         "github_token": "github_token_enc",
         "gitlab_token": "gitlab_token_enc",
         "audiobookshelf_pass": "audiobookshelf_pass_enc",
+        "audiobookshelf_api_key": "audiobookshelf_api_key_enc",
         "mass_token": "mass_token_enc",
         "git_token": "git_token_enc",
         "huggingface_token": "huggingface_token_enc",
@@ -716,6 +878,110 @@ def update_user(username: str, body: UserUpdate, session: Session = Depends(get_
     session.refresh(user)
     return user
 
+@app.get("/api/users/{username}/credential-shares")
+def get_credential_shares(
+    username: str, session: Session = Depends(get_session), caller: User = Depends(require_api_key)
+):
+    """Which shared (User 1) services this user may borrow. Self or admin."""
+    target = session.exec(select(User).where(User.username == username.lower())).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not caller.is_admin and caller.username != target.username:
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    row = session.exec(
+        select(UserCredentialShare).where(UserCredentialShare.username == target.username)
+    ).first()
+    shared_owner = _system_default_user(session)
+    return CredentialSharesRead(
+        username=target.username,
+        services=_granted_services(session, target.username),
+        granted_by=row.granted_by if row else None,
+        granted_at=row.granted_at if row else None,
+        note=row.note if row else None,
+        shared_owner=shared_owner.username if shared_owner is not None else None,
+    )
+
+
+@app.put("/api/users/{username}/credential-shares")
+def update_credential_shares(
+    username: str,
+    body: CredentialSharesUpdate,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Grant (or revoke) a user's permission to use the shared credentials.
+
+    Admin only. An admin may opt itself in, or grant another user; an empty
+    ``services`` list revokes every grant for that user.
+    """
+    if not caller.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin can grant permission to use the shared credentials",
+        )
+
+    target = session.exec(select(User).where(User.username == username.lower())).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    requested = {str(s).strip().lower() for s in body.services if str(s).strip()}
+    unknown = sorted(requested - set(SHARED_CREDENTIAL_SERVICES))
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Unknown service(s): {', '.join(unknown)}. "
+                f"Valid services: {', '.join(SHARED_CREDENTIAL_SERVICES)}"
+            ),
+        )
+
+    services = sorted(requested)
+    existing = session.exec(
+        select(UserCredentialShare).where(UserCredentialShare.username == target.username)
+    ).first()
+
+    if not services:
+        if existing:
+            session.delete(existing)
+            session.commit()
+            log.info(
+                f"[credentials] {caller.username} revoked {target.username}'s shared-credential grants"
+            )
+    else:
+        note = body.note.strip() if isinstance(body.note, str) and body.note.strip() else None
+        if existing:
+            existing.services = json.dumps(services)
+            existing.granted_by = caller.username
+            existing.granted_at = datetime.now(UTC).isoformat()
+            existing.note = note
+            row = existing
+        else:
+            row = UserCredentialShare(
+                username=target.username,
+                services=json.dumps(services),
+                granted_by=caller.username,
+                granted_at=datetime.now(UTC).isoformat(),
+                note=note,
+            )
+        session.add(row)
+        session.commit()
+        log.info(
+            f"[credentials] {caller.username} granted {target.username} permission to use "
+            f"the shared {', '.join(services)} credentials"
+        )
+
+    shared_owner = _system_default_user(session)
+    return CredentialSharesRead(
+        username=target.username,
+        services=_granted_services(session, target.username),
+        granted_by=caller.username if services else None,
+        granted_at=row.granted_at if (services and row) else None,
+        note=body.note if services else None,
+        shared_owner=shared_owner.username if shared_owner is not None else None,
+    )
+
+
 @app.delete("/api/users/{username}")
 def delete_user(username: str, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):
     if not admin.is_admin:
@@ -753,6 +1019,15 @@ def delete_user(username: str, session: Session = Depends(get_session), admin: U
 
     session.delete(user)
     session.commit()
+
+    # A re-created user with the same username must not inherit the old
+    # shared-credential grants.
+    stale_grant = session.exec(
+        select(UserCredentialShare).where(UserCredentialShare.username == user.username)
+    ).first()
+    if stale_grant:
+        session.delete(stale_grant)
+        session.commit()
     return {"status": "SUCCESS"}
 
 @app.get("/api/users", response_model=list[UserRead])

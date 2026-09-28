@@ -37,24 +37,15 @@ async def handle_light(req: LightControlRequest) -> ExecutionResult:
         )
 
     # 2. CREDENTIAL RESOLUTION & STATE CHECK
-    if not ctx.ha_url or not ctx.ha_token:
-        try:
-            from ..main import resolve_first_user
-        except Exception:
-            try:
-                from main import resolve_first_user
-            except Exception:
-                resolve_first_user = None
-        if resolve_first_user:
-            creds = await resolve_first_user()
-            if creds:
-                ctx.ha_url = ctx.ha_url or creds.get("ha_url")
-                ctx.ha_token = ctx.ha_token or creds.get("ha_token")
-
+    #    Strictly this user's own HA credentials — a grant may have supplied them
+    #    in Identity, but the execution service never borrows another account's.
     if not ctx.ha_url or not ctx.ha_token:
         return ExecutionResult(
             status="FAILURE",
-            message="Home Assistant URL or token not configured.",
+            message=(
+                f"Home Assistant URL or token not configured for user '{ctx.user}' "
+                "(Identity -> Services)."
+            ),
             service="light_control"
         )
 

@@ -17,10 +17,16 @@ log = logging.getLogger("execution.ha_config")
 
 
 async def _get_ha_credentials(user_context: dict) -> tuple:
-    """Resolve HA URL and token from identity service."""
+    """Resolve HA URL and token from the identity service for the calling user.
+
+    Raises ValueError when the context names no user: guessing the "default"
+    user here would hand one account's Home Assistant to another.
+    """
     from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
 
-    rag_user = user_context.get("user", "default")
+    rag_user = (user_context or {}).get("user") or ""
+    if not rag_user:
+        raise ValueError("No user in the request context, so Home Assistant credentials cannot be resolved.")
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5.0)) as client, client.post(
         f"{IDENTITY_SVC_URL}/api/resolve",
         json={"rag_user": rag_user},

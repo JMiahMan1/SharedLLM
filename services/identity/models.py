@@ -171,6 +171,27 @@ class UserThemeSetting(SQLModel, table=True):  # type: ignore
     data: str = Field(default="{}")
 
 
+class UserCredentialShare(SQLModel, table=True):  # type: ignore
+    """Per-user permission to use the system default user's credentials.
+
+    A user always uses their own service credentials when they have any. For a
+    service they have not configured, an admin may grant them permission to
+    borrow the system default user's ("User 1") credentials for that service.
+    Without a grant the service is absent, so the consumer fails loudly instead
+    of silently acting as the shared account.
+
+    One row per user. ``services`` is a JSON array of service keys from
+    ``SHARED_CREDENTIAL_SERVICES`` in main.py, e.g. '["music_assistant"]'.
+    ``granted_by``/``granted_at`` are the audit trail: who allowed the sharing.
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, foreign_key="user.username")
+    services: str = Field(default="[]")
+    granted_by: str | None = None
+    granted_at: str | None = None
+    note: str | None = None
+
+
 class UserActivitySharing(SQLModel, table=True):  # type: ignore
     """Per-user opt-in activity sharing (steps/workouts/achievements).
 

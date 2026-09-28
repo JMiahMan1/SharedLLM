@@ -274,19 +274,10 @@ def test_ha_service_without_service_data(mocker):
 
 
 def test_discovery_entities_no_credentials():
-    """Test entity discovery returns 400 when no HA credentials."""
-    async def mock_resolve():
-        return None
-
-    import services.execution.main as exec_main
-    original = exec_main.resolve_first_user
-    exec_main.resolve_first_user = mock_resolve
-
-    try:
-        resp = client.get("/discovery/entities", headers={"X-Internal-Secret": "test-secret"})
-        assert resp.status_code == 400
-    finally:
-        exec_main.resolve_first_user = original
+    """Entity discovery is 400 without credentials — it never borrows another account's HA."""
+    resp = client.get("/discovery/entities", headers={"X-Internal-Secret": "test-secret"})
+    assert resp.status_code == 400
+    assert "ha_url" in resp.json()["detail"]
 
 
 def test_discovery_entities_with_credentials():
@@ -300,31 +291,28 @@ def test_discovery_entities_with_credentials():
         {"entity_id": "media_player.tv", "state": "off", "attributes": {"friendly_name": "TV"}},
     ]
 
-    async def mock_resolve():
-        return mock_creds
-
     import services.execution.device_registry as device_reg_mod
     import services.execution.ha_client as ha_client_mod
-    import services.execution.main as exec_main
 
-    original_resolve = exec_main.resolve_first_user
     original_get_states = ha_client_mod.get_states
     original_get_areas = ha_client_mod.get_areas
     original_list = device_reg_mod.list_devices
 
-    exec_main.resolve_first_user = mock_resolve
     ha_client_mod.get_states = _async_return(mock_states)
     ha_client_mod.get_areas = _async_return({})
     device_reg_mod.list_devices = _async_return({})
 
     try:
-        resp = client.get("/discovery/entities", headers={"X-Internal-Secret": "test-secret"})
+        resp = client.get(
+            "/discovery/entities",
+            headers={"X-Internal-Secret": "test-secret"},
+            params={"ha_url": mock_creds["ha_url"], "ha_token": mock_creds["ha_token"]},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, dict) and "entities" in data
         assert len(data["entities"]) >= 1
     finally:
-        exec_main.resolve_first_user = original_resolve
         ha_client_mod.get_states = original_get_states
         ha_client_mod.get_areas = original_get_areas
         device_reg_mod.list_devices = original_list
@@ -338,25 +326,23 @@ def test_discovery_entities_with_areas():
     ]
     mock_areas = {"light.living_room": "living_room"}
 
-    async def mock_resolve():
-        return mock_creds
-
     import services.execution.device_registry as device_reg_mod
     import services.execution.ha_client as ha_client_mod
-    import services.execution.main as exec_main
 
-    original_resolve = exec_main.resolve_first_user
     original_get_states = ha_client_mod.get_states
     original_get_areas = ha_client_mod.get_areas
     original_list = device_reg_mod.list_devices
 
-    exec_main.resolve_first_user = mock_resolve
     ha_client_mod.get_states = _async_return(mock_states)
     ha_client_mod.get_areas = _async_return(mock_areas)
     device_reg_mod.list_devices = _async_return({})
 
     try:
-        resp = client.get("/discovery/entities", headers={"X-Internal-Secret": "test-secret"})
+        resp = client.get(
+            "/discovery/entities",
+            headers={"X-Internal-Secret": "test-secret"},
+            params={"ha_url": mock_creds["ha_url"], "ha_token": mock_creds["ha_token"]},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data, dict) and "entities" in data
@@ -371,7 +357,6 @@ def test_discovery_entities_with_areas():
                 break
         assert found, "light.living_room entity not found in response"
     finally:
-        exec_main.resolve_first_user = original_resolve
         ha_client_mod.get_states = original_get_states
         ha_client_mod.get_areas = original_get_areas
         device_reg_mod.list_devices = original_list

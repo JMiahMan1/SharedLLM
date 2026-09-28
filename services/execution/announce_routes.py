@@ -31,10 +31,8 @@ async def _resolve_for_request(
 ) -> list[str]:
     ha_url, ha_token = _ha_creds(user_context)
     if not ha_url or not ha_token:
-        from services.execution.main import resolve_first_user  # lazy: only when creds missing
-        creds = await resolve_first_user() or {}
-        ha_url = ha_url or creds.get("ha_url", "")
-        ha_token = ha_token or creds.get("ha_token", "")
+        # No borrowing: a user without Home Assistant credentials has no targets.
+        return []
     return await resolve_targets(
         entity_ids=entity_ids,
         rooms=rooms,
@@ -52,6 +50,17 @@ async def run_announcement(
     """Resolve targets and fan out announcements. Returns dict for ExecutionResult."""
     if announce_fn is None:
         from services.execution.main import execute_announce as announce_fn  # type: ignore
+
+    ha_url, ha_token = _ha_creds(user_context)
+    if not ha_url or not ha_token:
+        return {
+            "status": "FAILURE",
+            "message": (
+                f"Home Assistant URL or token not configured for user "
+                f"'{user_context.user}' (Identity -> Services)."
+            ),
+            "detail": {"resolved": []},
+        }
 
     entity_ids = getattr(req, "target_devices", None) or getattr(req, "target_entity_ids", None) or []
     rooms = getattr(req, "target_rooms", None) or []

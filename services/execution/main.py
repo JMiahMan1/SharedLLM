@@ -167,8 +167,23 @@ async def resolve_internal_user(user_id: int | None = None, rag_user: str | None
 
 
 async def resolve_first_user() -> dict[str, Any] | None:
-    """Resolve the first (ID=1) user in the system — the system default."""
+    """Resolve the first (ID=1) user in the system — the system default.
+
+    Only for system-level callers that have no user of their own (background
+    workers, discovery sweeps). Never use it to fill in a missing credential for
+    a *named* user — that would silently borrow another person's services.
+    """
     return await resolve_internal_user(user_id=1)
+
+
+class ServiceNotConfiguredError(RuntimeError):
+    """A caller has no usable credentials for the service it asked for.
+
+    Raised instead of falling back to the system default user: whether a user may
+    borrow the shared credentials is decided per service in Identity
+    (`UserCredentialShare`, see docs/PER_USER_CREDENTIALS.md), so by the time a
+    request reaches the execution service a missing credential means "absent".
+    """
 
 async def require_internal(request: Request, x_internal_secret: str = Header(None)):
     if request.url.path == "/health" or request.url.path.startswith("/media/"):
@@ -1482,11 +1497,11 @@ async def execute_announce(req: AnnouncementRequest):
     ha_url = ctx.ha_url
     ha_token = ctx.ha_token
     if not ha_url or not ha_token:
-        creds = await resolve_first_user()
-        ha_url = ha_url or (creds or {}).get("ha_url", "")
-        ha_token = ha_token or (creds or {}).get("ha_token", "")
-    if not ha_url or not ha_token:
-        return _fail("Home Assistant URL or token not configured (check Identity service).", "announce")
+        return _fail(
+            f"Home Assistant URL or token not configured for user '{ctx.user}' "
+            "(Identity -> Services, or ask an admin to grant the shared ones).",
+            "announce",
+        )
 
     # Entity resolution: if entity_id is missing, resolve from device_name
     if not target_player and req.device_name:
@@ -1777,12 +1792,11 @@ async def execute_entity_search(req: EntitySearchRequest):
     ha_token = ctx.ha_token
 
     if not ha_url or not ha_token:
-        creds = await resolve_first_user()
-        ha_url = ha_url or (creds or {}).get("ha_url", "")
-        ha_token = ha_token or (creds or {}).get("ha_token", "")
-
-    if not ha_url or not ha_token:
-        return _fail("Home Assistant URL or token not configured.", "entity_search")
+        return _fail(
+            f"Home Assistant URL or token not configured for user '{ctx.user}' "
+            "(Identity -> Services, or ask an admin to grant the shared ones).",
+            "entity_search",
+        )
 
     allowed_entities: set[str] | None = None
     if not ctx.is_admin:
@@ -1950,12 +1964,9 @@ def _detect_media_platform(entity_id: str, attrs: dict) -> str:
     return "unknown"
 
 @app.get("/discovery/entities")
-async def discovery_entities(request: Request):
-    creds = await resolve_first_user()
-    ha_url = (creds or {}).get("ha_url", "")
-    ha_token = (creds or {}).get("ha_token", "")
+async def discovery_entities(request: Request, ha_url: str = "", ha_token: str = ""):
     if not ha_url or not ha_token:
-        raise HTTPException(status_code=400, detail="HA credentials not configured in Identity")
+        raise HTTPException(status_code=400, detail="Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials).")
     states = await ha_client.get_states(ha_url, ha_token) or []
     areas = await ha_client.get_areas(ha_url, ha_token) or {}
     registry = await device_registry.list_devices()
@@ -1979,12 +1990,9 @@ async def discovery_entities(request: Request):
     return {"entities": states}
 
 @app.get("/discovery/history")
-async def discovery_history(entity_id: str, days: int = 1):
-    creds = await resolve_first_user()
-    ha_url = (creds or {}).get("ha_url", "")
-    ha_token = (creds or {}).get("ha_token", "")
+async def discovery_history(entity_id: str, days: int = 1, ha_url: str = "", ha_token: str = ""):
     if not ha_url or not ha_token:
-        raise HTTPException(status_code=400, detail="HA credentials not configured in Identity")
+        raise HTTPException(status_code=400, detail="Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials).")
     return await ha_client.get_history(ha_url, ha_token, entity_id, days)
 
 @app.get("/discovery/devices")
@@ -2001,18 +2009,15 @@ async def discovery_device(entity_id: str):
     return {"device": None, "message": f"No device registered for {entity_id}"}
 
 @app.post("/discovery/devices/{entity_id}/refresh")
-async def discovery_device_refresh(entity_id: str, request: Request):
+async def discovery_device_refresh(entity_id: str, request: Request, ha_url: str = "", ha_token: str = ""):
     """Trigger re-discovery for a specific device."""
     import device_discovery
     body = await request.json() if request.headers.get("content-length") or request.headers.get("content-type") else {}
     device_type = body.get("device_type")
     subnet = body.get("subnet") or device_discovery.DEFAULT_SUBNET
 
-    creds = await resolve_first_user()
-    ha_url = (creds or {}).get("ha_url", "")
-    ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
-        return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
+        return {"status": "FAILURE", "message": "Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials)."}
 
     await device_registry.invalidate_device(entity_id, reason="manual_refresh")
     result = await device_discovery.discover_device(
@@ -2023,17 +2028,14 @@ async def discovery_device_refresh(entity_id: str, request: Request):
     return {"status": "FAILURE", "message": f"Could not discover {entity_id}"}
 
 @app.post("/discovery/scan")
-async def discovery_bulk_scan(request: Request):
+async def discovery_bulk_scan(request: Request, ha_url: str = "", ha_token: str = ""):
     """Bulk network scan for all media devices."""
     import device_discovery
     body = await request.json() if request.headers.get("content-length") or request.headers.get("content-type") else {}
     subnet = body.get("subnet") or device_discovery.DEFAULT_SUBNET
 
-    creds = await resolve_first_user()
-    ha_url = (creds or {}).get("ha_url", "")
-    ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
-        return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
+        return {"status": "FAILURE", "message": "Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials)."}
 
     discovered = await device_discovery.bulk_scan(ha_url, ha_token, subnet)
     return {"status": "SUCCESS", "discovered": discovered, "count": len(discovered)}
@@ -2047,29 +2049,23 @@ async def discovery_device_remove(entity_id: str):
     return {"status": "FAILURE", "message": f"Device {entity_id} not found"}
 
 @app.get("/discovery/profile/{entity_id}")
-async def discovery_device_profile(entity_id: str, subnet: str | None = None):
+async def discovery_device_profile(entity_id: str, subnet: str | None = None, ha_url: str = "", ha_token: str = ""):
     """Generate a complete device profile with network info, HA data, and control methods."""
     import device_discovery
     import device_profiler
-    creds = await resolve_first_user()
-    ha_url = (creds or {}).get("ha_url", "")
-    ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
-        return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
+        return {"status": "FAILURE", "message": "Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials)."}
     subnet = subnet or device_discovery.DEFAULT_SUBNET
     profile = await device_profiler.profile_device(entity_id, ha_url, ha_token, subnet)
     return profile
 
 @app.get("/discovery/profile")
-async def discovery_profile_all(subnet: str | None = None):
+async def discovery_profile_all(subnet: str | None = None, ha_url: str = "", ha_token: str = ""):
     """Profile all media_player entities."""
     import device_discovery
     import device_profiler
-    creds = await resolve_first_user()
-    ha_url = (creds or {}).get("ha_url", "")
-    ha_token = (creds or {}).get("ha_token", "")
     if not ha_url or not ha_token:
-        return {"status": "FAILURE", "message": "HA credentials not configured in Identity"}
+        return {"status": "FAILURE", "message": "Home Assistant URL and token are required: pass ha_url and ha_token (the gateway sends the authenticated user's credentials)."}
     subnet = subnet or device_discovery.DEFAULT_SUBNET
     profiles = await device_profiler.profile_all_media_devices(ha_url, ha_token, subnet)
     return {"profiles": profiles, "count": len(profiles)}
@@ -2286,18 +2282,37 @@ async def execute_media_state_sync(req: MediaStateSyncRequest):
 
 
 async def _resolve_mass_ha_creds(user_id: str):
-    """Resolve HA credentials for a user via MA's HA integration (avoids MA REST API auth issues)."""
+    """Resolve a user's Music Assistant / Home Assistant credentials.
+
+    Either pair is enough: MA's REST API when `mass_url`/`mass_token` are set,
+    HA's `music_assistant.*` services when `ha_url`/`ha_token` are. The MA config
+    entry id (needed by the HA path) is discovered from HA when it is missing.
+
+    Raises ServiceNotConfiguredError when no user was named or the user has
+    neither pair — callers surface that instead of borrowing someone else's.
+    """
     if not user_id:
-        return None
+        raise ServiceNotConfiguredError(
+            "No user was supplied, so no Music Assistant credentials can be resolved. "
+            "Pass user_id (the authenticated username)."
+        )
     creds = await resolve_internal_user(rag_user=user_id)
     if not creds:
-        return None
-    ha_url = creds.get("ha_url")
-    ha_token = creds.get("ha_token")
-    if not ha_url or not ha_token:
-        return None
+        raise ServiceNotConfiguredError(
+            f"Identity returned no credentials for user '{user_id}'."
+        )
+    ha_url = creds.get("ha_url") or ""
+    ha_token = creds.get("ha_token") or ""
+    mass_url = creds.get("mass_url") or ""
+    mass_token = creds.get("mass_token") or ""
+    if not (ha_url and ha_token) and not (mass_url and mass_token):
+        raise ServiceNotConfiguredError(
+            f"User '{user_id}' has no Music Assistant credentials and no Home Assistant "
+            "credentials. Add them under Identity -> Services, or ask an admin to grant "
+            "access to the shared ones."
+        )
     # If mass_config_entry_id is missing, discover it from HA
-    if not creds.get("mass_config_entry_id"):
+    if ha_url and ha_token and not creds.get("mass_config_entry_id"):
         from services.execution import ha_client as _hc
         entry_id = await _hc.find_mass_config_entry(ha_url, ha_token)
         if entry_id:
@@ -2394,8 +2409,8 @@ async def get_ma_playlists(user_id: str = ""):
     """Get Music Assistant playlists via direct API if configured, fallback to HA."""
     try:
         creds = await _resolve_mass_ha_creds(user_id)
-        mass_url = creds.get("mass_url") if creds else None
-        mass_token = creds.get("mass_token") if creds else None
+        mass_url = creds.get("mass_url") or ""
+        mass_token = creds.get("mass_token") or ""
 
         if mass_url and mass_token:
             from services.execution.handlers.mass_client import get_playlists as _direct_playlists
@@ -2403,17 +2418,20 @@ async def get_ma_playlists(user_id: str = ""):
             if playlists:
                 return {"status": "SUCCESS", "playlists": playlists}
 
-        ha_url = creds.get("ha_url") if creds else None
-        ha_token = creds.get("ha_token") if creds else None
-        mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
+        ha_url = creds.get("ha_url") or ""
+        ha_token = creds.get("ha_token") or ""
+        mass_entry_id = creds.get("mass_config_entry_id", "") or ""
         if ha_url and ha_token:
             playlists = await _get_ma_playlists_via_ha(ha_url, ha_token, mass_entry_id)
             return {"status": "SUCCESS", "playlists": playlists}
 
-        return {"status": "SUCCESS", "playlists": []}
+        return {"status": "FAILURE", "playlists": [], "notice": f"No Music Assistant credentials for user '{user_id}'."}
+    except ServiceNotConfiguredError as e:
+        log.warning(f"[ma/playlists] {e}")
+        return {"status": "FAILURE", "playlists": [], "notice": str(e)}
     except Exception as e:
         log.error(f"[ma/playlists] Error: {e}")
-        return {"status": "SUCCESS", "playlists": []}
+        return {"status": "FAILURE", "playlists": [], "message": str(e)}
 
 
 @app.get("/execute/media/music-assistant/recent")
@@ -2421,8 +2439,8 @@ async def get_ma_recent(user_id: str = ""):
     """Get Music Assistant recently played via direct API if configured, fallback to HA."""
     try:
         creds = await _resolve_mass_ha_creds(user_id)
-        mass_url = creds.get("mass_url") if creds else None
-        mass_token = creds.get("mass_token") if creds else None
+        mass_url = creds.get("mass_url") or ""
+        mass_token = creds.get("mass_token") or ""
 
         if mass_url and mass_token:
             from services.execution.handlers.mass_client import get_recent as _direct_recent
@@ -2430,17 +2448,20 @@ async def get_ma_recent(user_id: str = ""):
             if recent:
                 return {"status": "SUCCESS", "recent": recent}
 
-        ha_url = creds.get("ha_url") if creds else None
-        ha_token = creds.get("ha_token") if creds else None
-        mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
+        ha_url = creds.get("ha_url") or ""
+        ha_token = creds.get("ha_token") or ""
+        mass_entry_id = creds.get("mass_config_entry_id", "") or ""
         if ha_url and ha_token:
             recent = await _get_ma_recent_via_ha(ha_url, ha_token, mass_entry_id)
             return {"status": "SUCCESS", "recent": recent}
 
-        return {"status": "SUCCESS", "recent": []}
+        return {"status": "FAILURE", "recent": [], "notice": f"No Music Assistant credentials for user '{user_id}'."}
+    except ServiceNotConfiguredError as e:
+        log.warning(f"[ma/recent] {e}")
+        return {"status": "FAILURE", "recent": [], "notice": str(e)}
     except Exception as e:
         log.error(f"[ma/recent] Error: {e}")
-        return {"status": "SUCCESS", "recent": []}
+        return {"status": "FAILURE", "recent": [], "message": str(e)}
 
 
 @app.get("/execute/media/music-assistant/browse")
@@ -2448,19 +2469,25 @@ async def get_ma_library(user_id: str = "", media_type: str = "TRACKS", offset: 
     """Browse MA library content via HA proxy (tracks, albums, artists, playlists, radio)."""
     try:
         creds = await _resolve_mass_ha_creds(user_id)
-        ha_url = creds.get("ha_url") if creds else None
-        ha_token = creds.get("ha_token") if creds else None
-        mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
+        ha_url = creds.get("ha_url") or ""
+        ha_token = creds.get("ha_token") or ""
+        mass_entry_id = creds.get("mass_config_entry_id", "") or ""
 
         if not ha_url or not ha_token:
-            return {"status": "SUCCESS", "items": [], "notice": "MA/HA not configured"}
+            raise ServiceNotConfiguredError(
+                f"Browsing the Music Assistant library needs Home Assistant credentials, and user "
+                f"'{user_id}' has none (MA credentials alone only cover search and direct reads)."
+            )
 
         from services.execution.handlers.mass_ha_client import get_library as _ma_get_library
         items = await _ma_get_library(ha_url, ha_token, media_type, limit=limit, offset=offset, search=search, order_by=order_by, mass_entry_id=mass_entry_id)
         return {"status": "SUCCESS", "items": items, "media_type": media_type, "offset": offset, "limit": limit}
+    except ServiceNotConfiguredError as e:
+        log.warning(f"[ma/browse] {e}")
+        return {"status": "FAILURE", "items": [], "notice": str(e)}
     except Exception as e:
         log.error(f"[ma/browse] Error: {e}")
-        return {"status": "SUCCESS", "items": []}
+        return {"status": "FAILURE", "items": [], "message": str(e)}
 
 
 @app.get("/execute/media/music-assistant/search")
@@ -2468,8 +2495,8 @@ async def search_ma(user_id: str = "", query: str = "", media_type: str = "", li
     """Search MA for media items — prefer the direct MA token API, fall back to HA proxy."""
     try:
         creds = await _resolve_mass_ha_creds(user_id)
-        mass_url = creds.get("mass_url") if creds else None
-        mass_token = creds.get("mass_token") if creds else None
+        mass_url = creds.get("mass_url") or ""
+        mass_token = creds.get("mass_token") or ""
 
         # Primary path: direct MA search via the MA token (no HA dependency).
         # This is authoritative: the MA token search uses config.providers=["library"]
@@ -2493,15 +2520,18 @@ async def search_ma(user_id: str = "", query: str = "", media_type: str = "", li
                 log.warning(f"[ma/search] direct MA search failed, falling back to HA: {e}")
 
         # Fallback: HA music_assistant.search service
-        ha_url = creds.get("ha_url") if creds else None
-        ha_token = creds.get("ha_token") if creds else None
-        mass_entry_id = creds.get("mass_config_entry_id", "") if creds else ""
+        ha_url = creds.get("ha_url") or ""
+        ha_token = creds.get("ha_token") or ""
+        mass_entry_id = creds.get("mass_config_entry_id", "") or ""
         if ha_url and ha_token:
             from services.execution.handlers.mass_ha_client import search as _ma_search
             results = await _ma_search(ha_url, ha_token, query, mass_entry_id=mass_entry_id, media_types=[media_type] if media_type else None, limit=limit, artist=artist, album=album, library_only=library_only)
             return {"status": "SUCCESS", "results": results, "query": query, "source": "ha"}
 
-        return {"status": "SUCCESS", "results": [], "notice": "MA/HA not configured"}
+        return {"status": "FAILURE", "results": [], "notice": f"No Music Assistant credentials for user '{user_id}'."}
+    except ServiceNotConfiguredError as e:
+        log.warning(f"[ma/search] {e}")
+        return {"status": "FAILURE", "results": [], "notice": str(e)}
     except Exception as e:
         log.error(f"[ma/search] Error: {e}")
         return {"status": "FAILURE", "message": str(e), "results": []}

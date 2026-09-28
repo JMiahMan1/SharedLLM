@@ -127,6 +127,11 @@ class UserContext(BaseModel):
     audiobookshelf_user: str | None = None
     audiobookshelf_pass: str | None = None
     audiobookshelf_api_key: str | None = None
+    # Music Assistant is token-only; the per-user pair comes from Identity
+    # (a grant may supply the system default user's pair -- see
+    # docs/PER_USER_CREDENTIALS.md).
+    mass_url: str | None = None
+    mass_token: str | None = None
     preferred_tts_voice: str | None = None
     calendar_settings: dict | None = None  # per-user calendar integration prefs (Identity UserCalendarSetting)
 
