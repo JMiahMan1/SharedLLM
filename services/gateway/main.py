@@ -4698,6 +4698,22 @@ async def proxy_react_talk_message(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/communication/talk/game")
+async def proxy_talk_game(request: Request):
+    """Drive a family game in a room: start | answer | flip | stop."""
+    body = await request.json()
+    payload = {
+        "action": "game",
+        "token": body.get("token"),
+        "message": body.get("message"),
+        "game_command": body.get("game_command"),
+        "game_kind": body.get("game_kind"),
+        "game_words": body.get("game_words"),
+        "card_detail": body.get("player") or body.get("card_detail"),
+    }
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+
+
 @app.post("/api/communication/talk/card")
 async def proxy_post_talk_card(request: Request):
     """Post a typed card (achievement, game move, creation) into a room."""
@@ -8850,33 +8866,31 @@ async def search_abs(q: str, request: Request, limit: int = 20):
 # ─── ABS connectivity status ─────────────────────────────────────────────
 
 @app.get("/api/media/audiobookshelf/status")
-async def get_abs_status():
-    """Check ABS server connectivity by pinging the login endpoint."""
-    try:
-        from services.config import IDENTITY_SVC_URL, INTERNAL_SECRET
-        async with shared_http_client() as client:
-            # Resolve ABS URL from identity settings
-            settings_resp = await client.get(
-                f"{IDENTITY_SVC_URL}/api/settings",
-                headers={"X-Internal-Secret": INTERNAL_SECRET}
-                , timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT),
-            )
-            if settings_resp.status == 200:
-                settings = await settings_resp.json()
-                abs_url = ""
-                for s in settings:
-                    if s.get("key") == "audiobookshelf_url" and s.get("value"):
-                        abs_url = s["value"]
-                        break
-                if not abs_url:
-                    return {"status": "UNAVAILABLE", "error": "ABS URL not configured", "reachable": False}
+async def get_abs_status(request: Request):
+    """Check ABS connectivity by pinging the caller's own ABS instance.
 
-            # Ping ABS with a lightweight HEAD request
-            async with shared_http_client() as ping_client:
-                resp = await ping_client.get(f"{abs_url}/api/books?limit=1", timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT))
-                if resp.status == 200:
-                    return {"status": "AVAILABLE", "url": abs_url, "reachable": True}
-                return {"status": "ERROR", "url": abs_url, "reachable": False, "code": resp.status}
+    BUG-16: requires auth (resolves the caller's identity), uses the user's
+    ``audiobookshelf_url`` instead of the global settings list (which also
+    left ``abs_url`` unbound on a non-200 settings response), and pings the
+    real ``GET /ping`` route instead of the nonexistent ``/api/books``.
+    """
+    try:
+        creds = await _resolve_identity_from_request(request)
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"[abs/status] identity resolution failed: {e}")
+        raise HTTPException(status_code=401, detail="Authentication required") from e
+
+    abs_url = (creds.get("audiobookshelf_url") or "") if isinstance(creds, dict) else ""
+    if not abs_url:
+        return {"status": "UNAVAILABLE", "error": "ABS URL not configured", "reachable": False}
+    try:
+        async with shared_http_client() as client:
+            resp = await client.get(f"{abs_url}/ping", timeout=aiohttp.ClientTimeout(total=ABS_TIMEOUT))
+            if resp.status == 200:
+                return {"status": "AVAILABLE", "url": abs_url, "reachable": True}
+            return {"status": "ERROR", "url": abs_url, "reachable": False, "code": resp.status}
     except TimeoutError as e:
         log.warning(f"[abs/status] ABS timeout: {e}")
         return {"status": "UNREACHABLE", "error": "Connection timed out", "reachable": False}
