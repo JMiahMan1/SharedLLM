@@ -191,3 +191,16 @@ so there is one backup, one sync and one mobile app — no new service.
 Because notes resolve to the caller's own account, an admin can flip the same
 "Send as" control to the Admin identity to keep one house cookbook, and every
 other member keeps their own. Non-admins never see the control. 8 tests.
+
+## Make music (shipped)
+
+`/api/music/generate` proxies the alpaca audio server's `POST /api/music`
+(prompt + length → base64 WAV) and returns a data URL the browser can play
+directly. `ALPACA_AUDIO_URL` has **no default**: an unset value is a 503 naming
+the setting, and the backend's own error text is passed through with its status
+so a refused prompt reads as refused. A backend that returns success with no
+audio is reported, not treated as a silent success.
+
+UI: Family → Create → `MakeMusic.tsx` — presets, a length slider, inline
+playback, and the failure shown in place. Sharing a finished song into the chat
+room (Talk file upload) is the next step. 5 gateway + 5 UI tests.

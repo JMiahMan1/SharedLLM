@@ -869,6 +869,16 @@ export const api = {
     return resp.data;
   },
 
+  async generateMusic(payload: {
+    prompt: string;
+    duration_s?: number;
+  }): Promise<{ status: string; audio_url?: string; mime?: string; message?: string }> {
+    // Music generation can take minutes on CPU; the shared client's 15s would
+    // abort it mid-render.
+    const resp = await apiClient.post('/api/music/generate', payload, { timeout: 600_000 });
+    return resp.data;
+  },
+
   async getStars(userId?: string): Promise<StarsResponse> {
     const query = new URLSearchParams();
     if (userId && userId !== 'all') query.set('user_id', userId);

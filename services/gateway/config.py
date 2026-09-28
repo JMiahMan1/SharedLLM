@@ -38,6 +38,10 @@ ALPACA_ARCADE_URL = os.getenv("ALPACA_ARCADE_URL", "http://jeremiah-home-desktop
 # URL the browser uses to open a game (defaults to the internal URL for LAN installs).
 ALPACA_ARCADE_PUBLIC_URL = os.getenv("ALPACA_ARCADE_PUBLIC_URL", ALPACA_ARCADE_URL).rstrip("/")
 
+# alpaca audio server (TTS + music generation). No default on purpose: an unset
+# value fails with a clear message instead of probing a guessed host.
+ALPACA_AUDIO_URL = (os.getenv("ALPACA_AUDIO_URL") or "").rstrip("/")
+
 # Use runtime-resolved values (or fallback to env vars)
 IDENTITY_SVC = IDENTITY_SVC_URL
 EXECUTION_SVC = EXECUTION_SVC_URL
