@@ -563,6 +563,16 @@ ALLOWED_TOOLS = {
     # Editing a photo silently turned the heating on. Same class of bug as the
     # git-verb fast-path below; same fix.
     "imagegenerationrequest", "imageeditrequest", "ocrrequest", "ravenmissionrequest",
+    # Alpaca's audio side, reached through the podcast studio on the dashboard.
+    # Whitelisted for the same reason as the four above: an absent name is not
+    # rejected, it is fuzzy-matched into something else, and these are lexically
+    # close enough to the climate and TTS tools to be rewritten into one of them.
+    "podcastrenderrequest", "speakeridentifyrequest", "listvoicesrequest",
+    # Found by test_podcast_tools.py, which walks every _RAVEN_TOOL_TABLE row
+    # rather than just the tool_builder and prose_tools sources. Scanning the
+    # network was being rewritten into a workspace file search, and the
+    # storage TTS row into a bare text-to-TextRequest call.
+    "networkdevicescanrequest", "storagetexttoaudiorequest",
     "ghrequest",
     "ravenrecallrequest",
     "workspaceportexposerequest", "workspace_expose_port", "expose_port", "port_expose",
@@ -3806,6 +3816,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                         "Docker Tools": ["dockerlogsrequest", "dockercomposerequest"],
                         "HA Tools": ["lightcontrolrequest", "haservicerequest", "climaterequest", "securityrequest", "announcementrequest", "entitysearchrequest", "logbookrequest", "executionlogrequest", "haconfigrequest"],
                         "Image Tools": ["imagegenerationrequest", "imageeditrequest", "ocrrequest"],
+                        "Voice Tools": ["podcastrenderrequest", "speakeridentifyrequest", "listvoicesrequest", "ttsrequest", "sttrequest"],
                         "Other": ["calendarrequest", "noterequest", "timerrequest", "talkrequest", "tvcastrequest", "systemlearningrequest", "discoverysyncrequest", "identityrequest", "identitymanagerequest", "audiobookshelfrequest", "llminforequest", "contextsearchrequest", "deploymentrequest", "capabilityindexrequest", "volumeinventoryrequest", "controlplanerequest", "ravenmissionrequest", "ravenrecallrequest", "redisinspectrequest"],
                     }
                     tool_table = "\n".join(f"  {cat}: {', '.join(tools)}" for cat, tools in tool_categories.items())
@@ -3907,11 +3918,19 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                 "sttrequest": (EXECUTION_SVC, "/execute/stt/transcribe_workspace"),
                 "audiobookregeneraterequest": (EXECUTION_SVC, "/execute/audiobook/regenerate"),
                 "storagetexttorequest": (STORAGE_SVC, "/text_to_audio"),
+                # _RAVEN_TOOL_TABLE advertises StorageTextToAudioRequest, so it
+                # needs a row of its own. It reaches the same storage route as
+                # storagetexttorequest, but until now only by way of the fuzzy
+                # matcher, which is the hijack this file exists to prevent.
+                "storagetexttoaudiorequest": (STORAGE_SVC, "/text_to_audio"),
                 "networkdevicescanrequest": (EXECUTION_SVC, "/execute/network_scan"),
                 "ghrequest": (EXECUTION_SVC, "/execute/gh"),
                 "imagegenerationrequest": (ALPACA_SD_URL, "/v1/images/generations"),
                 "ocrrequest": (EXECUTION_SVC, "/execute/ocr"),
                 "imageeditrequest": (EXECUTION_SVC, "/execute/image_edit"),
+                "podcastrenderrequest": (EXECUTION_SVC, "/execute/podcast_render"),
+                "speakeridentifyrequest": (EXECUTION_SVC, "/execute/speaker_identify"),
+                "listvoicesrequest": (EXECUTION_SVC, "/execute/list_voices"),
                 "controlplanerequest": (CONTROL_PLANE_URL, "/api/restart/{service_name}"),
             }
 
@@ -4042,6 +4061,7 @@ async def AgentLoop(query: str, selected_model: str, full_system: str, short_ter
                     "gitoperationrequest", "workspacebootstraprequest",
                     "workspacesettingsupdaterequest",
                     "ocrrequest", "imageeditrequest",
+                    "podcastrenderrequest", "speakeridentifyrequest",
                 }
                 if workspace_id and isinstance(payload, dict) and lookup_action in _ws_actions:
                     payload["workspace_id"] = workspace_id

@@ -100,7 +100,10 @@ from services.execution.schemas import (
     NoteRequest,
     OcrRequest,
     ImageEditRequest,
+    ListVoicesRequest,
+    PodcastRenderRequest,
     RedisInspectRequest,
+    SpeakerIdentifyRequest,
     ResolveStreamRequest,
     StorageFileReadRequest,
     StorageFileWriteRequest,
@@ -862,6 +865,24 @@ async def execute_ocr(req: OcrRequest):
 async def execute_image_edit(req: ImageEditRequest):
     from services.execution.handlers import image_edit
     return await image_edit.handle_image_edit(req)
+
+@app.post("/execute/podcast_render", response_model=ExecutionResult)
+async def execute_podcast_render(req: PodcastRenderRequest):
+    """Speak a speaker-tagged script and save the mixed episode into the workspace."""
+    from services.execution.handlers import podcast
+    return await podcast.handle_podcast_render(req)
+
+@app.post("/execute/speaker_identify", response_model=ExecutionResult)
+async def execute_speaker_identify(req: SpeakerIdentifyRequest):
+    """Say which enrolled speaker a workspace audio clip belongs to."""
+    from services.execution.handlers import podcast
+    return await podcast.handle_speaker_identify(req)
+
+@app.post("/execute/list_voices", response_model=ExecutionResult)
+async def execute_list_voices(req: ListVoicesRequest):
+    """List enrolled speaker profiles and the curated podcast host pairs."""
+    from services.execution.handlers import podcast
+    return await podcast.handle_list_voices(req)
 
 @app.post("/execute/code_search", response_model=ExecutionResult)
 async def execute_code_search(req: CodeSearchRequest):

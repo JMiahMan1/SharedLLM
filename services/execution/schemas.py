@@ -1024,6 +1024,56 @@ class ImageEditRequest(BaseRequest):
     proxy_url: str | None = Field(None, description="Override LLM proxy URL (default: llm_local_url setting)")
 
 
+class PodcastRenderRequest(BaseRequest):
+    """
+    Renders a two-host podcast episode on the alpaca dashboard's Podcast Studio
+    and saves the mixed WAV into the workspace.
+
+    The script is speaker-tagged, one turn per line ("HOST A: ..." / "HOST B:
+    ..."). The renderer speaks each turn with that host's curated Kokoro voice,
+    synthesizes a music bed, ducks it under the speech and mixes the result. An
+    optional OpenVoice clone can be layered onto a host; it is only attached when
+    the clone key is exactly 'host_clone_<pair_id>_<a|b>', and a clone whose
+    recorded gender differs from the host's source voice is reported as a warning
+    rather than silently producing a wrong-sounding voice.
+    """
+    user_context: UserContext
+    script: str = Field(..., description="Speaker-tagged script, one turn per line ('HOST A: ...').")
+    pair_id: str | None = Field(None, description="Curated voice pair: duo_warm | duo_bright | duo_deep | duo_witty")
+    output_path: str | None = Field(None, description="WAV path to write in the workspace (default 'podcast.wav')")
+    bed_preset: str | None = Field(None, description="Music bed style: ambient_warm | lofi_calm | minimal_pulse | acoustic_morning | deep_focus")
+    voice_profiles: dict[str, str] = Field(default_factory=dict, description="OpenVoice clones keyed 'host_clone_<pair_id>_<a|b>'")
+
+
+class SpeakerIdentifyRequest(BaseRequest):
+    """
+    Identifies which enrolled speaker a recorded clip belongs to, using the
+    audio server's reference encoder.
+
+    The threshold is optional on purpose: the deployment derives one from how
+    much its own enrolled speakers vary between takes, which is a more honest
+    yardstick than any constant. The full ranking is returned even when nothing
+    clears the threshold, because "closest is X, but it is not them" is the
+    answer a caller usually needs.
+    """
+    user_context: UserContext
+    audio_path: str = Field(..., description="Path to the audio clip inside the workspace (e.g. 'visitor/doorbell.wav')")
+    threshold: float | None = Field(None, description="Optional similarity floor in 0..1; omit to derive it")
+
+
+class ListVoicesRequest(BaseRequest):
+    """
+    Lists the enrolled OpenVoice speaker profiles and the curated podcast host
+    pairs, each with its source voice, role and gender.
+
+    Call it before assigning a clone to a host: a clone only transfers timbre
+    well onto a source voice of the same gender, and this is where a caller
+    learns both sides of that pair.
+    """
+    user_context: UserContext
+    pair_id: str | None = Field(None, description="Restrict the host list to one pair id (default: all pairs)")
+
+
 class LocationRequest(BaseRequest):
     """Request to query family location, HA zone matching, speed, dwell time, and travel telemetry."""
     user_context: UserContext | None = None

@@ -140,6 +140,24 @@ AUDIOBOOKSHELF_URL = os.getenv("AUDIOBOOKSHELF_URL")
 AUDIOBOOKSHELF_USER = os.getenv("AUDIOBOOKSHELF_USER")
 AUDIOBOOKSHELF_PASS = os.getenv("AUDIOBOOKSHELF_PASS")
 
+# --- Alpaca backends SharedLLM calls directly (external to this compose) ---
+# The SD backend (port 8081) and the arcade shelf (5001) are declared in
+# gateway/config.py; the podcast/audio backend is declared HERE as well because
+# the execution handlers need it and they import from services.config, not from
+# the gateway config. Port 5000 is alpaca's dashboard, which fronts the
+# audio-server (8082) behind /api/audio/* and /api/podcast/*.
+ALPACA_WEB_URL = os.getenv("ALPACA_WEB_URL", "http://jeremiah-home-desktop.local:5000").rstrip("/")
+
+# The audio-server (port 8082) is a SEPARATE backend from the dashboard, and the
+# two are not interchangeable: the dashboard owns the podcast mixer (numpy, no
+# model needed) but speaker identification needs OpenVoice's reference encoder,
+# which only exists in the audio-server container because it is the only one
+# with torch loaded. So podcast rendering goes through ALPACA_WEB_URL and
+# identification goes through this one. Deliberately no default: a deployment
+# that has not wired an audio backend must say so rather than silently
+# resolving a hostname that does not exist.
+ALPACA_AUDIO_URL = (os.getenv("ALPACA_AUDIO_URL") or "").rstrip("/")
+
 # --- Gateway shorthand aliases ---
 IDENTITY_SVC = IDENTITY_SVC_URL
 EXECUTION_SVC = EXECUTION_SVC_URL
