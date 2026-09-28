@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   RotateCcw,
@@ -7,6 +7,8 @@ import {
   Eye,
   EyeOff,
   Grid3X3,
+  Pin,
+  PinOff,
   X,
   Settings2,
 } from 'lucide-react';
@@ -29,6 +31,7 @@ const WidgetCatalog = () => {
         const visibility: WidgetVisibility = settings?.visibility ?? 'visible';
         const isPinned = settings?.is_pinned ?? false;
         const size = settings?.size ?? def.defaultSize;
+        const Icon = def.icon;
 
         return (
           <div
@@ -36,6 +39,9 @@ const WidgetCatalog = () => {
             className="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5 transition-colors group"
           >
             <div className="flex items-center gap-3 min-w-0">
+              <span className="text-slate-500 group-hover:text-slate-300 transition-colors shrink-0">
+                <Icon size={14} />
+              </span>
               <span className="text-sm font-medium text-white truncate">{def.label}</span>
               <span className="text-[9px] font-bold uppercase tracking-widest text-slate-600 shrink-0">
                 {size}
@@ -62,11 +68,14 @@ const WidgetCatalog = () => {
               </button>
               <button
                 onClick={() => togglePin(def.key)}
-                className="p-1 rounded text-slate-500 hover:text-amber-400 transition-colors"
-                title={isPinned ? 'Unpin' : 'Pin'}
+                className={`p-1 rounded transition-colors ${
+                  isPinned ? 'text-amber-400' : 'text-slate-500 hover:text-amber-400'
+                }`}
+                title={isPinned ? 'Unpin' : 'Pin to top'}
                 aria-label={`${isPinned ? 'Unpin' : 'Pin'} ${def.label}`}
+                aria-pressed={isPinned}
               >
-                <Grid3X3 size={13} className={isPinned ? 'text-amber-400' : ''} />
+                {isPinned ? <PinOff size={13} /> : <Pin size={13} />}
               </button>
             </div>
           </div>
@@ -197,6 +206,62 @@ const ImportSection = () => {
 
 const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps) => {
   const { userWidgets, replaceAllWidgets } = useWidgetStore();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+
+  // Dismissing the dialog must never leave the destructive confirm armed, so
+  // every close path goes through here rather than an after-the-fact effect.
+  const requestClose = useCallback(() => {
+    setConfirmingReset(false);
+    onClose();
+  }, [onClose]);
+
+  // Dialog behaviour: focus the panel, keep Tab inside it, close on Escape,
+  // and hand focus back to whatever opened it.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const panel = panelRef.current;
+
+    const focusable = () =>
+      Array.from(
+        panel?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'
+        ) ?? []
+      );
+
+    (focusable()[0] ?? panel)?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        requestClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+
+      if (e.shiftKey && (active === first || !panel?.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      previouslyFocused?.focus?.();
+    };
+  }, [isOpen, requestClose]);
 
   const handleReset = useCallback(async () => {
     const defaultByKey = new Map(defaultWidgetDefs.map((def) => [def.key, def]));
@@ -207,9 +272,6 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
       return w.visibility !== defaultVisibility || w.is_pinned || w.size !== defaultSize;
     });
     if (!hasChanges) return;
-
-    const confirm = window.confirm('Reset all widget settings to defaults? This cannot be undone.');
-    if (!confirm) return;
 
     const resetWidgets: Record<string, UserWidgetSettings> = {};
     for (let i = 0; i < defaultWidgetDefs.length; i++) {
@@ -239,14 +301,20 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
       )
     );
     toast.success('Widget settings reset to defaults');
+    setConfirmingReset(false);
   }, [userWidgets, replaceAllWidgets]);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={requestClose}>
       <div
-        className="glass-panel w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col animate-fade-up"
+        ref={panelRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dashboard-settings-title"
+        className="glass-panel w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col animate-fade-up outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -256,7 +324,7 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
               <Settings2 size={16} className="text-purple-400" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Dashboard Settings</h2>
+              <h2 id="dashboard-settings-title" className="text-base font-bold text-white">Dashboard Settings</h2>
               <p className="text-[10px] text-slate-500">Widget catalog, visibility, and preferences</p>
             </div>
           </div>
@@ -303,17 +371,39 @@ const DashboardSettingsPanel = ({ isOpen, onClose }: DashboardSettingsPanelProps
             <div className="glass-card p-4 flex items-center justify-between">
               <div>
                 <p className="text-sm text-white font-medium">Reset to defaults</p>
-                <p className="text-xs text-slate-500 mt-0.5">
+                <p id="reset-all-hint" className="text-xs text-slate-500 mt-0.5">
                   Restore all widgets to their original sizes, positions, and visibility.
                 </p>
               </div>
-              <button
-                onClick={handleReset}
-                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-300 border border-amber-500/20 hover:bg-amber-500/10 rounded-lg transition-colors"
-              >
-                <RotateCcw size={14} />
-                Reset All
-              </button>
+              {confirmingReset ? (
+                <div className="flex items-center gap-2" role="alertdialog" aria-labelledby="reset-confirm-title">
+                  <p id="reset-confirm-title" className="text-xs text-amber-200 max-w-[16rem]">
+                    Reset every widget to its default size, position, and visibility?
+                  </p>
+                  <button
+                    onClick={() => setConfirmingReset(false)}
+                    className="px-3 py-2 text-sm text-slate-300 hover:text-white rounded-lg hover:bg-white/5 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleReset}
+                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-red-300 border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 rounded-lg transition-colors"
+                  >
+                    <RotateCcw size={14} />
+                    Yes, reset all
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmingReset(true)}
+                  aria-describedby="reset-all-hint"
+                  className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-amber-300 border border-amber-500/20 hover:bg-amber-500/10 rounded-lg transition-colors"
+                >
+                  <RotateCcw size={14} />
+                  Reset All
+                </button>
+              )}
             </div>
           </section>
         </div>

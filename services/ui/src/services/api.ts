@@ -497,8 +497,11 @@ export const api = {
     return resp.data.models;
   },
 
-  async globalSearch(query: string): Promise<SearchResult> {
-    const resp = await apiClient.get(`/api/search?q=${encodeURIComponent(query)}`);
+  async globalSearch(query: string, signal?: AbortSignal): Promise<SearchResult> {
+    const url = `/api/search?q=${encodeURIComponent(query)}`;
+    // Only pass a config object when there is something to cancel with, so
+    // callers that do not abort see the plain request shape.
+    const resp = signal ? await apiClient.get(url, { signal }) : await apiClient.get(url);
     return resp.data as SearchResult;
   },
 

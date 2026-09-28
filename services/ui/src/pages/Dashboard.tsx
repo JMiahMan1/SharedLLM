@@ -188,70 +188,77 @@ const WorkspaceCard = ({ workspace }: { workspace: Workspace }) => (
 
 // ── Search hook ──────────────────────────────────────────────────────────────
 
+interface SearchResponse {
+  query: string;
+  results: SearchResult | null;
+  error: string | null;
+}
+
 function useSearch(query: string) {
-  const [results, setResults] = useState<SearchResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
+  const trimmed = query.trim();
+  // Responses are tagged with the query that produced them, so staleness is
+  // resolved while rendering rather than by resetting state from an effect.
+  const [response, setResponse] = useState<SearchResponse | null>(null);
+  const [pendingQuery, setPendingQuery] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const hasSearchedRef = useRef(false);
 
   useEffect(() => {
-    if (!query) {
-      if (hasSearchedRef.current) {
-        hasSearchedRef.current = false;
-        setResults(null);
-        setError(null);
-      }
-      return;
-    }
+    // Always drop the in-flight request first: a cancelled search must never
+    // land after the box was cleared.
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
 
-    hasSearchedRef.current = true;
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
+    if (!trimmed) return;
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    let active = true;
 
     const performSearch = async () => {
-      setIsSearching(true);
-      setError(null);
+      setPendingQuery(trimmed);
 
       try {
-        const data = await api.globalSearch(query);
-        if (!controller.signal.aborted) {
-          setResults(data);
-          if (!data.answer && (!data.files || data.files.length === 0)) {
-            setError('No results found');
-          }
-        }
+        const data = await api.globalSearch(trimmed, controller.signal);
+        if (!active) return;
+        const empty = !data.answer && (!data.files || data.files.length === 0);
+        setResponse({
+          query: trimmed,
+          results: empty ? null : data,
+          error: empty ? 'No results found' : null,
+        });
       } catch {
-        if (!controller.signal.aborted) {
-          toast.error('Search failed');
-          setError('Search failed. Please try again.');
-        }
+        // A cancelled request is expected while typing; only real failures speak up.
+        if (!active || controller.signal.aborted) return;
+        toast.error('Search failed');
+        setResponse({ query: trimmed, results: null, error: 'Search failed. Please try again.' });
       } finally {
-        if (!controller.signal.aborted) {
-          setIsSearching(false);
-        }
+        if (active) setPendingQuery(null);
       }
     };
 
-    performSearch();
+    void performSearch();
 
     return () => {
+      active = false;
       controller.abort();
     };
-  }, [query]);
+  }, [trimmed]);
+
+  const fresh = response && response.query === trimmed ? response : null;
 
   const clear = useCallback(() => {
-    setResults(null);
-    setError(null);
-    hasSearchedRef.current = false;
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    setResponse(null);
+    setPendingQuery(null);
   }, []);
 
-  return { results, error, isSearching, clear };
+  return {
+    results: fresh?.results ?? null,
+    error: fresh?.error ?? null,
+    isSearching: pendingQuery !== null && pendingQuery === trimmed,
+    clear,
+  };
 }
 
 // ── Dashboard ────────────────────────────────────────────────────────────────
@@ -448,7 +455,7 @@ const Dashboard = () => {
       </header>
 
       {/* ── Search Results (anchored directly beneath the search bar) ── */}
-      {searchResults && (
+      {(searchResults || searchError) && (
         <SectionErrorBoundary label="Search Results">
           <section className="glass-panel p-6 border-indigo-500/20 bg-indigo-950/5">
             <div className="flex items-center justify-between mb-4">
@@ -465,11 +472,11 @@ const Dashboard = () => {
               </button>
             </div>
 
-            {searchError && !searchResults.answer && (!searchResults.files || searchResults.files.length === 0) ? (
+            {searchError && !searchResults ? (
               <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 p-4 text-sm text-indigo-300">
                 {searchError}
               </div>
-            ) : (
+            ) : searchResults ? (
               <>
                 {searchResults.answer && (
                   <div className="rounded-xl border border-white/5 bg-black/20 p-4 text-sm leading-relaxed text-slate-300 mb-4">
@@ -488,7 +495,7 @@ const Dashboard = () => {
                   ))}
                 </div>
               </>
-            )}
+            ) : null}
           </section>
         </SectionErrorBoundary>
       )}

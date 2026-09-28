@@ -9,6 +9,18 @@ import type {
   WidgetInstance,
 } from '../types/widget';
 import { api } from '../services/api';
+import {
+  Zap,
+  Timer,
+  StickyNote,
+  Music,
+  ListChecks,
+  CalendarDays,
+  Sparkles,
+  LayoutGrid,
+  LayoutDashboard,
+  Activity,
+} from 'lucide-react';
 
 export interface WidgetStateItem {
   id: string;
@@ -46,17 +58,32 @@ function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSetting
 }
 
 export const defaultWidgetDefs: WidgetDef[] = [
-  { key: 'energy_insights', label: 'Energy Insights', icon: () => null, minSize: 'small', defaultSize: 'medium' },
-  { key: 'ambient_timer', label: 'Ambient Timer', icon: () => null, minSize: 'small', defaultSize: 'small' },
-  { key: 'quick_notes', label: 'Quick Notes', icon: () => null, minSize: 'small', defaultSize: 'medium' },
-  { key: 'active_media', label: 'Active Media', icon: () => null, minSize: 'medium', defaultSize: 'wide' },
-  { key: 'chores_progress', label: 'Chores Progress', icon: () => null, minSize: 'small', defaultSize: 'tall' },
-  { key: 'upcoming_events', label: 'Upcoming Events', icon: () => null, minSize: 'small', defaultSize: 'wide' },
-  { key: 'quick_assistant', label: 'Quick Assistant', icon: () => null, minSize: 'small', defaultSize: 'medium', requiresQuickAssistantEnabled: true },
-  { key: 'device_control', label: 'Device Control', icon: () => null, minSize: 'small', defaultSize: 'tall' },
-  { key: 'workspaces', label: 'Workspaces', icon: () => null, minSize: 'small', defaultSize: 'medium' },
-  { key: 'health_activity', label: 'Health', icon: () => null, minSize: 'small', defaultSize: 'medium' },
+  { key: 'energy_insights', label: 'Energy Insights', icon: Zap, minSize: 'small', defaultSize: 'medium' },
+  { key: 'ambient_timer', label: 'Ambient Timer', icon: Timer, minSize: 'small', defaultSize: 'small' },
+  { key: 'quick_notes', label: 'Quick Notes', icon: StickyNote, minSize: 'small', defaultSize: 'medium' },
+  { key: 'active_media', label: 'Active Media', icon: Music, minSize: 'medium', defaultSize: 'wide' },
+  { key: 'chores_progress', label: 'Chores Progress', icon: ListChecks, minSize: 'small', defaultSize: 'tall' },
+  { key: 'upcoming_events', label: 'Upcoming Events', icon: CalendarDays, minSize: 'small', defaultSize: 'wide' },
+  { key: 'quick_assistant', label: 'Quick Assistant', icon: Sparkles, minSize: 'small', defaultSize: 'medium', requiresQuickAssistantEnabled: true },
+  { key: 'device_control', label: 'Device Control', icon: LayoutGrid, minSize: 'small', defaultSize: 'tall' },
+  { key: 'workspaces', label: 'Workspaces', icon: LayoutDashboard, minSize: 'small', defaultSize: 'medium' },
+  { key: 'health_activity', label: 'Health', icon: Activity, minSize: 'small', defaultSize: 'medium' },
 ];
+
+/**
+ * Widgets display pinned-first, then in user order. The key tiebreaker keeps
+ * the sequence stable when two widgets share an order_index — legacy or
+ * imported rows defaulting to 0 would otherwise shuffle between renders.
+ */
+function compareWidgetInstances(a: WidgetInstance, b: WidgetInstance): number {
+  if (a.userSettings.is_pinned !== b.userSettings.is_pinned) {
+    return a.userSettings.is_pinned ? -1 : 1;
+  }
+  if (a.userSettings.order_index !== b.userSettings.order_index) {
+    return a.userSettings.order_index - b.userSettings.order_index;
+  }
+  return a.def.key.localeCompare(b.def.key);
+}
 
 interface WidgetState {
   widgetRegistry: WidgetDef[];
@@ -133,7 +160,7 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
           userSettings: merged.userWidgets[def.key] ?? createDefaultSettings(def.key, index),
           isActive: true,
         }))
-        .sort((a, b) => a.userSettings.order_index - b.userSettings.order_index);
+        .sort(compareWidgetInstances);
 
       return { ...next, visibleWidgets };
     }, replace);
@@ -246,14 +273,37 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   updateOrder: async (widgetKey: WidgetKey, newIndex: number) => {
-    const registryIndex = get().widgetRegistry.findIndex((d) => d.key === widgetKey);
-    const current = get().userWidgets[widgetKey] ?? createDefaultSettings(widgetKey, Math.max(0, registryIndex));
-    const updated = { ...current, order_index: newIndex, updated_at: Date.now() };
-    set({ userWidgets: { ...get().userWidgets, [widgetKey]: updated } });
+    const previousWidgets = get().userWidgets;
+    // Resequence the whole board: pull the widget out of the order the user is
+    // looking at, re-insert it at the requested slot, then hand every widget a
+    // dense 0..n-1 index. Assigning a single raw index instead lets repeated
+    // moves drift past the end of the list and collide with one another.
+    const ordered = [...get().visibleWidgets];
+    const from = ordered.findIndex((w) => w.def.key === widgetKey);
+    const [moved] = from === -1 ? [] : ordered.splice(from, 1);
+    if (!moved) return;
+
+    const target = Math.max(0, Math.min(newIndex, ordered.length));
+    ordered.splice(target, 0, moved);
+
+    const now = Date.now();
+    const nextWidgets: Record<string, UserWidgetSettings> = { ...previousWidgets };
+    const reordered = ordered.map((instance, index) => {
+      const key = instance.def.key;
+      nextWidgets[key] = { ...instance.userSettings, order_index: index, updated_at: now };
+      return { key, index, changed: previousWidgets[key]?.order_index !== index };
+    });
+
+    set({ userWidgets: nextWidgets });
+
     try {
-      await api.updateWidgetSettings(widgetKey, { order_index: newIndex });
+      await Promise.all(
+        reordered
+          .filter((w) => w.changed)
+          .map((w) => api.updateWidgetSettings(w.key, { order_index: w.index }))
+      );
     } catch {
-      set({ userWidgets: { ...get().userWidgets, [widgetKey]: current } });
+      set({ userWidgets: previousWidgets });
     }
   },
 
@@ -416,7 +466,7 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
         userSettings: userWidgets[def.key] ?? createDefaultSettings(def.key, index),
         isActive: true,
       }))
-      .sort((a, b) => a.userSettings.order_index - b.userSettings.order_index);
+      .sort(compareWidgetInstances);
   },
 
   getVisibleWidgets: () => {
