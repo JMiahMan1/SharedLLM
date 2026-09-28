@@ -357,7 +357,7 @@ class TestABSHandlers:
         ]
         with (
             patch("services.execution.handlers.audiobookshelf.abs_client.get_libraries", new=AsyncMock(return_value=mock_libraries)),
-            patch("services.execution.handlers.audiobookshelf.abs_client.get_all_library_items", new=AsyncMock(return_value=mock_items)),
+            patch("services.execution.handlers.audiobookshelf.abs_client.search_library_items", new=AsyncMock(return_value={"book": [{"libraryItem": mock_items[0]}], "series": [], "authors": []})),
         ):
             result = await _handle_search(abs_url, abs_key, req)
 
@@ -448,7 +448,7 @@ class TestABSHandlers:
         mock_libraries = {"libraries": [{"id": "lib_audiobooks", "name": "Audiobooks", "mediaType": "book"}]}
         with (
             patch("services.execution.handlers.audiobookshelf.abs_client.get_libraries", new=AsyncMock(return_value=mock_libraries)),
-            patch("services.execution.handlers.audiobookshelf.abs_client.get_all_library_items", new=AsyncMock(return_value=[])),
+            patch("services.execution.handlers.audiobookshelf.abs_client.search_library_items", new=AsyncMock(return_value={"book": []})),
         ):
             result = await _handle_search(abs_url, abs_key, req)
 

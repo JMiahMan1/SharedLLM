@@ -3,6 +3,7 @@
 Audiobookshelf (ABS) handler — search, play, resume, and track audiobook progress.
 Integrates with Home Assistant media_player for playback on any supported device.
 """
+import asyncio
 import logging
 from datetime import datetime
 
@@ -81,72 +82,140 @@ async def _handle_search(abs_url: str, abs_key: str, req) -> ExecutionResult:
     if not req.query:
         return ExecutionResult(status="FAILURE", message="Search query is required.", service="audiobookshelf")
 
-    # ABS server-side search is unreliable on some servers (the items endpoint
-    # ignores the `query` param and the /search endpoints are often empty), so we
-    # enumerate the user's libraries and filter the items client-side. This also
-    # lets us surface both audiobooks (book libraries) and podcasts (podcast
-    # libraries) from a single query.
     libs_res = await abs_client.get_libraries(abs_url, abs_key)
     if "error" in libs_res:
         return ExecutionResult(status="FAILURE", message=libs_res["error"], service="audiobookshelf")
 
-    q = (req.query or "").lower()
+    libraries = [lib for lib in libs_res.get("libraries", []) if lib.get("id")]
+    q = req.query or ""
+    search_limit = max(req.limit, 25)
+
+    # BUG-14: server-side search per library, run in parallel — library items
+    # are never enumerated (was up to 51x500 items downloaded per query).
+    responses = await asyncio.gather(
+        *(abs_client.search_library_items(abs_url, abs_key, lib["id"], q, limit=search_limit) for lib in libraries),
+        return_exceptions=True,
+    )
+
     book_summaries: list[dict] = []
     podcast_summaries: list[dict] = []
     authors: dict[str, dict] = {}
+    seen_ids: set[str] = set()
+    matched_author_ids: list[str] = []
 
-    for lib in libs_res.get("libraries", []):
-        lib_id = lib.get("id")
-        media_type = (lib.get("mediaType") or "").lower()
-        if not lib_id:
+    def _unwrap(entry) -> dict | None:
+        if isinstance(entry, dict) and isinstance(entry.get("libraryItem"), dict):
+            return entry["libraryItem"]
+        return entry if isinstance(entry, dict) else None
+
+    def _summary(item: dict) -> dict:
+        meta = item.get("media", {}).get("metadata", {})
+        title = meta.get("title") or ""
+        author = meta.get("authorName") or ""
+        narrator = meta.get("narratorName") or ""
+        cover = item.get("media", {}).get("coverPath", "")
+        if not cover and isinstance(item.get("media", {}).get("cover"), dict):
+            cover = item["media"]["cover"].get("path", "")
+        return {
+            "meta": meta,
+            "media": item.get("media", {}),
+            "id": item.get("id", ""),
+            "title": title,
+            "author": author,
+            "narrator": narrator,
+            "cover": cover,
+        }
+
+    def _add_book(item: dict) -> None:
+        info = _summary(item)
+        if not info["id"] or info["id"] in seen_ids:
+            return
+        seen_ids.add(info["id"])
+        meta, media = info["meta"], info["media"]
+        book_summaries.append({
+            "id": info["id"],
+            "title": info["title"],
+            "author": info["author"],
+            "narrator": info["narrator"],
+            "series": meta.get("seriesName", ""),
+            "publishedYear": meta.get("publishedYear", ""),
+            "genres": meta.get("genres", []),
+            "duration": media.get("duration", 0),
+            "duration_formatted": _format_time(media.get("duration", 0)) if media.get("duration") else "",
+            "cover": info["cover"],
+            "type": "book",
+            "source": "library",
+        })
+        if info["author"] and info["author"].lower() not in authors:
+            authors[info["author"].lower()] = {"id": info["author"], "name": info["author"], "type": "author", "source": "library"}
+
+    def _add_podcast(item: dict) -> None:
+        info = _summary(item)
+        if not info["id"] or info["id"] in seen_ids:
+            return
+        seen_ids.add(info["id"])
+        podcast_summaries.append({
+            "id": info["id"],
+            "title": info["title"],
+            "author": info["author"],
+            "description": info["meta"].get("description", ""),
+            "cover": info["cover"],
+            "type": "podcast",
+            "source": "library",
+        })
+
+    for lib, resp in zip(libraries, responses):
+        if isinstance(resp, BaseException):
+            log.warning(f"[abs.search] library {lib.get('id')} search failed: {resp}")
             continue
-        # Treat anything describing a podcast as a podcast library; everything
-        # else (book, audiobook, etc.) as a book/audiobook library. This avoids
-        # hardcoding exact mediaType strings that vary across ABS/MA integrations.
-        is_podcast = "podcast" in media_type
-        items = await abs_client.get_all_library_items(abs_url, abs_key, lib_id)
-        if isinstance(items, dict) and "error" in items:
+        if not isinstance(resp, dict) or "error" in resp:
             continue
-        for it in items:
-            meta = it.get("media", {}).get("metadata", {})
-            title = meta.get("title") or ""
-            author = meta.get("authorName") or ""
-            narrator = meta.get("narratorName") or ""
-            haystack = f"{title} {author} {narrator} {meta.get('seriesName', '')}".lower()
-            if q not in haystack:
+        is_podcast = "podcast" in (lib.get("mediaType") or "").lower()
+        if is_podcast:
+            entries = list(resp.get("podcast") or []) + list(resp.get("episodes") or [])
+            for entry in entries:
+                item = _unwrap(entry)
+                if item:
+                    _add_podcast(item)
+            continue
+        for entry in resp.get("book") or []:
+            item = _unwrap(entry)
+            if item:
+                _add_book(item)
+        # Series matches carry their books with them.
+        for series_match in resp.get("series") or []:
+            if isinstance(series_match, dict):
+                for item in series_match.get("books") or []:
+                    if isinstance(item, dict):
+                        _add_book(item)
+        # Author matches: render chips (Media.tsx re-searches by name) and
+        # remember ids so their books can be fetched without a listing call.
+        for author in resp.get("authors") or []:
+            if not isinstance(author, dict):
                 continue
-            item_id = it.get("id", "")
-            media = it.get("media", {})
-            cover = media.get("coverPath", "")
-            if not cover and isinstance(media.get("cover"), dict):
-                cover = media.get("cover", {}).get("path", "")
-            if is_podcast:
-                podcast_summaries.append({
-                    "id": item_id,
-                    "title": title,
-                    "author": author,
-                    "description": meta.get("description", ""),
-                    "cover": cover,
-                    "type": "podcast",
-                    "source": "library",
-                })
-            else:
-                book_summaries.append({
-                    "id": item_id,
-                    "title": title,
-                    "author": author,
-                    "narrator": narrator,
-                    "series": meta.get("seriesName", ""),
-                    "publishedYear": meta.get("publishedYear", ""),
-                    "genres": meta.get("genres", []),
-                    "duration": media.get("duration", 0),
-                    "duration_formatted": _format_time(media.get("duration", 0)) if media.get("duration") else "",
-                    "cover": cover,
-                    "type": "book",
-                    "source": "library",
-                })
-            if author and author.lower() not in authors:
-                authors[author.lower()] = {"id": author, "name": author, "type": "author", "source": "library"}
+            name = author.get("name") or ""
+            author_id = author.get("id") or ""
+            if not name:
+                continue
+            if name.lower() not in authors:
+                authors[name.lower()] = {"id": author_id or name, "name": name, "type": "author", "source": "library"}
+            if author_id and author_id not in matched_author_ids and len(matched_author_ids) < search_limit:
+                matched_author_ids.append(author_id)
+
+    # Author chips re-search by author name; server title search won't match
+    # those books, so fetch each matched author's books via
+    # GET /api/authors/:id?include=items (parallel, never an /items listing).
+    if matched_author_ids:
+        author_responses = await asyncio.gather(
+            *(abs_client.get_author(abs_url, abs_key, author_id, include="items") for author_id in matched_author_ids),
+            return_exceptions=True,
+        )
+        for author_resp in author_responses:
+            if isinstance(author_resp, BaseException) or not isinstance(author_resp, dict) or "error" in author_resp:
+                continue
+            for item in author_resp.get("libraryItems") or []:
+                if isinstance(item, dict):
+                    _add_book(item)
 
     total = len(book_summaries) + len(podcast_summaries) + len(authors)
     return ExecutionResult(

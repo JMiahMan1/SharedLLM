@@ -17,6 +17,8 @@ fetched 2026-09-27; the router is mounted under ``/api``):
 * ``POST /session/local`` (:238), ``PATCH /me/progress/batch/update`` (:184),
   ``GET /me/listening-sessions`` (:179), ``GET /libraries/:id/collections`` (:80),
   ``GET /libraries/:id/series`` (:78), ``GET /me/progress`` (:176)
+* ``GET /api/authors/:id?include=items`` (:217; AuthorController.findOne —
+  ``libraryItems`` are the author's books)
 
 Live probes of ``https://abs.sumemail.com`` could not discriminate routes:
 ABS auth runs before routing and returns 401 for every path (including
@@ -117,6 +119,12 @@ async def _assert_call(upstream, method, path_and_query):
         ),
         (lambda: abs_client.get_library_collections(ABS, KEY, "lib1"), "GET", "/api/libraries/lib1/collections"),
         (lambda: abs_client.get_library_series(ABS, KEY, "lib1"), "GET", "/api/libraries/lib1/series"),
+        (lambda: abs_client.get_author(ABS, KEY, "au_1"), "GET", "/api/authors/au_1"),
+        (
+            lambda: abs_client.get_author(ABS, KEY, "au_1", include="items"),
+            "GET",
+            "/api/authors/au_1?include=items",
+        ),
     ],
     ids=lambda v: v if isinstance(v, str) else "",
 )

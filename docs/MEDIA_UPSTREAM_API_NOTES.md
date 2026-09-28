@@ -184,3 +184,30 @@ service.
   no per-item fetch; progress value passed through).
 - Graceful degradation: progress fetch error → warning log, books still
   returned at 0% (same UX as the old broken per-item path, minus N calls).
+
+## ABS search response shapes + author-chip path (P2-T5 / BUG-14, 2026-09-27)
+
+- Book-library `GET /api/libraries/{id}/search` verified from ABS source
+  (`server/libraries/filters/bookFilters.js` `search` L1093): returns
+  `{book: [{libraryItem: toOldJSONExpanded}], narrators: [{name,numBooks}],
+  tags, genres, series: [{series, books: [<plain item JSON>]}],
+  authors: [{id, name, numBooks}]}`. The book where-clause matches
+  **title/subtitle/asin/isbn only** — author, narrator and series names are
+  separate result keys, so an author-name query returns ZERO books.
+- Podcast-library search (`podcastFilters.js` `search` L361): returns
+  `{podcast: [{libraryItem}], tags, genres, episodes: [{libraryItem with
+  recentEpisode}]}` — matches title+author; no authors/series keys.
+- `limit` applies per result section (default 12); handler requests
+  `max(req.limit, 25)` per library.
+- Author chip flow (Media.tsx): tapping a chip re-runs search with the
+  author's NAME as the query and renders whatever `books` come back — so
+  author-name queries must keep returning books. Solved WITHOUT the
+  forbidden `/items` listing via `GET /api/authors/{id}?include=items`
+  (ApiRouter L217, `AuthorController.findOne` L40-86) whose `libraryItems`
+  key holds the author's books. Chip entries get the real ABS author id;
+  books from that endpoint are fetched in parallel with `asyncio.gather`.
+- Narrator-name queries: `narrators` matches carry only names (no ids) and
+  no non-`/items` endpoint resolves a narrator's books, so narrator chips
+  are listed but their books are not auto-added (documented limitation;
+  ABS's items filter does support `narrators:{name}` if ever needed).
+- Plan row BUG-14 amended to include the authors-endpoint requirement.

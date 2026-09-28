@@ -445,6 +445,12 @@ async def search_library_items(
     )
 
 
+async def get_author(abs_url: str, abs_api_key: str, author_id: str, include: str | None = None) -> dict:
+    """GET /api/authors/:id — ``include="items"`` returns the author's libraryItems."""
+    params = {"include": include} if include else None
+    return await abs_get(abs_url, abs_api_key, f"/api/authors/{author_id}", params=params)
+
+
 async def get_personalized_shelves(abs_url: str, abs_api_key: str, library_id: str) -> dict:
     """User-personalized shelves for a library (GET /api/libraries/:id/personalized)."""
     return await abs_get(abs_url, abs_api_key, f"/api/libraries/{library_id}/personalized")
