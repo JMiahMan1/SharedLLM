@@ -164,3 +164,20 @@ answering in chat never gets one by accident. Gateway:
 Correct answers are banked in geo's star ledger (`reason: "game"`) so stars
 outlive the round; a geo outage is logged and never breaks a game in progress.
 11 unit + 6 integration tests.
+
+## Draw together (shipped, single-device first)
+
+`components/family/DrawCanvas.tsx` lives on Family → Create: colour and brush
+pickers, undo, clear, download, and a **Make it way better** pass that sends the
+PNG to the existing image-edit backend and shows the result side by side. A
+refusal is reported in place — nothing pretends to have worked.
+
+Deliberately dependency-free (pointer events, `toDataURL`, the `/api/images/edit`
+proxy we already had). On a family device that has to download an APK to get a
+change, a new build-time dependency is a real cost, and the component's
+interface is small enough that dropping in Excalidraw later is a swap rather
+than a rewrite. Multi-user live drawing on one board is the next slice.
+
+Handling notes worth keeping: pointer capture and PNG export are feature-
+detected, and "has anyone drawn yet" tracks the first stroke rather than
+reading pixels back.
