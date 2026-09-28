@@ -295,6 +295,11 @@ def _safe_int_env(key: str, default: int) -> int:
 RAVEN_QUARANTINE_THRESHOLD = _safe_int_env("RAVEN_QUARANTINE_THRESHOLD", 3)
 RAVEN_QUARANTINE_WINDOW_SECONDS = _safe_int_env("RAVEN_QUARANTINE_WINDOW", 600)
 
+# Synthetic return codes for "the linter could not run", matching the shell
+# convention so a caller reading the result cannot mistake them for a finding.
+_LINTER_MISSING_RC = 127
+_LINTER_TIMEOUT_RC = 124
+
 _redis_client: redis.Redis | None = None
 
 def _get_redis() -> redis.Redis:
@@ -1312,7 +1317,18 @@ def _run_lint_for_file(workspace_path: Path, relative_path: str) -> dict[str, An
     passed = True
 
     def _lint(cmd: list[str]) -> tuple[int, str]:
-        result = _run_command(workspace_path, cmd, timeout_seconds=30)
+        try:
+            result = _run_command(workspace_path, cmd, timeout_seconds=30)
+        except FileNotFoundError:
+            # subprocess.run raises when the binary is absent, which is a
+            # deployment condition (the linter is not installed) rather than a
+            # problem with the file. Let it escape and the caller sees an opaque
+            # 500, _record_verification_failure is never called, and the
+            # quarantine counter - the mechanism meant to stop a model retrying
+            # the same bad write - never advances.
+            return _LINTER_MISSING_RC, f"linter not installed on this deployment: {cmd[0]}"
+        except subprocess.TimeoutExpired:
+            return _LINTER_TIMEOUT_RC, f"linter timed out after 30s: {cmd[0]}"
         output = result["stdout"].strip() or result["stderr"].strip()
         return result["returncode"], output
 
