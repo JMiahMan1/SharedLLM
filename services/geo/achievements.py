@@ -15,6 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
+import os
 from typing import Any, Iterable
 
 log = logging.getLogger("geo.achievements")
@@ -348,6 +349,50 @@ async def record_awards(r, user: str, earned: list[Earned]) -> None:
         await r.hset(f"geo:points:{user}", mapping=mapping)
     except Exception as e:
         log.warning("Points ledger write failed for %s: %s", user, e)
+
+
+async def announce_awards(earned: list[Earned]) -> None:
+    """Tell the family's chat when a badge is earned.
+
+    Optional and best-effort: the badge is already banked, so a Talk outage
+    must never cost someone their achievement or fail the read that triggered
+    it. Off unless a chat token is configured, so a deployment with no family
+    room never posts anything.
+    """
+    if not earned:
+        return
+    token = os.getenv("FAMILY_CHAT_TOKEN", "").strip()
+    if not token:
+        return
+    try:
+        import aiohttp
+
+        from services.gateway.config import EXECUTION_SVC, INTERNAL_SECRET
+
+        async with aiohttp.ClientSession() as client:
+            for item in earned:
+                body = {
+                    "action": "post_card",
+                    "token": token,
+                    "message": f"{item.achievement.name} unlocked!",
+                    "card_kind": "activity",
+                    "card_title": item.achievement.name,
+                    "card_detail": f"{item.achievement.description}".strip() or None,
+                    "card_stars": item.achievement.points,
+                    "card_stats": [{"label": "Points", "value": str(item.achievement.points)}],
+                }
+                async with client.post(
+                    f"{EXECUTION_SVC}/execute/talk",
+                    json={"user_context": {"user": "jarvis"}, **body},
+                    headers={"X-Internal-Secret": INTERNAL_SECRET},
+                    timeout=aiohttp.ClientTimeout(total=10.0),
+                ) as resp:
+                    if resp.status >= 400:
+                        log.warning(
+                            "Achievement announcement failed for %s: %s", item.achievement.id, resp.status
+                        )
+    except Exception as exc:  # noqa: BLE001 - an announcement is never load-bearing
+        log.warning("Achievement announcement error: %s", exc)
 
 
 def total_points(ledger: dict[str, str], definitions: list[Achievement]) -> int:
