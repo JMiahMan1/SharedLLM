@@ -156,6 +156,20 @@ async def search(
     return items[:limit]
 
 
+def _normalize_media_type(media_type: str) -> str:
+    """Lowercase + strip ONE trailing 's' to match HA's get_library enum.
+
+    homeassistant/components/music_assistant/services.yaml (dev, verified
+    2026-09-27) only accepts lowercase singular values: artist, album,
+    audiobook, playlist, podcast, track, radio. Callers historically sent
+    uppercase plurals like "TRACKS", which the service rejects.
+    """
+    mt = (media_type or "").strip().lower()
+    if len(mt) > 1 and mt.endswith("s") and not mt.endswith("ss"):
+        mt = mt[:-1]
+    return mt
+
+
 async def get_library(
     ha_url: str,
     ha_token: str,
@@ -165,16 +179,20 @@ async def get_library(
     favorite: bool = False,
     search: str = "",
     order_by: str = "",
+    mass_entry_id: str = "",
 ) -> list[dict[str, Any]]:
     """Get library content from MA via HA proxy.
 
     Args:
         media_type: MediaType string - PLAYLIST, TRACK, ALBUM, ARTIST, RADIO
+            (case/plural-insensitive; normalized to HA's lowercase singular enum)
         limit: Max results
         offset: Pagination offset
         favorite: Only return favorites
         search: Filter by search term
         order_by: Sort order
+        mass_entry_id: HA config entry ID for the Music Assistant integration
+            (required by the music_assistant.get_library service schema)
 
     Returns:
         List of library items
@@ -182,11 +200,14 @@ async def get_library(
     if not ha_url or not ha_token:
         return []
 
+    media_type_norm = _normalize_media_type(media_type)
     service_data = {
-        "media_type": media_type,
+        "media_type": media_type_norm,
         "limit": limit,
         "offset": offset,
     }
+    if mass_entry_id:
+        service_data["config_entry_id"] = mass_entry_id
 
     if favorite:
         service_data["favorite"] = favorite
@@ -199,29 +220,22 @@ async def get_library(
     if not result:
         return []
 
-    # MA get_library returns {"playlists": [...]} or {"tracks": [...]} etc.
+    # HA wraps the service result: {"changed_states": [...],
+    # "service_response": {"items": [...], "limit", "offset", "order_by",
+    # "media_type"}} (handle_get_library -> LIBRARY_RESULTS_SCHEMA). Tolerate a
+    # bare unwrapped dict too.
+    body = result.get("service_response", result)
+    items_list = body.get("items") if isinstance(body, dict) else None
+
     items = []
-    # Look for the key matching the media_type pluralized
-    type_keys = {
-        "PLAYLIST": "playlists",
-        "PLAYLISTS": "playlists",
-        "TRACK": "tracks",
-        "TRACKS": "tracks",
-        "ALBUM": "albums",
-        "ALBUMS": "albums",
-        "ARTIST": "artists",
-        "ARTISTS": "artists",
-        "RADIO": "radios",
-        "RADIOS": "radios",
-    }
-    key = type_keys.get(media_type, f"{media_type.lower()}s")
-    items_list = result.get(key, result.get("items", []))
     if isinstance(items_list, list):
         for item in items_list:
+            if not isinstance(item, dict):
+                continue
             items.append({
                 "name": item.get("name", ""),
                 "uri": item.get("uri", ""),
-                "type": media_type,
+                "type": media_type_norm,
                 "duration": item.get("duration", 0),
                 "num_tracks": item.get("num_tracks", item.get("track_count", 0)),
             })
@@ -375,10 +389,11 @@ async def get_recently_played(
     ha_url: str,
     ha_token: str,
     limit: int = 10,
+    mass_entry_id: str = "",
 ) -> list[dict[str, Any]]:
     """Get recently played items from MA via HA proxy.
 
     Uses get_library with TRACK type and library_only=False to get recently played.
     MA tracks are ordered by recently_played rank when no order_by specified.
     """
-    return await get_library(ha_url, ha_token, "TRACK", limit=limit)
+    return await get_library(ha_url, ha_token, "TRACK", limit=limit, mass_entry_id=mass_entry_id)

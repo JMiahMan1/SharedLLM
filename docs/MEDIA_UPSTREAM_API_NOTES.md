@@ -246,3 +246,37 @@ service.
   the direct path.
 - Scope note: `mass_ha_client.search` (HA proxy path) already accepted and
   forwarded all three params; only the direct path was missing them.
+
+## HA music_assistant.get_library service contract (P2-T9 / BUG-18, 2026-09-27)
+
+Source: Home Assistant core `dev` branch, integration lives IN HA core at
+`homeassistant/components/music_assistant/` — verified by fetching
+`services.yaml`, `services.py`, `const.py`, `schemas.py`, `helpers.py`
+(cached in `.tmp/ha_ma_*`).
+
+- `get_library` service schema (`services.yaml:176`):
+  - `config_entry_id`: **required: true** (`config_entry` selector, integration
+    `music_assistant`). Omitting it makes HA reject the call
+    (`ServiceValidationError`).
+  - `media_type`: required select, options = **lowercase singular**:
+    `artist, album, audiobook, playlist, podcast, track, radio`.
+    Uppercase plurals like `"TRACKS"` are invalid (Coerce(MediaType) fails).
+  - optional: `favorite` (bool), `search` (text), `pagination.limit` (1..500,
+    default 25), `pagination.offset`, `order_by` (name/name_desc/sort_name/
+    sort_name_desc/timestamp_added/timestamp_added_desc/last_played/...).
+- Response (`services.py:312-321`): `handle_get_library` returns
+  `LIBRARY_RESULTS_SCHEMA` = `{"items": [...], "limit": int, "offset": int,
+  "order_by": str, "media_type": MediaType}` (`const.py`: `ATTR_ITEMS="items"`).
+  There is **no per-type key** (`tracks`/`playlists`/... do NOT exist). HA's
+  service API wraps it: `{"changed_states": [...], "service_response": {...}}`
+  — the old code read top-level keys, so browse always returned `[]`.
+- Item dicts come from `schemas.media_item_dict_from_mass_item`: always
+  `media_type, uri, name, version, image` (+ favorite/explicit and per-type
+  extras such as duration/discart/fanart).
+- Callers pass `media_type` case/plural-insensitively; `get_library`
+  normalizes (lowercase + strip one trailing `s`) before sending and echoes
+  the normalized singular as each item's `type`.
+- The browse endpoint forwards `mass_config_entry_id` from resolved creds as
+  `config_entry_id`; when it is empty the field is omitted entirely (never
+  sent as `""`), keeping older HA installs that predate `required: true`
+  working.
