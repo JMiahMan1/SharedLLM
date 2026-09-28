@@ -170,6 +170,35 @@ async def run_jarvis_orchestration(query: str, token: str, user_context: Any):
         log.error(f"[Jarvis] Orchestration failed: {e}", exc_info=True)
 
 
+CARD_KINDS = ("activity", "game", "creation", "system")
+
+ENVELOPE_FENCE = "```jarvis-envelope"
+
+
+def _encode_envelope(text: str, card: dict) -> str:
+    """Append a Jarvis card to human-readable text.
+
+    The wire format is duplicated in the UI (services/ui/src/lib/chatEnvelope.ts)
+    and pinned by tests on both sides: a bot post is still a plain Talk string,
+    so old clients keep reading the text and only Jarvis renders the card.
+    """
+    body = {
+        "kind": card["kind"],
+        "title": card["title"],
+    }
+    if card.get("detail"):
+        body["detail"] = card["detail"]
+    if card.get("stars") is not None:
+        body["stars"] = card["stars"]
+    if card.get("stats"):
+        body["stats"] = [
+            {"label": s["label"], "value": s["value"]}
+            for s in card["stats"]
+            if isinstance(s, dict) and "label" in s and "value" in s
+        ]
+    return f"{text.strip()}\n\n{ENVELOPE_FENCE}\n{json.dumps(body)}\n{ENVELOPE_FENCE}"
+
+
 async def handle_talk(req: TalkRequest) -> ExecutionResult:
     provider = resolve_personal_data_provider(req.user_context)
     if not provider:
@@ -219,6 +248,42 @@ async def handle_talk(req: TalkRequest) -> ExecutionResult:
                 message=f"Opened conversation {_conversation_summary(data).get('display_name')}.",
                 service="talk_open",
                 detail={"conversation": _conversation_summary(data)},
+            )
+
+        if action == "post_card":
+            if not req.token:
+                return ExecutionResult(status="FAILURE", message="Conversation token is required.", service="talk_post_card")
+            kind = (req.card_kind or "").strip()
+            title = (req.card_title or "").strip()
+            if kind not in CARD_KINDS:
+                return ExecutionResult(
+                    status="FAILURE",
+                    message=f"card_kind must be one of: {', '.join(CARD_KINDS)}",
+                    service="talk_post_card",
+                )
+            if not title:
+                return ExecutionResult(status="FAILURE", message="card_title is required.", service="talk_post_card")
+            card = {
+                "kind": kind,
+                "title": title[:120],
+                "detail": (req.card_detail or "").strip()[:200] or None,
+                "stars": req.card_stars,
+                "stats": req.card_stats or None,
+            }
+            wire = _encode_envelope(req.message or title, card)
+            ok, _data, message = await _talk_request_with_retry(
+                provider,
+                "POST",
+                f"/ocs/v2.php/apps/spreed/api/v1/chat/{urllib.parse.quote(req.token)}",
+                data={"message": wire},
+            )
+            if not ok:
+                return ExecutionResult(status="FAILURE", message=message or "Failed to post the card.", service="talk_post_card")
+            return ExecutionResult(
+                status="SUCCESS",
+                message=f"Posted a {kind} card.",
+                service="talk_post_card",
+                detail={"card": card},
             )
 
         if action == "mark_read":

@@ -122,7 +122,11 @@ Tests: 7 gateway (`test_talk_identity_switch.py`) + 6 UI
   plain text. Malformed cards degrade to text instead of blanking a
   conversation. `encodeEnvelope` / `decodeEnvelope` / `activityEnvelope` are the
   whole contract; 7 unit + 6 component tests.
-  **Next:** have the achievements worker post one when a badge is earned.
+  Posting side: execution action `post_card` (and gateway
+  `POST /api/communication/talk/card`) sends `card_kind`/`card_title`/
+  `card_detail`/`card_stars`/`card_stats`; an unknown kind or a missing title
+  is rejected rather than posted. **Next:** have the achievements worker call
+  it when a badge is earned.
 - Kid-friendly touches: emoji reactions, big buttons, optionally read-aloud
   replies through the existing TTS path.
 
