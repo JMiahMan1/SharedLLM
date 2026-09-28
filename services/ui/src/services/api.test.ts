@@ -71,6 +71,17 @@ describe('api service', () => {
     expect(result).toEqual(mockResults);
   });
 
+  it('globalSearch should forward an abort signal so stale searches can be cancelled', async () => {
+    const mockResults = { answer: 'test answer', files: [] };
+    vi.mocked(apiClient.get).mockResolvedValue({ data: mockResults } as AxiosResponse);
+    const controller = new AbortController();
+
+    const result = await api.globalSearch('slow query', controller.signal);
+
+    expect(apiClient.get).toHaveBeenCalledWith('/api/search?q=slow%20query', { signal: controller.signal });
+    expect(result).toEqual(mockResults);
+  });
+
   it('createTimer should call the communication timer endpoint', async () => {
     const mockResult = { status: 'SUCCESS', message: 'Set timer', service: 'timer_add' };
     vi.mocked(apiClient.post).mockResolvedValue({ data: mockResult } as AxiosResponse);

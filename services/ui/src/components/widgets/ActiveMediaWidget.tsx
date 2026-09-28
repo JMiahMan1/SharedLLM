@@ -93,18 +93,52 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     };
   }, [media, duration]);
 
+  // Scrubbing and volume drags fire one request per movement frame, which
+  // floods the player with intermediate positions. Keep the knob glued to the
+  // pointer locally and let only the settled value reach the device.
+  const CONTROL_DEBOUNCE_MS = 200;
+  const seekTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const volumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSeekRef = useRef<number | null>(null);
+
+  const flushSeek = useCallback(() => {
+    if (seekTimerRef.current) {
+      clearTimeout(seekTimerRef.current);
+      seekTimerRef.current = null;
+    }
+    const target = pendingSeekRef.current;
+    pendingSeekRef.current = null;
+    if (target === null || !media?.entity_id) return;
+    api
+      .mediaTransport({ entity_id: media.entity_id, command: 'seek', position: Math.round(target) })
+      .catch(() => toast.error('Could not seek on that player'));
+  }, [media]);
+
   const handleSeek = useCallback((timeSec: number) => {
     const clamped = Math.max(0, duration > 0 ? Math.min(timeSec, duration) : timeSec);
     localTimeRef.current = clamped;
     setPosition(clamped);
-    if (media?.entity_id) {
-      // Await so a rejected seek is reported instead of becoming an unhandled
-      // promise rejection (and the knob silently snapping back).
+    if (!media?.entity_id) return;
+    pendingSeekRef.current = clamped;
+    if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+    seekTimerRef.current = setTimeout(flushSeek, CONTROL_DEBOUNCE_MS);
+  }, [media, duration, flushSeek]);
+
+  const commitVolume = useCallback((entityId: string, level: number) => {
+    if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current);
+    volumeTimerRef.current = setTimeout(() => {
+      volumeTimerRef.current = null;
       api
-        .mediaTransport({ entity_id: media.entity_id, command: 'seek', position: Math.round(clamped) })
-        .catch(() => toast.error('Could not seek on that player'));
-    }
-  }, [media, duration]);
+        .mediaTransport({ entity_id: entityId, command: 'volume_set', volume_level: level / 100 })
+        .catch(() => toast.error('Could not set the volume on that player'));
+    }, CONTROL_DEBOUNCE_MS);
+  }, []);
+
+  // Never leave a pending control request firing into an unmounted widget.
+  useEffect(() => () => {
+    if (seekTimerRef.current) clearTimeout(seekTimerRef.current);
+    if (volumeTimerRef.current) clearTimeout(volumeTimerRef.current);
+  }, []);
 
   const playPause = async () => {
     if (!media?.entity_id) return;
@@ -136,6 +170,8 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     calculatePosition(e.clientX);
     const moveHandler = (ev: PointerEvent) => calculatePosition(ev.clientX);
     const upHandler = () => {
+      // Release is the moment the user settled on a position: send that one seek.
+      flushSeek();
       document.removeEventListener('pointermove', moveHandler);
       document.removeEventListener('pointerup', upHandler);
       document.removeEventListener('pointercancel', upHandler);
@@ -143,7 +179,27 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
     document.addEventListener('pointermove', moveHandler);
     document.addEventListener('pointerup', upHandler);
     document.addEventListener('pointercancel', upHandler);
-  }, [duration, media, handleSeek]);
+  }, [duration, media, handleSeek, flushSeek]);
+
+  // The scrubber advertises role="slider", so it has to be operable without a
+  // pointer too. Arrow keys step 5s (30s with Shift).
+  const handleScrubberKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (!duration || !media?.entity_id) return;
+    const step = e.shiftKey ? 30 : 5;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      handleSeek(position + step);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      handleSeek(position - step);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      handleSeek(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      handleSeek(duration);
+    }
+  }, [duration, media, handleSeek, position]);
 
   const progressPercent = duration > 0 ? (position / duration) * 100 : 0;
 
@@ -209,12 +265,14 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
           {duration > 0 && (
             <div
               onPointerDown={handlePointerDown}
+              onKeyDown={handleScrubberKeyDown}
               role="slider"
               tabIndex={0}
               aria-label="Track progress scrubber"
               aria-valuemin={0}
               aria-valuemax={Math.round(duration)}
               aria-valuenow={Math.round(position)}
+              aria-valuetext={`${formatTime(position)} of ${formatTime(duration)}`}
               className="relative py-4 sm:py-2 select-none touch-none cursor-pointer group"
             >
               <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden relative pointer-events-none">
@@ -242,13 +300,13 @@ const ActiveMediaWidget = ({ userSettings, onTogglePin, onMediaStop, settingsBut
               min={0}
               max={100}
               value={volumeLevel}
+              aria-label="Volume"
               className="flex-1 h-1 bg-slate-800 rounded-full appearance-none cursor-pointer accent-purple-500"
-              onChange={async (e) => {
+              onChange={(e) => {
                 const next = Number(e.target.value);
                 setVolumeLevel(next);
-                if (media?.entity_id) {
-                  try { await api.mediaTransport({ entity_id: media.entity_id, command: 'volume_set', volume_level: next / 100 }); } catch { /* ignore */ }
-                }
+                // Local value moves instantly; the device gets one settled call.
+                if (media?.entity_id) commitVolume(media.entity_id, next);
               }}
             />
           </div>

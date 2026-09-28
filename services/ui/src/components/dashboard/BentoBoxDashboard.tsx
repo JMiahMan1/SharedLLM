@@ -183,7 +183,7 @@ const BentoBoxDashboard = () => {
         gridAutoRows: '200px',
       }}
     >
-      {widgets.map((widget) => {
+      {widgets.map((widget, index) => {
         const LazyWidget = LazyWidgets[widget.def.key];
         const size = (widget.userSettings.size as WidgetSize) || 'medium';
         const sizeClass = SIZE_CLASSES[size] ?? SIZE_CLASSES.medium;
@@ -197,6 +197,7 @@ const BentoBoxDashboard = () => {
             onTogglePin={handleTogglePin}
             onResize={handleResize}
             onReorder={handleReorder}
+            currentIndex={index}
             totalWidgets={totalWidgets}
             onRemove={handleRemove}
           />

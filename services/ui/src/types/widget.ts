@@ -118,6 +118,8 @@ export interface WidgetContextMenuProps {
   onTogglePin: (widgetKey: WidgetKey) => void;
   onResize: (widgetKey: WidgetKey, size: WidgetSize) => void;
   onReorder: (widgetKey: WidgetKey, newIndex: number) => void;
+  /** Position of this widget within the currently visible board. */
+  currentIndex: number;
   totalWidgets: number;
   onRemove: (widgetKey: WidgetKey) => void;
   className?: string;

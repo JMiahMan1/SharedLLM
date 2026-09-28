@@ -25,7 +25,7 @@ describe('Family hub', () => {
     expect(await screen.findByTestId('family-games')).toHaveTextContent(/bible trivia/i);
 
     await user.click(screen.getByRole('tab', { name: /create/i }));
-    expect(await screen.findByTestId('family-create')).toHaveTextContent(/draw together/i);
+    expect(await screen.findByTestId('family-create')).toHaveTextContent(/shared family space/i);
   });
 
   it('opens a conversation from a username and sends a message', async () => {

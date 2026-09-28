@@ -1,6 +1,16 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Settings2 } from 'lucide-react';
+import {
+  Settings2,
+  Pin,
+  PinOff,
+  Eye,
+  EyeOff,
+  ChevronUp,
+  ChevronDown,
+  ArrowDownToLine,
+  Trash2,
+} from 'lucide-react';
 import type { WidgetSize, WidgetContextMenuProps } from '../../types/widget';
 
 const SIZE_OPTIONS: { value: WidgetSize; label: string }[] = [
@@ -14,6 +24,9 @@ interface ContextMenuPosition {
   x: number;
   y: number;
 }
+
+/** Every focusable action inside the menu, for roving keyboard navigation. */
+const MENU_ITEM_SELECTOR = '[role="menuitem"],[role="menuitemradio"]';
 
 const WidgetContextMenu = (props: WidgetContextMenuProps) => {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -69,20 +82,37 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
       }
     };
 
-    const handleEsc = (e: KeyboardEvent) => {
+    const handleKeys = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setMenuOpen(false);
+        return;
       }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+
+      const items = Array.from(
+        menuRef.current?.querySelectorAll<HTMLButtonElement>(MENU_ITEM_SELECTOR + ':not([disabled])') ?? []
+      );
+      if (items.length === 0) return;
+
+      e.preventDefault();
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      const next = current === -1 ? 0 : (current + step + items.length) % items.length;
+      items[next]?.focus();
     };
 
     if (menuOpen) {
       document.addEventListener('mousedown', handleClickOutside);
-      document.addEventListener('keydown', handleEsc);
+      document.addEventListener('keydown', handleKeys);
+      // Land keyboard users on the first action instead of stranding focus.
+      menuRef.current
+        ?.querySelector<HTMLButtonElement>(MENU_ITEM_SELECTOR + ':not([disabled])')
+        ?.focus();
     }
 
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
-      document.removeEventListener('keydown', handleEsc);
+      document.removeEventListener('keydown', handleKeys);
     };
   }, [menuOpen]);
 
@@ -103,6 +133,8 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
         className="text-slate-500 hover:text-white transition-colors p-1 rounded hover:bg-white/5"
         title="Widget options"
         aria-label="Widget options"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
       >
         <Settings2 size={14} />
       </button>
@@ -130,6 +162,8 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
         ref={menuRef}
         style={{ top: displayPos.y, left: displayPos.x }}
         className="fixed z-50 glass-card min-w-[180px] p-2 animate-in fade-in"
+        role="menu"
+        aria-label={`${props.def.label} options`}
       >
         <div className="space-y-1">
           <div className="text-xs font-semibold text-white px-2 py-1 mb-1">
@@ -137,13 +171,15 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
           </div>
 
           <button
+            role="menuitem"
             onClick={() => {
               props.onTogglePin(props.widgetKey);
               setMenuOpen(false);
             }}
             className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
           >
-            {props.userSettings.is_pinned ? '📌 Unpin' : '📌 Pin'}
+            {props.userSettings.is_pinned ? <PinOff size={13} /> : <Pin size={13} />}
+            {props.userSettings.is_pinned ? 'Unpin' : 'Pin to top'}
           </button>
 
           <div className="border-t border-slate-700/50 my-1" />
@@ -152,6 +188,8 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
           {SIZE_OPTIONS.map((size) => (
             <button
               key={size.value}
+              role="menuitemradio"
+              aria-checked={props.userSettings.size === size.value}
               onClick={() => {
                 props.onResize(props.widgetKey, size.value);
                 setMenuOpen(false);
@@ -170,35 +208,68 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
 
           {props.widgetKey !== 'active_media' && (
             <button
+              role="menuitem"
               onClick={() => {
                 props.onToggleVisibility(props.widgetKey, props.userSettings.visibility !== 'visible');
                 setMenuOpen(false);
               }}
-              className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors"
+              className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
             >
-              {props.userSettings.visibility === 'hidden' ? '👁 Show' : '🙈 Hide'}
+              {props.userSettings.visibility === 'hidden' ? <Eye size={13} /> : <EyeOff size={13} />}
+              {props.userSettings.visibility === 'hidden' ? 'Show' : 'Hide'}
             </button>
           )}
 
           <button
+            role="menuitem"
+            disabled={props.currentIndex <= 0}
             onClick={() => {
-              props.onReorder(props.widgetKey, props.totalWidgets);
+              props.onReorder(props.widgetKey, props.currentIndex - 1);
               setMenuOpen(false);
             }}
-            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors"
+            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-2"
           >
-            ⬇ Move to bottom
+            <ChevronUp size={13} />
+            Move up
+          </button>
+
+          <button
+            role="menuitem"
+            disabled={props.currentIndex >= props.totalWidgets - 1}
+            onClick={() => {
+              props.onReorder(props.widgetKey, props.currentIndex + 1);
+              setMenuOpen(false);
+            }}
+            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-2"
+          >
+            <ChevronDown size={13} />
+            Move down
+          </button>
+
+          <button
+            role="menuitem"
+            disabled={props.currentIndex >= props.totalWidgets - 1}
+            onClick={() => {
+              props.onReorder(props.widgetKey, props.totalWidgets - 1);
+              setMenuOpen(false);
+            }}
+            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-2"
+          >
+            <ArrowDownToLine size={13} />
+            Move to bottom
           </button>
 
           <div className="border-t border-slate-700/50 my-1" />
 
           <button
+            role="menuitem"
             onClick={() => {
               props.onRemove(props.widgetKey);
               setMenuOpen(false);
             }}
-            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-red-900/30 text-red-400 hover:text-red-300 transition-colors"
+            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-red-900/30 text-red-400 hover:text-red-300 transition-colors flex items-center gap-2"
           >
+            <Trash2 size={13} />
             Remove
           </button>
         </div>
