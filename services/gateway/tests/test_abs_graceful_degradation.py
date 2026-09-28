@@ -50,6 +50,32 @@ class MockAioResponse:
         return ""
 
 
+class _PingClient:
+    """Stands in for the session yielded by shared_http_client (BUG-16 tests)."""
+
+    def __init__(self, status=200, error=None):
+        self.status = status
+        self.error = error
+        self.urls = []
+
+    async def get(self, url, **kwargs):
+        self.urls.append(url)
+        if self.error is not None:
+            raise self.error
+        return MockAioResponse(status=self.status)
+
+
+def _ctx_for(client):
+    class _Ctx:
+        async def __aenter__(self):
+            return client
+
+        async def __aexit__(self, *exc):
+            return False
+
+    return _Ctx()
+
+
 # ─── ABS Graceful Degradation ──────────────────────────────────────────────
 
 
@@ -143,22 +169,13 @@ async def test_abs_library_items_timeout_returns_empty(client):
 
 @pytest.mark.asyncio
 async def test_abs_connectivity_status_unreachable(client):
-    """ABS status endpoint reports UNREACHABLE when server times out."""
-    from services import config as services_config
+    """ABS status endpoint reports UNREACHABLE when the ping fails to connect."""
+    from services.gateway import main as gateway_main
 
-    # Mock identity settings
-    mock_settings_resp = MagicMock()
-    mock_settings_resp.status = 200
-    mock_settings_resp.json = AsyncMock(return_value=[
-        {"key": "audiobookshelf_url", "value": "https://abs.sumemail.com/"}
-    ])
-
-    with patch.object(services_config, 'IDENTITY_SVC_URL', 'http://identity:8001'), patch.object(services_config, 'INTERNAL_SECRET', 'test-secret'), patch('aiohttp.ClientSession') as mock_client_cls:
-                mock_client = AsyncMock()
-                mock_client.get = AsyncMock(side_effect=aiohttp.ClientConnectionError("timeout"))
-                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
+    ping = _PingClient(error=aiohttp.ClientConnectionError("timeout"))
+    creds = {"user": "testuser", "audiobookshelf_url": "https://abs.sumemail.com/"}
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=creds)), \
+         patch.object(gateway_main, 'shared_http_client', new=lambda: _ctx_for(ping)):
                 resp = client.get("/api/media/audiobookshelf/status")
 
                 assert resp.status_code == 200
@@ -304,56 +321,38 @@ async def test_abs_search_with_data(client):
 
 @pytest.mark.asyncio
 async def test_abs_connectivity_status_available(client):
-    """ABS status endpoint reports AVAILABLE when server responds."""
-    from services import config as services_config
+    """ABS status endpoint pings the caller's own ABS URL at GET /ping."""
+    from services.gateway import main as gateway_main
 
-    mock_settings_resp = MagicMock()
-    mock_settings_resp.status = 200
-    mock_settings_resp.json = AsyncMock(return_value=[
-        {"key": "audiobookshelf_url", "value": "https://abs.sumemail.com/"}
-    ])
-
-    with patch.object(services_config, 'IDENTITY_SVC_URL', 'http://identity:8001'), patch.object(services_config, 'INTERNAL_SECRET', 'test-secret'), patch('aiohttp.ClientSession') as mock_client_cls:
-                mock_client = AsyncMock()
-                # First call returns settings, second call pings ABS
-                mock_client.get = AsyncMock(side_effect=[
-                    mock_settings_resp,
-                    MockAioResponse(status=200)
-                ])
-                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
+    ping = _PingClient(status=200)
+    creds = {"user": "testuser", "audiobookshelf_url": "https://abs.sumemail.com/"}
+    with patch.object(gateway_main, '_resolve_identity_from_request', new=AsyncMock(return_value=creds)), \
+         patch.object(gateway_main, 'shared_http_client', new=lambda: _ctx_for(ping)):
                 resp = client.get("/api/media/audiobookshelf/status")
 
                 assert resp.status_code == 200
                 data = resp.json()
                 assert data["status"] == "AVAILABLE"
                 assert data["reachable"] is True
+                assert ping.urls == ["https://abs.sumemail.com/ping"]
 
 
 @pytest.mark.asyncio
 async def test_abs_connectivity_status_no_config(client):
     """ABS status endpoint reports error when ABS URL not configured."""
-    from services import config as services_config
+    from services.gateway import main as gateway_main
 
-    mock_settings_resp = MagicMock()
-    mock_settings_resp.status = 200
-    mock_settings_resp.json = AsyncMock(return_value=[
-        {"key": "other_setting", "value": "value"}
-    ])
-
-    with patch.object(services_config, 'IDENTITY_SVC_URL', 'http://identity:8001'), patch.object(services_config, 'INTERNAL_SECRET', 'test-secret'), patch('aiohttp.ClientSession') as mock_client_cls:
-                mock_client = AsyncMock()
-                mock_client.get = AsyncMock(return_value=mock_settings_resp)
-                mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-                mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
-
+    ping = _PingClient(status=200)
+    with patch.object(gateway_main, '_resolve_identity_from_request',
+                      new=AsyncMock(return_value={"user": "testuser"})), \
+         patch.object(gateway_main, 'shared_http_client', new=lambda: _ctx_for(ping)):
                 resp = client.get("/api/media/audiobookshelf/status")
 
                 assert resp.status_code == 200
                 data = resp.json()
                 assert data["status"] == "UNAVAILABLE"
                 assert data["reachable"] is False
+                assert ping.urls == []
 
 
 @pytest.mark.asyncio

@@ -211,3 +211,17 @@ service.
   are listed but their books are not auto-added (documented limitation;
   ABS's items filter does support `narrators:{name}` if ever needed).
 - Plan row BUG-14 amended to include the authors-endpoint requirement.
+
+## ABS liveness ping route (P2-T7 / BUG-16, 2026-09-27)
+
+- `GET /ping` **verified**: ABS `server.js` registers it on the ROOT router
+  (L385, `router.get('/ping', …)` → `{success: true}`) — mounted via
+  `app.use(RouterBasePath, router)` (L318) BEFORE `router.use('/api', auth, …)`
+  (L338), so it is unauthenticated and needs no token — ideal liveness probe.
+- `/api/books` **does not exist**: no match anywhere in `server/routers/
+  ApiRouter.js` — the old status probe hit a route ABS never had (only worked
+  when ABS's SPA/static fallback answered 200).
+- Endpoint now resolves the caller's identity and pings the user's own
+  `audiobookshelf_url` (trailing-slash normalized) instead of reading the
+  global identity settings list (which also left `abs_url` unbound on a
+  non-200 settings response → UnboundLocalError → generic ERROR).
