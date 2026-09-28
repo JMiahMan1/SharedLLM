@@ -86,7 +86,10 @@ GIT_TOKEN = os.getenv("GIT_TOKEN")
 REDIS_URL = os.getenv(f"{NETWORK_MODE}_REDIS_URL") or os.getenv("REDIS_URL", "redis://redis:6379/0")
 LOG_RETENTION_DAYS = 30
 LOG_MAX_ENTRIES = 10000
-RAVEN_MAX_TOTAL_SECONDS = 0
+# Hard wall-clock cap for one Raven mission. Must stay in sync with the
+# Identity seed (services/identity/models.py) and orchestrator._DEFAULTS;
+# agent_loop.py prefers the DB setting and falls back to this.
+RAVEN_MAX_TOTAL_SECONDS = 1800
 RAVEN_ITERATION_TIMEOUT = 600
 RAVEN_HEARTBEAT_INTERVAL = 30
 RAVEN_HUNG_THRESHOLD = 600

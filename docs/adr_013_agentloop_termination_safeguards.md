@@ -45,7 +45,7 @@ Introduce explicit success criteria and iteration guards:
 
 **Positive:**
 
-* Raven now persists until it either executes at least one tool OR hits the hard iteration limit (30) or hard timeout (600s).
+* Raven now persists until it either executes at least one tool OR hits the hard iteration limit (60) or hard timeout (1800s).
 * Reduces false-positive "success" reports; agent must take action before concluding.
 * More deterministic behavior across model quality tiers.
 
@@ -62,11 +62,11 @@ Introduce explicit success criteria and iteration guards:
 | :--- | :--- |
 | Keep drift detection but require ≥1 tool call | Still arbitrary keywords; clarity over heuristics |
 | Infinite retry with exponential backoff | Could loop forever on hopeless cases; need hard cutoff |
-| Always force full 30 iterations | Wasteful; terminate when task done |
+| Always force full 60 iterations | Wasteful; terminate when task done |
 
 ---
 
 ## Implementation Notes
 
-* The `MAX_TOOL_ITERATIONS = 30` cap and `RAVEN_MAX_TOTAL_SECONDS = 600` hard timeout remain as ultimate safeguards.
+* The `MAX_TOOL_ITERATIONS = 60` cap and `RAVEN_MAX_TOTAL_SECONDS = 1800` hard timeout remain as ultimate safeguards.
 * Future improvement: evaluate whether the final answer contains actionable conclusions vs. vague summarization using a lightweight classifier; but keep it simple for now.

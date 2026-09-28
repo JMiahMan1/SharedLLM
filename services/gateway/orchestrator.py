@@ -40,7 +40,9 @@ _DEFAULTS = cast(dict[str, str], {
     "redis_url": "redis://redis:6379/0",
     "ollama_timeout": "600",
     "fast_path_threshold": "0.85",
-    "raven_max_total_seconds": "14400",
+    # Only consulted when Identity has no value for the key, so it must match
+    # the seeded row (services/identity/models.py) and services/config.py.
+    "raven_max_total_seconds": "1800",
     "raven_iteration_timeout": "600",
     "raven_heartbeat_interval": "30",
     "raven_hung_threshold": "600",
