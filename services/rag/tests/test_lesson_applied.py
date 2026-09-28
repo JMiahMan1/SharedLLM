@@ -10,10 +10,8 @@ Integration tests for the HONEST Raven lessons feature:
 3. The gateway-side apply-citation scanner (mirrors agent_loop.py:4096)
    extracts lesson ids the model cites via ``Apply: [id]``.
 """
-import os
 import re
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 
 import numpy as np
 import pytest

@@ -6,7 +6,6 @@ import asyncio
 
 import pytest
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 sys.path.insert(0, os.path.abspath("."))
 
 

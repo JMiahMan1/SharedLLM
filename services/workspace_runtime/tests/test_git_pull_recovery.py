@@ -5,7 +5,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["WORKSPACE_RUNTIME_ROOT"] = os.path.abspath(".tmp")
 
 # Import the service module at collection time so SQLModel metadata (Workspace table)

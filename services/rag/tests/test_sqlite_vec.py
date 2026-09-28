@@ -7,10 +7,8 @@ runs in production if the native extension fails to load). The API-level tests
 monkeypatch the module globals (``conn``, ``adapter``, ``embed``) so they do not
 require fastembed or the native extension.
 """
-import os
 import sqlite3
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 
 import numpy as np
 import pytest

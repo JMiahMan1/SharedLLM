@@ -7,12 +7,10 @@ URL), GET only ever fetches bytes — it never starts playback.
 
 pytest: two Range GETs after a start -> ``play_media`` called 0 times.
 """
-import os
 import sys
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 import pytest
 from fastapi.testclient import TestClient

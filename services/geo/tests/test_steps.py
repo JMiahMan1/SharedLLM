@@ -4,13 +4,10 @@ These cover the midnight/rollover rules that determine which local day a
 pedometer reading belongs to, including the case that caused an inflated count
 after a day with no syncs.
 """
-import os
 import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
-os.environ.setdefault("FERNET_KEY", "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=")
 
 import pytest
 

@@ -7,9 +7,8 @@ from cryptography.fernet import Fernet
 
 _test_fernet_key = Fernet.generate_key().decode()
 
-# Load env files (.env.test takes precedence over .env) so tests pick up real
-# configuration (e.g. TIMEZONE) that is not otherwise set by the test defaults
-# below. Called AFTER the explicit test defaults so those always win.
+# Load env files (.env.test takes precedence over .env) for any var the explicit
+# test defaults below do not cover. Called BEFORE them, so the pins always win.
 def _load_env_files():
     for _env_name in (".env.test", ".env"):
         _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _env_name)
@@ -30,7 +29,6 @@ _root = os.path.dirname(os.path.abspath(__file__))
 if _root not in sys.path:
     sys.path.insert(0, _root)
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret-ci")
 os.environ["FERNET_KEY"] = _test_fernet_key
 os.environ.setdefault("INIT_DB", "false")
 os.environ.setdefault("WORKSPACE_DATABASE_URL", "sqlite:///:memory:")
@@ -48,7 +46,7 @@ os.environ.setdefault("bridge_WORKSPACE_RUNTIME_SVC_URL", "http://localhost:8007
 os.environ.setdefault("bridge_GEO_SVC_URL", "http://localhost:8009")
 os.environ.setdefault("HOST_IDENTITY_SVC_URL", "http://127.0.0.1:8001")
 os.environ.setdefault("EXECUTION_SVC_URL", "http://localhost:8003")
-os.environ.setdefault("RAG_SVC_URL", "http://localhost:8003")
+os.environ.setdefault("RAG_SVC_URL", "http://localhost:8004")
 os.environ.setdefault("STORAGE_SVC_URL", "http://localhost:8005")
 os.environ.setdefault("LOGGING_SVC_URL", "http://localhost:8006")
 os.environ.setdefault("WORKSPACE_RUNTIME_SVC_URL", "http://localhost:8007")
@@ -59,9 +57,165 @@ os.environ.setdefault("FAST_PATH_THRESHOLD", "0.85")
 os.environ.setdefault("EMBEDDING_MODEL", "nomic-ai/nomic-embed-text-v1.5")
 os.environ.setdefault("TEST_MODE", "true")
 
-# Load real env config (.env.test > .env) for any vars not set above
-# (e.g. TIMEZONE). Runs after the explicit test defaults so those win.
+# Every env var services/config.py reads must have a deterministic test default.
+#
+# Without one, a var that is only set in a developer's real .env silently
+# differs between their machine and CI, and services/config.py derives each of
+# them ONCE at import into module attributes that ~30 modules capture. A test
+# that then reloads services.config (or another module imports it later) reads a
+# *different* snapshot than the module under test, which is how
+# test_abs_stream_url.py came to compare 192.168.2.205 against localhost: a
+# single assertion failure that said nothing about the code it meant to cover.
+#
+# Pinning also stops _load_env_files() from injecting real deployment secrets
+# (ABS_API_KEY, HA_TOKEN, the Git tokens) into the test environment.
+#
+# tests/unit/test_config_env_isolation.py fails if this ever falls behind.
+_TEST_ENV_DEFAULTS = {
+    # --- The values a test MUST see exactly, whatever the runner exported ---
+    #
+    # INTERNAL_SECRET had a module-scope assignment in two dozen test files and
+    # whichever imported first won: the gateway captures it once at import, so a
+    # test that sent a different literal in its X-Internal-Secret header got a
+    # 401 that had nothing to do with the code it meant to cover (five
+    # test_music_proxy tests, all green in isolation).
+    # tests/unit/test_workspace_env_enc.py had already worked around this for
+    # itself with a per-test fixture; the fix belongs here.
+    "INTERNAL_SECRET": "test-secret",
+    "FERNET_KEY": _test_fernet_key,
+    # Service topology — localhost everywhere, matching CI, never the docker
+    # service aliases (which only resolve inside the compose network).
+    "GATEWAY_INTERNAL_URL": "http://gateway:11435",
+    "EXECUTION_EXTERNAL_HOST": "localhost",
+    "NETWORK_MODE": "bridge",
+    "REDIS_URL": "redis://localhost:6379/0",
+    "SEARXNG_URL": "http://localhost:8080",
+    "SCRIPTS_DIR": "/app/scripts",
+    "MODELS_DIR": "/app/models",
+    "COMPOSE_PROJECT_DIR": "/app",
+    "MASS_CONFIG_ENTRY_ID": "1",
+    # Models — a named local model, so a test that resolves "which model"
+    # gets a stable answer instead of whatever the developer last deployed.
+    "DEFAULT_MODEL": "test-model:q4_k_m",
+    "ASSISTANT_MODEL": "test-model:q4_k_m",
+    "CODING_MODEL": "test-model:q4_k_m",
+    "LIBRARIAN_MODEL": "test-model:q4_k_m",
+    "DEFAULT_TTS_VOICE": "af_heart",
+    # Third-party integrations — dummies. The live URLs and tokens belong in
+    # .env, never in a test run.
+    "HA_URL": "http://localhost:8123",
+    "HA_TOKEN": "test-ha-token",
+    "ABS_URL": "http://localhost:13378/",
+    "ABS_API_KEY": "test-abs-key",
+    "AUDIOBOOKSHELF_URL": "http://localhost:13378",
+    "AUDIOBOOKSHELF_USER": "test-user",
+    "AUDIOBOOKSHELF_PASS": "test-pass",
+    "NEXTCLOUD_URL": "http://localhost:8081",
+    "NEXTCLOUD_USER": "test-user",
+    "NEXTCLOUD_PASS": "test-pass",
+    "GITHUB_URL": "https://github.com",
+    "GITHUB_USER": "test-user",
+    "GITHUB_TOKEN": "test-github-token",
+    "GITLAB_URL": "https://gitlab.com",
+    "GITLAB_USER": "test-user",
+    "GITLAB_TOKEN": "test-gitlab-token",
+    "GIT_URL": "https://github.com/test/repo.git",
+    "GIT_USER": "test-user",
+    "GIT_TOKEN": "test-git-token",
+    "GIT_WEBHOOK_SECRET": "test-webhook-secret",
+    "UPSTREAM_DNS": "127.0.0.1",
+    "DNS_CONF_PATH": "/etc/dnsmasq.conf",
+    # Filesystem — tmp paths, so a test can never write into a real deployment.
+    "WORKSPACE_ROOT": tempfile.gettempdir(),
+    "WORKSPACE_REGISTRY_PATH": os.path.join(tempfile.gettempdir(), "workspaces.json"),
+    "LOCAL_NOTES_ROOT": os.path.join(tempfile.gettempdir(), "notes"),
+    "PHRASEBOOK_PATH": os.path.join(_root, "data", "phrasebook.json"),
+    "CHROMA_PERSIST_DIR": os.path.join(tempfile.gettempdir(), "chroma_db"),
+    "VOLUME_BACKUP_ROOT": os.path.join(tempfile.gettempdir(), "backups"),
+    "VOLUME_MANIFEST_PATH": os.path.join(tempfile.gettempdir(), "volumes.json"),
+    "LEGACY_ENV_PATH": os.path.join(_root, ".env"),
+    "TEMP_MEDIA_DIR": os.path.join(tempfile.gettempdir(), "sharedllm_media"),
+    # Device registry — an in-memory store so a test can never read or write the
+    # real device list. Set at import time by two execution test modules before
+    # conftest's isolation fixture existed.
+    "DEVICE_REGISTRY_PATH": ":memory:",
+    # --- Gateway-only configuration ---
+    #
+    # services/gateway/config.py is a SECOND config module (separate from
+    # services/config.py) and it also derives its constants once, at import.
+    # ALPACA_AUDIO_URL is the one that bit: test_music_proxy.py set it with a
+    # module-scope setdefault, which runs at *collection*. Run that file alone
+    # and the setdefault lands before services.gateway.main is imported, so the
+    # route saw the URL; run the whole suite and some earlier module had already
+    # imported main, ALPACA_AUDIO_URL was captured as "", and four tests failed
+    # with a 503 that read like a missing-configuration error. Pinning here
+    # moves the value ahead of every import, which is the only ordering that
+    # cannot lose a race.
+    "ALPACA_AUDIO_URL": "http://audio.test:8082",
+    "EMBEDDING_MODEL": "nomic-ai/nomic-embed-text-v1.5",
+    # Identity seeding requires a password and refuses to boot without one.
+    "DEFAULT_ADMIN_PASSWORD": "test-admin-password",
+    # Mail — dummies. The real relay credentials live in .env.
+    "MAIL_URL": "http://localhost:8025",
+    "MAIL_ADMIN_URL": "http://localhost:8025/admin",
+    "MAIL_ADMIN": "test-admin",
+    "MAIL_PASS": "test-mail-pass",
+    "MAIL_USER": "test-user",
+    "MAIL_USER_PASS": "test-user-pass",
+    # Presentation
+    "TIMEZONE": "UTC",
+    "ANNOUNCEMENT_BLACKLIST": "test-announcement",
+}
+
+# Load real env config (.env.test > .env) first, then pin on top of it.
+#
+# Order AND operator both matter, and getting either wrong is invisible:
+#
+#  * Pinning first with setdefault looked correct and was not. It defers to
+#    whatever is already in the environment, so a CI `env:` block or a developer's
+#    exported shell variable overrode every "deterministic" default — which is
+#    exactly how five test_music_proxy tests kept returning 401 against a real
+#    INTERNAL_SECRET while services/config.py had captured a different one.
+#  * Pinning first with a plain assignment would let _load_env_files() overwrite
+#    the dummies with the developer's real ABS_API_KEY / HA_TOKEN / Git tokens
+#    moments later.
+#
+# So: load, then ASSIGN. After this block, every var above holds its listed
+# value no matter what the runner or the developer's .env contained.
+#
+# The opt-out exists for `local_only` runs that genuinely point at live
+# infrastructure; it is never set in CI.
+_PASSTHROUGH = os.environ.get("SHAREDLLM_TEST_PASSTHROUGH_ENV", "").strip().lower() in {"1", "true", "yes"}
+if not _PASSTHROUGH:
+    for _key, _val in _TEST_ENV_DEFAULTS.items():
+        os.environ[_key] = _val
+
+# Load real env config (.env.test > .env) for any var not pinned above.
 _load_env_files()
+
+if _PASSTHROUGH:
+    # Honour the real deployment for the vars a live run needs, but keep the
+    # values that would otherwise silently point tests at production storage.
+    for _key, _val in _TEST_ENV_DEFAULTS.items():
+        os.environ.setdefault(_key, _val)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_environ():
+    """Stop one test's os.environ edits from becoming the next test's baseline.
+
+    Several tests reload services.config, which re-derives every constant from
+    the *current* environment. Combined with the env clobbering some test
+    modules do at import time, an un-restored environment makes a large part of
+    the suite order-dependent: the same test passes alone and fails in a full
+    run, or the reverse. Snapshot and restore so each test starts clean.
+    """
+    saved = dict(os.environ)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
 
 
 @pytest.fixture(scope="session")

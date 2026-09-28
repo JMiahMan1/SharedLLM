@@ -2,8 +2,6 @@ import json
 import os
 import time
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 
 import pytest
 from fastapi.testclient import TestClient

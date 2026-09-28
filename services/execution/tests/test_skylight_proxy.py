@@ -1,7 +1,5 @@
 import os
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 
 from unittest.mock import patch
 

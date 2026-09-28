@@ -11,7 +11,6 @@ import os
 # at the bottom). Importing git_ops directly triggers the cycle, so we must
 # import main first (the production entrypoint order). main refuses to start
 # without INTERNAL_SECRET, hence the env stub.
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
 os.environ.setdefault("WORKSPACE_DATABASE_URL", "sqlite:///:memory:")
 
 from unittest.mock import AsyncMock, MagicMock

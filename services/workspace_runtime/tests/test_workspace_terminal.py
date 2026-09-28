@@ -5,7 +5,6 @@ import os
 import tempfile
 from unittest.mock import AsyncMock, MagicMock, patch
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 _TEST_WS_ROOT = os.path.abspath(".tmp/workspaces")
 os.environ["WORKSPACE_RUNTIME_ROOT"] = _TEST_WS_ROOT
 os.makedirs(_TEST_WS_ROOT, exist_ok=True)

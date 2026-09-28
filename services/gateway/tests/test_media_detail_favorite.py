@@ -1,8 +1,6 @@
 """Tests for media detail and favorite endpoints."""
-import os
 import sys
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 
 from unittest.mock import AsyncMock, MagicMock, patch
 

@@ -4,12 +4,9 @@ Nothing is visible cross-user unless the target opted in and the viewer is
 inside the chosen audience. Failure paths return empty, never other people's
 data.
 """
-import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-os.environ.setdefault("INTERNAL_SECRET", "test-secret")
-os.environ.setdefault("FERNET_KEY", "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE=")
 
 import pytest
 from fastapi import HTTPException

@@ -5,8 +5,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["ALPACA_AUDIO_URL"] = "http://audio.test:8082"
+# The URL and the shared secret both come from conftest, which pins them before
+# any module is imported. A literal in this file would be a second source of
+# truth that only agrees when collection order happens to be favourable.
 
 mock_redis = MagicMock()
 sys.modules["redis"] = mock_redis
@@ -15,7 +16,7 @@ sys.modules["fastembed"] = MagicMock()
 sys.modules["intent_engine"] = MagicMock()
 sys.modules["background_worker"] = MagicMock()
 
-AUTH = {"X-Internal-Secret": "test-secret"}
+AUTH = {"X-Internal-Secret": os.environ["INTERNAL_SECRET"]}
 
 
 class _Response:
@@ -121,7 +122,7 @@ def _body(response):
 class _FakeRequest:
     def __init__(self, body):
         self._body = body
-        self.headers = {"X-Internal-Secret": "test-secret"}
+        self.headers = dict(AUTH)
 
     async def json(self):
         return self._body

@@ -5,8 +5,6 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, StaticPool, create_engine, select
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
-os.environ["FERNET_KEY"] = "bW9ja2VkLWtleS1mb3ItdGVzdGluZy1wdXJwb3NlcyE="
 
 from services.identity import main as identity_main
 from services.identity.main import app, _forward_location_to_ha, LocationUpdate

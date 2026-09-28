@@ -6,9 +6,7 @@ from pathlib import Path
 _TMP = Path(__file__).resolve().parents[1] / ".tmp"
 _TMP.mkdir(parents=True, exist_ok=True)
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 os.environ["WORKSPACE_DATABASE_URL"] = f"sqlite:///{_TMP / 'test_ws_security.db'}"
-os.environ["FERNET_KEY"] = "g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14="
 
 import httpx
 import pytest
