@@ -80,17 +80,34 @@ export interface UserProfileRaw {
   gitlab_user?: string | null;
   git_url?: string | null;
   git_user?: string | null;
- audiobookshelf_url?: string | null;
+  audiobookshelf_url?: string | null;
   audiobookshelf_user?: string | null;
   audiobookshelf_api_key?: string | null;
+  mass_url?: string | null;
+  mass_token?: string | null;
   skylight_url?: string | null;
   skylight_email?: string | null;
   skylight_enabled?: boolean;
   voice_fingerprint?: string | null;
   voice_id?: string | null;
   avatar_url?: string | null;
-  share_with_all?: boolean;
   [key: string]: unknown;
+}
+
+/**
+ * Services a user may borrow from the system default user when they have no
+ * credentials of their own. Grants are per service, admin-only and revocable
+ * (see docs/PER_USER_CREDENTIALS.md).
+ */
+export type ShareableService = 'home_assistant' | 'music_assistant' | 'audiobookshelf' | 'nextcloud';
+
+export interface CredentialShares {
+  username: string;
+  services: ShareableService[];
+  granted_by?: string | null;
+  granted_at?: string | null;
+  note?: string | null;
+  shared_owner?: string | null;
 }
 
 export interface UserProfile extends UserProfileRaw {

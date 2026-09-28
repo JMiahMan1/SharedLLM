@@ -110,7 +110,15 @@ The current resolved credential payload can include:
 - GitHub: `github_url`, `github_user`, `github_token`
 - GitLab: `gitlab_url`, `gitlab_user`, `gitlab_token`
 - Audiobookshelf: `audiobookshelf_url`, `audiobookshelf_user`,
-  `audiobookshelf_pass`
+  `audiobookshelf_pass`, `audiobookshelf_api_key`
+- Music Assistant: `mass_url`, `mass_token` (token only)
+
+Alongside the credentials, `/api/resolve` returns `credential_sources`
+(`own` / `granted` / `shared` / `absent` per service) and
+`shared_credential_owner`. A user's own credentials always win; a grant
+(per service, admin-only, revocable, recorded) is the only way another user can
+borrow the system default user's credentials. See
+`docs/PER_USER_CREDENTIALS.md`.
 
 ## What It Is Meant To Do
 

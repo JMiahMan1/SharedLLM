@@ -10,6 +10,8 @@ import type {
   WorkspaceListResponse,
   UserProfileRaw,
   UserProfile,
+  CredentialShares,
+  ShareableService,
   APIKey,
   DiscoveredUser,
   DeviceAssignment,
@@ -410,6 +412,25 @@ export const api = {
   async updateProfile(data: Partial<UserProfile>): Promise<UserProfile> {
     const resp = await apiClient.patch('/api/users/me', mapUserPayload(data));
     return normalizeUser(resp.data);
+  },
+
+  /** Which shared (system default) services this user may borrow. */
+  async getCredentialShares(username: string): Promise<CredentialShares> {
+    const resp = await apiClient.get(`/api/users/${username}/credential-shares`);
+    return resp.data;
+  },
+
+  /** Grant/revoke shared services. Identity allows admins only. */
+  async putCredentialShares(
+    username: string,
+    services: ShareableService[],
+    note?: string,
+  ): Promise<CredentialShares> {
+    const resp = await apiClient.put(`/api/users/${username}/credential-shares`, {
+      services,
+      note: note ?? null,
+    });
+    return resp.data;
   },
   async getUserTheme(): Promise<{ theme_id: string; packs: unknown[] }> {
     // Runs before/independently of auth, so a 401 must not log the user out.

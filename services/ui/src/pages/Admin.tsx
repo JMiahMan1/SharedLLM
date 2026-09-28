@@ -31,6 +31,7 @@ import {
   ArrowUpCircle,
   PowerOff,
   RefreshCw,
+  Users,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../services/api';
@@ -44,6 +45,7 @@ import type {
   RagStats,
 } from '../services/api';
 import Modal from '../components/ui/Modal';
+import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import ServiceAccessSetup from '../components/admin/ServiceAccessSetup';
 import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
@@ -102,6 +104,8 @@ type UserFormState = {
   audiobookshelf_user: string;
   audiobookshelf_pass: string;
   audiobookshelf_api_key: string;
+  mass_url: string;
+  mass_token: string;
 };
 
 const emptyUserForm: UserFormState = {
@@ -124,6 +128,8 @@ const emptyUserForm: UserFormState = {
   audiobookshelf_user: '',
   audiobookshelf_pass: '',
   audiobookshelf_api_key: '',
+  mass_url: '',
+  mass_token: '',
 };
 
 const toUserForm = (user?: UserProfile | null): UserFormState => ({
@@ -146,6 +152,8 @@ const toUserForm = (user?: UserProfile | null): UserFormState => ({
   audiobookshelf_user: String(user?.audiobookshelf_user ?? ''),
   audiobookshelf_pass: '',
   audiobookshelf_api_key: String(user?.audiobookshelf_api_key ?? ''),
+  mass_url: String(user?.mass_url ?? ''),
+  mass_token: '',
 });
 
 const normalizeServiceKey = (name: string): string =>
@@ -166,6 +174,7 @@ const Admin = () => {
   const [newSettingValue, setNewSettingValue] = useState('');
   const [discoveryFilter, setDiscoveryFilter] = useState('');
   const [passwordModalUser, setPasswordModalUser] = useState<string | null>(null);
+  const [sharesUser, setSharesUser] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [inspectingCollection, setInspectingCollection] = useState<string | null>(null);
   const [inspectLimit, setInspectLimit] = useState(50);
@@ -333,6 +342,8 @@ const Admin = () => {
         audiobookshelf_user: form.audiobookshelf_user,
         audiobookshelf_pass: form.audiobookshelf_pass,
         audiobookshelf_api_key: form.audiobookshelf_api_key,
+        mass_url: form.mass_url,
+        mass_token: form.mass_token,
       };
 
       if (editingUser) {
@@ -700,6 +711,13 @@ const Admin = () => {
                         aria-label={`Change password for ${user.username}`}
                       >
                         <KeyRound size={16} />
+                      </button>
+                      <button
+                        onClick={() => setSharesUser(user.username)}
+                        className="rounded-xl p-2 text-slate-400 transition hover:bg-purple-500/10 hover:text-purple-300"
+                        aria-label={`Shared service access for ${user.username}`}
+                      >
+                        <Users size={16} />
                       </button>
                       {!user.is_system_default && (
                         <button
@@ -1864,6 +1882,8 @@ const Admin = () => {
               ['Audiobookshelf Username', 'audiobookshelf_user'],
               ['Audiobookshelf Password', 'audiobookshelf_pass'],
               ['Audiobookshelf API Key', 'audiobookshelf_api_key'],
+              ['Music Assistant URL', 'mass_url'],
+              ['Music Assistant Token', 'mass_token'],
             ].map(([label, key]) => (
               <label key={key} className="space-y-2">
                 <span className="text-xs font-black uppercase tracking-widest text-slate-500">{label}</span>
@@ -1953,6 +1973,22 @@ const Admin = () => {
               {setPasswordMutation.isPending ? 'Updating...' : 'Set Password'}
             </button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={Boolean(sharesUser)}
+        onClose={() => setSharesUser(null)}
+        title={`Shared Service Access for @${sharesUser}`}
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-400">
+            A user&apos;s own credentials always win. Grant a service only when this user has none of their own —
+            Jarvis then uses the system default user&apos;s credentials for it.
+          </p>
+          {sharesUser && (
+            <SharedCredentialsCard username={sharesUser} isAdmin isSystemDefault={false} />
+          )}
         </div>
       </Modal>
 
