@@ -406,13 +406,13 @@ class TestABSHandlers:
             ],
         }
         mock_progress = {
-            "currentTime": 21708,
-            "isComplete": False,
-            "progress": 67,
+            "mediaProgress": [
+                {"libraryItemId": "def456", "currentTime": 21708, "duration": 32400, "isFinished": False, "progress": 0.67},
+            ],
         }
         with (
             patch("services.execution.handlers.audiobookshelf.abs_client.get_items_in_progress", new=AsyncMock(return_value=mock_items_in_progress)),
-            patch("services.execution.handlers.audiobookshelf.abs_client.get_book_progress", new=AsyncMock(return_value=mock_progress)),
+            patch("services.execution.handlers.audiobookshelf.abs_client.get_progress", new=AsyncMock(return_value=mock_progress)),
         ):
             result = await _handle_last_played(abs_url, abs_key)
 
