@@ -91,13 +91,37 @@ async def test_stream_url_uses_lan_host_for_devices():
     The docker-internal alias (`http://gateway:11435`) is not resolvable from
     devices, so when EXECUTION_EXTERNAL_HOST is configured (the same host used
     for every :8888 device URL) the gateway URL must be built from it.
+
+    The expected host is read from abs_client — the module that actually builds
+    the URL — not from services.config. Other tests reload services.config
+    mid-session, which re-derives its constants from the current environment;
+    importing it here compared two different import-time snapshots of the same
+    name, so the assertion failed on a developer machine (where .env sets
+    EXECUTION_EXTERNAL_HOST to a LAN address) while passing in CI.
     """
     from urllib.parse import urlparse
 
-    from services.config import EXECUTION_EXTERNAL_HOST
+    from services.execution import abs_client
 
     url = await abs_handler.abs_client.get_stream_url("book-9", "testuser")
     netloc = urlparse(url).netloc
     assert netloc.endswith(":11435")
-    if EXECUTION_EXTERNAL_HOST:
-        assert netloc == f"{EXECUTION_EXTERNAL_HOST}:11435"
+    assert abs_client.EXECUTION_EXTERNAL_HOST, "test env must pin EXECUTION_EXTERNAL_HOST"
+    assert netloc == f"{abs_client.EXECUTION_EXTERNAL_HOST}:11435"
+
+
+async def test_stream_url_falls_back_to_the_gateway_when_no_external_host(monkeypatch):
+    """With EXECUTION_EXTERNAL_HOST unset the URL must use the gateway alias.
+
+    Patching the attribute on abs_client (rather than the environment) is what
+    makes this a real test: abs_client captured its constants at import, so an
+    os.environ edit would not be seen without the patch.
+    """
+    from urllib.parse import urlparse
+
+    from services.execution import abs_client
+
+    monkeypatch.setattr(abs_client, "EXECUTION_EXTERNAL_HOST", "")
+    url = await abs_client.get_stream_url("book-9", "testuser")
+    netloc = urlparse(url).netloc
+    assert netloc == "gateway:11435"  # the docker-internal alias, unroutable but reachable in-mesh

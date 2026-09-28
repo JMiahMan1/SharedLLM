@@ -79,40 +79,75 @@ class TestMediaTypeDetection(unittest.TestCase):
 
 
 class TestPort8888InCode(unittest.TestCase):
-    """Verify port 8888 is used consistently in all media URL construction."""
+    """Port 8888 is the execution media file server, and every media URL is signed.
 
-    def test_video_handler_uses_port_8888(self):
-        video_path = os.path.join(os.path.dirname(__file__), "..", "execution", "handlers", "video.py")
-        with open(video_path) as f:
-            content = f.read()
-        # Non-Roku path should use 8888
-        assert ":8888/media/" in content, "video.py should use port 8888 for media URLs"
-        # Should NOT have old port 8003 for media
-        lines = content.split("\n")
-        for i, line in enumerate(lines):
-            if ":8003/media/" in line and "EXECUTION_EXTERNAL_HOST" in line:
-                self.fail(f"video.py line {i+1} still uses port 8003 for media: {line.strip()}")
+    These assertions used to grep handlers/video.py and handlers/media.py for the
+    literal ":8888/media/". That rotted the moment commit d6148ccb moved URL
+    construction into execution/media_links.py so the token could be attached —
+    the handlers stopped containing the string and the two tests failed while
+    the code they described was correct and better. They now assert the helper's
+    behaviour, and assert the handlers *delegate* to it rather than building a
+    URL of their own.
+    """
 
-    def test_media_handler_uses_port_8888(self):
-        media_path = os.path.join(os.path.dirname(__file__), "..", "execution", "handlers", "media.py")
-        with open(media_path) as f:
-            content = f.read()
-        assert ":8888/media/" in content, "media.py should use port 8888 for media URLs"
-        lines = content.split("\n")
-        for i, line in enumerate(lines):
-            if ":8003/media/" in line and "EXECUTION_EXTERNAL_HOST" in line:
-                self.fail(f"media.py line {i+1} still uses port 8003 for media: {line.strip()}")
+    @staticmethod
+    def _read(rel: str) -> str:
+        path = os.path.join(os.path.dirname(__file__), "..", "execution", rel)
+        with open(path) as f:
+            return f.read()
 
-    def test_roku_handler_uses_port_8888(self):
-        roku_path = os.path.join(os.path.dirname(__file__), "..", "execution", "handlers", "roku.py")
-        with open(roku_path) as f:
-            content = f.read()
-        # Roku handler doesn't construct media URLs directly (video.py does),
-        # but verify no hardcoded 8003 for media
-        lines = content.split("\n")
-        for i, line in enumerate(lines):
-            if ":8003/media/" in line:
-                self.fail(f"roku.py line {i+1} still uses port 8003 for media: {line.strip()}")
+    def test_media_file_url_targets_port_8888_and_carries_a_signed_token(self):
+        from urllib.parse import parse_qs, urlparse
+
+        from services.execution.media_links import media_file_url
+        from services.shared.media_token import verify
+
+        url = media_file_url("abc 123", "testuser", "host.local")
+        parsed = urlparse(url)
+        assert parsed.netloc == "host.local:8888"
+        assert parsed.path == "/media/abc%20123", "the media id must be url-quoted"
+
+        query = parse_qs(parsed.query)
+        assert query["user"] == ["testuser"]
+        assert verify(query["mt"][0], "testuser") is True, "the mt= token must verify for that user"
+        # And it must not be a valid token for somebody else.
+        assert verify(query["mt"][0], "someone-else") is False
+
+    def test_media_file_url_keeps_the_id_to_a_single_path_segment(self):
+        """A media id must not be able to walk the served directory.
+
+        The dots survive but the separators do not: media_file_url() quotes with
+        safe="", so "../../etc/passwd" arrives as one opaque segment rather than
+        three. That is what stops the traversal, so assert the segment count
+        rather than the absence of "..".
+        """
+        from urllib.parse import unquote, urlparse
+
+        from services.execution.media_links import media_file_url
+
+        parsed = urlparse(media_file_url("../../etc/passwd", "u", "h"))
+        prefix = "/media/"
+        assert parsed.path.startswith(prefix)
+        # The separators are percent-encoded, so the server sees one opaque
+        # segment and the dots never become a directory walk.
+        assert "/" not in parsed.path[len(prefix) :], f"media id escaped its path segment: {parsed.path}"
+        assert unquote(parsed.path) == "/media/../../etc/passwd"  # what it *would* be unquoted
+
+    def test_handlers_delegate_to_the_signed_url_helper(self):
+        for rel in ("handlers/video.py", "handlers/media.py"):
+            content = self._read(rel)
+            assert "media_file_url" in content, f"{rel} should build media URLs via media_file_url()"
+
+    def test_no_handler_hardcodes_a_media_port(self):
+        """A hand-built URL would skip the token, so no handler may contain a
+        media URL literal at all — not 8888 (bypasses signing) and not 8003."""
+        for rel in ("handlers/video.py", "handlers/media.py", "handlers/roku.py"):
+            content = self._read(rel)
+            for bad in (":8888/media/", ":8003/media/"):
+                lines = content.split("\n")
+                for i, line in enumerate(lines):
+                    if bad in line:
+                        self.fail(f"{rel} line {i+1} hardcodes {bad}: {line.strip()}")
 
 
 class TestMediaPlaybackRouting(unittest.TestCase):

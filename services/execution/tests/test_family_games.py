@@ -1,7 +1,6 @@
 import os
 import sys
 
-os.environ["INTERNAL_SECRET"] = "test-secret"
 sys.path.insert(0, os.path.abspath("."))
 
 import pytest
@@ -86,7 +85,14 @@ def test_memory_matching_a_pair_scores_and_keeps_it_up():
 def test_memory_miss_flips_the_wrong_cards_back():
     state = GameRegistry().start_memory("room", pairs=2)
     revealed_before = set(state.revealed)
-    wrong = [state.board[1], state.board[2]]
+    # Pick two cards from *different* pairs by content. The board is shuffled
+    # (family_games.py random.shuffle), so board[1] and board[2] are sometimes
+    # the same pair and the flip legitimately matches — this test used to fail
+    # roughly one run in four.
+    first = state.board[0]
+    partner = state.board.index(first, 1)
+    other = next(i for i, name in enumerate(state.board) if i not in (0, partner))
+    wrong = [first, state.board[other]]
 
     result = apply_memory_flip(state, "Kiddo", wrong)
     assert result["matched"] is False
@@ -96,8 +102,17 @@ def test_memory_miss_flips_the_wrong_cards_back():
 
 def test_memory_finishes_when_every_card_is_up():
     state = GameRegistry().start_memory("room", pairs=2)
-    for i in range(0, len(state.board), 2):
-        apply_memory_flip(state, "A", [state.board[i], state.board[i + 1]])
+    # Walk the board in *pair* order rather than index order: the board is
+    # shuffled, so consecutive indices are not consecutive pairs and the game
+    # could never complete.
+    seen: set[str] = set()
+    pairs = []
+    for name in state.board:
+        if name not in seen:
+            seen.add(name)
+            pairs.append(name)
+    for name in pairs:
+        apply_memory_flip(state, "A", [name, state.board[state.board.index(name, 1)]])
     assert state.over is True
 
 
