@@ -4699,6 +4699,15 @@ async def proxy_react_talk_message(request: Request):
     return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
 
 
+@app.post("/api/communication/talk/call")
+async def proxy_talk_call(request: Request):
+    """Join or leave the room's Talk call and return its signalling details."""
+    body = await request.json()
+    action = "call_leave" if body.get("leave") else "call_join"
+    payload = {"action": action, "token": body.get("token")}
+    return await _proxy_execution_with_identity(request, "/execute/talk", payload, as_user=body.get("as_user"))
+
+
 @app.post("/api/communication/talk/game")
 async def proxy_talk_game(request: Request):
     """Drive a family game in a room: start | answer | flip | stop."""

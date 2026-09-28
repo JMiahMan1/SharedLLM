@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart3, Loader2, MessageSquare, Mic, Plus, RefreshCw, Send, Square } from 'lucide-react';
+import { BarChart3, Loader2, MessageSquare, Mic, Phone, Plus, RefreshCw, Send, Square } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
 import type { ExecutionResponse } from '../../types/api';
@@ -143,6 +143,23 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
     // Keep the newest message in view as the feed grows.
     if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
   }, [messages]);
+
+  const [inCall, setInCall] = useState(false);
+  const [callError, setCallError] = useState<string | null>(null);
+
+  const call = useMutation({
+    mutationFn: (leave: boolean) =>
+      leave ? api.leaveTalkCall(activeToken, asUser) : api.joinTalkCall(activeToken, asUser),
+    onSuccess: (res, leave) => {
+      if (res.status === 'SUCCESS') {
+        setInCall(!leave);
+        setCallError(null);
+      } else {
+        setCallError(res.message || (leave ? 'Could not leave the call' : 'Could not join the call'));
+      }
+    },
+    onError: (error: Error) => setCallError(error.message || 'Could not start the call'),
+  });
 
   const markRead = useMutation({
     mutationFn: (token: string) => api.markTalkRead(token, asUser),
@@ -582,6 +599,19 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
             >
               {recording ? <Square size={16} /> : <Mic size={16} />}
             </button>
+            {activeToken && (
+              <button
+                type="button"
+                className={`glass-button min-h-11 min-w-11 px-4 py-3 ${inCall ? 'text-emerald-300' : ''}`}
+                onClick={() => call.mutate(inCall)}
+                disabled={call.isPending}
+                aria-pressed={inCall}
+                aria-label={inCall ? 'Leave the call' : 'Join the call'}
+                title={callError ?? (inCall ? 'Leave the call' : 'Join the call')}
+              >
+                {call.isPending ? <Loader2 size={16} className="animate-spin" /> : <Phone size={16} />}
+              </button>
+            )}
           </div>
           {clip && (
             <div className="rounded-xl border border-white/10 bg-white/5 p-2 space-y-2" data-testid="voice-preview">
@@ -620,7 +650,7 @@ export default function ChatPanel({ currentUser = '', className = '' }: ChatPane
             </div>
           )}
           <p className="text-[10px] text-slate-500">
-            Enter sends · Shift+Enter adds a line · voice messages post straight into Talk.
+            {callError ?? 'Enter sends · Shift+Enter adds a line · voice messages post straight into Talk.'}
           </p>
         </div>
       </div>
