@@ -5,7 +5,7 @@ the command shaping, path translation, and return-value contract that the
 execution service and workspace_runtime depend on.
 """
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -90,15 +90,39 @@ def test_run_workspace_cmd_shapes_exec(fake_docker):
 
 
 def test_run_workspace_cmd_timeout(fake_docker):
+    # The path has to sit under SANDBOX_MOUNT_ROOT or this takes the host-exec
+    # branch, which never calls asyncio.to_thread - so the patch below would be
+    # dead code and the assertion would be measuring a host timeout instead of
+    # the container one.
     _container, _ = fake_docker
 
     async def go():
         with patch("asyncio.to_thread", side_effect=TimeoutError()):
-            return await sb.run_workspace_cmd("ws", "/w", "sleep 10", shell=True, timeout=0.01)
+            return await sb.run_workspace_cmd("ws", "/workspaces/w", "sleep 10", shell=True, timeout=0.01)
 
     res = asyncio.run(go())
     assert res["returncode"] == 124
     assert "timed out" in res["stderr"]
+
+
+def test_run_workspace_cmd_outside_the_mount_root_falls_back_to_the_host(fake_docker):
+    """A workspace that cannot be bind-mounted runs on the host instead, and it
+    has to land in the workspace - not in the service's own working directory."""
+    _container, client = fake_docker
+
+    async def go():
+        return await sb.run_workspace_cmd("ws", "/tmp/elsewhere", "pwd", timeout=5.0)
+
+    with patch("asyncio.create_subprocess_exec") as spawn:
+        spawn.return_value.communicate = AsyncMock(return_value=(b"/tmp/elsewhere\n", b""))
+        spawn.return_value.returncode = 0
+        res = asyncio.run(go())
+
+    assert res["returncode"] == 0
+    assert res["stdout"] == "/tmp/elsewhere\n"
+    # Docker was never touched for an unmappable path.
+    assert client.containers.get.call_count == 0
+    assert spawn.call_args.kwargs["cwd"] == "/tmp/elsewhere"
 
 
 def test_run_workspace_cmd_shell_wraps_sh(fake_docker):

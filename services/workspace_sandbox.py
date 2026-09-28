@@ -581,7 +581,13 @@ async def run_workspace_cmd(
     # container, so run on the host instead (also covers test/dev paths).
     if not host_path or not _under_mount_root(host_path):
         log.info(f"[Sandbox] {workspace_id} root {host_path} not under {SANDBOX_MOUNT_ROOT}; using host exec")
-        return await _host_exec(cmd, cwd=cwd, env=env, shell=shell, timeout=timeout)
+        # container_cwd, not cwd: the host fallback has to land in the workspace
+        # too. Passing cwd through (None for most callers) ran the command in
+        # the service's own working directory, so `ls` listed the service root,
+        # pytest collected the wrong tree, git reported the wrong repo, and a
+        # relative write landed outside the workspace. It is also the clamped
+        # value, so an escape attempt is contained on the host as well.
+        return await _host_exec(cmd, cwd=container_cwd, env=env, shell=shell, timeout=timeout)
     try:
         rc, out, err = await asyncio.wait_for(
             asyncio.to_thread(
@@ -610,7 +616,7 @@ async def run_workspace_cmd(
         log.warning(f"[Sandbox] docker execution failed for {workspace_id}, falling back to host: {e}")
         return await _host_exec(
             cmd,
-            cwd=cwd,
+            cwd=container_cwd,
             env=env,
             shell=shell,
             timeout=timeout,
