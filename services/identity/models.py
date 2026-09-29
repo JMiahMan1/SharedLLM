@@ -71,6 +71,28 @@ class DeviceAssignment(SQLModel, table=True):  # type: ignore
     revoked: bool = Field(default=False)
     user: User | None = Relationship(back_populates="devices")
 
+class EntityProtection(SQLModel, table=True):  # type: ignore
+    """Per-entity control lock for entities that change the physical world.
+
+    A protected entity is controllable only by admins (and the system default
+    user) plus the usernames on its own permit list. The `DeviceAssignment` row
+    for that entity is ignored while the protection is in force, so a stale
+    grant can never re-open an entity an admin has locked.
+
+    One row per locked entity. ``permitted_usernames`` is a JSON array of
+    usernames, e.g. '["kate", "sam"]'. ``granted_by``/``granted_at`` are the
+    audit trail: who locked it and when.
+
+    Rows only ever exist for *protected* entities: releasing a lock deletes the
+    row, so there is no third "protected but inactive" state to reason about.
+    """
+    __table_args__ = {"extend_existing": True}
+    entity_id: str = Field(primary_key=True)  # e.g. "climate.hallway"
+    permitted_usernames: str = Field(default="[]", description="JSON array of usernames allowed to control it")
+    granted_by: str | None = None
+    granted_at: str | None = None
+    note: str | None = None
+
 class APIKey(SQLModel, table=True):  # type: ignore
     """Secure access tokens for users and external clients."""
     __table_args__ = {"extend_existing": True}

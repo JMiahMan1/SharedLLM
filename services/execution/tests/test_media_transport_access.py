@@ -7,6 +7,8 @@ import os
 
 from fastapi.testclient import TestClient
 
+import services.execution.entity_access as entity_access
+import services.execution.main as exec_main
 from services.execution.main import app
 
 client = TestClient(app)
@@ -17,19 +19,21 @@ def _secret() -> str:
 
 
 def _post_transport(monkeypatch, allowed_entities, entity_id="media_player.office"):
-    import services.execution.main as exec_main
+    from services.execution.entity_access import EntityPermissions
     from services.execution.schemas import ExecutionResult
 
     reached = []
 
-    async def fake_allowed(username, is_admin):
-        return set(allowed_entities)
+    async def fake_permissions(username, is_admin=False):
+        return EntityPermissions(assigned=frozenset(allowed_entities))
 
     async def fake_transport(req):
         reached.append(req.entity_id)
         return ExecutionResult(status="SUCCESS", message="reached", service="media_transport")
 
-    monkeypatch.setattr(exec_main, "_allowed_entity_ids", fake_allowed)
+    # Patched on the module that owns the lookup: verify_entity_access resolves
+    # load_entity_permissions in entity_access's namespace, not main's.
+    monkeypatch.setattr(entity_access, "load_entity_permissions", fake_permissions)
     monkeypatch.setattr(exec_main.MediaPlaybackService, "transport", fake_transport)
 
     resp = client.post(

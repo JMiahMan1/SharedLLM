@@ -3340,6 +3340,45 @@ async def proxy_put_credential_shares(username: str, request: Request):
         return await _proxy_json_response(resp)
 
 
+@app.get("/api/entity-protection")
+async def proxy_list_entity_protection(request: Request):
+    """Every entity currently locked against normal users, with its permit list.
+
+    Identity allows admins only; a non-admin gets a 403 passed straight
+    through, so the gateway deliberately does no role check of its own.
+    """
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/entity-protection",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.put("/api/entity-protection/{entity_id}")
+async def proxy_put_entity_protection(entity_id: str, request: Request):
+    """Lock an entity (with a permit list) or release it. Admins only.
+
+    The id is a Home Assistant ``domain.object`` id, so a single path segment
+    is the whole story: the default converter refuses any ``/`` outright. It
+    is then percent-encoded before being spliced into the upstream URL, so an
+    encoded ``?`` or ``#`` in the id can't truncate the path and quietly lock
+    a different entity than the caller asked for.
+    """
+    body = await request.json()
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.put(
+            f"{IDENTITY_SVC}/api/entity-protection/{quote(entity_id, safe='')}",
+            json=body,
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/settings")
 async def proxy_get_settings(request: Request):
     auth_header = request.headers.get("Authorization")

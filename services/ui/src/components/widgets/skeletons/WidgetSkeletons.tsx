@@ -184,6 +184,26 @@ export const HealthActivitySkeleton: React.FC = () => (
   </div>
 );
 
+export const ClimateSkeleton: React.FC = () => (
+  <div className="glass-panel overflow-hidden p-5 flex flex-col h-full w-full relative">
+    <SkeletonHeader title="Climate" icon="🌡️" />
+    <div className="flex-1 flex flex-col items-center justify-center gap-3">
+      <div className="relative h-28 w-28">
+        <div className="absolute inset-0 rounded-full border-[10px] border-white/5 animate-pulse" />
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+          <div className="h-6 w-12 bg-white/5 rounded animate-pulse" />
+          <div className="h-2 w-10 bg-white/5 rounded animate-pulse" />
+        </div>
+      </div>
+      <div className="flex gap-1.5">
+        <div className="h-6 w-14 bg-white/5 rounded-lg animate-pulse" />
+        <div className="h-6 w-14 bg-white/5 rounded-lg animate-pulse" />
+        <div className="h-6 w-14 bg-white/5 rounded-lg animate-pulse" />
+      </div>
+    </div>
+  </div>
+);
+
 const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   energy_insights: EnergyInsightsSkeleton,
   ambient_timer: AmbientTimerSkeleton,
@@ -195,6 +215,7 @@ const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   device_control: DeviceControlSkeleton,
   workspaces: WorkspacesSkeleton,
   health_activity: HealthActivitySkeleton,
+  climate: ClimateSkeleton,
 };
 
 interface WidgetSkeletonSelectorProps {

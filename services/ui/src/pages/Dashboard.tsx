@@ -32,6 +32,7 @@ import VoiceAssistantOverlay from '../components/voice/VoiceAssistantOverlay';
 import Modal from '../components/ui/Modal';
 import BentoBoxDashboard from '../components/dashboard/BentoBoxDashboard';
 import DashboardSettingsPanel from '../components/dashboard/DashboardSettingsPanel';
+import { useWidgetStore } from '../stores/widgetStore';
 
 // ── Per-section Error Boundary ───────────────────────────────────────────────
 
@@ -271,6 +272,13 @@ const Dashboard = () => {
   const { trigger } = useHaptics();
   const isMobile = Capacitor.isNativePlatform();
   const isAdmin = user?.is_admin;
+  // The widget store owns the `adminOnly` gate, so it needs the role. This
+  // component is the single place that has it and renders both consumers
+  // (BentoBoxDashboard and DashboardSettingsPanel).
+  const setAdminStatus = useWidgetStore((state) => state.setAdminStatus);
+  useEffect(() => {
+    setAdminStatus(Boolean(isAdmin));
+  }, [isAdmin, setAdminStatus]);
   // On mobile, normal users get a streamlined dashboard: the full Live Service
   // Status / Recent Activity / Workspaces sections are hidden (admins keep
   // them). Workspaces are still reachable via the toggleable Workspaces widget.

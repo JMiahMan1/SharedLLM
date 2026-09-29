@@ -3,7 +3,7 @@
 Pydantic schemas for the Identity Service API.
 """
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # ─── Internal inter-service schema ────────────────────────────────────────────
 
@@ -204,6 +204,28 @@ class DeviceAssignmentRead(BaseModel):
     user_id: int
     username: str
     revoked: bool = False
+
+
+class EntityProtectionUpdate(BaseModel):
+    """Body for locking/unlocking one entity.
+
+    `permitted_usernames` is a list of usernames that may control a protected
+    entity even though they are not admins. Sending `protected: false` releases
+    the lock and forgets the permit list (the entity reverts to plain
+    DeviceAssignment rules).
+    """
+    protected: bool = True
+    permitted_usernames: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+
+class EntityProtectionRead(BaseModel):
+    entity_id: str
+    permitted_usernames: list[str] = Field(default_factory=list)
+    granted_by: str | None = None
+    granted_at: str | None = None
+    note: str | None = None
+
 
 class LoginRequest(BaseModel):
     username: str

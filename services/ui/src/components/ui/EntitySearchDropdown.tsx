@@ -10,6 +10,12 @@ interface EntitySearchDropdownProps {
   placeholder?: string;
   domainFilter?: string;
   className?: string;
+  /**
+   * Distinguishes multiple instances on one page. The Users & Devices admin
+   * tab has two of these (device assignment and entity protection), and
+   * `getByTestId` throws on duplicates rather than quietly picking one.
+   */
+  testId?: string;
 }
 
 export default function EntitySearchDropdown({
@@ -18,6 +24,7 @@ export default function EntitySearchDropdown({
   placeholder = 'Search entities...',
   domainFilter,
   className = '',
+  testId,
 }: EntitySearchDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -112,9 +119,9 @@ export default function EntitySearchDropdown({
               <button
                 type="button"
                 onClick={() => handleSelect(entity.entity_id)}
-                className={`w-full px-4 py-2 text-left transition hover:bg-white/10 ${
+                className={`w-full px-4 py-2 text-left transition hover:bg-white/10 focus-visible:bg-white/10 ${
                   entity.entity_id === value ? 'bg-white/10' : ''
-                }`}
+                } pointer-coarse:min-h-11`}
               >
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-mono text-indigo-400/70 w-24 truncate">
@@ -145,6 +152,7 @@ export default function EntitySearchDropdown({
         <input
           ref={inputRef}
           type="text"
+          data-testid={testId}
           value={isOpen ? search : displayValue}
           onChange={(e) => {
             setSearch(e.target.value);
@@ -161,7 +169,7 @@ export default function EntitySearchDropdown({
           <button
             type="button"
             onClick={handleClear}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white flex items-center justify-center h-8 w-8 pointer-coarse:h-11 pointer-coarse:w-11"
           >
             <X size={14} />
           </button>
