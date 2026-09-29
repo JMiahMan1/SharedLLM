@@ -18,9 +18,18 @@ import java.util.Map;
 public final class MaterialIcons {
     private static final Map<String, Integer> ICONS = new LinkedHashMap<>();
 
+    /**
+     * Names that stay resolvable for already-saved widget configs but are not
+     * offered in the picker. "garage_closed" pointed at its own drawable whose
+     * pathData was a byte-identical copy of mi_garage (the closed-door
+     * Material "garage_door" glyph), so the picker offered two identical tiles.
+     * The alias now resolves to the one real drawable, deliberately.
+     */
+    private static final List<String> HIDDEN_ALIASES = java.util.Collections.singletonList("garage_closed");
+
     static {
         ICONS.put("garage", R.drawable.mi_garage);
-        ICONS.put("garage_closed", R.drawable.mi_garage_closed);
+        ICONS.put("garage_closed", R.drawable.mi_garage);
         ICONS.put("garage_open", R.drawable.mi_garage_open);
         ICONS.put("car", R.drawable.mi_car);
         ICONS.put("lightbulb", R.drawable.mi_lightbulb);
@@ -72,8 +81,13 @@ public final class MaterialIcons {
         return "garage";
     }
 
+    /** Icon names offered in the picker, in order, minus the hidden aliases. */
     public static List<String> names() {
-        return new ArrayList<>(ICONS.keySet());
+        List<String> out = new ArrayList<>(ICONS.size());
+        for (String name : ICONS.keySet()) {
+            if (!HIDDEN_ALIASES.contains(name)) out.add(name);
+        }
+        return out;
     }
 
     public static int drawableRes(String name) {
