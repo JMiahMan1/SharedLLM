@@ -184,13 +184,19 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
     };
   }, [loadDevices]);
 
-  // Check if current user has permission to control this device
+  // Can the current user control this device?
+  //
+  // `devices` comes from `/execute/entity/search`, which already drops every
+  // entity this user may neither see nor control — honouring both the device
+  // assignment and any admin-set entity protection. Presence in that list is
+  // therefore the permission answer. This used to be re-derived from the
+  // assignment list, which was wrong twice over: it hid entities an admin had
+  // explicitly permitted through a protection grant (no assignment row), and
+  // it re-implemented a security rule in the browser, where a stale copy
+  // silently disagrees with the backend. The server is the single authority.
   const hasControlPermission = useCallback((entityId: string) => {
-    if (role === 'admin') return true;
-    return assignments.some(
-      (a) => a.device_id === entityId && a.username.toLowerCase() === user?.username?.toLowerCase()
-    );
-  }, [role, assignments, user]);
+    return devices.some((d) => d.entity_id === entityId);
+  }, [devices]);
 
   const isAwayFromHome = useCallback(async (): Promise<boolean> => {
     if (!Capacitor.isNativePlatform()) return false;
@@ -228,7 +234,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
 
   const callHAService = useCallback(async (domain: string, service: string, entityId: string, serviceData: unknown = null) => {
     if (!hasControlPermission(entityId)) {
-      toast.error('Access Denied: You are not assigned to control this device.');
+      toast.error('Access Denied: this device is no longer available to your account.');
       return;
     }
 
@@ -262,7 +268,7 @@ const DeviceControlWidget = ({ settingsButton }: IWidgetProps) => {
   const toggleDevice = useCallback(
     async (entityId: string, currentState: string) => {
       if (!hasControlPermission(entityId)) {
-        toast.error('Access Denied: You are not assigned to control this device.');
+        toast.error('Access Denied: this device is no longer available to your account.');
         return;
       }
 

@@ -16,9 +16,11 @@
 - **docs/NOTES.md** — Keep-style notes over Nextcloud markdown
 - **docs/SQLITE_VEC_MIGRATION.md** — RAG vector store (referenced by `services/rag/main.py`)
 - **docs/THEMES.md** — theme pack system (Jarvis-wide, per-user)
+- **docs/ENTITY_PROTECTION.md** — locking entities to admins + chosen users; hidden outright from everyone else
 
 ## UI
 - **docs/THEMES.md** — theme packs, import/export, Android widget tinting
+- **docs/ENTITY_PROTECTION.md** — entity locks, the admin panel, and the `adminOnly` widget flag
 - **docs/NOTES.md** — notes UX, actions, pin/colour prefs
 - **docs/FAMILY_HUB.md** — family chat/games/create hub (Nextcloud Talk based)
 - **docs/CHAT_UI_RESEARCH.md** — chat/canvas/call research, decisions and integration phases

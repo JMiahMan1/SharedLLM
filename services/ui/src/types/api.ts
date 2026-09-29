@@ -145,6 +145,20 @@ export interface DeviceAssignment {
   username: string;
 }
 
+/**
+ * An entity locked against normal users. While a row exists, the entity's
+ * DeviceAssignment is ignored: only admins, the system default user, and the
+ * names in `permitted_usernames` may see or control it. Releasing the lock
+ * deletes the row, so an entity is never "protected but inactive".
+ */
+export interface EntityProtection {
+  entity_id: string;
+  permitted_usernames: string[];
+  granted_by: string;
+  granted_at: string;
+  note?: string | null;
+}
+
 export interface GlobalSetting {
   key: string;
   value: string;

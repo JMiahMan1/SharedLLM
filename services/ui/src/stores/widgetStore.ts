@@ -20,6 +20,7 @@ import {
   LayoutGrid,
   LayoutDashboard,
   Activity,
+  Thermometer,
 } from 'lucide-react';
 
 export interface WidgetStateItem {
@@ -41,6 +42,7 @@ const defaultSizes: Record<WidgetKey, WidgetSize> = {
   device_control: 'tall',
   workspaces: 'medium',
   health_activity: 'medium',
+  climate: 'medium',
 };
 
 function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSettings {
@@ -68,7 +70,42 @@ export const defaultWidgetDefs: WidgetDef[] = [
   { key: 'device_control', label: 'Device Control', icon: LayoutGrid, minSize: 'small', defaultSize: 'tall' },
   { key: 'workspaces', label: 'Workspaces', icon: LayoutDashboard, minSize: 'small', defaultSize: 'medium' },
   { key: 'health_activity', label: 'Health', icon: Activity, minSize: 'small', defaultSize: 'medium' },
+  { key: 'climate', label: 'Climate', icon: Thermometer, minSize: 'small', defaultSize: 'medium' },
 ];
+
+/**
+ * The single visibility rule for a widget, shared by every call site.
+ *
+ * This lives as one function on purpose. The `set` wrapper below and
+ * `getActiveWidgets` used to carry two hand-rolled copies of the same filter,
+ * which meant a rule added to one was silently missing from the other — and
+ * `BentoBoxDashboard` subscribes to `visibleWidgets`, the copy the `set`
+ * wrapper produces. Filtering in one place and not the other is a bypass, so
+ * there is now nowhere for a rule to be forgotten.
+ */
+export function isWidgetVisible(
+  def: WidgetDef,
+  ctx: {
+    userWidgets: Record<string, UserWidgetSettings>;
+    capabilities: CapabilityPayload;
+    quickAssistantEnabled: boolean;
+    isAdmin: boolean;
+  },
+): boolean {
+  // Management widgets are hidden from normal users before anything else is
+  // considered, so their existence is not even hinted at by the registry.
+  if (def.adminOnly && !ctx.isAdmin) return false;
+  if (def.mountConditions && !def.mountConditions(ctx.capabilities)) return false;
+  const settings = ctx.userWidgets[def.key];
+  if (settings) {
+    if (settings.visibility === 'removed' || settings.visibility === 'hidden') return false;
+  } else {
+    const defaultSettings = createDefaultSettings(def.key, 0);
+    if (defaultSettings.visibility === 'hidden' || defaultSettings.visibility === 'removed') return false;
+  }
+  if (def.requiresQuickAssistantEnabled && !ctx.quickAssistantEnabled) return false;
+  return true;
+}
 
 /**
  * Widgets display pinned-first, then in user order. The key tiebreaker keeps
@@ -94,7 +131,10 @@ interface WidgetState {
   error: string | null;
   mountCapabilities: CapabilityPayload;
   visibleWidgets: WidgetInstance[];
+  /** Whether the signed-in user may see `adminOnly` widgets. Defaults to false. */
+  isAdmin: boolean;
 
+  setAdminStatus: (isAdmin: boolean) => void;
   evaluateMountConditions: (capabilities: CapabilityPayload) => void;
   togglePin: (widgetKey: WidgetKey) => Promise<void>;
   updateOrder: (widgetKey: WidgetKey, newIndex: number) => Promise<void>;
@@ -143,18 +183,12 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
         const next = typeof partial === 'function' ? partial(state) : partial;
         const merged = { ...state, ...next };
       const visibleWidgets = merged.widgetRegistry
-        .filter((def) => {
-          if (def.mountConditions && !def.mountConditions(merged.mountCapabilities)) return false;
-          const settings = merged.userWidgets[def.key];
-          if (settings) {
-            if (settings.visibility === 'removed' || settings.visibility === 'hidden') return false;
-          } else {
-            const defaultSettings = createDefaultSettings(def.key, 0);
-            if (defaultSettings.visibility === 'hidden' || defaultSettings.visibility === 'removed') return false;
-          }
-          if (def.requiresQuickAssistantEnabled && !merged.quickAssistantEnabled) return false;
-          return true;
-        })
+        .filter((def) => isWidgetVisible(def, {
+          userWidgets: merged.userWidgets,
+          capabilities: merged.mountCapabilities,
+          quickAssistantEnabled: merged.quickAssistantEnabled,
+          isAdmin: merged.isAdmin,
+        }))
         .map((def, index) => ({
           def,
           userSettings: merged.userWidgets[def.key] ?? createDefaultSettings(def.key, index),
@@ -175,6 +209,15 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
     error: null,
     mountCapabilities: defaultCapabilities,
     visibleWidgets: [],
+    // Fail closed: until something authoritative says otherwise, the viewer is
+    // not an admin, so `adminOnly` widgets stay hidden. The one-frame delay
+    // for an admin is the safe direction to be wrong in.
+    isAdmin: false,
+
+    setAdminStatus: (isAdmin: boolean) => {
+      if (get().isAdmin === isAdmin) return;
+      set({ isAdmin });
+    },
 
   syncWithServer: async () => {
     if (activeSyncPromise) {
@@ -447,20 +490,14 @@ export const useWidgetStore = create<WidgetState>((rawSet, get) => {
   },
 
   getActiveWidgets: (capabilities: CapabilityPayload) => {
-    const { userWidgets, quickAssistantEnabled, widgetRegistry } = get();
+    const { userWidgets, quickAssistantEnabled, widgetRegistry, isAdmin } = get();
     return widgetRegistry
-      .filter((def) => {
-        if (def.mountConditions && !def.mountConditions(capabilities)) return false;
-        const settings = userWidgets[def.key];
-        if (settings) {
-          if (settings.visibility === 'removed' || settings.visibility === 'hidden') return false;
-        } else {
-          const defaultSettings = createDefaultSettings(def.key, 0);
-          if (defaultSettings.visibility === 'hidden' || defaultSettings.visibility === 'removed') return false;
-        }
-        if (def.requiresQuickAssistantEnabled && !quickAssistantEnabled) return false;
-        return true;
-      })
+      .filter((def) => isWidgetVisible(def, {
+        userWidgets,
+        capabilities,
+        quickAssistantEnabled,
+        isAdmin,
+      }))
       .map((def, index) => ({
         def,
         userSettings: userWidgets[def.key] ?? createDefaultSettings(def.key, index),

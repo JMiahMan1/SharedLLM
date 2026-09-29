@@ -46,6 +46,7 @@ import type {
 } from '../services/api';
 import Modal from '../components/ui/Modal';
 import { SharedCredentialsCard } from '../components/admin/SharedCredentialsCard';
+import { EntityProtectionPanel } from '../components/admin/EntityProtectionPanel';
 import HelpTooltip from '../components/ui/HelpTooltip';
 import ServiceAccessSetup from '../components/admin/ServiceAccessSetup';
 import EntitySearchDropdown from '../components/ui/EntitySearchDropdown';
@@ -839,6 +840,7 @@ const Admin = () => {
                 value={deviceId}
                 onChange={setDeviceId}
                 placeholder="Search Home Assistant entities..."
+                testId="entity-search"
               />
               <select
                 value={deviceUsername}
@@ -886,6 +888,8 @@ const Admin = () => {
               ))}
             </div>
           </section>
+
+          <EntityProtectionPanel users={users} />
         </div>
       )}
 

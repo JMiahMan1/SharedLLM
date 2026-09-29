@@ -4,10 +4,23 @@ import Admin from './Admin';
 import { renderWithProviders } from '../test/render';
 import { api } from '../services/api';
 
+// The Users & Devices tab has two entity dropdowns (device assignment and
+// entity protection), so the mock honours `testId` — `getByTestId` throws on
+// duplicates rather than quietly picking the first one.
 vi.mock('../components/ui/EntitySearchDropdown', () => ({
-  default: ({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) => (
+  default: ({
+    value,
+    onChange,
+    placeholder,
+    testId,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    placeholder?: string;
+    testId?: string;
+  }) => (
     <input
-      data-testid="entity-search"
+      data-testid={testId ?? 'entity-search'}
       type="text"
       value={value}
       placeholder={placeholder}

@@ -15,6 +15,7 @@ import type {
   APIKey,
   DiscoveredUser,
   DeviceAssignment,
+  EntityProtection,
   GlobalSetting,
   GatewayConfig,
   EsphomeDevice,
@@ -118,6 +119,7 @@ export type {
   UserProfile,
   Workspace,
   DeviceAssignment,
+  EntityProtection,
   DiscoveredUser,
   RagStats,
   TelemetryEnrollment,
@@ -252,6 +254,26 @@ function describeFailedTarget(config: AxiosRequestConfig | undefined, status?: n
   const target = `${service}${detail} — ${method} ${path}`;
   lastFailedTarget = target;
   return target;
+}
+
+/**
+ * Re-throw an upstream failure carrying the server's own explanation.
+ *
+ * The response interceptor rejects the raw axios error, whose `message` is
+ * only ever "Request failed with status code 400" — it drops the `detail` the
+ * service actually sent. That is fine for connectivity noise but not for a
+ * refusal an operator has to act on ("Unknown username(s) in the permit list:
+ * alise"), so anything a human is expected to read goes through here rather
+ * than being flattened into a status code.
+ */
+export function rethrowWithServerDetail(error: unknown, fallback: string): never {
+  const data = (error as { response?: { data?: { detail?: unknown } } } | null)?.response?.data;
+  const detail = data?.detail;
+  const message = typeof detail === 'string' && detail.trim()
+    ? detail
+    : (Array.isArray(detail) && detail.length && typeof detail[0]?.msg === 'string' ? detail[0].msg : null)
+    ?? fallback;
+  throw new Error(message);
 }
 
 apiClient.interceptors.response.use(
@@ -1055,6 +1077,36 @@ export const api = {
   async deleteDeviceAssignment(deviceId: string): Promise<{ status?: string; success?: boolean }> {
     const resp = await apiClient.delete(`/api/devices/${encodeURIComponent(deviceId)}`);
     return resp.data;
+  },
+
+  /** Every entity locked against normal users, with its permit list. Admins only. */
+  async getEntityProtections(): Promise<EntityProtection[]> {
+    const resp = await apiClient.get('/api/entity-protection');
+    return resp.data;
+  },
+
+  /**
+   * Lock an entity for everyone but the permit list, or release the lock.
+   *
+   * Admins only (Identity enforces). `protected: false` removes the lock
+   * entirely — the entity reverts to plain device-assignment rules. A refusal
+   * is re-thrown with Identity's own wording, because "you asked for a permit
+   * for a user that does not exist" is the entire point of the check.
+   */
+  async setEntityProtection(
+    entityId: string,
+    body: { protected: boolean; permitted_usernames: string[]; note?: string | null },
+  ): Promise<EntityProtection> {
+    try {
+      const resp = await apiClient.put(`/api/entity-protection/${encodeURIComponent(entityId)}`, {
+        protected: body.protected,
+        permitted_usernames: body.permitted_usernames,
+        note: body.note ?? null,
+      });
+      return resp.data;
+    } catch (error) {
+      return rethrowWithServerDetail(error, `Failed to update protection for ${entityId}`);
+    }
   },
 
   async syncDiscovery(): Promise<{ status: string; entities_count: number }> {
@@ -1907,6 +1959,25 @@ export const api = {
       service: action === 'on' ? 'turn_on' : 'turn_off',
       entity_id: entityId,
       service_data: null,
+    });
+    return resp.data;
+  },
+
+  /**
+   * Call any Home Assistant service. `serviceData` maps to the service's
+   * own fields (e.g. { temperature: 72 } for climate.set_temperature).
+   */
+  async callHaService(
+    domain: string,
+    service: string,
+    entityId: string,
+    serviceData?: Record<string, unknown> | null
+  ): Promise<{ status: string; message?: string }> {
+    const resp = await apiClient.post('/execute/ha_service', {
+      domain,
+      service,
+      entity_id: entityId,
+      service_data: serviceData ?? null,
     });
     return resp.data;
   },

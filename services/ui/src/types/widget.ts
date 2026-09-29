@@ -8,7 +8,8 @@ export type WidgetKey =
   | 'quick_assistant'
   | 'device_control'
   | 'workspaces'
-  | 'health_activity';
+  | 'health_activity'
+  | 'climate';
 
 export type WidgetVisibility = 'visible' | 'hidden' | 'removed';
 export type WidgetSize = 'small' | 'medium' | 'wide' | 'tall';
@@ -34,6 +35,12 @@ export interface WidgetDef {
   defaultSize: WidgetSize;
   mountConditions?: (capabilities: CapabilityPayload) => boolean;
   requiresQuickAssistantEnabled?: boolean;
+  /**
+   * A management widget: hidden from normal users entirely, not merely
+   * disabled. Resolved by `isWidgetVisible` in the widget store, which is the
+   * one place both the dashboard and the settings catalog read from.
+   */
+  adminOnly?: boolean;
 }
 
 export interface CapabilityPayload {
@@ -138,4 +145,18 @@ export interface IWidgetProps {
 
 export interface IActiveMediaWidgetProps extends IWidgetProps {
   onMediaStop?: () => void;
+}
+
+/**
+ * Climate widget layout.
+ * - `auto`  : one device renders as the dial, two or more render as tiles.
+ * - `dial`  : always the Nest-style dial, focused on one device at a time.
+ * - `tiles` : always the multi-room tile grid.
+ */
+export type ClimateLayout = 'auto' | 'dial' | 'tiles';
+
+export interface ClimateConfig {
+  /** climate.* entity ids shown by this widget, in display order. */
+  devices?: string[];
+  layout?: ClimateLayout;
 }

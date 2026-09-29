@@ -21,10 +21,20 @@ async def handle_climate(req: ClimateRequest) -> ExecutionResult:
     log.info(f"[climate] user={ctx.user} entity={req.entity_id} temp={req.temperature}")
 
     # 1. AUTHORIZATION CHECK
-    if not ha_client.authorize_action(ctx.model_dump(), "climate", "set_temperature"):
+    # Deliberately NOT ha_client.authorize_action: a setpoint is only as
+    # sensitive as the entity itself, so the rule is "may this user control this
+    # entity" — admin, system-default user, or the entity's own permit list.
+    # Checking here (rather than only in the /execute/climate route) also closes
+    # the composite night-mode path, which calls this handler directly.
+    from services.execution.entity_access import verify_entity_access
+
+    if not await verify_entity_access(ctx, req.entity_id):
         return ExecutionResult(
             status="FAILURE",
-            message=f"Access Denied: You are not authorized to set temperature on {req.entity_id}. Admin privileges required.",
+            message=(
+                f"Access Denied: {ctx.user} is not permitted to set the "
+                f"temperature on {req.entity_id}."
+            ),
             service="climate"
         )
 

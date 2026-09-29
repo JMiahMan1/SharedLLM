@@ -25,7 +25,13 @@ async def _ha_session(ha_url: str, verify: bool = True):
 def authorize_action(user_context: dict, domain: str, action: str) -> bool:
     """
     Validates if a user is authorized to perform a specific action.
-    Strictly enforces the 'Admin-Only' rule for sensitive environmental changes.
+
+    Only *physical security* actions live here, because they stay admin-only no
+    matter who the entity is assigned to: opening a garage or disarming an alarm
+    is not a household-permission decision. Everything else is gated per entity
+    by `entity_access.verify_entity_access`, which honours entity protection --
+    that is why `climate` is deliberately absent from this table. A setpoint is
+    only as sensitive as the thermostat it belongs to.
     """
     is_admin = user_context.get("is_admin", False)
 
@@ -34,7 +40,6 @@ def authorize_action(user_context: dict, domain: str, action: str) -> bool:
         "lock": ["unlock", "open"],
         "cover": ["open"],
         "alarm_control_panel": ["alarm_disarm"],
-        "climate": ["set_temperature"], # Some homes consider this sensitive
     }
 
     if domain in sensitive_actions and action in sensitive_actions[domain] and not is_admin:

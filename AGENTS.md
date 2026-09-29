@@ -10,6 +10,26 @@ intermediate files, or temp files created inside `bash` commands.
 Create `<workspace>/.tmp/` first if it does not exist. This rule overrides any tool default
 that suggests `/tmp` or `/var/folders/.../T/opencode`.
 
+## Mobile Parity Rule (ABSOLUTE — NO EXCEPTIONS)
+
+This app ships as a Capacitor Android/iOS app (`services/ui/android`) from the same React
+code in `services/ui/src`. Desktop work is never "done" without the mobile surface.
+
+- **Every desktop UI change MUST land with its mobile form** unless the user explicitly
+  says otherwise. Same widget/screen, correct at phone widths — not merely not-broken.
+- Touch targets: interactive rows, menu items and steppers need a ≥44px hit area. Keep
+  desktop density with `pointer-coarse:min-h-11` (Tailwind 4.2 variant) rather than
+  inflating the desktop layout.
+- Never rely on hover to reveal an affordance, and never on mouse-only events
+  (`onMouseEnter`/drag) as the sole path to a feature — provide tap/pointer equivalents.
+- Respect the phone grid: widgets render in `BentoBoxDashboard` at ~280px columns and
+  200px row bands, so content must fit `small` (1x1) up through `tall`, and scale with
+  its container (SVG `viewBox` + percentage sizes, no fixed pixel canvas).
+- Native polish is available and should be used where it fits: `useHaptics()` for tactile
+  feedback, `Capacitor.isNativePlatform()` for platform branches, and the shell's
+  `safe-area-*` handling for insets.
+- Verify both forms: check the narrow layout (or native) before claiming a UI change works.
+
 ## Fail Fast, Never Fall Back To A Hardcoded Value (ABSOLUTE — NO EXCEPTIONS)
 
 When a value is missing, wrong or stale, **fail loudly at the point of use**. Never

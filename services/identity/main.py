@@ -29,6 +29,7 @@ from services.identity.models import (
     APIKey,
     DeviceAssignment,
     DnsRecord,
+    EntityProtection,
     GlobalSetting,
     RavenMission,
     User,
@@ -45,6 +46,8 @@ from services.identity.schemas import (
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
     DiscoverResponse,
+    EntityProtectionRead,
+    EntityProtectionUpdate,
     DiscoverUser,
     GlobalSettingRead,
     GlobalSettingUpdate,
@@ -1087,6 +1090,22 @@ def create_user(body: UserCreate, session: Session = Depends(get_session), admin
     session.refresh(user)
     return user
 
+def _require_assignment_admin(user: User = Depends(require_api_key)) -> User:
+    """Dependency: only an admin may grant or revoke control of a device.
+
+    Writing an assignment IS granting control of a real device, so this is
+    admin-only. Without it any authenticated user could assign an entity to
+    themselves and walk straight past both DeviceAssignment and entity
+    protection.
+    """
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin can assign devices to users.",
+        )
+    return user
+
+
 @app.get("/api/devices", response_model=list[DeviceAssignmentRead])
 def list_devices(session: Session = Depends(get_session), _: User = Depends(require_api_key)):
     results = session.exec(select(DeviceAssignment)).all()
@@ -1101,7 +1120,11 @@ def list_devices(session: Session = Depends(get_session), _: User = Depends(requ
     ]
 
 @app.post("/api/devices", response_model=DeviceAssignmentRead)
-def add_device(body: DeviceAssignmentCreate, session: Session = Depends(get_session), _: User = Depends(require_api_key)):
+def add_device(
+    body: DeviceAssignmentCreate,
+    session: Session = Depends(get_session),
+    admin: User = Depends(_require_assignment_admin),
+):
     user = session.exec(select(User).where(User.username == body.username.lower())).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -1119,7 +1142,11 @@ def add_device(body: DeviceAssignmentCreate, session: Session = Depends(get_sess
     )
 
 @app.delete("/api/devices/{device_id}")
-def remove_device(device_id: str, session: Session = Depends(get_session), _: User = Depends(require_api_key)):
+def remove_device(
+    device_id: str,
+    session: Session = Depends(get_session),
+    admin: User = Depends(_require_assignment_admin),
+):
     assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == device_id)).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Device assignment not found.")
@@ -1128,7 +1155,11 @@ def remove_device(device_id: str, session: Session = Depends(get_session), _: Us
     return {"status": "SUCCESS"}
 
 @app.post("/api/devices/{device_id}/revoke")
-def revoke_device(device_id: str, session: Session = Depends(get_session), _: User = Depends(require_api_key)):
+def revoke_device(
+    device_id: str,
+    session: Session = Depends(get_session),
+    admin: User = Depends(_require_assignment_admin),
+):
     assignment = session.exec(select(DeviceAssignment).where(DeviceAssignment.device_id == device_id)).first()
     if not assignment:
         raise HTTPException(status_code=404, detail="Device assignment not found.")
@@ -1139,6 +1170,170 @@ def revoke_device(device_id: str, session: Session = Depends(get_session), _: Us
     username = assignment.user.username if assignment.user else "unknown"
     return {"status": "SUCCESS", "message": f"Device '{device_id}' revoked (was assigned to '{username}')."}
 
+# --- Entity Protection --------------------------------------------------------
+# A protected entity is one whose physical state only admins (plus the users on
+# its own permit list) may change. This is the single authority for that rule:
+# Execution asks for it per request and hides the entity from users who have no
+# permit, so a stale DeviceAssignment row cannot re-open a locked entity.
+
+# A Home Assistant entity id is one `domain.object_id` segment, so the route
+# deliberately uses the *default* path converter rather than ``:path``: an id
+# containing ``/`` then fails to match the route at all. ``:path`` looked
+# harmless, but URL normalisation resolves ``a/../b`` before routing, so it let
+# a single request lock `light.kitchen` while naming `climate.hallway`. The
+# pattern below is anchored for the same reason.
+_ENTITY_ID_RE = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+
+
+def _permitted_usernames(row: EntityProtection) -> list[str]:
+    """Decode the JSON permit list. A corrupt value is an error, not a grant."""
+    raw = (row.permitted_usernames or "[]").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Entity protection for '{row.entity_id}' has a corrupt "
+                f"permitted_usernames value. Fix it in Identity -> Entity Protection."
+            ),
+        ) from e
+    if not isinstance(parsed, list):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Entity protection for '{row.entity_id}' has a non-list "
+                f"permitted_usernames value. Fix it in Identity -> Entity Protection."
+            ),
+        )
+    return [str(name).strip().lower() for name in parsed if str(name).strip()]
+
+
+def _protection_read(row: EntityProtection) -> EntityProtectionRead:
+    return EntityProtectionRead(
+        entity_id=row.entity_id,
+        permitted_usernames=_permitted_usernames(row),
+        granted_by=row.granted_by,
+        granted_at=row.granted_at,
+        note=row.note,
+    )
+
+
+def _entity_protection_rows(session: Session) -> list[EntityProtection]:
+    return list(session.exec(select(EntityProtection)).all())
+
+
+def _permitted_protected_entity_ids(session: Session, user: User) -> list[str]:
+    """Protected entity ids this user may control, beyond the admin bypass.
+
+    The system default user is always permitted: it is the household's shared
+    account and the one an admin uses to bootstrap the home.
+    """
+    rows = _entity_protection_rows(session)
+    if user.is_admin or _is_system_default_user(user):
+        return [row.entity_id for row in rows]
+    username = (user.username or "").lower()
+    return [
+        row.entity_id
+        for row in rows
+        if username in _permitted_usernames(row)
+    ]
+
+
+def _require_protection_admin(user: User = Depends(require_api_key)) -> User:
+    """Dependency: entity protection is admin-only, for reads and writes alike.
+
+    Protection is the only thing standing between a normal user and the house,
+    so a non-admin must never be able to lock, unlock, or widen a permit list.
+    """
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin can manage entity protection.",
+        )
+    return user
+
+
+@app.get("/api/entity-protection", response_model=list[EntityProtectionRead])
+def list_entity_protection(
+    session: Session = Depends(get_session),
+    admin: User = Depends(_require_protection_admin),
+):
+    """Every protected entity and who may still control it. Admin only."""
+    return [_protection_read(row) for row in _entity_protection_rows(session)]
+
+
+@app.put("/api/entity-protection/{entity_id}", response_model=EntityProtectionRead)
+def set_entity_protection(
+    entity_id: str,
+    body: EntityProtectionUpdate,
+    session: Session = Depends(get_session),
+    admin: User = Depends(_require_protection_admin),
+):
+    """Lock or release one entity. Admin only.
+
+    `protected: false` releases the lock and forgets the permit list, so the
+    entity reverts to plain DeviceAssignment rules with no stale state left.
+    """
+    entity_id = entity_id.strip()
+    if not _ENTITY_ID_RE.match(entity_id):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"'{entity_id}' is not a Home Assistant entity id "
+                "(expected something like 'climate.hallway')."
+            ),
+        )
+
+    row = session.exec(
+        select(EntityProtection).where(EntityProtection.entity_id == entity_id)
+    ).first()
+    if row and not body.protected:
+        session.delete(row)
+        session.commit()
+        return EntityProtectionRead(
+            entity_id=entity_id,
+            permitted_usernames=[],
+            note=f"Released by @{admin.username} on {dt.now(UTC).isoformat()}",
+        )
+
+    # Unknown usernames are rejected rather than stored, so a typo cannot
+    # silently hand a permit to nobody.
+    wanted = [str(name).strip().lower() for name in body.permitted_usernames if str(name).strip()]
+    unknown = [
+        name for name in wanted
+        if not session.exec(select(User).where(User.username == name)).first()
+    ]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown username(s) in the permit list: {', '.join(sorted(unknown))}.",
+        )
+
+    now = dt.now(UTC).isoformat()
+    if row is None:
+        row = EntityProtection(
+            entity_id=entity_id,
+            permitted_usernames=json.dumps(wanted),
+            granted_by=admin.username,
+            granted_at=now,
+            note=body.note,
+        )
+        session.add(row)
+    else:
+        row.permitted_usernames = json.dumps(wanted)
+        row.granted_by = admin.username
+        row.granted_at = now
+        if body.note is not None:
+            row.note = body.note
+        session.add(row)
+    session.commit()
+    session.refresh(row)
+    return _protection_read(row)
+
+
 # --- Device Matrix (UI Contract) ---
 @app.get("/api/internal/user-device-assignments")
 def internal_user_device_assignments(
@@ -1146,17 +1341,33 @@ def internal_user_device_assignments(
     session: Session = Depends(get_session),
     _: None = Depends(require_internal),
 ):
-    """Internal: entity_ids (device_ids) assigned to a user (non-revoked)."""
+    """Internal: what this user may control.
+
+    `device_ids` is the plain DeviceAssignment grant (unprotected entities).
+    `protected_entity_ids` is every locked entity — a caller must not treat it
+    as a grant, it only says the entity exists and is locked.
+    `permitted_entity_ids` is the subset of locked entities this user may
+    actually control. Admins and the system default user get all of them.
+    """
     user = session.exec(select(User).where(User.username == username)).first()
     if not user:
-        return {"device_ids": []}
+        return {
+            "device_ids": [],
+            "protected_entity_ids": [],
+            "permitted_entity_ids": [],
+        }
     rows = session.exec(
         select(DeviceAssignment).where(
             DeviceAssignment.user_id == (user.id or 0),
             DeviceAssignment.revoked == False,  # noqa: E712
         )
     ).all()
-    return {"device_ids": [r.device_id for r in rows]}
+    protections = _entity_protection_rows(session)
+    return {
+        "device_ids": [r.device_id for r in rows],
+        "protected_entity_ids": [p.entity_id for p in protections],
+        "permitted_entity_ids": _permitted_protected_entity_ids(session, user),
+    }
 
 
 @app.get("/api/users/devices", response_model=list[DeviceAssignmentRead])
@@ -1181,16 +1392,20 @@ def add_device_ui(
     authorization: str = Header(None),
     x_internal_secret: str = Header(None, alias="X-Internal-Secret")
 ):
-    # Determine if internal or user-authed
+    # Internal calls (Gateway's entity auto-discovery) send only
+    # X-Internal-Secret; a user request must be an admin, because writing an
+    # assignment grants control of a real device.
     is_internal = x_internal_secret == INTERNAL_SECRET
-    user = None
     if not is_internal:
-        # User-facing API calls require a valid API key
-        user = require_api_key(authorization, session)
-        if not user:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Missing authorization")
+        caller = require_api_key(authorization, session)
+        if not caller.is_admin:
+            raise HTTPException(
+                status_code=403,
+                detail="Only an admin can assign devices to users.",
+            )
 
-    # Internal calls (like auto-discovery from Gateway) bypass user auth
     target_user = session.exec(select(User).where(User.username == body.username.lower())).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -2248,7 +2463,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
     known_keys = [
         'energy_insights', 'ambient_timer', 'quick_notes', 'active_media',
         'chores_progress', 'upcoming_events', 'quick_assistant', 'device_control',
-        'workspaces', 'health_activity'
+        'workspaces', 'health_activity', 'climate'
     ]
     default_sizes = {
         'energy_insights': 'medium',
@@ -2261,6 +2476,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
         'device_control': 'tall',
         'workspaces': 'medium',
         'health_activity': 'medium',
+        'climate': 'medium',
     }
     result = []
     for key in known_keys:

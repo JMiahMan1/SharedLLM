@@ -661,56 +661,16 @@ CONTROLLABLE_DOMAINS = frozenset({
     "remote", "siren",
 })
 
-async def _allowed_entity_ids(username: str, is_admin: bool) -> set[str] | None:
-    """Entity ids the non-admin user may control via DeviceAssignment.
-
-    Returns None on Identity network/HTTP failure (caller fail-opens).
-    Empty set means Identity answered with no assignments (caller fail-closes).
-    Admins are short-circuited before this is called.
-    """
-    if is_admin or not username:
-        return set()
-    try:
-        async with get_client() as client:
-            resp = await client.get(
-                f"{IDENTITY_SVC_URL}/api/internal/user-device-assignments",
-                params={"username": username},
-                headers={"X-Internal-Secret": INTERNAL_SECRET},
-                timeout=aiohttp.ClientTimeout(total=5.0),
-            )
-            if resp.status != 200:
-                log.warning(f"Identity device-assignments HTTP {resp.status} for {username}")
-                return None
-            data = await resp.json()
-            if isinstance(data, dict):
-                data = data.get("device_ids") or data.get("entities") or []
-            return {str(x) for x in data if x}
-    except Exception as e:
-        log.warning(f"Identity device-assignments failed for {username}: {e}")
-        return None
-
-
-async def verify_entity_access(ctx: UserContext, entity_id: str) -> bool:
-    """
-    Checks if the user has permission to control this entity.
-    Admins bypass all checks.
-    Non-admin: allow only DeviceAssignment-mapped entities.
-    Identity unreachable → fail-open (availability); empty assignments → fail-closed.
-    """
-    if ctx.is_admin:
-        return True
-    if not entity_id:
-        return False
-    allowed = await _allowed_entity_ids(ctx.user, ctx.is_admin)
-    if allowed is None:
-        log.info(f"Access check for {ctx.user} on {entity_id}: ALLOW (identity unavailable)")
-        return True
-    ok = entity_id in allowed
-    log.info(
-        f"Access check for {ctx.user} on {entity_id}: "
-        f"{'ALLOWED' if ok else 'DENIED'} ({len(allowed)} assigned entities)"
-    )
-    return ok
+# Entity permissions are centralised in `entity_access` so the HTTP endpoints,
+# the composite handlers and the entity listing all enforce one identical rule.
+# The lookup is uncached when Identity is healthy; only Identity failures fall
+# back to a last known good payload (see that module's docstring).
+from services.execution.entity_access import (  # noqa: E402
+    EntityPermissions,
+    can_view,
+    load_entity_permissions,
+    verify_entity_access,
+)
 
 
 def _ensure_ha_creds(ctx: UserContext) -> None:
@@ -791,6 +751,8 @@ async def execute_tv_cast(req: TVCastRequest):
 
 @app.post("/execute/climate", response_model=ExecutionResult)
 async def execute_climate(req: climate.ClimateRequest):
+    # Checked here as well as inside handle_climate: the route wants a real 403,
+    # while the handler check is what protects the composite night-mode path.
     if not await verify_entity_access(req.user_context, req.entity_id):
         raise HTTPException(status_code=403, detail="Access denied to this device")
     return await climate.handle_climate(req)
@@ -1798,11 +1760,12 @@ async def execute_entity_search(req: EntitySearchRequest):
             "entity_search",
         )
 
-    allowed_entities: set[str] | None = None
+    # Non-admins only ever see entities they may control. `None` means Identity
+    # is unreachable and we have no cached answer: allow rather than hide the
+    # whole house (see entity_access for the degraded-mode contract).
+    permissions: EntityPermissions | None = None
     if not ctx.is_admin:
-        allowed_entities = await _allowed_entity_ids(ctx.user, ctx.is_admin)
-        if allowed_entities is None:
-            allowed_entities = None  # fail-open: identity unreachable
+        permissions = await load_entity_permissions(ctx.user, ctx.is_admin)
 
     all_states = await ha_client.get_states(ha_url, ha_token) or []
     results = []
@@ -1817,9 +1780,9 @@ async def execute_entity_search(req: EntitySearchRequest):
         area = attrs.get("area_id", "") or state.get("area_id", "")
         current_state = state.get("state", "")
 
-        # Permission: non-admin sees only DeviceAssignment-mapped entities
-        # (identity unreachable → allow; empty set → show nothing).
-        if allowed_entities is not None and eid not in allowed_entities:
+        # Protected entities are hidden outright from anyone not on the permit
+        # list, even if a stale DeviceAssignment row still names them.
+        if not can_view(permissions, eid):
             continue
         if req.controllable_only:
             entity_domain = eid.split('.')[0] if '.' in eid else ''
