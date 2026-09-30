@@ -618,6 +618,19 @@ export interface WorkspaceFileEntry {
   content?: string;
 }
 
+/**
+ * Whether an AI tool can actually run, as opposed to merely being installed.
+ * `available: null` is a real third state: the backend cannot be judged without
+ * attempting a real request (a two-image swap, say), so the honest answer is
+ * "unconfirmed" and the UI must not present it as either yes or no.
+ */
+export interface AiCapability {
+  key: string;
+  label: string;
+  available: boolean | null;
+  detail: string;
+}
+
 export interface WorkspaceFilesListResponse {
   files: WorkspaceFileEntry[];
 }

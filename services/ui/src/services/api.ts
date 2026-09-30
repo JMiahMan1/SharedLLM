@@ -16,6 +16,7 @@ import type {
   DiscoveredUser,
   DeviceAssignment,
   EntityProtection,
+  AiCapability,
   GlobalSetting,
   GatewayConfig,
   EsphomeDevice,
@@ -120,6 +121,7 @@ export type {
   Workspace,
   DeviceAssignment,
   EntityProtection,
+  AiCapability,
   DiscoveredUser,
   RagStats,
   TelemetryEnrollment,
@@ -2187,6 +2189,16 @@ export const api = {
 
   async listImageModels(): Promise<{ status: string; models?: string[]; message?: string }> {
     const resp = await apiClient.get('/api/images/models');
+    return resp.data;
+  },
+
+  /**
+   * What the AI tools can actually do right now. `available: null` means the
+   * backend cannot be judged without trying a real request, so the UI must show
+   * that as unconfirmed rather than rounding it to yes or no.
+   */
+  async getAiCapabilities(): Promise<{ capabilities: AiCapability[] }> {
+    const resp = await apiClient.get('/api/ai/capabilities');
     return resp.data;
   },
 

@@ -617,7 +617,19 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "the donor face), output_path, size, model. A face swap needs TWO images: set "
      "image_path to the photo to keep and face_image_path to the photo whose face "
      "should be copied onto it. A swap prompt with no face_image_path is rejected "
-     "rather than silently editing only the first image."),
+     "rather than silently editing only the first image. To put a new scene around "
+     "the people in one photo, use image_path alone and instruct the model in the "
+     "prompt to keep every face recognisably the same individual; identity is then "
+     "held only by instruction, so the result approximates the person rather than "
+     "reproducing them exactly. Call AiCapabilitiesRequest first if you need to know "
+     "whether a two-image swap is supported here -- do not promise a swap without it."),
+    ("AiCapabilitiesRequest", SVC_EXECUTION, "POST", "/execute/ai_capabilities", False,
+     "Report which AI tools can actually run right now (image editing, face swap, "
+     "face-preserving generate, voice profiles, video). Each entry is available true, "
+     "false, or null when it cannot be judged without attempting a real request.",
+     "payload fields: (none required). Check this before promising a user an image "
+     "or voice capability: a tool can be installed and still unusable, and "
+     "'available: null' means unconfirmed rather than working."),
     ("ControlPlaneRequest", SVC_CONTROL_PLANE, "POST", "/api/restart/{service_name}", False,
      "Restart a SharedLLM service via the control plane.",
      "payload fields: service_name (fills the path)."),

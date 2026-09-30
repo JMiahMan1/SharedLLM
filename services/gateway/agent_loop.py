@@ -553,6 +553,7 @@ ALLOWED_TOOLS = {
     "entitysearchrequest", "logbookrequest", "executionlogrequest",
     "documentbroadcastrequest", "nightmoderequest", "ttsrequest", "sttrequest", "storagetexttorequest",
     "audiobookregeneraterequest",
+    "aicapabilitiesrequest",
     # Advertised by tool_builder._Tool and dispatched by prose_tools, but absent
     # from this set until now. ALLOWED_TOOLS is the hard gate at the action
     # dispatcher (`if action_name not in ALLOWED_TOOLS:`), so a model naming any

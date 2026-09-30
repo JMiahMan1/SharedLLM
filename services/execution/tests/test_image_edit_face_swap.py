@@ -6,6 +6,7 @@ sent to the model with a single photo, which returns a plausible-looking edited
 image of the *wrong person* reported as success.
 """
 import base64
+import json
 from pathlib import Path
 
 import pytest
@@ -28,10 +29,12 @@ def _make_png(path: Path) -> None:
 
 
 class _FakeResponse:
-    def __init__(self, status, json_data=None, text_data=""):
+    def __init__(self, status, json_data=None, text_data=None):
         self.status = status
         self._json = json_data
-        self._text = text_data
+        # A real error arrives as a body, so json_data is what .text() must
+        # return too -- otherwise the handler sees an empty error message.
+        self._text = text_data if text_data is not None else (json.dumps(json_data) if json_data else "")
 
     async def json(self):
         return self._json
@@ -302,3 +305,130 @@ async def test_a_donor_that_is_the_source_image_is_refused(tmpdir, monkeypatch):
 
     assert result.status == "FAILURE"
     assert "same file" in result.message
+
+
+# --------------------------------------------------------------------------
+# The donor field name is configuration, not a constant in logic
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_the_donor_field_defaults_to_the_openai_convention(monkeypatch):
+    async def no_setting(key):
+        return None
+
+    monkeypatch.setattr(image_edit_mod, "_identity_setting", no_setting)
+    assert await image_edit_mod.get_face_donor_field() == "image"
+
+
+@pytest.mark.asyncio
+async def test_the_donor_field_comes_from_identity_when_configured(monkeypatch):
+    """The SD proxy is a separate product, so what it calls the second image is
+    a deployment fact, not something to hardcode and redeploy for."""
+    seen = {}
+
+    async def fake_setting(key):
+        seen["key"] = key
+        return "ref_image"
+
+    monkeypatch.setattr(image_edit_mod, "_identity_setting", fake_setting)
+    assert await image_edit_mod.get_face_donor_field() == "ref_image"
+    assert seen["key"] == "face_swap_donor_field"
+
+
+@pytest.mark.asyncio
+async def test_the_configured_donor_field_is_the_one_actually_sent(tmpdir, monkeypatch):
+    _make_png(Path(tmpdir) / "keep.jpg")
+    _make_png(Path(tmpdir) / "donor.jpg")
+    _stub_workspace(monkeypatch, tmpdir)
+
+    async def fake_donor_field():
+        return "ref_image"
+
+    monkeypatch.setattr(image_edit_mod, "get_face_donor_field", fake_donor_field)
+
+    captured = {}
+    _patch_aiohttp(monkeypatch, _ok_route(captured))
+
+    result = await image_edit_mod.handle_image_edit(
+        _edit_req(prompt="swap the face", face_image_path="donor.jpg", proxy_url="http://proxy:11434")
+    )
+
+    assert result.status == "SUCCESS"
+    names = [n for n, _v, _fn in _form_fields(captured)]
+    assert names == ["model", "prompt", "size", "response_format", "image", "ref_image"]
+
+
+@pytest.mark.asyncio
+async def test_no_settings_lookup_happens_for_a_plain_edit(tmpdir, monkeypatch):
+    """The donor field is only needed when a donor is sent."""
+
+    async def boom():
+        raise AssertionError("must not fetch settings for a single-image edit")
+
+    monkeypatch.setattr(image_edit_mod, "get_face_donor_field", boom)
+    _make_png(Path(tmpdir) / "keep.jpg")
+    _stub_workspace(monkeypatch, tmpdir)
+    _patch_aiohttp(monkeypatch, _ok_route({}))
+
+    result = await image_edit_mod.handle_image_edit(
+        _edit_req(prompt="make it look old", proxy_url="http://proxy:11434")
+    )
+    assert result.status == "SUCCESS"
+
+
+# --------------------------------------------------------------------------
+# A backend that silently ignores the donor must say so, not look like success
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_backend_that_cannot_take_a_donor_says_so_plainly(tmpdir, monkeypatch):
+    """This is the exact failure the live build returns for a two-image edit.
+    The raw text names neither the cause nor the fix, so it must not be the
+    whole message an operator sees."""
+    _make_png(Path(tmpdir) / "keep.jpg")
+    _make_png(Path(tmpdir) / "donor.jpg")
+    _stub_workspace(monkeypatch, tmpdir)
+
+    def route(url, kwargs):
+        if "images/edits" in url:
+            return _FakeResponse(
+                502,
+                json_data={"detail": 'sd-server error: {"error":"generate_image returned no results"}'},
+            )
+        return _FakeResponse(500, text_data="unexpected")
+
+    _patch_aiohttp(monkeypatch, route)
+
+    result = await image_edit_mod.handle_image_edit(
+        _edit_req(prompt="swap the face", face_image_path="donor.jpg", proxy_url="http://proxy:11434")
+    )
+
+    assert result.status == "FAILURE"
+    assert "did not accept a second" in result.message
+    assert "face_swap_donor_field" in result.message
+    # The original is still there for diagnosis, not swallowed.
+    assert "generate_image returned no results" in result.message
+
+
+@pytest.mark.asyncio
+async def test_a_plain_edit_failure_keeps_the_ordinary_api_error_shape(tmpdir, monkeypatch):
+    """The donor-specific advice must not leak onto unrelated failures."""
+    _make_png(Path(tmpdir) / "keep.jpg")
+    _stub_workspace(monkeypatch, tmpdir)
+
+    def route(url, kwargs):
+        if "images/edits" in url:
+            return _FakeResponse(400, json_data={"detail": "model not loaded"})
+        return _FakeResponse(500, text_data="unexpected")
+
+    _patch_aiohttp(monkeypatch, route)
+
+    result = await image_edit_mod.handle_image_edit(
+        _edit_req(prompt="make it look old", proxy_url="http://proxy:11434")
+    )
+
+    assert result.status == "FAILURE"
+    assert "Image edit API error 400" in result.message
+    assert "face_swap_donor_field" not in result.message

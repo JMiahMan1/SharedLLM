@@ -39,11 +39,19 @@ import {
   UserRound,
   ScanText,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api, type RavenMission, type Workspace } from '../../services/api';
-import type { GitLogEntry, GitStatusResponse, WorkspaceFileEntry } from '../../types/api';
+import type { AiCapability, GitLogEntry, GitStatusResponse, WorkspaceFileEntry } from '../../types/api';
 import { detectLanguage } from '../../lib/editorLanguages';
+import {
+  buildFacePreservePrompt,
+  hasIdentityInstruction,
+  FACE_PRESERVE_SUGGESTIONS,
+  type FaceCount,
+} from '../../lib/facePreserve';
 import { CodeEditor } from '../editor/CodeEditor';
+import AiCapabilityStrip from './AiCapabilityStrip';
 import { MarkdownViewer } from './viewers/MarkdownViewer';
 import { MarkdownEditor } from './viewers/MarkdownEditor';
 import { ImageViewer } from './viewers/ImageViewer';
@@ -316,6 +324,9 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
   // Donor face for a swap: the photo whose face is copied onto the open image.
   // A swap is a two-image edit, so this is required before the action can run.
   const [faceDonor, setFaceDonor] = useState('');
+  // Face-preserving generate: describe a NEW scene for the people in the open photo.
+  const [faceKeepScene, setFaceKeepScene] = useState('');
+  const [faceKeepCount, setFaceKeepCount] = useState<FaceCount>('auto');
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrResult, setOcrResult] = useState<{ full_text?: string; headline?: string; subtext?: string; badge?: string } | null>(null);
 
@@ -385,6 +396,30 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
       /* models optional */
     }
   }, [sdModel]);
+
+  // Reachability of the AI tools, as opposed to what is merely installed.
+  // react-query rather than local state: this is server data with a natural
+  // cache key, and it owns the fetching so the mount path sets no state
+  // synchronously. Not polled on a timer -- a stale "ready" is precisely the
+  // failure this exists to prevent, so it is checked on demand instead.
+  const { data: aiCapsData, isFetching: aiCapsLoading, refetch: refetchAiCaps } = useQuery({
+    queryKey: ['ai-capabilities'],
+    queryFn: () => api.getAiCapabilities(),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const aiCaps: AiCapability[] = useMemo(
+    () => (Array.isArray(aiCapsData?.capabilities) ? aiCapsData.capabilities : []),
+    [aiCapsData],
+  );
+
+  const swapCap = useMemo(
+    () => aiCaps.find((c) => c.key === 'face_swap') ?? null,
+    [aiCaps],
+  );
+  // Only a confirmed "no" disables the control. Unconfirmed must stay usable,
+  // or a first-time user could never discover whether their backend supports it.
+  const swapBlocked = swapCap?.available === false;
 
   const active = useMemo(() => tabs.find((t) => t.path === activeTab) ?? null, [tabs, activeTab]);
   const language = active && active.kind === 'text' ? active.language : 'plaintext';
@@ -1140,6 +1175,52 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
     }
   }, [active, faceDonor, sdPrompt, sdModel, sdSize, currentPath, workspace.id, loadDir, openByPath, baseDirOf]);
 
+  // New picture, same people. Unlike a swap this needs no second image, so it
+  // works on the single-image path the backend actually supports today.
+  const runFacePreserve = useCallback(async () => {
+    if (!active) {
+      toast.error('Open the photo whose faces you want to keep first');
+      return;
+    }
+    const scene = faceKeepScene.trim();
+    if (!scene && !hasIdentityInstruction(sdPrompt)) {
+      toast.error('Describe the new scene you want');
+      return;
+    }
+    setSdBusy(true);
+    try {
+      // If the user already wrote their own identity instruction in the shared
+      // prompt box, use theirs alone — stacking two identity blocks makes the
+      // model over-weight the face and ignore the new scene.
+      const prompt = scene
+        ? hasIdentityInstruction(sdPrompt)
+          ? `${scene}\n\n${sdPrompt.trim()}`
+          : buildFacePreservePrompt(scene, faceKeepCount)
+        : sdPrompt.trim();
+      const fname = `facekeep_${Date.now()}.png`;
+      const rel = baseDirOf(currentPath) + fname;
+      const res = await api.workspaceEditImage(workspace.id, {
+        prompt,
+        image_path: active.path,
+        output_path: rel,
+        model: sdModel || undefined,
+        size: sdSize || undefined,
+      });
+      if (res?.status !== 'SUCCESS') {
+        toast.error(res?.message || 'Face-preserving generate failed');
+        return;
+      }
+      const saved = res?.detail?.output_path || rel;
+      toast.success(`New image saved — ${saved}`);
+      await loadDir(currentPath);
+      await openByPath(saved);
+    } catch (e: unknown) {
+      toast.error(`Face-preserving generate failed: ${apiErr(e)}`);
+    } finally {
+      setSdBusy(false);
+    }
+  }, [active, faceKeepScene, faceKeepCount, sdPrompt, sdModel, sdSize, currentPath, workspace.id, loadDir, openByPath, baseDirOf]);
+
   const runOcr = useCallback(async () => {
     if (!active) {
       toast.error('Select an image first');
@@ -1614,6 +1695,11 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                       <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500">
                         <Wand2 size={13} className="text-indigo-400" /> Stable Diffusion
                       </div>
+                      <AiCapabilityStrip
+                        capabilities={aiCaps}
+                        loading={aiCapsLoading}
+                        onRefresh={() => void refetchAiCaps()}
+                      />
                       <textarea
                         value={sdPrompt}
                         onChange={(e) => setSdPrompt(e.target.value)}
@@ -1707,18 +1793,81 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                         </select>
                         <button
                           onClick={() => void runFaceSwap()}
-                          disabled={sdBusy || !faceDonor || !active}
+                          disabled={sdBusy || !faceDonor || !active || swapBlocked}
                           title={
-                            !active
-                              ? 'Open the photo you want to keep first'
-                              : !faceDonor
-                                ? 'Choose the donor photo to copy the face from'
-                                : 'Copy the donor face onto the open photo'
+                            swapBlocked
+                              ? swapCap?.detail ?? 'This image backend does not accept a second image.'
+                              : !active
+                                ? 'Open the photo you want to keep first'
+                                : !faceDonor
+                                  ? 'Choose the donor photo to copy the face from'
+                                  : 'Copy the donor face onto the open photo'
                           }
                           className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200 min-h-11 pointer-coarse:min-h-11"
                         >
                           {sdBusy ? <Loader2 size={13} className="animate-spin" /> : <UserRound size={13} />}
                           Swap face onto this image
+                        </button>
+                        {swapBlocked && (
+                          <p className="mt-1 text-[11px] text-amber-300/80">
+                            {swapCap?.detail ?? 'This image backend does not accept a second image.'}
+                          </p>
+                        )}
+                        {!swapBlocked && swapCap?.available === null && (
+                          <p className="mt-1 text-[11px] text-slate-500">
+                            Unconfirmed — this backend may only accept one image. Try it; the answer
+                            is recorded either way.
+                          </p>
+                        )}
+                      </div>
+                      <div className="mt-1 border-t border-white/10 pt-3">
+                        <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500 mb-2">
+                          <UserRound size={13} className="text-emerald-400" /> New image, same face
+                        </div>
+                        <p className="text-[11px] text-slate-500 mb-2">
+                          Describe a new scene and the people in this photo are re-drawn into it with
+                          their faces kept. The face is held by instruction, so the closer the new
+                          scene is to the original pose and lighting, the more it stays recognisable.
+                        </p>
+                        <input
+                          value={faceKeepScene}
+                          onChange={(e) => setFaceKeepScene(e.target.value)}
+                          placeholder="e.g. on the deck of a boat at sunset"
+                          aria-label="New scene for the face-preserving generate"
+                          disabled={sdBusy}
+                          className="w-full rounded bg-black/40 border border-white/10 px-2 py-2 text-xs text-slate-200 placeholder:text-slate-600 disabled:opacity-40 min-h-11 pointer-coarse:min-h-11"
+                        />
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {FACE_PRESERVE_SUGGESTIONS.map((s) => (
+                            <button
+                              key={s}
+                              onClick={() => setFaceKeepScene(s)}
+                              disabled={sdBusy}
+                              className="rounded-full bg-white/5 hover:bg-white/10 disabled:opacity-40 px-2.5 py-1.5 text-[10px] text-slate-300 min-h-11 pointer-coarse:min-h-11"
+                            >
+                              {s}
+                            </button>
+                          ))}
+                        </div>
+                        <select
+                          value={faceKeepCount}
+                          onChange={(e) => setFaceKeepCount(e.target.value as FaceCount)}
+                          aria-label="How many people are in the photo"
+                          disabled={sdBusy}
+                          className="mt-2 w-full rounded bg-black/40 border border-white/10 px-2 py-2 text-xs text-slate-200 disabled:opacity-40 min-h-11 pointer-coarse:min-h-11"
+                        >
+                          <option value="auto">One or more people</option>
+                          <option value="one">Just one person</option>
+                          <option value="many">A group — keep each face distinct</option>
+                        </select>
+                        <button
+                          onClick={() => void runFacePreserve()}
+                          disabled={sdBusy || !active}
+                          title={!active ? 'Open the photo whose faces you want to keep first' : 'Create a new image keeping the faces'}
+                          className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-emerald-600/80 hover:bg-emerald-600 disabled:opacity-40 text-white min-h-11 pointer-coarse:min-h-11"
+                        >
+                          {sdBusy ? <Loader2 size={13} className="animate-spin" /> : <UserRound size={13} />}
+                          Generate new image, keep the face
                         </button>
                       </div>
                       <div className="mt-1 border-t border-white/10 pt-3">

@@ -866,6 +866,34 @@ async def execute_code_search(req: CodeSearchRequest):
     from services.execution.handlers import code_search
     return await code_search.handle_code_search(req)
 
+
+@app.get("/execute/ai_capabilities")
+@app.post("/execute/ai_capabilities")
+async def execute_ai_capabilities():
+    """What the AI tools can actually do right now.
+
+    The Workspace and Raven both need to distinguish "this is installed" from
+    "this works", because a capability can be fully wired and still unavailable
+    (an image backend that lists three models and rejects every call). Probes
+    are reachability-only and never run a generation.
+    """
+    from services.execution import ai_caps
+
+    try:
+        return {"capabilities": await ai_caps.collect_capabilities()}
+    except Exception as e:  # never let a probe take the page down
+        log.warning(f"AI capability probe failed: {e}")
+        return {
+            "capabilities": [
+                {
+                    "key": "probe",
+                    "label": "AI capability check",
+                    "available": False,
+                    "detail": f"Could not determine capabilities: {type(e).__name__}.",
+                }
+            ]
+        }
+
 @app.get("/execute/timers")
 async def list_timers(user_id: str | None = None):
     return await timer.get_active_timers(user_id=user_id)
