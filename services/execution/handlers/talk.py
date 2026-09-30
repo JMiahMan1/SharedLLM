@@ -214,9 +214,10 @@ async def _bank_game_stars(user: str, total_stars: int, reason: str) -> None:
     try:
         import aiohttp
 
+        from services.common.http import get_client
         from services.gateway.config import GEO_SVC, INTERNAL_SECRET
 
-        async with get_client().post(
+        async with get_client() as client, client.post(
             f"{GEO_SVC}/api/geo/stars",
             json={"user_id": user, "stars": 1, "reason": "game", "note": reason[:200], "granted_by": "game"},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
