@@ -130,7 +130,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
           setMenuPos({ x: rect.right, y: rect.bottom });
           setMenuOpen(true);
         }}
-        className="text-slate-500 hover:text-white transition-colors p-1 rounded hover:bg-white/5"
+        className="text-slate-500 hover:text-white transition-colors p-1 rounded hover:bg-white/5 pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:flex pointer-coarse:items-center pointer-coarse:justify-center"
         title="Widget options"
         aria-label="Widget options"
         aria-haspopup="menu"
@@ -141,16 +141,41 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
     </div>
   );
 
+  // Must run on every render: this component returns early while closed, so a
+  // hook declared past that point would change the hook count when opened.
+  // The menu's real height is only knowable after paint, so nudge it back on
+  // screen once — otherwise a 44px-row menu spills off a phone's bottom edge.
+  useEffect(() => {
+    if (!menuOpen || !menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const maxX = window.innerWidth - rect.width - 8;
+    const maxY = window.innerHeight - rect.height - 8;
+    if (rect.left <= maxX && rect.top <= maxY) return;
+    setMenuPos((p) => {
+      const next = {
+        x: Math.max(8, Math.min(p.x, maxX)),
+        y: Math.max(8, Math.min(p.y, maxY)),
+      };
+      // Return the same object when already clamped: a menu wider than the
+      // viewport yields a negative max, and a fresh object every pass would
+      // re-render forever against an overflow that cannot be fixed by moving.
+      return next.x === p.x && next.y === p.y ? p : next;
+    });
+  }, [menuOpen, menuPos.x, menuPos.y]);
+
   if (!menuOpen) {
     return triggerButton;
   }
 
-  const clampPosition = (pos: ContextMenuPosition): ContextMenuPosition => ({
-    x: Math.max(0, Math.min(pos.x, window.innerWidth - 200)),
-    y: Math.max(0, Math.min(pos.y, window.innerHeight - 300)),
-  });
-
-  const displayPos = clampPosition(menuPos);
+  // A first-paint estimate only, so the menu never renders off-screen while
+  // the effect above is still measuring. The real height is unknowable until
+  // after paint, and reading menuRef.current here would be a ref access during
+  // render (react-hooks/refs).
+  const ESTIMATED_MENU = { width: 208, height: 300 };
+  const displayPos: ContextMenuPosition = {
+    x: Math.max(8, Math.min(menuPos.x, window.innerWidth - ESTIMATED_MENU.width - 8)),
+    y: Math.max(8, Math.min(menuPos.y, window.innerHeight - ESTIMATED_MENU.height - 8)),
+  };
 
   const menuContent = (
     <>
@@ -176,7 +201,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
               props.onTogglePin(props.widgetKey);
               setMenuOpen(false);
             }}
-            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
+            className="w-full text-left text-xs px-2 py-1.5 rounded-md pointer-coarse:min-h-11 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
           >
             {props.userSettings.is_pinned ? <PinOff size={13} /> : <Pin size={13} />}
             {props.userSettings.is_pinned ? 'Unpin' : 'Pin to top'}
@@ -194,7 +219,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
                 props.onResize(props.widgetKey, size.value);
                 setMenuOpen(false);
               }}
-              className={`w-full text-left text-xs px-2 py-1.5 rounded-md transition-colors ${
+              className={`w-full text-left text-xs px-2 py-1.5 rounded-md pointer-coarse:min-h-11 transition-colors ${
                 props.userSettings.size === size.value
                   ? 'bg-indigo-600/30 text-white'
                   : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
@@ -213,7 +238,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
                 props.onToggleVisibility(props.widgetKey, props.userSettings.visibility !== 'visible');
                 setMenuOpen(false);
               }}
-              className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
+              className="w-full text-left text-xs px-2 py-1.5 rounded-md pointer-coarse:min-h-11 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors flex items-center gap-2"
             >
               {props.userSettings.visibility === 'hidden' ? <Eye size={13} /> : <EyeOff size={13} />}
               {props.userSettings.visibility === 'hidden' ? 'Show' : 'Hide'}
@@ -227,7 +252,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
               props.onReorder(props.widgetKey, props.currentIndex - 1);
               setMenuOpen(false);
             }}
-            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-2"
+            className="w-full text-left text-xs px-2 py-1.5 rounded-md pointer-coarse:min-h-11 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-2"
           >
             <ChevronUp size={13} />
             Move up
@@ -240,7 +265,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
               props.onReorder(props.widgetKey, props.currentIndex + 1);
               setMenuOpen(false);
             }}
-            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-2"
+            className="w-full text-left text-xs px-2 py-1.5 rounded-md pointer-coarse:min-h-11 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-2"
           >
             <ChevronDown size={13} />
             Move down
@@ -253,7 +278,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
               props.onReorder(props.widgetKey, props.totalWidgets - 1);
               setMenuOpen(false);
             }}
-            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-2"
+            className="w-full text-left text-xs px-2 py-1.5 rounded-md pointer-coarse:min-h-11 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent flex items-center gap-2"
           >
             <ArrowDownToLine size={13} />
             Move to bottom
@@ -267,7 +292,7 @@ const WidgetContextMenu = (props: WidgetContextMenuProps) => {
               props.onRemove(props.widgetKey);
               setMenuOpen(false);
             }}
-            className="w-full text-left text-xs px-2 py-1.5 rounded-md hover:bg-red-900/30 text-red-400 hover:text-red-300 transition-colors flex items-center gap-2"
+            className="w-full text-left text-xs px-2 py-1.5 rounded-md pointer-coarse:min-h-11 hover:bg-red-900/30 text-red-400 hover:text-red-300 transition-colors flex items-center gap-2"
           >
             <Trash2 size={13} />
             Remove

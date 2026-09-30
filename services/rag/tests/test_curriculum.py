@@ -282,12 +282,33 @@ async def test_priority_score_with_benchmark_boost(tmp_path):
     assert no_score == base_score or abs(no_score - base_score) < 0.01
 
 
+def _benchmarks_fixture(tmp_path):
+    """A benchmark_tests.json stand-in.
+
+    The default BENCHMARKS_PATH points into the separate `alpaca` repo, which is
+    not present in CI, so tests must not rely on a developer's checkout.
+    """
+    fixture = tmp_path / "benchmark_tests.json"
+    fixture.write_text(json.dumps({
+        "coding": [
+            {"id": "code-1", "label": "Write a function", "expected": "def f(): ..."},
+            {"id": "code-2", "label": "Fix the failing test"},
+        ],
+        "reasoning": [
+            {"id": "reason-1", "label": "Deduce the ordering"},
+        ],
+    }))
+    return fixture
+
+
 @pytest.mark.asyncio
 async def test_ingest_benchmark_curriculum(tmp_path):
     _install_fakes(tmp_path)
-    resp = await rag_main.ingest_benchmark_curriculum()
+    fixture = _benchmarks_fixture(tmp_path)
+    resp = await rag_main.ingest_benchmark_curriculum(path=str(fixture))
     assert resp["status"] == "SUCCESS"
-    assert resp["categories_ingested"] > 0
+    assert resp["categories_ingested"] == 2
+    assert set(resp["lesson_ids"]) == {"benchmark-coding", "benchmark-reasoning"}
     items = (await rag_main.list_learnings())["items"]
     benchmark_items = [i for i in items if i["metadata"].get("type") == "benchmark_curriculum"]
     assert len(benchmark_items) == resp["categories_ingested"]
@@ -295,12 +316,17 @@ async def test_ingest_benchmark_curriculum(tmp_path):
         meta = item["metadata"]
         assert meta.get("id", "").startswith("benchmark-")
         assert meta.get("ground_truth_count", 0) >= 0
+    # The fixture carries one expected answer, so the count must be real rather
+    # than a defaulting zero.
+    by_id = {i["metadata"]["id"]: i["metadata"] for i in benchmark_items}
+    assert by_id["benchmark-coding"]["ground_truth_count"] == 1
+    assert by_id["benchmark-reasoning"]["ground_truth_count"] == 0
 
 
 @pytest.mark.asyncio
 async def test_benchmark_insights(tmp_path):
     _install_fakes(tmp_path)
-    await rag_main.ingest_benchmark_curriculum()
+    await rag_main.ingest_benchmark_curriculum(path=str(_benchmarks_fixture(tmp_path)))
     insights = await rag_main.benchmark_insights()
     assert insights["status"] == "SUCCESS"
     assert "proven_capabilities" in insights

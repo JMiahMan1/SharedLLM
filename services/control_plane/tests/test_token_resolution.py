@@ -81,17 +81,22 @@ class TestEnvironmentVariableConfiguration:
         assert "GITHUB_TOKEN" in compose_content
 
     def test_ghcr_token_in_env_file(self):
-        """GHCR_TOKEN should be in .env file."""
+        """GHCR_TOKEN should be declared in the shipped env template.
+
+        `.env` is gitignored and therefore absent in CI, so asserting against
+        it only ever passed on a developer machine. `.env.example` is the
+        committed contract that actually reaches a fresh deploy.
+        """
         with open(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env.example"),
         ) as f:
             env_content = f.read()
         assert "GHCR_TOKEN" in env_content
 
     def test_github_token_in_env_file(self):
-        """GITHUB_TOKEN should be in .env file."""
+        """GITHUB_TOKEN should be declared in the shipped env template."""
         with open(
-            os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "..", ".env.example"),
         ) as f:
             env_content = f.read()
         assert "GITHUB_TOKEN" in env_content

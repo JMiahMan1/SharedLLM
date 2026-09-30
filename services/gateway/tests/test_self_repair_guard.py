@@ -6,6 +6,7 @@ missions — so the coder agent is not re-triggered on every health-check cycle.
 """
 
 import json
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -98,6 +99,37 @@ class TestTriggerSelfRepair:
         ]
         mock_client = MagicMock()
         mock_client.get = AsyncMock(return_value=_aio_resp(200, pending, text=json.dumps(pending)))
+        mock_client.post = AsyncMock(return_value=_aio_resp(200, {"status": "SUCCESS"}))
+        with patch("services.gateway.background_worker._shared_http_client", return_value=_client_ctx(mock_client)):
+            await worker.trigger_self_repair(PROBLEMATIC, {"coding_model": "m1"})
+        mock_client.post.assert_awaited_once()
+
+    def test_cooldown_state_is_initialized_per_instance(self):
+        """Every worker starts with a clean, independent cooldown.
+
+        Regression guard: the state used to be created lazily behind a
+        `hasattr` check on first dispatch, so a fresh instance could be skipped
+        as "within cooldown" whenever anything had already written that
+        attribute. Initializing in __init__ makes each instance self-contained.
+        """
+        a = RavenWorker()
+        b = RavenWorker()
+        assert a._self_repair_cooldown == {}
+        assert b._self_repair_cooldown == {}
+        a._self_repair_cooldown["sharedllm_rag"] = time.monotonic()
+        assert "sharedllm_rag" not in b._self_repair_cooldown
+        assert a._self_repair_cooldown is not b._self_repair_cooldown
+        assert a._self_repair_cooldown_seconds > 0
+
+    @pytest.mark.asyncio
+    async def test_a_fresh_worker_ignores_an_externally_written_cooldown(self):
+        """The real failure: a dispatch that must happen but was skipped."""
+        worker = RavenWorker()
+        # Simulate the ambient state the old lazy-init bug could leave behind.
+        worker._self_repair_cooldown = {"sharedllm_rag": time.monotonic()}
+        worker._self_repair_cooldown_seconds = 0  # even a zero window must not block
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=_aio_resp(200, [], text="[]"))
         mock_client.post = AsyncMock(return_value=_aio_resp(200, {"status": "SUCCESS"}))
         with patch("services.gateway.background_worker._shared_http_client", return_value=_client_ctx(mock_client)):
             await worker.trigger_self_repair(PROBLEMATIC, {"coding_model": "m1"})

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import {
@@ -42,6 +43,13 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 const ARC_SWEEP = 0.75; // 270° visible, gap centred at the bottom
 const ARC_LENGTH = CIRCUMFERENCE * ARC_SWEEP;
 
+// A horizontally scrollable strip with the default `touch-action: auto` makes
+// Chrome claim the whole gesture once the touch starts on it, so a vertical
+// drag on the strip scrolls nothing and the page appears stuck on a phone.
+// Claiming only the horizontal axis leaves vertical panning to the ancestor
+// scroller, which is what a thumb expects.
+const MODE_STRIP_TOUCH = 'touch-pan-x';
+
 type DialProps = {
   /** Arc fill start/end as 0..1 fractions of the 270° sweep. */
   from: number;
@@ -58,7 +66,7 @@ function DialArc({ from, to, stroke, glow, size, children }: DialProps) {
   const end = clamp(Math.max(from, to), 0, 1);
   const length = Math.max(0, (end - start) * ARC_LENGTH);
   return (
-    <div className={`relative mx-auto aspect-square w-full ${size === 'compact' ? 'max-w-[132px]' : 'max-w-[208px]'}`}>
+    <div className={`relative mx-auto aspect-square max-h-full w-full ${size === 'compact' ? 'max-w-[132px]' : 'max-w-[208px]'}`}>
       <svg viewBox="0 0 200 200" className="h-full w-full" aria-hidden="true" data-testid="climate-ring">
         <circle
           cx="100" cy="100" r={RADIUS}
@@ -358,7 +366,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
 
     return (
       <div className="flex h-full min-h-0 flex-col gap-1.5" data-testid="climate-dial" data-entity={device.entity_id}>
-        <div className="flex items-center gap-1">
+        <div className="flex min-h-0 flex-1 items-center gap-1">
           {!dual && (
             <Stepper
               direction="down"
@@ -420,7 +428,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
         )}
 
         {!compact && (
-          <div className="flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className={`flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${MODE_STRIP_TOUCH}`}>
             {modesFor(device).map((mode) => {
               const { Icon, label, tone: modeTone } = modeVisual(mode);
               const active = attrs.hvac_mode === mode;
@@ -447,7 +455,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
         )}
 
         {Array.isArray(attrs.preset_modes) && attrs.preset_modes.length > 0 && (
-          <div className="flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className={`flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${MODE_STRIP_TOUCH}`}>
             {attrs.preset_modes.map((preset) => {
               const active = attrs.preset_mode === preset;
               return (
@@ -515,11 +523,20 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
     const tone = actionTone(attrs.hvac_action, attrs.hvac_mode);
     const target = pending[device.entity_id]?.target ?? numberAttr(attrs.temperature);
     const current = numberAttr(attrs.current_temperature);
+    const low = numberAttr(attrs.target_temp_low);
+    const high = numberAttr(attrs.target_temp_high);
+    // A dual-bound thermostat never reports a single target, so the tile must
+    // show the band instead of an empty "--°".
+    const dual = attrs.hvac_mode === 'heat_cool' && typeof low === 'number' && typeof high === 'number';
+    const headline = typeof target === 'number' ? formatTemp(target)
+      : dual ? `${formatTemp(low)}–${formatTemp(high)}`
+      : formatTemp(current);
+    const fillValue = typeof target === 'number' ? target : dual ? (low + high) / 2 : undefined;
     const { min, max } = setpointRange(attrs);
     const span = Math.max(max - min, 1);
     const off = device.state === 'off';
     const { Icon } = modeVisual(attrs.hvac_mode);
-    const fill = typeof target === 'number' ? clamp((target - min) / span, 0, 1) : 0;
+    const fill = typeof fillValue === 'number' ? clamp((fillValue - min) / span, 0, 1) : 0;
     return (
       <button
         key={device.entity_id}
@@ -533,8 +550,8 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
           <Icon size={11} className={`shrink-0 ${tone.text}`} aria-hidden="true" />
           <span className="truncate">{deviceName(device)}</span>
         </span>
-        <span className={`tabular-nums text-xl font-bold leading-none ${off ? 'text-slate-400' : tone.text}`}>
-          {formatTemp(off ? current : target)}°
+        <span className={`tabular-nums font-bold leading-none ${dual ? 'text-base' : 'text-xl'} ${off ? 'text-slate-400' : tone.text}`}>
+          {headline}°
         </span>
         <span className="text-[9px] tabular-nums text-slate-500">
           {typeof current === 'number' ? `${formatTemp(current)}° now` : statusLine(device, attrs)}
@@ -599,7 +616,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
     return (
       <div className="flex h-full min-h-0 flex-col gap-1.5">
         {devices.length > 1 && (
-          <div className="flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className={`flex gap-1 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${MODE_STRIP_TOUCH}`}>
             {viewingDial && devices.map((d) => (
               <button
                 key={d.entity_id}
@@ -655,7 +672,7 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
       >
         {body()}
       </WidgetCard>
-      {setupOpen && (
+      {setupOpen && createPortal(
         <DeviceSetupDialog
           entities={all}
           selected={configured}
@@ -663,7 +680,8 @@ export function ClimateWidget({ settingsButton, userSettings }: ClimateWidgetPro
           saving={saving}
           onCancel={() => setSetupOpen(false)}
           onSave={saveSetup}
-        />
+        />,
+        document.body,
       )}
     </>
   );
