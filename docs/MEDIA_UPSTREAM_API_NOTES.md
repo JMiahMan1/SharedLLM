@@ -311,7 +311,7 @@ Source: Home Assistant core `dev` branch, integration lives IN HA core at
 
 - `services/gateway/config.py` freezes `INTERNAL_SECRET` and
   `ALPACA_AUDIO_URL` at its **first import**, while the root `conftest.py`
-  pre-sets `INTERNAL_SECRET=test-secret-ci`. Whichever test module imports
+  pre-sets `INTERNAL_SECRET=test-secret`. Whichever test module imports
   gateway `main` first therefore wins: `test_music_proxy.py` (which sets both
   to its own values at module import) got 401/503 whenever an
   earlier-alphabetical file (e.g. `test_ma_jsonrpc_allowlist.py`) imported the

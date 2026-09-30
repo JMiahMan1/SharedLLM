@@ -197,7 +197,7 @@ The `.env` file exists **only for bootstrapping**:
 For testing (e.g., E2E integration tests), create a `test.env` file with hardcoded values:
 
 ```env
-INTERNAL_SECRET=test-secret-ci
+INTERNAL_SECRET=test-secret
 FERNET_KEY=g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=
 IDENTITY_SVC_URL=http://identity:8001
 EXECUTION_SVC_URL=http://execution:8012

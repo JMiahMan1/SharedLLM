@@ -8,7 +8,7 @@ import pytest
 SERVER_IP = os.getenv("SERVER_IP", "localhost")
 GATEWAY_URL = f"http://{SERVER_IP}:8080"
 WORKSPACE_RUNTIME_URL = f"http://{SERVER_IP}:8007"
-INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "change-me-in-production")
+INTERNAL_SECRET = os.getenv("INTERNAL_SECRET", "test-secret")
 # Per-workspace webhook secret this test sets on the workspace it creates.
 WEBHOOK_TOKEN = "integration-test-webhook-token"
 

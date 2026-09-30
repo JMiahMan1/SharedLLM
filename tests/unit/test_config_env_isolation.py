@@ -243,6 +243,42 @@ def test_config_sees_the_pinned_values_not_the_dotenv_ones():
         assert getattr(config, key) == os.environ[key], f"services.config.{key} came from .env, not the pin"
 
 
+def test_internal_secret_agrees_across_the_e2e_stack():
+    """conftest, the E2E workflow and the compose stack must pick one value.
+
+    Not hypothetical: the compose services were started with
+    `INTERNAL_SECRET=test-secret-ci` while conftest pinned `test-secret`, so
+    every workspace call in the E2E integration suite came back
+    `{"detail": "Invalid internal secret"}` and the pipeline stayed red on every
+    commit for weeks. The test process signs its header from the environment
+    while the containers verify against their own env, so a silent divergence
+    fails only at runtime, in CI, and only in the integration job.
+    """
+    conftest = (ROOT / "conftest.py").read_text()
+    match = re.search(r'"INTERNAL_SECRET":\s*"([^"]+)"', conftest)
+    assert match, "conftest no longer pins INTERNAL_SECRET in _TEST_ENV_DEFAULTS"
+    pinned = match.group(1)
+
+    workflow = (ROOT / ".github" / "workflows" / "e2e-tests.yml").read_text()
+    wf = re.search(r"^\s*INTERNAL_SECRET:\s*(\S+)\s*$", workflow, re.M)
+    assert wf, "e2e-tests.yml no longer sets INTERNAL_SECRET"
+    assert wf.group(1) == pinned, (
+        f"e2e-tests.yml sets INTERNAL_SECRET={wf.group(1)} but conftest pins {pinned}. "
+        f"The integration tests sign X-Internal-Secret from the environment while the "
+        f"containers verify their own value, so a mismatch fails every workspace call."
+    )
+
+    compose = (ROOT / "docker-compose.test.yml").read_text()
+    literals = set(re.findall(r"INTERNAL_SECRET=(?!\$\{)(\S+)", compose))
+    assert not literals, (
+        f"docker-compose.test.yml hardcodes INTERNAL_SECRET={sorted(literals)}. "
+        f"Use ${{INTERNAL_SECRET:-{pinned}}} so the stack and the test process cannot diverge."
+    )
+    assert f"${{INTERNAL_SECRET:-{pinned}}}" in compose, (
+        f"docker-compose.test.yml does not fall back to conftest's pinned value {pinned}"
+    )
+
+
 @pytest.mark.parametrize("secret", ["ABS_API_KEY", "HA_TOKEN", "GITHUB_TOKEN", "GITLAB_TOKEN", "NEXTCLOUD_PASS"])
 def test_no_real_deployment_secret_reaches_the_test_environment(secret: str):
     """The real .env carries live credentials; _load_env_files() must not inject

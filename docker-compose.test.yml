@@ -18,7 +18,7 @@ services:
       - "8011:8001"
     environment:
       - IDENTITY_DATABASE_URL=sqlite:////tmp/identity_test.db
-      - INTERNAL_SECRET=test-secret-ci
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-test-secret}
       - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - DEFAULT_ADMIN_PASSWORD=${DEFAULT_ADMIN_PASSWORD:-mock-admin-password-for-testing}
       - INIT_DB=true
@@ -37,7 +37,7 @@ services:
     ports:
       - "8012:8003"
     environment:
-      - INTERNAL_SECRET=test-secret-ci
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-test-secret}
       - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
@@ -70,7 +70,7 @@ services:
     ports:
       - "8013:8004"
     environment:
-      - INTERNAL_SECRET=test-secret-ci
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-test-secret}
       - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - OLLAMA_URL=http://ollama_mock:11434
       - IDENTITY_SVC_URL=http://identity:8001
@@ -95,7 +95,7 @@ services:
     ports:
       - "8014:8005"
     environment:
-      - INTERNAL_SECRET=test-secret-ci
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-test-secret}
       - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
@@ -118,7 +118,7 @@ services:
     ports:
       - "8015:8006"
     environment:
-      - INTERNAL_SECRET=test-secret-ci
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-test-secret}
       - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - REDIS_URL=redis://redis:6379/0
       - EXECUTION_SVC_URL=http://execution:8003
@@ -143,7 +143,7 @@ services:
     ports:
       - "8016:11435"
     environment:
-      - INTERNAL_SECRET=test-secret-ci
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-test-secret}
       - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
@@ -175,7 +175,7 @@ services:
     ports:
       - "8007:8007"
     environment:
-      - INTERNAL_SECRET=test-secret-ci
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-test-secret}
       - FERNET_KEY=${FERNET_KEY:-g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=}
       - IDENTITY_SVC_URL=http://identity:8001
       - EXECUTION_SVC_URL=http://execution:8003
