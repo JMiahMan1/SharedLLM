@@ -2162,7 +2162,11 @@ export const api = {
   // Workspace-scoped AI image edit (execution service path). Uses a dedicated
   // long-timeout request: CPU-offloaded image editing takes minutes, and the
   // shared apiClient aborts at 15s.
-  async workspaceEditImage(workspaceId: string, payload: { prompt: string; image_path: string; output_path?: string; model?: string; size?: string }): Promise<{ status: string; message?: string; detail?: { output_path?: string } }> {
+  //
+  // A face swap is a two-image edit: `image_path` is the photo to keep and
+  // `face_image_path` is the donor face copied onto it. The server rejects a
+  // swap prompt with no donor, so both images are required for a swap.
+  async workspaceEditImage(workspaceId: string, payload: { prompt: string; image_path: string; face_image_path?: string; output_path?: string; model?: string; size?: string }): Promise<{ status: string; message?: string; detail?: { output_path?: string; face_swapped?: boolean; face_image_path?: string | null } }> {
     let baseURL = getBaseUrl();
     if (Capacitor.isNativePlatform()) {
       const serverUrl = storageGetSync('jarvis_server_url');

@@ -609,8 +609,15 @@ _RAVEN_TOOL_TABLE: tuple[tuple, ...] = (
      "Scan the LAN for devices.",
      "payload fields: subnet."),
     ("ImageEditRequest", SVC_EXECUTION, "POST", "/execute/image_edit", False,
-     "Edit an image via the execution image pipeline.",
-     "payload fields: prompt, image, model."),
+     "Edit an image via the execution image pipeline (img2img). The field is "
+     "image_path -- there is no 'image' field, and a wrong key is dropped silently, "
+     "so a typo here fails as 'image_path: Field required'.",
+     "payload fields: image_path (required, the image to edit), prompt (required, "
+     "the edit to make), face_image_path (optional, SECOND workspace image supplying "
+     "the donor face), output_path, size, model. A face swap needs TWO images: set "
+     "image_path to the photo to keep and face_image_path to the photo whose face "
+     "should be copied onto it. A swap prompt with no face_image_path is rejected "
+     "rather than silently editing only the first image."),
     ("ControlPlaneRequest", SVC_CONTROL_PLANE, "POST", "/api/restart/{service_name}", False,
      "Restart a SharedLLM service via the control plane.",
      "payload fields: service_name (fills the path)."),
