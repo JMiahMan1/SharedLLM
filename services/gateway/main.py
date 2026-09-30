@@ -4609,14 +4609,54 @@ async def zip_workspace_files_proxy(request: Request):
         headers={"Content-Disposition": content_disposition},
     )
 
-def _sd_request_authorized(request: Request) -> bool:
+async def _api_key_is_valid(api_key: str) -> bool:
+    """Ask Identity whether this exact key authenticates a real user.
+
+    Deliberately does NOT go through ``resolve_identity``: that endpoint falls
+    back to the system default user (an admin) when nothing matches, so every
+    string "resolves" successfully and it cannot be used to prove a caller is
+    authenticated. ``/api/internal/validate-api-key`` is the strict variant.
+
+    Fails closed: if Identity is unreachable the key cannot be confirmed, so we
+    deny rather than wave the request through.
+    """
+    try:
+        resp = await get_http_client().get(
+            f"{IDENTITY_SVC}/api/internal/validate-api-key",
+            params={"api_key": api_key},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+    except Exception as exc:
+        log.error(f"[sd-gate] key validation failed (identity unreachable): {exc}")
+        return False
+    if resp.status != 200:
+        log.info(f"[sd-gate] key validation rejected (HTTP {resp.status})")
+        return False
+    return True
+
+
+async def _sd_request_authorized(request: Request) -> bool:
+    """Gate the image/music/OCR routes on a *verified* key, not a present one.
+
+    This used to be ``bool(api_key)`` — a presence check, so any non-empty
+    string authorized the caller. Combined with the default-user fallback in
+    ``resolve_identity`` that made these routes, including GPU-spending image
+    generation, reachable by an anonymous caller. It now validates the key
+    against Identity and fails closed when Identity is unreachable.
+
+    Accepts, in this order: the internal secret (service-to-service), then a
+    Bearer token, then ``X-API-Key``.
+    """
+    if request.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+        return True
     api_key = request.headers.get("X-API-Key")
     auth_header = request.headers.get("Authorization")
     if auth_header and auth_header.startswith("Bearer "):
-        api_key = auth_header.split(" ")[1]
-    if request.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
-        return True
-    return bool(api_key)
+        api_key = auth_header.split(" ", 1)[1]
+    if not api_key or not api_key.strip():
+        return False
+    return await _api_key_is_valid(api_key.strip())
 
 async def _sd_proxy_base_url() -> str:
     """Resolve the SD/image proxy base URL from Identity settings (llm_local_url).
@@ -4635,7 +4675,7 @@ async def _sd_proxy_base_url() -> str:
 
 @app.post("/api/images/generate")
 async def sd_image_generate_proxy(request: Request):
-    if not _sd_request_authorized(request):
+    if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     body = await request.json()
     try:
@@ -4657,7 +4697,7 @@ async def music_generate_proxy(request: Request):
     The backend's own error text is passed through so a refused prompt reads
     as refused instead of as silence.
     """
-    if not _sd_request_authorized(request):
+    if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     if not ALPACA_AUDIO_URL:
         return JSONResponse(
@@ -4712,7 +4752,7 @@ async def music_generate_proxy(request: Request):
 
 @app.post("/api/images/edit")
 async def sd_image_edit_proxy(request: Request):
-    if not _sd_request_authorized(request):
+    if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     body = await request.json()
     base_url = resolve_service_base_url(SVC_ALPACA_SD)
@@ -4731,7 +4771,7 @@ async def ai_capabilities_proxy(request: Request):
     execution service owns the probes, because it is the service that holds the
     image/audio configuration and the record of what actually worked.
     """
-    if not _sd_request_authorized(request):
+    if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     try:
         resp = await get_http_client().get(
@@ -4749,7 +4789,7 @@ async def ai_capabilities_proxy(request: Request):
 
 @app.get("/api/images/models")
 async def sd_image_models_proxy(request: Request):
-    if not _sd_request_authorized(request):
+    if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     try:
         base_url = await _sd_proxy_base_url()
@@ -4775,7 +4815,7 @@ async def workspace_image_edit_proxy(workspace_id: str, request: Request):
     handler rejects a swap prompt with no donor rather than editing the wrong
     photo.
     """
-    if not _sd_request_authorized(request):
+    if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     body = await request.json()
     creds = await _resolve_identity_from_request(request)
@@ -4834,7 +4874,7 @@ async def workspace_ocr_proxy(workspace_id: str, request: Request):
     Raven uses) so the IDE and missions share one implementation. Long
     timeout: vision LLM inference on CPU takes up to a minute or two.
     """
-    if not _sd_request_authorized(request):
+    if not await _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
     body = await request.json()
     creds = await _resolve_identity_from_request(request)

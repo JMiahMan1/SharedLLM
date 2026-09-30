@@ -111,8 +111,16 @@ _SYNCED_CONSTANTS = (
 
 
 @pytest.fixture
-def client(fake_identity):
-    """Authenticated TestClient; identity resolution is faked."""
+def client(fake_identity, monkeypatch):
+    """Authenticated TestClient; identity resolution is faked.
+
+    ``_sd_request_authorized`` validates the presented key against Identity via
+    ``main._api_key_is_valid`` (a separate, strict identity call that does not
+    use ``resolve_identity``, because that one falls back to the default admin).
+    It is stubbed to "valid" here so media/image tests keep testing their own
+    subject; the gate's own accept/reject matrix lives in
+    tests/test_sd_auth_gate.py.
+    """
     import services.gateway.config as gw_config
     from services.gateway import main
     from services.gateway.main import app
@@ -120,6 +128,11 @@ def client(fake_identity):
     for attr in _SYNCED_CONSTANTS:
         if hasattr(gw_config, attr):
             setattr(main, attr, getattr(gw_config, attr))
+
+    async def _key_is_valid(api_key: str) -> bool:
+        return bool(api_key)
+
+    monkeypatch.setattr(main, "_api_key_is_valid", _key_is_valid)
 
     return TestClient(
         app,

@@ -1370,6 +1370,36 @@ def internal_user_device_assignments(
     }
 
 
+@app.get("/api/internal/validate-api-key")
+def internal_validate_api_key(
+    api_key: str,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_internal),
+):
+    """Internal: is this API key real, and whose is it?
+
+    Deliberately has **no** system-default fallback, which is what makes it
+    safe to use as an authentication gate. `POST /api/resolve` falls back to
+    the default (admin) user whenever nothing matches, so a caller that
+    validated a key through it would accept *any* string — including an
+    anonymous caller's — as the default administrator. This endpoint answers
+    only "did this exact key authenticate", and 401s otherwise.
+
+    Do not add a fallback here; that is the whole point of the endpoint.
+    """
+    if not api_key or not api_key.strip():
+        raise HTTPException(status_code=400, detail="api_key is required")
+    user = _find_user_for_api_key(session, api_key)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return {
+        "user": user.username,
+        "user_id": user.id or 0,
+        "is_admin": bool(user.is_admin),
+        "is_system_default": bool(user.is_system_default),
+    }
+
+
 @app.get("/api/users/devices", response_model=list[DeviceAssignmentRead])
 def list_devices_ui(session: Session = Depends(get_session), user: User = Depends(require_api_key)):
     query = select(DeviceAssignment)
