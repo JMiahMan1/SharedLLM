@@ -8,6 +8,7 @@ it with OCR (verify the edit) and other file tasks.
 
 import logging
 import os
+import re
 
 from fastapi import HTTPException
 
@@ -26,6 +27,49 @@ from services.execution.handlers.workspace import (
 log = logging.getLogger("execution.image_edit")
 
 _MAX_DIMENSION = 2048
+
+# Multipart field carrying the donor face. /v1/images/edits follows the OpenAI
+# contract where `image` may be repeated, base first and reference second, so a
+# donor is sent as a second part with the same name. The backing proxy is an
+# external service and could not be probed while its host was offline, so if it
+# ever turns out to want a differently-named key this is the only line to change.
+_DONOR_FIELD = "image"
+
+# A face swap is only possible with a second image, so we refuse the request
+# rather than let the model edit the wrong photo and call it a swap. Matching is
+# deliberately narrow: it needs a face word AND a verb that moves a face from one
+# person to another, in either order, since "swap the faces" puts the verb first
+# and "his face ... transplant" puts it last. "replace the face with a smiley" is
+# a legitimate single-image edit, so bare "replace" is not a trigger.
+# The window is bounded and cannot cross a sentence boundary, so a prompt that
+# merely mentions faces in a different sentence is not dragged into this.
+_FACE = r"\bfaces?\b"
+_SWAP_VERB = (
+    r"\b(?:swap|swaps|swapped|swapping|transplant\w*|transfer\w*|exchange[ds]?)\b"
+)
+_FACE_SWAP_RE = re.compile(
+    rf"{_FACE}[^.]{{0,40}}?{_SWAP_VERB}"      # "his face ... transplant"
+    rf"|{_SWAP_VERB}[^.]{{0,40}}?{_FACE}"      # "swap the faces"
+    rf"|\b(?:put|place|paste)[^.]{{0,30}}?{_FACE}"   # "put bob's face on ..."
+    rf"|\buse\b[^.]{{0,20}}?{_FACE}[^.]{{0,20}}?\bfrom\b",  # "use the face from ..."
+    re.IGNORECASE,
+)
+
+_NEEDS_DONOR = (
+    "Face swap needs a second image: the model is only shown one image, so it "
+    "cannot copy a face it was never given. Set face_image_path to the photo "
+    "whose face should be copied onto image_path."
+)
+
+
+def looks_like_face_swap(prompt: str | None) -> bool:
+    """True when the prompt asks for a face to be transferred from elsewhere.
+
+    Used only to decide whether to demand a donor image. A false positive costs
+    a clear error message; a false negative would silently edit the wrong photo,
+    which is the outcome this exists to prevent.
+    """
+    return bool(prompt and _FACE_SWAP_RE.search(prompt))
 
 
 async def get_image_edit_model() -> str | None:
@@ -101,6 +145,46 @@ async def handle_image_edit(req) -> ExecutionResult:
             detail={"image_path": req.image_path, "resolved_path": resolved_path},
         )
 
+    # Donor face: optional for every other edit, mandatory for a face swap.
+    face_path_arg = (getattr(req, "face_image_path", None) or "").strip()
+    if face_path_arg:
+        try:
+            face_safe_path = resolve_safe_path(face_path_arg, resolved_path)
+        except ValueError as e:
+            return ExecutionResult(
+                status="FAILURE",
+                message=f"Image edit failed: {e}",
+                service="image_edit",
+                detail={"image_path": req.image_path, "face_image_path": face_path_arg},
+            )
+        if not face_safe_path or not os.path.isfile(face_safe_path):
+            return ExecutionResult(
+                status="FAILURE",
+                message=(
+                    f"Image edit failed: donor face image not found at "
+                    f"'{face_path_arg}'"
+                ),
+                service="image_edit",
+                detail={"image_path": req.image_path, "face_image_path": face_path_arg},
+            )
+        if os.path.realpath(face_safe_path) == os.path.realpath(safe_path):
+            return ExecutionResult(
+                status="FAILURE",
+                message=(
+                    "Image edit failed: donor face image and source image are the "
+                    "same file. A face swap needs two different photos."
+                ),
+                service="image_edit",
+                detail={"image_path": req.image_path, "face_image_path": face_path_arg},
+            )
+    elif looks_like_face_swap(req.prompt):
+        return ExecutionResult(
+            status="FAILURE",
+            message=f"Image edit failed: {_NEEDS_DONOR}",
+            service="image_edit",
+            detail={"image_path": req.image_path, "prompt": req.prompt},
+        )
+
     # Resolve model: explicit override, else the user-configured setting. No
     # silent defaults - if the setting is missing, fail loudly with a clear fix.
     model = (req.model or "").strip()
@@ -137,12 +221,40 @@ async def handle_image_edit(req) -> ExecutionResult:
             image_bytes = f.read()
         content_type = "image/png" if safe_path.lower().endswith(".png") else "image/jpeg"
 
+        prompt = req.prompt
+        donor_bytes = None
+        if face_path_arg:
+            with open(face_safe_path, "rb") as f:
+                donor_bytes = f.read()
+            donor_type = (
+                "image/png" if face_safe_path.lower().endswith(".png") else "image/jpeg"
+            )
+            # Two images are ambiguous to a text-conditioned model unless it is
+            # told which is which, so state the roles explicitly ahead of the
+            # user's own instruction. The user's wording is preserved verbatim
+            # after this.
+            prompt = (
+                "Image 1 is the photo to edit. Image 2 is a reference photo "
+                "whose face should be copied onto the person in Image 1, "
+                "matching their skin tone and lighting. Keep Image 1's "
+                f"background, pose, clothing and framing. Then: {req.prompt}"
+            )
+
         form = aiohttp.FormData()
         form.add_field("model", model)
-        form.add_field("prompt", req.prompt)
+        form.add_field("prompt", prompt)
         form.add_field("size", size)
         form.add_field("response_format", "b64_json")
         form.add_field("image", image_bytes, filename=os.path.basename(safe_path), content_type=content_type)
+        if donor_bytes is not None:
+            # Same field name, base first then donor, per the OpenAI
+            # images/edits array convention.
+            form.add_field(
+                _DONOR_FIELD,
+                donor_bytes,
+                filename=os.path.basename(face_safe_path),
+                content_type=donor_type,
+            )
 
         async with aiohttp.ClientSession() as client:
             resp = await client.post(
@@ -200,10 +312,16 @@ async def handle_image_edit(req) -> ExecutionResult:
 
         return ExecutionResult(
             status="SUCCESS",
-            message=f"Edited image saved to {output_path}",
+            message=(
+                f"Face swapped onto {output_path}"
+                if face_path_arg
+                else f"Edited image saved to {output_path}"
+            ),
             service="image_edit",
             detail={
                 "image_path": req.image_path,
+                "face_image_path": face_path_arg or None,
+                "face_swapped": bool(face_path_arg),
                 "output_path": output_path,
                 "model": model,
                 "size": size,

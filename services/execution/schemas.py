@@ -1020,10 +1020,17 @@ class ImageEditRequest(BaseRequest):
 
     Reads the source image, sends it with an editing instruction, and saves the
     result back into the workspace.
+
+    A face swap is a two-image edit, so it takes a second path:
+    ``image_path`` is the photo to keep and ``face_image_path`` supplies the
+    donor face copied onto it. The model is only ever shown one image when the
+    donor is absent, so a swap request without it is rejected instead of
+    quietly producing an edit of the wrong photo.
     """
     user_context: UserContext
     image_path: str = Field(..., description="Path to the source image inside the workspace (e.g. 'sign_original.jpg')")
     prompt: str = Field(..., description="Editing instruction, e.g. 'Make this image look old and remove the website link on the sign'")
+    face_image_path: str | None = Field(None, description="Second workspace image supplying the donor face for a face swap. Required when the prompt asks to swap or transfer a face: the face from this image is copied onto image_path.")
     output_path: str | None = Field(None, description="Path to save the edited image (default: '<stem>_edited.<ext>' next to the source)")
     size: str | None = Field(None, description="Output size as WxH (default: source image size, max 2048x2048)")
     model: str | None = Field(None, description="Override image edit model name (default: image_edit_model setting)")

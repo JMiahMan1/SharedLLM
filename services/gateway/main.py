@@ -4745,6 +4745,11 @@ async def workspace_image_edit_proxy(workspace_id: str, request: Request):
     Delegates to the execution service /execute/image_edit handler (which owns
     the workspace resolution, proxy multipart call, and binary save) so the IDE
     and Raven share one code path. Long timeout: CPU-offloaded SD takes minutes.
+
+    A face swap is a two-image edit: image_path is the photo to keep and
+    face_image_path (alias donor_path) supplies the donor face. The execution
+    handler rejects a swap prompt with no donor rather than editing the wrong
+    photo.
     """
     if not _sd_request_authorized(request):
         return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
@@ -4755,6 +4760,7 @@ async def workspace_image_edit_proxy(workspace_id: str, request: Request):
     payload = {
         "workspace_id": workspace_id,
         "image_path": body.get("image_path") or body.get("path"),
+        "face_image_path": body.get("face_image_path") or body.get("donor_path"),
         "prompt": body.get("prompt"),
         "model": body.get("model"),
         "output_path": body.get("output_path"),

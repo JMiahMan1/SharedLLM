@@ -36,7 +36,7 @@ import {
   Wand2,
   Maximize2,
   Brush,
-  Eye,
+  UserRound,
   ScanText,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -313,6 +313,9 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
   const [sdPrompt, setSdPrompt] = useState('');
   const [sdBusy, setSdBusy] = useState(false);
   const [sdSize, setSdSize] = useState('');
+  // Donor face for a swap: the photo whose face is copied onto the open image.
+  // A swap is a two-image edit, so this is required before the action can run.
+  const [faceDonor, setFaceDonor] = useState('');
   const [ocrBusy, setOcrBusy] = useState(false);
   const [ocrResult, setOcrResult] = useState<{ full_text?: string; headline?: string; subtext?: string; badge?: string } | null>(null);
 
@@ -992,13 +995,21 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
     }
   }, [missions, refineInput, loadMissions]);
 
+  // Donor candidates for a face swap: images in the current folder other than
+  // the one being edited. A swap needs two different photos, so the open image
+  // is excluded here as well as in the action's own guard.
+  const donorImages = useMemo(
+    () => entries.filter((e) => !e.is_dir && isImagePath(e.path) && e.path !== active?.path),
+    [entries, active?.path, isImagePath],
+  );
+
   const runImageTask = useCallback(
-    async (mode: 'txt2img' | 'img2img' | 'upscale' | 'inpaint') => {
+    async (mode: 'txt2img' | 'img2img' | 'upscale') => {
       if (mode !== 'txt2img' && !active) {
         toast.error('Select a source image first');
         return;
       }
-      if (!sdPrompt.trim() && mode !== 'upscale' && mode !== 'inpaint') {
+      if (!sdPrompt.trim() && mode !== 'upscale') {
         toast.error('Enter a prompt');
         return;
       }
@@ -1022,9 +1033,7 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
         const prompt =
           mode === 'upscale'
             ? sdPrompt.trim() || 'upscale to 2x higher resolution, enhance fine details'
-            : mode === 'inpaint'
-              ? sdPrompt.trim() || 'inpaint and seamlessly improve the masked region'
-              : sdPrompt.trim();
+            : sdPrompt.trim();
         const fname = `${mode}_${Date.now()}.png`;
         const rel = baseDirOf(currentPath) + fname;
         const res = await api.workspaceEditImage(workspace.id, {
@@ -1084,6 +1093,52 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
     },
     [active, sdModel, sdSize, currentPath, workspace.id, loadDir, openByPath, baseDirOf],
   );
+
+  // A face swap needs two images: the open one is the photo to keep, faceDonor
+  // is the photo the face is copied from. The server rejects a swap with no
+  // donor rather than quietly editing the wrong photo, so the action is gated
+  // here too and the reason is shown instead of a silent no-op.
+  const runFaceSwap = useCallback(async () => {
+    if (!active) {
+      toast.error('Open the photo you want to keep first');
+      return;
+    }
+    if (!faceDonor) {
+      toast.error('Choose the donor photo to copy the face from');
+      return;
+    }
+    if (faceDonor === active.path) {
+      toast.error('The donor must be a different photo than the one you are editing');
+      return;
+    }
+    setSdBusy(true);
+    try {
+      const fname = `faceswap_${Date.now()}.png`;
+      const rel = baseDirOf(currentPath) + fname;
+      const res = await api.workspaceEditImage(workspace.id, {
+        prompt:
+          sdPrompt.trim() ||
+          'Copy the face from the donor photo onto the person in this photo, matching skin tone and lighting, and keep this photo’s background, pose, clothing and framing.',
+        image_path: active.path,
+        face_image_path: faceDonor,
+        output_path: rel,
+        model: sdModel || undefined,
+        size: sdSize || undefined,
+      });
+      if (res?.status !== 'SUCCESS') {
+        toast.error(res?.message || 'Face swap failed');
+        return;
+      }
+      const saved = res?.detail?.output_path || rel;
+      toast.success(`Face swapped onto ${saved}`);
+      await loadDir(currentPath);
+      await openByPath(saved);
+    } catch (e: unknown) {
+      toast.error(`Face swap failed: ${apiErr(e)}`);
+    } finally {
+      setSdBusy(false);
+    }
+  }, [active, faceDonor, sdPrompt, sdModel, sdSize, currentPath, workspace.id, loadDir, openByPath, baseDirOf]);
 
   const runOcr = useCallback(async () => {
     if (!active) {
@@ -1562,7 +1617,7 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                       <textarea
                         value={sdPrompt}
                         onChange={(e) => setSdPrompt(e.target.value)}
-                        placeholder="Prompt for generate / edit / inpaint…"
+                        placeholder="Prompt for generate / edit / face swap…"
                         rows={3}
                         className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-1.5 text-xs text-white placeholder-slate-600 focus:border-indigo-500 outline-none resize-none"
                       />
@@ -1624,13 +1679,48 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                       >
                         <Maximize2 size={13} /> Upscale
                       </button>
-                      <button
-                        onClick={() => runImageTask('inpaint')}
-                        disabled={sdBusy}
-                        className="flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200"
-                      >
-                        <Eye size={13} /> Inpaint
-                      </button>
+                      <div className="mt-1 border-t border-white/10 pt-3">
+                        <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500 mb-2">
+                          <UserRound size={13} className="text-indigo-400" /> Face swap
+                        </div>
+                        <p className="text-[11px] text-slate-500 mb-2">
+                          Copies the face from a second photo onto the image you have open.
+                          Both photos stay in the workspace; the result opens automatically.
+                        </p>
+                        <select
+                          value={faceDonor}
+                          onChange={(e) => setFaceDonor(e.target.value)}
+                          aria-label="Donor face photo"
+                          disabled={sdBusy || donorImages.length === 0}
+                          className="w-full rounded bg-black/40 border border-white/10 px-2 py-2 text-xs text-slate-200 disabled:opacity-40 min-h-11 pointer-coarse:min-h-11"
+                        >
+                          <option value="">
+                            {donorImages.length === 0
+                              ? 'No other image in this folder'
+                              : 'Donor photo (whose face to copy)'}
+                          </option>
+                          {donorImages.map((e) => (
+                            <option key={e.path} value={e.path}>
+                              {e.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => void runFaceSwap()}
+                          disabled={sdBusy || !faceDonor || !active}
+                          title={
+                            !active
+                              ? 'Open the photo you want to keep first'
+                              : !faceDonor
+                                ? 'Choose the donor photo to copy the face from'
+                                : 'Copy the donor face onto the open photo'
+                          }
+                          className="mt-2 w-full flex items-center justify-center gap-1.5 py-2 text-xs rounded bg-white/5 hover:bg-white/10 disabled:opacity-40 text-slate-200 min-h-11 pointer-coarse:min-h-11"
+                        >
+                          {sdBusy ? <Loader2 size={13} className="animate-spin" /> : <UserRound size={13} />}
+                          Swap face onto this image
+                        </button>
+                      </div>
                       <div className="mt-1 border-t border-white/10 pt-3">
                         <div className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500 mb-2">
                           <ScanText size={13} className="text-indigo-400" /> Read text (OCR)
@@ -1666,7 +1756,7 @@ export default function WorkspaceIDE({ workspace, onClose, initialPath }: Worksp
                         </div>
                       )}
                       <p className="text-[10px] text-slate-600 leading-relaxed">
-                        Results are saved into the current folder and open automatically. Edit/Upscale/Inpaint use the selected image as the source.
+                        Results are saved into the current folder and open automatically. Edit and Upscale use the selected image as the source; Face swap additionally uses the donor photo you pick.
                       </p>
                     </div>
                   </div>
