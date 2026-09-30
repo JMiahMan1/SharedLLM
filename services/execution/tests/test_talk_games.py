@@ -132,3 +132,127 @@ def test_star_banking_failure_never_breaks_a_game(talk, monkeypatch):
     # The answer still counted in the game, whatever geo thinks.
     assert state.player("Kiddo").stars == 1
     assert result is not None
+
+
+# ─── _bank_game_stars, the real body ───────────────────────────────────────────
+# The tests above all monkeypatch _bank_game_stars away, so they only ever
+# exercised the caller. That is how a NameError lived in the real body for so
+# long: `get_client` was never imported, every star raise raised it, and the
+# broad `except Exception` logged it as "telemetry" and moved on. These tests
+# call the real function with a fake HTTP client instead.
+
+
+class _FakeResponse:
+    def __init__(self, status: int):
+        self.status = status
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeClient:
+    def __init__(self, calls: list, status: int):
+        self._calls = calls
+        self._status = status
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    def post(self, url, **kwargs):
+        self._calls.append({"url": url, **kwargs})
+        return _FakeResponse(self._status)
+
+
+class _FakeClientFactory:
+    """Stands in for services.common.http.get_client."""
+
+    def __init__(self, calls: list, status: int = 200, raises: Exception | None = None):
+        self._calls = calls
+        self._status = status
+        self._raises = raises
+
+    def __call__(self):
+        if self._raises is not None:
+            raise self._raises
+        return _FakeClient(self._calls, self._status)
+
+
+def _capture_geo(monkeypatch, calls: list, status: int = 200, raises: Exception | None = None):
+    import services.common.http as common_http
+
+    monkeypatch.setattr(common_http, "get_client", _FakeClientFactory(calls, status=status, raises=raises))
+
+
+def test_bank_game_stars_really_posts_to_geo(monkeypatch):
+    """Regression: the body must reach the HTTP call, not die on a NameError."""
+    import services.execution.handlers.talk as talk_module
+
+    calls: list[dict] = []
+    _capture_geo(monkeypatch, calls)
+
+    asyncio.run(talk_module._bank_game_stars("kiddo", 3, "Trivia round"))
+
+    assert len(calls) == 1, "geo was never called — stars are silently not banked"
+    assert calls[0]["url"].endswith("/api/geo/stars")
+    assert calls[0]["json"] == {
+        "user_id": "kiddo",
+        "stars": 1,
+        "reason": "game",
+        "note": "Trivia round",
+        "granted_by": "game",
+    }
+    assert calls[0]["headers"]["X-Internal-Secret"]
+
+
+def test_bank_game_stars_truncates_a_long_note(monkeypatch):
+    import services.execution.handlers.talk as talk_module
+
+    calls: list[dict] = []
+    _capture_geo(monkeypatch, calls)
+
+    asyncio.run(talk_module._bank_game_stars("kiddo", 1, "x" * 500))
+
+    assert len(calls[0]["json"]["note"]) == 200
+
+
+def test_bank_game_stars_skips_family_and_zero_star_rounds(monkeypatch):
+    import services.execution.handlers.talk as talk_module
+
+    calls: list[dict] = []
+    _capture_geo(monkeypatch, calls)
+
+    asyncio.run(talk_module._bank_game_stars("family", 3, "Trivia"))
+    asyncio.run(talk_module._bank_game_stars("", 3, "Trivia"))
+    asyncio.run(talk_module._bank_game_stars("kiddo", 0, "Trivia"))
+
+    assert calls == [], "nothing to bank should mean no HTTP call at all"
+
+
+def test_bank_game_stars_logs_a_rejection_without_raising(monkeypatch):
+    import services.execution.handlers.talk as talk_module
+
+    warnings: list[str] = []
+    monkeypatch.setattr(talk_module, "log", SimpleNamespace(warning=lambda *a: warnings.append(" ".join(map(str, a)))))
+    _capture_geo(monkeypatch, [], status=403)
+
+    asyncio.run(talk_module._bank_game_stars("kiddo", 1, "Trivia"))  # must not raise
+
+    assert any("403" in w for w in warnings), warnings
+
+
+def test_bank_game_stars_swallows_a_dead_geo_and_says_so(monkeypatch):
+    import services.execution.handlers.talk as talk_module
+
+    warnings: list[str] = []
+    monkeypatch.setattr(talk_module, "log", SimpleNamespace(warning=lambda *a: warnings.append(" ".join(map(str, a)))))
+    _capture_geo(monkeypatch, [], raises=RuntimeError("geo is down"))
+
+    asyncio.run(talk_module._bank_game_stars("kiddo", 1, "Trivia"))  # must not raise
+
+    assert any("star banking failed" in w for w in warnings), warnings
