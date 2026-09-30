@@ -107,6 +107,13 @@ _TOOLS: tuple[_Tool, ...] = (
          "restyle", "change the image", "modify the image", "age the photo", "old photo"),
     ),
     _Tool(
+        "AiCapabilitiesRequest",
+        "Check which AI tools (image editing, face swap, voice profiles) can actually run right now.",
+        ("what can you do", "which tools work", "are you able to edit images",
+         "can you swap faces", "check ai tools", "tool availability",
+         "are you able to generate video", "can you make a video"),
+    ),
+    _Tool(
         "OcrRequest",
         "Extract/read all visible text from an image in the workspace using the vision OCR model.",
         ("read text from image", "read the text from", "read the text in", "ocr", "extract text from image",

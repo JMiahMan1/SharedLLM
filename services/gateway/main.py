@@ -4723,6 +4723,30 @@ async def sd_image_edit_proxy(request: Request):
         return JSONResponse(status_code=502, content={"status": "ERROR", "message": f"Stable Diffusion backend unreachable: {exc}"})
 
 
+@app.get("/api/ai/capabilities")
+async def ai_capabilities_proxy(request: Request):
+    """Expose the execution service's AI capability probe to the UI.
+
+    Read-only, and the gateway does no capability logic of its own: the
+    execution service owns the probes, because it is the service that holds the
+    image/audio configuration and the record of what actually worked.
+    """
+    if not _sd_request_authorized(request):
+        return JSONResponse(status_code=401, content={"status": "ERROR", "message": "Unauthorized"})
+    try:
+        resp = await get_http_client().get(
+            f"{EXECUTION_SVC}/execute/ai_capabilities",
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=20.0),
+        )
+        return JSONResponse(status_code=resp.status, content=await resp.json())
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={"status": "ERROR", "message": f"Capability check unavailable: {exc}"},
+        )
+
+
 @app.get("/api/images/models")
 async def sd_image_models_proxy(request: Request):
     if not _sd_request_authorized(request):

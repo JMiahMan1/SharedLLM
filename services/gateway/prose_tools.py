@@ -37,6 +37,7 @@ _RAVEN_TOOL_TYPES = (
     "RavenRecallRequest",
     "RavenMissionRequest",
     "ImageEditRequest",
+    "AiCapabilitiesRequest",
     "OcrRequest",
 )
 
@@ -57,6 +58,7 @@ _TYPE_ALIASES = {
     "ravenrecallrequest": "RavenRecallRequest",
     "ravenmissionrequest": "RavenMissionRequest",
     "imageeditrequest": "ImageEditRequest",
+    "aicapabilitiesrequest": "AiCapabilitiesRequest",
     "ocrrequest": "OcrRequest",
 }
 

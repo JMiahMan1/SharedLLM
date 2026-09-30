@@ -61,6 +61,50 @@ _NEEDS_DONOR = (
     "whose face should be copied onto image_path."
 )
 
+# The SD proxy reports an unusable image backend in several near-identical ways.
+# Seen in the field against the build behind llm_local_url, all of which mean
+# "it did not like the image parts I sent":
+_DONOR_REJECTED_MARKERS = (
+    "generate_image returned no results",
+    "at least one source image is required",
+    "no results",
+)
+
+
+def _explain_backend_failure(status: int, body: str, sent_donor: bool, bucket: str = "default") -> str:
+    """Turn the proxy's raw error into something an operator can act on.
+
+    The raw text is kept, but never alone: 'sd-server error: {"error":
+    "generate_image returned no results"}' names neither the cause nor the fix.
+    A donor that the backend silently ignores is the failure worth calling out,
+    because the request otherwise looks like it worked.
+    """
+    raw = (body or "").strip()
+    if sent_donor:
+        looks_rejected = any(m in raw.lower() for m in _DONOR_REJECTED_MARKERS)
+        if looks_rejected or status in (500, 502, 503, 400):
+            # Learn the answer rather than re-attempting it on every swap.
+            try:
+                from services.execution import ai_caps
+
+                ai_caps.record_observation(
+                    "face_swap",
+                    False,
+                    f"This backend rejected a second image: {raw[:160] or f'HTTP {status}'}",
+                    bucket=bucket,
+                )
+            except Exception:
+                pass
+            return (
+                f"Face swap failed: the image backend did not accept a second "
+                f"(donor) image. Most SD backends expose a single source image "
+                f"field, so a two-image edit cannot be honoured by this build. "
+                f"Backend said: {raw or f'HTTP {status}'}. To enable swapping, "
+                f"use a backend that accepts two source images and set "
+                f"face_swap_donor_field in Settings to the field name it expects."
+            )
+    return f"Image edit API error {status}: {raw}"
+
 
 def looks_like_face_swap(prompt: str | None) -> bool:
     """True when the prompt asks for a face to be transferred from elsewhere.
@@ -72,8 +116,8 @@ def looks_like_face_swap(prompt: str | None) -> bool:
     return bool(prompt and _FACE_SWAP_RE.search(prompt))
 
 
-async def get_image_edit_model() -> str | None:
-    """Fetch the image edit model from Identity settings ('image_edit_model')."""
+async def _identity_setting(key: str) -> str | None:
+    """Read one Identity GlobalSetting. Returns None when unset or unreachable."""
     try:
         import aiohttp
 
@@ -86,11 +130,29 @@ async def get_image_edit_model() -> str | None:
             if resp.status == 200:
                 settings = await resp.json()
                 for s in settings:
-                    if s.get("key") == "image_edit_model" and s.get("value"):
-                        return s["value"].strip()
+                    if s.get("key") == key and s.get("value"):
+                        return str(s["value"]).strip()
     except Exception as e:
-        log.warning(f"Failed to get image edit model from Identity: {e}")
+        log.warning(f"Failed to get image edit setting '{key}' from Identity: {e}")
     return None
+
+
+async def get_image_edit_model() -> str | None:
+    """Fetch the image edit model from Identity settings ('image_edit_model')."""
+    return await _identity_setting("image_edit_model")
+
+
+async def get_face_donor_field() -> str:
+    """Multipart field name the image backend expects for the DONOR image.
+
+    'image' (the OpenAI images/edits array convention, i.e. two parts with the
+    same name) is the default, but it is configurable because the SD proxy is a
+    separate product and not every build accepts a repeated field: the one
+    behind llm_local_url currently returns 'generate_image returned no results'
+    when it is sent two. Operators set 'face_swap_donor_field' once they know
+    what their backend wants, instead of a code change and redeploy.
+    """
+    return await _identity_setting("face_swap_donor_field") or _DONOR_FIELD
 
 
 def _parse_size(size: str | None, source_size: tuple[int, int]) -> str:
@@ -185,6 +247,9 @@ async def handle_image_edit(req) -> ExecutionResult:
             detail={"image_path": req.image_path, "prompt": req.prompt},
         )
 
+    # Only pay for the settings round-trip when a donor is actually being sent.
+    donor_field = await get_face_donor_field() if face_path_arg else _DONOR_FIELD
+
     # Resolve model: explicit override, else the user-configured setting. No
     # silent defaults - if the setting is missing, fail loudly with a clear fix.
     model = (req.model or "").strip()
@@ -247,10 +312,9 @@ async def handle_image_edit(req) -> ExecutionResult:
         form.add_field("response_format", "b64_json")
         form.add_field("image", image_bytes, filename=os.path.basename(safe_path), content_type=content_type)
         if donor_bytes is not None:
-            # Same field name, base first then donor, per the OpenAI
-            # images/edits array convention.
+            # Base first, donor second, under the configured donor field name.
             form.add_field(
-                _DONOR_FIELD,
+                donor_field,
                 donor_bytes,
                 filename=os.path.basename(face_safe_path),
                 content_type=donor_type,
@@ -266,9 +330,9 @@ async def handle_image_edit(req) -> ExecutionResult:
                 body = (await resp.text())[:500]
                 return ExecutionResult(
                     status="FAILURE",
-                    message=f"Image edit API error {resp.status}: {body}",
+                    message=_explain_backend_failure(resp.status, body, bool(face_path_arg), proxy_url),
                     service="image_edit",
-                    detail={"image_path": req.image_path},
+                    detail={"image_path": req.image_path, "face_image_path": face_path_arg or None},
                 )
             data = await resp.json()
 
@@ -277,12 +341,24 @@ async def handle_image_edit(req) -> ExecutionResult:
         if not b64:
             return ExecutionResult(
                 status="FAILURE",
-                message=f"Image edit returned no image data: {str(data)[:300]}",
+                message=_explain_backend_failure(200, str(data)[:300], bool(face_path_arg), proxy_url),
                 service="image_edit",
-                detail={"image_path": req.image_path},
+                detail={"image_path": req.image_path, "face_image_path": face_path_arg or None},
             )
 
         output_path = (req.output_path or "").strip() or _default_output_path(req.image_path)
+        # Record what this backend actually did with a donor, so the capability
+        # list can report it as fact rather than advertising a swap that this
+        # build of the image backend cannot honour.
+        if face_path_arg:
+            from services.execution import ai_caps
+
+            ai_caps.record_observation(
+                "face_swap",
+                True,
+                f"A two-image edit succeeded against {proxy_url}.",
+                bucket=proxy_url,
+            )
         uc = getattr(req, "user_context", None)
         if hasattr(uc, "model_dump"):
             uc = uc.model_dump()
