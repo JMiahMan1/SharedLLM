@@ -93,6 +93,12 @@ class RavenWorker:
         self._cleanup_task = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
+        # Initialize the self-repair cooldown here rather than lazily behind a
+        # hasattr() check in trigger_self_repair. Lazy init left the attribute
+        # missing until the first dispatch, so any code path that read it first
+        # (or a reused instance) could inherit a stale window and silently skip
+        # a mission it should have pushed.
+        self.__init_self_repair_state()
         self.job_queue = InferenceJobQueue(REDIS_URL)
     def _is_autonomous_job(self, payload: dict[str, Any], user_id: str) -> bool:
         """Determine if a job requires Tier-3 (Raven) exclusive lock."""

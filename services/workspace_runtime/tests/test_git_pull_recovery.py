@@ -53,6 +53,19 @@ def _git(cwd: str, *args: str) -> None:
     )
 
 
+def _init_repo(path: str) -> None:
+    """git init + an explicit identity.
+
+    CI runners have no global user.name/user.email, so a bare `git commit`
+    fails with exit 128 and takes the whole test down for a reason that has
+    nothing to do with the pull recovery under test.
+    """
+    _git(path, "init", "-b", "main")
+    _git(path, "config", "user.email", "test@example.com")
+    _git(path, "config", "user.name", "Test User")
+    _git(path, "config", "commit.gpgsign", "false")
+
+
 def _make_remote_with_conflict(base: str) -> str:
     remote = os.path.join(base, "remote.git")
     work = os.path.join(base, "work")
@@ -60,6 +73,10 @@ def _make_remote_with_conflict(base: str) -> str:
     subprocess.run(["git", "init", "--bare", "-b", "main", remote], check=True, capture_output=True)
     subprocess.run(["git", "clone", remote, work], check=True, capture_output=True)
     _git(work, "checkout", "-b", "main")
+    # A clone inherits no identity, and CI has no global one either.
+    _git(work, "config", "user.email", "test@example.com")
+    _git(work, "config", "user.name", "Test User")
+    _git(work, "config", "commit.gpgsign", "false")
     with open(os.path.join(work, "file.txt"), "w") as f:
         f.write("original\n")
     _git(work, "add", "file.txt")
@@ -68,6 +85,9 @@ def _make_remote_with_conflict(base: str) -> str:
 
     # Divergent change pushed straight to the remote
     subprocess.run(["git", "clone", remote, remote_work], check=True, capture_output=True)
+    _git(remote_work, "config", "user.email", "test@example.com")
+    _git(remote_work, "config", "user.name", "Test User")
+    _git(remote_work, "config", "commit.gpgsign", "false")
     with open(os.path.join(remote_work, "file.txt"), "w") as f:
         f.write("changed-by-remote\n")
     _git(remote_work, "add", "file.txt")
@@ -130,6 +150,9 @@ def test_pull_clean_repo_no_recovery(client: TestClient):
     subprocess.run(["git", "init", "--bare", "-b", "main", remote], check=True, capture_output=True)
     subprocess.run(["git", "clone", remote, work], check=True, capture_output=True)
     _git(work, "checkout", "-b", "main")
+    _git(work, "config", "user.email", "test@example.com")
+    _git(work, "config", "user.name", "Test User")
+    _git(work, "config", "commit.gpgsign", "false")
     with open(os.path.join(work, "file.txt"), "w") as f:
         f.write("original\n")
     _git(work, "add", "file.txt")

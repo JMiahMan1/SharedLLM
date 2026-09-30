@@ -124,6 +124,13 @@ def test_android_auto_endpoint(client, monkeypatch):
 
 async def test_steps_falls_back_to_ha_when_redis_empty(client, monkeypatch):
     import services.geo.main as geo
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    # The reading must land inside the requested window, so date it relative to
+    # now. A hardcoded date silently expires: this test started failing on its
+    # own once "today" moved past the fixture's timestamp.
+    fresh = datetime.now(ZoneInfo("America/Phoenix")).strftime("%Y-%m-%dT12:00:00+00:00")
 
     async def fake_ha_states():
         return [
@@ -131,7 +138,7 @@ async def test_steps_falls_back_to_ha_when_redis_empty(client, monkeypatch):
                 "entity_id": "sensor.jeremiahs_phone_daily_steps",
                 "state": "4321",
                 "attributes": {},
-                "last_updated": "2026-09-22T12:00:00+00:00",
+                "last_updated": fresh,
             }
         ]
 
