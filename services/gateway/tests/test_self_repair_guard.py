@@ -135,6 +135,38 @@ class TestTriggerSelfRepair:
             await worker.trigger_self_repair(PROBLEMATIC, {"coding_model": "m1"})
         mock_client.post.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_first_mission_is_not_suppressed_just_after_a_restart(self):
+        """A container's monotonic clock starts near 0 after a restart.
+
+        The cooldown lookup used to default a missing entry to 0.0, which on a
+        freshly booted process read as "triggered just now" and suppressed every
+        self-repair mission for the whole cooldown window. That is why CI, where
+        the gateway had just started, saw "within cooldown, 1393s remaining" on
+        a worker that had never pushed anything.
+        """
+        worker = RavenWorker()
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=_aio_resp(200, [], text="[]"))
+        mock_client.post = AsyncMock(return_value=_aio_resp(200, {"status": "SUCCESS"}))
+        with patch("services.gateway.background_worker._shared_http_client", return_value=_client_ctx(mock_client)), \
+             patch("services.gateway.background_worker.time.monotonic", return_value=12.0):
+            await worker.trigger_self_repair(PROBLEMATIC, {"coding_model": "m1"})
+        mock_client.post.assert_awaited_once()
+        assert worker._self_repair_cooldown == {"sharedllm_rag": 12.0}
+
+    @pytest.mark.asyncio
+    async def test_a_recent_mission_is_still_suppressed(self):
+        """The guard itself must keep working, not just stop misfiring."""
+        worker = RavenWorker()
+        mock_client = MagicMock()
+        mock_client.get = AsyncMock(return_value=_aio_resp(200, [], text="[]"))
+        mock_client.post = AsyncMock(return_value=_aio_resp(200, {"status": "SUCCESS"}))
+        with patch("services.gateway.background_worker._shared_http_client", return_value=_client_ctx(mock_client)):
+            await worker.trigger_self_repair(PROBLEMATIC, {"coding_model": "m1"})
+            await worker.trigger_self_repair(PROBLEMATIC, {"coding_model": "m1"})
+        assert mock_client.post.await_count == 1
+
 
 class TestGetCodingModelFromSettings:
     @pytest.mark.asyncio

@@ -1212,8 +1212,12 @@ class RavenWorker:
             if not hasattr(self, "_self_repair_cooldown"):
                 self.__init_self_repair_state()
             now = time.monotonic()
-            last = self._self_repair_cooldown.get(c["name"], 0.0)
-            if last + self._self_repair_cooldown_seconds > now:
+            # `None` means "never triggered". Defaulting to 0.0 is wrong:
+            # time.monotonic() starts near 0 on a freshly booted container, so
+            # a missing entry read as "just triggered" and suppressed the very
+            # first mission after any restart.
+            last = self._self_repair_cooldown.get(c["name"])
+            if last is not None and last + self._self_repair_cooldown_seconds > now:
                 remain = int(last + self._self_repair_cooldown_seconds - now)
                 log.info(
                     f"[SelfRepair] Skipping {c['name']}: within cooldown "

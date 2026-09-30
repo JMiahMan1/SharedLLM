@@ -25,7 +25,11 @@ on:
       - '.github/workflows/e2e-tests.yml'
 
 env:
-  INTERNAL_SECRET: test-secret-ci
+  # Must match conftest.py's pinned INTERNAL_SECRET. The integration tests read
+  # this variable to sign their X-Internal-Secret header, while the compose
+  # stack interpolates the same value into every service — so a mismatch here
+  # makes every workspace call fail with "Invalid internal secret".
+  INTERNAL_SECRET: test-secret
   FERNET_KEY: g13l5bpIeVaVe4ri66RE0bPYpB9IjCYdObQAKJU2Z14=
   TEST_MODE: "true"
   DEFAULT_ADMIN_PASSWORD: mock-admin-password-for-testing
