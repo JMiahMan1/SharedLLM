@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
 import { useLocation } from '../context/LocationContext';
-import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink } from 'lucide-react';
+import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Package } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import type { GlobalSetting } from '../services/api';
@@ -14,7 +14,8 @@ import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
 import Toggle from '../components/ui/Toggle';
 import { isAdminPinSet, setAdminPin, clearAdminPin } from '../lib/adminPin';
-import { checkForAppUpdates, downloadAndInstallApk, getRunningVersion } from '../lib/appUpdater';
+import { checkForAppUpdates, checkApkUpdate, downloadAndInstallApk, getRunningVersion } from '../lib/appUpdater';
+import type { ApkUpdateStatus } from '../lib/appUpdater';
 import toast from 'react-hot-toast';
 
 const Settings = () => {
@@ -453,18 +454,22 @@ const SystemConfigSection = ({ isAdmin, onEdit }: { isAdmin: boolean; onEdit: ()
   );
 };
 
+const formatBytes = (bytes?: number) => {
+  if (!bytes || bytes <= 0) return null;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
+
 const AppUpdatesSection = () => {
   const { trigger } = useHaptics();
   const [checking, setChecking] = useState(false);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [apk, setApk] = useState<ApkUpdateStatus | null>(null);
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     gitSha: string;
     remoteSha?: string;
     remoteVersion?: string;
     releaseNotes?: string;
-    apkUrl?: string | null;
-    apkAvailable?: boolean;
     hasUpdate?: boolean;
   }>({ version: '1.2.0', gitSha: 'unknown' });
 
@@ -472,6 +477,15 @@ const AppUpdatesSection = () => {
     let active = true;
     void getRunningVersion().then((v) => {
       if (active) setUpdateInfo((prev) => ({ ...prev, version: v.version, gitSha: v.gitSha }));
+    });
+    return () => { active = false; };
+  }, []);
+
+  // Notice the pending APK on arrival rather than only after "Check Now".
+  useEffect(() => {
+    let active = true;
+    void checkApkUpdate().then((status) => {
+      if (active) setApk(status);
     });
     return () => { active = false; };
   }, []);
@@ -487,20 +501,28 @@ const AppUpdatesSection = () => {
         remoteVersion: res.remoteVersion,
         releaseNotes: res.releaseNotes,
         hasUpdate: res.hasUpdate,
-        apkUrl: res.apkUrl,
-        apkAvailable: res.apkUpdateAvailable,
       }));
+      // Re-probe for the full APK detail (version code, size) the combined
+      // check does not return, so the notice reflects this press.
+      setApk(await checkApkUpdate());
       setLastChecked(new Date());
     } finally {
       setChecking(false);
     }
   };
 
-  const updateState = updateInfo.hasUpdate
-    ? { label: 'Update Available', cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10' }
-    : updateInfo.remoteSha
-      ? { label: 'Up to Date', cls: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10' }
-      : { label: 'Not Checked', cls: 'text-slate-400 border-white/10 bg-white/5' };
+  const apkPending = Boolean(apk?.updateAvailable && apk.apkUrl);
+  const apkSize = formatBytes(apk?.sizeBytes);
+
+  // A pending APK outranks "Up to Date": claiming the app is current while an
+  // install is waiting is the contradiction this notice exists to remove.
+  const updateState = apkPending
+    ? { label: 'App Update Ready', cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10' }
+    : updateInfo.hasUpdate
+      ? { label: 'Update Available', cls: 'text-amber-300 border-amber-500/40 bg-amber-500/10' }
+      : updateInfo.remoteSha
+        ? { label: 'Up to Date', cls: 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10' }
+        : { label: 'Not Checked', cls: 'text-slate-400 border-white/10 bg-white/5' };
 
   return (
     <div className="glass-panel rounded-2xl p-4 space-y-3">
@@ -537,34 +559,83 @@ const AppUpdatesSection = () => {
           <button
             onClick={handleCheck}
             disabled={checking}
-            className="glass-button shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold text-purple-300 hover:text-white flex items-center gap-1.5 border-purple-500/30"
+            className="glass-button shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold text-purple-300 hover:text-white flex items-center gap-1.5 border-purple-500/30 pointer-coarse:min-h-11"
           >
             <RefreshCw size={13} className={checking ? 'animate-spin text-purple-400' : ''} />
             <span>{checking ? 'Checking...' : 'Check Now'}</span>
           </button>
         </div>
+      </div>
 
-        {updateInfo.apkAvailable && updateInfo.apkUrl && (
-          <div className="mt-2 pt-2.5 border-t border-white/5 flex items-center justify-between gap-2">
+      {apkPending && apk && (
+        <div
+          data-testid="apk-update-notice"
+          role="status"
+          className="p-3.5 rounded-xl border border-amber-500/40 bg-amber-500/10 space-y-2.5"
+        >
+          <div className="flex items-start gap-2.5">
+            <Package size={16} className="text-amber-300 shrink-0 mt-0.5" />
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-amber-300 flex items-center gap-1">
-                <span>📦 New Native APK Build Available</span>
+              <p className="text-sm font-semibold text-amber-200">New app version available</p>
+              <p className="text-xs text-amber-100/80 mt-0.5">
+                Install build {apk.apkVersionCode} to get new native features and permissions.
+                {apk.nativeBuildNumber !== undefined && ` You are on build ${apk.nativeBuildNumber}.`}
+                {apkSize && ` ${apkSize} download.`}
               </p>
-              <p className="text-[10px] text-slate-400">Required for new plugins / native permissions (e.g. step counter)</p>
             </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => {
                 trigger('medium');
-                void downloadAndInstallApk(updateInfo.apkUrl!);
+                void downloadAndInstallApk(apk.apkUrl!);
               }}
-              className="shrink-0 px-3 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-bold flex items-center gap-1.5"
+              className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
             >
               <Download size={13} />
-              <span>Download APK</span>
+              <span>Install update</span>
             </button>
+            <a
+              href={apk.apkUrl!}
+              download="app-debug.apk"
+              target="_blank"
+              rel="noreferrer"
+              onClick={() => trigger('light')}
+              className="px-3 py-1.5 rounded-xl text-amber-200/90 hover:text-white border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 pointer-coarse:min-h-11"
+            >
+              <ExternalLink size={13} />
+              <span>Download link</span>
+            </a>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {apk?.indeterminate && (
+        <div
+          data-testid="apk-update-unknown"
+          role="status"
+          className="p-3.5 rounded-xl border border-white/10 bg-white/5 flex items-start gap-2.5"
+        >
+          <AlertCircle size={15} className="text-slate-400 shrink-0 mt-0.5" />
+          <p className="text-xs text-slate-400">
+            An APK build is published but the server did not report its version code, so we
+            cannot tell whether it is newer than yours.
+          </p>
+        </div>
+      )}
+
+      {apk?.error && (
+        <div
+          data-testid="apk-update-error"
+          role="status"
+          className="p-3.5 rounded-xl border border-white/10 bg-white/5 flex items-start gap-2.5"
+        >
+          <AlertCircle size={15} className="text-slate-500 shrink-0 mt-0.5" />
+          <p className="text-xs text-slate-500">
+            Could not check for app updates: {apk.error}
+          </p>
+        </div>
+      )}
     </div>
   );
 };

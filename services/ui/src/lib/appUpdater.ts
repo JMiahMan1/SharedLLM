@@ -31,6 +31,67 @@ export interface CheckUpdateResult {
   blockedReason?: string;
 }
 
+export interface ApkUpdateStatus {
+  /** Server advertises a build strictly newer than the one running. */
+  updateAvailable: boolean;
+  /**
+   * Server has an APK but not enough metadata to compare versions. We refuse
+   * to call this "up to date" — the honest answer is that we do not know.
+   */
+  indeterminate: boolean;
+  apkUrl: string | null;
+  apkVersionCode?: number;
+  /**
+   * versionCode of the running native build, or `undefined` when it is not
+   * knowable — a browser is not running an APK at all, so there is no honest
+   * number to quote. Never substitute a placeholder for display.
+   */
+  nativeBuildNumber?: number;
+  sizeBytes?: number;
+  /** Populated when the probe itself failed; never silently treated as "current". */
+  error?: string;
+}
+
+/**
+ * Version code of the running native build, or undefined when unknown.
+ * Returning a made-up number here would be quoted to the user as fact.
+ */
+async function getNativeBuildNumber(): Promise<number | undefined> {
+  if (!Capacitor.isNativePlatform()) return undefined;
+  try {
+    const appInfo = await App.getInfo();
+    return parseInt(appInfo.build, 10) || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Turn a server-relative update path into an absolute, http->https URL.
+ * The published metadata can carry the legacy plain-http host.
+ */
+function resolveUpdateUrl(origin: string, url: string): string {
+  if (url.startsWith('http')) {
+    return url.replace(/^http:\/\/jarvis\.sumemail\.com/, 'https://jarvis.sumemail.com');
+  }
+  return `${origin}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
+/** Decide whether the published APK is newer than the running native build. */
+function evaluateApk(remote: AppVersionInfo, nativeBuildNumber: number | undefined, apkUrl: string | null) {
+  if (!remote.apk_available || !apkUrl) {
+    return { updateAvailable: false, indeterminate: false };
+  }
+  if (typeof remote.apk_version_code !== 'number') {
+    // An APK exists but we cannot compare it. Reporting "up to date" here
+    // would be a guess, so report the uncertainty instead.
+    return { updateAvailable: false, indeterminate: true };
+  }
+  // With no running build to compare against (a browser), any published build
+  // is worth surfacing — there is no version the viewer is known to already have.
+  return { updateAvailable: remote.apk_version_code > (nativeBuildNumber ?? 1), indeterminate: false };
+}
+
 let isInitialized = false;
 let currentRuntimeSha: string = typeof __BUILD_SHA__ === 'string' ? __BUILD_SHA__ : 'unknown';
 
@@ -223,22 +284,9 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
 
     await getRunningVersion();
 
-    let nativeBuildNumber = 1;
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const appInfo = await App.getInfo();
-        nativeBuildNumber = parseInt(appInfo.build, 10) || 1;
-      } catch {
-        // fallback
-      }
-    }
-
-    const apkUpdateAvailable = Boolean(
-      remote.apk_available &&
-      remote.apk_url &&
-      remote.apk_version_code &&
-      remote.apk_version_code > nativeBuildNumber
-    );
+    const nativeBuildNumber = await getNativeBuildNumber();
+    const apkUrl = remote.apk_url ? resolveUpdateUrl(origin, remote.apk_url) : null;
+    const { updateAvailable: apkUpdateAvailable } = evaluateApk(remote, nativeBuildNumber, apkUrl);
 
     const hasWebUpdate = Boolean(
       remote.bundle_available &&
@@ -248,17 +296,7 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
       !shaMatches(currentRuntimeSha, remote.git_sha)
     );
 
-    const effectiveBundleUrl = remote.bundle_url
-      ? (remote.bundle_url.startsWith('http')
-          ? remote.bundle_url.replace(/^http:\/\/jarvis\.sumemail\.com/, 'https://jarvis.sumemail.com')
-          : `${origin}${remote.bundle_url.startsWith('/') ? '' : '/'}${remote.bundle_url}`)
-      : '';
-
-    const effectiveApkUrl = remote.apk_url
-      ? (remote.apk_url.startsWith('http')
-          ? remote.apk_url.replace(/^http:\/\/jarvis\.sumemail\.com/, 'https://jarvis.sumemail.com')
-          : `${origin}${remote.apk_url.startsWith('/') ? '' : '/'}${remote.apk_url}`)
-      : null;
+    const effectiveBundleUrl = remote.bundle_url ? resolveUpdateUrl(origin, remote.bundle_url) : '';
 
     const baseResult: CheckUpdateResult = {
       hasUpdate: hasWebUpdate,
@@ -268,7 +306,7 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
       remoteVersion: remote.version,
       releaseNotes: remote.release_notes,
       apkUpdateAvailable,
-      apkUrl: effectiveApkUrl,
+      apkUrl,
     };
 
     if (hasWebUpdate && effectiveBundleUrl && Capacitor.isNativePlatform()) {
@@ -384,4 +422,43 @@ export async function downloadAndInstallApk(apkUrl: string): Promise<void> {
   }
   toast.loading('Opening APK download...', { duration: 3000, id: 'apk-install' });
   window.open(apkUrl, '_system');
+}
+
+/**
+ * Ask only "is a newer native APK published?" and nothing else.
+ *
+ * Deliberately does NOT call `checkForAppUpdates`: on a device that stages an
+ * OTA bundle (`next()`) and raises a toast, which would be a nasty surprise
+ * just for opening Settings. This probe has no side effects, so the update
+ * section can show an accurate notice on arrival instead of only after the
+ * user presses "Check Now".
+ */
+export async function checkApkUpdate(): Promise<ApkUpdateStatus> {
+  const origin = getServerOrigin();
+  const nativeBuildNumber = await getNativeBuildNumber();
+
+  try {
+    const resp = await axios.get<AppVersionInfo>(`${origin}/api/app-updates/version`, { timeout: 7000 });
+    const remote = resp.data;
+    const apkUrl = remote.apk_url ? resolveUpdateUrl(origin, remote.apk_url) : null;
+    const { updateAvailable, indeterminate } = evaluateApk(remote, nativeBuildNumber, apkUrl);
+
+    return {
+      updateAvailable,
+      indeterminate,
+      apkUrl,
+      apkVersionCode: remote.apk_version_code,
+      nativeBuildNumber,
+      sizeBytes: remote.apk_size_bytes,
+    };
+  } catch (err) {
+    console.error('[AppUpdater] APK update probe failed:', err);
+    return {
+      updateAvailable: false,
+      indeterminate: false,
+      apkUrl: null,
+      nativeBuildNumber,
+      error: 'Could not reach the update server.',
+    };
+  }
 }
