@@ -90,6 +90,30 @@ function num(value: unknown): number {
 }
 
 /**
+ * Round away binary-float noise for display.
+ *
+ * Summing per-trip floats lands on values like 2.6999999999999997, which
+ * rendered raw in the summary tiles. Rounding for *display* only -- the totals
+ * themselves stay exact so the tiles are not built on lossy sums.
+ */
+export function roundForDisplay(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.round(value * 10) / 10;
+}
+
+/** Fuel for the summary tile: at most one decimal, never a long float tail. */
+export function formatFuelSummary(gallons: number): string {
+  const rounded = roundForDisplay(gallons);
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)} gal`;
+}
+
+/** Dollars for the summary tile, matching formatFuelSummary's precision. */
+export function formatCostSummary(usd: number): string {
+  const rounded = roundForDisplay(usd);
+  return `$${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}`;
+}
+
+/**
  * Render a trip endpoint: resolved place name, else coordinates, else zone,
  * else a generic label. Geo writes `latitude`/`longitude`; older records use
  * `lat`/`lon`.
