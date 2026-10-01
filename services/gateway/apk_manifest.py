@@ -8,6 +8,7 @@ artifact we serve is the only trustworthy source for its own version.
 
 Pure stdlib (`zipfile` + `struct`) so it runs anywhere the gateway does.
 """
+import hashlib
 import logging
 import struct
 import zipfile
@@ -23,7 +24,8 @@ TYPE_STRING = 0x03
 
 # The string pool is tiny next to the APK, but this endpoint is polled by every
 # client, so cache on (path, mtime, size) rather than re-opening a 12MB zip.
-_cache: dict[tuple, Optional[dict]] = {}
+# Values are version info dicts, digest strings, or None.
+_cache: dict[tuple, object] = {}
 
 
 def _read_string_pool(data: bytes, chunk_start: int) -> list[str]:
@@ -168,6 +170,36 @@ def read_apk_version(apk_path: Path) -> Optional[dict]:
 
     _cache[key] = result
     return result
+
+
+def read_apk_digest(apk_path: Path) -> Optional[str]:
+    """SHA-256 of the APK we are actually serving, hex-encoded, or None.
+
+    The client verifies the download against this before handing the file to
+    the system installer, so the bytes that get installed are provably the
+    bytes we published. None means "we could not hash it", and the client must
+    treat that as a refusal to install rather than a licence to skip the check.
+    """
+    try:
+        st = apk_path.stat()
+    except OSError:
+        return None
+    key = ("sha256", str(apk_path), st.st_mtime_ns, st.st_size)
+    if key in _cache:
+        return _cache[key]
+
+    digest: Optional[str] = None
+    try:
+        h = hashlib.sha256()
+        with open(apk_path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 256), b""):
+                h.update(chunk)
+        digest = h.hexdigest()
+    except OSError as e:
+        log.warning("[AppUpdates] Could not hash %s: %s", apk_path.name, e)
+
+    _cache[key] = digest
+    return digest
 
 
 def clear_cache() -> None:

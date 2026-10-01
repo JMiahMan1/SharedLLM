@@ -83,6 +83,34 @@ class TestVersionEndpoint:
         data = client.get("/api/app-updates/version").json()
         assert data["apk_version_code"] == 22
 
+    def test_advertises_a_digest_the_client_can_verify(self, client):
+        import hashlib
+
+        from services.gateway import main
+
+        self._publish_apk(client, 22)
+        data = client.get("/api/app-updates/version").json()
+        assert data["apk_sha256"] == hashlib.sha256(
+            (main.APP_UPDATES_DIR / "jarvis-os.apk").read_bytes()
+        ).hexdigest()
+
+    def test_withholds_an_apk_it_cannot_hash(self, client, monkeypatch):
+        """No digest means we cannot authenticate the download, so we do not
+        offer it -- an unverifiable APK is worse than none."""
+        from services.gateway import main
+
+        self._publish_apk(client, 22)
+        monkeypatch.setattr(main, "read_apk_digest", lambda _p: None)
+        main.clear_apk_version_cache()
+        data = client.get("/api/app-updates/version").json()
+        assert data["apk_available"] is False
+        assert data["apk_sha256"] is None
+        assert data["apk_version_code"] is None
+
+    def test_reports_no_digest_when_no_apk_is_published(self, client):
+        data = client.get("/api/app-updates/version").json()
+        assert data["apk_sha256"] is None
+
     def test_reports_no_version_code_when_no_apk_is_published(self, client):
         data = client.get("/api/app-updates/version").json()
         assert data["apk_available"] is False

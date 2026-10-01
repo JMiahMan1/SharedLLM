@@ -33,7 +33,7 @@
     <uses-feature android:name="android.hardware.sensor.stepcounter" android:required="false" />
 
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -179,6 +179,17 @@
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Relaunches the app after its own APK is installed. Must be
+             manifest-declared: the update kills our process, so a receiver
+             registered in code would not survive to see the broadcast. -->
+        <receiver
+            android:name=".SelfRestartReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

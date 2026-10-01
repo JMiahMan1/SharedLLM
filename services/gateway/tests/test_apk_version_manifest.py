@@ -14,6 +14,7 @@ import pytest
 from services.gateway.apk_manifest import (
     clear_cache,
     parse_manifest,
+    read_apk_digest,
     read_apk_version,
 )
 
@@ -158,6 +159,36 @@ class TestParseManifest:
         """versionCode is a u32; reading it as a signed short truncates."""
         info = parse_manifest(build_manifest(2_000_000_003, "9.9.9"))
         assert info["version_code"] == 2_000_000_003
+
+
+class TestReadApkDigest:
+    def test_matches_hashlib(self, tmp_path):
+        """The digest the client verifies against must be the real one."""
+        import hashlib
+
+        apk = tmp_path / "jarvis-os.apk"
+        make_apk(apk, 23, "1.5.0")
+        expected = hashlib.sha256(apk.read_bytes()).hexdigest()
+        assert read_apk_digest(apk) == expected
+        assert len(expected) == 64
+
+    def test_changes_when_the_apk_changes(self, tmp_path):
+        apk = tmp_path / "jarvis-os.apk"
+        make_apk(apk, 22, "1.4.12")
+        first = read_apk_digest(apk)
+        make_apk(apk, 23, "1.5.0")
+        import os
+
+        os.utime(apk, (0, 0))
+        assert read_apk_digest(apk) != first
+
+    def test_returns_none_for_a_missing_file(self, tmp_path):
+        assert read_apk_digest(tmp_path / "nope.apk") is None
+
+    def test_is_stable_across_repeated_calls(self, tmp_path):
+        apk = tmp_path / "jarvis-os.apk"
+        make_apk(apk, 23, "1.5.0")
+        assert read_apk_digest(apk) == read_apk_digest(apk)
 
 
 class TestReadApkVersion:
