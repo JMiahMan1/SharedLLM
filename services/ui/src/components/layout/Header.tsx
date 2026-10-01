@@ -179,7 +179,7 @@ const Header = () => {
           aria-label="Search pages, tabs and settings"
         />
         {navOpen && navQuery.trim() && (
-          <div className="absolute top-14 left-0 right-0 z-50 glass-panel p-2 max-h-96 overflow-y-auto">
+          <div className="absolute top-14 left-0 right-0 z-50 glass-menu p-2 max-h-96 overflow-y-auto">
             {matches.length === 0 ? (
               <p className="text-xs text-slate-500 px-3 py-3">No matches found.</p>
             ) : (
@@ -227,7 +227,7 @@ const Header = () => {
           </button>
           
           {showNotifications && (
-            <div className="absolute right-0 mt-4 w-80 max-w-[calc(100vw-2rem)] glass-panel p-4 z-50 animate-in slide-in-from-top-2 duration-200">
+            <div className="absolute right-0 mt-4 w-80 max-w-[calc(100vw-2rem)] glass-menu p-4 z-50 animate-in slide-in-from-top-2 duration-200">
               <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-3">
                 <h4 className="text-sm font-bold text-white uppercase tracking-widest">Notifications</h4>
                 <button 
@@ -291,7 +291,7 @@ const Header = () => {
                 role="menu"
                 aria-label="Account menu"
                 data-testid="profile-menu"
-                className="absolute right-0 mt-2 w-60 glass-panel p-1.5 rounded-2xl border border-white/10 z-50"
+                className="absolute right-0 mt-2 w-60 glass-menu p-1.5 rounded-2xl z-50"
               >
                 <div className="px-3 py-2.5 border-b border-white/5 mb-1">
                   <p className="text-sm font-semibold text-white truncate">{user?.username || 'Guest'}</p>
@@ -306,7 +306,7 @@ const Header = () => {
                     setProfileOpen(false);
                     navigate('/settings');
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-slate-200 hover:bg-white/5 transition-colors"
+                  className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-[var(--site-text)] hover:bg-slate-500/20 transition-colors"
                 >
                   <Settings size={15} className="text-slate-400" /> Profile Settings
                 </button>
@@ -317,7 +317,7 @@ const Header = () => {
                     setProfileOpen(false);
                     navigate('/identity');
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-slate-200 hover:bg-white/5 transition-colors"
+                  className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-[var(--site-text)] hover:bg-slate-500/20 transition-colors"
                 >
                   <UserIcon size={15} className="text-slate-400" /> Family Members
                 </button>
@@ -329,7 +329,7 @@ const Header = () => {
                       setProfileOpen(false);
                       navigate('/admin');
                     }}
-                    className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-slate-200 hover:bg-white/5 transition-colors"
+                    className="w-full flex items-center gap-2.5 px-3 min-h-11 rounded-xl text-sm text-[var(--site-text)] hover:bg-slate-500/20 transition-colors"
                   >
                     <Shield size={15} className="text-purple-300" /> Admin Control Panel
                   </button>
