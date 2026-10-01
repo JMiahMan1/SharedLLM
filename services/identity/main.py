@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from datetime import datetime as dt
 
 import aiohttp
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import inspect, text
@@ -26,8 +26,15 @@ from services.config import IDENTITY_DATABASE_URL, INTERNAL_SECRET
 from services.identity.crypto import decrypt, digest_secret, encrypt
 from services.identity.models import (
     DEFAULT_GLOBAL_SETTINGS,
+    ADVANCED_DEVICE_KINDS,
+    DEVICE_KINDS,
+    NO_OPT_IN_EVENTS,
     APIKey,
+    CapabilityInventory,
+    Device,
     DeviceAssignment,
+    DeviceEvent,
+    FeatureUsage,
     DnsRecord,
     EntityProtection,
     GlobalSetting,
@@ -43,8 +50,13 @@ from services.identity.schemas import (
     ChangePasswordRequest,
     CredentialSharesRead,
     CredentialSharesUpdate,
+    DeviceAdminCreate,
+    DeviceAssign,
     DeviceAssignmentCreate,
     DeviceAssignmentRead,
+    DeviceRead,
+    DeviceSelfRegister,
+    TelemetryIngest,
     DiscoverResponse,
     EntityProtectionRead,
     EntityProtectionUpdate,
@@ -4193,3 +4205,290 @@ def get_all_user_locations(x_internal_secret: str = Header(...)):
             user_id = setting.key.replace("user_location:", "")
             locations[user_id] = json.loads(setting.value)
     return locations
+
+
+# ---------------------------------------------------------------------------
+# User Panel: device registry
+#
+# Phones self-register when they log in; assistants and lights have no account
+# of their own, so an admin registers them. Either way the row is owned by a
+# user, which is what separates this from execution.device_registry (a list of
+# discovered network entities with no owner).
+# ---------------------------------------------------------------------------
+
+
+def _device_to_read(d: Device) -> DeviceRead:
+    try:
+        caps = json.loads(d.capabilities or "{}")
+    except (TypeError, ValueError):
+        caps = {}
+    return DeviceRead(
+        id=d.id,
+        device_key=d.device_key,
+        kind=d.kind,
+        label=d.label or "",
+        owner_username=d.owner_username,
+        registered_by=d.registered_by,
+        revoked=d.revoked,
+        entity_id=d.entity_id,
+        model=d.model,
+        manufacturer=d.manufacturer,
+        os_version=d.os_version,
+        app_version=d.app_version,
+        app_build=d.app_build,
+        esphome_version=d.esphome_version,
+        hardware=d.hardware,
+        capabilities=caps if isinstance(caps, dict) else {},
+        last_ip_address=d.last_ip_address,
+        last_seen_at=d.last_seen_at,
+        first_seen_at=d.first_seen_at,
+    )
+
+
+def _client_ip(request: Request) -> str | None:
+    """The caller's address, from the request rather than the body.
+
+    A client-supplied IP would let a caller write an arbitrary address into
+    someone else's device row, which then shows up in the panel as fact.
+    """
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
+@app.post("/api/user-panel/devices/register", response_model=DeviceRead)
+def register_device(
+    body: DeviceSelfRegister,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Register or refresh the caller's own phone, on login.
+
+    Idempotent on ``device_key``: logging in repeatedly updates the existing
+    row instead of creating a new device each time, which is why the key is
+    unique in the schema rather than cleaned up here.
+
+    ``kind`` is deliberately not accepted from the client. A phone is a phone;
+    letting the app claim ``kind="light"`` would move itself out of the
+    advanced panel. Assistants and lights go through the admin endpoint.
+    """
+    key = body.device_key.strip()
+    now = datetime.now().isoformat()
+    device = session.exec(select(Device).where(Device.device_key == key)).first()
+    if device is None:
+        device = Device(device_key=key, kind="phone", registered_by="self", first_seen_at=now)
+        session.add(device)
+    elif device.kind != "phone" or device.registered_by == "admin":
+        # A device already registered as an assistant/light must not be
+        # silently reclassified by whoever holds its key.
+        raise HTTPException(status_code=409, detail="This device key is already registered as another kind")
+
+    device.owner_username = caller.username
+    device.model = body.model or device.model
+    device.manufacturer = body.manufacturer or device.manufacturer
+    device.os_version = body.os_version or device.os_version
+    device.os_build = body.os_build or device.os_build
+    device.app_version = body.app_version or device.app_version
+    device.app_build = body.app_build or device.app_build
+    device.last_ip_address = _client_ip(request)
+    device.last_seen_at = now
+    session.add(device)
+    session.commit()
+    session.refresh(device)
+    return _device_to_read(device)
+
+
+@app.get("/api/user-panel/devices", response_model=list[DeviceRead])
+def list_devices(
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Devices visible to the caller: their own, plus every device if admin.
+
+    A non-admin sees only what they own, so the endpoint is safe to call from
+    the app itself and not just from an admin screen.
+    """
+    stmt = select(Device)
+    if not caller.is_admin:
+        stmt = stmt.where(Device.owner_username == caller.username)
+    return [_device_to_read(d) for d in session.exec(stmt).all()]
+
+
+@app.post("/api/user-panel/devices", response_model=DeviceRead)
+def create_device(
+    body: DeviceAdminCreate,
+    request: Request,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_api_key),
+):
+    """Register an assistant or light. Admin only.
+
+    These have no account to log in with, so an admin declares them and assigns
+    the owner. A phone must not be created here: it registers itself.
+    """
+    if not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    kind = (body.kind or "").strip().lower()
+    if kind not in DEVICE_KINDS:
+        raise HTTPException(status_code=422, detail=f"kind must be one of {', '.join(DEVICE_KINDS)}")
+    if kind == "phone":
+        raise HTTPException(status_code=422, detail="Phones register themselves; use /api/user-panel/devices/register")
+    if body.owner_username:
+        owner = session.exec(select(User).where(User.username == body.owner_username.lower())).first()
+        if owner is None:
+            raise HTTPException(status_code=404, detail=f"No such user: {body.owner_username}")
+    key = body.device_key.strip()
+    if session.exec(select(Device).where(Device.device_key == key)).first():
+        raise HTTPException(status_code=409, detail="device_key already registered")
+    now = datetime.now().isoformat()
+    device = Device(
+        device_key=key,
+        kind=kind,
+        label=body.label or "",
+        owner_username=body.owner_username.lower() if body.owner_username else None,
+        registered_by="admin",
+        entity_id=body.entity_id,
+        esphome_version=body.esphome_version,
+        hardware=body.hardware,
+        capabilities=json.dumps(body.capabilities or {}),
+        last_ip_address=_client_ip(request),
+        last_seen_at=now,
+        first_seen_at=now,
+    )
+    session.add(device)
+    session.commit()
+    session.refresh(device)
+    return _device_to_read(device)
+
+
+@app.patch("/api/user-panel/devices/{device_key}", response_model=DeviceRead)
+def update_device(
+    device_key: str,
+    body: DeviceAssign,
+    request: Request,
+    session: Session = Depends(get_session),
+    admin: User = Depends(require_api_key),
+):
+    """Assign or reassign a device to a user. Admin only.
+
+    Assignment stays admin-side on purpose: a device being able to claim an
+    owner would let anyone reassign the family's assistant by holding its key.
+    """
+    if not admin.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    device = session.exec(select(Device).where(Device.device_key == device_key)).first()
+    if device is None:
+        raise HTTPException(status_code=404, detail="No such device")
+    if body.owner_username:
+        owner = session.exec(select(User).where(User.username == body.owner_username.lower())).first()
+        if owner is None:
+            raise HTTPException(status_code=404, detail=f"No such user: {body.owner_username}")
+        device.owner_username = body.owner_username.lower()
+    session.add(device)
+    session.commit()
+    session.refresh(device)
+    return _device_to_read(device)
+
+
+@app.post("/api/user-panel/devices/telemetry")
+def ingest_telemetry(
+    body: TelemetryIngest,
+    request: Request,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Record usage events for one of the caller's own devices.
+
+    ``event`` is checked against NO_OPT_IN_EVENTS, an allowlist, so content
+    (a transcript, a coordinate, a vital) cannot be smuggled in under a name
+    that happens to sound innocuous -- the check fails closed and reports which
+    names were rejected.
+
+    ``extra`` is stored as given; it is the client's responsibility to send
+    scalars. The size is capped so a client cannot turn this into a blob store.
+    """
+    device = session.exec(select(Device).where(Device.device_key == body.device_key.strip())).first()
+    if device is None:
+        raise HTTPException(status_code=404, detail="Register this device before sending telemetry")
+    if device.owner_username and device.owner_username != caller.username and not caller.is_admin:
+        raise HTTPException(status_code=403, detail="Not your device")
+
+    rejected: list[str] = []
+    now = datetime.now().isoformat()
+    written = 0
+    for raw in body.events[:200]:
+        event = str(raw.get("event", "")).strip()
+        if event not in NO_OPT_IN_EVENTS:
+            rejected.append(event or "<missing>")
+            continue
+        extra = raw.get("extra")
+        if not isinstance(extra, dict):
+            extra = {"value": extra} if extra is not None else {}
+        encoded = json.dumps(extra)
+        if len(encoded) > 2000:
+            rejected.append(f"{event} (extra too large)")
+            continue
+        session.add(
+            DeviceEvent(
+                device_key=device.device_key,
+                username=caller.username,
+                event=event,
+                extra=encoded,
+                at=str(raw.get("at") or now),
+            )
+        )
+        written += 1
+
+    device.last_seen_at = now
+    device.last_ip_address = _client_ip(request)
+    session.add(device)
+    session.commit()
+    if rejected:
+        log.warning(
+            "[devices] rejected %d telemetry event(s) not in NO_OPT_IN_EVENTS: %s",
+            len(rejected),
+            ", ".join(sorted(set(rejected))[:10]),
+        )
+    return {"written": written, "rejected": sorted(set(rejected))}
+
+
+@app.post("/api/user-panel/devices/{device_key}/capabilities", response_model=DeviceRead)
+def report_capabilities(
+    device_key: str,
+    body: dict,
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """Record what a device can currently do, versioned over time.
+
+    A capability gap only means something relative to what the device could do
+    at the time, so the inventory is appended rather than overwritten.
+    """
+    device = session.exec(select(Device).where(Device.device_key == device_key)).first()
+    if device is None:
+        raise HTTPException(status_code=404, detail="No such device")
+    if device.owner_username and device.owner_username != caller.username and not caller.is_admin:
+        raise HTTPException(status_code=403, detail="Not your device")
+    caps = body.get("capabilities")
+    if not isinstance(caps, dict):
+        raise HTTPException(status_code=422, detail="capabilities must be an object")
+    encoded = json.dumps(caps)
+    if len(encoded) > 8000:
+        raise HTTPException(status_code=422, detail="capabilities too large")
+    now = datetime.now().isoformat()
+    session.add(
+        CapabilityInventory(
+            device_key=device.device_key,
+            capabilities=encoded,
+            esphome_version=body.get("esphome_version") or device.esphome_version,
+            observed_at=now,
+        )
+    )
+    device.capabilities = encoded
+    device.esphome_version = body.get("esphome_version") or device.esphome_version
+    session.add(device)
+    session.commit()
+    session.refresh(device)
+    return _device_to_read(device)
