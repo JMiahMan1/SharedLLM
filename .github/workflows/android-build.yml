@@ -124,6 +124,9 @@ jobs:
     # Skipped on pull requests: a fork's APK must never be published.
     - name: Publish APK to the update server
       if: github.event_name != 'pull_request'
+      # The job defaults run steps from services/ui, but the paths below are
+      # root-relative to match the upload-artifact steps above.
+      working-directory: .
       env:
         PUBLISH_URL: ${{ secrets.APK_PUBLISH_URL }}
         INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
