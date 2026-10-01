@@ -6,6 +6,7 @@ import type { Workout, RoutePoint, StepsResponse, ActivityTrendsResponse } from 
 import AchievementsPanel from '../components/wander/AchievementsPanel';
 import FamilyActivityCard from '../components/health/FamilyActivityCard';
 import RoutePreview from '../components/geo/RoutePreview';
+import SensorStatusBanner from '../components/location/SensorStatusBanner';
 import toast from 'react-hot-toast';
 import {
   Activity,
@@ -219,6 +220,9 @@ const Health = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12" data-testid="health-page">
+      {/* A phone that stopped reporting must never look like a quiet day. */}
+      <SensorStatusBanner />
+
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-panel p-6 rounded-2xl border border-white/10 shadow-xl">
         <div className="space-y-1">
