@@ -49,7 +49,7 @@ def test_get_widget_settings_returns_all_known_widgets(client: TestClient, sessi
     resp = client.get("/api/widgets/settings")
     assert resp.status_code == 200
     settings = resp.json()
-    assert len(settings["widgets"]) == 11  # 11 known widget keys
+    assert len(settings["widgets"]) == 12  # 12 known widget keys
 
     widget_keys = [w["widget_key"] for w in settings["widgets"]]
     assert "energy_insights" in widget_keys
@@ -63,6 +63,34 @@ def test_get_widget_settings_returns_all_known_widgets(client: TestClient, sessi
     assert "workspaces" in widget_keys
     assert "health_activity" in widget_keys
     assert "climate" in widget_keys
+    assert "presence" in widget_keys
+
+
+def test_presence_widget_survives_a_round_trip(client: TestClient, session: Session):
+    """A saved row for a widget the server doesn't know about is silently
+    dropped on every load, because the GET synthesises one row per known key
+    and rebuilds the list from those alone."""
+    session.add(
+        UserWidget(
+            username="default",
+            widget_key="presence",
+            visibility="hidden",
+            order_index=99,
+            size="tall",
+        )
+    )
+    session.commit()
+
+    widget_keys = [w["widget_key"] for w in client.get("/api/widgets/settings").json()["widgets"]]
+    assert "presence" in widget_keys
+
+    presence = next(
+        w
+        for w in client.get("/api/widgets/settings").json()["widgets"]
+        if w["widget_key"] == "presence"
+    )
+    assert presence["visibility"] == "hidden"
+    assert presence["size"] == "tall"
 
 
 def test_quick_assistant_hidden_by_default(client: TestClient):

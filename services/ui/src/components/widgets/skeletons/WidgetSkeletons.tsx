@@ -204,6 +204,21 @@ export const ClimateSkeleton: React.FC = () => (
   </div>
 );
 
+export const PresenceSkeleton: React.FC = () => (
+  <div className="glass-panel overflow-hidden p-5 flex flex-col h-full w-full relative">
+    <SkeletonHeader title="Family Presence" icon="📍" />
+    <div className="flex-1 flex flex-col gap-3">
+      <div className="h-7 w-24 bg-white/5 rounded-lg animate-pulse" />
+      <div className="h-8 bg-white/5 rounded-lg w-full animate-pulse" />
+      <div className="h-8 bg-white/5 rounded-lg w-4/5 animate-pulse" />
+      <div className="mt-auto pt-3 border-t border-white/5 space-y-2">
+        <div className="h-3 w-16 bg-white/5 rounded animate-pulse" />
+        <div className="h-4 w-full bg-white/5 rounded animate-pulse" />
+      </div>
+    </div>
+  </div>
+);
+
 const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   energy_insights: EnergyInsightsSkeleton,
   ambient_timer: AmbientTimerSkeleton,
@@ -216,6 +231,7 @@ const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   workspaces: WorkspacesSkeleton,
   health_activity: HealthActivitySkeleton,
   climate: ClimateSkeleton,
+  presence: PresenceSkeleton,
 };
 
 interface WidgetSkeletonSelectorProps {

@@ -2520,7 +2520,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
     known_keys = [
         'energy_insights', 'ambient_timer', 'quick_notes', 'active_media',
         'chores_progress', 'upcoming_events', 'quick_assistant', 'device_control',
-        'workspaces', 'health_activity', 'climate'
+        'workspaces', 'health_activity', 'climate', 'presence'
     ]
     default_sizes = {
         'energy_insights': 'medium',
@@ -2534,6 +2534,7 @@ def get_widget_settings(session: Session = Depends(get_session), user: User = De
         'workspaces': 'medium',
         'health_activity': 'medium',
         'climate': 'medium',
+        'presence': 'medium',
     }
     result = []
     for key in known_keys:

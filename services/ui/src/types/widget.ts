@@ -9,7 +9,8 @@ export type WidgetKey =
   | 'device_control'
   | 'workspaces'
   | 'health_activity'
-  | 'climate';
+  | 'climate'
+  | 'presence';
 
 export type WidgetVisibility = 'visible' | 'hidden' | 'removed';
 export type WidgetSize = 'small' | 'medium' | 'wide' | 'tall';
