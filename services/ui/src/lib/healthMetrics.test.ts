@@ -8,6 +8,8 @@ import {
   paceLabel,
   stepDayLabel,
   stepSourcesLabel,
+  syncAdvice,
+  syncStatus,
   stepsSummary,
   workoutTotals,
 } from './healthMetrics';
@@ -218,5 +220,77 @@ describe('elapsedLabel', () => {
 
   it('never renders a negative duration when the clock skews', () => {
     expect(elapsedLabel(1100, 1000)).toBe('0:00');
+  });
+});
+describe('syncStatus', () => {
+  const NOW = 1_790_819_543_000; // fixed clock so these never go flaky
+  const ago = (seconds: number) => (NOW - seconds * 1000) / 1000;
+
+  it('reports a recent upload as fresh', () => {
+    const s = syncStatus(ago(120), NOW);
+    expect(s.freshness).toBe('fresh');
+    expect(s.stale).toBe(false);
+    expect(s.label).toBe('2m ago');
+  });
+
+  it('ages before it goes stale, so a blip is not alarming', () => {
+    // The phone syncs every 30s while open, so 10 minutes is still normal.
+    expect(syncStatus(ago(10 * 60), NOW).freshness).toBe('fresh');
+    // Past the 20-minute mark it is worth noticing, but not yet alarming.
+    expect(syncStatus(ago(25 * 60), NOW).freshness).toBe('aging');
+    expect(syncStatus(ago(25 * 60), NOW).stale).toBe(false);
+  });
+
+  it('marks a phone that has been quiet for hours as stale', () => {
+    const s = syncStatus(ago(5 * 3600), NOW);
+    expect(s.freshness).toBe('stale');
+    expect(s.stale).toBe(true);
+    expect(s.label).toBe('5h ago');
+  });
+
+  it('distinguishes never-synced from synced-long-ago', () => {
+    expect(syncStatus(null, NOW).freshness).toBe('never');
+    expect(syncStatus(undefined, NOW).freshness).toBe('never');
+    expect(syncStatus(null, NOW).stale).toBe(true);
+    expect(syncStatus(ago(86400), NOW).freshness).toBe('stale');
+  });
+
+  it('treats clock skew as fresh rather than printing a negative age', () => {
+    const s = syncStatus(ago(-600), NOW);
+    expect(s.freshness).toBe('fresh');
+    expect(s.label).toBe('just now');
+  });
+
+  it('labels days when the phone has been gone a long time', () => {
+    expect(syncStatus(ago(3 * 86400), NOW).label).toBe('3d ago');
+  });
+
+  it('ignores a malformed timestamp instead of rendering NaN', () => {
+    expect(syncStatus(Number.NaN, NOW).freshness).toBe('never');
+  });
+
+  it('never renders a 0m age, which reads as "nothing"', () => {
+    expect(syncStatus(ago(20), NOW).label).toBe('1m ago');
+  });
+});
+
+describe('syncAdvice', () => {
+  const NOW = 1_790_819_543_000;
+
+  it('stays quiet while the data is fresh', () => {
+    expect(syncAdvice(syncStatus(NOW / 1000 - 60, NOW))).toBeNull();
+    expect(syncAdvice(syncStatus(NOW / 1000 - 600, NOW))).toBeNull();
+  });
+
+  it('explains a stale reading, naming the age', () => {
+    const advice = syncAdvice(syncStatus(NOW / 1000 - 7200, NOW));
+    expect(advice).toMatch(/2h ago/);
+    expect(advice).toMatch(/open the app/i);
+  });
+
+  it('explains a never-synced state without inventing an age', () => {
+    const advice = syncAdvice(syncStatus(null, NOW));
+    expect(advice).toMatch(/no sync yet/i);
+    expect(advice).not.toMatch(/ago/);
   });
 });

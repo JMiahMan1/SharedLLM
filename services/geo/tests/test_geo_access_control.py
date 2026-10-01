@@ -294,3 +294,60 @@ def test_goal_writes_require_the_internal_secret(redis):
     anon = TestClient(geo.app, raise_server_exceptions=False)
     assert anon.put("/goals", json={"user_id": "jeremiah", "goals": {"daily_steps": 1}}).status_code in (401, 403)
     assert anon.put("/steps/goal", json={"user_id": "jeremiah", "goal": 1}).status_code in (401, 403)
+
+
+# ---------------------------------------------------------------------------
+# Steps freshness
+#
+# Without `last_synced` in the payload a client cannot tell a live step count
+# from one frozen since the phone went to sleep -- and both render as a
+# plausible-looking number. Geo already records `geo:steps_meta:{user}.updated_at`
+# on every upload; nothing read it, so the fact was simply unavailable.
+# ---------------------------------------------------------------------------
+
+
+class _HashRedis(_EmptyRedis):
+    """`_EmptyRedis` plus just enough hash support for the freshness stamp.
+
+    Defined here rather than added to `_EmptyRedis` because the shared fake is
+    relied on for *empty* answers by the consent tests above.
+    """
+
+    def __init__(self):
+        self.hashes = {}
+
+    async def hset(self, key, field, value):
+        self.hashes.setdefault(key, {})[field] = value
+
+    async def hget(self, key, field):
+        return self.hashes.get(key, {}).get(field)
+
+
+@pytest.fixture
+def hash_redis(monkeypatch):
+    fake = _HashRedis()
+
+    async def _get():
+        return fake
+
+    monkeypatch.setattr(geo, "get_redis", _get)
+    return fake
+
+
+def test_steps_expose_when_the_phone_last_uploaded(client, hash_redis):
+    hash_redis.hashes["geo:steps_meta:default"] = {"updated_at": "1780000000"}
+    body = client.get("/steps", params={"user_id": "default", "days": 7}).json()
+    assert body["last_synced"] == pytest.approx(1780000000.0)
+
+
+def test_steps_report_null_when_the_phone_has_never_synced(client, hash_redis):
+    body = client.get("/steps", params={"user_id": "default", "days": 7}).json()
+    assert body["last_synced"] is None
+
+
+def test_steps_tolerate_a_corrupt_freshness_stamp(client, hash_redis):
+    # A bad value must not 500 the whole steps payload.
+    hash_redis.hashes["geo:steps_meta:default"] = {"updated_at": "not-a-number"}
+    resp = client.get("/steps", params={"user_id": "default", "days": 7})
+    assert resp.status_code == 200
+    assert resp.json()["last_synced"] is None

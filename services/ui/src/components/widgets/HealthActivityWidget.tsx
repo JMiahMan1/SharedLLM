@@ -9,6 +9,8 @@ import { useActiveThemeId } from '../../themes/siteTheme';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { useHaptics } from '../../hooks/useHaptics';
+import { syncAdvice, syncStatus } from '../../lib/healthMetrics';
 import { pedometerQueryOptions, stepsQueryKey } from '../../lib/healthQueries';
 
 export interface HealthActivityConfig {
@@ -75,6 +77,7 @@ function Ring({
 const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { trigger } = useHaptics();
   const currentUsername = (user?.username || '').toLowerCase() || undefined;
   const updateWidgetConfig = useWidgetStore((s) => s.updateWidgetConfig);
   const config = (userSettings.config ?? {}) as HealthActivityConfig;
@@ -131,6 +134,18 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
   const track = cssVars['--ht-progress-track'] ?? theme.tokens.border;
   const glow = theme.tokens.glow;
 
+  // A number with no age is a number you cannot trust. This is what lets the
+  // card distinguish "12,000 steps so far today" from "12,000 steps, and the
+  // phone stopped reporting two hours ago" -- otherwise a dead sensor and a
+  // quiet day look identical here.
+  const sync = syncStatus(stepsData?.last_synced);
+  const syncHint = syncAdvice(sync);
+
+  const open = () => {
+    trigger('light');
+    navigate('/fitness');
+  };
+
   return (
     <WidgetCard
       title="Health"
@@ -143,9 +158,14 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
         data-testid="health-activity-widget"
         role="button"
         tabIndex={0}
-        onClick={() => navigate('/fitness')}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') navigate('/fitness'); }}
-        className="h-full flex flex-col gap-3 p-1 rounded-xl relative overflow-hidden cursor-pointer"
+        onClick={open}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            open();
+          }
+        }}
+        className="h-full flex flex-col gap-3 p-1 rounded-xl relative overflow-hidden cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
         style={{
           ...cssVars,
           background: cssVars['--ht-bg'],
@@ -191,6 +211,17 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
                 / {stepsGoal.toLocaleString()}
               </span>
             </div>
+            {/* Freshness, or an explicit reason the number may be frozen. */}
+            {(sync.label || syncHint) && (
+              <div
+                data-testid="health-sync-status"
+                data-freshness={sync.freshness}
+                className="text-[10px] leading-tight mt-0.5"
+                style={{ color: sync.stale ? cssVars['--ht-warning'] ?? '#f59e0b' : cssVars['--ht-text-muted'] }}
+              >
+                {syncHint ?? `Updated ${sync.label}`}
+              </div>
+            )}
           </div>
           <Ring
             pct={stepPct}
