@@ -360,11 +360,29 @@ def test_a_consent_refusal_is_reported_as_404_not_as_an_outage(monkeypatch, make
     assert resp.json()["detail"] == "activity not shared"
 
 
-@pytest.mark.parametrize("status,expected", [(401, 401), (403, 403), (404, 404)])
+@pytest.mark.parametrize(
+    "status,expected",
+    [(400, 400), (401, 401), (403, 403), (404, 404), (422, 422)],
+)
 def test_refusal_status_codes_pass_through_untouched(monkeypatch, make_client, status, expected):
     _patch_geo(monkeypatch, status=status, payload={"detail": "nope"}, captured={})
     resp = make_client().get("/api/geo/steps")
     assert resp.status_code == expected
+
+
+@pytest.mark.parametrize("status", [400, 422])
+def test_a_rejected_request_is_not_reported_as_an_outage(monkeypatch, make_client, status):
+    """geo answered correctly -- the *caller* was wrong. Reporting 502 says
+    "the server is down", which sends the reader to the wrong system entirely.
+
+    Caught live: `GET /api/geo/steps?days=365` returned 502 while geo had
+    answered 422 about the 30-day bound. The range route has the same shape,
+    so an unknown `range` must read the same way.
+    """
+    _patch_geo(monkeypatch, status=status, payload={"detail": "Input should be less than or equal to 30"}, captured={})
+    resp = make_client().get("/api/geo/steps?days=365")
+    assert resp.status_code == status
+    assert resp.json()["detail"] == "Input should be less than or equal to 30"
 
 
 def test_a_genuine_upstream_fault_is_still_a_502(monkeypatch, make_client):
