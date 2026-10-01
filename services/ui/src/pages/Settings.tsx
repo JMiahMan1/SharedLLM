@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
 import { useLocation } from '../context/LocationContext';
-import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Package } from 'lucide-react';
+import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Package, Settings as SettingsIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import type { GlobalSetting } from '../services/api';
@@ -14,8 +14,8 @@ import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
 import Toggle from '../components/ui/Toggle';
 import { isAdminPinSet, setAdminPin, clearAdminPin } from '../lib/adminPin';
-import { checkForAppUpdates, checkApkUpdate, downloadAndInstallApk, getRunningVersion } from '../lib/appUpdater';
-import type { ApkUpdateStatus } from '../lib/appUpdater';
+import { checkForAppUpdates, checkApkUpdate, downloadAndInstallApk, getApkInstallPermission, getRunningVersion, openApkInstallSettings } from '../lib/appUpdater';
+import type { ApkInstallPermission, ApkUpdateStatus } from '../lib/appUpdater';
 import toast from 'react-hot-toast';
 
 const Settings = () => {
@@ -464,6 +464,7 @@ const AppUpdatesSection = () => {
   const [checking, setChecking] = useState(false);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
   const [apk, setApk] = useState<ApkUpdateStatus | null>(null);
+  const [perm, setPerm] = useState<ApkInstallPermission | null>(null);
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     gitSha: string;
@@ -513,6 +514,30 @@ const AppUpdatesSection = () => {
 
   const apkPending = Boolean(apk?.updateAvailable && apk.apkUrl);
   const apkSize = formatBytes(apk?.sizeBytes);
+
+  // Android only grants "Install unknown apps" from system Settings, so the
+  // check has to happen before the user commits to installing -- otherwise they
+  // tap Install and get bounced into Settings mid-flow, which is what made
+  // this feel like a broken multi-step dance. Re-checked on return from
+  // Settings so the button flips without a manual refresh.
+  useEffect(() => {
+    if (!apkPending) return;
+    let active = true;
+    const probe = () => {
+      void getApkInstallPermission().then((p) => {
+        if (active) setPerm(p);
+      });
+    };
+    probe();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') probe();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      active = false;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [apkPending]);
 
   // A pending APK outranks "Up to Date": claiming the app is current while an
   // install is waiting is the contradiction this notice exists to remove.
@@ -582,19 +607,38 @@ const AppUpdatesSection = () => {
                 {apk.nativeBuildNumber !== undefined && ` You are on build ${apk.nativeBuildNumber}.`}
                 {apkSize && ` ${apkSize} download.`}
               </p>
+              {perm?.known && !perm.allowed && (
+                <p className="text-[11px] text-amber-200/70 mt-1">
+                  One-time setup: Android needs permission to install updates. Allow it once,
+                  then come back and tap Install.
+                </p>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => {
-                trigger('medium');
-                void downloadAndInstallApk(apk.apkUrl!);
-              }}
-              className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
-            >
-              <Download size={13} />
-              <span>Install update</span>
-            </button>
+            {perm?.known && !perm.allowed ? (
+              <button
+                onClick={() => {
+                  trigger('medium');
+                  void openApkInstallSettings();
+                }}
+                className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
+              >
+                <SettingsIcon size={13} />
+                <span>Allow updates</span>
+              </button>
+            ) : perm?.known ? (
+              <button
+                onClick={() => {
+                  trigger('medium');
+                  void downloadAndInstallApk(apk.apkUrl!);
+                }}
+                className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
+              >
+                <Download size={13} />
+                <span>Install update</span>
+              </button>
+            ) : null}
             <a
               href={apk.apkUrl!}
               download="app-debug.apk"

@@ -113,6 +113,16 @@ describe('checkApkUpdate', () => {
     expect(status.updateAvailable).toBe(true);
   });
 
+  // The real bug: a device whose build cannot be read used to compare against
+  // a placeholder and show a notice that could never be cleared.
+  it('reports indeterminate, not an update, when a device build is unreadable', async () => {
+    mocks.getInfo.mockRejectedValue(new Error('no native shell'));
+    mocks.get.mockResolvedValue({ data: remote() });
+    const status = await checkApkUpdate();
+    expect(status.updateAvailable).toBe(false);
+    expect(status.indeterminate).toBe(true);
+  });
+
   it('reports no running build number when the shell cannot be queried', async () => {
     mocks.getInfo.mockRejectedValue(new Error('no native shell'));
     mocks.get.mockResolvedValue({ data: remote() });
