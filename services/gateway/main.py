@@ -33,7 +33,7 @@ from services.gateway.agent_loop import (
     get_vram_safe_params,
 )
 from services.gateway.apk_manifest import clear_cache as clear_apk_version_cache
-from services.gateway.apk_manifest import read_apk_version
+from services.gateway.apk_manifest import read_apk_digest, read_apk_version
 from services.gateway.background_worker import worker as raven_worker
 from services.gateway.config import (
     ABS_TIMEOUT,
@@ -8435,11 +8435,23 @@ async def get_app_update_version(request: Request):
     # number drift ahead of the real artifact, so a user who installed the
     # newest APK on offer was told to update forever.
     apk_version_code = None
+    apk_sha256 = None
     if apk_available:
         apk_info = read_apk_version(apk_file)
         if apk_info and apk_info.get("version_code") is not None:
             apk_version_code = apk_info["version_code"]
             apk_version_name = apk_info.get("version_name")
+            # Published so the client can verify the download before it hands
+            # the file to the system installer.
+            apk_sha256 = read_apk_digest(apk_file)
+            if apk_sha256 is None:
+                # Without a digest we cannot prove what the user installs, so
+                # withhold the APK rather than offer an unverifiable one.
+                log.warning("[AppUpdates] APK present but unreadable for hashing; not offering it.")
+                apk_available = False
+                apk_size = 0
+                apk_version_code = None
+                apk_version_name = None
         else:
             # We cannot say what we are serving, and a wrong version code is
             # exactly what makes the notice un-clearable. Withhold it instead
@@ -8465,6 +8477,9 @@ async def get_app_update_version(request: Request):
         # treats a missing code as "cannot tell", not "up to date".
         "apk_version_code": apk_version_code,
         "apk_version_name": apk_version_name,
+        # The digest of the file at apk_url, so the client can verify what it
+        # downloaded before installing it. Null whenever no APK is offered.
+        "apk_sha256": apk_sha256,
     }
 
 

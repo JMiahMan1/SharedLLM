@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { useDarkModeSync } from '../hooks/useDarkModeSync';
 import { useLocation } from '../context/LocationContext';
-import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Package, Settings as SettingsIcon } from 'lucide-react';
+import { User, Shield, Bell, Moon, Key, LogOut, ChevronRight, SlidersHorizontal, Lock, X, Smartphone, Download, RefreshCw, MapPin, Footprints, AlertCircle, ExternalLink, Loader2, Package, PackageCheck, Settings as SettingsIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import type { GlobalSetting } from '../services/api';
@@ -14,8 +14,18 @@ import SiteThemePanel from '../components/settings/SiteThemePanel';
 import TelemetryReportsPanel from '../components/settings/TelemetryReportsPanel';
 import Toggle from '../components/ui/Toggle';
 import { isAdminPinSet, setAdminPin, clearAdminPin } from '../lib/adminPin';
-import { checkForAppUpdates, checkApkUpdate, downloadAndInstallApk, getApkInstallPermission, getRunningVersion, openApkInstallSettings } from '../lib/appUpdater';
-import type { ApkInstallPermission, ApkUpdateStatus } from '../lib/appUpdater';
+import {
+  checkForAppUpdates,
+  checkApkUpdate,
+  downloadAndInstallApk,
+  downloadApkWithProgress,
+  getApkInstallPermission,
+  getRunningVersion,
+  hasVerifiedInstallFlow,
+  installVerifiedApk,
+  openApkInstallSettings,
+} from '../lib/appUpdater';
+import type { ApkDownloadProgress, ApkInstallPermission, ApkUpdateStatus } from '../lib/appUpdater';
 import toast from 'react-hot-toast';
 
 const Settings = () => {
@@ -465,6 +475,12 @@ const AppUpdatesSection = () => {
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
   const [apk, setApk] = useState<ApkUpdateStatus | null>(null);
   const [perm, setPerm] = useState<ApkInstallPermission | null>(null);
+  // Download/install state machine. `ready` means the APK is in the cache and
+  // its checksum matched what the server published.
+  const [apkPhase, setApkPhase] = useState<'idle' | 'downloading' | 'ready' | 'installing'>('idle');
+  const [progress, setProgress] = useState<ApkDownloadProgress | null>(null);
+  const [apkError, setApkError] = useState<string | null>(null);
+  const [canVerify, setCanVerify] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<{
     version: string;
     gitSha: string;
@@ -538,6 +554,20 @@ const AppUpdatesSection = () => {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [apkPending]);
+
+  // The web bundle arrives over OTA, so this UI can be newer than the APK it
+  // is running on. Only offer the verified download when this build has it AND
+  // the server published a digest to check against.
+  useEffect(() => {
+    if (!apkPending) return;
+    let active = true;
+    void hasVerifiedInstallFlow().then((ok) => {
+      if (active) setCanVerify(ok && Boolean(apk?.apkSha256));
+    });
+    return () => {
+      active = false;
+    };
+  }, [apkPending, apk?.apkSha256]);
 
   // A pending APK outranks "Up to Date": claiming the app is current while an
   // install is waiting is the contradiction this notice exists to remove.
@@ -627,7 +657,75 @@ const AppUpdatesSection = () => {
                 <SettingsIcon size={13} />
                 <span>Allow updates</span>
               </button>
+            ) : apkPhase === 'downloading' ? (
+              <div
+                data-testid="apk-download-progress"
+                className="w-full space-y-1.5"
+                role="status"
+                aria-live="polite"
+              >
+                <div className="flex items-center justify-between text-[11px] font-semibold text-amber-100">
+                  <span>Downloading update…</span>
+                  <span>{progress?.percent ?? 0}%</span>
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-amber-500/20 overflow-hidden">
+                  <div
+                    data-testid="apk-download-bar"
+                    className="h-full rounded-full bg-amber-400 transition-[width] duration-200"
+                    style={{ width: `${Math.max(2, progress?.percent ?? 0)}%` }}
+                  />
+                </div>
+                {progress?.total ? (
+                  <p className="text-[10px] text-amber-200/70 font-mono">
+                    {(progress.received / 1048576).toFixed(1)} / {(progress.total / 1048576).toFixed(1)} MB
+                  </p>
+                ) : null}
+              </div>
+            ) : apkPhase === 'ready' || apkPhase === 'installing' ? (
+              <button
+                data-testid="apk-install-button"
+                onClick={() => {
+                  trigger('medium');
+                  setApkError(null);
+                  setApkPhase('installing');
+                  void installVerifiedApk()
+                    .then(() => toast.success('Installer opened — tap Install.', { id: 'apk-install' }))
+                    .catch((err) => {
+                      setApkPhase('ready');
+                      setApkError(err instanceof Error ? err.message : String(err));
+                    });
+                }}
+                className="px-3 py-1.5 rounded-xl bg-emerald-500/25 text-emerald-100 hover:bg-emerald-500/35 border border-emerald-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
+              >
+                {apkPhase === 'installing' ? <Loader2 size={13} className="animate-spin" /> : <PackageCheck size={13} />}
+                <span>{apkPhase === 'installing' ? 'Opening installer…' : 'Install'}</span>
+              </button>
+            ) : canVerify ? (
+              <button
+                data-testid="apk-download-button"
+                onClick={() => {
+                  trigger('light');
+                  setApkError(null);
+                  setApkPhase('downloading');
+                  setProgress(null);
+                  void downloadApkWithProgress(apk.apkUrl!, apk.apkSha256!, (p) => setProgress(p))
+                    .then(() => {
+                      trigger('medium');
+                      setApkPhase('ready');
+                    })
+                    .catch((err) => {
+                      setApkPhase('idle');
+                      setApkError(err instanceof Error ? err.message : String(err));
+                    });
+                }}
+                className="px-3 py-1.5 rounded-xl bg-amber-500/25 text-amber-100 hover:bg-amber-500/35 border border-amber-500/50 text-xs font-bold flex items-center gap-1.5 pointer-coarse:min-h-11"
+              >
+                <Download size={13} />
+                <span>Download</span>
+              </button>
             ) : perm?.known ? (
+              // No digest or no verified flow on this build: fall back to the
+              // unverified in-app install rather than pretending we verified it.
               <button
                 onClick={() => {
                   trigger('medium');
@@ -639,18 +737,31 @@ const AppUpdatesSection = () => {
                 <span>Install update</span>
               </button>
             ) : null}
-            <a
-              href={apk.apkUrl!}
-              download="app-debug.apk"
-              target="_blank"
-              rel="noreferrer"
-              onClick={() => trigger('light')}
-              className="px-3 py-1.5 rounded-xl text-amber-200/90 hover:text-white border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 pointer-coarse:min-h-11"
-            >
-              <ExternalLink size={13} />
-              <span>Download link</span>
-            </a>
+            {/* Only a last resort: the verified path above never leaves the app. */}
+            {!canVerify && (
+              <a
+                href={apk.apkUrl!}
+                download="jarvis-os.apk"
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => trigger('light')}
+                className="px-3 py-1.5 rounded-xl text-amber-200/90 hover:text-white border border-amber-500/30 text-xs font-semibold flex items-center gap-1.5 pointer-coarse:min-h-11"
+              >
+                <ExternalLink size={13} />
+                <span>Download link</span>
+              </a>
+            )}
           </div>
+          {apkError && (
+            <p data-testid="apk-download-error" role="alert" className="text-[11px] text-red-300">
+              {apkError}
+            </p>
+          )}
+          {apkPhase === 'ready' && (
+            <p className="text-[11px] text-emerald-200/80">
+              Downloaded and checksum verified. The app restarts after installing.
+            </p>
+          )}
         </div>
       )}
 

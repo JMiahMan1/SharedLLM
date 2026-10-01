@@ -16,6 +16,9 @@ export interface AppVersionInfo {
   apk_url?: string | null;
   apk_size_bytes?: number;
   apk_version_code?: number;
+  apk_version_name?: string | null;
+  /** SHA-256 of the served APK, so the client can verify what it downloads. */
+  apk_sha256?: string | null;
 }
 
 export interface CheckUpdateResult {
@@ -41,6 +44,13 @@ export interface ApkUpdateStatus {
   indeterminate: boolean;
   apkUrl: string | null;
   apkVersionCode?: number;
+  /**
+   * SHA-256 the server computed over the APK it is serving. Required before we
+   * will download-and-install; a missing digest means we cannot authenticate
+   * what we fetched, so we fall back to the browser link rather than install
+   * an unverified binary.
+   */
+  apkSha256?: string;
   /**
    * versionCode of the running native build, or `undefined` when it is not
    * knowable — a browser is not running an APK at all, so there is no honest
@@ -402,6 +412,25 @@ interface ApkInstallPlugin {
   canInstall(): Promise<{ allowed: boolean }>;
   openInstallSettings(): Promise<void>;
   installApk(opts: { url: string }): Promise<{ message: string }>;
+  /** Present only on builds that verify the download; see hasVerifiedFlow(). */
+  downloadApk?(opts: { url: string; sha256: string }): Promise<{ path: string; sha256: string; bytes: number }>;
+  installDownloadedApk?(): Promise<{ message: string }>;
+  isApkDownloaded?(): Promise<{ downloaded: boolean }>;
+  clearDownloadedApk?(): Promise<void>;
+  addListener?(event: 'downloadProgress', cb: (p: ApkDownloadProgress) => void): Promise<{ remove(): Promise<void> }>;
+}
+
+export interface ApkDownloadProgress {
+  received: number;
+  total: number;
+  percent: number;
+  done: boolean;
+}
+
+export interface ApkDownloadResult {
+  path: string;
+  sha256: string;
+  bytes: number;
 }
 
 /** The native installer plugin, or null where it is not registered. */
@@ -444,6 +473,50 @@ export async function getApkInstallPermission(): Promise<ApkInstallPermission> {
     console.warn('[AppUpdater] Install-permission probe failed:', err);
     return { allowed: false, known: false };
   }
+}
+
+/**
+ * Whether this build can download-and-verify an update itself.
+ *
+ * The web bundle arrives over OTA, so a brand new UI can land on a device
+ * still running the previous APK. Rather than fail, the UI falls back to the
+ * old download-and-install path, which does not verify -- so the digest check
+ * is honest about when it is actually happening.
+ */
+export async function hasVerifiedInstallFlow(): Promise<boolean> {
+  const ApkInstall = await getApkInstallPlugin();
+  return !!ApkInstall && typeof ApkInstall.downloadApk === 'function';
+}
+
+/**
+ * Download the update, reporting progress, and verify it against the digest
+ * the server published. Rejects on a checksum mismatch or a short read, and
+ * the file is never left installable in either case.
+ */
+export async function downloadApkWithProgress(
+  apkUrl: string,
+  sha256: string,
+  onProgress: (p: ApkDownloadProgress) => void,
+): Promise<ApkDownloadResult> {
+  const ApkInstall = await getApkInstallPlugin();
+  if (!ApkInstall || typeof ApkInstall.downloadApk !== 'function') {
+    throw new Error('This build cannot download updates in-app.');
+  }
+  const handle = ApkInstall.addListener?.('downloadProgress', onProgress);
+  try {
+    return await ApkInstall.downloadApk({ url: apkUrl, sha256 });
+  } finally {
+    await (await handle)?.remove();
+  }
+}
+
+/** Hand the verified, downloaded APK to the system installer. */
+export async function installVerifiedApk(): Promise<void> {
+  const ApkInstall = await getApkInstallPlugin();
+  if (!ApkInstall || typeof ApkInstall.installDownloadedApk !== 'function') {
+    throw new Error('This build cannot install a downloaded update.');
+  }
+  await ApkInstall.installDownloadedApk();
 }
 
 /** Open the OS screen where "Install unknown apps" is granted. */
@@ -537,6 +610,7 @@ export async function checkApkUpdate(): Promise<ApkUpdateStatus> {
       indeterminate,
       apkUrl,
       apkVersionCode: remote.apk_version_code,
+      apkSha256: remote.apk_sha256 ?? undefined,
       nativeBuildNumber,
       sizeBytes: remote.apk_size_bytes,
     };
