@@ -101,7 +101,7 @@ if command -v gh >/dev/null 2>&1; then
     if [ -n "${APK_SRC:-}" ] && [ -f "$APK_SRC" ]; then
         echo "Syncing APK ($APK_SRC) to remote $HOST:$DIR/data/app_updates/..."
         ssh $SSH_OPTS "$HOST" "mkdir -p '$DIR/data/app_updates'"
-        rsync -a -e "ssh $SSH_OPTS" "$APK_SRC" "$HOST:$DIR/data/app_updates/app-debug.apk"
+        rsync -a -e "ssh $SSH_OPTS" "$APK_SRC" "$HOST:$DIR/data/app_updates/jarvis-os.apk"
         echo "[OK] Latest APK synced to remote update server."
     fi
     fi

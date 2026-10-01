@@ -57,7 +57,7 @@ class TestVersionEndpoint:
         r = client.post(
             "/api/app-updates/publish",
             headers=auth(),
-            files={"apk": ("app-debug.apk", make_apk_bytes(version_code, version_name), "application/vnd.android.package-archive")},
+            files={"apk": ("jarvis-os.apk", make_apk_bytes(version_code, version_name), "application/vnd.android.package-archive")},
         )
         assert r.status_code == 200, r.text
 
@@ -94,7 +94,7 @@ class TestVersionEndpoint:
     def test_withholds_an_apk_whose_version_cannot_be_read(self, client):
         from services.gateway import main
 
-        (main.APP_UPDATES_DIR / "app-debug.apk").write_bytes(b"not a zip")
+        (main.APP_UPDATES_DIR / "jarvis-os.apk").write_bytes(b"not a zip")
         data = client.get("/api/app-updates/version").json()
         assert data["apk_available"] is False
         assert data["apk_version_code"] is None
@@ -108,12 +108,53 @@ class TestVersionEndpoint:
         assert data["apk_version_code"] == 22
 
 
+class TestApkServing:
+    """The published artifact is the release build, not a debug build."""
+
+    def _publish(self, client, code=22):
+        r = client.post(
+            "/api/app-updates/publish",
+            headers=auth(),
+            files={"apk": ("anything.apk", make_apk_bytes(code), "application/vnd.android.package-archive")},
+        )
+        assert r.status_code == 200
+
+    def test_serves_the_apk_under_its_real_name(self, client):
+        self._publish(client)
+        r = client.get("/api/app-updates/jarvis-os.apk")
+        assert r.status_code == 200
+        assert r.headers["content-disposition"] == "attachment; filename=jarvis-os.apk"
+
+    def test_advertises_the_real_name_to_clients(self, client):
+        self._publish(client)
+        url = client.get("/api/app-updates/version").json()["apk_url"]
+        assert url.endswith("/api/app-updates/jarvis-os.apk")
+
+    def test_stores_the_apk_under_its_real_name(self, client):
+        from services.gateway import main
+
+        self._publish(client)
+        assert (main.APP_UPDATES_DIR / "jarvis-os.apk").exists()
+        # The misleading name must not linger on disk alongside it.
+        assert not (main.APP_UPDATES_DIR / "app-debug.apk").exists()
+
+    def test_the_old_debug_path_redirects_rather_than_404ing(self, client):
+        """A stale client or bookmark must not look like a broken update."""
+        self._publish(client)
+        r = client.get("/api/app-updates/app-debug.apk", follow_redirects=False)
+        assert r.status_code == 307
+        assert r.headers["location"] == "/api/app-updates/jarvis-os.apk"
+
+    def test_404s_when_no_apk_is_published(self, client):
+        assert client.get("/api/app-updates/jarvis-os.apk").status_code == 404
+
+
 class TestPublishEndpoint:
     def test_records_the_uploaded_apk_version(self, client):
         r = client.post(
             "/api/app-updates/publish",
             headers=auth(),
-            files={"apk": ("app-debug.apk", make_apk_bytes(23, "1.5.0"), "application/vnd.android.package-archive")},
+            files={"apk": ("jarvis-os.apk", make_apk_bytes(23, "1.5.0"), "application/vnd.android.package-archive")},
         )
         assert r.status_code == 200
         assert r.json()["metadata"]["apk_version_code"] == 23
@@ -123,7 +164,7 @@ class TestPublishEndpoint:
             "/api/app-updates/publish",
             headers=auth(),
             data={"apk_version_code": "99"},
-            files={"apk": ("app-debug.apk", make_apk_bytes(23), "application/vnd.android.package-archive")},
+            files={"apk": ("jarvis-os.apk", make_apk_bytes(23), "application/vnd.android.package-archive")},
         )
         assert r.status_code == 200
         assert r.json()["metadata"]["apk_version_code"] == 23
@@ -134,7 +175,7 @@ class TestPublishEndpoint:
         r = client.post(
             "/api/app-updates/publish",
             headers=auth(),
-            files={"apk": ("app-debug.apk", b"not a zip at all", "application/vnd.android.package-archive")},
+            files={"apk": ("jarvis-os.apk", b"not a zip at all", "application/vnd.android.package-archive")},
         )
         assert r.status_code == 400
         assert "unreadable" in r.json()["detail"].lower()
@@ -147,18 +188,18 @@ class TestPublishEndpoint:
         r = client.post(
             "/api/app-updates/publish",
             headers=auth(),
-            files={"apk": ("app-debug.apk", good, "application/vnd.android.package-archive")},
+            files={"apk": ("jarvis-os.apk", good, "application/vnd.android.package-archive")},
         )
         assert r.status_code == 200
 
         bad = client.post(
             "/api/app-updates/publish",
             headers=auth(),
-            files={"apk": ("app-debug.apk", b"truncated garbage", "application/vnd.android.package-archive")},
+            files={"apk": ("jarvis-os.apk", b"truncated garbage", "application/vnd.android.package-archive")},
         )
         assert bad.status_code == 400
 
-        served = (main.APP_UPDATES_DIR / "app-debug.apk").read_bytes()
+        served = (main.APP_UPDATES_DIR / "jarvis-os.apk").read_bytes()
         assert served == good
         # And the endpoint still describes what it is actually serving.
         assert client.get("/api/app-updates/version").json()["apk_version_code"] == 22
@@ -166,6 +207,6 @@ class TestPublishEndpoint:
     def test_requires_the_internal_secret(self, client):
         r = client.post(
             "/api/app-updates/publish",
-            files={"apk": ("app-debug.apk", make_apk_bytes(23), "application/vnd.android.package-archive")},
+            files={"apk": ("jarvis-os.apk", make_apk_bytes(23), "application/vnd.android.package-archive")},
         )
         assert r.status_code == 403
