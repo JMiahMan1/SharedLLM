@@ -398,3 +398,77 @@ class UserWidgetUpdate(BaseModel):
     config: dict | None = None
     quick_assistant_enabled: bool | None = None
     user_id: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# User Panel: device registry
+# ---------------------------------------------------------------------------
+
+DEVICE_KINDS = ("phone", "assistant", "light")
+
+
+class DeviceSelfRegister(BaseModel):
+    """What a phone reports about itself when it logs in.
+
+    Deliberately no IP field: the address is taken from the request, not
+    accepted from the client, so a caller cannot record someone else's.
+    """
+
+    device_key: str = Field(min_length=8, max_length=128)
+    model: str | None = None
+    manufacturer: str | None = None
+    os_version: str | None = None
+    os_build: str | None = None
+    app_version: str | None = None
+    app_build: str | None = None
+
+
+class DeviceAdminCreate(BaseModel):
+    """Register an assistant or light, which has no account to log in with."""
+
+    device_key: str = Field(min_length=1, max_length=128)
+    kind: str
+    label: str = ""
+    owner_username: str | None = None
+    entity_id: str | None = None
+    esphome_version: str | None = None
+    hardware: str | None = None
+    capabilities: dict = Field(default_factory=dict)
+
+
+class DeviceAssign(BaseModel):
+    owner_username: str | None = None
+
+
+class DeviceRead(BaseModel):
+    id: int | None = None
+    device_key: str
+    kind: str
+    label: str = ""
+    owner_username: str | None = None
+    registered_by: str = "self"
+    revoked: bool = False
+    entity_id: str | None = None
+    model: str | None = None
+    manufacturer: str | None = None
+    os_version: str | None = None
+    app_version: str | None = None
+    app_build: str | None = None
+    esphome_version: str | None = None
+    hardware: str | None = None
+    capabilities: dict = Field(default_factory=dict)
+    last_ip_address: str | None = None
+    last_seen_at: str | None = None
+    first_seen_at: str | None = None
+
+
+class TelemetryIngest(BaseModel):
+    """A usage event, written without opt-in.
+
+    ``event`` is checked against NO_OPT_IN_EVENTS; ``extra`` is expected to hold
+    small non-content scalars. Anything content-derived belongs in
+    AssistantConversation, which has its own retention policy.
+    """
+
+    device_key: str = Field(min_length=1, max_length=128)
+    events: list[dict]
