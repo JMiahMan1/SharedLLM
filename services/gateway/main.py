@@ -3404,6 +3404,28 @@ async def proxy_update_me(request: Request):
         )
         return await _proxy_json_response(resp)
 
+@app.get("/api/users/sharing-recipients")
+async def proxy_sharing_recipients(request: Request):
+    """Who the caller may share activity with.
+
+    Identity serves this and deliberately does not require admin, because the
+    audience picker has to work for a non-admin -- `getUsers` is admin-only and
+    rendering a non-admin's picker empty would leave "Everyone" as the only
+    option, which is the opposite of opting in.
+
+    Declared before the "/api/users/{username}" routes so a literal path is
+    never captured as a username.
+    """
+    auth_header = request.headers.get("Authorization")
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/users/sharing-recipients",
+            headers={"Authorization": auth_header} if auth_header else {},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.patch("/api/users/{username}")
 async def proxy_update_user(username: str, request: Request):
     body = await request.json()
