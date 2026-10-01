@@ -7631,8 +7631,15 @@ async def _raise_geo_failure(resp, label: str) -> None:
     you". Collapsing that into a blanket 502 told the client the server was
     broken, which is both wrong and unhelpful -- it is the reason a refused
     read looked identical to an outage. Only a genuine upstream fault is a 502.
+
+    **400/422 join them.** geo answers those for a request it understood and
+    rejected -- an out-of-bounds `days`, an unknown `range`. Reporting "geo is
+    unavailable" for a bad parameter is the same mistake one status code
+    further down, and it is actively misleading: the fix is in the caller's
+    URL, not on the server. Verified live before this change:
+    `GET /api/geo/steps?days=365` returned 502 while geo had correctly said 422.
     """
-    if resp.status in (401, 403, 404):
+    if resp.status in (400, 401, 403, 404, 422):
         detail: Any = None
         try:
             body = await resp.json()
