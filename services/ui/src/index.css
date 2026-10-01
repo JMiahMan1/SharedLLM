@@ -45,6 +45,11 @@ body {
   --site-panel-b: rgba(255, 255, 255, 0.03);
   --site-card-bg: rgba(255, 255, 255, 0.03);
   --site-card-bg-hover: rgba(255, 255, 255, 0.06);
+  /* Floating surfaces (menus, popovers) sit over arbitrary content, so they
+     need far more opacity than a panel to stay readable. .glass-panel at 7%
+     white lets the page show straight through a dropdown. */
+  --site-menu-a: rgba(15, 23, 42, 0.97);
+  --site-menu-b: rgba(2, 6, 23, 0.99);
   --site-input-bg: rgba(0, 0, 0, 0.25);
   --site-placeholder: #475569;
   --site-radius-input: 0.625rem;
@@ -96,6 +101,16 @@ body {
     border: 1px solid var(--color-border-mid);
     border-radius: var(--radius-panel);
     box-shadow: var(--shadow-panel);
+  }
+
+  /* Menus/popovers — floating over content, so near-opaque */
+  .glass-menu {
+    background: linear-gradient(135deg, var(--site-menu-a) 0%, var(--site-menu-b) 100%);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--color-border-mid);
+    border-radius: var(--radius-panel);
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
   }
 
   /* Cards — widget inner cards */
@@ -438,12 +453,25 @@ input[type="range"] {
 [data-theme-scheme="light"] {
   --shadow-card: 0 2px 10px rgba(17, 24, 39, 0.08), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
   --shadow-panel: 0 8px 40px rgba(17, 24, 39, 0.12), 0 1px 0 rgba(255, 255, 255, 0.7) inset;
+  /* Text must flip with the surface. These were defined only once, at the dark
+     values, so every remap below (`.text-white` -> --site-text) produced
+     near-white text on a near-white page in the light scheme. */
+  --site-text: #0f172a;
+  --site-text-muted: #475569;
+  --site-placeholder: #94a3b8;
+  --site-menu-a: rgba(255, 255, 255, 0.97);
+  --site-menu-b: rgba(248, 250, 252, 0.99);
 }
 
 [data-theme-scheme="light"] .glass-panel,
 [data-theme-scheme="light"] .glass-card {
   backdrop-filter: blur(14px) saturate(120%);
   -webkit-backdrop-filter: blur(14px) saturate(120%);
+}
+
+/* A near-opaque dark menu would be a black rectangle on a light page. */
+[data-theme-scheme="light"] .glass-menu {
+  box-shadow: 0 12px 40px rgba(17, 24, 39, 0.18), 0 0 0 1px rgba(17, 24, 39, 0.06);
 }
 
 [data-theme-scheme="light"] .glass-card:hover {
