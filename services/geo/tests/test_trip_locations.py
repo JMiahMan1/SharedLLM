@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import services.geo.main as geo
+from services.config import INTERNAL_SECRET
 
 
 class FakeRedis:
@@ -80,7 +81,7 @@ def fake_redis(monkeypatch):
 
 @pytest.fixture
 def client(fake_redis):
-    return TestClient(geo.app)
+    return TestClient(geo.app, headers={"X-Internal-Secret": INTERNAL_SECRET})
 
 
 HEADERS = {"X-Internal-Secret": geo.INTERNAL_SECRET, "X-User-Id": "jeremiah"}
@@ -173,7 +174,11 @@ def test_suggestions_survive_overpass_failure(client, fake_redis, monkeypatch):
 
 def test_suggestions_require_secret_and_coordinates(client, fake_redis, monkeypatch):
     _mock_place_sources(monkeypatch)
-    assert client.get("/locations/suggestions?lat=33.0&lon=-111.0").status_code == 403
+    # No internal secret at all -> refused at the edge, before the route runs.
+    from fastapi.testclient import TestClient as _TC
+
+    unauthenticated = _TC(geo.app)
+    assert unauthenticated.get("/locations/suggestions?lat=33.0&lon=-111.0").status_code == 403
     assert client.get("/locations/suggestions?lon=-111.0", headers=HEADERS).status_code == 422
     assert client.get("/locations/suggestions?lat=95.0&lon=-111.0", headers=HEADERS).status_code == 422
 

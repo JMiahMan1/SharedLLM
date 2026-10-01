@@ -60,12 +60,22 @@ const Health = () => {
       setSteps(null);
     }
     try {
-      const workoutsRes = await api.getWorkouts(undefined, 10);
+      // Scoped to this user. Passing nothing returned `geo:workouts:all`, which
+      // is every user's workouts -- including unlabelled ones, since this
+      // page never rendered an owner.
+      const workoutsRes = await api.getWorkouts(currentUsername || undefined, 10);
       setWorkouts(workoutsRes.workouts || []);
-      const active = (workoutsRes.workouts || []).find((w) => w.status === 'active');
-      if (active) setActiveWorkout(active);
     } catch {
       setWorkouts([]);
+    }
+    try {
+      // Asked separately because an in-progress session is deliberately not in
+      // the history index -- geo only files it there once it stops. The old
+      // `status === 'active'` scan could therefore never match, so a running
+      // workout was unrecoverable after a reload and Stop went stale.
+      setActiveWorkout(await api.getActiveWorkout(currentUsername || undefined));
+    } catch {
+      setActiveWorkout(null);
     }
   }, [currentUsername]);
 
@@ -136,10 +146,9 @@ const Health = () => {
       const res = await api.startWorkout(activityType, currentUsername || undefined);
       if (res.status === 'already_active') {
         toast.error('You already have a workout in progress. Stop it first.');
-        // Refresh to surface the active workout
-        const list = await api.getWorkouts(currentUsername || undefined, 10);
-        const active = list.workouts.find((w) => w.status === 'active');
-        setActiveWorkout(active || null);
+        // Ask geo for the running session directly; it is not in the history
+        // list, which is why the old list scan never found it.
+        setActiveWorkout(await api.getActiveWorkout(currentUsername || undefined));
         return;
       }
       setActiveWorkout(res.workout);

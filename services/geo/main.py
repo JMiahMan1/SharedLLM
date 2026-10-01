@@ -26,8 +26,8 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
-from fastapi import FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
 
 from services.geo import achievements
 from pydantic import BaseModel
@@ -84,6 +84,35 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SOA Geo Service", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def require_internal_secret_middleware(request: Request, call_next):
+    """Reject any request that is not service-to-service.
+
+    Geo is published on its own host port as well as behind the gateway, so
+    "the gateway checks auth" was never actually true: a handful of routes
+    (``/trips``, ``/workouts``, ``/people``, ``/zones``, ``GET /vehicles``)
+    verified nothing and handed back live household locations, trip histories
+    and step data to anyone who could reach the port.
+
+    This closes the whole class at the edge instead of per-route, so a route
+    added later is protected by default rather than by remembering. Per-route
+    consent (whose data, opt-in) is still enforced by ``_require_may_view``.
+
+    Only ``/health`` is exempt -- it is the container healthcheck and carries
+    no data.
+    """
+    if request.url.path.rstrip("/") == "/health":
+        return await call_next(request)
+    secret = request.headers.get("X-Internal-Secret") or request.query_params.get(
+        "x_internal_secret"
+    )
+    if not _verify_internal_secret(secret):
+        return JSONResponse(
+            status_code=403, content={"detail": "Forbidden"}
+        )
+    return await call_next(request)
 app.include_router(info_router)
 
 
@@ -150,24 +179,93 @@ def health():
 
 
 @app.get("/people")
-async def get_people():
-    """All person + device_tracker entities as a GeoJSON FeatureCollection."""
+async def get_people(
+    viewer: str | None = None,
+    is_admin: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
+    """Person + device_tracker entities as a GeoJSON FeatureCollection.
+
+    This returns the *live* position of everyone in the house. It previously had
+    no authentication at all and geo is published on its own host port, so the
+    whole family's live location was readable by anything that could reach the
+    port. It now requires the internal secret, and drops any person whose
+    entity does not map to a user who has opted into being visible.
+
+    An entity with no matching user (``person.jeremiah_phone``, say) is kept for
+    admins and dropped otherwise: we cannot prove consent for a row we cannot
+    attribute to a user.
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    clean_viewer = (viewer or "").split(".")[-1].strip().lower()
+
+    visible: set[str] | None = None
+    if not _is_privileged_viewer(viewer, is_admin):
+        visible = {clean_viewer}
+        sharing = await _fetch_activity_sharing()
+        for entry in sharing.get("users", []):
+            name = str(entry.get("username", "")).strip().lower()
+            if not name or not entry.get("enabled"):
+                continue
+            if entry.get("audience") == "circle":
+                visible.add(name)
+                continue
+            allowed = [str(u).strip().lower() for u in entry.get("user_ids", [])]
+            if clean_viewer in allowed:
+                visible.add(name)
+
     states = await _ha_get_states()
     features = []
     for s in _filter_entities(states, "person") + _filter_entities(states, "device_tracker"):
+        if visible is not None and not _entity_belongs_to(s.get("entity_id") or "", visible):
+            continue
         f = _entity_to_feature(s["entity_id"], s)
         if f:
             features.append(f)
     return {"type": "FeatureCollection", "features": features}
 
 
+def _entity_belongs_to(entity_id: str, usernames: set[str]) -> bool:
+    """True when a HA person/device_tracker entity maps to one of `usernames`.
+
+    Matches on any underscore-separated token of the object id so
+    ``person.jeremiah_phone``, ``device_tracker.jeremiah`` and ``person.jeremiah``
+    all attribute to ``jeremiah``. Deliberately does not substring-match, which
+    would let ``person.michelle_phone`` match a user named ``mich``.
+    """
+    obj = entity_id.split(".", 1)[-1].lower()
+    tokens = {t for t in obj.replace("-", "_").split("_") if t}
+    return bool(tokens & usernames)
+
+
 @app.get("/android_auto")
-async def get_android_auto(user_id: str | None = None):
+async def get_android_auto(
+    user_id: str | None = None,
+    viewer: str | None = None,
+    is_admin: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+):
     """Android Auto / detected-activity status from the HA companion sensors.
 
     Finds `binary_sensor.*_android_auto` (and optional `*detected_activity*`)
     for the given user (or every phone if user_id is omitted).
+
+    These sensors reveal who is home and what they are doing, so this requires
+    the internal secret and the same opt-in visibility as /people.
     """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if user_id:
+        user_id = await _require_may_view(viewer, user_id, is_admin)
+    elif not _is_privileged_viewer(viewer, is_admin):
+        # "every phone" is an all-users view: scope it to the caller unless
+        # they are privileged.
+        user_id = (viewer or "").split(".")[-1].strip().lower()
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
     try:
         states = await _ha_get_states()
     except HTTPException:
@@ -1636,13 +1734,27 @@ async def process_trip_point(user_id: str, lat: float, lon: float, speed_mps: fl
 
 
 @app.get("/trips")
-async def get_trips(user_id: str | None = None, limit: int = 50):
-    """Retrieve recorded trips per login user or for all users, with shared trip grouping."""
+async def get_trips(
+    user_id: str | None = None,
+    limit: int = 50,
+    viewer: str | None = None,
+    is_admin: str | None = None,
+):
+    """Trips for one user, or (admin only) everyone.
+
+    Previously any caller could omit ``user_id`` and receive ``geo:trips:all``,
+    i.e. every user's trips. Reading another person's now requires them to have
+    opted in; the ``all`` bucket is admin-only.
+    """
     r = await get_redis()
     if not r:
         return {"trips": [], "total_trips": 0}
 
-    clean_user = user_id.split(".")[-1].lower() if (user_id and user_id != "all") else None
+    wants_all = not user_id or user_id == "all"
+    admin = str(is_admin or "").lower() in {"1", "true", "yes"}
+    if wants_all and not admin:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    clean_user = None if wants_all else await _require_may_view(viewer, user_id, is_admin)
     key = f"geo:trips:user:{clean_user}" if clean_user else "geo:trips:all"
 
     trip_ids = await r.zrevrange(key, 0, limit - 1)
@@ -2276,14 +2388,14 @@ async def get_daily_steps(
     days: int = Query(7, ge=1, le=30),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
 ):
-    """Daily step history from the hardware pedometer: {date: steps} buckets."""
+    """Daily step history: {date: steps} buckets, subject to opt-in consent."""
     r = await get_redis()
     if not r:
         return {"user_id": user_id, "days": days, "daily_steps": {}, "today": 0}
-    clean = (user_id or "").split(".")[-1].lower()
-    if not clean:
-        raise HTTPException(status_code=400, detail="user_id required")
+    clean = await _require_may_view(viewer, user_id, is_admin)
     history = await _get_daily_steps(r, clean, days)
     tz = ZoneInfo("America/Phoenix")
     today = datetime.now(tz).strftime("%Y-%m-%d")
@@ -2344,11 +2456,11 @@ async def get_goals(
     user_id: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
 ):
-    """The user's goal set (daily/weekly steps, workouts, weekly distance)."""
-    clean = (user_id or "").split(".")[-1].lower()
-    if not clean:
-        raise HTTPException(status_code=400, detail="user_id required")
+    """The user's goal set, subject to opt-in consent."""
+    clean = await _require_may_view(viewer, user_id, is_admin)
     r = await get_redis()
     if not r:
         return {"user_id": clean, "goals": dict(achievements.DEFAULT_GOALS)}
@@ -2361,7 +2473,13 @@ async def put_goals(
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
-    """Update any subset of goals; unknown/out-of-range keys are ignored."""
+    """Update any subset of goals; unknown/out-of-range keys are ignored.
+
+    Like PUT /steps/goal, this declared the internal secret but never verified
+    it -- an unauthenticated write hole on geo's own port.
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
     clean = (str(payload.get("user_id") or "")).split(".")[-1].lower()
     if not clean:
         raise HTTPException(status_code=400, detail="user_id required")
@@ -2384,15 +2502,15 @@ async def get_achievements(
     days: int = Query(30, ge=1, le=120),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
 ):
     """Unlocked achievements (stable dates), next-up progress, and points.
 
     Derived on read from the same buckets the widgets use; awards are banked in
     `geo:points:{user}` so a badge keeps the date it was first earned.
     """
-    clean = (user_id or "").split(".")[-1].lower()
-    if not clean:
-        raise HTTPException(status_code=400, detail="user_id required")
+    clean = await _require_may_view(viewer, user_id, is_admin)
     r = await get_redis()
     definitions = achievements.load_definitions()
     if not r:
@@ -2453,11 +2571,11 @@ async def get_points(
     user_id: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
 ):
     """Points ledger: total plus each award with the date it was earned."""
-    clean = (user_id or "").split(".")[-1].lower()
-    if not clean:
-        raise HTTPException(status_code=400, detail="user_id required")
+    clean = await _require_may_view(viewer, user_id, is_admin)
     r = await get_redis()
     definitions = achievements.load_definitions()
     by_id = {d.id: d for d in definitions}
@@ -2576,10 +2694,10 @@ async def get_step_goal(
     user_id: str | None = None,
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
 ):
-    clean = (user_id or "").split(".")[-1].lower()
-    if not clean:
-        raise HTTPException(status_code=400, detail="user_id required")
+    clean = await _require_may_view(viewer, user_id, is_admin)
     r = await get_redis()
     if not r:
         return {"user_id": clean, "goal": DEFAULT_STEP_GOAL}
@@ -2592,7 +2710,15 @@ async def set_step_goal(
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
 ):
-    """Set the user's daily step goal (1000–100000)."""
+    """Set the user's daily step goal (1000–100000).
+
+    This route accepted ``x_internal_secret`` but never called
+    ``_verify_internal_secret``, so with geo published on its own port anyone
+    could rewrite anyone's step goal. It is now verified at the source rather
+    than relying on the gateway to be the only path in.
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
     user_id = payload.get("user_id")
     clean = (str(user_id) if user_id else "").split(".")[-1].lower()
     if not clean:
@@ -2614,13 +2740,25 @@ async def set_step_goal(
 
 
 @app.get("/workouts")
-async def get_workouts(user_id: str | None = None, limit: int = 50):
-    """List recorded workouts (non-driving outdoor activities)."""
+async def get_workouts(
+    user_id: str | None = None,
+    limit: int = 50,
+    viewer: str | None = None,
+    is_admin: str | None = None,
+):
+    """List recorded workouts (non-driving outdoor activities).
+
+    Same defect as /trips: omitting ``user_id`` served ``geo:workouts:all``.
+    """
     r = await get_redis()
     if not r:
         return {"workouts": [], "total_workouts": 0}
 
-    clean_user = user_id.split(".")[-1].lower() if (user_id and user_id != "all") else None
+    wants_all = not user_id or user_id == "all"
+    admin = str(is_admin or "").lower() in {"1", "true", "yes"}
+    if wants_all and not admin:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    clean_user = None if wants_all else await _require_may_view(viewer, user_id, is_admin)
     key = f"geo:workouts:user:{clean_user}" if clean_user else "geo:workouts:all"
 
     ids = await r.zrevrange(key, 0, limit - 1)
@@ -2684,6 +2822,46 @@ async def start_workout(
     await r.set(f"geo:active_workout:{user}", json.dumps(workout), ex=86400 * 2)
     log.info(f"[Geo] Started {update.activity_type} workout {wid} for {user}")
     return {"status": "ok", "workout": workout}
+
+
+@app.get("/workouts/active")
+async def get_active_workout(
+    x_user_id: str | None = Header(None, alias="X-User-Id"),
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = Query(None),
+    is_admin: str | bool | None = Query(None),
+):
+    """The caller's in-progress workout, or 404 when there is none.
+
+    This exists because an active workout is *not* in `geo:workouts:user:{u}`:
+    a session only enters that index when it is stopped, so it is saved to the
+    history at the end. The client therefore cannot find one by listing
+    workouts -- it was reduced to matching a `status` string that this service
+    never emits, so "Stop & Save" could never be rediscovered after a reload.
+
+    404 (rather than a null field) keeps the "is one running?" answer
+    unambiguous and matches the shape of a plain missing resource.
+    """
+    if not _verify_internal_secret(x_internal_secret, query_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    user = (x_user_id or "").split(".")[-1].lower()
+    if not user:
+        raise HTTPException(status_code=400, detail="X-User-Id header required")
+
+    # Same consent rule as the rest of the per-user reads: you may only ask
+    # about yourself unless you are an admin.
+    clean_user = None if (user == "all") else await _require_may_view(viewer, user, is_admin)
+
+    r = await get_redis()
+    if not r:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
+
+    target = clean_user or "all"
+    raw = await r.get(f"geo:active_workout:{target}")
+    if not raw:
+        raise HTTPException(status_code=404, detail="No active workout")
+    return {"workout": json.loads(raw)}
 
 
 @app.post("/workouts/stop")
@@ -3060,6 +3238,59 @@ async def _viewer_may_see(viewer: str, target: str) -> bool:
     return False
 
 
+def _is_privileged_viewer(viewer: str | None, is_admin: str | bool | None) -> bool:
+    """True when the request may bypass per-user opt-in filtering.
+
+    Two cases, both already proven trusted upstream:
+
+    * an admin -- the family-circle admin view is a deliberate feature;
+    * **no viewer at all** -- ``require_internal_secret_middleware`` rejects
+      every request without the internal secret, and the gateway 401s before it
+      forwards, so a missing viewer can only be another service calling geo
+      directly.
+
+    Anything else is an ordinary user and is filtered by their own opt-in.
+    """
+    if str(is_admin or "").strip().lower() in {"1", "true", "yes"}:
+        return True
+    return not (viewer or "").split(".")[-1].strip()
+
+
+async def _require_may_view(
+    viewer: str | None,
+    target: str | None,
+    is_admin: str | bool | None = None,
+) -> str:
+    """Authorize a read of `target`'s data on behalf of `viewer`.
+
+    Returns the normalized target username, or raises 404. The single consent
+    authority is ``_viewer_may_see``; this adds only the admin carve-out and
+    the HTTP shape, so the policy still exists in exactly one place.
+
+    * 404 (not 403) on refusal, so a probe cannot distinguish "no such user"
+      from "not shared with you".
+
+    Admins may read anyone's data: the admin view of the family circle is a
+    deliberate feature, so it is an explicit carve-out rather than an accident
+    of who happens to be a member of the audience.
+
+    An **absent** ``viewer`` is treated as a trusted internal caller and allowed.
+    That is safe because ``require_internal_secret_middleware`` rejects every
+    request that does not carry the internal secret, and the gateway always
+    populates ``viewer`` (it 401s first). So a missing viewer can only mean
+    another service talking to geo directly -- not an unauthenticated caller.
+    """
+    clean_target = (target or "").split(".")[-1].strip().lower()
+    clean_viewer = (viewer or "").split(".")[-1].strip().lower()
+    if _is_privileged_viewer(viewer, is_admin):
+        return clean_target
+    if not clean_target:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    if not await _viewer_may_see(clean_viewer, clean_target):
+        raise HTTPException(status_code=404, detail="activity not shared")
+    return clean_target
+
+
 async def _activity_points(r, clean: str) -> tuple[int, int]:
     """(points, achievements_earned) from the ledger — exact, not estimated."""
     definitions = achievements.load_definitions()
@@ -3172,6 +3403,8 @@ async def get_activity_trends(
     refresh: bool = Query(False),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
 ):
     """Real activity data for one family member: steps, workouts, driving.
 
@@ -3182,9 +3415,7 @@ async def get_activity_trends(
     """
     if not _verify_internal_secret(x_internal_secret, query_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
-    clean = (user_id or "").split(".")[-1].lower()
-    if not clean:
-        raise HTTPException(status_code=400, detail="user_id required")
+    clean = await _require_may_view(viewer, user_id, is_admin)
 
     r = await get_redis()
     if not r:
@@ -3228,6 +3459,8 @@ async def analyze_activity_trends(
     refresh: bool = Query(False),
     x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
     query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
 ):
     """Explicitly generate (or re-generate) the LLM activity narrative.
 
@@ -3236,9 +3469,7 @@ async def analyze_activity_trends(
     """
     if not _verify_internal_secret(x_internal_secret, query_secret):
         raise HTTPException(status_code=403, detail="Forbidden")
-    clean = (user_id or "").split(".")[-1].lower()
-    if not clean:
-        raise HTTPException(status_code=400, detail="user_id required")
+    clean = await _require_may_view(viewer, user_id, is_admin)
 
     r = await get_redis()
     if not r:

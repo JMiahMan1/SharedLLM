@@ -28,7 +28,13 @@ describe('ActivitySharingPanel', () => {
     userActivitySharing.audience = 'circle';
     userActivitySharing.user_ids = [];
     userActivitySharing.share = ['totals'];
-    server.use(http.get('/api/users', () => HttpResponse.json([sam])));
+    // The picker reads the narrow recipient list, NOT the admin-only
+    // `GET /api/users` -- which is what left a non-admin with an empty picker.
+    server.use(
+      http.get('/api/users/sharing-recipients', () =>
+        HttpResponse.json([{ username: sam.username, display_name: sam.display_name }]),
+      ),
+    );
   });
 
   it('defaults to private and explains it', async () => {

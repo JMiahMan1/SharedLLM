@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api } from '../../services/api';
@@ -30,9 +30,12 @@ export default function ActivitySharingPanel() {
     queryFn: () => api.getActivitySharing(),
   });
 
+  // `getSharingRecipients`, not `getUsers`: the latter is admin-only, which
+  // rendered a non-admin's picker empty and left "Everyone" as the only
+  // audience they could pick -- the opposite of opting in.
   const { data: users = [] } = useQuery({
-    queryKey: ['users'],
-    queryFn: () => api.getUsers(),
+    queryKey: ['sharing-recipients'],
+    queryFn: () => api.getSharingRecipients(),
   });
 
   const state: SharingState = draft ??
@@ -44,6 +47,14 @@ export default function ActivitySharingPanel() {
           share: server.share.length ? server.share : ['totals'],
         }
       : { enabled: false, audience: 'circle', user_ids: [], share: ['totals'] });
+
+  // The system `default` account is excluded: geo treats it as a privileged
+  // viewer that can read everyone's activity regardless of consent, so
+  // offering it as a grant target would imply a control it does not have.
+  const recipients = useMemo(
+    () => users.filter((u) => u.username && u.username !== 'default'),
+    [users],
+  );
 
   const patch = (updates: Partial<SharingState>) => {
     setDraft({ ...state, ...updates });
@@ -147,15 +158,13 @@ export default function ActivitySharingPanel() {
             <div className="space-y-1.5">
               <p className="text-xs text-slate-500">Who can see it:</p>
               <div className="flex flex-wrap gap-2">
-                {users
-                  .filter((u) => u.username && u.username !== 'default')
-                  .map((u) => (
+                {recipients.map((u) => (
                     <button
-                      key={u.id ?? u.username}
+                      key={u.username}
                       type="button"
                       data-testid={`sharing-user-${u.username}`}
                       onClick={() => toggleUser(u.username)}
-                      className={`px-3 py-2 text-xs rounded-lg border min-h-11 transition-colors ${
+                      className={`px-3 py-2 text-xs rounded-lg border min-h-11 pointer-coarse:min-h-11 transition-colors ${
                         state.user_ids.includes(u.username)
                           ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-200'
                           : 'border-white/10 text-slate-400 hover:text-slate-200'
@@ -164,6 +173,12 @@ export default function ActivitySharingPanel() {
                       {u.display_name || u.username}
                     </button>
                   ))}
+                {recipients.length === 0 && (
+                  <p className="text-xs text-amber-300/80">
+                    No other accounts yet. Add someone in Admin → Users before
+                    sharing with specific people.
+                  </p>
+                )}
               </div>
             </div>
           )}

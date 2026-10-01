@@ -2027,22 +2027,128 @@ async def _resolve_identity_from_media_token(request: Request) -> Any | None:
         raise HTTPException(status_code=401, detail=f"Authentication required: {e.detail}") from e
 
 
-async def _user_id_from_request(request: Request) -> str | None:
-    """Resolve the acting username from X-User-Id or a Bearer API key."""
-    user = request.headers.get("X-User-Id")
-    if user:
-        return user
-    auth_header = request.headers.get("Authorization")
-    if not (auth_header and auth_header.startswith("Bearer ")):
+async def _resolve_strict_identity(api_key: str) -> dict | None:
+    """Resolve an API key to its real owner, with NO default-user fallback.
+
+    ``resolve_identity`` (``POST /api/resolve``) tries user_id -> api_key ->
+    rag_user -> voice_id -> device_id and then **falls back to the system
+    default user, which is an admin**. That makes it useless for deciding *who
+    is calling*: every junk string "resolves" successfully and comes back as the
+    administrator. Verified directly::
+
+        POST /api/resolve {"api_key": "totally-bogus-key"}
+        -> {"user": "default", "is_admin": true, "api_key": "bf7ca7c0..."}
+
+    ``GET /api/internal/validate-api-key`` is the strict variant: no fallback at
+    all, so a miss is a 401.
+
+    Returns ``None`` when the key is not a real user's key, or when Identity
+    cannot be reached. Callers must deny in that case rather than assume an
+    identity -- defaulting to the admin is exactly the bug this replaces.
+    """
+    key = (api_key or "").strip()
+    if not key:
         return None
-    token = auth_header.split(" ", 1)[1]
     try:
-        ident = await resolve_identity({"api_key": token})
+        resp = await get_http_client().get(
+            f"{IDENTITY_SVC}/api/internal/validate-api-key",
+            params={"api_key": key},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+    except Exception as exc:
+        log.warning(f"[identity] strict key lookup failed (identity unreachable): {exc}")
+        return None
+    if resp.status != 200:
+        return None
+    try:
+        ident = await resp.json()
     except Exception:
         return None
     if not isinstance(ident, dict):
         return None
-    return ident.get("user") or ident.get("username") or ident.get("user_id") or None
+    user = ident.get("user")
+    if not user:
+        return None
+    return ident
+
+
+async def _acting_identity(request: Request) -> dict | None:
+    """The verified acting identity for a geo request, or ``None`` if anonymous.
+
+    Returns ``{"user": str, "is_admin": bool}``.
+    """
+    # X-User-Id is a gateway->geo transport header. Nothing in the UI, the
+    # Android client or the e2e suite ever sends it, so accepting it from an
+    # arbitrary client let anyone assert any identity -- including an admin's,
+    # and ahead of their own Bearer token. Honour it only from a caller that
+    # already holds the internal secret (service-to-service).
+    if request.headers.get("X-Internal-Secret") == INTERNAL_SECRET:
+        trusted = (request.headers.get("X-User-Id") or "").strip()
+        if trusted:
+            return {"user": trusted, "is_admin": True}
+
+    auth_header = request.headers.get("Authorization")
+    if not (auth_header and auth_header.startswith("Bearer ")):
+        return None
+    ident = await _resolve_strict_identity(auth_header.split(" ", 1)[1])
+    if not ident:
+        return None
+    return {"user": str(ident["user"]), "is_admin": bool(ident.get("is_admin"))}
+
+
+async def _user_id_from_request(request: Request) -> str | None:
+    """Resolve the acting username, or ``None`` when the caller is anonymous.
+
+    Anonymous callers get ``None`` (never ``"default"``/``"all"``) so that a
+    route which forgets to check cannot silently fall back to serving everyone.
+    """
+    ident = await _acting_identity(request)
+    return ident["user"] if ident else None
+
+
+async def _caller_is_admin(request: Request) -> bool:
+    """True when the caller is a verified admin (or an internal service)."""
+    ident = await _acting_identity(request)
+    return bool(ident and ident.get("is_admin"))
+
+
+async def _require_authenticated(request: Request) -> str:
+    """401 unless the caller is authenticated; returns their username."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return ident["user"]
+
+
+async def _geo_read_target(request: Request, requested: str | None) -> tuple[str, str, str]:
+    """Resolve whose data a geo read may return, the viewer, and the admin flag.
+
+    These routes used to do::
+
+        user_id = request.query_params.get("user_id") or await _user_id_from_request(request) or "all"
+
+    so a caller-supplied ``?user_id=`` always beat the authenticated identity,
+    and an anonymous caller silently fell through to the ``"all"`` bucket --
+    which geo serves from an index containing *every* user's rows.
+
+    Returns ``(target, viewer, is_admin)``. The viewer is forwarded so that GEO
+    can apply the opt-in consent check in one place (``geo._viewer_may_see``);
+    consent is deliberately not reimplemented here, because two copies of a
+    privacy policy is how they drift apart.
+
+    ``is_admin`` has to be forwarded explicitly or geo cannot honour the admin
+    carve-out in ``geo._is_privileged_viewer``, and every admin read would be
+    refused as if the caller were an ordinary user. It is a third return value
+    on purpose: a two-value unpack would let a future route silently forget it.
+    """
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    viewer = ident["user"]
+    target = (requested or "").strip() or viewer
+    is_admin = "true" if ident.get("is_admin") else ""
+    return target, viewer, is_admin
 
 
 async def _resolve_ma_credentials(request: Request, body: dict | None = None) -> tuple[str, str]:
@@ -4615,25 +4721,13 @@ async def _api_key_is_valid(api_key: str) -> bool:
     Deliberately does NOT go through ``resolve_identity``: that endpoint falls
     back to the system default user (an admin) when nothing matches, so every
     string "resolves" successfully and it cannot be used to prove a caller is
-    authenticated. ``/api/internal/validate-api-key`` is the strict variant.
+    authenticated. ``/api/internal/validate-api-key`` is the strict variant,
+    shared with ``_resolve_strict_identity``.
 
     Fails closed: if Identity is unreachable the key cannot be confirmed, so we
     deny rather than wave the request through.
     """
-    try:
-        resp = await get_http_client().get(
-            f"{IDENTITY_SVC}/api/internal/validate-api-key",
-            params={"api_key": api_key},
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
-            timeout=aiohttp.ClientTimeout(total=10.0),
-        )
-    except Exception as exc:
-        log.error(f"[sd-gate] key validation failed (identity unreachable): {exc}")
-        return False
-    if resp.status != 200:
-        log.info(f"[sd-gate] key validation rejected (HTTP {resp.status})")
-        return False
-    return True
+    return await _resolve_strict_identity(api_key) is not None
 
 
 async def _sd_request_authorized(request: Request) -> bool:
@@ -7437,23 +7531,36 @@ async def vehicle_lookup_detail(vehicle_id: str):
 
 
 @app.get("/api/geo/telemetry/{user_id}")
-async def get_geo_telemetry(user_id: str, hours: float = 24.0):
+async def get_geo_telemetry(request: Request, user_id: str, hours: float = 24.0):
+    """Fine-grained GPS telemetry for one person — own, admin, or opted-in only."""
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
-            f"{GEO_SVC}/people/{user_id}/telemetry?hours={hours}",
+            f"{GEO_SVC}/people/{target}/telemetry",
+            params={"hours": hours, "viewer": viewer, "is_admin": is_admin},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Geo telemetry unavailable")
+        raise HTTPException(status_code=resp.status, detail="Geo telemetry unavailable")
 
 
 @app.get("/api/geo/people")
-async def get_geo_people():
+async def get_geo_people(request: Request, viewer: str | None = None):
+    """Live HA presence for the family circle.
+
+    Requires authentication (this returned the live position of every person
+    entity to an anonymous caller), and forwards the viewer so geo can drop
+    anyone who has not opted into being visible.
+    """
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/people",
+            params={"viewer": ident["user"], "is_admin": str(bool(ident.get("is_admin")))},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
@@ -7463,8 +7570,10 @@ async def get_geo_people():
 
 
 @app.get("/api/geo/android_auto")
-async def get_geo_android_auto(user_id: str | None = None):
-    params = {"user_id": user_id} if user_id else {}
+async def get_geo_android_auto(request: Request, user_id: str | None = None):
+    """Android auto-reporting configuration — own data only unless admin."""
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    params = {"user_id": target, "viewer": viewer, "is_admin": is_admin}
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/android_auto",
@@ -7492,15 +7601,20 @@ async def get_geo_zones():
 
 @app.get("/api/geo/trips")
 async def get_geo_trips(request: Request, user_id: str | None = None, limit: int = 50):
-    headers = {"X-Internal-Secret": INTERNAL_SECRET}
-    params = {"limit": limit}
-    if user_id and user_id != "all":
-        params["user_id"] = user_id
+    """List trips.
+
+    This used to forward no identity at all, so geo served its ``geo:trips:all``
+    index -- every user's trips to any authenticated caller (verified live:
+    a non-admin received 7 trips, all belonging to the admin). The viewer is
+    now forwarded and geo applies the opt-in consent check.
+    """
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    params = {"limit": limit, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/trips",
             params=params,
-            headers=headers,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=8.0),
         )
         if resp.status == 200:
@@ -7509,7 +7623,8 @@ async def get_geo_trips(request: Request, user_id: str | None = None, limit: int
 
 
 @app.get("/api/geo/trips/{trip_id}")
-async def get_geo_trip(trip_id: str):
+async def get_geo_trip(request: Request, trip_id: str):
+    await _require_authenticated(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/trips/{trip_id}",
@@ -7522,8 +7637,9 @@ async def get_geo_trip(trip_id: str):
 
 
 @app.get("/api/geo/trips/{trip_id}/locations")
-async def get_geo_trip_locations(trip_id: str):
+async def get_geo_trip_locations(request: Request, trip_id: str):
     """Resolved start/end place names + coordinates for a trip."""
+    await _require_authenticated(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/trips/{trip_id}/locations",
@@ -7537,12 +7653,12 @@ async def get_geo_trip_locations(trip_id: str):
 
 @app.patch("/api/geo/trips/{trip_id}")
 async def update_geo_trip(trip_id: str, request: Request):
-    user = await _user_id_from_request(request)
+    user = await _require_authenticated(request)
 
     body = await request.json()
     headers = {
         "X-Internal-Secret": INTERNAL_SECRET,
-        "X-User-Id": user or "",
+        "X-User-Id": user,
     }
     async with shared_http_client() as client:
         resp = await client.patch(
@@ -7562,7 +7678,8 @@ async def update_geo_trip(trip_id: str, request: Request):
 
 
 @app.get("/api/geo/trips/{trip_id}/route")
-async def get_geo_trip_route(trip_id: str):
+async def get_geo_trip_route(request: Request, trip_id: str):
+    await _require_authenticated(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/trips/{trip_id}/route",
@@ -7594,12 +7711,20 @@ async def get_geo_location_suggestions(lat: float, lon: float):
 
 @app.patch("/api/geo/trips/{trip_id}/share")
 async def share_geo_trip(trip_id: str, request: Request):
+    """Share a trip with riders.
+
+    Previously this forwarded no ``X-User-Id`` at all, which made geo's owner
+    check (``if request_user and request_user != trip_user``) vacuous -- it
+    received an empty string and skipped the comparison, so any caller could
+    share anyone's trip.
+    """
+    user = await _require_authenticated(request)
     body = await request.json()
     async with shared_http_client() as client:
         resp = await client.patch(
             f"{GEO_SVC}/trips/{trip_id}/share",
             json=body,
-            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            headers={"X-Internal-Secret": INTERNAL_SECRET, "X-User-Id": user},
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
         if resp.status == 200:
@@ -7614,15 +7739,18 @@ async def share_geo_trip(trip_id: str, request: Request):
 
 @app.get("/api/geo/workouts")
 async def get_geo_workouts(request: Request, user_id: str | None = None, limit: int = 20):
-    headers = {"X-Internal-Secret": INTERNAL_SECRET}
-    params = {"limit": limit}
-    if user_id and user_id != "all":
-        params["user_id"] = user_id
+    """List workouts.
+
+    Identical defect to /api/geo/trips: no identity was forwarded, so geo served
+    ``geo:workouts:all`` -- every user's workouts to any authenticated caller.
+    """
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    params = {"limit": limit, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/workouts",
             params=params,
-            headers=headers,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=8.0),
         )
         if resp.status == 200:
@@ -7630,18 +7758,53 @@ async def get_geo_workouts(request: Request, user_id: str | None = None, limit: 
     raise HTTPException(status_code=502, detail="Failed to fetch workouts")
 
 
+@app.get("/api/geo/workouts/active")
+async def get_geo_active_workout(request: Request, user_id: str | None = None):
+    """The caller's in-progress workout, if any.
+
+    Always scoped to the caller: an in-progress session is live state, not
+    history, and there is no "all" bucket to request. 404 is passed through as
+    "nothing running" rather than an error.
+    """
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/workouts/active",
+            params={"viewer": viewer, "is_admin": is_admin},
+            headers={"X-Internal-Secret": INTERNAL_SECRET, "X-User-Id": target},
+            timeout=aiohttp.ClientTimeout(total=8.0),
+        )
+        if resp.status == 200:
+            return await resp.json()
+        if resp.status == 404:
+            return {"workout": None}
+    raise HTTPException(status_code=502, detail="Failed to fetch active workout")
+
+
 @app.post("/api/geo/workouts/start")
 async def start_geo_workout(request: Request):
-    user = await _user_id_from_request(request)
+    """Start a workout for the caller.
 
+    The body's ``user_id`` is no longer trusted over the authenticated caller:
+    starting a workout for someone else requires admin.
+    """
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
     body = await request.json()
+    claimed = str(body.get("user_id") or "").strip().lower()
+    if claimed and claimed != ident["user"].lower() and not ident.get("is_admin"):
+        raise HTTPException(
+            status_code=403, detail="Cannot start a workout for another user"
+        )
+    body["user_id"] = claimed or ident["user"]
     async with shared_http_client() as client:
         resp = await client.post(
             f"{GEO_SVC}/workouts/start",
             json=body,
             headers={
                 "X-Internal-Secret": INTERNAL_SECRET,
-                "X-User-Id": user or body.get("user_id") or "",
+                "X-User-Id": ident["user"],
             },
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
@@ -7654,16 +7817,24 @@ async def start_geo_workout(request: Request):
 
 @app.post("/api/geo/workouts/stop")
 async def stop_geo_workout(request: Request):
-    user = await _user_id_from_request(request)
-
+    """Stop the caller's active workout (admins may stop anyone's)."""
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
     body = await request.json()
+    claimed = str(body.get("user_id") or "").strip().lower()
+    if claimed and claimed != ident["user"].lower() and not ident.get("is_admin"):
+        raise HTTPException(
+            status_code=403, detail="Cannot stop another user's workout"
+        )
+    body["user_id"] = claimed or ident["user"]
     async with shared_http_client() as client:
         resp = await client.post(
             f"{GEO_SVC}/workouts/stop",
             json=body,
             headers={
                 "X-Internal-Secret": INTERNAL_SECRET,
-                "X-User-Id": user or body.get("user_id") or "",
+                "X-User-Id": ident["user"],
             },
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
@@ -7676,7 +7847,8 @@ async def stop_geo_workout(request: Request):
 
 
 @app.get("/api/geo/workouts/{workout_id}/route")
-async def get_geo_workout_route(workout_id: str):
+async def get_geo_workout_route(request: Request, workout_id: str):
+    await _require_authenticated(request)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/workouts/{workout_id}/route",
@@ -7690,11 +7862,9 @@ async def get_geo_workout_route(workout_id: str):
 
 @app.get("/api/geo/steps")
 async def get_geo_steps(request: Request, user_id: str | None = None, days: int = 7):
-    if not user_id:
-        user_id = await _user_id_from_request(request) or "all"
-    # Always pass user_id — geo GET /steps 400s when it's omitted.
-    # "all" is a valid sentinel (empty history for that key).
-    params = {"days": days, "user_id": user_id or "all"}
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    # Always pass user_id -- geo GET /steps 400s when it's omitted.
+    params = {"days": days, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/steps",
@@ -7709,9 +7879,24 @@ async def get_geo_steps(request: Request, user_id: str | None = None, days: int 
 
 @app.post("/api/geo/steps")
 async def proxy_geo_steps(request: Request):
-    """Ingest hardware pedometer reading via Geo service (used by mobile app
-    with Bearer auth — gateway adds X-Internal-Secret when forwarding)."""
+    """Ingest a hardware pedometer reading (sent by the mobile app with Bearer auth).
+
+    Previously the body's ``user_id`` was forwarded verbatim with no check at
+    all, so anyone could write readings into anyone's history. It must now match
+    the authenticated caller (or the caller must be admin). An unauthenticated
+    write is rejected outright rather than stored -- that is what produced the
+    orphan ``geo:steps_meta:me`` bucket.
+    """
     body = await request.json()
+    ident = await _acting_identity(request)
+    if not ident:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    claimed = str(body.get("user_id") or "").strip().lower()
+    if claimed and claimed != ident["user"].lower() and not ident.get("is_admin"):
+        raise HTTPException(
+            status_code=403, detail="Cannot record steps for another user"
+        )
+    body["user_id"] = claimed or ident["user"]
     async with shared_http_client() as client:
         resp = await client.post(
             f"{GEO_SVC}/steps",
@@ -7726,12 +7911,11 @@ async def proxy_geo_steps(request: Request):
 
 @app.get("/api/geo/goals")
 async def proxy_get_goals(request: Request, user_id: str | None = None):
-    if not user_id:
-        user_id = await _user_id_from_request(request) or ""
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/goals",
-            params={"user_id": user_id},
+            params={"user_id": target, "viewer": viewer, "is_admin": is_admin},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
@@ -7742,11 +7926,21 @@ async def proxy_get_goals(request: Request, user_id: str | None = None):
 
 @app.put("/api/geo/goals")
 async def proxy_put_goals(request: Request):
-    body = await request.json()
-    if not body.get("user_id"):
-        body["user_id"] = await _user_id_from_request(request) or ""
-    if not body.get("user_id"):
+    """Set activity goals for the caller (admins may set anyone's).
+
+    geo's PUT /goals never verified the internal secret, so this route was an
+    unauthenticated *write* hole: anyone could rewrite anyone's goals.
+    """
+    ident = await _acting_identity(request)
+    if not ident:
         raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    target = str(body.get("user_id") or "").strip().lower()
+    if target and target != ident["user"].lower() and not ident.get("is_admin"):
+        raise HTTPException(
+            status_code=403, detail="Cannot change goals for another user"
+        )
+    body["user_id"] = target or ident["user"]
     async with shared_http_client() as client:
         resp = await client.put(
             f"{GEO_SVC}/goals",
@@ -7761,12 +7955,18 @@ async def proxy_put_goals(request: Request):
 
 
 @app.get("/api/geo/stars")
-async def proxy_get_stars(request: Request):
-    user = request.query_params.get("user_id") or _user_id_from_request(request) or ""
+async def proxy_get_stars(request: Request, user_id: str | None = None):
+    """Read a star balance. Own balance by default; another user's needs admin."""
+    viewer = await _user_id_from_request(request)
+    if not viewer:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    target = (user_id or "").strip() or viewer
+    if target != viewer and not await _caller_is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/api/geo/stars",
-            params={"user_id": user},
+            params={"user_id": target},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
@@ -7775,16 +7975,23 @@ async def proxy_get_stars(request: Request):
 
 @app.post("/api/geo/stars")
 async def proxy_grant_stars(request: Request):
-    """Grant bonus stars. Identity enforces admin rights on the caller."""
+    """Grant bonus stars. Admin only.
+
+    The previous docstring claimed "Identity enforces admin rights on the
+    caller", but nothing did: geo has no admin check on this route and the
+    gateway forwarded no admin signal, so any authenticated user could mint
+    stars for anyone. The check is enforced here instead of being asserted.
+    """
+    if not await _caller_is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required to grant stars")
     body = await request.json()
-    auth_header = request.headers.get("Authorization")
     if not body.get("user_id"):
-        body["user_id"] = _user_id_from_request(request) or ""
+        body["user_id"] = await _user_id_from_request(request) or ""
     async with shared_http_client() as client:
         resp = await client.post(
             f"{GEO_SVC}/api/geo/stars",
             json=body,
-            headers={"Authorization": auth_header} if auth_header else {},
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
         return await _proxy_json_response(resp)
@@ -7794,12 +8001,11 @@ async def proxy_grant_stars(request: Request):
 async def proxy_get_achievements(
     request: Request, user_id: str | None = None, days: int = 30
 ):
-    if not user_id:
-        user_id = await _user_id_from_request(request) or ""
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/achievements",
-            params={"user_id": user_id, "days": days},
+            params={"user_id": target, "viewer": viewer, "is_admin": is_admin, "days": days},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
@@ -7810,12 +8016,11 @@ async def proxy_get_achievements(
 
 @app.get("/api/geo/points")
 async def proxy_get_points(request: Request, user_id: str | None = None):
-    if not user_id:
-        user_id = await _user_id_from_request(request) or ""
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/points",
-            params={"user_id": user_id},
+            params={"user_id": target, "viewer": viewer, "is_admin": is_admin},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
@@ -7829,18 +8034,11 @@ async def proxy_activity_summary(
     request: Request, user_id: str | None = None, window: str = "week"
 ):
     """Running totals — own data always; anyone else's only with opt-in."""
-    viewer = await _user_id_from_request(request) or ""
-    if not user_id:
-        user_id = viewer
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    params = {"user_id": user_id, "window": window}
-    if viewer:
-        params["viewer"] = viewer
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/activity/summary",
-            params=params,
+            params={"user_id": target, "window": window, "viewer": viewer, "is_admin": is_admin},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=10.0),
         )
@@ -7853,13 +8051,13 @@ async def proxy_activity_summary(
 @app.get("/api/geo/activity/feed")
 async def proxy_activity_feed(request: Request, window: str = "week"):
     """Activity of others who opted in and included the caller in their audience."""
-    viewer = await _user_id_from_request(request) or ""
-    if not viewer:
+    ident = await _acting_identity(request)
+    if not ident:
         raise HTTPException(status_code=401, detail="Authentication required")
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/activity/feed",
-            params={"viewer": viewer, "window": window},
+            params={"viewer": ident["user"], "window": window},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=15.0),
         )
@@ -7870,12 +8068,11 @@ async def proxy_activity_feed(request: Request, window: str = "week"):
 
 @app.get("/api/geo/steps/goal")
 async def proxy_get_step_goal(request: Request, user_id: str | None = None):
-    if not user_id:
-        user_id = await _user_id_from_request(request) or ""
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
     async with shared_http_client() as client:
         resp = await client.get(
             f"{GEO_SVC}/steps/goal",
-            params={"user_id": user_id},
+            params={"user_id": target, "viewer": viewer, "is_admin": is_admin},
             headers={"X-Internal-Secret": INTERNAL_SECRET},
             timeout=aiohttp.ClientTimeout(total=5.0),
         )
@@ -7886,11 +8083,21 @@ async def proxy_get_step_goal(request: Request, user_id: str | None = None):
 
 @app.put("/api/geo/steps/goal")
 async def proxy_set_step_goal(request: Request):
-    body = await request.json()
-    if not body.get("user_id"):
-        body["user_id"] = await _user_id_from_request(request) or ""
-    if not body.get("user_id"):
+    """Set the daily step goal for the caller (admins may set anyone's).
+
+    geo's PUT /steps/goal never verified the internal secret, so this was an
+    unauthenticated *write* hole.
+    """
+    ident = await _acting_identity(request)
+    if not ident:
         raise HTTPException(status_code=401, detail="Authentication required")
+    body = await request.json()
+    target = str(body.get("user_id") or "").strip().lower()
+    if target and target != ident["user"].lower() and not ident.get("is_admin"):
+        raise HTTPException(
+            status_code=403, detail="Cannot change another user's step goal"
+        )
+    body["user_id"] = target or ident["user"]
     async with shared_http_client() as client:
         resp = await client.put(
             f"{GEO_SVC}/steps/goal",
@@ -7907,10 +8114,8 @@ async def proxy_set_step_goal(request: Request):
 @app.get("/api/geo/trends/activity")
 async def get_geo_activity_trends(request: Request, user_id: str | None = None, days: int = 7, refresh: bool = False):
     if not user_id:
-        user_id = await _user_id_from_request(request) or "all"
-    params = {"days": days}
-    if user_id and user_id != "all":
-        params["user_id"] = user_id
+        target, viewer, is_admin = await _geo_read_target(request, user_id)
+    params = {"days": days, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     if refresh:
         params["refresh"] = "true"
     async with shared_http_client() as client:
@@ -7930,11 +8135,8 @@ async def post_geo_activity_trends_analyze(
     request: Request, user_id: str | None = None, days: int = 7, refresh: bool = False
 ):
     """Explicitly generate the activity narrative (never triggered by a page load)."""
-    if not user_id:
-        user_id = await _user_id_from_request(request) or "all"
-    params = {"days": days}
-    if user_id and user_id != "all":
-        params["user_id"] = user_id
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    params = {"days": days, "user_id": target, "viewer": viewer, "is_admin": is_admin}
     if refresh:
         params["refresh"] = "true"
     async with shared_http_client() as client:

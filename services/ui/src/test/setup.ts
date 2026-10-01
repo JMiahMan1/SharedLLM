@@ -311,6 +311,12 @@ export const server = setupServer(
     status: 'SUCCESS',
     ...userActivitySharing,
   })),
+  // Narrow, non-admin-reachable recipient list. The caller (`default`) is
+  // excluded server-side, so only the other household accounts appear.
+  http.get('/api/users/sharing-recipients', () => HttpResponse.json([
+    { username: 'jeremiah', display_name: 'Jeremiah' },
+    { username: 'michele', display_name: 'Michele' },
+  ])),
   http.put('/api/users/me/activity-sharing', async ({ request }) => {
     const body = await request.json() as Partial<typeof userActivitySharing>;
     if (body.enabled !== undefined) userActivitySharing.enabled = body.enabled;

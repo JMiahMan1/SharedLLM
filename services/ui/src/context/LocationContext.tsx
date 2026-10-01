@@ -6,8 +6,19 @@ import { storageGet, storageSet } from '../lib/storage';
 import { getServerOrigin } from '../lib/serverUrl';
 import StepCounter from '../plugins/stepCounter';
 import TokenBridge from '../plugins/tokenBridge';
+import {
+  classifyLocationFailure,
+  classifyStepFailure,
+  isStepPermissionDenied,
+  isUnsupportedAvailability,
+  nextRetryDelayMs,
+  sensorErrorMessage,
+  shouldRetry,
+} from '../lib/sensorFailure';
+import { hasDayRolledOver, localDayKey } from '../lib/stepDay';
 
 export type SensorId = 'location' | 'steps';
+type NoticeOwner = 'service' | 'read';
 export type SensorPermissionStatus = 'unknown' | 'granted' | 'denied' | 'unavailable' | 'disabled';
 
 interface LocationState {
@@ -25,6 +36,15 @@ interface SensorToggleState {
   enabled: boolean;
   permission: SensorPermissionStatus;
   message: string | null;
+  /**
+   * True while a transient failure is being retried automatically.
+   *
+   * Deliberately separate from `message`: a successful step read or upload
+   * clears the routine message, and must not wipe the notice that tracking is
+   * still recovering. The UI renders this as an explicit "reconnecting" state
+   * so a silent stall is never the only symptom again.
+   */
+  recovering: boolean;
 }
 
 export interface SensorsState {
@@ -59,10 +79,6 @@ function logSensor(scope: string, message: string, err?: unknown) {
   }
 }
 
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  return String(err);
-}
 
 export function LocationProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<LocationState>({
@@ -77,8 +93,8 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   });
 
   const [sensors, setSensors] = useState<SensorsState>({
-    location: { enabled: false, permission: 'unknown', message: null },
-    steps: { enabled: false, permission: 'unknown', message: null },
+    location: { enabled: false, permission: 'unknown', message: null, recovering: false },
+    steps: { enabled: false, permission: 'unknown', message: null, recovering: false },
   });
 
   const lastLocationRef = useRef<{ lat: number; lng: number } | null>(null);
@@ -91,6 +107,23 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const stepsPluginReadyRef = useRef(false);
   const stepUpdateListenerRef = useRef<{ remove: () => Promise<void> } | null>(null);
   const stationarySyncTimerRef = useRef<number | null>(null);
+  // Self-heal bookkeeping: a transient step-counter failure must be retried with
+  // backoff rather than persisted as a permanent disable.
+  const stepRetryAttemptRef = useRef(0);
+  const stepRetryAtRef = useRef(0);
+  // Local calendar day the current step reading belongs to, so a rollover is
+  // detected by comparing dates instead of racing a 60-second midnight window.
+  const stepReadingDayRef = useRef<string | null>(null);
+  // Synchronous mirrors of the `recovering` flags.
+  //
+  // React state is not safe to consult from the message-clearing guards below:
+  // they run inside async continuations, and reading `sensorsRef.current` there
+  // can observe the value from *before* the patch that set it — which silently
+  // wiped the "retrying automatically" notice. These refs are written in the
+  // same tick as the patch, so a guard always sees current truth.
+  const stepRecoveringRef = useRef(false);
+  const locationRecoveringRef = useRef(false);
+  const locationNoticeOwnerRef = useRef<NoticeOwner | null>(null);
   const sensorsRef = useRef(sensors);
   useEffect(() => {
     sensorsRef.current = sensors;
@@ -107,17 +140,80 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const patchSensor = useCallback((id: SensorId, patch: Partial<SensorToggleState>) => {
-    // Keep sensorsRef in sync immediately so startTracking/sync gates see the
-    // new value before React re-renders (async enable paths await storage I/O).
-    setSensors((prev) => {
-      const next = {
-        ...prev,
-        [id]: { ...prev[id], ...patch },
-      };
-      sensorsRef.current = next;
-      return next;
-    });
+    // Compute from the ref, write the ref synchronously, then commit state.
+    //
+    // This used to assign `sensorsRef.current` *inside* the setSensors updater,
+    // which React does not run until render — so the ref was stale for the rest
+    // of the tick. Every async gate that read it (startTracking, the sync
+    // guards, the message-clearing guards) was therefore reading pre-patch
+    // values, which silently clobbered messages set moments earlier.
+    const next = {
+      ...sensorsRef.current,
+      [id]: { ...sensorsRef.current[id], ...patch },
+    };
+    sensorsRef.current = next;
+    setSensors(next);
   }, []);
+
+  /**
+   * Which part of the sensor pipeline last set the visible message.
+   *
+   * The step counter has two independent failure sources — the *service*
+   * (native listener/poll) and the *read* (fetching today's count) — and they
+   * must not clear each other's notice. Without this, a successful service start
+   * wiped "no hardware step counter" set moments earlier by the read path.
+   */
+  const stepNoticeOwnerRef = useRef<NoticeOwner | null>(null);
+
+  /**
+   * Set a sensor's recovery state, keeping the synchronous mirror in step with
+   * React state so the message-clearing guards never read a stale value.
+   *
+   * Clearing only takes effect for the owner that set the notice, so unrelated
+   * successes leave it alone.
+   */
+  const markRecovering = useCallback(
+    (id: SensorId, owner: NoticeOwner, recovering: boolean, message: string | null) => {
+      const recoveringRef = id === 'steps' ? stepRecoveringRef : locationRecoveringRef;
+      const ownerRef = id === 'steps' ? stepNoticeOwnerRef : locationNoticeOwnerRef;
+      recoveringRef.current = recovering;
+      if (recovering) {
+        ownerRef.current = owner;
+        patchSensor(id, { recovering: true, message });
+      } else if (ownerRef.current === owner || ownerRef.current === null) {
+        ownerRef.current = null;
+        patchSensor(id, { recovering: false, message: null });
+      } else {
+        // Another subsystem owns the current notice — leave it in place.
+        patchSensor(id, { recovering: true });
+      }
+    },
+    [patchSensor],
+  );
+
+  /**
+   * Show a non-recovering notice (a definite condition such as "no hardware",
+   * or a failed upload) without touching the recovery flag. Ownership still
+   * applies, so a later success elsewhere cannot wipe it.
+   */
+  const setNotice = useCallback((id: SensorId, owner: NoticeOwner, message: string | null) => {
+    const ownerRef = id === 'steps' ? stepNoticeOwnerRef : locationNoticeOwnerRef;
+    ownerRef.current = message ? owner : null;
+    patchSensor(id, { message });
+  }, [patchSensor]);
+
+  /**
+   * Clear a sensor's message, unless it is currently recovering or owned by a
+   * different subsystem — in either case the notice is still the truth.
+   */
+  const clearMessageUnlessRecovering = useCallback((id: SensorId, owner: NoticeOwner) => {
+    const recoveringRef = id === 'steps' ? stepRecoveringRef : locationRecoveringRef;
+    const ownerRef = id === 'steps' ? stepNoticeOwnerRef : locationNoticeOwnerRef;
+    if (recoveringRef.current) return;
+    if (ownerRef.current && ownerRef.current !== owner) return;
+    ownerRef.current = null;
+    patchSensor(id, { message: null });
+  }, [patchSensor]);
 
   const stopStepService = useCallback(async () => {
     try {
@@ -144,15 +240,13 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       if (!stepsPluginReadyRef.current) {
         const avail = await StepCounter.isAvailable();
         if (!avail.available) {
-          patchSensor('steps', {
-            permission: 'unavailable',
-            message: 'No hardware step counter on this device',
-          });
+          patchSensor('steps', { permission: 'unavailable' });
+          setNotice('steps', 'read', 'No hardware step counter on this device');
           return;
         }
         if (avail.permissionRequired && !avail.permissionGranted) {
           const req = await StepCounter.requestPermission();
-          if (!req.granted) {
+          if (isStepPermissionDenied(req)) {
             // Denial turns the feature OFF (still re-enableable from Settings)
             patchSensor('steps', {
               enabled: false,
@@ -173,27 +267,52 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       const reading = await StepCounter.getTodaySteps();
       if (reading.available && typeof reading.steps === 'number' && reading.steps >= 0) {
         dailyStepsRef.current = reading.steps;
-        patchSensor('steps', { permission: 'granted', message: null });
+        stepReadingDayRef.current = localDayKey();
+        patchSensor('steps', { permission: 'granted' });
+        clearMessageUnlessRecovering('steps', 'read');
       }
     } catch (err) {
-      const msg = errorMessage(err);
-      if (msg.includes('permission')) {
-        patchSensor('steps', {
-          enabled: false,
-          permission: 'denied',
-          message: 'Physical activity permission denied — steps turned off',
-        });
-        await storageSet(KEY_STEPS_ENABLED, 'false');
-        await stopStepService();
-        toast.error('Step tracking disabled — permission denied');
-      } else {
-        patchSensor('steps', { message: msg });
-      }
-      logSensor('steps', 'refresh failed', err);
+      // A throw here is never a permission denial (see lib/sensorFailure) — the
+      // plugin only signals denial through requestPermission()'s return value.
+      // The old code scanned the message for "permission" and permanently
+      // disabled step tracking, which is how both phones silently went stale.
+      markRecovering(
+        'steps',
+        'read',
+        true,
+        `${sensorErrorMessage(err, 'Step counter unavailable')} — retrying automatically`,
+      );
+      logSensor('steps', 'refresh failed (transient, will retry)', err);
     }
   }, [patchSensor, stopStepService]);
 
   // Sync steps independently of location updates (treadmill/stationary use)
+  /**
+   * The real username to attribute sensor readings to, or `null` if there isn't
+   * one yet.
+   *
+   * This deliberately has no fallback literal. Three copies of this logic used
+   * to end in `|| 'me'`, which wrote readings under the literal key `me` —
+   * `geo:steps_meta:me` sat unreadable in production for a week. A reading we
+   * cannot attribute is worse than a reading we skip: skipping is visible and
+   * recoverable, a bogus key is invisible and permanent.
+   */
+  const resolveSyncUsername = useCallback(async (): Promise<string | null> => {
+    const rawUser = await storageGet('jarvis_user');
+    if (rawUser) {
+      try {
+        const parsed = JSON.parse(rawUser);
+        const name = parsed?.username || parsed?.user_id || parsed?.id;
+        if (typeof name === 'string' && name.trim()) return name.trim();
+      } catch {
+        // Stored value was a bare username rather than JSON.
+        if (rawUser.trim()) return rawUser.trim();
+      }
+    }
+    const stored = await storageGet('username');
+    return typeof stored === 'string' && stored.trim() ? stored.trim() : null;
+  }, []);
+
   /**
    * Reconcile missed days from the on-device ledger.
    *
@@ -214,15 +333,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       const history = await StepCounter.getDaysSince({ since, max: 60 });
       if (!history?.days?.length) return;
 
-      const rawUser = await storageGet('jarvis_user');
-      let user = 'me';
-      if (rawUser) {
-        try {
-          const parsed = JSON.parse(rawUser);
-          user = parsed.username || parsed.user_id || parsed.id || 'me';
-        } catch {
-          user = rawUser;
-        }
+      const user = await resolveSyncUsername();
+      if (!user) {
+        logSensor('steps', 'backfill skipped: no username in storage (not writing a placeholder)');
+        return;
       }
 
       let newest = since ?? '';
@@ -245,7 +359,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       logSensor('steps', 'ledger backfill failed', err);
     }
-  }, []);
+  }, [ resolveSyncUsername ]);
 
   const syncDailySteps = useCallback(async () => {
     if (!sensorsRef.current.steps.enabled) return;
@@ -259,17 +373,11 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       }
       if (dailyStepsRef.current === null || dailyStepsRef.current === lastSyncedStepsRef.current) return;
 
-      let user: string;
-      const rawUser = await storageGet('jarvis_user');
-      if (rawUser) {
-        try {
-          const parsed = JSON.parse(rawUser);
-          user = parsed.username || parsed.user_id || parsed.id || 'me';
-        } catch {
-          user = rawUser;
-        }
-      } else {
-        user = (await storageGet('username')) || 'me';
+      const user = await resolveSyncUsername();
+      if (!user) {
+        logSensor('steps', 'sync skipped: no username in storage (not writing a placeholder)');
+        setNotice('steps', 'read', 'Not signed in — steps are not being uploaded yet');
+        return;
       }
 
       const resp = await fetch(`${serverUrl}/api/geo/steps`, {
@@ -280,16 +388,16 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       if (!resp.ok) {
         const body = await resp.text().catch(() => '');
         logSensor('steps', `POST /api/geo/steps failed HTTP ${resp.status}`, body);
-        patchSensor('steps', { message: `Step sync failed (HTTP ${resp.status})` });
+        setNotice('steps', 'read', `Step sync failed (HTTP ${resp.status})`);
         return;
       }
       lastSyncedStepsRef.current = dailyStepsRef.current;
-      patchSensor('steps', { message: null });
+      clearMessageUnlessRecovering('steps', 'read');
     } catch (err) {
       logSensor('steps', 'sync failed', err);
-      patchSensor('steps', { message: errorMessage(err) });
+      markRecovering('steps', 'read', true, sensorErrorMessage(err, 'Step sync failed'));
     }
-  }, [patchSensor]);
+  }, [ patchSensor, resolveSyncUsername ]);
 
   /**
    * Single 30 s step-sync cadence.
@@ -299,12 +407,73 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
    * gate silently did nothing. One unconditional tick keeps server step counts
    * fresh during walks too, and a pedometer read is cheap.
    */
+  /**
+   * Start the native step listener. **Never switches the sensor off.**
+   *
+   * The step plugin reports permission only through `requestPermission()`'s
+   * return value — it puts no code on a thrown error — so anything thrown here
+   * is transient by construction. The previous implementation disabled steps and
+   * persisted `KEY_STEPS_ENABLED='false'` on *any* failure, which meant a single
+   * bridge hiccup silently ended tracking until the user went digging in
+   * Settings. Failures now schedule a backoff retry instead.
+   *
+   * Idempotent: returns immediately once the listener is attached.
+   */
+  const startStepService = useCallback(async (): Promise<boolean> => {
+    if (stepUpdateListenerRef.current) {
+      stepRetryAttemptRef.current = 0;
+      stepRetryAtRef.current = 0;
+      return true;
+    }
+    // Respect the backoff window so a persistent fault is not hammered.
+    if (Date.now() < stepRetryAtRef.current) return false;
+    try {
+      await StepCounter.startPolling();
+      stepUpdateListenerRef.current = await StepCounter.addListener('stepUpdate', (reading) => {
+        if (reading.available && typeof reading.steps === 'number') {
+          const changed = dailyStepsRef.current !== reading.steps;
+          dailyStepsRef.current = reading.steps;
+          // Push new step counts immediately — don't wait for a GPS fix
+          if (changed) void syncDailySteps();
+        }
+      });
+      stepRetryAttemptRef.current = 0;
+      stepRetryAtRef.current = 0;
+      markRecovering('steps', 'service', false, null);
+      return true;
+    } catch (err) {
+      const kind = classifyStepFailure(err);
+      if (shouldRetry(kind)) {
+        stepRetryAttemptRef.current += 1;
+        const wait = nextRetryDelayMs(stepRetryAttemptRef.current - 1);
+        stepRetryAtRef.current = Date.now() + wait;
+        logSensor('steps', `step service unavailable, retrying in ${wait}ms`, err);
+        patchSensor('steps', {
+          permission: Capacitor.isNativePlatform() ? 'unknown' : 'unavailable',
+        });
+        markRecovering(
+          'steps',
+          'service',
+          true,
+          `${sensorErrorMessage(err, 'Step counter unavailable')} — retrying automatically`,
+        );
+      }
+      return false;
+    }
+  }, [patchSensor, syncDailySteps]);
+
   const ensureStepSyncTimer = useCallback(() => {
     if (stationarySyncTimerRef.current !== null) return;
     stationarySyncTimerRef.current = window.setInterval(() => {
-      void refreshDailySteps().then(() => syncDailySteps());
+      // This tick is the self-heal loop: it re-attaches the native step
+      // listener (idempotent, backoff-aware) and re-reads the counter, so a
+      // transient bridge failure recovers on its own instead of leaving the
+      // sensor silently off.
+      void startStepService()
+        .then(() => refreshDailySteps())
+        .then(() => syncDailySteps());
     }, DAILY_STEPS_SYNC_INTERVAL_MS);
-  }, [refreshDailySteps, syncDailySteps]);
+  }, [refreshDailySteps, syncDailySteps, startStepService]);
 
   const syncToGateway = useCallback(async (lat: number, lng: number, accuracy: number | null, speed: number | null) => {
     if (!sensorsRef.current.location.enabled) return;
@@ -317,17 +486,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      let user: string;
-      const rawUser = await storageGet('jarvis_user');
-      if (rawUser) {
-        try {
-          const parsed = JSON.parse(rawUser);
-          user = parsed.username || parsed.user_id || parsed.id || 'me';
-        } catch {
-          user = rawUser;
-        }
-      } else {
-        user = (await storageGet('username')) || 'me';
+      const user = await resolveSyncUsername();
+      if (!user) {
+        logSensor('location', 'breadcrumb skipped: no username in storage (not writing a placeholder)');
+        return;
       }
 
       let battery: number | undefined;
@@ -383,9 +545,9 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       patchSensor('location', { permission: 'granted', message: null });
     } catch (err) {
       logSensor('location', 'sync failed', err);
-      patchSensor('location', { message: errorMessage(err) });
+      markRecovering('location', 'service', true, sensorErrorMessage(err, 'Location unavailable'));
     }
-  }, [patchSensor]);
+  }, [ patchSensor, resolveSyncUsername ]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleLocationUpdate = useCallback(async (position: any) => {
@@ -452,27 +614,7 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       // Kick off hardware step counting in parallel with location tracking
       if (sensorsRef.current.steps.enabled) {
         void refreshDailySteps();
-        try {
-          await StepCounter.startPolling();
-          if (!stepUpdateListenerRef.current) {
-            stepUpdateListenerRef.current = await StepCounter.addListener('stepUpdate', (reading) => {
-              if (reading.available && typeof reading.steps === 'number') {
-                const changed = dailyStepsRef.current !== reading.steps;
-                dailyStepsRef.current = reading.steps;
-                // Push new step counts immediately — don't wait for a GPS fix
-                if (changed) void syncDailySteps();
-              }
-            });
-          }
-        } catch (err) {
-          logSensor('steps', 'startPolling failed', err);
-          patchSensor('steps', {
-            enabled: false,
-            permission: 'denied',
-            message: errorMessage(err),
-          });
-          await storageSet(KEY_STEPS_ENABLED, 'false');
-        }
+        await startStepService();
       }
 
       if (!Capacitor.isNativePlatform()) {
@@ -577,15 +719,21 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         // won, which accidentally disabled the intended stationary gate.
         ensureStepSyncTimer();
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to start location tracking';
-        logSensor('location', 'startTracking failed', err);
-        setState((s) => ({ ...s, error: msg, isTracking: false }));
-        if (msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('denied')) {
+        const msg = sensorErrorMessage(err, 'Failed to start location tracking');
+        const kind = classifyLocationFailure(err);
+        logSensor('location', `startTracking failed (${kind})`, err);
+        if (kind === 'denied') {
+          setState((s) => ({ ...s, error: msg, isTracking: false }));
           patchSensor('location', { enabled: false, permission: 'denied', message: msg });
           await storageSet(KEY_LOCATION_ENABLED, 'false');
           toast.error('Location tracking disabled — permission denied');
         } else {
-          patchSensor('location', { message: msg });
+          // Transient: leave the preference ON and let the retry loop recover.
+          // The old code matched the substrings "permission"/"denied" in the
+          // message, so any error mentioning permissions killed tracking for
+          // good. Only a coded PERMISSION_DENIED is allowed to disable.
+          setState((s) => ({ ...s, error: msg }));
+          markRecovering('location', 'service', true, `${msg} — retrying automatically`);
         }
       }
     } finally {
@@ -616,19 +764,16 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       await storageSet(KEY_STEPS_ENABLED, 'true');
       try {
         const avail = await StepCounter.isAvailable();
-        if (!avail.available) {
-          patchSensor('steps', {
-            enabled: false,
-            permission: 'unavailable',
-            message: 'No hardware step counter on this device',
-          });
+        if (isUnsupportedAvailability(avail)) {
+          patchSensor('steps', { enabled: false, permission: 'unavailable' });
+          setNotice('steps', 'read', 'No hardware step counter on this device');
           await storageSet(KEY_STEPS_ENABLED, 'false');
           toast.error('Step counter unavailable on this device');
           return false;
         }
         if (avail.permissionRequired && !avail.permissionGranted) {
           const req = await StepCounter.requestPermission();
-          if (!req.granted) {
+          if (isStepPermissionDenied(req)) {
             patchSensor('steps', {
               enabled: false,
               permission: 'denied',
@@ -648,32 +793,25 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
             return false;
           }
         }
-        patchSensor('steps', { enabled: true, permission: 'granted', message: null });
+        patchSensor('steps', { enabled: true, permission: 'granted', message: null, recovering: false });
         stepsPluginReadyRef.current = false;
         void refreshDailySteps().then(() => syncDailySteps());
         void backfillStepHistory();
-        try {
-          await StepCounter.startPolling();
-          if (!stepUpdateListenerRef.current) {
-            stepUpdateListenerRef.current = await StepCounter.addListener('stepUpdate', (reading) => {
-              if (reading.available && typeof reading.steps === 'number') {
-                const changed = dailyStepsRef.current !== reading.steps;
-                dailyStepsRef.current = reading.steps;
-                if (changed) void syncDailySteps();
-              }
-            });
-          }
-        } catch (err) {
-          logSensor('steps', 'startPolling failed on enable', err);
-          patchSensor('steps', { message: errorMessage(err) });
-        }
+        await startStepService();
         return true;
       } catch (err) {
-        logSensor('steps', 'enable failed', err);
-        patchSensor('steps', { enabled: false, message: errorMessage(err) });
-        await storageSet(KEY_STEPS_ENABLED, 'false');
-        toast.error(`Could not enable steps: ${errorMessage(err)}`);
-        return false;
+        // A failure while *enabling* is usually transient (bridge not ready).
+        // Keep the user's intent on and let the retry loop recover, rather than
+        // persisting an off-state they have to undo in Settings.
+        patchSensor('steps', {
+          enabled: true,
+          message: `${sensorErrorMessage(err, 'Step counter unavailable')} — retrying automatically`,
+        });
+        stepRetryAttemptRef.current = 0;
+        stepRetryAtRef.current = 0;
+        void startStepService();
+        logSensor('steps', 'enable attempt failed (will retry)', err);
+        return true;
       }
     }
 
@@ -688,12 +826,14 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
   const disableSensor = useCallback(async (id: SensorId): Promise<void> => {
     if (id === 'steps') {
       patchSensor('steps', { enabled: false, message: null });
+      stepRecoveringRef.current = false;
       await storageSet(KEY_STEPS_ENABLED, 'false');
       await stopStepService();
       logSensor('steps', 'sensor disabled by user');
       return;
     }
     patchSensor('location', { enabled: false, message: null });
+    locationRecoveringRef.current = false;
     await storageSet(KEY_LOCATION_ENABLED, 'false');
     await storageSet('jarvis_location_tracking_enabled', 'false');
     stopTracking();
@@ -739,11 +879,13 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
               enabled: locationOn,
               permission: locationOn ? 'unknown' : 'disabled',
               message: null,
+              recovering: false,
             },
             steps: {
               enabled: stepsOn,
               permission: stepsOn ? 'unknown' : 'disabled',
               message: null,
+              recovering: false,
             },
           };
           sensorsRef.current = next;
@@ -756,23 +898,12 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
         if (stepsOn) {
           void refreshDailySteps().then(() => syncDailySteps());
           void backfillStepHistory();
-          try {
-            await StepCounter.startPolling();
-            if (!stepUpdateListenerRef.current) {
-              stepUpdateListenerRef.current = await StepCounter.addListener('stepUpdate', (reading) => {
-                if (reading.available && typeof reading.steps === 'number') {
-                  const changed = dailyStepsRef.current !== reading.steps;
-                  dailyStepsRef.current = reading.steps;
-                  if (changed) void syncDailySteps();
-                }
-              });
-            }
-          } catch (err) {
-            logSensor('steps', 'polling start failed on init', err);
-            // Web / no sensor — leave feature state as-is; permission path reports unavailable
-            if (!Capacitor.isNativePlatform()) {
-              patchSensor('steps', { permission: 'unavailable', message: 'Step counter requires the native app' });
-            }
+          await startStepService();
+          if (!Capacitor.isNativePlatform()) {
+            // Web has no hardware pedometer; report unavailable without
+            // disabling the preference so a native build recovers on its own.
+            patchSensor('steps', { permission: 'unavailable' });
+            setNotice('steps', 'read', 'Step counter requires the native app');
           }
           ensureStepSyncTimer();
         }
@@ -786,17 +917,32 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     };
   }, [startTracking, refreshDailySteps, syncDailySteps, patchSensor]);
 
-  // Midnight rollover: re-read the sensor so the new day's bucket starts even
-  // if no step event has fired yet after 00:00 local time.
+  // Midnight rollover: re-read the sensor so the new day's bucket starts even if
+// no step event has fired yet.
+  //
+  // This used to poll for `getHours() === 0 && getMinutes() === 0` on a 30 s
+  // interval — a 60-second window. Backgrounded or killed across midnight and
+  // the reset never ran. It now tracks which local day the current reading
+  // belongs to and reacts to an actual date change, so the reset happens on the
+  // next tick regardless of when the app was open.
   useEffect(() => {
-    const checkMidnight = () => {
-      const d = new Date();
-      if (d.getHours() === 0 && d.getMinutes() === 0) {
-        void refreshDailySteps().then(() => syncDailySteps());
-      }
+    const checkDayChange = () => {
+      if (!sensorsRef.current.steps.enabled) return;
+      if (!hasDayRolledOver(stepReadingDayRef.current)) return;
+      logSensor('steps', 'local day changed, resetting daily bucket');
+      void refreshDailySteps().then(() => syncDailySteps());
     };
-    const midnightTimer = window.setInterval(checkMidnight, 30000);
-    return () => window.clearInterval(midnightTimer);
+    // 30 s is frequent enough to feel immediate and rare enough to be free.
+    const timer = window.setInterval(checkDayChange, 30000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') checkDayChange();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    checkDayChange();
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [refreshDailySteps, syncDailySteps]);
 
   useEffect(() => {

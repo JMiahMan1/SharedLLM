@@ -16,6 +16,7 @@ import type {
   DiscoveredUser,
   DeviceAssignment,
   EntityProtection,
+  ShareRecipient,
   AiCapability,
   GlobalSetting,
   GatewayConfig,
@@ -121,6 +122,7 @@ export type {
   Workspace,
   DeviceAssignment,
   EntityProtection,
+  ShareRecipient,
   AiCapability,
   DiscoveredUser,
   RagStats,
@@ -478,6 +480,18 @@ export const api = {
   }> {
     const resp = await apiClient.get('/api/users/me/activity-sharing');
     return resp.data;
+  },
+
+  /**
+   * Accounts an activity-sharing grant may name.
+   *
+   * Deliberately NOT `getUsers()`: that route is admin-only, so using it here
+   * left every non-admin with an empty picker and "Everyone" as their only
+   * choice. This returns username + display name and nothing else.
+   */
+  async getSharingRecipients(): Promise<ShareRecipient[]> {
+    const resp = await apiClient.get('/api/users/sharing-recipients');
+    return resp.data ?? [];
   },
 
   async updateActivitySharing(body: {
@@ -870,6 +884,22 @@ export const api = {
   async stopWorkout(payload: { user_id?: string; notes?: string; steps?: number; distance_miles?: number }): Promise<{ status: string; workout: Workout }> {
     const resp = await apiClient.post('/api/geo/workouts/stop', payload);
     return resp.data;
+  },
+
+  /**
+   * The caller's in-progress workout, or null when none is running.
+   *
+   * Needed because an active session is not in the workouts list: geo only
+   * indexes it into history when it stops. The page used to look for a
+   * `status === 'active'` entry that the server never emits, so a running
+   * workout could never be recovered after a reload and the Stop button went
+   * stale.
+   */
+  async getActiveWorkout(userId?: string): Promise<Workout | null> {
+    const resp = await apiClient.get('/api/geo/workouts/active', {
+      params: userId ? { user_id: userId } : undefined,
+    });
+    return (resp.data?.workout ?? null) as Workout | null;
   },
 
   async getWorkouts(userId?: string, limit = 20): Promise<WorkoutsResponse> {
