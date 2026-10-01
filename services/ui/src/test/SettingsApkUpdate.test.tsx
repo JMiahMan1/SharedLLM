@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   checkApkUpdate: vi.fn(),
   checkForAppUpdates: vi.fn(),
   downloadAndInstallApk: vi.fn(),
+  getApkInstallPermission: vi.fn(),
+  openApkInstallSettings: vi.fn(),
   getRunningVersion: vi.fn(),
 }));
 
@@ -15,6 +17,8 @@ vi.mock('../lib/appUpdater', () => ({
   checkApkUpdate: mocks.checkApkUpdate,
   checkForAppUpdates: mocks.checkForAppUpdates,
   downloadAndInstallApk: mocks.downloadAndInstallApk,
+  getApkInstallPermission: mocks.getApkInstallPermission,
+  openApkInstallSettings: mocks.openApkInstallSettings,
   getRunningVersion: mocks.getRunningVersion,
 }));
 
@@ -38,6 +42,8 @@ describe('Settings APK update notice', () => {
     vi.clearAllMocks();
     mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
     mocks.checkApkUpdate.mockResolvedValue(status());
+    mocks.getApkInstallPermission.mockResolvedValue({ allowed: true, known: true });
+    mocks.openApkInstallSettings.mockResolvedValue(true);
     mocks.checkForAppUpdates.mockResolvedValue({
       hasUpdate: false,
       isDownloading: false,
@@ -127,5 +133,65 @@ describe('Settings APK update notice', () => {
     mocks.checkApkUpdate.mockClear();
     await userEvent.click(screen.getByRole('button', { name: /check now/i }));
     await waitFor(() => expect(mocks.checkApkUpdate).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe('Settings APK install permission', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getRunningVersion.mockResolvedValue({ version: '1.5.0', gitSha: 'abc1234' });
+    mocks.checkApkUpdate.mockResolvedValue(pending);
+    mocks.openApkInstallSettings.mockResolvedValue(true);
+    mocks.checkForAppUpdates.mockResolvedValue({
+      hasUpdate: false,
+      isDownloading: false,
+      currentGitSha: 'abc1234',
+      remoteGitSha: 'abc1234',
+      remoteVersion: '1.5.0',
+      apkUpdateAvailable: false,
+      apkUrl: null,
+    });
+  });
+
+  // The permission can only be granted in system Settings, so offering a
+  // download first just bounced the user out mid-flow and back again.
+  it('offers the one-time grant instead of downloading when not yet permitted', async () => {
+    mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: true });
+    renderWithProviders(<Settings />);
+
+    expect(await screen.findByRole('button', { name: /allow updates/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /install update/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/one-time setup/i)).toBeInTheDocument();
+  });
+
+  it('installs directly when the permission is already granted', async () => {
+    mocks.getApkInstallPermission.mockResolvedValue({ allowed: true, known: true });
+    renderWithProviders(<Settings />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /install update/i }));
+    await waitFor(() =>
+      expect(mocks.downloadAndInstallApk).toHaveBeenCalledWith(
+        'https://jarvis.example.com/api/app-updates/app-debug.apk',
+      ),
+    );
+  });
+
+  it('opens install settings from the grant button', async () => {
+    mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: true });
+    renderWithProviders(<Settings />);
+    await userEvent.click(await screen.findByRole('button', { name: /allow updates/i }));
+    await waitFor(() => expect(mocks.openApkInstallSettings).toHaveBeenCalled());
+    expect(mocks.downloadAndInstallApk).not.toHaveBeenCalled();
+  });
+
+  // No plugin means no in-app install; offering a button that cannot work is
+  // the same trap as the old silent browser fallback.
+  it('offers only the download link when the install path is unavailable', async () => {
+    mocks.getApkInstallPermission.mockResolvedValue({ allowed: false, known: false });
+    renderWithProviders(<Settings />);
+
+    expect(await screen.findByRole('link', { name: /download link/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /install update/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /allow updates/i })).not.toBeInTheDocument();
   });
 });

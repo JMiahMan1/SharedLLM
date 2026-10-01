@@ -266,21 +266,20 @@ if ssh $SSH_OPTS "$HOST" << EOF
         fi
 
         BUILD_TIME=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
-        # Keep in sync with services/ui/android/app/build.gradle versionCode —
-        # the app only offers an APK install when this exceeds its own build.
-        APK_CODE=\$(grep -oE 'versionCode [0-9]+' services/ui/android/app/build.gradle | awk '{print \$2}' | head -1)
-        if [ -z "\$APK_CODE" ]; then APK_CODE=5; fi
+        # Deliberately NO apk_version_code here. The gateway reads the version
+        # code out of the APK it actually serves, so writing a number parsed
+        # from build.gradle would just reintroduce the drift that made a
+        # correctly-installed app look permanently out of date.
         cat << JSON_EOF > data/app_updates/version.json
 {
   "version": "\$BUNDLE_VERSION",
   "git_sha": "\$BUNDLE_SHA",
   "build_timestamp": "\$BUILD_TIME",
-  "release_notes": "Jarvis OS Over-The-Air Update",
-  "apk_version_code": \$APK_CODE
+  "release_notes": "Jarvis OS Over-The-Air Update"
 }
 JSON_EOF
         rm -f data/app_updates/.bundle_version.json
-        echo "[OK] Published OTA bundle \$BUNDLE_SHA (version \$BUNDLE_VERSION, apk_version_code \$APK_CODE)."
+        echo "[OK] Published OTA bundle \$BUNDLE_SHA (version \$BUNDLE_VERSION)."
     fi
 EOF
 then

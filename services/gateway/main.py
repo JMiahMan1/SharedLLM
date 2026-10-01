@@ -32,6 +32,8 @@ from services.gateway.agent_loop import (
     get_dynamic_llm_settings,
     get_vram_safe_params,
 )
+from services.gateway.apk_manifest import clear_cache as clear_apk_version_cache
+from services.gateway.apk_manifest import read_apk_version
 from services.gateway.background_worker import worker as raven_worker
 from services.gateway.config import (
     ABS_TIMEOUT,
@@ -8425,6 +8427,29 @@ async def get_app_update_version(request: Request):
     apk_file = APP_UPDATES_DIR / "app-debug.apk"
     apk_available = apk_file.exists()
     apk_size = apk_file.stat().st_size if apk_available else 0
+    apk_version_name = None
+
+    # The APK we actually serve is authoritative for its own version code, for
+    # the same reason the bundle is authoritative for git_sha above. Reading
+    # this from build.gradle or from published metadata let the advertised
+    # number drift ahead of the real artifact, so a user who installed the
+    # newest APK on offer was told to update forever.
+    apk_version_code = None
+    if apk_available:
+        apk_info = read_apk_version(apk_file)
+        if apk_info and apk_info.get("version_code") is not None:
+            apk_version_code = apk_info["version_code"]
+            apk_version_name = apk_info.get("version_name")
+        else:
+            # We cannot say what we are serving, and a wrong version code is
+            # exactly what makes the notice un-clearable. Withhold it instead
+            # of guessing -- an APK the user cannot install is better than one
+            # we misdescribe.
+            log.warning(
+                "[AppUpdates] APK present but its manifest version is unreadable; not offering it."
+            )
+            apk_available = False
+            apk_size = 0
 
     return {
         "version": bundle_meta.get("version") or version_data.get("version", "1.2.0"),
@@ -8436,7 +8461,10 @@ async def get_app_update_version(request: Request):
         "apk_available": apk_available,
         "apk_url": f"{base_url}/api/app-updates/app-debug.apk" if apk_available else None,
         "apk_size_bytes": apk_size,
-        "apk_version_code": version_data.get("apk_version_code", 5),
+        # None when no APK is published -- never a placeholder. The client
+        # treats a missing code as "cannot tell", not "up to date".
+        "apk_version_code": apk_version_code,
+        "apk_version_name": apk_version_name,
     }
 
 
@@ -8499,7 +8527,6 @@ async def publish_app_update(request: Request):
     version = form.get("version", "1.2.0")
     git_sha = form.get("git_sha", "unknown")
     notes = form.get("release_notes", "Jarvis OS update")
-    apk_code = form.get("apk_version_code", "1")
 
     bundle_file = form.get("bundle")
     if isinstance(bundle_file, UploadFile) and bundle_file.filename:
@@ -8509,19 +8536,50 @@ async def publish_app_update(request: Request):
         log.info(f"[AppUpdates] Published new bundle.zip ({len(content)} bytes)")
 
     apk_file = form.get("apk")
+    apk_published = False
     if isinstance(apk_file, UploadFile) and apk_file.filename:
         out_a = APP_UPDATES_DIR / "app-debug.apk"
         content = await apk_file.read()
         out_a.write_bytes(content)
         log.info(f"[AppUpdates] Published new app-debug.apk ({len(content)} bytes)")
+        apk_published = True
+
+    # Take the version code from the APK we just wrote, so the advertised
+    # number always describes the artifact clients can actually download. A
+    # caller-supplied code is only ever a cross-check.
+    apk_code = None
+    if apk_published:
+        clear_apk_version_cache()
+        info = read_apk_version(APP_UPDATES_DIR / "app-debug.apk")
+        if info and info.get("version_code") is not None:
+            apk_code = info["version_code"]
+            claimed = form.get("apk_version_code")
+            if claimed is not None and str(claimed).isdigit() and int(claimed) != apk_code:
+                log.warning(
+                    f"[AppUpdates] Publish claimed apk_version_code={claimed} but the "
+                    f"uploaded APK is versionCode {apk_code}. Advertising the APK's own code."
+                )
+        else:
+            # Refuse to advertise a build we cannot read -- a wrong code here is
+            # what made a correctly-installed app look permanently out of date.
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded APK has an unreadable AndroidManifest versionCode; refusing to publish it.",
+            )
+    else:
+        # Bundle-only publish: keep whatever the currently published APK says.
+        existing = read_apk_version(APP_UPDATES_DIR / "app-debug.apk")
+        if existing and existing.get("version_code") is not None:
+            apk_code = existing["version_code"]
 
     meta = {
         "version": str(version),
         "git_sha": str(git_sha),
         "build_timestamp": datetime.now(timezone.utc).isoformat(),
         "release_notes": str(notes),
-        "apk_version_code": int(apk_code) if str(apk_code).isdigit() else 5,
     }
+    if apk_code is not None:
+        meta["apk_version_code"] = apk_code
     (APP_UPDATES_DIR / "version.json").write_text(json.dumps(meta, indent=2))
     return {"status": "ok", "metadata": meta}
 

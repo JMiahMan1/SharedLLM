@@ -86,18 +86,45 @@ push, build UI + APK from that SHA, deploy both artifacts together.
 
 A web-only fix does **not** require a new APK (users get it via OTA at the same
 `git_sha`). A native-only fix **does** require a new APK; bump `versionCode` so
-`apk_version_code` in published metadata exceeds older installs.
+the published build exceeds older installs.
 
 ## Native APK updates
 
-The web bundle cannot change native code. `apk_version_code` in
-`data/app_updates/version.json` must be kept in sync with `versionCode` in
-`services/ui/android/app/build.gradle`; when the server's value exceeds the
-running build, the app offers the APK for manual install.
+The web bundle cannot change native code. When the published APK is newer than
+the running build, the app offers it for manual install.
+
+**The server never takes the advertised version on trust.** `apk_version_code`
+is read out of `AndroidManifest.xml` inside the APK it is actually serving
+(`services/gateway/apk_manifest.py`, pure stdlib — no `aapt` needed). This is
+deliberate: an earlier version parsed `versionCode` out of
+`services/ui/android/app/build.gradle` on every *bundle* deploy, so the
+advertised number drifted ahead of the published artifact (server said 23, the
+APK on disk was 22) and a user who installed the newest APK on offer was told
+to update forever. One source of truth — the artifact — removes that class of
+bug entirely.
+
+Consequences worth knowing:
+
+- The publish endpoint **rejects** an APK whose `versionCode` it cannot read,
+  rather than advertising a number it cannot honour.
+- An APK present but unreadable is **withheld** (`apk_available: false`); a
+  misdescribed APK is worse than none.
+- A bundle-only deploy never changes the advertised APK version, so deploying
+  web code can never invent a pending native update.
+- The deploy scripts deliberately no longer write `apk_version_code`.
 
 `versionName` is **not** hardcoded in Gradle — it is parsed from
 `services/ui/package.json` so a release cannot ship web `1.4.0` against Android
 `1.3.1`.
+
+### Publishing
+
+`.github/workflows/android-build.yml` publishes the built release APK to
+`POST /api/app-updates/publish` on every push that touches `services/ui/**`
+(never on pull requests). It does not send a version code — the gateway derives
+it. Requires the `APK_PUBLISH_URL` and `INTERNAL_SECRET` repository secrets;
+without them the step skips with a notice and the APK remains available as a
+workflow artifact.
 
 ## Self-signed APK (no Play Store)
 

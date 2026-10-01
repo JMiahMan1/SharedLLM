@@ -114,3 +114,37 @@ jobs:
         name: jarvis-os-release-unsigned-apk
         path: services/ui/android/app/build/outputs/apk/release/app-release.apk
         retention-days: 30
+
+    # Publish the freshly built APK so the in-app "new version available"
+    # notice can clear. The gateway reads the version code out of the
+    # uploaded file, so this never has to state one -- which is what let a
+    # build.gradle-derived number drift ahead of the real artifact and leave
+    # users told to update forever.
+    #
+    # Skipped on pull requests: a fork's APK must never be published.
+    - name: Publish APK to the update server
+      if: github.event_name != 'pull_request'
+      env:
+        PUBLISH_URL: ${{ secrets.APK_PUBLISH_URL }}
+        INTERNAL_SECRET: ${{ secrets.INTERNAL_SECRET }}
+        GIT_SHA: ${{ github.sha }}
+        APK_PATH: services/ui/android/app/build/outputs/apk/release/app-release.apk
+      run: |
+        if [ -z "$PUBLISH_URL" ] || [ -z "$INTERNAL_SECRET" ]; then
+          echo "::notice::APK_PUBLISH_URL / INTERNAL_SECRET not configured; skipping publish."
+          echo "::notice::The APK is still available as the jarvis-os-release-apk artifact."
+          exit 0
+        fi
+        if [ ! -f "$APK_PATH" ]; then
+          echo "::error::Built APK not found at $APK_PATH"
+          exit 1
+        fi
+        VERSION=$(python3 -c "import json;print(json.load(open('services/ui/package.json'))['version'])")
+        curl --fail-with-body --retry 3 --retry-delay 5 --max-time 300 \
+          -H "X-Internal-Secret: $INTERNAL_SECRET" \
+          -F "apk=@$APK_PATH" \
+          -F "version=$VERSION" \
+          -F "git_sha=$GIT_SHA" \
+          -F "release_notes=Android build ${GIT_SHA:0:8}" \
+          "$PUBLISH_URL"
+        echo "[OK] Published APK build ${GIT_SHA:0:8}."

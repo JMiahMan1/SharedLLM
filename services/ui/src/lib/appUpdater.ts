@@ -87,9 +87,19 @@ function evaluateApk(remote: AppVersionInfo, nativeBuildNumber: number | undefin
     // would be a guess, so report the uncertainty instead.
     return { updateAvailable: false, indeterminate: true };
   }
-  // With no running build to compare against (a browser), any published build
-  // is worth surfacing — there is no version the viewer is known to already have.
-  return { updateAvailable: remote.apk_version_code > (nativeBuildNumber ?? 1), indeterminate: false };
+  if (nativeBuildNumber !== undefined) {
+    return { updateAvailable: remote.apk_version_code > nativeBuildNumber, indeterminate: false };
+  }
+  if (nativeBuildNumber === undefined && Capacitor.isNativePlatform()) {
+    // A device whose build we failed to read: claiming either way is a guess,
+    // and guessing "up to date" would hide a real update. Say we cannot tell.
+    return { updateAvailable: false, indeterminate: true };
+  }
+  // A browser is not running an APK at all, so there is no installed build to
+  // compare against and nothing here is "needed" -- but a published build is
+  // still worth surfacing (it is what the phone should be on). The notice
+  // omits any "you are on build N" claim, since nativeBuildNumber is undefined.
+  return { updateAvailable: true, indeterminate: false };
 }
 
 let isInitialized = false;
@@ -388,40 +398,119 @@ export async function checkForAppUpdates(options: { silent?: boolean } = {}): Pr
   }
 }
 
+interface ApkInstallPlugin {
+  canInstall(): Promise<{ allowed: boolean }>;
+  openInstallSettings(): Promise<void>;
+  installApk(opts: { url: string }): Promise<{ message: string }>;
+}
+
+/** The native installer plugin, or null where it is not registered. */
+async function getApkInstallPlugin(): Promise<ApkInstallPlugin | null> {
+  if (!Capacitor.isNativePlatform()) return null;
+  try {
+    const { registerPlugin } = await import('@capacitor/core');
+    return registerPlugin<ApkInstallPlugin>('ApkInstall');
+  } catch (err) {
+    console.warn('[AppUpdater] Could not reach the ApkInstall plugin:', err);
+    return null;
+  }
+}
+
+export interface ApkInstallPermission {
+  /** The OS will let this app install an APK. */
+  allowed: boolean;
+  /**
+   * False when we could not find out (a browser, or a build without the
+   * plugin). Distinct from `allowed: false`, which is a real "not yet granted".
+   */
+  known: boolean;
+}
+
+/**
+ * Whether this device can install an APK yet.
+ *
+ * Android requires a one-time per-app "Install unknown apps" grant, and it can
+ * only be given in system Settings -- there is no way to ask for it inline. So
+ * the grant is surfaced *before* the user commits to installing, turning a
+ * confusing mid-flow jump into Settings into a single deliberate step.
+ */
+export async function getApkInstallPermission(): Promise<ApkInstallPermission> {
+  const ApkInstall = await getApkInstallPlugin();
+  if (!ApkInstall) return { allowed: false, known: false };
+  try {
+    const can = await ApkInstall.canInstall();
+    return { allowed: Boolean(can.allowed), known: true };
+  } catch (err) {
+    console.warn('[AppUpdater] Install-permission probe failed:', err);
+    return { allowed: false, known: false };
+  }
+}
+
+/** Open the OS screen where "Install unknown apps" is granted. */
+export async function openApkInstallSettings(): Promise<boolean> {
+  const ApkInstall = await getApkInstallPlugin();
+  if (!ApkInstall) return false;
+  try {
+    await ApkInstall.openInstallSettings();
+    return true;
+  } catch (err) {
+    console.warn('[AppUpdater] Could not open install settings:', err);
+    return false;
+  }
+}
+
 /**
  * Download and launch Android system package installer for APK updates.
- * Uses the native ApkInstall plugin (self-signed, no Play Store) when available;
- * falls back to opening the URL in the system browser.
+ * Uses the native ApkInstall plugin (self-signed, no Play Store). There is no
+ * browser fallback: see the note in the body for why.
  */
 export async function downloadAndInstallApk(apkUrl: string): Promise<void> {
   if (!apkUrl) return;
-  if (Capacitor.isNativePlatform()) {
-    try {
-      const { registerPlugin } = await import('@capacitor/core');
-      const ApkInstall = registerPlugin<{
-        canInstall(): Promise<{ allowed: boolean }>;
-        openInstallSettings(): Promise<void>;
-        installApk(opts: { url: string }): Promise<{ message: string }>;
-      }>('ApkInstall');
-      const can = await ApkInstall.canInstall();
-      if (!can.allowed) {
-        toast('Allow “Install unknown apps” for Jarvis OS to continue.', {
-          id: 'apk-install',
-          duration: 8000,
-        });
-        await ApkInstall.openInstallSettings();
-        return;
-      }
-      toast.loading('Downloading APK…', { id: 'apk-install' });
-      await ApkInstall.installApk({ url: apkUrl });
-      toast.success('Installer opened — tap Install.', { id: 'apk-install', duration: 5000 });
-      return;
-    } catch (err) {
-      console.warn('[AppUpdater] ApkInstall plugin failed, falling back:', err);
-    }
+
+  // Off-device there is no package installer to hand off to. The old
+  // `window.open(url, '_system')` fallback dumped the user into a browser to
+  // fetch a file, which is several steps worse than saying so plainly -- and
+  // it silently masked a broken in-app installer as "working".
+  if (!Capacitor.isNativePlatform()) {
+    toast('Installing the app update needs the Jarvis OS Android app.', {
+      id: 'apk-install',
+      duration: 6000,
+    });
+    return;
   }
-  toast.loading('Opening APK download...', { duration: 3000, id: 'apk-install' });
-  window.open(apkUrl, '_system');
+
+  const ApkInstall = await getApkInstallPlugin();
+  if (!ApkInstall) {
+    console.warn('[AppUpdater] ApkInstall plugin is not available on this build.');
+    toast('This build cannot install updates in-app. Use the download link instead.', {
+      id: 'apk-install',
+      duration: 8000,
+    });
+    return;
+  }
+
+  try {
+    const can = await ApkInstall.canInstall();
+    if (!can.allowed) {
+      toast('Turn on “Install unknown apps” for Jarvis OS, then tap Install again.', {
+        id: 'apk-install',
+        duration: 9000,
+      });
+      await ApkInstall.openInstallSettings();
+      return;
+    }
+    toast.loading('Downloading update…', { id: 'apk-install', duration: 60000 });
+    await ApkInstall.installApk({ url: apkUrl });
+    toast.success('Installer opened — tap Install.', { id: 'apk-install', duration: 5000 });
+  } catch (err) {
+    // No browser fallback on purpose: a silent hand-off to a browser is what
+    // made this look broken. Say what happened and leave the link visible.
+    console.error('[AppUpdater] In-app APK install failed:', err);
+    toast.error('Could not start the installer. Use the download link instead.', {
+      id: 'apk-install',
+      duration: 8000,
+    });
+  }
 }
 
 /**
