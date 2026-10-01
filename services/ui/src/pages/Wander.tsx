@@ -1,14 +1,25 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../context/AuthContext';
 import { useHaptics } from '../hooks/useHaptics';
 import { api } from '../services/api';
-import type { Trip, TripLocation, TripUpdatePayload, TripLocationsResponse, TripLocationSuggestion, RoutePoint } from '../types/api';
+import type { Trip, TripLocation, TripUpdatePayload, TripLocationsResponse, TripLocationSuggestion, RoutePoint, TripsResponse } from '../types/api';
 import Modal from '../components/ui/Modal';
 import LiveFamilyMap from '../components/geo/LiveFamilyMap';
 import TripLocationsMap from '../components/geo/TripLocationsMap';
 import RoutePreview from '../components/geo/RoutePreview';
 import SensorStatusBanner from '../components/location/SensorStatusBanner';
 import { ACTIVITY_ICONS, ACTIVITY_LABELS, formatDuration, formatTimeRange } from '../lib/workoutMeta';
+import {
+  displayName,
+  filterTrips,
+  formatDistanceMeters,
+  formatTripLocation,
+  isTripOwner,
+  relativeTime,
+  tripStats,
+  type TripFilter,
+} from '../lib/wanderTrips';
 import toast from 'react-hot-toast';
 import {
   Users,
@@ -41,26 +52,6 @@ interface VehicleOption {
   fuel_type: string;
 }
 
-/** Compact "5 min ago" style label for a last-updated timestamp. */
-function relativeTime(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return '';
-  const mins = Math.round((Date.now() - then) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return hours === 1 ? '1 hr ago' : `${hours} hrs ago`;
-  const days = Math.round(hours / 24);
-  return days === 1 ? 'yesterday' : `${days} days ago`;
-}
-
-/** " · 120 m" style distance suffix for nearby-place chips. */
-function formatDistanceMeters(m?: number): string {
-  if (typeof m !== 'number' || !Number.isFinite(m)) return '';
-  if (m >= 1609.34) return ` · ${(m / 1609.34).toFixed(1)} mi`;
-  return ` · ${Math.round(m)} m`;
-}
-
 interface FamilyMemberStatus {
   id: string;
   name: string;
@@ -76,36 +67,15 @@ interface FamilyMemberStatus {
   inZones?: string[];
 }
 
-/**
- * Render a trip endpoint: prefer the resolved place name, fall back to
- * coordinates, then to a generic label. The geo service stores these as
- * `latitude`/`longitude`, older records as `lat`/`lon`.
- */
-const formatTripLocation = (loc: TripLocation | undefined, fallback: string): string => {
-  if (loc?.name) return loc.name;
-  const lat = loc?.latitude ?? loc?.lat;
-  const lon = loc?.longitude ?? loc?.lon;
-  if (typeof lat === 'number' && typeof lon === 'number') {
-    return `${lat.toFixed(4)}, ${lon.toFixed(4)}`;
-  }
-  return loc?.zone || fallback;
-};
-
 const Wander = () => {
   const { user } = useAuth();
   const { trigger } = useHaptics();
+  const queryClient = useQueryClient();
 
   const currentUsername = (user?.username || '').toLowerCase();
 
-  const [trips, setTrips] = useState<Trip[]>([]);
-  const [vehicles, setVehicles] = useState<VehicleOption[]>([]);
-  const [familyMembers, setFamilyMembers] = useState<FamilyMemberStatus[]>([]);
   const [focusMember, setFocusMember] = useState<string | null>(null);
-  /** HA zones ("Places") drawn on the live map. */
-  const [places, setPlaces] = useState<Array<{ id: string; name: string; lat: number; lon: number; radius: number }>>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [filterTab, setFilterTab] = useState<'all' | 'mine'>('all');
+  const [filterTab, setFilterTab] = useState<TripFilter>('all');
 
   // Route previews (fetched lazily per card)
   const [routePoints, setRoutePoints] = useState<Record<string, RoutePoint[]>>({});
@@ -139,129 +109,119 @@ const Wander = () => {
   const [shareSelection, setShareSelection] = useState<string[]>([]);
   const [isSavingShare, setIsSavingShare] = useState(false);
 
-  const fetchTripsAndTelemetry = useCallback(async () => {
-    try {
-      setIsRefreshing(true);
-      const [tripsRes, vehRes, peopleRes, zonesRes] = await Promise.allSettled([
-        api.getTrips(),
-        api.getVehicles(),
-        api.getGeoPeople(),
-        api.getGeoZones(),
-      ]);
+  // One query per source instead of a 15s hand-rolled interval. Trips now come
+  // back scoped to the caller (geo applies per-user opt-in consent), so the
+  // page and the LiveFamilyMap read the same numbers from one cache.
+  const tripsQuery = useQuery({
+    queryKey: ['geo-trips'],
+    queryFn: () => api.getTrips(),
+    retry: false,
+    staleTime: 30_000,
+  });
+  const vehiclesQuery = useQuery({
+    queryKey: ['geo-vehicles'],
+    queryFn: () => api.getVehicles(),
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const peopleQuery = useQuery({
+    queryKey: ['geo-people'],
+    queryFn: () => api.getGeoPeople(),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const zonesQuery = useQuery({
+    queryKey: ['geo-zones'],
+    queryFn: () => api.getGeoZones(),
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
 
-      // HA zones become "Places" on the live map (Life360-style geofences).
-      if (zonesRes.status === 'fulfilled' && zonesRes.value) {
-        const geoJson = zonesRes.value as {
+  const trips = useMemo(() => tripsQuery.data?.trips ?? [], [tripsQuery.data]);
+  const vehicles = useMemo(
+    () => (vehiclesQuery.data?.vehicles ?? []) as VehicleOption[],
+    [vehiclesQuery.data],
+  );
+  const isLoading = tripsQuery.isLoading;
+  // Only a background refetch advertises itself; the old code set the spinner
+  // inside the polling path, so Refresh appeared to spin every 15 seconds.
+  const isRefreshing = tripsQuery.isFetching && !tripsQuery.isLoading;
+
+  /** HA zones become "Places" on the live map (Life360-style geofences). */
+  const places = useMemo(() => {
+    const geoJson = zonesQuery.data as
+      | {
           features?: Array<{
             properties?: Record<string, unknown>;
             geometry?: { coordinates?: [number, number] };
           }>;
+        }
+      | undefined;
+    return (geoJson?.features ?? [])
+      .map((feature) => {
+        const props = feature.properties || {};
+        const coords = feature.geometry?.coordinates;
+        const lat = Number(props.latitude ?? coords?.[1]);
+        const lon = Number(props.longitude ?? coords?.[0]);
+        const radius = Number(props.radius ?? 100);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        return {
+          id: String(props.entity_id || props.friendly_name || `${lat},${lon}`),
+          name: String(props.friendly_name || 'Place'),
+          lat,
+          lon,
+          radius: Number.isFinite(radius) && radius > 0 ? radius : 100,
         };
-        const parsed = (geoJson.features || [])
-          .map((feature) => {
-            const props = feature.properties || {};
-            const coords = feature.geometry?.coordinates;
-            const lat = Number(props.latitude ?? coords?.[1]);
-            const lon = Number(props.longitude ?? coords?.[0]);
-            const radius = Number(props.radius ?? 100);
-            if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-            return {
-              id: String(props.entity_id || props.friendly_name || `${lat},${lon}`),
-              name: String(props.friendly_name || 'Place'),
-              lat,
-              lon,
-              radius: Number.isFinite(radius) && radius > 0 ? radius : 100,
-            };
-          })
-          .filter((z): z is { id: string; name: string; lat: number; lon: number; radius: number } => z !== null);
-        setPlaces(parsed);
-      }
+      })
+      .filter(
+        (z): z is { id: string; name: string; lat: number; lon: number; radius: number } =>
+          z !== null,
+      );
+  }, [zonesQuery.data]);
 
-      if (tripsRes.status === 'fulfilled' && tripsRes.value?.trips) {
-        setTrips(tripsRes.value.trips);
-      }
-
-      if (vehRes.status === 'fulfilled' && vehRes.value?.vehicles) {
-        setVehicles(vehRes.value.vehicles);
-      }
-
-      // Parse Family Members from HA People collection — real entities only.
-      const members: FamilyMemberStatus[] = [];
-      if (peopleRes.status === 'fulfilled' && peopleRes.value) {
-        const geoJson = peopleRes.value as { features?: Array<{ properties?: Record<string, unknown> }> };
-        const features = geoJson.features || [];
-        for (const feat of features) {
-          const props = feat.properties || {};
-          const entityId = String(props.entity_id || '');
-          if (entityId.startsWith('person.')) {
-            const rawName = String(props.friendly_name || entityId.replace('person.', ''));
-            const zone = String(props.state || 'Unknown');
-            const speedRaw = Number(props.speed || 0);
-            const battery = props.battery != null ? Number(props.battery) : null;
-            const accuracy = props.gps_accuracy != null ? Number(props.gps_accuracy) : null;
-            const lastUpdated = props.last_updated != null ? String(props.last_updated) : undefined;
-            const inZones = Array.isArray(props.in_zones) ? (props.in_zones as string[]) : [];
-            members.push({
-              id: entityId,
-              name: rawName,
-              zone: zone.charAt(0).toUpperCase() + zone.slice(1),
-              isMoving: speedRaw > 1.0,
-              speedMph: Math.round(speedRaw * 2.23694), // m/s -> mph
-              battery,
-              accuracy: Number.isFinite(accuracy) ? accuracy : null,
-              lastUpdated,
-              inZones,
-            });
-          }
-        }
-      }
-      setFamilyMembers(members);
-    } catch (err) {
-      console.error('Failed to load trips or family data:', err);
-      toast.error('Failed to load trip telemetry');
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
+  /** Parse Family Members from the HA People collection - real entities only. */
+  const familyMembers = useMemo(() => {
+    const geoJson = peopleQuery.data as
+      | { features?: Array<{ properties?: Record<string, unknown> }> }
+      | undefined;
+    const members: FamilyMemberStatus[] = [];
+    for (const feat of geoJson?.features ?? []) {
+      const props = feat.properties || {};
+      const entityId = String(props.entity_id || '');
+      if (!entityId.startsWith('person.')) continue;
+      const rawName = String(props.friendly_name || entityId.replace('person.', ''));
+      const zone = String(props.state || 'Unknown');
+      const speedRaw = Number(props.speed || 0);
+      const battery = props.battery != null ? Number(props.battery) : null;
+      const accuracy = props.gps_accuracy != null ? Number(props.gps_accuracy) : null;
+      const lastUpdated = props.last_updated != null ? String(props.last_updated) : undefined;
+      const inZones = Array.isArray(props.in_zones) ? (props.in_zones as string[]) : [];
+      members.push({
+        id: entityId,
+        name: rawName,
+        zone: zone.charAt(0).toUpperCase() + zone.slice(1),
+        isMoving: speedRaw > 1.0,
+        speedMph: Math.round(speedRaw * 2.23694), // m/s -> mph
+        battery: Number.isFinite(battery as number) ? battery : null,
+        accuracy: Number.isFinite(accuracy as number) ? accuracy : null,
+        lastUpdated,
+        inZones,
+      });
     }
-  }, []);
+    return members;
+  }, [peopleQuery.data]);
 
-  useEffect(() => {
-    let active = true;
-    const init = async () => {
-      try {
-        await fetchTripsAndTelemetry();
-      } catch (err) {
-        if (active) {
-          console.error('Initial telemetry load failed:', err);
-        }
-      }
-    };
-    void init();
-    return () => {
-      active = false;
-    };
-  }, [fetchTripsAndTelemetry]);
+  const refreshAll = useCallback(() => {
+    trigger('light');
+    void Promise.all([
+      tripsQuery.refetch(),
+      vehiclesQuery.refetch(),
+      peopleQuery.refetch(),
+      zonesQuery.refetch(),
+    ]);
+  }, [tripsQuery, vehiclesQuery, peopleQuery, zonesQuery, trigger]);
 
-  // Live polling: trips should appear as events happen,
-  // not only when the user remembers to hit Refresh.
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== 'visible') return;
-      void fetchTripsAndTelemetry();
-    }, 15000);
-    return () => window.clearInterval(timer);
-  }, [fetchTripsAndTelemetry]);
-
-  // Also refresh the moment the user comes back to the tab
-  useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void fetchTripsAndTelemetry();
-      }
-    };
-    document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
-  }, [fetchTripsAndTelemetry]);
+  const loadError = tripsQuery.isError || peopleQuery.isError || zonesQuery.isError;
 
   // Lazy route loading for trip cards
   const loadRoute = useCallback(async (key: string, loader: () => Promise<RoutePoint[]>) => {
@@ -326,55 +286,18 @@ const Wander = () => {
     }
   }, []);
 
-  // Check if current user is owner of a trip
-  const isTripOwner = useCallback(    (trip: Trip): boolean => {
-      if (!currentUsername) return false;
-      const tripOwner = (trip.user_id || '').split('.').pop()?.toLowerCase() || '';
-      return tripOwner === currentUsername || currentUsername === 'admin';
-    },
-    [currentUsername]
+  // Filtering and stats come from lib/wanderTrips, where they are unit-tested.
+  const displayedTrips = useMemo(
+    () => filterTrips(trips, filterTab, currentUsername),
+    [trips, filterTab, currentUsername],
   );
 
-  // Filter trips
-  const displayedTrips = useMemo(() => {
-    if (filterTab === 'mine') {
-      return trips.filter((t) => {
-        const owner = (t.user_id || '').split('.').pop()?.toLowerCase() || '';
-        return owner === currentUsername;
-      });
-    }
-    return trips;
-  }, [trips, filterTab, currentUsername]);
-
-  // Aggregate stats — only driving trips contribute fuel/cost
-  const stats = useMemo(() => {
-    let totalMiles = 0;
-    let totalCost = 0;
-    let totalFuel = 0;
-    let sharedCount = 0;
-
-    for (const t of displayedTrips) {
-      totalMiles += Number(t.distance_miles || 0);
-      if ((t.activity_type || 'driving') === 'driving') {
-        totalCost += Number(t.trip_cost_usd || 0);
-        totalFuel += Number(t.fuel_used_gal || 0);
-      }
-      if (t.is_shared) sharedCount += 1;
-    }
-
-    return {
-      miles: totalMiles.toFixed(1),
-      cost: totalCost.toFixed(2),
-      fuel: totalFuel.toFixed(1),
-      count: displayedTrips.length,
-      sharedCount,
-    };
-  }, [displayedTrips]);
+  const stats = useMemo(() => tripStats(displayedTrips), [displayedTrips]);
 
   // Open Edit Modal
   const handleOpenEdit = (trip: Trip) => {
     trigger('light');
-    if (!isTripOwner(trip)) {
+    if (!isTripOwner(trip, currentUsername)) {
       toast.error(`Only ${trip.user_name || 'the trip owner'} can edit this trip.`);
       return;
     }
@@ -477,7 +400,11 @@ const Wander = () => {
       toast.success('Trip updated!');
 
       // Update in local state
-      setTrips((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
+      queryClient.setQueryData<TripsResponse>(['geo-trips'], (prev) =>
+        prev
+          ? { ...prev, trips: prev.trips.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)) }
+          : prev,
+      );
       setEditingTrip(null);
     } catch (err: unknown) {
       const errorMsg =
@@ -493,7 +420,7 @@ const Wander = () => {
   // Share trip with manually-chosen riders
   const handleOpenShare = (trip: Trip) => {
     trigger('light');
-    if (!isTripOwner(trip)) {
+    if (!isTripOwner(trip, currentUsername)) {
       toast.error(`Only ${trip.user_name || 'the trip owner'} can share this trip.`);
       return;
     }
@@ -507,7 +434,11 @@ const Wander = () => {
     setIsSavingShare(true);
     try {
       const updated = await api.shareTrip(sharingTrip.id, shareSelection);
-      setTrips((prev) => prev.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
+      queryClient.setQueryData<TripsResponse>(['geo-trips'], (prev) =>
+        prev
+          ? { ...prev, trips: prev.trips.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)) }
+          : prev,
+      );
       toast.success(shareSelection.length > 0 ? 'Trip shared!' : 'Sharing removed');
       setSharingTrip(null);
     } catch (err: unknown) {
@@ -544,6 +475,24 @@ const Wander = () => {
       {/* A phone that stopped reporting must never look like "nobody moved". */}
       <SensorStatusBanner />
 
+      {/* A failed fetch must not render as "no trips" — prefer a visible
+          warning over a silent empty state. */}
+      {loadError && (
+        <div
+          role="alert"
+          data-testid="wander-load-error"
+          className="bg-red-500/20 border border-red-500/30 rounded-xl p-3 text-red-400 text-sm flex items-center justify-between gap-3"
+        >
+          <span>Could not load trips and family locations.</span>
+          <button
+            onClick={refreshAll}
+            className="underline text-xs shrink-0 min-h-11 pointer-coarse:min-h-11"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-panel p-6 rounded-2xl border border-white/10 shadow-xl">
         <div className="space-y-1">
@@ -569,7 +518,7 @@ const Wander = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => void fetchTripsAndTelemetry()}
+            onClick={refreshAll}
             disabled={isRefreshing}
             className="glass-button flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white rounded-xl"
             title="Refresh Trips & Telemetry"
@@ -734,7 +683,8 @@ const Wander = () => {
               trigger('light');
               setFilterTab('all');
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            aria-pressed={filterTab === 'all'}
+            className={`px-3 py-2 rounded-lg text-xs font-medium transition-all min-h-11 pointer-coarse:min-h-11 ${
               filterTab === 'all'
                 ? 'bg-purple-600 text-white shadow-md'
                 : 'text-slate-400 hover:text-white'
@@ -747,7 +697,8 @@ const Wander = () => {
               trigger('light');
               setFilterTab('mine');
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            aria-pressed={filterTab === 'mine'}
+            className={`px-3 py-2 rounded-lg text-xs font-medium transition-all min-h-11 pointer-coarse:min-h-11 ${
               filterTab === 'mine'
                 ? 'bg-purple-600 text-white shadow-md'
                 : 'text-slate-400 hover:text-white'
@@ -764,7 +715,7 @@ const Wander = () => {
           <RefreshCw size={28} className="animate-spin text-purple-400 mx-auto mb-3" />
           <p className="text-sm text-slate-400">Loading trips and telemetry...</p>
         </div>
-      ) : displayedTrips.length === 0 ? (
+      ) : displayedTrips.length === 0 && !loadError ? (
         <div className="glass-panel p-12 text-center rounded-2xl border border-white/5 space-y-3">
           <div className="p-3 bg-purple-500/10 text-purple-400 rounded-full w-fit mx-auto">
             <Car size={32} />
@@ -777,7 +728,7 @@ const Wander = () => {
       ) : (
         <div className="space-y-4">
           {displayedTrips.map((trip) => {
-            const canEdit = isTripOwner(trip);
+            const canEdit = isTripOwner(trip, currentUsername);
             const isShared = trip.is_shared;
             const ActivityIcon = ACTIVITY_ICONS[trip.activity_type || 'driving'] || Car;
             const isDrive = (trip.activity_type || 'driving') === 'driving';
@@ -797,7 +748,7 @@ const Wander = () => {
                     {/* User Badge */}
                     <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800/80 text-xs font-semibold text-slate-200 border border-white/5">
                       <span className="w-2 h-2 rounded-full bg-purple-400" />
-                      <span>{trip.user_name || trip.user_id}</span>
+                      <span>{displayName(trip)}</span>
                     </div>
 
                     {/* Activity Type Badge */}
