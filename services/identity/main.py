@@ -59,7 +59,8 @@ from services.identity.schemas import (
     RavenMissionRead,
     RavenMissionUpdate,
     ResolvedCredentials,
-    ResolveRequest,
+ResolveRequest,
+    ShareRecipient,
     UserCreate,
     UserRead,
     UserUpdate,
@@ -1037,6 +1038,32 @@ def delete_user(username: str, session: Session = Depends(get_session), admin: U
 @app.get("/api/users", response_model=list[UserRead])
 def list_users(session: Session = Depends(get_session), _: bool = Depends(require_admin_or_internal)):
     return session.exec(select(User)).all()
+
+
+@app.get("/api/users/sharing-recipients", response_model=list[ShareRecipient])
+def list_sharing_recipients(
+    session: Session = Depends(get_session),
+    caller: User = Depends(require_api_key),
+):
+    """List the accounts an activity-sharing grant may name.
+
+    ``GET /api/users`` is admin-only, which left the sharing picker rendering
+    zero people for every non-admin -- so the only choice available to a normal
+    user was "Everyone", the opposite of the consent model we want.
+
+    Any authenticated caller may read this: naming someone in a grant requires
+    knowing they exist, and the response is deliberately just username +
+    display name. It carries no integration URLs, no credential fields, no
+    voice fingerprint and no API key, none of which ``UserRead`` omits.
+
+    The caller is excluded: you cannot grant yourself anything.
+    """
+    people = session.exec(select(User)).all()
+    return [
+        ShareRecipient(username=u.username, display_name=u.display_name or u.username)
+        for u in people
+        if u.username != (caller.username or "").lower()
+    ]
 
 @app.post("/api/users", response_model=UserRead)
 def create_user(body: UserCreate, session: Session = Depends(get_session), admin: User = Depends(require_api_key)):

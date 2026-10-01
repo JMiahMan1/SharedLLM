@@ -7,6 +7,7 @@ MapLibre client being served at "/".
 from unittest.mock import patch
 
 import pytest
+from services.config import INTERNAL_SECRET
 
 
 @pytest.fixture
@@ -48,7 +49,7 @@ def client(monkeypatch):
     with patch.object(geo, "_ha_get_states", fake_states):
         from fastapi.testclient import TestClient
 
-        yield TestClient(geo.app)
+        yield TestClient(geo.app, headers={"X-Internal-Secret": INTERNAL_SECRET})
 
 
 def test_health_reports_configured(client):
@@ -83,8 +84,16 @@ def test_index_serves_client(client):
     assert "Family Location" in r.text
 
 
-def test_see_requires_secret(client):
-    r = client.post(
+def test_see_requires_secret(monkeypatch):
+    """A request with no internal secret is refused before it reaches the route."""
+    import services.geo.main as geo
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(geo, "HA_URL", "https://ha.test")
+    monkeypatch.setattr(geo, "HA_TOKEN", "tok")
+    # No default headers: this client is deliberately unauthenticated.
+    unauthenticated = TestClient(geo.app)
+    r = unauthenticated.post(
         "/people/device_tracker.phone/see",
         json={"latitude": 1.0, "longitude": 2.0},
     )
@@ -334,8 +343,12 @@ def test_vehicle_crud_with_internal_secret_header(client, monkeypatch):
 
     monkeypatch.setattr(geo, "get_redis", fake_get_redis)
 
-    # 1. Unauthorized without header
-    r = client.post("/vehicles", json={"id": "truck", "name": "Ford F-150", "mpg": 18.5, "cost_per_gallon": 3.75, "fuel_type": "regular"})
+    # 1. Unauthorized without header. The `client` fixture now sends the
+    #    secret by default, so build an explicitly unauthenticated client.
+    from fastapi.testclient import TestClient as _TC
+
+    unauthenticated = _TC(geo.app)
+    r = unauthenticated.post("/vehicles", json={"id": "truck", "name": "Ford F-150", "mpg": 18.5, "cost_per_gallon": 3.75, "fuel_type": "regular"})
     assert r.status_code == 403
 
     # 2. Authorized with X-Internal-Secret header

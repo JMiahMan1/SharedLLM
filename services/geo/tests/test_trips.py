@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import services.geo.main as geo
+from services.config import INTERNAL_SECRET
 
 
 class FakeRedis:
@@ -90,7 +91,7 @@ def fake_redis(monkeypatch):
 
 @pytest.fixture
 def client(fake_redis):
-    return TestClient(geo.app)
+    return TestClient(geo.app, headers={"X-Internal-Secret": INTERNAL_SECRET})
 
 
 def test_shared_trips_grouping():
@@ -174,13 +175,13 @@ def _sample_trip(trip_id: str, user_id: str, user_name: str, start: float) -> di
 
 
 def test_get_trips_seed_and_filter(client, fake_redis):
-    """Verify trips are retrieved per user and over all users."""
+    """Trips are retrieved per user, and the all-users view is admin-only."""
     now = time.time()
     _insert_trip(fake_redis, _sample_trip("t_j1", "jeremiah", "Jeremiah", now - 3600))
     _insert_trip(fake_redis, _sample_trip("t_m1", "michele", "Michele", now - 1800))
 
-    # Getting all trips
-    r = client.get("/trips")
+    # The all-users view is an admin capability.
+    r = client.get("/trips", params={"is_admin": "true"})
     assert r.status_code == 200
     data = r.json()
     assert data["total_trips"] >= 2
@@ -189,21 +190,76 @@ def test_get_trips_seed_and_filter(client, fake_redis):
     assert "michele" in users
 
     # Filter per login (Jeremiah)
-    r_j = client.get("/trips?user_id=jeremiah")
+    r_j = client.get("/trips", params={"user_id": "jeremiah", "viewer": "jeremiah"})
     assert r_j.status_code == 200
+    assert r_j.json()["trips"]
     for t in r_j.json()["trips"]:
         assert t["user_id"] == "jeremiah"
 
     # Filter per login (Michele)
-    r_m = client.get("/trips?user_id=michele")
+    r_m = client.get("/trips", params={"user_id": "michele", "viewer": "michele"})
     assert r_m.status_code == 200
     for t in r_m.json()["trips"]:
         assert t["user_id"] == "michele"
 
 
+def test_trips_all_bucket_is_not_open_to_everyone(client, fake_redis):
+    """Omitting user_id must NOT hand back everyone's trips.
+
+    This was the reported leak: `GET /api/geo/trips` forwarded no identity, so
+    geo served `geo:trips:all` to any authenticated caller.
+    """
+    now = time.time()
+    _insert_trip(fake_redis, _sample_trip("t_j1", "jeremiah", "Jeremiah", now - 3600))
+    assert client.get("/trips").status_code == 401
+    assert client.get("/trips", params={"is_admin": "false"}).status_code == 401
+
+
+def test_trips_require_opt_in_to_read_another_users(client, fake_redis, monkeypatch):
+    """Reading another person's trips needs their sharing consent."""
+    now = time.time()
+    _insert_trip(fake_redis, _sample_trip("t_j1", "jeremiah", "Jeremiah", now - 3600))
+
+    # Michele has not opted in -> not shared.
+    monkeypatch.setattr(geo, "_fetch_activity_sharing", _sharing({}))
+    assert client.get(
+        "/trips", params={"user_id": "jeremiah", "viewer": "michele"}
+    ).status_code == 404
+
+    # Opted in to the circle -> readable.
+    monkeypatch.setattr(
+        geo,
+        "_fetch_activity_sharing",
+        _sharing({"jeremiah": {"enabled": True, "audience": "circle"}}),
+    )
+    ok = client.get("/trips", params={"user_id": "jeremiah", "viewer": "michele"})
+    assert ok.status_code == 200
+    assert ok.json()["trips"]
+
+    # An admin reads it regardless of consent.
+    admin = client.get(
+        "/trips", params={"user_id": "jeremiah", "viewer": "michele", "is_admin": "true"}
+    )
+    assert admin.status_code == 200
+    assert admin.json()["trips"]
+
+
+def _sharing(entries: dict) -> callable:
+    """Build a `_fetch_activity_sharing` stub: {username: {...overrides}}."""
+    rows = [
+        {"username": name, "enabled": False, "audience": "circle", "user_ids": [], **overrides}
+        for name, overrides in entries.items()
+    ]
+    return lambda: _done({"users": rows})
+
+
+async def _done(value):
+    return value
+
+
 def test_get_trips_empty_without_seed(client, fake_redis):
     """Real data only: no auto-seeding, so an empty store yields zero trips."""
-    r = client.get("/trips")
+    r = client.get("/trips", params={"is_admin": "true"})
     assert r.status_code == 200
     assert r.json() == {"trips": [], "total_trips": 0}
 
@@ -535,7 +591,10 @@ def test_daily_steps_direct_endpoint(client, fake_redis):
 
 
 def test_steps_endpoints_require_secret(client):
-    resp = client.post("/steps", json={"steps": 100, "user_id": "jeremiah"})
+    from fastapi.testclient import TestClient as _TC
+
+    unauthenticated = _TC(geo.app)
+    resp = unauthenticated.post("/steps", json={"steps": 100, "user_id": "jeremiah"})
     assert resp.status_code == 403
 
 

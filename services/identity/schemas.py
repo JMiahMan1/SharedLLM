@@ -159,6 +159,20 @@ class UserUpdate(BaseModel):
     is_system_default: bool | None = None
 
 
+class ShareRecipient(BaseModel):
+    """The minimum needed to pick who to share activity with.
+
+    Deliberately narrower than ``UserRead``, which carries integration URLs,
+    credential fields, the voice fingerprint and the raw API key. A share
+    picker only needs to render "who are the other people here" -- it has no
+    business seeing any of that, and a non-admin must be able to build the
+    picker at all (this endpoint is what makes opt-in sharing usable for them).
+    """
+
+    username: str
+    display_name: str
+
+
 class UserRead(BaseModel):
     id: int
     username: str

@@ -146,6 +146,18 @@ export interface DeviceAssignment {
 }
 
 /**
+ * An account an activity-sharing grant may name.
+ *
+ * Deliberately narrower than {@link UserProfile}: this is what a non-admin
+ * needs to build the share picker, and it carries no integration URLs,
+ * credential fields, voice fingerprint or API key.
+ */
+export interface ShareRecipient {
+  username: string;
+  display_name: string;
+}
+
+/**
  * An entity locked against normal users. While a row exists, the entity's
  * DeviceAssignment is ignored: only admins, the system default user, and the
  * names in `permitted_usernames` may see or control it. Releasing the lock
@@ -947,7 +959,12 @@ export interface Workout {
   steps?: number | null;
   steps_source?: 'pedometer' | 'gps_estimate' | null;
   notes?: string | null;
-  status: 'active' | 'completed';
+  /**
+   * Geo writes `in_progress` for a running session and `completed` once it is
+   * filed into history -- there is no `active` value, which is what made the
+   * old client-side scan for one impossible to match.
+   */
+  status: 'in_progress' | 'completed';
 }
 
 export interface WorkoutsResponse {
