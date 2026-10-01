@@ -227,6 +227,190 @@ class UserActivitySharing(SQLModel, table=True):  # type: ignore
     username: str = Field(primary_key=True, foreign_key="user.username")
     data: str = Field(default="{}")
 
+
+# ---------------------------------------------------------------------------
+# User Panel: device registry and telemetry
+#
+# The consent boundary, made explicit so it can be audited:
+#
+#   Collected WITHOUT opt-in (device + usage metadata, never content):
+#     device identity, IP address, app/APK version, update events, per-feature
+#     usage counts, how often the app is opened.
+#
+#   Opt-in ONLY, owned by UserActivitySharing above:
+#     location, steps, workouts, achievements. Nothing in this section may
+#     duplicate or widen that consent -- a second source of truth for "may I
+#     see this user's location" is exactly how a sharing check drifts.
+#
+# `NO_OPT_IN_EVENTS` is an allowlist, not a denylist, so a new event has to be
+# added deliberately. Content (transcripts, message bodies, coordinates, vitals)
+# cannot reach the no-opt-in tables by accident; `test_user_panel_telemetry.py`
+# asserts that.
+# ---------------------------------------------------------------------------
+
+DEVICE_KINDS = ("phone", "assistant", "light")
+
+#: Kinds that get the advanced panel. ``light`` is deliberately minimal: a
+#: light has no screen, no app, and nothing to install.
+ADVANCED_DEVICE_KINDS = ("phone", "assistant")
+
+NO_OPT_IN_EVENTS = frozenset(
+    {
+        "device_seen",  # a device checked in
+        "app_open",  # the app was opened
+        "apk_check",  # looked for an app update
+        "apk_install",  # an APK update was installed
+        "feature_use",  # a feature was used
+        "capability_miss",  # asked for something that does not exist
+    }
+)
+
+
+class Device(SQLModel, table=True):  # type: ignore
+    """A registered device, and what we know about it.
+
+    ``kind`` decides which panel it appears in. Phones self-register on login
+    (``registered_by="self"``) and report their own hardware; assistants and
+    lights are registered by an admin (``registered_by="admin"``) because they
+    have no account of their own to log in with.
+
+    ``device_key`` is a stable client-supplied identifier, unique across all
+    kinds -- a device that changes kind keeps its history.
+
+    This is *not* a replacement for ``services/execution/device_registry.py``,
+    which is a separate registry of discovered network/HA entities keyed by
+    ``entity_id`` (IP, MAC, integration) with no notion of an owner. This table
+    answers "whose device is this and what does it do"; that one answers "what
+    is on my network". An assistant or light is normally in both, so
+    ``entity_id`` links the two. Keep that link, and prefer the execution
+    registry for network facts on linked devices, so an IP never has two
+    homes.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    device_key: str = Field(index=True, unique=True)
+    kind: str = Field(default="phone", index=True)  # phone | assistant | light
+    label: str = Field(default="")  # "Jeremiah's Pixel"
+    owner_username: str | None = Field(default=None, index=True, foreign_key="user.username")
+    registered_by: str = Field(default="self")  # self | admin
+    revoked: bool = Field(default=False)
+    #: Link into execution.device_registry for assistants/lights. A phone has
+    #: no HA entity, so this stays null for kind="phone".
+    entity_id: str | None = Field(default=None, index=True)
+
+    # Phone / app build metadata, reported on self-registration.
+    model: str | None = None  # "Pixel 7"
+    manufacturer: str | None = None  # "Google"
+    os_version: str | None = None  # "14"
+    os_build: str | None = None
+    app_version: str | None = None  # versionName, e.g. "1.5.0"
+    app_build: str | None = None  # versionCode, e.g. 24
+
+    # Assistant / light metadata, reported by the device.
+    esphome_version: str | None = None
+    hardware: str | None = None
+    #: JSON object of what the device can do, e.g.
+    #: {"climate": true, "media": false}. Drives the capability-gap analysis.
+    capabilities: str = Field(default="{}")
+
+    # Collected without opt-in.
+    last_ip_address: str | None = None
+    last_seen_at: str | None = None
+    first_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+class DeviceEvent(SQLModel, table=True):  # type: ignore
+    """Append-only usage timeline for trends ("how often is the app used").
+
+    Only ``NO_OPT_IN_EVENTS`` may be written here, and ``extra`` is expected to
+    hold small non-content scalars (a version number, a feature id) -- never a
+    transcript, a coordinate, or a vital.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    device_key: str = Field(index=True)
+    username: str | None = Field(default=None, index=True)
+    event: str = Field(index=True)  # must be in NO_OPT_IN_EVENTS
+    extra: str = Field(default="{}")  # JSON object of small non-content scalars
+    at: str = Field(default_factory=lambda: datetime.now().isoformat(), index=True)
+
+
+class FeatureUsage(SQLModel, table=True):  # type: ignore
+    """Rollup of feature use, so "what do they use it for most" is one query.
+
+    Kept as a counter rather than derived from DeviceEvent on every read: the
+    event table grows without bound, this does not.
+
+    The primary key is the pair itself, so a second write for the same feature
+    increments the existing row rather than creating a duplicate.
+    """
+    __table_args__ = {"extend_existing": True}
+    username: str = Field(primary_key=True, index=True)
+    feature: str = Field(primary_key=True, index=True)
+    kind: str = Field(default="app")  # app | assistant | light
+    uses: int = Field(default=0)
+    first_used_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    last_used_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+
+
+class CapabilityGap(SQLModel, table=True):  # type: ignore
+    """Someone asked for something the system does not have.
+
+    The highest-value row in the panel: it is a feature request written by
+    behaviour rather than by a human filing a ticket. ``request`` is the
+    user-facing phrasing, which is content the user typed, so this table is
+    content-derived and is expected to be cleared on request -- unlike
+    DeviceEvent.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    kind: str = Field(default="app", index=True)  # app | assistant
+    #: The capability that was wanted, e.g. "set_thermostat".
+    capability: str = Field(index=True)
+    #: What the user actually said. Content-derived: retention is a decision.
+    request: str = Field(default="")
+    #: How many distinct times this gap has been hit.
+    occurrences: int = Field(default=1)
+    first_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    last_seen_at: str = Field(default_factory=lambda: datetime.now().isoformat())
+    resolved: bool = Field(default=False)
+    resolved_at: str | None = None
+
+
+class AssistantConversation(SQLModel, table=True):  # type: ignore
+    """Retained assistant turns, so usage trends and gaps can be analysed.
+
+    This is **content**, not device metadata: it holds what was said. It is
+    modelled separately from DeviceEvent precisely so the two retention
+    policies cannot be confused -- no-opt-in telemetry never lands here, and
+    this table is the one to purge when a user asks for their data to go.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True)
+    device_key: str | None = Field(default=None, index=True)
+    #: JSON array of {"role": "user"|"assistant", "text": str} turns.
+    turns: str = Field(default="[]")
+    #: Feature ids referenced in the exchange, for "used for most".
+    features: str = Field(default="[]")
+    at: str = Field(default_factory=lambda: datetime.now().isoformat(), index=True)
+
+
+class CapabilityInventory(SQLModel, table=True):  # type: ignore
+    """What a device reports it can do, versioned over time.
+
+    A gap is only meaningful against the capabilities that existed *at the
+    time* -- an assistant that gained thermostat control stops being a gap.
+    """
+    __table_args__ = {"extend_existing": True}
+    id: int | None = Field(default=None, primary_key=True)
+    device_key: str = Field(index=True)
+    #: JSON object of capability -> bool.
+    capabilities: str = Field(default="{}")
+    esphome_version: str | None = None
+    observed_at: str = Field(default_factory=lambda: datetime.now().isoformat(), index=True)
+
 DEFAULT_GLOBAL_SETTINGS = [
     {"key": "system_log_level", "value": "INFO", "description": "Global log level for all Jarvis OS services"},
     {"key": "system_name", "value": "Jarvis OS", "description": "The displayed name of this system"},
