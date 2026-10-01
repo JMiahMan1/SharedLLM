@@ -8,6 +8,8 @@ import { themeRegistry } from '../../themes';
 import { useActiveThemeId } from '../../themes/siteTheme';
 import { WidgetCard } from './WidgetCard';
 import { api } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import { pedometerQueryOptions, stepsQueryKey } from '../../lib/healthQueries';
 
 export interface HealthActivityConfig {
   themeId?: string;
@@ -72,6 +74,8 @@ function Ring({
  */
 const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const currentUsername = (user?.username || '').toLowerCase() || undefined;
   const updateWidgetConfig = useWidgetStore((s) => s.updateWidgetConfig);
   const config = (userSettings.config ?? {}) as HealthActivityConfig;
 
@@ -80,15 +84,18 @@ const HealthActivityWidget = ({ settingsButton, userSettings }: IWidgetProps) =>
   const theme = useMemo(() => themeRegistry.resolveTheme(themeId), [themeId]);
   const cssVars = useMemo(() => themeRegistry.cssVarsFor(themeId), [themeId]);
 
-  // Same source Wander reads, so both screens always agree.
-  const { data: stepsData } = useQuery({
-    queryKey: ['daily-steps', 'health-widget'],
-    queryFn: () => api.getDailySteps(undefined, 7),
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+  // Shares one cache entry with the Health page, so the card and the page can
+  // never show different numbers for the same day. Previously this used a
+  // separate `['daily-steps','health-widget']` key while the page used none,
+  // so the two screens genuinely could disagree.
+  const stepsQuery = useQuery({
+    queryKey: stepsQueryKey(currentUsername),
+    queryFn: () => api.getDailySteps(currentUsername, 7),
+    ...pedometerQueryOptions,
   });
+  const stepsData = stepsQuery.data ?? null;
   const hasStepData = stepsData != null && Object.keys(stepsData.daily_steps ?? {}).length > 0;
-  const steps = hasStepData ? (stepsData.today ?? 0) : null;
+  const steps = hasStepData ? (stepsData?.today ?? 0) : null;
   const stepsGoal = stepsData?.goal || config.stepGoal || DEFAULT_CONFIG.stepGoal;
 
   const stepPct = steps == null ? 0 : steps / Math.max(1, stepsGoal);

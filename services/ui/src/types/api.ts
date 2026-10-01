@@ -974,9 +974,20 @@ export interface WorkoutsResponse {
 
 export interface StepsResponse {
   user_id: string;
+  /** Present on the wire (geo echoes the requested window). */
+  days?: number;
   daily_steps: Record<string, number>;
   today: number;
-  goal: number;
+  /**
+   * Omitted by geo's no-redis early return, so treat it as optional even though
+   * the happy path always sends it.
+   */
+  goal?: number;
+  /**
+   * Per-device contribution to *today*, e.g. `{ phone: 368 }`. Present so the
+   * UI can explain a total that no single device counted.
+   */
+  sources?: Record<string, number>;
 }
 
 export interface ActivityTrendsResponse {
