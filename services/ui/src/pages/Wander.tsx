@@ -7,6 +7,7 @@ import Modal from '../components/ui/Modal';
 import LiveFamilyMap from '../components/geo/LiveFamilyMap';
 import TripLocationsMap from '../components/geo/TripLocationsMap';
 import RoutePreview from '../components/geo/RoutePreview';
+import SensorStatusBanner from '../components/location/SensorStatusBanner';
 import { ACTIVITY_ICONS, ACTIVITY_LABELS, formatDuration, formatTimeRange } from '../lib/workoutMeta';
 import toast from 'react-hot-toast';
 import {
@@ -540,6 +541,9 @@ const Wander = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
+      {/* A phone that stopped reporting must never look like "nobody moved". */}
+      <SensorStatusBanner />
+
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-panel p-6 rounded-2xl border border-white/10 shadow-xl">
         <div className="space-y-1">
