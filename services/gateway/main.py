@@ -7416,7 +7416,7 @@ async def get_geo_assigned_vehicle(user_id: str):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Geo service unavailable")
+    await _raise_geo_failure(resp, "Geo service unavailable")
 
 
 @app.post("/api/geo/vehicles/assign")
@@ -7464,7 +7464,7 @@ async def vehicle_lookup_years():
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Vehicle lookup failed")
+    await _raise_geo_failure(resp, "Vehicle lookup failed")
 
 
 @app.get("/api/geo/vehicle-lookup/makes")
@@ -7477,7 +7477,7 @@ async def vehicle_lookup_makes(year: int = 0):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Vehicle lookup failed")
+    await _raise_geo_failure(resp, "Vehicle lookup failed")
 
 
 @app.get("/api/geo/vehicle-lookup/models")
@@ -7490,7 +7490,7 @@ async def vehicle_lookup_models(year: int = 0, make: str = ""):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Vehicle lookup failed")
+    await _raise_geo_failure(resp, "Vehicle lookup failed")
 
 
 @app.get("/api/geo/vehicle-lookup/options")
@@ -7503,7 +7503,7 @@ async def vehicle_lookup_options(year: int = 0, make: str = "", model: str = "")
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Vehicle lookup failed")
+    await _raise_geo_failure(resp, "Vehicle lookup failed")
 
 
 @app.get("/api/geo/vehicle-lookup/vin/{vin}")
@@ -7515,7 +7515,7 @@ async def vehicle_lookup_vin(vin: str):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="VIN lookup failed")
+    await _raise_geo_failure(resp, "VIN lookup failed")
 
 
 @app.get("/api/geo/vehicle-lookup/{vehicle_id}")
@@ -7527,7 +7527,7 @@ async def vehicle_lookup_detail(vehicle_id: str):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Vehicle lookup failed")
+    await _raise_geo_failure(resp, "Vehicle lookup failed")
 
 
 @app.get("/api/geo/telemetry/{user_id}")
@@ -7566,7 +7566,7 @@ async def get_geo_people(request: Request, viewer: str | None = None):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Geo people unavailable")
+    await _raise_geo_failure(resp, "Geo people unavailable")
 
 
 @app.get("/api/geo/android_auto")
@@ -7583,7 +7583,7 @@ async def get_geo_android_auto(request: Request, user_id: str | None = None):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Geo android_auto unavailable")
+    await _raise_geo_failure(resp, "Geo android_auto unavailable")
 
 
 @app.get("/api/geo/zones")
@@ -7596,7 +7596,28 @@ async def get_geo_zones():
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Geo zones unavailable")
+    await _raise_geo_failure(resp, "Geo zones unavailable")
+
+
+async def _raise_geo_failure(resp, label: str) -> None:
+    """Translate a non-200 from geo into the right answer for the client.
+
+    geo deliberately answers **404** when a caller may not read another's
+    activity, so a probe cannot tell "no such user" from "not shared with
+    you". Collapsing that into a blanket 502 told the client the server was
+    broken, which is both wrong and unhelpful -- it is the reason a refused
+    read looked identical to an outage. Only a genuine upstream fault is a 502.
+    """
+    if resp.status in (401, 403, 404):
+        detail: Any = None
+        try:
+            body = await resp.json()
+            if isinstance(body, dict):
+                detail = body.get("detail")
+        except Exception:  # noqa: BLE001 - a non-JSON error body is not fatal
+            detail = None
+        raise HTTPException(status_code=resp.status, detail=detail or label)
+    raise HTTPException(status_code=502, detail=label)
 
 
 @app.get("/api/geo/trips")
@@ -7619,7 +7640,7 @@ async def get_geo_trips(request: Request, user_id: str | None = None, limit: int
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to fetch trips")
+    await _raise_geo_failure(resp, "Failed to fetch trips")
 
 
 @app.get("/api/geo/trips/{trip_id}")
@@ -7674,7 +7695,7 @@ async def update_geo_trip(trip_id: str, request: Request):
             raise HTTPException(status_code=403, detail=err.get("detail", "Forbidden"))
         elif resp.status == 404:
             raise HTTPException(status_code=404, detail="Trip not found")
-    raise HTTPException(status_code=502, detail="Failed to update trip")
+    await _raise_geo_failure(resp, "Failed to update trip")
 
 
 @app.get("/api/geo/trips/{trip_id}/route")
@@ -7688,7 +7709,7 @@ async def get_geo_trip_route(request: Request, trip_id: str):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to fetch trip route")
+    await _raise_geo_failure(resp, "Failed to fetch trip route")
 
 
 @app.get("/api/geo/locations/suggestions")
@@ -7706,7 +7727,7 @@ async def get_geo_location_suggestions(lat: float, lon: float):
         if resp.status == 422:
             err = await resp.json()
             raise HTTPException(status_code=422, detail=err.get("detail", "Invalid coordinates"))
-    raise HTTPException(status_code=502, detail="Failed to fetch location suggestions")
+    await _raise_geo_failure(resp, "Failed to fetch location suggestions")
 
 
 @app.patch("/api/geo/trips/{trip_id}/share")
@@ -7734,7 +7755,7 @@ async def share_geo_trip(trip_id: str, request: Request):
             raise HTTPException(status_code=403, detail=err.get("detail", "Forbidden"))
         elif resp.status == 404:
             raise HTTPException(status_code=404, detail="Trip not found")
-    raise HTTPException(status_code=502, detail="Failed to share trip")
+    await _raise_geo_failure(resp, "Failed to share trip")
 
 
 @app.get("/api/geo/workouts")
@@ -7755,7 +7776,7 @@ async def get_geo_workouts(request: Request, user_id: str | None = None, limit: 
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to fetch workouts")
+    await _raise_geo_failure(resp, "Failed to fetch workouts")
 
 
 @app.get("/api/geo/workouts/active")
@@ -7778,7 +7799,7 @@ async def get_geo_active_workout(request: Request, user_id: str | None = None):
             return await resp.json()
         if resp.status == 404:
             return {"workout": None}
-    raise HTTPException(status_code=502, detail="Failed to fetch active workout")
+    await _raise_geo_failure(resp, "Failed to fetch active workout")
 
 
 @app.post("/api/geo/workouts/start")
@@ -7812,7 +7833,7 @@ async def start_geo_workout(request: Request):
             return await resp.json()
         elif resp.status == 409:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to start workout")
+    await _raise_geo_failure(resp, "Failed to start workout")
 
 
 @app.post("/api/geo/workouts/stop")
@@ -7843,7 +7864,7 @@ async def stop_geo_workout(request: Request):
         elif resp.status == 404:
             err = await resp.json()
             raise HTTPException(status_code=404, detail=err.get("detail", "No active workout"))
-    raise HTTPException(status_code=502, detail="Failed to stop workout")
+    await _raise_geo_failure(resp, "Failed to stop workout")
 
 
 @app.get("/api/geo/workouts/{workout_id}/route")
@@ -7857,7 +7878,7 @@ async def get_geo_workout_route(request: Request, workout_id: str):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to fetch workout route")
+    await _raise_geo_failure(resp, "Failed to fetch workout route")
 
 
 @app.get("/api/geo/steps")
@@ -7874,7 +7895,7 @@ async def get_geo_steps(request: Request, user_id: str | None = None, days: int 
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to fetch steps")
+    await _raise_geo_failure(resp, "Failed to fetch steps")
 
 
 @app.post("/api/geo/steps")
@@ -7906,7 +7927,7 @@ async def proxy_geo_steps(request: Request):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to record steps")
+    await _raise_geo_failure(resp, "Failed to record steps")
 
 
 @app.get("/api/geo/goals")
@@ -7921,7 +7942,7 @@ async def proxy_get_goals(request: Request, user_id: str | None = None):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to read goals")
+    await _raise_geo_failure(resp, "Failed to read goals")
 
 
 @app.put("/api/geo/goals")
@@ -8011,7 +8032,7 @@ async def proxy_get_achievements(
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to read achievements")
+    await _raise_geo_failure(resp, "Failed to read achievements")
 
 
 @app.get("/api/geo/points")
@@ -8026,7 +8047,7 @@ async def proxy_get_points(request: Request, user_id: str | None = None):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to read points")
+    await _raise_geo_failure(resp, "Failed to read points")
 
 
 @app.get("/api/geo/activity/summary")
@@ -8063,7 +8084,7 @@ async def proxy_activity_feed(request: Request, window: str = "week"):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to read activity feed")
+    await _raise_geo_failure(resp, "Failed to read activity feed")
 
 
 @app.get("/api/geo/steps/goal")
@@ -8078,7 +8099,7 @@ async def proxy_get_step_goal(request: Request, user_id: str | None = None):
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to read step goal")
+    await _raise_geo_failure(resp, "Failed to read step goal")
 
 
 @app.put("/api/geo/steps/goal")
@@ -8127,7 +8148,7 @@ async def get_geo_activity_trends(request: Request, user_id: str | None = None, 
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to fetch activity trends")
+    await _raise_geo_failure(resp, "Failed to fetch activity trends")
 
 
 @app.post("/api/geo/trends/activity/analyze")
@@ -8148,7 +8169,7 @@ async def post_geo_activity_trends_analyze(
         )
         if resp.status == 200:
             return await resp.json()
-    raise HTTPException(status_code=502, detail="Failed to analyze activity trends")
+    await _raise_geo_failure(resp, "Failed to analyze activity trends")
 
 
 # --- Scheduled telemetry reports (health/fitness + power) --------------------

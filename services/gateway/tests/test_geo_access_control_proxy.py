@@ -329,3 +329,61 @@ def test_active_workout_does_not_leak_another_users_session_to_a_non_admin(make_
         "/api/geo/workouts/active", params={"user_id": "jeremiah"}
     )
     assert resp.json() == {"workout": None}
+
+
+# ---------------------------------------------------------------------------
+# geo's refusals must reach the client unchanged.
+#
+# geo answers 404 when a caller may not read another's activity -- deliberately,
+# so a probe cannot tell "no such user" from "not shared with you". The gateway
+# used to rewrite every non-200 into a blanket 502 "Failed to fetch X", which
+# made a *permission refusal look identical to an outage*. Observed live: with
+# consent withdrawn, `GET /api/geo/steps?user_id=jeremiah` as Michele returned
+# 502 instead of 404.
+#
+# The distinction matters to the client: 404 means "ask the owner to share",
+# 502 means "retry later, something is broken". Only a genuine upstream fault
+# deserves the latter.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("route", READ_ROUTES)
+def test_a_consent_refusal_is_reported_as_404_not_as_an_outage(monkeypatch, make_client, route):
+    _patch_geo(
+        monkeypatch,
+        status=404,
+        payload={"detail": "activity not shared"},
+        captured={},
+    )
+    resp = make_client().get(route)
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["detail"] == "activity not shared"
+
+
+@pytest.mark.parametrize("status,expected", [(401, 401), (403, 403), (404, 404)])
+def test_refusal_status_codes_pass_through_untouched(monkeypatch, make_client, status, expected):
+    _patch_geo(monkeypatch, status=status, payload={"detail": "nope"}, captured={})
+    resp = make_client().get("/api/geo/steps")
+    assert resp.status_code == expected
+
+
+def test_a_genuine_upstream_fault_is_still_a_502(monkeypatch, make_client):
+    _patch_geo(monkeypatch, status=500, payload={"detail": "redis down"}, captured={})
+    resp = make_client().get("/api/geo/steps")
+    assert resp.status_code == 502
+    assert resp.json()["detail"] == "Failed to fetch steps"
+
+
+def test_a_non_json_error_body_still_reports_the_right_status(monkeypatch, make_client):
+    # geo behind a proxy can emit HTML; the status must survive regardless.
+    _patch_geo(monkeypatch, status=403, payload=None, captured={})
+    resp = make_client().get("/api/geo/steps")
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "Failed to fetch steps"
+
+
+def test_a_200_with_data_is_unaffected(monkeypatch, make_client):
+    _patch_geo(monkeypatch, status=200, payload={"daily_steps": {"2026-10-01": 5}}, captured={})
+    resp = make_client().get("/api/geo/steps")
+    assert resp.status_code == 200
+    assert resp.json()["daily_steps"] == {"2026-10-01": 5}
