@@ -139,6 +139,30 @@ class TestPublishEndpoint:
         assert r.status_code == 400
         assert "unreadable" in r.json()["detail"].lower()
 
+    def test_a_refused_upload_does_not_destroy_the_live_apk(self, client):
+        """A corrupt CI upload must not take the served build down with it."""
+        from services.gateway import main
+
+        good = make_apk_bytes(22)
+        r = client.post(
+            "/api/app-updates/publish",
+            headers=auth(),
+            files={"apk": ("app-debug.apk", good, "application/vnd.android.package-archive")},
+        )
+        assert r.status_code == 200
+
+        bad = client.post(
+            "/api/app-updates/publish",
+            headers=auth(),
+            files={"apk": ("app-debug.apk", b"truncated garbage", "application/vnd.android.package-archive")},
+        )
+        assert bad.status_code == 400
+
+        served = (main.APP_UPDATES_DIR / "app-debug.apk").read_bytes()
+        assert served == good
+        # And the endpoint still describes what it is actually serving.
+        assert client.get("/api/app-updates/version").json()["apk_version_code"] == 22
+
     def test_requires_the_internal_secret(self, client):
         r = client.post(
             "/api/app-updates/publish",

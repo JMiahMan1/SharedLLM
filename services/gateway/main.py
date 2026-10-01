@@ -8516,9 +8516,21 @@ async def get_app_debug_apk():
     )
 
 
+def _write_temp_apk(content: bytes):
+    """Stage an upload beside the live APK so it can be validated first."""
+    tmp = APP_UPDATES_DIR / "app-debug.apk.incoming"
+    tmp.write_bytes(content)
+    return tmp
+
+
 @app.post("/api/app-updates/publish")
 async def publish_app_update(request: Request):
-    """Publish a new bundle.zip and/or app-debug.apk and update metadata."""
+    """Publish a new bundle.zip and/or app-debug.apk and update metadata.
+
+    An uploaded APK is validated before it replaces the live one, and the
+    advertised `apk_version_code` is read from that APK rather than trusted
+    from the request -- see apk_manifest.py for why.
+    """
     form = await request.form()
     secret = request.headers.get("X-Internal-Secret") or form.get("secret")
     if secret != INTERNAL_SECRET:
@@ -8540,8 +8552,23 @@ async def publish_app_update(request: Request):
     if isinstance(apk_file, UploadFile) and apk_file.filename:
         out_a = APP_UPDATES_DIR / "app-debug.apk"
         content = await apk_file.read()
+        # Validate before replacing the live APK. Writing first would mean a
+        # truncated or corrupt upload destroys the build currently being
+        # served, turning a bad CI publish into an outage for every user.
+        try:
+            probe = read_apk_version(_write_temp_apk(content))
+        except Exception:
+            probe = None
+        if not probe or probe.get("version_code") is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Uploaded APK has an unreadable AndroidManifest versionCode; refusing to publish it.",
+            )
         out_a.write_bytes(content)
-        log.info(f"[AppUpdates] Published new app-debug.apk ({len(content)} bytes)")
+        log.info(
+            f"[AppUpdates] Published new app-debug.apk ({len(content)} bytes, "
+            f"versionCode {probe['version_code']})"
+        )
         apk_published = True
 
     # Take the version code from the APK we just wrote, so the advertised
