@@ -13,7 +13,9 @@ import { ACTIVITY_ICONS, ACTIVITY_LABELS, formatDuration, formatTimeRange } from
 import {
   displayName,
   filterTrips,
+  formatCostSummary,
   formatDistanceMeters,
+  formatFuelSummary,
   formatTripLocation,
   isTripOwner,
   relativeTime,
@@ -659,13 +661,13 @@ const Wander = () => {
 
         <div className="glass-panel p-4 rounded-xl border border-white/5 flex flex-col">
           <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Fuel Consumed</span>
-          <span className="text-xl sm:text-2xl font-bold text-purple-400 mt-1">{stats.fuel} gal</span>
+          <span className="text-xl sm:text-2xl font-bold text-purple-400 mt-1">{formatFuelSummary(stats.fuel)}</span>
           <span className="text-[10px] text-slate-500 mt-0.5">Driving trips only</span>
         </div>
 
         <div className="glass-panel p-4 rounded-xl border border-white/5 flex flex-col">
           <span className="text-[11px] text-slate-400 uppercase tracking-wider font-semibold">Estimated Cost</span>
-          <span className="text-xl sm:text-2xl font-bold text-emerald-400 mt-1">${stats.cost}</span>
+          <span className="text-xl sm:text-2xl font-bold text-emerald-400 mt-1">{formatCostSummary(stats.cost)}</span>
           <span className="text-[10px] text-slate-500 mt-0.5">Gas / Diesel fuel price</span>
         </div>
       </div>

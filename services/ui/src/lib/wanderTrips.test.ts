@@ -13,6 +13,9 @@ import {
   relativeTime,
   tripLocationCoords,
   tripOwner,
+  formatCostSummary,
+  formatFuelSummary,
+  roundForDisplay,
   tripStats,
 } from './wanderTrips';
 import type { Trip } from '../types/api';
@@ -112,6 +115,45 @@ describe('filterTrips', () => {
 
   it('is empty rather than everything when nobody is signed in', () => {
     expect(filterTrips([mine, theirs], 'mine', undefined)).toEqual([]);
+  });
+});
+
+describe('summary formatting', () => {
+  it('kills binary float noise from summed floats', () => {
+    // 0.1 + 0.2 is the canonical case; these arrive from per-trip sums.
+    const stats = tripStats([
+      trip({ fuel_used_gal: 0.1, trip_cost_usd: 0.1 }),
+      trip({ fuel_used_gal: 0.2, trip_cost_usd: 0.2 }),
+    ]);
+    expect(formatFuelSummary(stats.fuel)).toBe('0.3 gal');
+    expect(formatCostSummary(stats.cost)).toBe('$0.3');
+  });
+
+  it('shows no decimal when the value is whole', () => {
+    expect(formatFuelSummary(3)).toBe('3 gal');
+    expect(formatCostSummary(12)).toBe('$12');
+  });
+
+  it('never renders a long float tail', () => {
+    expect(formatFuelSummary(2.6999999999999997)).toBe('2.7 gal');
+    expect(formatCostSummary(12.300000000000001)).toBe('$12.3');
+  });
+
+  it('keeps one decimal for values that need it', () => {
+    expect(formatFuelSummary(0.25)).toBe('0.3 gal');
+    expect(formatCostSummary(0.25)).toBe('$0.3');
+  });
+
+  it('survives missing and non-finite values', () => {
+    expect(formatFuelSummary(NaN)).toBe('0 gal');
+    expect(formatCostSummary(Infinity)).toBe('$0');
+    expect(roundForDisplay(NaN)).toBe(0);
+  });
+
+  it('leaves the underlying totals exact', () => {
+    // Rounding is a display concern only; the sum itself must stay lossless.
+    const stats = tripStats([trip({ fuel_used_gal: 0.1 }), trip({ fuel_used_gal: 0.2 })]);
+    expect(stats.fuel).toBeCloseTo(0.30000000000000004);
   });
 });
 
