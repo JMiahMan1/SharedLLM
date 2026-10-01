@@ -125,7 +125,10 @@ function App() {
             <Route path="/media" element={<ProtectedRoute isMobile={isMobile}><Media /></ProtectedRoute>} />
             <Route path="/wander" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
             <Route path="/fitness" element={<ProtectedRoute isMobile={isMobile}><Health /></ProtectedRoute>} />
-            <Route path="/family-circle" element={<ProtectedRoute isMobile={isMobile}><Wander /></ProtectedRoute>} />
+            {/* Historic alias for the same page. Redirecting rather than
+                mounting a second copy keeps one URL per page, so the query
+                cache and "you are here" state can't diverge between them. */}
+            <Route path="/family-circle" element={<Navigate to="/wander" replace />} />
             <Route path="/remote" element={<ProtectedRoute isMobile={isMobile}><Remote /></ProtectedRoute>} />
             <Route path="/settings" element={<ProtectedRoute isMobile={isMobile}><Settings /></ProtectedRoute>} />
             <Route path="/knowledge" element={<ProtectedRoute isMobile={isMobile}><KnowledgeHub /></ProtectedRoute>} />

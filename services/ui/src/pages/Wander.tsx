@@ -20,6 +20,14 @@ import {
   tripStats,
   type TripFilter,
 } from '../lib/wanderTrips';
+import {
+  geoPeopleQueryKey,
+  geoZonesQueryKey,
+  houseConfigQueryOptions,
+  tripsQueryKey,
+  tripsQueryOptions,
+  vehiclesQueryKey,
+} from '../lib/wanderQueries';
 import toast from 'react-hot-toast';
 import {
   Users,
@@ -112,29 +120,27 @@ const Wander = () => {
   // One query per source instead of a 15s hand-rolled interval. Trips now come
   // back scoped to the caller (geo applies per-user opt-in consent), so the
   // page and the LiveFamilyMap read the same numbers from one cache.
+  // Keys come from lib/wanderQueries so this page and the dashboard's Family
+  // Presence card share one cache entry instead of drifting apart.
   const tripsQuery = useQuery({
-    queryKey: ['geo-trips'],
+    queryKey: tripsQueryKey(),
     queryFn: () => api.getTrips(),
-    retry: false,
-    staleTime: 30_000,
+    ...tripsQueryOptions,
   });
   const vehiclesQuery = useQuery({
-    queryKey: ['geo-vehicles'],
+    queryKey: vehiclesQueryKey(),
     queryFn: () => api.getVehicles(),
-    retry: false,
-    staleTime: 5 * 60_000,
+    ...houseConfigQueryOptions,
   });
   const peopleQuery = useQuery({
-    queryKey: ['geo-people'],
+    queryKey: geoPeopleQueryKey(),
     queryFn: () => api.getGeoPeople(),
-    retry: false,
-    staleTime: 60_000,
+    ...houseConfigQueryOptions,
   });
   const zonesQuery = useQuery({
-    queryKey: ['geo-zones'],
+    queryKey: geoZonesQueryKey(),
     queryFn: () => api.getGeoZones(),
-    retry: false,
-    staleTime: 5 * 60_000,
+    ...houseConfigQueryOptions,
   });
 
   const trips = useMemo(() => tripsQuery.data?.trips ?? [], [tripsQuery.data]);

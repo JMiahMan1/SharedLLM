@@ -21,6 +21,7 @@ import {
   LayoutDashboard,
   Activity,
   Thermometer,
+  Compass,
 } from 'lucide-react';
 
 export interface WidgetStateItem {
@@ -43,6 +44,7 @@ const defaultSizes: Record<WidgetKey, WidgetSize> = {
   workspaces: 'medium',
   health_activity: 'medium',
   climate: 'medium',
+  presence: 'medium',
 };
 
 function createDefaultSettings(key: WidgetKey, order: number): UserWidgetSettings {
@@ -71,6 +73,7 @@ export const defaultWidgetDefs: WidgetDef[] = [
   { key: 'workspaces', label: 'Workspaces', icon: LayoutDashboard, minSize: 'small', defaultSize: 'medium' },
   { key: 'health_activity', label: 'Health', icon: Activity, minSize: 'small', defaultSize: 'medium' },
   { key: 'climate', label: 'Climate', icon: Thermometer, minSize: 'small', defaultSize: 'medium' },
+  { key: 'presence', label: 'Family Presence', icon: Compass, minSize: 'small', defaultSize: 'medium' },
 ];
 
 /**
