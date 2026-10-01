@@ -7905,6 +7905,26 @@ async def get_geo_workout_route(request: Request, workout_id: str):
     await _raise_geo_failure(resp, "Failed to fetch workout route")
 
 
+@app.get("/api/geo/steps/ranges")
+async def get_geo_step_ranges(request: Request, range: str = "W", user_id: str | None = None):
+    """Pre-aggregated step history for D/W/M/3M/Y.
+
+    Declared before the "/api/geo/steps" route so a literal path is never
+    captured as something else. The 30-day cap on the daily route stays where
+    it is: this is the way to look further back, not a widened version of it.
+    """
+    target, viewer, is_admin = await _geo_read_target(request, user_id)
+    params = {"range": range, "user_id": target, "viewer": viewer, "is_admin": is_admin}
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{GEO_SVC}/steps/ranges",
+            params=params,
+            headers={"X-Internal-Secret": INTERNAL_SECRET},
+            timeout=aiohttp.ClientTimeout(total=8.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/geo/steps")
 async def get_geo_steps(request: Request, user_id: str | None = None, days: int = 7):
     target, viewer, is_admin = await _geo_read_target(request, user_id)

@@ -29,7 +29,7 @@ import aiohttp
 from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
-from services.geo import achievements
+from services.geo import achievements, step_history
 from pydantic import BaseModel
 
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -415,6 +415,11 @@ async def record_point(
 
 STEP_SOURCES = ("phone", "watch", "ha", "health_connect", "intervals")
 
+#: The household's local time zone, in one place. Every day-bucket boundary
+#: resolves through this rather than repeating the literal -- a hardcoded zone
+#: duplicated seven times is a bug waiting for the household to move.
+APP_TIMEZONE = os.environ.get("APP_TIMEZONE", "America/Phoenix")
+
 
 async def _fuse_day(r, clean_id: str, day: str) -> int:
     """Fuse one day across sources.
@@ -460,7 +465,7 @@ async def _record_daily_steps(
     if source not in STEP_SOURCES:
         source = "phone"
     ts = timestamp or time.time()
-    tz = ZoneInfo("America/Phoenix")
+    tz = ZoneInfo(APP_TIMEZONE)
     day = datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d")
     try:
         src_key = f"geo:steps_src:{clean_id}:{source}"
@@ -484,7 +489,7 @@ async def _get_daily_steps(r, clean_id: str, days: int = 30) -> dict:
     the HA companion daily_steps sensor so the UI is not blank while the phone
     app is being updated (real sensor data only — never fabricated).
     """
-    tz = ZoneInfo("America/Phoenix")
+    tz = ZoneInfo(APP_TIMEZONE)
     result: dict[str, int] = {}
     raw = await r.hgetall(f"geo:steps:{clean_id}")
     for day_str, val in raw.items():
@@ -507,7 +512,7 @@ async def _steps_from_ha(clean_id: str, days: int) -> dict[str, int]:
         states = await _ha_get_states()
     except Exception:
         return {}
-    tz = ZoneInfo("America/Phoenix")
+    tz = ZoneInfo(APP_TIMEZONE)
     cutoff = (datetime.now(tz) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
     needle = clean_id.replace("-", "_")
     best: dict[str, int] = {}
@@ -867,7 +872,7 @@ async def calculate_telemetry(entity_id: str, hours: float = 24.0) -> dict:
         try:
             history = await _get_daily_steps(r, clean_id, 7)
             if history:
-                tz = ZoneInfo("America/Phoenix")
+                tz = ZoneInfo(APP_TIMEZONE)
                 today = datetime.now(tz).strftime("%Y-%m-%d")
                 if today in history and history[today] > 0:
                     steps_today = history[today]
@@ -2397,7 +2402,7 @@ async def get_daily_steps(
         return {"user_id": user_id, "days": days, "daily_steps": {}, "today": 0}
     clean = await _require_may_view(viewer, user_id, is_admin)
     history = await _get_daily_steps(r, clean, days)
-    tz = ZoneInfo("America/Phoenix")
+    tz = ZoneInfo(APP_TIMEZONE)
     today = datetime.now(tz).strftime("%Y-%m-%d")
     # Per-source breakdown for today, so the UI can show why a fused number
     # differs from the phone (e.g. a watch contributed more on a walk).
@@ -2429,6 +2434,58 @@ async def get_daily_steps(
         "sources": sources,
         "last_synced": last_synced,
     }
+
+
+@app.get("/steps/ranges")
+async def get_step_ranges(
+    range: str = Query("W", alias="range"),
+    user_id: str | None = None,
+    x_internal_secret: str | None = Header(None, alias="X-Internal-Secret"),
+    query_secret: str | None = Query(None, alias="x_internal_secret"),
+    viewer: str | None = None,
+    is_admin: str | None = None,
+):
+    """Pre-aggregated step history for one range, subject to opt-in consent.
+
+    The older /steps route caps at 30 days because it returns raw daily
+    buckets. A year view therefore has nowhere to come from, and the only way
+    to get one would be to ship 365 buckets to the client and fold them in the
+    browser -- per surface, per range, forever.
+
+    So aggregation lives here, once, and the buckets are coarse for long ranges
+    (a year is months, not days) because 365 bars is unreadable on a phone
+    regardless of how cheaply they arrive.
+
+    The response states its own data requirements: ``thin`` when there is not
+    enough history for the personal baseline to mean anything, ``has_gaps``
+    when days are missing. Those are omitted silently by most fitness apps,
+    which is how a broken sensor ends up looking like a sedentary week.
+    """
+    if range not in step_history.RANGE_DAYS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"range must be one of {', '.join(step_history.RANGE_DAYS)}",
+        )
+    r = await get_redis()
+    if not r:
+        return {"user_id": user_id, **step_history.to_payload(
+            step_history.build_series({}, _today_date(), range))}
+    clean = await _require_may_view(viewer, user_id, is_admin)
+    # Read the widest window any range needs, then let the aggregator slice it.
+    span = max(step_history.RANGE_DAYS.values())
+    history = await _get_daily_steps(r, clean, span)
+    goal = await _get_step_goal(r, clean)
+    series = step_history.build_series(history, _today_date(), range, goal=goal)
+    return {"user_id": clean, **step_history.to_payload(series, goal=goal)}
+
+
+def _today_date():
+    """The user's "today", in the configured local zone.
+
+    Deliberately routed through one helper so the day boundary is defined in a
+    single place rather than being inlined at each call site.
+    """
+    return datetime.now(ZoneInfo(APP_TIMEZONE)).date()
 
 
 DEFAULT_STEP_GOAL = 10000
@@ -3091,7 +3148,7 @@ def _build_trends_context(user: str, days: int, daily_steps: dict, workouts: lis
         avg = int(statistics.mean(values))
         lines.append("Daily steps (hardware pedometer, by date):")
         for d, v in daily_steps.items():
-            marker = " ← today" if d == datetime.now(ZoneInfo("America/Phoenix")).strftime("%Y-%m-%d") else ""
+            marker = " ← today" if d == datetime.now(ZoneInfo(APP_TIMEZONE)).strftime("%Y-%m-%d") else ""
             lines.append(f"  {d}: {v:,}{marker}")
         best_day = max(daily_steps, key=daily_steps.get)
         lines.append(f"  Average: {avg:,}/day · Best: {best_day} ({max(values):,})")
@@ -3106,7 +3163,7 @@ def _build_trends_context(user: str, days: int, daily_steps: dict, workouts: lis
             dist = w.get("distance_miles") or 0
             dur_min = int((w.get("duration_seconds") or 0) / 60)
             steps_txt = f", {w['steps']:,} steps" if w.get("steps") else ""
-            when = datetime.fromtimestamp(w.get("start_time", 0), ZoneInfo("America/Phoenix")).strftime("%b %d")
+            when = datetime.fromtimestamp(w.get("start_time", 0), ZoneInfo(APP_TIMEZONE)).strftime("%b %d")
             lines.append(f"  {when}: {label}, {dist} mi, {dur_min} min{steps_txt}")
     else:
         lines.append("Recorded workouts: none in this window.")
@@ -3137,7 +3194,7 @@ def _build_trends_context(user: str, days: int, daily_steps: dict, workouts: lis
 
 async def _collect_activity_stats(r, clean: str, days: int) -> dict:
     """Gather raw activity stats for a window. No LLM call happens here."""
-    tz = ZoneInfo("America/Phoenix")
+    tz = ZoneInfo(APP_TIMEZONE)
     today = datetime.now(tz).strftime("%Y-%m-%d")
     daily_steps = await _get_daily_steps(r, clean, days)
 
