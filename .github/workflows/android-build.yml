@@ -143,11 +143,24 @@ jobs:
           exit 1
         fi
         VERSION=$(python3 -c "import json;print(json.load(open('services/ui/package.json'))['version'])")
-        curl --fail-with-body --retry 3 --retry-delay 5 --max-time 300 \
+        set -o pipefail
+        HTTP=$(curl -sS --max-time 300 -o publish-response.json -w '%{http_code}' \
           -H "X-Internal-Secret: $INTERNAL_SECRET" \
           -F "apk=@$APK_PATH" \
           -F "version=$VERSION" \
           -F "git_sha=$GIT_SHA" \
           -F "release_notes=Android build ${GIT_SHA:0:8}" \
-          "$PUBLISH_URL"
+          "$PUBLISH_URL") || HTTP="000"
+        cat publish-response.json 2>/dev/null || true
+        echo
+        if [ "$HTTP" = "413" ]; then
+          echo "::error::The proxy in front of the server rejected the ~$(( $(stat -c%s "$APK_PATH") / 1000000 ))MB APK (HTTP 413)."
+          echo "::error::Raise the request body limit on the nginx that fronts the domain"
+          echo "::error::(add \`client_max_body_size 64m;\` to its server{} block, then reload nginx)."
+          exit 1
+        fi
+        if [ "$HTTP" != "200" ]; then
+          echo "::error::Publish failed with HTTP $HTTP"
+          exit 1
+        fi
         echo "[OK] Published APK build ${GIT_SHA:0:8}."
