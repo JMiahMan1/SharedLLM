@@ -44,6 +44,8 @@ import {
   stepDayLabel,
   stepSourcesLabel,
   stepsSummary,
+  syncAdvice,
+  syncStatus,
   type DailyStepPoint,
   type StepsSummary,
 } from '../lib/healthMetrics';
@@ -107,6 +109,11 @@ const Health = () => {
   const summary = stepsSummary(steps);
   const series = useMemo(() => dailyStepSeries(steps?.daily_steps, 7), [steps?.daily_steps]);
   const seriesMax = useMemo(() => Math.max(1, ...series.map((p) => p.steps)), [series]);
+  // A number with no age is a number you cannot trust; geo exposes
+  // `last_synced` precisely so a frozen reading is distinguishable from a
+  // live one.
+  const sync = syncStatus(steps?.last_synced);
+  const syncHint = syncAdvice(sync);
 
   // A background poll must not look like the user pressed Refresh, so this is
   // only true while a *non-first* fetch is in flight.
@@ -214,6 +221,8 @@ const Health = () => {
           series={series}
           seriesMax={seriesMax}
           sources={stepSourcesLabel(steps?.sources)}
+          sync={sync}
+          syncHint={syncHint}
           loading={stepsQuery.isLoading}
           editingGoal={editingGoal}
           goalDraft={goalDraft}
@@ -317,6 +326,8 @@ interface StepsCardProps {
   series: DailyStepPoint[];
   seriesMax: number;
   sources: string | null;
+  sync: ReturnType<typeof syncStatus>;
+  syncHint: string | null;
   loading: boolean;
   editingGoal: boolean;
   goalDraft: string;
@@ -332,6 +343,8 @@ function StepsCard({
   series,
   seriesMax,
   sources,
+  sync,
+  syncHint,
   loading,
   editingGoal,
   goalDraft,
@@ -465,7 +478,20 @@ function StepsCard({
         </div>
       )}
 
-      {sources && <p className="text-[11px] text-slate-500">Reported by {sources}</p>}
+      {(sources || sync.label || syncHint) && (
+        <div className="text-[11px] text-slate-500 space-y-0.5">
+          {sources && <p data-testid="steps-sources">Reported by {sources}</p>}
+          {(sync.label || syncHint) && (
+            <p
+              data-testid="steps-sync-status"
+              data-freshness={sync.freshness}
+              className={sync.stale ? 'text-slate-400' : undefined}
+            >
+              {syncHint ?? `Updated ${sync.label}`}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

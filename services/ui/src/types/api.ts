@@ -988,6 +988,12 @@ export interface StepsResponse {
    * UI can explain a total that no single device counted.
    */
   sources?: Record<string, number>;
+  /**
+   * Epoch seconds of the phone's last successful upload, or null if it has
+   * never synced. Added because without it a frozen number is
+   * indistinguishable from a live one.
+   */
+  last_synced?: number | null;
 }
 
 export interface ActivityTrendsResponse {

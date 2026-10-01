@@ -183,3 +183,60 @@ export function elapsedLabel(startTimeSeconds: number, nowSeconds: number): stri
   const ss = String(s).padStart(2, '0');
   return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
 }
+/**
+ * How long ago the phone last uploaded, and whether that is recent enough to
+ * trust.
+ *
+ * `last_synced` is epoch seconds. It is genuinely absent (null) when a user has
+ * never synced, which is a different state from "synced long ago" and must not
+ * be rendered as the same thing.
+ */
+export type SyncFreshness = 'never' | 'fresh' | 'aging' | 'stale' | 'unknown';
+
+export interface SyncStatus {
+  freshness: SyncFreshness;
+  /** e.g. `2m ago`, `3h ago`. Empty for `never`. */
+  label: string;
+  /** True when the number on screen should not be trusted as current. */
+  stale: boolean;
+}
+
+/** A pedometer that has not spoken in this long is not describing today. */
+const AGING_AFTER_MS = 20 * 60_000;
+const STALE_AFTER_MS = 2 * 60 * 60_000;
+
+export function syncStatus(
+  lastSynced: number | null | undefined,
+  nowMs: number = Date.now(),
+): SyncStatus {
+  if (lastSynced == null || !Number.isFinite(Number(lastSynced))) {
+    return { freshness: 'never', label: '', stale: true };
+  }
+  const ageMs = nowMs - Number(lastSynced) * 1000;
+  // A timestamp in the future means clock skew, not a fresh reading; treat it
+  // as fresh rather than printing a negative age.
+  if (ageMs <= 0) return { freshness: 'fresh', label: 'just now', stale: false };
+
+  const minutes = Math.floor(ageMs / 60_000);
+  const hours = Math.floor(ageMs / 3_600_000);
+  const days = Math.floor(ageMs / 86_400_000);
+  const label = days >= 1 ? `${days}d ago` : hours >= 1 ? `${hours}h ago` : `${Math.max(1, minutes)}m ago`;
+
+  const freshness: SyncFreshness =
+    ageMs >= STALE_AFTER_MS ? 'stale' : ageMs >= AGING_AFTER_MS ? 'aging' : 'fresh';
+  return { freshness, label, stale: ageMs >= STALE_AFTER_MS };
+}
+
+/** One line explaining what a non-fresh sync means, or null when fresh. */
+export function syncAdvice(status: SyncStatus): string | null {
+  switch (status.freshness) {
+    case 'never':
+      return 'No sync yet — open the app on your phone';
+    case 'stale':
+      return `Not updated since ${status.label} — open the app on your phone`;
+    case 'aging':
+      return null;
+    default:
+      return null;
+  }
+}

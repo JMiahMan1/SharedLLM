@@ -2409,6 +2409,17 @@ async def get_daily_steps(
                 sources[source] = int(raw)
         except (TypeError, ValueError):
             continue
+    # When the phone last successfully uploaded. Without this the UI cannot
+    # tell a fresh number from one frozen since the phone went to sleep, which
+    # is exactly the "is this even updating?" doubt the dashboard card has to
+    # answer. Absent (never synced) is reported as null, not omitted.
+    last_synced: float | None = None
+    try:
+        raw_meta = await r.hget(f"geo:steps_meta:{clean}", "updated_at")
+        if raw_meta is not None:
+            last_synced = float(raw_meta)
+    except (TypeError, ValueError):
+        last_synced = None
     return {
         "user_id": clean,
         "days": days,
@@ -2416,6 +2427,7 @@ async def get_daily_steps(
         "today": history.get(today, 0),
         "goal": await _get_step_goal(r, clean),
         "sources": sources,
+        "last_synced": last_synced,
     }
 
 
