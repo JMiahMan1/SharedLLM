@@ -20,7 +20,7 @@ from zoneinfo import ZoneInfo
 import aiohttp
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect  # pyright: ignore[reportUnusedImport]
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse, FileResponse
 from pydantic import BaseModel
 from starlette.datastructures import UploadFile
 
@@ -8424,7 +8424,7 @@ async def get_app_update_version(request: Request):
     base_url = f"{scheme}://{host}"
 
     bundle_url = f"{base_url}/api/app-updates/bundle.zip"
-    apk_file = APP_UPDATES_DIR / "app-debug.apk"
+    apk_file = APP_UPDATES_DIR / APK_FILENAME
     apk_available = apk_file.exists()
     apk_size = apk_file.stat().st_size if apk_available else 0
     apk_version_name = None
@@ -8459,7 +8459,7 @@ async def get_app_update_version(request: Request):
         "bundle_url": bundle_url,
         "bundle_available": bundle_available,
         "apk_available": apk_available,
-        "apk_url": f"{base_url}/api/app-updates/app-debug.apk" if apk_available else None,
+        "apk_url": f"{base_url}/api/app-updates/{APK_FILENAME}" if apk_available else None,
         "apk_size_bytes": apk_size,
         # None when no APK is published -- never a placeholder. The client
         # treats a missing code as "cannot tell", not "up to date".
@@ -8499,10 +8499,19 @@ async def get_app_update_bundle():
     raise HTTPException(status_code=404, detail="Update bundle not found")
 
 
-@app.api_route("/api/app-updates/app-debug.apk", methods=["GET", "HEAD"])
-async def get_app_debug_apk():
-    """Serve the latest debug APK for in-app native installation."""
-    apk_file = APP_UPDATES_DIR / "app-debug.apk"
+# The published artifact is the *release* build (the workflow publishes
+# app-release.apk, which has no `debuggable` flag). It used to be stored and
+# served as "app-debug.apk", which was simply wrong and misled anyone auditing
+# what the server was shipping. LEGACY_APK_NAME is kept only so a stale client
+# still resolves to the current file.
+APK_FILENAME = "jarvis-os.apk"
+LEGACY_APK_NAME = "app-debug.apk"
+
+
+@app.api_route(f"/api/app-updates/{APK_FILENAME}", methods=["GET", "HEAD"])
+async def get_app_apk():
+    """Serve the published release APK for in-app native installation."""
+    apk_file = APP_UPDATES_DIR / APK_FILENAME
     if not apk_file.exists():
         raise HTTPException(status_code=404, detail="No APK build currently available on server")
     return FileResponse(
@@ -8510,22 +8519,33 @@ async def get_app_debug_apk():
         media_type="application/vnd.android.package-archive",
         headers={
             "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Content-Disposition": "attachment; filename=app-debug.apk",
+            "Content-Disposition": f"attachment; filename={APK_FILENAME}",
         },
-        filename="app-debug.apk",
+        filename=APK_FILENAME,
     )
+
+
+@app.api_route(f"/api/app-updates/{LEGACY_APK_NAME}", methods=["GET", "HEAD"])
+async def get_app_apk_legacy():
+    """Redirect the old app-debug.apk path to the real filename.
+
+    An installed app reads the URL from the version endpoint, so this only
+    matters for a stale client or an old bookmark -- but a 404 there would look
+    like a broken update, which is the exact confusion this rename removes.
+    """
+    return RedirectResponse(url=f"/api/app-updates/{APK_FILENAME}", status_code=307)
 
 
 def _write_temp_apk(content: bytes):
     """Stage an upload beside the live APK so it can be validated first."""
-    tmp = APP_UPDATES_DIR / "app-debug.apk.incoming"
+    tmp = APP_UPDATES_DIR / f"{APK_FILENAME}.incoming"
     tmp.write_bytes(content)
     return tmp
 
 
 @app.post("/api/app-updates/publish")
 async def publish_app_update(request: Request):
-    """Publish a new bundle.zip and/or app-debug.apk and update metadata.
+    """Publish a new bundle.zip and/or the release APK and update metadata.
 
     An uploaded APK is validated before it replaces the live one, and the
     advertised `apk_version_code` is read from that APK rather than trusted
@@ -8550,7 +8570,7 @@ async def publish_app_update(request: Request):
     apk_file = form.get("apk")
     apk_published = False
     if isinstance(apk_file, UploadFile) and apk_file.filename:
-        out_a = APP_UPDATES_DIR / "app-debug.apk"
+        out_a = APP_UPDATES_DIR / APK_FILENAME
         content = await apk_file.read()
         # Validate before replacing the live APK. Writing first would mean a
         # truncated or corrupt upload destroys the build currently being
@@ -8566,7 +8586,7 @@ async def publish_app_update(request: Request):
             )
         out_a.write_bytes(content)
         log.info(
-            f"[AppUpdates] Published new app-debug.apk ({len(content)} bytes, "
+            f"[AppUpdates] Published new {APK_FILENAME} ({len(content)} bytes, "
             f"versionCode {probe['version_code']})"
         )
         apk_published = True
@@ -8577,7 +8597,7 @@ async def publish_app_update(request: Request):
     apk_code = None
     if apk_published:
         clear_apk_version_cache()
-        info = read_apk_version(APP_UPDATES_DIR / "app-debug.apk")
+        info = read_apk_version(APP_UPDATES_DIR / APK_FILENAME)
         if info and info.get("version_code") is not None:
             apk_code = info["version_code"]
             claimed = form.get("apk_version_code")
@@ -8595,7 +8615,7 @@ async def publish_app_update(request: Request):
             )
     else:
         # Bundle-only publish: keep whatever the currently published APK says.
-        existing = read_apk_version(APP_UPDATES_DIR / "app-debug.apk")
+        existing = read_apk_version(APP_UPDATES_DIR / APK_FILENAME)
         if existing and existing.get("version_code") is not None:
             apk_code = existing["version_code"]
 

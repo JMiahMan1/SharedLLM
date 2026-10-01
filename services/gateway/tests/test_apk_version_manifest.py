@@ -162,19 +162,19 @@ class TestParseManifest:
 
 class TestReadApkVersion:
     def test_reads_from_a_real_zip(self, tmp_path):
-        apk = tmp_path / "app-debug.apk"
+        apk = tmp_path / "jarvis-os.apk"
         make_apk(apk, 22, "1.4.12")
         info = read_apk_version(apk)
         assert info["version_code"] == 22
         assert info["version_name"] == "1.4.12"
 
     def test_returns_none_for_a_corrupt_apk(self, tmp_path):
-        apk = tmp_path / "app-debug.apk"
+        apk = tmp_path / "jarvis-os.apk"
         apk.write_bytes(b"this is not a zip file")
         assert read_apk_version(apk) is None
 
     def test_returns_none_when_the_manifest_is_missing(self, tmp_path):
-        apk = tmp_path / "app-debug.apk"
+        apk = tmp_path / "jarvis-os.apk"
         with zipfile.ZipFile(apk, "w") as zf:
             zf.writestr("classes.dex", b"dex")
         assert read_apk_version(apk) is None
@@ -183,7 +183,7 @@ class TestReadApkVersion:
         assert read_apk_version(tmp_path / "nope.apk") is None
 
     def test_caches_by_mtime_and_size(self, tmp_path):
-        apk = tmp_path / "app-debug.apk"
+        apk = tmp_path / "jarvis-os.apk"
         make_apk(apk, 22, "1.4.12")
         assert read_apk_version(apk)["version_code"] == 22
         # Republishing a different build must not serve the stale answer.

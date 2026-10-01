@@ -11,7 +11,7 @@ or the app will restart in a loop.
 | Version/bundle API | `services/gateway/main.py` — `/api/app-updates/*` |
 | Bundle packaging | `services/ui/build.js` (`packageOtaBundle`) |
 | Publishing | `scripts/deploy_local_build.sh`, `scripts/deploy_remote.sh` |
-| Published artifacts | `data/app_updates/{version.json,bundle.zip,app-debug.apk}` |
+| Published artifacts | `data/app_updates/{version.json,bundle.zip,jarvis-os.apk}` |
 
 ## The core invariant
 
@@ -150,7 +150,7 @@ Android still shows the system “Install?” sheet (or requires a one-time
 possible on a non-rooted personal device without Play/MDM.
 
 Publish path: CI signs → `deploy_remote.sh` copies APK to
-`data/app_updates/app-debug.apk` → Settings → Check for updates → Download APK.
+`data/app_updates/jarvis-os.apk` → Settings → Check for updates → Download APK.
 
 ## Verifying a deploy
 
