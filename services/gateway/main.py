@@ -3380,6 +3380,98 @@ async def proxy_create_service_token(username: str, request: Request):
         return await _proxy_json_response(resp)
 
 
+# ---------------------------------------------------------------------------
+# User Panel: device registry + telemetry
+#
+# The phones only ever talk to the gateway, so identity serving these routes is
+# not enough -- without these the register call 404s and the Device table stays
+# empty. That is exactly the gap that left self-registration silently dead
+# (the same class of mistake as the missing /api/users/sharing-recipients route),
+# so each of these is declared ahead of the {device_key} routes below and
+# covered by its own proxy test.
+# ---------------------------------------------------------------------------
+
+
+def _panel_headers(request: Request) -> dict:
+    """Forward the caller's own credentials; never invent an identity."""
+    auth = request.headers.get("Authorization")
+    return {"Authorization": auth} if auth else {}
+
+
+@app.post("/api/user-panel/devices/register")
+async def proxy_register_device(request: Request):
+    """Phone self-registration, called on login. Fire-and-forget for the client."""
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/user-panel/devices/register",
+            headers=_panel_headers(request),
+            json=await request.json(),
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.get("/api/user-panel/devices")
+async def proxy_list_devices(request: Request):
+    async with shared_http_client() as client:
+        resp = await client.get(
+            f"{IDENTITY_SVC}/api/user-panel/devices",
+            headers=_panel_headers(request),
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.post("/api/user-panel/devices")
+async def proxy_create_device(request: Request):
+    """Admin-only in identity; the gateway just forwards and relays."""
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/user-panel/devices",
+            headers=_panel_headers(request),
+            json=await request.json(),
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.post("/api/user-panel/devices/telemetry")
+async def proxy_ingest_telemetry(request: Request):
+    """Declared before {device_key} so 'telemetry' is never read as a key."""
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/user-panel/devices/telemetry",
+            headers=_panel_headers(request),
+            json=await request.json(),
+            timeout=aiohttp.ClientTimeout(total=15.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.post("/api/user-panel/devices/{device_key}/capabilities")
+async def proxy_report_capabilities(device_key: str, request: Request):
+    async with shared_http_client() as client:
+        resp = await client.post(
+            f"{IDENTITY_SVC}/api/user-panel/devices/{device_key}/capabilities",
+            headers=_panel_headers(request),
+            json=await request.json(),
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
+@app.patch("/api/user-panel/devices/{device_key}")
+async def proxy_assign_device(device_key: str, request: Request):
+    async with shared_http_client() as client:
+        resp = await client.patch(
+            f"{IDENTITY_SVC}/api/user-panel/devices/{device_key}",
+            headers=_panel_headers(request),
+            json=await request.json(),
+            timeout=aiohttp.ClientTimeout(total=10.0),
+        )
+        return await _proxy_json_response(resp)
+
+
 @app.get("/api/users/me")
 async def proxy_get_me(request: Request):
     auth_header = request.headers.get("Authorization")
