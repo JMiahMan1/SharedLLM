@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import axios from 'axios';
 import { storageGet, storageSet, storageRemove, storageInit } from '../lib/storage';
 import { registerThisDevice } from '../lib/deviceRegistration';
+import { mirrorIdentity } from '../lib/locationTracking';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -113,6 +114,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       // build is this?" without guessing. Fire-and-forget: registration must
       // never delay or fail the login the user just completed.
       void registerThisDevice();
+
+      // Mirror the identity natively. The background location service can
+      // outlive the WebView, and without this it could authenticate but not
+      // attribute the position to anyone. Same fire-and-forget rule. Uses the
+      // profile's username, which is the canonical one the server resolved.
+      const canonical = profile.username || credentials.username;
+      if (canonical) void mirrorIdentity(canonical);
     } catch (error: unknown) {
       console.error('Login error:', error);
       if (axios.isAxiosError(error)) {

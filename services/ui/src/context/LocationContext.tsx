@@ -17,6 +17,7 @@ import {
 } from '../lib/sensorFailure';
 import { hasDayRolledOver, localDayKey } from '../lib/stepDay';
 import { isInsideGeofence, shouldUploadFix } from '../lib/locationSync';
+import { startBackgroundTracking, stopBackgroundTracking } from '../lib/locationTracking';
 
 export type SensorId = 'location' | 'steps';
 type NoticeOwner = 'service' | 'read';
@@ -773,10 +774,29 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
     } finally {
       startingRef.current = false;
     }
-  }, [handleLocationUpdate, refreshDailySteps, syncDailySteps, patchSensor]);
+
+    // Hand the upload to a native foreground service. The WebView watch above
+    // is still worth having -- it is immediate and gives the UI live updates --
+    // but it dies with the process, and on an aggressive OEM build that is what
+    // silently ended tracking in production. Only start the service if we
+    // actually got a watch, so a failed start does not leave it running.
+    if (sensorsRef.current.location.enabled) {
+      const user = await resolveSyncUsername();
+      if (user) {
+        const state = await startBackgroundTracking(user);
+        if (!state.supported) {
+          logSensor('location', 'background tracking unavailable on this build', null);
+        }
+      }
+    }
+  }, [handleLocationUpdate, refreshDailySteps, syncDailySteps, patchSensor, resolveSyncUsername]);
 
   const stopTracking = useCallback(() => {
     void storageSet('jarvis_location_tracking_enabled', 'false');
+    // The foreground service is sticky and independent of this context, so
+    // turning tracking off has to stop it explicitly -- otherwise it keeps
+    // uploading for a user who just opted out.
+    void stopBackgroundTracking();
     if (watchIdRef.current !== null) {
       if (typeof watchIdRef.current === 'number') {
         navigator.geolocation.clearWatch(watchIdRef.current);

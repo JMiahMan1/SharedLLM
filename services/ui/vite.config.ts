@@ -58,6 +58,13 @@ export default defineConfig({
     globals: true,
     environment: 'happy-dom',
     setupFiles: './src/test/setup.ts',
+    // These render whole pages (msw + providers + charts), so they lose the
+    // race for CPU when ~80 files run in parallel and were blowing vitest's
+    // default 5s budget. Every failure was a bare "Test timed out in 5000ms",
+    // never an assertion, and each file passed on its own. 20s keeps a real
+    // hang failing rather than hanging forever.
+    testTimeout: 20000,
+    hookTimeout: 20000,
     exclude: [
       '**/e2e/**/*.spec.ts',
       '**/node_modules/**',
