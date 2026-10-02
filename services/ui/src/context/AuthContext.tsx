@@ -4,6 +4,7 @@ import type { UserProfile } from '../services/api';
 import toast from 'react-hot-toast';
 import axios from 'axios';
 import { storageGet, storageSet, storageRemove, storageInit } from '../lib/storage';
+import { registerThisDevice } from '../lib/deviceRegistration';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -107,6 +108,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       
       const displayName = profile.full_name || profile.username || credentials.username;
       toast.success(`Welcome back, ${displayName}!`);
+
+      // Tell the server what this device is, so the panel can answer "which
+      // build is this?" without guessing. Fire-and-forget: registration must
+      // never delay or fail the login the user just completed.
+      void registerThisDevice();
     } catch (error: unknown) {
       console.error('Login error:', error);
       if (axios.isAxiosError(error)) {
