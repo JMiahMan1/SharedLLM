@@ -93,6 +93,8 @@ import type {
   StepsResponse,
   StepRange,
   StepRangeResponse,
+  MetricRangeResponse,
+  MetricCatalogResponse,
   ActivityTrendsResponse,
   ActivityFeedResponse,
   ActivitySummaryResponse,
@@ -959,6 +961,29 @@ export const api = {
   async getStepGoal(userId?: string): Promise<{ user_id: string; goal: number }> {
     const query = userId && userId !== 'all' ? `?user_id=${encodeURIComponent(userId)}` : '';
     const resp = await apiClient.get(`/api/geo/steps/goal${query}`);
+    return resp.data;
+  },
+
+  /**
+   * Pre-aggregated history for an event metric (workouts, distances).
+   *
+   * An empty day here means "no workout recorded", not "no reading" -- unlike
+   * steps, where a missing day is a sensor that did not sync. The response
+   * says which, via `empty`/`active_days` rather than `has_gaps`.
+   *
+   * A metric this install does not record is a 422 naming the metric and the
+   * reason, never a confident zero.
+   */
+  async getMetricRanges(metric: string, userId?: string, range: StepRange = 'W'): Promise<MetricRangeResponse> {
+    const query = new URLSearchParams({ metric, range });
+    if (userId && userId !== 'all') query.set('user_id', userId);
+    const resp = await apiClient.get(`/api/geo/metrics/ranges?${query.toString()}`);
+    return resp.data;
+  },
+
+  /** Which metrics this install records, and why the others are absent. */
+  async getMetricCatalog(): Promise<MetricCatalogResponse> {
+    const resp = await apiClient.get('/api/geo/metrics/catalog');
     return resp.data;
   },
 

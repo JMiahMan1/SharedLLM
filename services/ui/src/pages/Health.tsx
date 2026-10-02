@@ -6,6 +6,7 @@ import { api } from '../services/api';
 import ActivityRings from '../components/health/ActivityRings';
 import StepHistoryChart from '../components/health/StepHistoryChart';
 import StepRangeSelector from '../components/health/StepRangeSelector';
+import MetricDetailCards from '../components/health/MetricDetailCards';
 import { heroInsight } from '../lib/healthRanges';
 import type { StepRange, Workout } from '../types/api';
 import AchievementsPanel from '../components/wander/AchievementsPanel';
@@ -271,6 +272,11 @@ const Health = () => {
           />
         </div>
       </div>
+
+      {/* Shares the range selector's state with the step history above, so the
+          two always describe the same window. Outside that grid on purpose:
+          the cards lay themselves out. */}
+      <MetricDetailCards range={range} userId={currentUsername} />
 
       <TrendsPanel currentUsername={currentUsername} />
 
