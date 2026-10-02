@@ -17,7 +17,8 @@ const event = (over: Partial<TimelineEvent> = {}): TimelineEvent => ({
   detail: '3.2 mi · 28 min',
   meta: {},
   days_ago: 2,
-  label: '8:00 AM',
+  label: 'Workout',
+  time_label: '8:00 AM',
   icon: 'dumbbell',
   ...over,
 });
@@ -70,10 +71,23 @@ describe('EventTimeline', () => {
     expect(screen.queryByTestId('timeline-day')).not.toBeInTheDocument();
   });
 
-  it('uses the server label for the time, never re-deriving it', async () => {
-    // Re-deriving locally is how a skewed clock becomes a negative age.
+  it('shows the server-computed time of day, never re-deriving it', async () => {
+    // Formatting `at` in the browser would use the device's zone and could put
+    // the event on a different day than the group it is listed under.
     renderWithProviders(<EventTimeline />);
     expect(await screen.findByText('8:00 AM')).toBeInTheDocument();
+  });
+
+  it('falls back to the kind name when no time is known', async () => {
+    mocks.getTimeline.mockResolvedValue(
+      timeline({
+        groups: [
+          { day: '2025-09-26', relative: '2 days ago', events: [event({ time_label: '' })] },
+        ],
+      })
+    );
+    renderWithProviders(<EventTimeline />);
+    expect(await screen.findByText('Workout')).toBeInTheDocument();
   });
 
   it('renders an unknown icon kind without blanking the row', async () => {

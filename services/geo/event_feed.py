@@ -77,6 +77,9 @@ class Event:
     #: `build_timeline` so the client cannot re-derive it against a different
     #: clock and get a different answer.
     days_ago: int = 0
+    #: Time of day ("8:05 AM") in the zone the server bucketed the day with.
+    #: Set by `build_timeline`; "" for an event that was never placed.
+    time_label: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -86,7 +89,15 @@ class Event:
             "detail": self.detail,
             "meta": self.meta,
             "days_ago": self.days_ago,
+            # The kind's name, NOT a time. Sent so the client never invents
+            # its own vocabulary for a kind the server may add later.
             "label": KIND_LABELS.get(self.kind, self.kind),
+            # Time of day as the server computed it, in the same zone it used
+            # to bucket the day. The client must not format `at` itself: its
+            # own timezone could file the event on a different day than the
+            # group it is listed under, which is the bug the steps timezone
+            # fix was about.
+            "time_label": self.time_label,
             "icon": KIND_ICONS.get(self.kind, "•"),
         }
 
@@ -127,8 +138,26 @@ def _finite(value: Any) -> Optional[float]:
     return out
 
 
-def _epoch_to_day(ts: float, tz: timezone) -> str:
-    return datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d")
+def _epoch_to_day(ts: float, tz: timezone) -> Optional[str]:
+    """Calendar day for an epoch, or None if it is out of range.
+
+    None rather than a guess: an event we cannot place on a day has no place in
+    a day-grouped timeline, and inventing one would misfile it.
+    """
+    try:
+        return datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d")
+    except (ValueError, OSError, OverflowError):
+        return None
+
+
+def _epoch_to_time_label(ts: float, tz: timezone) -> str:
+    """Time of day, 12-hour with no leading zero ("8:05 AM", "12:30 PM")."""
+    try:
+        return datetime.fromtimestamp(ts, tz).strftime("%-I:%M %p")
+    except (ValueError, OSError, OverflowError):
+        # An out-of-range epoch must not take the whole timeline down; the day
+        # label still renders, so the row stays readable without a time.
+        return ""
 
 
 def relative_day_label(day: str, now: float, tz: timezone) -> str:
@@ -344,12 +373,18 @@ def build_timeline(
         if shown >= limit:
             break
         day = _epoch_to_day(e.at, tz)
+        if day is None:
+            # Out of range: cannot be grouped, so it is dropped rather than
+            # filed under a made-up day. Consistent with the rule that an event
+            # with no usable timestamp is never dated "now".
+            continue
         group = seen_days.get(day)
         if group is None:
             group = DayGroup(day=day, _relative=relative_day_label(day, now, tz))
             seen_days[day] = group
             groups.append(group)
         e.days_ago = max(0, int((now - e.at) // DAY_SECONDS))
+        e.time_label = _epoch_to_time_label(e.at, tz)
         group.events.append(e)
         shown += 1
     return groups
