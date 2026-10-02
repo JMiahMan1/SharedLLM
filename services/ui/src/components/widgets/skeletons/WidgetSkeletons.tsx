@@ -184,6 +184,23 @@ export const HealthActivitySkeleton: React.FC = () => (
   </div>
 );
 
+/**
+ * The hero is a ring beside a sentence, so the skeleton mirrors that shape
+ * rather than the stack of bars HealthActivitySkeleton uses.
+ */
+export const HealthHeroSkeleton: React.FC = () => (
+  <div className="glass-panel overflow-hidden p-4 flex flex-col h-full w-full relative">
+    <SkeletonHeader title="Today" icon="👣" />
+    <div className="flex-1 flex items-center gap-4">
+      <div className="h-20 w-20 rounded-full bg-white/5 animate-pulse shrink-0" />
+      <div className="flex-1 space-y-2">
+        <div className="h-4 bg-white/5 rounded-lg w-3/5 animate-pulse" />
+        <div className="h-3 bg-white/5 rounded-lg w-4/5 animate-pulse" />
+      </div>
+    </div>
+  </div>
+);
+
 export const ClimateSkeleton: React.FC = () => (
   <div className="glass-panel overflow-hidden p-5 flex flex-col h-full w-full relative">
     <SkeletonHeader title="Climate" icon="🌡️" />
@@ -230,6 +247,7 @@ const skeletonMap: Record<WidgetKey, React.ComponentType> = {
   device_control: DeviceControlSkeleton,
   workspaces: WorkspacesSkeleton,
   health_activity: HealthActivitySkeleton,
+  health_hero: HealthHeroSkeleton,
   climate: ClimateSkeleton,
   presence: PresenceSkeleton,
 };
